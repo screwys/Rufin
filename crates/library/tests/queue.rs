@@ -439,7 +439,6 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let playlist_key = fixture
         .catalog
         .create_playlist(
-            Some(fixture.source),
             "Collection",
             &library::MemberSelection::Uris(((&fixture.track_uris[..3]).to_vec()).into()),
         )
@@ -1166,10 +1165,11 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
 
 #[tokio::test]
 async fn large_source_membership_keeps_metadata_reads_bounded() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("WITH RECURSIVE n(i) AS(VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)\n        INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) SELECT ?1,'bulk-'||i,'https://example.test/bulk/'||i,jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1 FROM n")
+    sqlx::query("WITH RECURSIVE n(i) AS(VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)\n        INSERT INTO tracks(source_key,object_id,media_uri,title,display_album,display_artist,sort_text,duration_millis,indexed) SELECT ?1,'bulk-'||i,'https://example.test/bulk/'||i,COALESCE('Bulk '||i,''),COALESCE('',''),COALESCE('',''),COALESCE(printf('%06d',i),''),COALESCE(1000,0),1 FROM n")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for activation in 0..6_usize {
         let selected_index = (activation * 7919) % 20000;
         let selected = sqlx::query_scalar::<_, library::TrackKey>(

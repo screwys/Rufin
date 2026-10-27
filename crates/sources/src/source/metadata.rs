@@ -1135,14 +1135,6 @@ impl FileEditSession {
                 .unwrap()
                 .refresh_metadata_after_write(catalog, work.take());
         }
-        if let Some(source) = &self.source
-            && !source.is_retired()
-            && let Some(observation) = observation
-        {
-            catalog
-                .publish_catalog_update(source.source_id().as_str(), observation.into_changes())
-                .await;
-        }
         crate::finish_metadata_save(result, publication, saved)
     }
 
@@ -1599,9 +1591,6 @@ impl NativeFile {
                 .write_file_observations(&files, vec![track], true)
                 .await
                 .map_err(failure)?;
-            catalog
-                .publish_catalog_update(source_id.as_str(), observation.into_changes())
-                .await;
         } else {
             let path = path.clone();
             let mut track = tokio::task::spawn_blocking(move || {

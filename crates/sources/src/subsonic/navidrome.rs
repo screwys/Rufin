@@ -288,12 +288,12 @@ impl SubsonicSource {
                     break;
                 }
             }
-            if let Some(stamp) = stamp {
+            if stamp.is_some() {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
                 observation
-                    .complete_source_observation(stamp, &[kind.as_str()], None)
+                    .complete_source_observation(&[kind.as_str()], None)
                     .await?;
             }
         }
@@ -1261,13 +1261,6 @@ mod tests {
             result
         }
         .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         for clear in [false, true] {
             cleared.store(clear, Ordering::Relaxed);
             source_owner
@@ -1286,13 +1279,6 @@ mod tests {
                     )
                     .await;
                 result
-            }
-            .unwrap();
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
             }
             .unwrap();
             let row = catalog
@@ -1553,13 +1539,6 @@ mod tests {
             result
         }
         .expect("private Navidrome library");
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .expect("publish Navidrome Inventory");
         let cancellation = library::ReadCancellation::new();
         let source_key = catalog
             .cached_source("navidrome:test", &cancellation)

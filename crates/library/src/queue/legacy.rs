@@ -91,12 +91,50 @@ pub(crate) async fn stored_rows(
     Ok((rows, keys))
 }
 
-pub(crate) async fn decode_saved(
-    connection: &mut SqliteConnection,
-    value: serde_json::Value,
-) -> LibraryResult<(QueueRestore, Vec<Option<String>>)> {
+/// A saved queue whose media URIs still have to become tracks.
+pub(crate) struct Saved {
+    pub(crate) uris: Vec<String>,
+    provenances: Vec<QueueProvenance>,
+    occurrences: Vec<Option<String>>,
+    order: Arc<[u32]>,
+    current_index: Option<usize>,
+    progress_millis: i64,
+    repeat_mode: QueueRepeatMode,
+    shuffled: bool,
+}
+
+impl Saved {
+    /// The queue, with one track key for each saved URI in order.
+    pub(crate) fn restore(self, keys: Vec<crate::TrackKey>) -> (QueueRestore, Vec<Option<String>>) {
+        let entries = keys
+            .into_iter()
+            .zip(self.provenances)
+            .map(|(track_key, provenance)| QueueEntry {
+                track_key,
+                provenance,
+                received_from_connect: false,
+            })
+            .collect::<Vec<_>>();
+        (
+            QueueRestore {
+                ids: (1..=entries.len() as u64).collect(),
+                entries: entries.into(),
+                order: self.order,
+                current_index: self.current_index,
+                progress_millis: self.progress_millis,
+                repeat_mode: self.repeat_mode,
+                shuffled: self.shuffled,
+                ..Default::default()
+            },
+            self.occurrences,
+        )
+    }
+}
+
+pub(crate) fn decode_saved(value: serde_json::Value) -> LibraryResult<Saved> {
     let saved: SavedQueue = serde_json::from_value(value)?;
-    let mut entries = Vec::with_capacity(saved.entries.len());
+    let mut uris = Vec::with_capacity(saved.entries.len());
+    let mut provenances = Vec::with_capacity(saved.entries.len());
     let mut occurrences = Vec::with_capacity(saved.entries.len());
     for entry in saved.entries {
         let (occurrence, media_uri, provenance) = match entry {
@@ -125,33 +163,18 @@ pub(crate) async fn decode_saved(
                 provenance,
             } => (occurrence, media_uri, provenance),
         };
-        let track_key = crate::catalog::remember_track(
-            connection,
-            &TrackReference {
-                media_uri,
-                ..Default::default()
-            },
-        )
-        .await?;
-        entries.push(QueueEntry {
-            track_key,
-            provenance,
-            received_from_connect: false,
-        });
+        uris.push(media_uri);
+        provenances.push(provenance);
         occurrences.push(Some(occurrence));
     }
-    let ids = (1..=entries.len() as u64).collect();
-    Ok((
-        QueueRestore {
-            ids,
-            entries: entries.into(),
-            order: saved.order,
-            current_index: saved.current_index,
-            progress_millis: saved.progress_millis,
-            repeat_mode: saved.repeat_mode,
-            shuffled: saved.shuffled,
-            ..Default::default()
-        },
+    Ok(Saved {
+        uris,
+        provenances,
         occurrences,
-    ))
+        order: saved.order,
+        current_index: saved.current_index,
+        progress_millis: saved.progress_millis,
+        repeat_mode: saved.repeat_mode,
+        shuffled: saved.shuffled,
+    })
 }

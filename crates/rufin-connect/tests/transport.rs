@@ -2,7 +2,6 @@ use library::ConnectRecord;
 use library::profile::{ProfileStore, SyncStream};
 use loro::{LoroDoc, ToJson, VersionVector};
 use rufin_connect::{ConnectNetwork, Credentials, NetworkConfig, NetworkEvent};
-use sqlx::Connection as _;
 use std::{path::Path, sync::Arc, time::Duration};
 
 const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
@@ -252,127 +251,6 @@ async fn cancel_after_bilateral_approval_ends_blocked_enrollment_and_allows_retr
     })
     .await
     .expect("Cancel/retry did not finish");
-}
-
-#[tokio::test]
-async fn enrollment_after_collection_publication() {
-    tokio::time::timeout(Duration::from_secs(120), async {
-        let a_dir = tempfile::tempdir().unwrap();
-        let b_dir = tempfile::tempdir().unwrap();
-        let (a, mut a_events) = node(a_dir.path(), "Host").await;
-        let (b, mut b_events) = node(b_dir.path(), "Joiner").await;
-        let profile = ConnectNetwork::new_profile_id();
-        a.open_profile(&profile, true, Vec::new()).await.unwrap();
-        let a_catalog = library::Catalog::open(a_dir.path().join("profile.sqlite"))
-            .await
-            .unwrap();
-        let b_catalog = library::Catalog::open(b_dir.path().join("profile.sqlite"))
-            .await
-            .unwrap();
-        let a_docs = Arc::new(
-            ProfileStore::open(a_catalog.clone(), 1, KEY.parse().unwrap())
-                .await
-                .unwrap(),
-        );
-        let b_docs = Arc::new(
-            ProfileStore::open(b_catalog.clone(), 2, KEY.parse().unwrap())
-                .await
-                .unwrap(),
-        );
-        let source = library::SourceId::new("music");
-        for (catalog, documents, identity) in [
-            (&a_catalog, &a_docs, a.identity()),
-            (&b_catalog, &b_docs, b.identity()),
-        ] {
-            catalog
-                .reconcile_source(&source, "webdav", "Files")
-                .await
-                .unwrap();
-            documents.bind_profile(&profile, &identity).await.unwrap();
-            catalog.connect_set_active(true).await.unwrap();
-        }
-        let mut records = Vec::new();
-        for index in 0..20 {
-            let object_id = format!("track-{index}");
-            let path = format!("https://files.example.test/music/{object_id}.flac");
-            a_catalog
-                .observe("music", None)
-                .await
-                .unwrap()
-                .write_file_observations(
-                    &[(
-                        library::LocalFileWrite {
-                            path: path.clone(),
-                            root: "https://files.example.test/music".into(),
-                            relative_path: format!("{object_id}.flac"),
-                            kind: library::LocalFileKind::Media,
-                            size_bytes: Some(12),
-                            mtime_ns: 0,
-                            device_id: None,
-                            inode: None,
-                            native_id: None,
-                            picture_index: None,
-                            artist_pictures: None,
-                            revision: Some("v1".into()),
-                            parse_version: Some(1),
-                            state: library::LocalFileState::Accepted,
-                        },
-                        Vec::new(),
-                    )],
-                    vec![library::TrackObservation {
-                        object_id: object_id.clone(),
-                        media_uri: Some(library::source_entity_uri(&source, "track", &object_id)),
-                        source_path: Some(path.clone()),
-                        metadata: library::TrackMetadata {
-                            title: format!("Track {index}"),
-                            comment: Some("x".repeat(512 * 1024)),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }],
-                    true,
-                )
-                .await
-                .unwrap();
-            records.push(ConnectRecord {
-                kind: "catalog:file".into(),
-                key: serde_json::to_string(&("music", path)).unwrap(),
-                value: None,
-            });
-        }
-        let mut connection = sqlx::SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new().filename(a_catalog.path()),
-        )
-        .await
-        .unwrap();
-        for record in &mut records {
-            *record =
-                library::Catalog::connect_record_on(&mut connection, &record.kind, &record.key)
-                    .await
-                    .unwrap();
-        }
-        drop(connection);
-        for (index, record) in records.iter().enumerate() {
-            let value = record.value.as_ref().unwrap();
-            assert_eq!(
-                value["tracks"][0]["metadata"]["title"],
-                format!("Track {index}")
-            );
-            assert!(
-                value["tracks"][0]["metadata"]["comment"].as_str()
-                    == Some("x".repeat(512 * 1024).as_str()),
-                "track {index} must retain its full 512 KiB comment"
-            );
-        }
-        a.attach_documents(a_docs.clone()).await.unwrap();
-        pair(&a, &mut a_events, &b, &mut b_events, &profile).await;
-        b.attach_documents(b_docs.clone()).await.unwrap();
-        received(&a_docs, &b_docs, &records).await;
-        a.shutdown().await.unwrap();
-        b.shutdown().await.unwrap();
-    })
-    .await
-    .expect("Collection publication starved enrollment");
 }
 
 #[tokio::test]

@@ -275,15 +275,16 @@ pub(super) fn read_items<'a>(
             artists,
             folders,
             playlists,
-            genres: genre_rows
+            tags: genre_rows
                 .into_iter()
-                .map(|tag| library::GenreObservation {
+                .map(|tag| library::TagObservation {
+                    kind: library::TagKind::Genre,
                     object_id: tag.object_id,
                     metadata: library::TagMetadata {
                         name: tag.name,
                         sort_text: tag.sort_text,
                     },
-                    ..Default::default()
+                    artwork_binding: None,
                 })
                 .collect(),
             ..Default::default()
@@ -352,11 +353,7 @@ mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let artists = [
             json!({"ratingKey":"608","type":"artist","title":"The Cure","titleSort":"Cure, The"}),
             json!({"ratingKey":"609","type":"artist","title":"Duran Duran"}),
@@ -393,15 +390,8 @@ mod tests {
         .await
         .unwrap();
 
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         for refresh in [false, true] {
             if refresh {
                 let catalog_source_id = ("plex").to_string();
@@ -420,14 +410,6 @@ mod tests {
                     Ok::<_, crate::SourceError>(())
                 })
                 .await
-                .unwrap();
-
-                {
-                    catalog
-                        .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                        .await;
-                    Ok::<_, crate::SourceError>(())
-                }
                 .unwrap();
             }
             let rows = library::ListRead {

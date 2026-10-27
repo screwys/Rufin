@@ -76,7 +76,7 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
         SELECT object_id,'2025-06','track','track-0',9,2 FROM sources WHERE source_key=?1")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     for index in 0..7 {
-        sqlx::query("INSERT INTO tracks(media_uri,indexed,metadata,normalized_search) VALUES (?1,0,jsonb(json_object('title',COALESCE(?2,''),'artist',COALESCE('Retained artist',''),'album',COALESCE('Retained album',''),'duration_millis',COALESCE(180000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'artist',COALESCE('Retained artist',''),'album',COALESCE('Retained album',''),'duration_millis',COALESCE(180000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'artist',COALESCE('Retained artist',''),'album',COALESCE('Retained album',''),'duration_millis',COALESCE(180000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'artist',COALESCE('Retained artist',''),'album',COALESCE('Retained album',''),'duration_millis',COALESCE(180000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'artist',COALESCE('Retained artist',''),'album',COALESCE('Retained album',''),'duration_millis',COALESCE(180000,0))),'$.comment'),'')))")
+        sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES (?1,0,COALESCE(?2,''),COALESCE('Retained artist',''),COALESCE('Retained album',''),COALESCE(180000,0))")
             .bind(format!("file:///retained-{index}.flac")).bind(format!("Retained {index}")).execute(&mut raw).await.unwrap();
         sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
             VALUES(?1,?2,'Retained artist','Retained album',100,'2025-06',180000,1000,0)")
@@ -130,14 +130,17 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
     );
 }
 
+fn listened(change: &library::Change) -> bool {
+    change
+        .scopes
+        .iter()
+        .any(|scope| matches!(scope, library::Scope::Listened { .. }))
+}
+
 #[tokio::test]
 async fn listens_accept_empty_optional_recording_ids() {
     let fixture = fixture().await;
-    let (published, mut observed) = tokio::sync::mpsc::unbounded_channel();
-    fixture.catalog.observe_catalog(move |source, update| {
-        let _ = published.send((source, update));
-        std::future::ready(())
-    });
+    let mut observed = fixture.catalog.changes();
     let listen = ListenWrite {
         external_id: Some("optional-recording-ids".into()),
         media_uri: "https://audio.invalid/direct.flac".into(),
@@ -162,9 +165,7 @@ async fn listens_accept_empty_optional_recording_ids() {
         .record_listen(&listen, None, &[])
         .await
         .unwrap();
-    let (source, update) = observed.try_recv().unwrap();
-    assert!(source.is_none());
-    assert!(update.activity && !update.metadata);
+    assert!(listened(&observed.try_recv().unwrap()));
     assert_eq!(
         fixture
             .catalog
@@ -211,12 +212,8 @@ async fn listens_accept_empty_optional_recording_ids() {
 
 #[tokio::test]
 async fn activity_keeps_one_listen_and_independent_delivery_targets() {
-    let fixture = fixture().await;
-    let (updates, mut observed) = tokio::sync::mpsc::unbounded_channel();
-    fixture.catalog.observe_catalog(move |_, update| {
-        updates.send(update).unwrap();
-        std::future::ready(())
-    });
+    let mut fixture = fixture().await;
+    let mut observed = fixture.catalog.changes();
     let listen = ListenWrite {
         external_id: Some("play-1".to_string()),
         media_uri: fixture.track_uris[0].clone(),
@@ -254,8 +251,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .await
         .expect("record listen");
     let update = observed.try_recv().expect("new listen changes activity");
-    assert!(update.activity);
-    assert!(!update.metadata);
+    assert!(listened(&update));
     assert_eq!(
         fixture
             .catalog
@@ -285,13 +281,13 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(history[0].metadata.duration_millis, 180_000);
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT local_play_count FROM tracks WHERE media_uri=?1")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listens WHERE media_uri=?1")
             .bind(&listen.media_uri)
             .fetch_one(&mut raw)
             .await
             .unwrap(),
         1,
-        "duplicate accepted listens must not increment the indexed local count"
+        "duplicate accepted listens are recorded once"
     );
     assert!(
         sqlx::query_scalar::<_, bool>("SELECT skipped FROM listens WHERE listen_key=?1")
@@ -305,9 +301,11 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .execute(&mut raw)
         .await
         .expect("seed recovered Activity baseline");
-    sqlx::query("INSERT INTO native_media_state(media_uri,play_count,last_played) SELECT media_uri,2,1600000000 FROM tracks WHERE source_key=?1 AND object_id='track-1' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,last_played=excluded.last_played")
+    sqlx::query("UPDATE tracks SET native_play_count=2,native_last_played=1600000000 WHERE source_key=?1 AND object_id='track-1'")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    observed = fixture.catalog.changes();
     let never = fixture
         .catalog
         .create_smart_playlist(
@@ -344,11 +342,9 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         )
         .await
         .unwrap();
-    assert!(
-        unplayed.contains(&fixture.track_uris[1]),
-        "remote play totals do not count as Rufin listens"
-    );
-    assert!(!unplayed.contains(&listen.media_uri));
+    // All-time rules read the server's own counts on a server source.
+    assert!(!unplayed.contains(&fixture.track_uris[1]));
+    assert!(unplayed.contains(&listen.media_uri));
     let catalog = fixture
         .catalog
         .tracks_by_uris(&([(&listen.media_uri).to_string()]), &cancel)
@@ -382,7 +378,6 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let (playlist, _) = fixture
         .catalog
         .create_playlist(
-            None,
             "History track",
             &library::MemberSelection::Uris(
                 ((std::slice::from_ref(&listen.media_uri)).to_vec()).into(),
@@ -490,7 +485,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .unwrap(),
         key
     );
-    assert!(observed.try_recv().unwrap().activity);
+    assert!(listened(&observed.try_recv().unwrap()));
     for repeated in [&listen, &completed] {
         assert_eq!(
             fixture
@@ -531,7 +526,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
 
 #[tokio::test]
 async fn current_activity_includes_recorded_and_unattributed_local_and_cue_listens() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let file = "file:///music/local.flac".to_string();
     let cue = library::cue_media_uri("segment", "file:///music/album.flac", 1000, 181000);
     let mut raw = connection(&fixture.path).await;
@@ -548,6 +543,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             .await
             .unwrap();
     }
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut listen = ListenWrite {
         external_id: None,
         media_uri: "file:///music/../music/local.flac".into(),
@@ -579,14 +575,12 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         .await
         .unwrap();
     assert_eq!(
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT media_uri,captured_media_uri FROM listens WHERE listen_key=?1"
-        )
-        .bind(file_key)
-        .fetch_one(&mut raw)
-        .await
-        .unwrap(),
-        (file.clone(), listen.media_uri.clone()),
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM listens WHERE listen_key=?1")
+            .bind(file_key)
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        file.clone(),
     );
     listen.media_uri = cue.clone();
     listen.title = "Recorded CUE".into();
@@ -615,6 +609,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(?1,?2,'Artist','Album',?3,'2023-11',180000,90000)")
             .bind(uri).bind(title).bind(time).execute(&mut raw).await.unwrap();
     }
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     listen.media_uri = "rufin:source/track/remote/uncached".into();
     listen.title = "Remote".into();
     listen.started_at = 500;
@@ -930,8 +925,15 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     let restored: library::ActivityRecord = serde_json::from_slice(&exported).unwrap();
     assert_eq!(restored.source_id, input.source_id);
-    assert_eq!(restored.current_media_uri, input.current_media_uri);
-    assert_eq!(restored.listen, input.listen);
+    // A listen keeps the current URI it was imported under, not the one it was captured under.
+    assert_eq!(restored.current_media_uri, None);
+    assert_eq!(
+        restored.listen,
+        ListenWrite {
+            media_uri: input.current_media_uri.clone().unwrap(),
+            ..input.listen.clone()
+        }
+    );
     let empty = tempfile::tempdir().unwrap();
     let catalog = library::Catalog::open(empty.path().join("store.sqlite"))
         .await

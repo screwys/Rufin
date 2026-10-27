@@ -109,7 +109,7 @@ impl JellyfinEmbySource {
                     .artists
                     .extend(artist_from_item(self.kind, source_id, &item)?),
                 "musicgenre" => batch
-                    .genres
+                    .tags
                     .extend(genre_from_item(self.kind, source_id, &item)?),
                 "playlist" => {
                     let Some(playlist) = playlist_from_item(self.kind, &item) else {
@@ -273,7 +273,7 @@ impl JellyfinEmbySource {
                                 .artists
                                 .extend(artist_from_item(self.kind, source_id, item)?),
                             "genre" => batch
-                                .genres
+                                .tags
                                 .extend(genre_from_item(self.kind, source_id, item)?),
                             _ => unreachable!(),
                         }
@@ -289,10 +289,10 @@ impl JellyfinEmbySource {
             if entity == "artist" {
                 self.acquire_missing_artists(observation, cancelled).await?;
             }
-            if complete && let Some(stamp) = stamp {
+            if complete && stamp.is_some() {
                 check_cancelled(cancelled)?;
                 observation
-                    .complete_source_observation(stamp, &[entity], None)
+                    .complete_source_observation(&[entity], None)
                     .await?;
             }
             if entity == "track" {
@@ -301,10 +301,10 @@ impl JellyfinEmbySource {
                     self.acquire_music_folder_memberships(observation, &folder, cancelled)
                         .await?;
                 }
-                if let Some(stamp) = stamp {
+                if stamp.is_some() {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(stamp, &["folder"], None)
+                        .complete_source_observation(&["folder"], None)
                         .await?;
                 }
             }
@@ -433,10 +433,10 @@ impl JellyfinEmbySource {
             check_cancelled(cancelled)?;
             observation.apply_catalog(&batch, true).await?;
             if finished {
-                if let Some(stamp) = stamp {
+                if stamp.is_some() {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_folder_membership(&folder_id, stamp)
+                        .complete_source_folder_membership(&folder_id)
                         .await?;
                 }
                 return Ok(());
@@ -493,10 +493,10 @@ impl JellyfinEmbySource {
                 pages.total(),
             ));
             if finished {
-                if let Some(stamp) = stamp {
+                if stamp.is_some() {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(stamp, &["playlist"], None)
+                        .complete_source_observation(&["playlist"], None)
                         .await?;
                 }
                 return Ok(());
@@ -591,11 +591,7 @@ mod tests {
             let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap();
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            catalog.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            let mut updates = catalog.changes();
             catalog
                 .reconcile_source(&library::SourceId::new("source"), "source", "Source")
                 .await
@@ -644,9 +640,9 @@ mod tests {
                     .await
                     .unwrap();
                 if identical {
-                    assert!(updates.try_recv().is_err());
+                    assert!(crate::published(&mut updates).is_none());
                 } else {
-                    assert!(updates.try_recv().expect("catalog update").changed());
+                    assert!(crate::published(&mut updates).is_some());
                 }
                 let home = catalog
                     .home_page(
@@ -772,11 +768,7 @@ mod tests {
         let catalog = library::Catalog::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         catalog
             .reconcile_source(&library::SourceId::new("source"), "jellyfin", "Jellyfin")
             .await
@@ -805,17 +797,16 @@ mod tests {
         (async { let mut batch=library::CatalogBatch::default(); let result = batch.tracks.extend_from_slice(&[(super::track_from_item(crate::ServerKind::Jellyfin, &catalog_source_id, &serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
         (async {
             let mut batch = library::CatalogBatch::default();
-            let result = batch
-                .genres
-                .extend_from_slice(&[(library::GenreObservation {
-                    object_id: "cached-genre".into(),
-                    metadata: library::TagMetadata {
-                        name: "Cached".into(),
-                        sort_text: Some("cached".into()),
-                    },
-                    ..Default::default()
-                })
-                .clone()]);
+            let result = batch.tags.extend_from_slice(&[(library::TagObservation {
+                kind: library::TagKind::Genre,
+                object_id: "cached-genre".into(),
+                metadata: library::TagMetadata {
+                    name: "Cached".into(),
+                    sort_text: Some("cached".into()),
+                },
+                artwork_binding: None,
+            })
+            .clone()]);
             observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
@@ -866,14 +857,9 @@ mod tests {
         })
         .await
         .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        updates.try_recv().expect("initial catalog update");
+        crate::published(&mut updates)
+            .expect("initial catalog update")
+            .1;
         catalog
             .reconcile_source(&library::SourceId::new("source"), "jellyfin", "Jellyfin")
             .await
@@ -886,15 +872,8 @@ mod tests {
             .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         let cancellation = library::ReadCancellation::new();
         for object in ["kept", "next"] {
             let uri = library::source_entity_uri(
@@ -1037,16 +1016,9 @@ mod tests {
             .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        assert!(!observation.changes().changed());
+        assert!(!observation.changed());
         assert!(
-            updates.try_recv().is_err(),
+            crate::published(&mut updates).is_none(),
             "unchanged native data stays quiet"
         );
     }
@@ -1145,11 +1117,7 @@ mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
             .await
             .expect("Library Catalog");
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         catalog
             .reconcile_source(
                 &library::SourceId::new("jellyfin:test"),
@@ -1167,15 +1135,8 @@ mod tests {
             .await
             .expect("stage overlapping Playlist pages");
 
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .expect("publish Playlists");
-        let update = updates.try_recv().expect("catalog update");
-        assert!(update.playlists);
+        let update = crate::published(&mut updates).expect("catalog update").1;
+        assert!(update.contains(sources::Shown::PLAYLIST));
     }
 }
 

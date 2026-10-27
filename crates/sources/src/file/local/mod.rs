@@ -236,7 +236,7 @@ impl LocalSource {
             cancelled,
         )
         .await?;
-        if observation.changes().metadata {
+        if observation.changed() {
             observation.record_imported_files(None).await?;
         }
         check_cancelled(cancelled)?;

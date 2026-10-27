@@ -1,14 +1,13 @@
-//! Owns bounded cached Search and complete route-filter orders over normalized facts.
-//! Callers receive final rows and never merge related Store results.
+//! Search over the resident Catalog, and the rows of server search results by object id.
 
 use serde::{Deserialize, Serialize};
-use sqlx::Connection;
 use std::collections::BTreeMap;
 
-use crate::query::{OrderedQuery, RequestedKeys};
+use crate::catalog::views::Context;
 use crate::{
-    AlbumView, ArtistView, Catalog, CatalogSort, Collection, FolderKey, LibraryResult, ListKind,
-    ListRead, MemberRead, ReadCancellation, SourceKey, TrackView,
+    AlbumKey, AlbumView, ArtistKey, ArtistView, Catalog, CatalogSort, Collection, FolderKey,
+    LibraryResult, ListKind, ListRead, MemberRead, ReadCancellation, SourceKey, TrackKey,
+    TrackView,
 };
 
 const SEARCH_LIMIT: usize = 100;
@@ -101,47 +100,70 @@ impl Catalog {
                 "Search identity page exceeds 100 rows".into(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let request = |kind: crate::CatalogKind,
-                       objects: &[String]|
-         -> LibraryResult<RequestedKeys> {
-            let (table, name) = kind.sql();
-            let batch = RequestedKeys::batch(objects)?;
-            Ok(RequestedKeys {
-                sql: format!(
-                    "SELECT entity.{name}_key value,request.ordinal FROM ({}) request JOIN {table} entity ON entity.source_key={} AND entity.object_id=request.value",
-                    batch.sql,
-                    source.raw()
-                ),
-                arguments: batch.arguments,
-            })
-        };
-        let result = SearchResults {
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut keys = Vec::new();
+        for (table, key, objects) in [
+            ("tracks", "track_key", track_objects),
+            ("albums", "album_key", album_objects),
+            ("artists", "artist_key", artist_objects),
+        ] {
+            keys.push(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+                "SELECT entity.{key} FROM json_each(?1) requested JOIN {table} entity ON entity.source_key=?2 AND entity.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)"
+            )))
+            .bind(serde_json::to_string(objects)?)
+            .bind(source)
+            .fetch_all(&mut *connection)
+            .await?);
+        }
+        self.search_rows(&mut connection, &keys, album_artists)
+            .await
+    }
+
+    async fn search_rows(
+        &self,
+        connection: &mut sqlx::SqliteConnection,
+        keys: &[Vec<i64>],
+        album_artists: bool,
+    ) -> LibraryResult<SearchResults> {
+        Ok(SearchResults {
             lyrics: BTreeMap::new(),
-            tracks: crate::tracks::load_track_requested(
-                &mut transaction,
-                request(crate::CatalogKind::Track, track_objects)?,
+            tracks: crate::tracks::load_track_rows(
+                self,
+                connection,
+                &keys[0]
+                    .iter()
+                    .copied()
+                    .map(TrackKey::from_raw)
+                    .collect::<Vec<_>>(),
             )
             .await?,
-            albums: crate::collections::load_album_requested(
-                &mut transaction,
-                request(crate::CatalogKind::Album, album_objects)?,
+            albums: crate::collections::load_album_rows(
+                self,
+                connection,
+                &keys[1]
+                    .iter()
+                    .copied()
+                    .map(AlbumKey::from_raw)
+                    .collect::<Vec<_>>(),
                 false,
             )
             .await?,
-            artists: crate::collections::load_artist_requested(
-                &mut transaction,
-                request(crate::CatalogKind::Artist, artist_objects)?,
+            artists: crate::collections::load_artist_rows(
+                self,
+                connection,
+                &keys[2]
+                    .iter()
+                    .copied()
+                    .map(ArtistKey::from_raw)
+                    .collect::<Vec<_>>(),
                 album_artists,
                 false,
             )
             .await?,
-        };
-        transaction.commit().await?;
-        Ok(result)
+        })
     }
 
+    /// Tracks, albums and artists of a source whose texts hold every search term.
     pub async fn search(
         &self,
         source: SourceKey,
@@ -153,67 +175,93 @@ impl Catalog {
         if request.query.is_empty() {
             return Ok(SearchResults::default());
         }
-        let terms = request
-            .query
-            .split_whitespace()
-            .filter(|term| !term.is_empty())
-            .collect::<Vec<_>>();
-        let terms = crate::query::quote(&serde_json::to_string(&terms)?);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let mut tracks = MemberRead::new(Collection::Source(source));
-        tracks.folder = folder;
-        let tracks = crate::query::member_query_on(&mut transaction, &tracks).await?;
-        let mut albums = ListRead::new(ListKind::Albums, Some(source), CatalogSort::Title);
-        albums.folder = folder;
-        let albums = crate::collections::collection_query(&albums);
-        let mut artists = ListRead::new(
-            ListKind::Artists {
-                album_artist: album_artists,
-            },
-            Some(source),
-            CatalogSort::Title,
-        );
-        artists.folder = folder;
-        let artists = crate::collections::collection_query(&artists);
-        let album_condition = format!(
-            "({} OR CAST(album.year_sort AS TEXT)=term.value OR EXISTS(SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND {}) OR EXISTS(SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND {}))",
-            term_match("album.title_search||' '||COALESCE(album.artist_search,'')"),
-            term_match("artist.normalized_name"),
-            term_match("genre.normalized_name")
-        );
-        let request = |mut relation: OrderedQuery, condition: String| {
-            relation.predicate.push_str(&format!(" AND NOT EXISTS(SELECT 1 FROM json_each({terms}) term WHERE NOT COALESCE({condition},0))"));
-            relation.requested_keys(0, request.limit)
+        let terms = request.query.split_whitespace().collect::<Vec<_>>();
+        let matches = |text: &str| terms.iter().all(|term| term_match(text, term));
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let tracks = MemberRead {
+            folder,
+            ..MemberRead::new(Collection::Source(source))
         };
-        let result = SearchResults {
-            lyrics: BTreeMap::new(),
-            tracks: crate::tracks::load_track_requested(
-                &mut transaction,
-                request(tracks, term_match("track.normalized_search")),
-            )
-            .await?,
-            albums: crate::collections::load_album_requested(
-                &mut transaction,
-                request(albums, album_condition),
-                false,
-            )
-            .await?,
-            artists: crate::collections::load_artist_requested(
-                &mut transaction,
-                request(artists, term_match("artist.normalized_name")),
-                album_artists,
-                false,
-            )
-            .await?,
+        let tracks = self.member_order(&mut connection, &tracks).await?;
+        let albums = ListRead {
+            folder,
+            ..ListRead::new(ListKind::Albums, Some(source), CatalogSort::Title)
         };
-        transaction.commit().await?;
-        Ok(result)
+        let albums = self.list_order(&mut connection, &albums).await?;
+        let artists = ListRead {
+            folder,
+            ..ListRead::new(
+                ListKind::Artists {
+                    album_artist: album_artists,
+                },
+                Some(source),
+                CatalogSort::Title,
+            )
+        };
+        let artists = self.list_order(&mut connection, &artists).await?;
+        let keys = {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot, false);
+            let name = |id| snapshot.text(id).to_lowercase();
+            vec![
+                tracks
+                    .iter()
+                    .map(|member| &snapshot.tracks.records[member.track as usize])
+                    .filter(|record| matches(&context.track_search(record)))
+                    .map(|record| record.key)
+                    .take(request.limit)
+                    .collect::<Vec<_>>(),
+                albums
+                    .iter()
+                    .filter_map(|key| snapshot.albums.get(*key))
+                    .filter(|album| {
+                        let caption = format!(
+                            "{} {}",
+                            snapshot.text(album.title),
+                            snapshot.text(album.artist)
+                        )
+                        .to_lowercase();
+                        let year = (album.year != i16::MIN).then(|| album.year.to_string());
+                        let runs = snapshot.album_runs(album);
+                        terms.iter().all(|term| {
+                            term_match(&caption, term)
+                                || year.as_deref() == Some(*term)
+                                || runs[0].iter().any(|slot| {
+                                    snapshot
+                                        .artists
+                                        .live(*slot)
+                                        .is_some_and(|artist| term_match(&name(artist.name), term))
+                                })
+                                || runs[1].iter().any(|slot| {
+                                    snapshot
+                                        .tags
+                                        .live(*slot)
+                                        .is_some_and(|tag| term_match(&name(tag.name), term))
+                                })
+                        })
+                    })
+                    .map(|album| album.key)
+                    .take(request.limit)
+                    .collect(),
+                artists
+                    .iter()
+                    .filter_map(|key| snapshot.artists.get(*key))
+                    .filter(|artist| matches(&name(artist.name)))
+                    .map(|artist| artist.key)
+                    .take(request.limit)
+                    .collect(),
+            ]
+        };
+        self.search_rows(&mut connection, &keys, album_artists)
+            .await
     }
 }
 
-fn term_match(text: &str) -> String {
-    format!(
-        "CASE WHEN length(term.value)=1 THEN instr(' '||{text}||' ',' '||term.value||' ') ELSE instr({text},term.value) END>0"
-    )
+/// A one-letter term matches a whole word; a longer one matches anywhere.
+fn term_match(text: &str, term: &str) -> bool {
+    if term.chars().count() == 1 {
+        format!(" {text} ").contains(&format!(" {term} "))
+    } else {
+        text.contains(term)
+    }
 }

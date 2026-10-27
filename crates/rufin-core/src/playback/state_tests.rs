@@ -2335,7 +2335,6 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .collect::<Vec<_>>();
     let (key, _) = catalog
         .create_playlist(
-            None,
             "Source",
             &library::MemberSelection::Uris((uris.to_vec()).into()),
         )

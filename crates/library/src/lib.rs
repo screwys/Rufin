@@ -66,6 +66,8 @@ pub use selection::MemberSelection;
 mod smart_playlists;
 mod storage;
 pub use storage::CacheUsage;
+mod tags;
+pub use tags::TagKind;
 mod tracks;
 pub use tracks::AudioProperties;
 
@@ -80,9 +82,9 @@ pub use artwork::{
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
-    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, CatalogUpdate,
-    FolderObservation, Freshness, GenreObservation, LocalArtworkCandidate, MoodObservation,
-    Observation, PlaylistEntryObservation, PlaylistObservation, TrackObservation,
+    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FolderObservation,
+    Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation, PlaylistObservation,
+    Scope, SourcePhase, TagObservation, TrackObservation,
 };
 pub use collections::{
     AlbumArtistLink, AlbumDetailIndex, AlbumDetailRow, AlbumGenreLink, AlbumLinks,

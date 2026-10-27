@@ -29,6 +29,98 @@ mod remote_http;
 mod remote_json;
 mod subsonic;
 
+/// What a test's Catalog committed since the last call, merged as the one publication clients
+/// would see: the first source whose shown rows changed, with everything it changed.
+#[cfg(test)]
+pub(crate) fn published(
+    changes: &mut tokio::sync::broadcast::Receiver<std::sync::Arc<library::Change>>,
+) -> Option<(library::SourceKey, Shown)> {
+    let mut published: Option<(library::SourceKey, Shown)> = None;
+    let mut unsourced = Shown::default();
+    while let Ok(committed) = changes.try_recv() {
+        for (source, part) in Shown::of(&committed) {
+            let Some(source) = source else {
+                unsourced |= part;
+                continue;
+            };
+            let (first, merged) = published.get_or_insert((source, Shown::default()));
+            if *first == source {
+                *merged |= part;
+            }
+        }
+    }
+    if let Some((_, merged)) = &mut published {
+        *merged |= unsourced;
+    }
+    published
+}
+
+#[cfg(test)]
+mod shown {
+    /// What clients refresh for after a test's committed Writes: the catalog rows of a source,
+    /// its playlists, its plays or its Home rows.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct Shown(u8);
+
+    impl Shown {
+        pub const CATALOG: Self = Self(1);
+        pub const PLAYLIST: Self = Self(1 << 1);
+        pub const STATS: Self = Self(1 << 2);
+        pub const HOME: Self = Self(1 << 3);
+
+        pub fn intersects(self, other: Self) -> bool {
+            self.0 & other.0 != 0
+        }
+
+        pub fn contains(self, other: Self) -> bool {
+            self.0 & other.0 == other.0
+        }
+
+        pub fn is_empty(self) -> bool {
+            self.0 == 0
+        }
+
+        /// The parts of one Change, by the source they belong to.
+        pub fn of(change: &library::Change) -> Vec<(Option<library::SourceKey>, Self)> {
+            use library::Scope;
+            change
+                .scopes
+                .iter()
+                .filter_map(|scope| match scope {
+                    Scope::Tracks { source, .. } => Some((*source, Self::CATALOG)),
+                    Scope::Collections { source } | Scope::Source { key: source, .. } => {
+                        Some((Some(*source), Self::CATALOG))
+                    }
+                    Scope::Playlist { .. }
+                    | Scope::Playlists
+                    | Scope::Smart { .. }
+                    | Scope::Folders => Some((None, Self::PLAYLIST)),
+                    Scope::Listened { .. } => Some((None, Self::STATS)),
+                    Scope::Home { source } => Some((Some(*source), Self::HOME)),
+                    Scope::Reload => Some((None, Self::CATALOG)),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    impl std::ops::BitOr for Shown {
+        type Output = Self;
+
+        fn bitor(self, other: Self) -> Self {
+            Self(self.0 | other.0)
+        }
+    }
+
+    impl std::ops::BitOrAssign for Shown {
+        fn bitor_assign(&mut self, other: Self) {
+            self.0 |= other.0;
+        }
+    }
+}
+#[cfg(test)]
+pub use shown::Shown;
+
 #[cfg(test)]
 mod local_change_integration_tests {
     include!(concat!(

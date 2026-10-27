@@ -58,10 +58,16 @@ impl Catalog {
     }
 
     async fn clear_cached_table(&self, table: &str) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
-            .execute(&mut *writer)
-            .await?;
+        let mut write = self.write().await?;
+        if sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected()
+            != 0
+        {
+            write.keep();
+        }
+        write.commit().await?;
         Ok(())
     }
 }

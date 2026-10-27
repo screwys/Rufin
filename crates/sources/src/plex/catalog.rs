@@ -94,23 +94,23 @@ impl PlexSource {
                     }
                 }
             }
-            if let Some(stamp) = stamp {
+            if stamp.is_some() {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
                 observation
-                    .complete_source_folder_membership(&section_record.object_id, stamp)
+                    .complete_source_folder_membership(&section_record.object_id)
                     .await?;
             }
             self.acquire_hubs(observation, &section_id, cancelled)
                 .await?;
         }
-        if let Some(stamp) = stamp {
+        if stamp.is_some() {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
             observation
-                .complete_source_observation(stamp, &["track", "album", "artist", "folder"], None)
+                .complete_source_observation(&["track", "album", "artist", "folder"], None)
                 .await?;
         }
         if cancelled() {
@@ -634,11 +634,7 @@ pub(super) mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
@@ -698,11 +694,11 @@ pub(super) mod tests {
                 .unwrap();
             if identical {
                 assert!(
-                    updates.try_recv().is_err(),
+                    crate::published(&mut updates).is_none(),
                     "unchanged native data stays quiet"
                 );
             } else {
-                assert!(updates.try_recv().expect("catalog update").changed());
+                assert!(crate::published(&mut updates).is_some());
             }
             let home = catalog
                 .home_page(
@@ -836,11 +832,7 @@ pub(super) mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         catalog
             .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
             .await
@@ -855,15 +847,8 @@ pub(super) mod tests {
             result
         }
         .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("plex-test"),
@@ -1034,16 +1019,9 @@ pub(super) mod tests {
             result
         }
         .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
-        assert!(!observation.changes().changed());
+        assert!(!observation.changed());
         assert!(
-            updates.try_recv().is_err(),
+            crate::published(&mut updates).is_none(),
             "unchanged native data stays quiet"
         );
         drop(stations);
@@ -1079,15 +1057,11 @@ pub(super) mod tests {
                 result
             }
             .unwrap();
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            assert!(!observation.changes().changed());
-            assert!(updates.try_recv().is_err(), "retained Home stays quiet");
+            assert!(!observation.changed());
+            assert!(
+                crate::published(&mut updates).is_none(),
+                "retained Home stays quiet"
+            );
             let retained = catalog
                 .home_page(
                     catalog

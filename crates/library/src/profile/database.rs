@@ -48,7 +48,6 @@ impl ProfileStore {
             validate_database(&mut transaction).await?;
             validate_base_database(&mut transaction).await?;
             crate::schema::initialize_durable(&mut transaction).await?;
-            crate::connect::initialize(&mut transaction).await?;
             rewrap(&mut transaction, transport_key, local_key).await?;
             transaction.commit().await?;
             Result::<()>::Ok(())
@@ -76,9 +75,25 @@ impl ProfileStore {
             let mut transaction = incoming.begin().await?;
             acknowledge_snapshot_on(&mut transaction, "").await?;
             transaction.commit().await?;
-            let mut connection = catalog.writer().await?;
-            let (_export, _reader) = catalog.acquire_export().await?;
-            Catalog::connect_adopt_database_on(&mut connection, &mut incoming).await?;
+            catalog.loaded().await;
+            let kept = {
+                let mut writer = catalog.writer().await?;
+                let (_export, _reader) = catalog.acquire_export().await?;
+                let kept = Catalog::downloaded_references_on(&mut writer).await?;
+                // Memory is behind the Store until the reload below lands.
+                catalog.require_reload();
+                catalog.forget_image();
+                Catalog::connect_adopt_database_on(&mut writer, &mut incoming).await?;
+                let revision = catalog.reload_under(&mut writer).await?;
+                catalog.publish(Arc::new(crate::Change {
+                    revision,
+                    scopes: vec![crate::Scope::Reload],
+                }));
+                kept
+            };
+            let mut write = catalog.write().await?;
+            Catalog::keep_downloaded_references(&mut write, &kept).await?;
+            write.commit().await?;
             Result::<()>::Ok(())
         }
         .await;
@@ -207,59 +222,37 @@ impl ProfileStore {
         transport_key: &age::x25519::Identity,
         publisher: Option<&str>,
     ) -> Result<bool> {
-        let mut kinds: Vec<String> =
-            sqlx::query_scalar("SELECT DISTINCT kind FROM connect_versions")
-                .fetch_all(&mut *incoming)
-                .await?;
-        kinds.sort_by_key(|kind| match kind.as_str() {
-            "catalog:source" => 0,
-            "catalog:file" => 1,
-            _ => 2,
-        });
         let mut changed = false;
-        for kind in std::iter::once(None).chain(kinds.into_iter().map(Some)) {
-            let (table, column, predicate) = if kind.is_some() {
-                ("connect_versions", "CAST(version AS BLOB)", "kind IS ?3")
-            } else {
-                ("documents", "snapshot", "?3 IS NULL")
-            };
-            let mut cursor = String::new();
-            loop {
-                let rows: Vec<(String,Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT name,{column} FROM {table} WHERE name>?1 AND {predicate} AND name<=coalesce((SELECT min(name) FROM {table} WHERE name>?1 AND {predicate} AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2")))
-                    .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64).bind(&kind).fetch_all(&mut *incoming).await?;
-                let Some(last) = rows.last() else { break };
-                cursor = last.0.clone();
-                let updates = if kind.is_none() {
-                    rows.iter()
-                        .map(|(name, bytes)| {
-                            Ok(Update {
-                                version: FORMAT,
-                                document: name.clone(),
-                                bytes: expose(name, bytes, transport_key)?.into_owned(),
-                                current: None,
-                            })
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                } else {
-                    let names = rows.iter().map(|row| row.0.clone()).collect::<Vec<_>>();
-                    Self::updates_on(incoming, transport_key, &self.versions(&names).await?).await?
-                };
-                let mut connection = self.writer().await?;
-                let mut transaction = connection.begin().await?;
-                let (applied, versions) = self.import_page_on(&mut transaction, updates).await?;
-                changed |= applied;
-                if kind.is_none()
-                    && let Some(publisher) = publisher
-                {
-                    let acknowledgements = rows
-                        .into_iter()
-                        .zip(versions)
-                        .map(|((name, _), version)| (publisher.to_owned(), name, version))
-                        .collect::<Vec<_>>();
-                    history::acknowledge_page_on(&mut transaction, &acknowledgements).await?;
-                }
-                transaction.commit().await?;
+        let mut cursor = String::new();
+        loop {
+            let rows: Vec<(String, Vec<u8>)> = sqlx::query_as("SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND name GLOB 'playlist_artwork:*'),char(1114111)) ORDER BY name LIMIT ?2")
+                .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *incoming).await?;
+            let Some(last) = rows.last() else { break };
+            cursor = last.0.clone();
+            let updates = rows
+                .iter()
+                .map(|(name, bytes)| {
+                    Ok(Update {
+                        version: FORMAT,
+                        document: name.clone(),
+                        bytes: expose(name, bytes, transport_key)?.into_owned(),
+                        current: None,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut writer = self.writer().await?;
+            let mut write = writer.begin().await?;
+            let (applied, versions) = self.import_page_on(&mut write, updates).await?;
+            changed |= applied;
+            if let Some(publisher) = publisher {
+                let acknowledgements = rows
+                    .into_iter()
+                    .zip(versions)
+                    .map(|((name, _), version)| (publisher.to_owned(), name, version))
+                    .collect::<Vec<_>>();
+                history::acknowledge_page_on(&mut write, &acknowledgements).await?;
             }
+            write.commit().await?;
         }
         Ok(changed)
     }
@@ -326,7 +319,7 @@ async fn validate_database(connection: &mut SqliteConnection) -> Result<()> {
     let version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&mut *connection)
         .await?;
-    if !matches!(version, 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 | 58) {
+    if version != crate::schema::STORE_VERSION {
         bail!(INCOMPATIBLE_PROFILE);
     }
     let profile: i64 =

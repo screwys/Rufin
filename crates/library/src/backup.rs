@@ -97,7 +97,7 @@ impl Catalog {
         }
         if contents.queue {
             let mut output = private_file(&directory.join("queue.jsonl"))?;
-            crate::queue::export_queue_jsonl_on(&mut transaction, &mut output).await?;
+            crate::queue::export_queue_jsonl_on(self, &mut transaction, &mut output).await?;
             output.flush()?;
         }
         if contents.activity {
@@ -128,21 +128,15 @@ impl Catalog {
         let open = |name: &str| -> LibraryResult<BufReader<File>> {
             Ok(BufReader::new(File::open(directory.join(name))?))
         };
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
+        write.reload();
         let mut report = BackupRestoreReport::default();
-        sync_restore_on(&mut transaction, contents, true).await?;
-        let receiving: bool =
-            sqlx::query_scalar("SELECT receiving FROM connect_profile WHERE singleton=1")
-                .fetch_one(&mut *transaction)
-                .await?;
-        crate::connect::set_receiving_on(&mut transaction, true).await?;
         if contents.playlists {
             sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
-                .execute(&mut *transaction)
+                .execute(write.connection().await?)
                 .await?;
             report.playlists = crate::playlists::import_playlists_jsonl_on(
-                &mut transaction,
+                &mut write,
                 open("playlist-order.jsonl")?,
             )
             .await?;
@@ -150,7 +144,7 @@ impl Catalog {
                 let name = format!("playlists/{ordinal}.m3u8");
                 let path = directory.join(&name);
                 let imported = crate::playlist_format::import_playlist_on(
-                    &mut transaction,
+                    &mut write,
                     crate::PlaylistFile::read(open(&name)?, &path)?,
                     &path,
                     None,
@@ -161,152 +155,66 @@ impl Catalog {
                 report.skipped_playlist_entries += imported.skipped;
             }
             report.smart_playlists = crate::smart_playlists::import_smart_playlists_jsonl_on(
-                &mut transaction,
+                write.connection().await?,
                 open("smart.jsonl")?,
             )
             .await?;
         }
         if contents.playlists && directory.join("playlist-folders.jsonl").exists() {
-            crate::playlist_folders::import_on(&mut transaction, open("playlist-folders.jsonl")?)
-                .await?;
+            crate::playlist_folders::import_on(
+                write.connection().await?,
+                open("playlist-folders.jsonl")?,
+            )
+            .await?;
         }
 
         if contents.favorites {
             sqlx::raw_sql("DELETE FROM user_media_state;DELETE FROM favorite_outbox;")
-                .execute(&mut *transaction)
+                .execute(write.connection().await?)
                 .await?;
             report.user_states = crate::favorites::import_user_media_state_jsonl_on(
-                &mut transaction,
+                &mut write,
                 open("user-state.jsonl")?,
             )
             .await?;
         }
         if contents.queue {
             sqlx::raw_sql("DELETE FROM queue_state;DELETE FROM queue_positions;DELETE FROM queue_entries;DELETE FROM queue_contexts;")
-                .execute(&mut *transaction)
+                .execute(write.connection().await?)
                 .await?;
-            crate::queue::import_queue_jsonl_on(&mut transaction, open("queue.jsonl")?).await?;
+            crate::queue::import_queue_jsonl_on(&mut write, open("queue.jsonl")?).await?;
         }
         if contents.activity {
             sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
-                .execute(&mut *transaction)
+                .execute(write.connection().await?)
                 .await?;
-            let activity = crate::activity::import_activity_jsonl_on(
-                &mut transaction,
-                open("activity.jsonl")?,
-            )
-            .await?;
+            let activity =
+                crate::activity::import_activity_jsonl_on(&mut write, open("activity.jsonl")?)
+                    .await?;
             report.listens = activity.accepted;
             report.skipped_listens = activity.skipped;
             crate::activity::import_legacy_activity_jsonl_on(
-                &mut transaction,
+                &mut write,
                 open("legacy-activity.jsonl")?,
             )
             .await?;
         }
         if contents.local_imports {
             sqlx::query("DELETE FROM main.local_locators WHERE origin<>'download'")
-                .execute(&mut *transaction)
+                .execute(write.connection().await?)
                 .await?;
             report.local_locators =
                 crate::local::import_local_locators_jsonl_preserving_downloads_on(
-                    &mut transaction,
+                    &mut write,
                     open("local-locators.jsonl")?,
                 )
                 .await?;
         }
-        crate::connect::set_receiving_on(&mut transaction, receiving).await?;
-        sync_restore_on(&mut transaction, contents, false).await?;
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(report)
     }
 }
 
-async fn sync_restore_on(
-    connection: &mut sqlx::SqliteConnection,
-    groups: StateGroups,
-    deleting: bool,
-) -> LibraryResult<()> {
-    let active:bool=sqlx::query_scalar("SELECT profile IS NOT NULL AND enabled AND NOT receiving FROM connect_profile WHERE singleton=1").fetch_one(&mut *connection).await?;
-    if !active {
-        return Ok(());
-    }
-    let mut selected = Vec::new();
-    if groups.playlists {
-        selected.push("SELECT 'playlist' kind,json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id) object_key,playlist_key FROM playlists playlist WHERE owner='rufin'");
-        selected.push(
-            "SELECT 'smart' kind,object_id object_key,NULL playlist_key FROM smart_playlists",
-        );
-    }
-    if groups.favorites {
-        selected.push(
-            "SELECT 'state' kind,media_uri object_key,NULL playlist_key FROM user_media_state",
-        );
-    }
-    if groups.activity {
-        selected.push("SELECT 'listen' kind,coalesce(external_id,'legacy-'||media_uri||'-'||started_at||'-'||listen_key) object_key,NULL playlist_key FROM listens");
-        selected.push("SELECT 'legacy_activity' kind,json_array(source_id,period,item_kind,track_object_id) object_key,NULL playlist_key FROM legacy_activity");
-    }
-    if selected.is_empty() {
-        return Ok(());
-    }
-    let query = format!(
-        "SELECT kind,object_key,playlist_key FROM ({}) WHERE (kind,object_key)>(?1,?2) ORDER BY kind,object_key LIMIT ?3",
-        selected.join(" UNION ALL ")
-    );
-    let mut after = (String::new(), String::new());
-    loop {
-        let page: Vec<(String, String, Option<PlaylistKey>)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(query.clone()))
-                .bind(&after.0)
-                .bind(&after.1)
-                .bind(crate::CONNECT_PAGE_SIZE as i64)
-                .fetch_all(&mut *connection)
-                .await?;
-        let Some(last) = page.last() else { break };
-        after = (last.0.clone(), last.1.clone());
-        let mut records = Vec::new();
-        for (kind, key, playlist) in page {
-            if crate::connect_current_kind(&kind) {
-                crate::connect::mark_current_on(connection, &kind, &key, deleting).await?;
-                continue;
-            }
-            if deleting {
-                records.push(crate::ConnectRecord {
-                    kind: kind.clone(),
-                    key: key.clone(),
-                    value: None,
-                });
-            } else {
-                records.push(Catalog::connect_record_on(connection, &kind, &key).await?);
-                if let Some(playlist) = playlist {
-                    records.extend(
-                        crate::playlists::playlist_entry_records_on(
-                            connection,
-                            playlist,
-                            0,
-                            i64::MAX,
-                        )
-                        .await?,
-                    );
-                }
-            }
-            if kind == "playlist" {
-                records.push(if deleting {
-                    crate::ConnectRecord {
-                        kind: "playlist_artwork".into(),
-                        key,
-                        value: None,
-                    }
-                } else {
-                    Catalog::connect_record_on(connection, "playlist_artwork", &key).await?
-                });
-            }
-        }
-        crate::profile::write_local_on(connection, &records).await?;
-    }
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,10 +339,12 @@ mod tests {
         let target = catalog(directory.path(), "target").await;
         {
             let mut writer = source.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(1,'https://example.test/song',jsonb(json_object('title','Saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(&mut *writer).await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(2,'local');INSERT INTO playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(2,'file:///music/song.flac',jsonb(json_object('title','Local saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES (1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name) VALUES (1,1,'source','native',NULL),(2,NULL,'rufin','authored','Mine');INSERT INTO tracks(track_key,media_uri,title) VALUES(1,'https://example.test/song','Saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(&mut *writer).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES (2,'local');INSERT INTO playlists(playlist_key,object_id,name) VALUES (3,'local-authored','Local playlist');INSERT INTO tracks(track_key,media_uri,title) VALUES(2,'file:///music/song.flac','Local saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
                 .execute(&mut *writer).await.unwrap();
         }
+        // The rows were written behind the Catalog, so it loads them before the next write.
+        source.require_reload();
         let smart = source
             .create_smart_playlist(
                 "Saved choice",
@@ -518,8 +428,9 @@ mod tests {
         assert_eq!(playlist_count, 2);
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,local_play_count,indexed,native_metadata) VALUES(1,'song','https://example.test/song',jsonb(json_object('title','Song','sort_text','song','duration_millis',100)),'song',7,1,1);").execute(&mut *writer).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (1,'catalog','Catalog'); INSERT INTO tracks(source_key,object_id,media_uri,title,sort_text,duration_millis,indexed,native_metadata) VALUES(1,'song','https://example.test/song','Song','song',100,1,1);").execute(&mut *writer).await.unwrap();
         }
+        target.require_reload();
         target
             .restore_state(staged.path(), all_groups(), playlist_count)
             .await
@@ -579,7 +490,7 @@ mod tests {
         let mut writer = target.writer().await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
-                "SELECT local_play_count FROM tracks WHERE media_uri='https://example.test/song'"
+                "SELECT count(*) FROM listens WHERE media_uri='https://example.test/song'"
             )
             .fetch_one(&mut *writer)
             .await
@@ -587,7 +498,7 @@ mod tests {
             1
         );
         let identities: Vec<(String, Option<String>, i64)> =
-            sqlx::query_as("SELECT object_id,name,position FROM main.playlists ORDER BY position")
+            sqlx::query_as("SELECT object_id,name,row_number() OVER(ORDER BY created_at,playlist_key)-1 FROM main.playlists ORDER BY created_at,playlist_key")
                 .fetch_all(&mut *writer)
                 .await
                 .unwrap();
@@ -629,7 +540,7 @@ mod tests {
         seed(&target, 19).await;
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (83,'remote','Remote','remote',zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (83,'remote','Remote');INSERT INTO main.playlists(object_id,name) VALUES('retained','Keep me');")
                 .execute(&mut *writer).await.unwrap();
         }
         let favorites = StateGroups {

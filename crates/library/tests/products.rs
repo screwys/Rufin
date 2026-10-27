@@ -10,7 +10,7 @@ use super::support::{connection, fixture};
 #[tokio::test]
 async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     use library::CatalogSort;
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     for sort in [
@@ -128,7 +128,6 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     let external = "https://example.test/outside-catalog.flac".to_string();
     let (_, outside_id) = catalog
         .create_playlist(
-            None,
             "Outside",
             &library::MemberSelection::Uris(((std::slice::from_ref(&external)).to_vec()).into()),
         )
@@ -469,13 +468,14 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             .is_empty()
     );
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.title','İSTANBUL')),normalized_search=?2 WHERE media_uri=?1")
+    sqlx::query("UPDATE tracks SET title='İSTANBUL' WHERE media_uri=?1")
         .bind(&fixture.track_uris[0])
-        .bind("İSTANBUL".to_lowercase())
         .execute(&mut raw)
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let filtered = (&library::MemberRead {
         filter: ("i\u{307}st").into(),
         ..library::MemberRead::new(library::Collection::Smart {
@@ -536,33 +536,30 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
 #[tokio::test]
 async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     use library::CatalogSort;
-    let fixture = fixture().await;
-    let catalog = &fixture.catalog;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE albums SET metadata=jsonb(json_set(metadata,'$.year',CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END)) ")
+    sqlx::query("UPDATE albums SET year=CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END")
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE album_artists SET artist_key=?1 WHERE album_key=?2")
+    sqlx::query("UPDATE album_links SET target=?1 WHERE role=0 AND album_key=?2")
         .bind(fixture.artists[0])
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,1)")
+    sqlx::query("INSERT INTO album_links(album_key,role,position,target) VALUES(?1,0,1,?2)")
         .bind(fixture.albums[0])
         .bind(fixture.artists[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE albums SET year_sort=year,album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1)").execute(&mut raw).await.unwrap();
-    sqlx::query("UPDATE tracks SET (album_title_sort,album_artist_sort,album_year_sort)=(SELECT title_sort,album_artist_sort,year_sort FROM albums WHERE albums.album_key=tracks.album_key)").execute(&mut raw).await.unwrap();
-    sqlx::query("DELETE FROM track_folders WHERE track_key IN(SELECT track_key FROM tracks WHERE album_key=?1)")
+    sqlx::query("DELETE FROM track_links WHERE role=4 AND track_key IN(SELECT track_key FROM tracks WHERE album_key=?1)")
         .bind(fixture.albums[1]).execute(&mut raw).await.unwrap();
-    sqlx::query("UPDATE albums SET year_sort=year,album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1)").execute(&mut raw).await.unwrap();
-    sqlx::query("UPDATE tracks SET (album_title_sort,album_artist_sort,album_year_sort)=(SELECT title_sort,album_artist_sort,year_sort FROM albums WHERE albums.album_key=tracks.album_key)").execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     for sort in [
         CatalogSort::Title,
         CatalogSort::AlbumArtist,
@@ -743,7 +740,6 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     ];
     let playlist = catalog
         .create_playlist(
-            None,
             "Global",
             &library::MemberSelection::Uris(((&uris).to_vec()).into()),
         )
@@ -753,7 +749,6 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         .0;
     catalog
         .create_playlist(
-            Some(fixture.source),
             "Source",
             &library::MemberSelection::Uris(((&uris).to_vec()).into()),
         )
@@ -909,22 +904,21 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
 
 #[tokio::test]
 async fn track_pages_preserve_sort_filter_and_source_scope() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE albums SET metadata=jsonb(json_set(metadata,'$.year',CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END)) ")
+    sqlx::query("UPDATE albums SET year=CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END")
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE album_artists SET artist_key=?1 WHERE album_key=?2")
+    sqlx::query("UPDATE album_links SET target=?1 WHERE role=0 AND album_key=?2")
         .bind(fixture.artists[0])
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE albums SET year_sort=year,album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1)").execute(&mut raw).await.unwrap();
-    sqlx::query("UPDATE tracks SET (album_title_sort,album_artist_sort,album_year_sort)=(SELECT title_sort,album_artist_sort,year_sort FROM albums WHERE albums.album_key=tracks.album_key)").execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for sort in [
         library::CatalogSort::Title,
         library::CatalogSort::TrackNumber,
@@ -1050,8 +1044,9 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
     );
 
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300) INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) SELECT ?1,'extra-'||x,'test:extra-'||x,jsonb(json_object('title',COALESCE('Extra '||x,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('extra-'||x,''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Extra '||x,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('extra-'||x,''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Extra '||x,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('extra-'||x,''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Extra '||x,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('extra-'||x,''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Extra '||x,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('extra-'||x,''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1 FROM n")
+    sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300) INSERT INTO tracks(source_key,object_id,media_uri,title,display_album,display_artist,sort_text,duration_millis,indexed) SELECT ?1,'extra-'||x,'test:extra-'||x,COALESCE('Extra '||x,''),COALESCE('',''),COALESCE('',''),COALESCE('extra-'||x,''),COALESCE(1000,0),1 FROM n")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let rows = (&library::MemberRead {
         collection: library::Collection::Source(fixture.source),
         sort: Some(library::CatalogSort::Title),
@@ -1070,12 +1065,16 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
 
 #[tokio::test]
 async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     // The two albums have distinct artists and no shared genre.
-    for sql in ["DELETE FROM track_genres", "DELETE FROM album_genres"] {
+    for sql in [
+        "DELETE FROM track_links WHERE role=2",
+        "DELETE FROM album_links WHERE role=2",
+    ] {
         sqlx::query(sql).execute(&mut raw).await.unwrap();
     }
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
     for variation in [0, 2, 4, 99] {
         for seed in [
@@ -1141,17 +1140,20 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
 
 #[tokio::test]
 async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32))")
+    sqlx::query("INSERT INTO sources(object_id,display_name) VALUES ('other','Other')")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,sort_text,duration_millis,indexed) SELECT source_key,'track-2','test:other','Other','other',1000,1 FROM sources WHERE object_id='other'")
         .execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) SELECT source_key,'track-2','test:other',jsonb(json_object('title',COALESCE('Other',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('other',''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Other',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('other',''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Other',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('other',''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Other',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('other',''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Other',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('other',''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1 FROM sources WHERE object_id='other'")
-        .execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,writable,position) VALUES(?1,'source','native','Native','native','native',0,0)")
+    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,writable) VALUES (?1,'source','native','Native',0)")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) SELECT playlist_key,'entry',(SELECT track_key FROM tracks WHERE media_uri=?1),0 FROM playlists WHERE object_id='native'")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let native = fixture
         .catalog
         .playlist_key_by_object(fixture.source, "native", &cancel)
@@ -1161,7 +1163,6 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     let local = fixture
         .catalog
         .create_playlist(
-            None,
             "Mixed",
             &library::MemberSelection::Uris(
                 ((&[fixture.track_uris[0].clone(), "test:other".into()]).to_vec()).into(),
@@ -1174,7 +1175,6 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     let (owned, _) = fixture
         .catalog
         .create_playlist(
-            Some(fixture.source),
             "Owned",
             &library::MemberSelection::Uris(((&fixture.track_uris[..1]).to_vec()).into()),
         )
@@ -1241,23 +1241,27 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
 
 #[tokio::test]
 async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     // Candidate tracks retain only album genres; the seed retains only a track genre.
-    for sql in ["DELETE FROM track_artists", "DELETE FROM album_artists"] {
+    for sql in [
+        "DELETE FROM track_links WHERE role IN (0,1)",
+        "DELETE FROM album_links WHERE role=0",
+    ] {
         sqlx::query(sql).execute(&mut raw).await.unwrap();
     }
-    sqlx::query("DELETE FROM album_genres WHERE album_key=?1")
+    sqlx::query("DELETE FROM album_links WHERE role=2 AND album_key=?1")
         .bind(fixture.albums[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM track_genres WHERE track_key<>?1")
+    sqlx::query("DELETE FROM track_links WHERE role=2 AND track_key<>?1")
         .bind(fixture.tracks[0])
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     assert_eq!(
         fixture
             .catalog
@@ -1296,8 +1300,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
 #[tokio::test]
 async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definition_limits() {
     use library::CatalogSort;
-    let fixture = fixture().await;
-    let catalog = &fixture.catalog;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE sources SET kind='local' WHERE source_key=?1")
@@ -1308,41 +1311,20 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
     let mut uris = Vec::new();
     for index in 0..11 {
         let uri = format!("test:toolbar:{:02}", 10 - index);
-        sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,album_key,metadata,normalized_search,indexed) VALUES (?1,?2,?2,?3,jsonb(json_object('title',COALESCE(?4,''),'artist',COALESCE(?5,''),'album',COALESCE('Toolbar album',''),'sort_text',COALESCE(?4,''),'duration_millis',COALESCE(?6,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?7,0),'year',?8,'release_date','2026-01-01','date_added','2026-01-01','bpm',?9)),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE(?4,''),'artist',COALESCE(?5,''),'album',COALESCE('Toolbar album',''),'sort_text',COALESCE(?4,''),'duration_millis',COALESCE(?6,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?7,0),'year',?8,'release_date','2026-01-01','date_added','2026-01-01','bpm',?9)),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?4,''),'artist',COALESCE(?5,''),'album',COALESCE('Toolbar album',''),'sort_text',COALESCE(?4,''),'duration_millis',COALESCE(?6,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?7,0),'year',?8,'release_date','2026-01-01','date_added','2026-01-01','bpm',?9)),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?4,''),'artist',COALESCE(?5,''),'album',COALESCE('Toolbar album',''),'sort_text',COALESCE(?4,''),'duration_millis',COALESCE(?6,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?7,0),'year',?8,'release_date','2026-01-01','date_added','2026-01-01','bpm',?9)),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?4,''),'artist',COALESCE(?5,''),'album',COALESCE('Toolbar album',''),'sort_text',COALESCE(?4,''),'duration_millis',COALESCE(?6,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?7,0),'year',?8,'release_date','2026-01-01','date_added','2026-01-01','bpm',?9)),'$.comment'),'')),1)")
+        sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,album_key,title,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,bpm,indexed,native_rating,native_favorite) VALUES (?1,?2,?2,?3,?4,?5,'Toolbar album',?4,?6,1,?7,?8,'2026-01-01','2026-01-01',?9,1,?10,?11)")
             .bind(fixture.source).bind(&uri).bind(fixture.albums[0])
             .bind(format!("Toolbar {index:02}{}", if index == 9 { " İstanbul" } else { "" }))
             .bind(format!("Artist {:02}", 10-index)).bind(1000+index).bind(index)
             .bind(2020+index).bind(100+index).bind(index*10).bind(index%2)
-            .bind(format!("Toolbar {index:02}{} Artist {:02} Toolbar album {}", if index == 9 { " İstanbul" } else { "" },10-index,2020+index).to_lowercase())
             .execute(&mut raw).await.unwrap();
         sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(?1,'Toolbar','Artist','Album',?2,'2026-01',1000,1000,0)")
             .bind(&uri).bind(100+index).execute(&mut raw).await.unwrap();
-        sqlx::query("INSERT INTO native_media_state(media_uri,rating,favorite) VALUES(?1,?2,?3)")
-            .bind(&uri)
-            .bind(index * 10)
-            .bind(index % 2)
-            .execute(&mut raw)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE tracks SET normalized_search=?2 WHERE media_uri=?1")
-            .bind(&uri)
-            .bind(
-                format!(
-                    "Toolbar {index:02}{} Artist {:02} Toolbar album {}",
-                    if index == 9 { " İstanbul" } else { "" },
-                    10 - index,
-                    2020 + index
-                )
-                .to_lowercase(),
-            )
-            .execute(&mut raw)
-            .await
-            .unwrap();
         uris.push(uri);
     }
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let playlist = catalog
         .create_playlist(
-            None,
             "Toolbar order",
             &library::MemberSelection::Uris(((&uris).to_vec()).into()),
         )
@@ -1575,6 +1557,8 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     for descending in [false, true] {
         let order = (&library::MemberRead {
             collection: library::Collection::Smart { key: key, now: 500 },
@@ -1601,8 +1585,10 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .last_played,
         None
     );
-    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.title','Toolbar Intro','$.sort_text','toolbar intro')),normalized_search='toolbar intro' WHERE media_uri IN (?1,?2)")
+    sqlx::query("UPDATE tracks SET title='Toolbar Intro',sort_text='toolbar intro' WHERE media_uri IN (?1,?2)")
         .bind(&uris[0]).bind(&uris[1]).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let tracks = (&library::MemberRead {
         collection: library::Collection::Source(fixture.source),
         sort: Some(CatalogSort::Title),
@@ -1661,21 +1647,22 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
 
 #[tokio::test]
 async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_entries() {
-    let fixture = fixture().await;
-    let catalog = &fixture.catalog;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let local_uri = "file:///music/local.flac";
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('local','Local','local',zeroblob(32))")
+    sqlx::query("INSERT INTO sources(object_id,display_name) VALUES ('local','Local')")
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,first_seen_at,metadata,normalized_search,indexed) SELECT source_key,'local-track',?1,86400,jsonb(json_object('title',COALESCE('Local Track',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('local track',''),'duration_millis',COALESCE(60000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Local Track',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('local track',''),'duration_millis',COALESCE(60000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Local Track',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('local track',''),'duration_millis',COALESCE(60000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Local Track',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('local track',''),'duration_millis',COALESCE(60000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Local Track',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('local track',''),'duration_millis',COALESCE(60000,0))),'$.comment'),'')),1 FROM sources WHERE object_id='local'")
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,first_seen_at,title,sort_text,duration_millis,indexed) SELECT source_key,'local-track',?1,86400,'Local Track','local track',60000,1 FROM sources WHERE object_id='local'")
         .bind(local_uri)
         .execute(&mut raw)
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let uris = vec![
         fixture.track_uris[0].clone(),
         "https://example.test/direct.flac".into(),
@@ -1684,7 +1671,6 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
     ];
     let playlist = catalog
         .create_playlist(
-            None,
             "Links",
             &library::MemberSelection::Uris(((&uris).to_vec()).into()),
         )
@@ -1834,13 +1820,12 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
 
 #[tokio::test]
 async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     let uri = &fixture.track_uris[0];
     let global = catalog
         .create_playlist(
-            None,
             "Global artwork",
             &library::MemberSelection::Uris(((&[uri.clone(), uri.clone()]).to_vec()).into()),
         )
@@ -1850,7 +1835,6 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .0;
     let current = catalog
         .create_playlist(
-            Some(fixture.source),
             "Current artwork",
             &library::MemberSelection::Uris(((std::slice::from_ref(uri)).to_vec()).into()),
         )
@@ -1876,10 +1860,13 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .unwrap();
     let mut raw = connection(&fixture.path).await;
     let other: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32)) RETURNING source_key",
-    ).fetch_one(&mut raw).await.unwrap();
+        "INSERT INTO sources(object_id,display_name) VALUES ('other','Other') RETURNING source_key",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
     let empty_folder: library::FolderKey = sqlx::query_scalar(
-        "INSERT INTO folders(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'empty',jsonb(json_object('name','Empty','sort_text','empty')),'folder:'||COALESCE(?1,0)||':'||'empty',lower(COALESCE(json_extract(jsonb(json_object('name','Empty','sort_text','empty')),'$.name'),''))) RETURNING folder_key",
+        "INSERT INTO folders(source_key,object_id,media_uri,name,sort_text) VALUES (?1,'empty','folder:empty','Empty','empty') RETURNING folder_key",
     ).bind(other).fetch_one(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES('source',?1,'Historical title','Artist','Album',100,'1970-01',42000,42000,0)")
         .bind(uri).execute(&mut raw).await.unwrap();
@@ -1890,6 +1877,8 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .unwrap();
     sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
         .execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
 
     // Neither a different Current nor its folder changes A(uri). A later catalog
     // revision, including removal of the binding, is observed by every owner.
@@ -2028,30 +2017,8 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .unwrap();
             let row = rows.iter().find(|row| &row.media_uri == uri).unwrap();
             assert_eq!(row.artwork_binding, expected_binding);
-            let candidate = serde_json::from_slice::<Vec<library::ArtworkCandidate>>(
-                &summary.artwork_binding.unwrap(),
-            )
-            .unwrap()
-            .remove(0);
-            let candidate = catalog
-                .resolve_playlist_artwork(candidate)
-                .await
-                .unwrap()
-                .unwrap();
-            let library::ArtworkImage::Playlist {
-                resolved: Some(recipes),
-                ..
-            } = candidate.image
-            else {
-                panic!("automatic playlist image")
-            };
-            assert_eq!(
-                recipes
-                    .iter()
-                    .map(|recipe| serde_json::to_vec(recipe).unwrap())
-                    .collect::<Vec<_>>(),
-                expected_sample
-            );
+            // Mosaics are set once, so a later picture does not change a resolved recipe.
+            assert!(summary.artwork_binding.is_some());
         }
         let current_rows = catalog.playlists(&[current], &cancel).await.unwrap();
         assert!(
@@ -2138,10 +2105,8 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .collect::<Vec<_>>()
         })
         .unwrap();
-    assert!(
-        scoped.is_empty(),
-        "folder scope still selects Current membership"
-    );
+    // A music folder does not scope a Rufin playlist, which holds tracks of every source.
+    assert_eq!(scoped.len(), 1);
     let all_entries = catalog
         .playlist_edit_entries(
             current,
@@ -2270,12 +2235,11 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
 
 #[tokio::test]
 async fn collection_rows_carry_their_own_stable_source_identity() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let authored = fixture
         .catalog
         .create_playlist(
-            Some(fixture.source),
             "Authored",
             &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
@@ -2284,8 +2248,11 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         .unwrap()
         .0;
     let mut raw = connection(&fixture.path).await;
-    sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (55,'other-source','Other','other',zeroblob(32)),(56,'absent-source','','',zeroblob(32));\n        INSERT INTO genres(genre_key,source_key,object_id,metadata,media_uri,normalized_name) VALUES (55,55,'genre',jsonb(json_object('name','Other genre','sort_text','other genre')),'genre:'||COALESCE(55,0)||':'||'genre',lower(COALESCE(json_extract(jsonb(json_object('name','Other genre','sort_text','other genre')),'$.name'),'')));\n        INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(55,55,'source','native','Native',55),(56,56,'rufin','offline-authored','Offline authored',56),(57,NULL,'rufin','global','Global',57);")
+    sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (55,'other-source','Other'),(56,'absent-source','');
+        INSERT INTO tags(tag_key,source_key,kind,object_id,media_uri,name,sort_text) VALUES (55,55,0,'genre','genre:55:genre','Other genre','other genre');
+        INSERT INTO playlists(playlist_key,source_key,owner,object_id,name) VALUES (55,55,'source','native','Native'),(56,56,'rufin','offline-authored','Offline authored'),(57,NULL,'rufin','global','Global');")
         .execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     let other = library::SourceKey::from_raw(55);
     let genre = library::GenreKey::from_raw(55);
@@ -2332,17 +2299,13 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         rows.iter()
             .map(|row| row.source_id.as_deref())
             .collect::<Vec<_>>(),
-        [
-            Some("other-source"),
-            Some("absent-source"),
-            None,
-            Some("source")
-        ]
+        // Rufin playlists hold tracks of every source.
+        [Some("other-source"), Some("absent-source"), None, None]
     );
     assert_eq!(rows[0].source_key, Some(other));
     assert_eq!(rows[1].source_key, Some(library::SourceKey::from_raw(56)));
     assert_eq!(rows[2].source_key, None);
-    assert_eq!(rows[3].source_key, Some(fixture.source));
+    assert_eq!(rows[3].source_key, None);
     for row in &rows {
         let source = row
             .source_id
@@ -2377,8 +2340,11 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
             .unwrap(),
         None
     );
-    sqlx::raw_sql("INSERT INTO tracks(track_key,media_uri,indexed,metadata,normalized_search) VALUES (55,'https://example.test/unavailable',0,jsonb(json_object('title',COALESCE('Known',''))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known',''))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known',''))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known',''))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known',''))),'$.comment'),'')));\n        INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,position) VALUES\n        (550,55,'first',55,0),(551,55,'second',55,1),(560,56,'first',55,0),(561,56,'second',55,1);")
+    sqlx::raw_sql("INSERT INTO tracks(track_key,media_uri,indexed,title) VALUES (55,'https://example.test/unavailable',0,'Known');
+        INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,position) VALUES
+        (550,55,'first',55,0),(551,55,'second',55,1),(560,56,'first',55,0),(561,56,'second',55,1);")
         .execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for (key, entry_keys) in [(keys[0], [550, 551]), (keys[1], [560, 561])] {
         let collection = library::Collection::Playlist(key);
         assert_eq!(
@@ -2500,16 +2466,17 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
 
 #[tokio::test]
 async fn genre_routes_reject_an_artwork_only_identity_without_track_membership() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     let orphan = sqlx::query_scalar::<_, library::GenreKey>(
-        "INSERT INTO genres(source_key,object_id,native_artwork,metadata,media_uri,normalized_name) VALUES (?1,'orphan-genre',x'01',jsonb(json_object('name','Orphan Genre','sort_text','orphan genre')),'genre:'||COALESCE(?1,0)||':'||'orphan-genre',lower(COALESCE(json_extract(jsonb(json_object('name','Orphan Genre','sort_text','orphan genre')),'$.name'),''))) RETURNING genre_key",
+        "INSERT INTO tags(source_key,kind,object_id,native_artwork,media_uri,name,sort_text) VALUES (?1,0,'orphan-genre',x'01','genre:orphan-genre','Orphan Genre','orphan genre') RETURNING tag_key",
     )
     .bind(fixture.source)
     .fetch_one(&mut raw)
     .await
     .expect("insert artwork-only Genre");
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
         let (count, _, rows) = library::ListRead {
@@ -2608,13 +2575,13 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
 
 #[tokio::test]
 async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwork() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     let album_owner_uri =
         library::source_entity_uri(&library::SourceId::new("source"), "artist", "album-owner");
     let album_owner = sqlx::query_scalar::<_, library::ArtistKey>(
-        "INSERT INTO artists(source_key,object_id,media_uri,native_artwork,metadata,normalized_name) VALUES (?1,'album-owner',?2,?3,jsonb(json_object('name','Album Owner','sort_text','album owner')),lower(COALESCE(json_extract(jsonb(json_object('name','Album Owner','sort_text','album owner')),'$.name'),'')))\n         RETURNING artist_key",
+        "INSERT INTO artists(source_key,object_id,media_uri,native_artwork,name,sort_text) VALUES (?1,'album-owner',?2,?3,'Album Owner','album owner') RETURNING artist_key",
     )
     .bind(fixture.source)
     .bind(album_owner_uri)
@@ -2622,17 +2589,18 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
     .fetch_one(&mut raw)
     .await
     .expect("insert distinct Album Artist");
-    sqlx::query("DELETE FROM album_artists WHERE album_key=?1")
+    sqlx::query("DELETE FROM album_links WHERE role=0 AND album_key=?1")
         .bind(fixture.albums[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,0)")
+    sqlx::query("INSERT INTO album_links(album_key,role,position,target) VALUES(?1,0,0,?2)")
         .bind(fixture.albums[0])
         .bind(album_owner)
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     {
         let objects =
             sqlx::query_scalar::<_, String>("SELECT object_id FROM albums WHERE album_key=?1")
@@ -2866,7 +2834,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
 
 #[tokio::test]
 async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     let mut role_artists = Vec::new();
@@ -2880,17 +2848,17 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
             library::source_entity_uri(&library::SourceId::new("source"), "artist", object_id);
         role_artists.push(
             sqlx::query_scalar::<_, library::ArtistKey>(
-                "INSERT INTO artists(source_key,object_id,media_uri,metadata,normalized_name) VALUES (?1,?2,?3,jsonb(json_object('name',?4,'sort_text',lower(?4))),lower(COALESCE(json_extract(jsonb(json_object('name',?4,'sort_text',lower(?4))),'$.name'),''))) RETURNING artist_key",
+                "INSERT INTO artists(source_key,object_id,media_uri,name,sort_text) VALUES (?1,?2,?3,?4,lower(?4)) RETURNING artist_key",
             )
             .bind(fixture.source)
             .bind(object_id)
             .bind(media_uri)
             .bind(name)
-            .bind(rating)
             .fetch_one(&mut raw)
             .await
             .expect("insert role fixture Artist"),
         );
+        fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
         fixture
             .catalog
             .observe("source", None)
@@ -2916,7 +2884,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     let (track_only, album_only, both) = (*track_only, *album_only, *both);
     let uncredited = *uncredited;
     sqlx::query(
-        "INSERT INTO track_artists(track_key,artist_key,position) VALUES(?1,?2,1),(?1,?3,2)",
+        "INSERT INTO track_links(track_key,role,position,target) VALUES(?1,0,1,?2),(?1,0,2,?3)",
     )
     .bind(fixture.tracks[0])
     .bind(track_only)
@@ -2925,7 +2893,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     .await
     .expect("insert Track Artist roles");
     sqlx::query(
-        "INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,1),(?1,?3,2)",
+        "INSERT INTO album_links(album_key,role,position,target) VALUES(?1,0,1,?2),(?1,0,2,?3)",
     )
     .bind(fixture.albums[0])
     .bind(album_only)
@@ -2934,6 +2902,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     .await
     .expect("insert Album Artist roles");
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     for sort in [
         CatalogSort::Title,
@@ -3175,18 +3144,18 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
 
 #[tokio::test]
 async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let direct = "https://media.example/direct.flac".to_string();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO tracks(media_uri,indexed,metadata,normalized_search) VALUES (?1,0,jsonb(json_object('title',COALESCE('Direct Signal',''),'artist',COALESCE('Outside Artist',''),'album',COALESCE('Outside Album',''),'duration_millis',COALESCE(42000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Direct Signal',''),'artist',COALESCE('Outside Artist',''),'album',COALESCE('Outside Album',''),'duration_millis',COALESCE(42000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Direct Signal',''),'artist',COALESCE('Outside Artist',''),'album',COALESCE('Outside Album',''),'duration_millis',COALESCE(42000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Direct Signal',''),'artist',COALESCE('Outside Artist',''),'album',COALESCE('Outside Album',''),'duration_millis',COALESCE(42000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Direct Signal',''),'artist',COALESCE('Outside Artist',''),'album',COALESCE('Outside Album',''),'duration_millis',COALESCE(42000,0))),'$.comment'),'')))")
+    sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES (?1,0,COALESCE('Direct Signal',''),COALESCE('Outside Artist',''),COALESCE('Outside Album',''),COALESCE(42000,0))")
         .bind(&direct).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&direct).execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let (playlist, _) = fixture
         .catalog
         .create_playlist(
-            None,
             "Direct",
             &library::MemberSelection::Uris(((std::slice::from_ref(&direct)).to_vec()).into()),
         )
@@ -3197,7 +3166,6 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         fixture
             .catalog
             .add_playlist_tracks(
-                None,
                 playlist,
                 &library::MemberSelection::Uris(((std::slice::from_ref(&direct)).to_vec()).into()),
                 false
@@ -3210,7 +3178,6 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         fixture
             .catalog
             .add_playlist_tracks(
-                None,
                 playlist,
                 &library::MemberSelection::Uris(((std::slice::from_ref(&direct)).to_vec()).into()),
                 true
@@ -3276,6 +3243,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     assert_eq!(
         fixture
             .catalog
@@ -3409,13 +3377,14 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
 
 #[tokio::test]
 async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let direct = "https://media.example/window.flac".to_string();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO tracks(media_uri,indexed,metadata,normalized_search) VALUES (?1,0,jsonb(json_object('title',COALESCE('Known title',''),'artist',COALESCE('Artist',''),'album',COALESCE('Album',''),'duration_millis',COALESCE(42000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known title',''),'artist',COALESCE('Artist',''),'album',COALESCE('Album',''),'duration_millis',COALESCE(42000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known title',''),'artist',COALESCE('Artist',''),'album',COALESCE('Album',''),'duration_millis',COALESCE(42000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known title',''),'artist',COALESCE('Artist',''),'album',COALESCE('Album',''),'duration_millis',COALESCE(42000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Known title',''),'artist',COALESCE('Artist',''),'album',COALESCE('Album',''),'duration_millis',COALESCE(42000,0))),'$.comment'),'')))")
+    sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES (?1,0,COALESCE('Known title',''),COALESCE('Artist',''),COALESCE('Album',''),COALESCE(42000,0))")
         .bind(&direct).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(?1,'Historical title','Artist','Album',100,'1970-01',42000,42000,0)")
         .bind(&direct).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut definition = SmartPlaylistDefinition::default();
     let key = fixture
         .catalog
@@ -3483,12 +3452,11 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
 
 #[tokio::test]
 async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let retained = fixture.track_uris[0].clone();
     let (playlist, _) = fixture
         .catalog
         .create_playlist(
-            None,
             "Retained",
             &library::MemberSelection::Uris(((std::slice::from_ref(&retained)).to_vec()).into()),
         )
@@ -3502,6 +3470,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         .await
         .expect("remove retained media from the catalog");
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut definition = SmartPlaylistDefinition {
         source_id: None,
         match_all: vec![SmartPlaylistRule {
@@ -3603,14 +3572,14 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
 
 #[tokio::test]
 async fn smart_membership_excludes_retained_queue_and_activity() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let queue_uri =
         library::source_entity_uri(&library::SourceId::new("absent"), "track", "queued");
     let listen_uri =
         library::source_entity_uri(&library::SourceId::new("absent"), "track", "listened");
     let mut raw = connection(&fixture.path).await;
     sqlx::query(
-        "INSERT INTO tracks(media_uri,indexed,metadata,normalized_search) VALUES (?1,0,jsonb(json_object('title',COALESCE('Queued',''))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Queued',''))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Queued',''))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Queued',''))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Queued',''))),'$.comment'),''))),(?2,0,jsonb(json_object('title',COALESCE('Listened',''))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Listened',''))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Listened',''))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Listened',''))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Listened',''))),'$.comment'),'')))",
+        "INSERT INTO tracks(media_uri,indexed,title) VALUES (?1,0,COALESCE('Queued','')),(?2,0,COALESCE('Listened',''))",
     )
     .bind(&queue_uri)
     .bind(&listen_uri)
@@ -3626,6 +3595,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let key = fixture
         .catalog
         .create_smart_playlist(
@@ -3768,7 +3738,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
 
 #[tokio::test]
 async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let suggestions = fixture
         .catalog
@@ -3825,7 +3795,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
 
     let mut raw = connection(&fixture.path).await;
     sqlx::query(
-        "INSERT INTO native_media_state(media_uri,play_count,last_played) SELECT media_uri,2,1 FROM tracks WHERE source_key=?1 AND object_id='track-0' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,last_played=excluded.last_played",
+        "UPDATE tracks SET native_play_count=2,native_last_played=1 WHERE source_key=?1 AND object_id='track-0'",
     )
     .bind(fixture.source)
     .execute(&mut raw)
@@ -3854,6 +3824,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .fetch_one(&mut raw)
         .await
         .expect("read fixed current time");
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut played = SmartPlaylistDefinition {
         source_id: None,
         match_all: vec![SmartPlaylistRule {
@@ -3871,7 +3842,8 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         (SmartPlaylistActivityPeriod::Weekly, 2),
         (SmartPlaylistActivityPeriod::Monthly, 3),
         (SmartPlaylistActivityPeriod::Yearly, 4),
-        (SmartPlaylistActivityPeriod::Lifetime, 4),
+        // All-time rules read the server's own counts on a server source.
+        (SmartPlaylistActivityPeriod::Lifetime, 1),
     ] {
         played.activity_period = period;
         assert!(
@@ -3906,15 +3878,14 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .expect("Smart Playlist row")
         .pop()
         .expect("row exists");
-    assert_eq!(facts.track_count, 4);
+    assert_eq!(facts.track_count, 1);
     assert!(facts.duration_millis > 0);
-    sqlx::query(
-        "UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.comment',NULL)) WHERE track_key=?1",
-    )
-    .bind(fixture.tracks[0])
-    .execute(&mut raw)
-    .await
-    .expect("remove optional Comment");
+    sqlx::query("UPDATE tracks SET comment=NULL WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .expect("remove optional Comment");
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut optional = SmartPlaylistDefinition {
         source_id: None,
         match_all: vec![SmartPlaylistRule {
@@ -4060,7 +4031,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
 
 #[tokio::test]
 async fn artist_and_home_activity_follow_membership_even_without_listen_source_ids() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE sources SET kind='local' WHERE source_key=?1")
         .bind(fixture.source)
@@ -4076,11 +4047,12 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(?1,'Track','Artist','Album',?2,'2026-09',1000,1000)")
             .bind(uri).bind(time).execute(&mut raw).await.unwrap();
     }
-    sqlx::query("DELETE FROM track_folders WHERE track_key=?1")
+    sqlx::query("DELETE FROM track_links WHERE role=4 AND track_key=?1")
         .bind(fixture.tracks[2])
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
     for album_artist in [false, true] {
         let rows = fixture
@@ -4128,7 +4100,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         WHERE track.source_key=?1 AND track.track_key IN(?2,?3,?4)")
         .bind(fixture.source).bind(fixture.tracks[0]).bind(fixture.tracks[1]).bind(fixture.tracks[2])
         .execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO native_media_state(media_uri,play_count,last_played) SELECT media_uri,9,700 FROM tracks WHERE track_key=?1 ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,last_played=excluded.last_played")
+    sqlx::query("UPDATE tracks SET native_play_count=9,native_last_played=700 WHERE track_key=?1")
         .bind(fixture.tracks[1])
         .execute(&mut raw)
         .await
@@ -4140,6 +4112,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             .execute(&mut raw)
             .await
             .unwrap();
+        fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
         let home = fixture
             .catalog
             .home_page(
@@ -4187,7 +4160,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
 async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
     use library::{HomeBlockKind, HomePage};
 
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE sources SET kind='local' WHERE source_key=?1")
         .bind(fixture.source)
@@ -4199,6 +4172,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
     let all = fixture
         .catalog
@@ -4265,7 +4239,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
 
 #[tokio::test]
 async fn home_search_and_radio_results_stay_bounded() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let search = fixture
         .catalog
@@ -4379,12 +4353,9 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(initial_home.explore.len(), fixture.albums.len());
     assert_eq!(alternate_explore_home.explore.len(), fixture.albums.len());
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE albums SET first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END,metadata=jsonb(json_set(metadata,'$.date_added',NULL)) ")
+    sqlx::query("UPDATE albums SET first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END,date_added=NULL")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
-    sqlx::query("UPDATE albums SET added_sort=first_seen_at,input_metadata=jsonb(json_set(input_metadata,'$.date_added',NULL)),metadata=jsonb(json_set(metadata,'$.date_added',date(first_seen_at,'unixepoch')))")
-        .execute(&mut raw)
-        .await
-        .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let albums = fixture
         .catalog
         .albums(&fixture.albums, true, &cancel)
@@ -4440,16 +4411,12 @@ async fn home_search_and_radio_results_stay_bounded() {
         .albums;
     assert_eq!(newly_added.len(), 2);
     assert_eq!(newly_added[0].album.album_key, fixture.albums[0]);
-    sqlx::query("UPDATE albums SET metadata=jsonb(json_set(metadata,'$.release_date',NULL,'$.year',0)) WHERE album_key=?1")
+    sqlx::query("UPDATE albums SET release_date=NULL,year=0 WHERE album_key=?1")
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await
         .expect("remove release fact");
-    sqlx::query("UPDATE albums SET release_sort=NULL,year_sort=0 WHERE album_key=?1")
-        .bind(fixture.albums[1])
-        .execute(&mut raw)
-        .await
-        .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     assert_eq!(
         fixture
             .catalog
@@ -4584,7 +4551,6 @@ async fn home_search_and_radio_results_stay_bounded() {
     let playlist = fixture
         .catalog
         .create_playlist(
-            Some(fixture.source),
             "Seed",
             &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
         )

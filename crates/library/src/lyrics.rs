@@ -2,7 +2,7 @@
 //! Fetching and provider policy remain outside Library.
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, FromRow};
+use sqlx::FromRow;
 
 use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
 
@@ -70,10 +70,14 @@ impl Catalog {
     }
 
     pub async fn clear_lyrics_cache(&self, active_media_uris: &[String]) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query("DELETE FROM lyrics_cache WHERE NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=lyrics_cache.media_uri AND locator.origin='download') AND media_uri NOT IN (SELECT value FROM json_each(?1))")
+        let mut write = self.write().await?;
+        if sqlx::query("DELETE FROM lyrics_cache WHERE NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=lyrics_cache.media_uri AND locator.origin='download') AND media_uri NOT IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(active_media_uris)?)
-            .execute(&mut *writer).await?;
+            .execute(write.connection().await?).await?.rows_affected() != 0
+        {
+            write.keep();
+        }
+        write.commit().await?;
         Ok(())
     }
 
@@ -82,8 +86,7 @@ impl Catalog {
         rows: Vec<LyricsCacheRow>,
         replace_stale_source: bool,
     ) -> LibraryResult<Vec<LyricsCacheRow>> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
         let mut imported = Vec::new();
         for row in rows {
             if row.lyrics.len() > LYRICS_PAYLOAD_BYTES {
@@ -94,10 +97,13 @@ impl Catalog {
             if sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at WHERE ?9 AND lyrics_cache.authority='source' AND lyrics_cache.cache_input_digest<>excluded.cache_input_digest")
                 .bind(&row.media_uri).bind(&row.authority).bind(&row.role).bind(&row.language).bind(&row.script)
                 .bind(row.cache_input_digest.as_slice()).bind(&row.lyrics).bind(row.updated_at).bind(replace_stale_source)
-                .execute(&mut *transaction).await?.rows_affected()!=0
+                .execute(write.connection().await?).await?.rows_affected()!=0
             { imported.push(row); }
         }
-        transaction.commit().await?;
+        if !imported.is_empty() {
+            write.keep();
+        }
+        write.commit().await?;
         Ok(imported)
     }
 
@@ -151,10 +157,14 @@ impl Catalog {
                 "invalid lyrics cache row".to_string(),
             ));
         }
-        let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at")
+        let mut write = self.write().await?;
+        if sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at WHERE (lyrics_cache.cache_input_digest,lyrics_cache.lyrics,lyrics_cache.updated_at) IS NOT (excluded.cache_input_digest,excluded.lyrics,excluded.updated_at)")
             .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
-            .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(&mut *writer).await?;
+            .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(write.connection().await?).await?.rows_affected() != 0
+        {
+            write.changed(crate::Scope::Lyrics { uri: media_uri.to_owned() });
+        }
+        write.commit().await?;
         Ok(())
     }
 
@@ -167,10 +177,17 @@ impl Catalog {
         language: &str,
         script: &str,
     ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        Ok(sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2 AND role=?3 AND language=?4 AND script=?5")
+        let mut write = self.write().await?;
+        let removed = sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2 AND role=?3 AND language=?4 AND script=?5")
             .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
-            .execute(&mut *writer).await?.rows_affected()==1)
+            .execute(write.connection().await?).await?.rows_affected()==1;
+        if removed {
+            write.changed(crate::Scope::Lyrics {
+                uri: media_uri.to_owned(),
+            });
+        }
+        write.commit().await?;
+        Ok(removed)
     }
 
     pub async fn remove_track_lyrics_by_authority(
@@ -178,14 +195,19 @@ impl Catalog {
         media_uri: &str,
         authority: &str,
     ) -> LibraryResult<u64> {
-        let mut writer = self.writer().await?;
-        Ok(
-            sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2")
-                .bind(media_uri)
-                .bind(authority)
-                .execute(&mut *writer)
-                .await?
-                .rows_affected(),
-        )
+        let mut write = self.write().await?;
+        let removed = sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2")
+            .bind(media_uri)
+            .bind(authority)
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected();
+        if removed != 0 {
+            write.changed(crate::Scope::Lyrics {
+                uri: media_uri.to_owned(),
+            });
+        }
+        write.commit().await?;
+        Ok(removed)
     }
 }

@@ -7,12 +7,12 @@ use super::support::{connection, fixture};
 
 #[tokio::test]
 async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     for (index, disc) in [(0, 1), (1, 2), (2, 0)] {
         sqlx::query(
-            "UPDATE tracks SET album_key=?1,metadata=jsonb(json_set(metadata,'$.disc_number',?2,'$.track_number',1)) WHERE track_key=?3",
+            "UPDATE tracks SET album_key=?1,disc_number=?2,track_number=1 WHERE track_key=?3",
         )
         .bind(fixture.albums[0])
         .bind(disc)
@@ -21,6 +21,7 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
         .await
         .unwrap();
     }
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for (descending, expected) in [
         (false, vec![(0, 0), (1, 1), (2, 2)]),
         (true, vec![(0, 2), (1, 1), (2, 0)]),
@@ -76,7 +77,12 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
         );
     }
     // One known disc, even if numbered 2 or accompanied by unknown tracks, needs no heading.
-    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.disc_number',2)) WHERE album_key=?1 AND disc_number>0").bind(fixture.albums[0]).execute(&mut raw).await.unwrap();
+    sqlx::query("UPDATE tracks SET disc_number=2 WHERE album_key=?1 AND disc_number>0")
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let read = library::MemberRead::new(library::Collection::Album(fixture.albums[0]));
     read.page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
@@ -91,25 +97,26 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
 
 #[tokio::test]
 async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.year',CASE object_id WHEN 'track-0' THEN NULL WHEN 'track-1' THEN 0 ELSE 2000 END)) ")
+    sqlx::query("UPDATE tracks SET year=CASE object_id WHEN 'track-0' THEN NULL WHEN 'track-1' THEN 0 ELSE 2000 END")
         .execute(&mut raw).await.unwrap();
-    sqlx::query("DELETE FROM track_genres WHERE track_key=?1")
+    sqlx::query("DELETE FROM track_links WHERE track_key=?1 AND role=2")
         .bind(fixture.tracks[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    let empty_genre = sqlx::query_scalar::<_, library::GenreKey>(
-        "INSERT INTO genres(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'empty',jsonb(json_object('name','','sort_text','')),'genre:'||COALESCE(?1,0)||':'||'empty',lower(COALESCE(json_extract(jsonb(json_object('name','','sort_text','')),'$.name'),''))) RETURNING genre_key",
+    let empty_genre = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO tags(source_key,kind,object_id,media_uri,name,sort_text) VALUES (?1,0,'empty','genre:empty','','') RETURNING tag_key",
     ).bind(fixture.source).fetch_one(&mut raw).await.unwrap();
-    sqlx::query("UPDATE track_genres SET genre_key=?1 WHERE track_key=?2")
+    sqlx::query("UPDATE track_links SET target=?1 WHERE track_key=?2 AND role=2")
         .bind(empty_genre)
         .bind(fixture.tracks[1])
         .execute(&mut raw)
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for sort in [CatalogSort::Year, CatalogSort::Genre] {
         for (descending, expected) in [(false, [1, 3, 2, 0]), (true, [3, 2, 1, 0])] {
             let page = (&library::MemberRead {
@@ -142,10 +149,14 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
 
 #[tokio::test]
 async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::raw_sql("UPDATE sources SET kind='subsonic';\n      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)\n      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);\n      INSERT INTO native_media_state(media_uri,play_count,last_played) SELECT media_uri,3,200 FROM tracks WHERE object_id='track-1' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,last_played=excluded.last_played;")
+    sqlx::raw_sql("UPDATE sources SET kind='subsonic';
+      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
+      UPDATE tracks SET native_play_count=3,native_last_played=200 WHERE object_id='track-1';")
         .execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     let cancel = ReadCancellation::new();
     let keys = [fixture.albums[0], fixture.albums[0]];
@@ -161,11 +172,12 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM track_folders WHERE track_key=?1")
+    sqlx::query("DELETE FROM track_links WHERE track_key=?1 AND role=4")
         .bind(fixture.tracks[1])
         .execute(&mut raw)
         .await
         .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let rows = fixture.catalog.albums(&keys, true, &cancel).await.unwrap();
     for row in &rows {
         assert_eq!(row.summary.track_count, 2);
@@ -183,7 +195,7 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
 
 #[tokio::test]
 async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     let covers = ["first-album", "second-album"].map(|item_id| {
         serde_json::to_vec(&[library::ArtworkCandidate::new(
@@ -220,14 +232,15 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
                 .unwrap();
         };
     }
-    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.date_added',CASE WHEN album_key=?1 THEN '2026-09-08' END)) ")
+    sqlx::query("UPDATE tracks SET date_added=CASE WHEN album_key=?1 THEN '2026-09-08' END")
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM track_folders WHERE track_key IN (SELECT track_key FROM tracks WHERE album_key=?1)")
+    sqlx::query("DELETE FROM track_links WHERE role=4 AND track_key IN (SELECT track_key FROM tracks WHERE album_key=?1)")
         .bind(fixture.albums[1]).execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
     for (folder, count) in [(None, 4), (Some(fixture.folder), 4)] {
         let genres = fixture
@@ -279,14 +292,15 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
 
 #[tokio::test]
 async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("DELETE FROM track_folders")
+    sqlx::query("DELETE FROM track_links WHERE role=4")
         .execute(&mut raw)
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let folder = Some(fixture.folder);
     let genre = fixture
         .catalog
@@ -401,7 +415,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
 
 #[tokio::test]
 async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     let paths = [
         "Artist/Album/Disc 1/a.flac",
@@ -419,7 +433,7 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
             .to_owned()
     });
     for (track, path) in fixture.tracks.iter().zip(&paths) {
-        sqlx::query("UPDATE tracks SET source_path=?1 WHERE track_key=?2")
+        sqlx::query("INSERT INTO track_details(track_key,source_path) VALUES(?2,?1) ON CONFLICT(track_key) DO UPDATE SET source_path=excluded.source_path")
             .bind(path)
             .bind(track)
             .execute(&mut raw)
@@ -427,18 +441,19 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
             .unwrap();
     }
     // A guest appearance belongs to the artist view, not their album-artist view.
-    sqlx::query("INSERT INTO track_artists(track_key,artist_key,position) VALUES(?1,?2,1)")
+    sqlx::query("INSERT INTO track_links(track_key,role,position,target) VALUES(?1,0,1,?2)")
         .bind(fixture.tracks[2])
         .bind(fixture.artists[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM track_folders WHERE track_key<>?1")
+    sqlx::query("DELETE FROM track_links WHERE role=4 AND track_key<>?1")
         .bind(fixture.tracks[0])
         .execute(&mut raw)
         .await
         .unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let catalog = &fixture.catalog;
     assert_eq!(
         catalog
@@ -486,35 +501,31 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
 
 #[tokio::test]
 async fn collection_play_retains_full_order_with_bounded_queue_projection() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     for position in 0..130 {
         let id = format!("extra-{position:03}");
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", &id);
         let key: library::TrackKey = sqlx::query_scalar(
-            "INSERT INTO tracks(source_key,object_id,album_key,media_uri,metadata,normalized_search,indexed) VALUES (?1,?2,?3,?5,jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.comment'),'')),1) RETURNING track_key",
+            "INSERT INTO tracks(source_key,object_id,album_key,media_uri,title,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,indexed) VALUES (?1,?2,?3,?5,?2,'Artist A','Album A',?2,1000,1,?4,1) RETURNING track_key",
         ).bind(fixture.source).bind(&id).bind(fixture.albums[0]).bind(position + 10).bind(uri)
             .fetch_one(&mut raw).await.expect("extend collection");
-        sqlx::query("INSERT INTO track_artists VALUES(?1,?2,0)")
-            .bind(key)
-            .bind(fixture.artists[0])
-            .execute(&mut raw)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO track_genres VALUES(?1,?2,0)")
-            .bind(key)
-            .bind(fixture.genre)
-            .execute(&mut raw)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO track_moods VALUES(?1,?2,0)")
-            .bind(key)
-            .bind(fixture.mood)
-            .execute(&mut raw)
-            .await
-            .unwrap();
+        for (role, target) in [
+            (0, fixture.artists[0].raw()),
+            (2, fixture.genre.raw()),
+            (3, fixture.mood.raw()),
+        ] {
+            sqlx::query("INSERT INTO track_links VALUES(?1,?2,0,?3)")
+                .bind(key)
+                .bind(role)
+                .bind(target)
+                .execute(&mut raw)
+                .await
+                .unwrap();
+        }
     }
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
     let pages = [
         (&library::MemberRead {
@@ -812,7 +823,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
 
 #[tokio::test]
 async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let title = fixture
         .catalog
@@ -1245,19 +1256,8 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.catalog.observe_catalog(move |_, update| {
-        let _ = updates_tx.send(update);
-        std::future::ready(())
-    });
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
-    };
-    let update = updates.try_recv().unwrap();
-    assert!(update.metadata);
+    assert!(scan_observation.changed());
+    drop(scan_observation);
     let changed = fixture
         .catalog
         .album_release_candidates(fixture.source, 100, &cancel)
@@ -1310,13 +1310,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
 
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE track_artists SET artist_key=?3 WHERE track_key IN (?1,?2)")
+    sqlx::query("UPDATE track_links SET target=?3 WHERE role=0 AND track_key IN (?1,?2)")
         .bind(fixture.tracks[0])
         .bind(fixture.tracks[1])
         .bind(fixture.artists[1])
         .execute(&mut raw)
         .await
         .expect("separate direct Track Artist from Album Artist");
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
 
     let album_artist_uri: String =
         sqlx::query_scalar("SELECT media_uri FROM artists WHERE artist_key=?1")
@@ -1588,8 +1589,9 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .track_count,
         4
     );
-    let empty_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'empty-folder',jsonb(json_object('name','Empty','sort_text','empty')),'folder:'||COALESCE(?1,0)||':'||'empty-folder',lower(COALESCE(json_extract(jsonb(json_object('name','Empty','sort_text','empty')),'$.name'),''))) RETURNING folder_key")
+    let empty_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,media_uri,name,sort_text) VALUES (?1,'empty-folder','folder:empty-folder','Empty','empty') RETURNING folder_key")
         .bind(fixture.source).fetch_one(&mut raw).await.expect("insert empty Folder");
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     assert!(
         library::ListRead {
             playlist_scope: Default::default(),
@@ -1617,18 +1619,17 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
 
 #[tokio::test]
 async fn empty_named_collection_routes_return_empty_pages() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     for statement in [
-        "DELETE FROM track_genres",
-        "DELETE FROM album_genres",
-        "DELETE FROM genres",
-        "DELETE FROM track_moods",
-        "DELETE FROM moods",
+        "DELETE FROM track_links WHERE role IN (2,3)",
+        "DELETE FROM album_links WHERE role=2",
+        "DELETE FROM tags",
     ] {
         sqlx::query(statement).execute(&mut raw).await.unwrap();
     }
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let source = fixture.source;
     let cancellation = ReadCancellation::new();
 
@@ -1672,9 +1673,11 @@ async fn empty_named_collection_routes_return_empty_pages() {
 #[tokio::test]
 async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let fixture = fixture().await;
+    let mut changes = super::support::Changes::of(&fixture.catalog);
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
     for refresh in 0..2 {
+        changes.facts();
         let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
         {
             let write = library::CatalogBatch {
@@ -1778,27 +1781,15 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
 
             scan_observation.apply_catalog(&write, true).await.unwrap();
         };
-        let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        fixture.catalog.observe_catalog(move |_, update| {
-            let _ = updates_tx.send(update);
-            std::future::ready(())
-        });
-        {
-            let update = scan_observation.into_changes();
-            (&fixture.catalog)
-                .publish_catalog_update("source", update)
-                .await;
-        };
-        let update = updates
-            .try_recv()
-            .map(|update| {
-                assert!(update.changed() || !update.track_rekeys.is_empty());
-                update
-            })
-            .unwrap_or_default();
-        assert_eq!(update.metadata, refresh == 0);
+        let update = changes.facts();
+        assert_eq!(
+            update.intersects(super::support::Shown::CATALOG),
+            refresh == 0
+        );
         if refresh == 1 {
-            assert!(!update.playlists && !update.artwork && !update.home);
+            assert!(
+                !update.intersects(super::support::Shown::PLAYLIST | super::support::Shown::HOME)
+            );
         }
     }
     let row = fixture
@@ -1919,26 +1910,27 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
 
 #[tokio::test]
 async fn album_genres_supply_browsing_and_playback_without_changing_track_tags() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("DELETE FROM album_genres")
+    sqlx::query("DELETE FROM album_links WHERE role=2")
         .execute(&mut raw)
         .await
         .unwrap();
     // Keep one track credit overlapping the album credit to check set semantics.
-    sqlx::query("DELETE FROM track_genres WHERE track_key<>?1")
+    sqlx::query("DELETE FROM track_links WHERE role=2 AND track_key<>?1")
         .bind(fixture.tracks[0])
         .execute(&mut raw)
         .await
         .unwrap();
     sqlx::query(
-        "INSERT OR REPLACE INTO album_genres(album_key,genre_key,position) VALUES(?1,?2,0)",
+        "INSERT OR REPLACE INTO album_links(album_key,role,position,target) VALUES(?1,2,0,?2)",
     )
     .bind(fixture.albums[0])
     .bind(fixture.genre)
     .execute(&mut raw)
     .await
     .unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cover = serde_json::to_vec(&[library::ArtworkCandidate::new(
         library::ArtworkImage::Native {
             source_id: library::SourceId::new("source"),
@@ -2030,7 +2022,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
         assert_eq!(home.genres[0].summary.track_count, 2);
     }
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_genres")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_links WHERE role=2")
             .fetch_one(&mut raw)
             .await
             .unwrap(),

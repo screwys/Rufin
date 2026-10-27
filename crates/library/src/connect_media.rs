@@ -1,7 +1,6 @@
 //! Device-local representations of shared collection entries.
 use crate::{Catalog, LibraryResult, LocalFileWrite, LocalMediaLocation};
 use serde::{Deserialize, Serialize};
-use sqlx::Connection;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CatalogFileStamp {
@@ -59,10 +58,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn cue_receipts_share_the_backing_index_after_reopen() {
+    async fn cue_receipts_share_the_backing_index() {
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("library.sqlite");
-        let catalog = Catalog::open(&path).await.unwrap();
+        let catalog = Catalog::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
         let backing = url::Url::from_file_path(root.path().join("album.flac"))
             .unwrap()
             .to_string();
@@ -135,26 +135,6 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(catalog.downloaded_count(None).await.unwrap(), 1);
-        catalog.close().await.unwrap();
-        let catalog = Catalog::open(&path).await.unwrap();
-        assert_eq!(
-            catalog
-                .downloaded_count(Some(source_id.as_str()))
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(catalog.downloaded_count(None).await.unwrap(), 0);
-        let records = catalog
-            .download_files_page(
-                Some(source_id.as_str()),
-                &(String::new(), String::new()),
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, backing);
         assert_eq!(
             std::fs::read(root.path().join("album.flac")).unwrap(),
             b"original"
@@ -364,26 +344,27 @@ impl Catalog {
     }
 
     pub async fn connect_forget_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
         let removed = sqlx::query("DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3 AND revision=?4")
-            .bind(&file.media_uri).bind(&file.encoding).bind(&file.path).bind(&file.revision).execute(&mut *transaction).await?.rows_affected()>0;
+            .bind(&file.media_uri).bind(&file.encoding).bind(&file.path).bind(&file.revision).execute(write.connection().await?).await?.rows_affected()>0;
         if removed {
+            write.keep();
+            write.touch_download(&file.media_uri);
             let access = sqlx::query("DELETE FROM local_locators WHERE media_uri=?1 AND access_uri=?2 AND origin='download' AND NOT EXISTS(SELECT 1 FROM connect_media_files WHERE media_uri=?1 AND path=?2)")
-                .bind(&file.media_uri).bind(&file.path).execute(&mut *transaction).await?.rows_affected()>0;
+                .bind(&file.media_uri).bind(&file.path).execute(write.connection().await?).await?.rows_affected()>0;
             if access && let Some(next) = sqlx::query_as::<_, ConnectMediaFile>("SELECT * FROM connect_media_files WHERE media_uri=?1 ORDER BY rowid DESC LIMIT 1")
-                .bind(&file.media_uri).fetch_optional(&mut *transaction).await? {
+                .bind(&file.media_uri).fetch_optional(write.connection().await?).await? {
                 let path = crate::file_media_path(&next.path);
                 let root = if next.storage_root.is_empty() { path.as_deref().and_then(std::path::Path::parent).map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(|| next.path.clone()) } else { next.storage_root.clone() };
-                crate::local::write_local_locator(&mut transaction, &crate::LocalLocatorWrite {
+                crate::local::write_local_locator(&mut write, &crate::LocalLocatorWrite {
                     source_id: next.source_id.clone(), media_uri: next.media_uri.clone(), origin: "download".into(),
                     path: path.map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(||next.path.clone()), root, relative_path: next.relative_path.clone(), access_uri: next.path.clone(),
                 }).await?;
                 sqlx::query("INSERT INTO local_access_metadata SELECT ?1,coalesce(?2,size_bytes),0,NULL,NULL,parser_version,loudness_analysis_key FROM local_access_metadata WHERE access_uri=?3 ON CONFLICT(access_uri) DO NOTHING")
-                    .bind(&next.path).bind(next.completed_size).bind(&file.path).execute(&mut *transaction).await?;
+                    .bind(&next.path).bind(next.completed_size).bind(&file.path).execute(write.connection().await?).await?;
             }
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -436,11 +417,11 @@ impl Catalog {
         access: &crate::LocalAccessWrite,
     ) -> LibraryResult<()> {
         let backing = self.connect_backing_id(&file.media_uri).await?;
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
-        crate::local::write_local_access_on(&mut transaction, source, &[access]).await?;
-        save_download_on(&mut transaction, file, &backing).await?;
-        transaction.commit().await?;
+        let mut write = self.write().await?;
+        crate::local::write_local_access_on(&mut write, source, &[access]).await?;
+        save_download_on(write.connection().await?, file, &backing).await?;
+        write.keep();
+        write.commit().await?;
         Ok(())
     }
 

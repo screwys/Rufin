@@ -167,11 +167,7 @@ mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
@@ -219,11 +215,11 @@ mod tests {
                 .unwrap();
             if identical {
                 assert!(
-                    updates.try_recv().is_err(),
+                    crate::published(&mut updates).is_none(),
                     "unchanged native data stays quiet"
                 );
             } else {
-                assert!(updates.try_recv().expect("catalog update").changed());
+                assert!(crate::published(&mut updates).is_some());
             }
             let home = catalog
                 .home_page(
@@ -280,11 +276,7 @@ mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let marker = library::Freshness::new(b"catalog".to_vec()).unwrap();
         catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
@@ -317,35 +309,33 @@ mod tests {
         .await
         .unwrap();
         (async {
-            let update = {
-                if let Some(stamp) = stamp {
-                    observation
-                        .complete_source_observation(
-                            stamp,
-                            &[
-                                "track", "album", "artist", "genre", "mood", "folder", "playlist",
-                            ],
-                            (Some(marker.clone())).as_ref(),
-                        )
-                        .await
-                        .unwrap();
-                }
-                if let Some(stamp) = stamp {
-                    observation
-                        .complete_source_observation(stamp, &[], Some(&marker))
-                        .await
-                        .unwrap();
-                }
-                Ok::<_, library::LibraryError>(observation.changes().clone())
-            }?;
-            catalog
-                .publish_catalog_update(&catalog_source_id, update)
-                .await;
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker))
+                    .await
+                    .unwrap();
+            }
             Ok::<_, library::LibraryError>(())
         })
         .await
         .unwrap();
-        assert!(updates.try_recv().expect("catalog update").metadata);
+        assert!(
+            crate::published(&mut updates)
+                .expect("catalog update")
+                .1
+                .intersects(sources::Shown::CATALOG)
+        );
         item["starred"] = true.into();
         item["rating"] = 4.into();
         Mock::given(method("GET"))
@@ -386,8 +376,8 @@ mod tests {
             crate::source::Implementation::OpenSubsonic(provider),
         );
         source.apply_items(&catalog, upserts, vec![]).await.unwrap();
-        let update = updates.try_recv().expect("catalog update");
-        assert!(update.metadata);
+        let update = crate::published(&mut updates).expect("catalog update").1;
+        assert!(update.intersects(sources::Shown::CATALOG));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),

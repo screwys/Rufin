@@ -34,11 +34,16 @@ impl fmt::Display for SourceId {
     }
 }
 
+/// Every entity word that source URIs carry.
+pub(crate) fn source_entity_kinds() -> impl Iterator<Item = &'static str> {
+    ["track", "album", "artist"]
+        .into_iter()
+        .chain(crate::tags::TAG_TABLES.iter().map(|table| table.name))
+        .chain(["folder"])
+}
+
 pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) -> String {
-    debug_assert!(matches!(
-        entity_kind,
-        "track" | "album" | "artist" | "genre" | "mood" | "folder"
-    ));
+    debug_assert!(source_entity_kinds().any(|kind| kind == entity_kind));
     format!(
         "{}{}",
         source_entity_prefix(source, entity_kind),
@@ -47,10 +52,7 @@ pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) 
 }
 
 pub(crate) fn source_entity_prefix(source: &SourceId, entity_kind: &str) -> String {
-    debug_assert!(matches!(
-        entity_kind,
-        "track" | "album" | "artist" | "genre" | "mood" | "folder"
-    ));
+    debug_assert!(source_entity_kinds().any(|kind| kind == entity_kind));
     format!("rufin:source/{entity_kind}/{}/", encode(source.as_str()))
 }
 

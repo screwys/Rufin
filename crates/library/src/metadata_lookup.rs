@@ -1,5 +1,4 @@
 use crate::{Catalog, LibraryResult};
-use sqlx::Connection;
 
 impl Catalog {
     pub async fn metadata_lookup_cache(
@@ -23,8 +22,8 @@ impl Catalog {
         payload: &[u8],
         now: i64,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
+        let transaction = write.connection().await?;
         sqlx::query("DELETE FROM metadata_lookup_cache WHERE expires_at<=?1")
             .bind(now)
             .execute(&mut *transaction)
@@ -33,21 +32,26 @@ impl Catalog {
             .bind(key).bind(payload).bind(now).bind(now + 7 * 86400).execute(&mut *transaction).await?;
         sqlx::query("DELETE FROM metadata_lookup_cache WHERE key IN (SELECT key FROM (SELECT key,row_number() OVER(ORDER BY written_at DESC,key DESC) AS position,sum(length(payload)) OVER(ORDER BY written_at DESC,key DESC) AS bytes FROM metadata_lookup_cache) WHERE position>10000 OR bytes>67108864)")
             .execute(&mut *transaction).await?;
-        transaction.commit().await?;
-        drop(writer);
-        self.cache_written();
+        write.keep();
+        write.commit().await?;
         Ok(())
     }
 
     pub async fn link_fingerprint_lookup(&self, uri: &str, key: &str) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query(
+        let mut write = self.write().await?;
+        if sqlx::query(
             "UPDATE fingerprint_cache SET lookup_key=?2 WHERE media_uri=?1 AND lookup_key<>?2",
         )
         .bind(uri)
         .bind(key)
-        .execute(&mut *writer)
-        .await?;
+        .execute(write.connection().await?)
+        .await?
+        .rows_affected()
+            != 0
+        {
+            write.keep();
+        }
+        write.commit().await?;
         Ok(())
     }
 

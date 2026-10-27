@@ -21,7 +21,7 @@ impl Catalog {
     pub async fn audio_analysis_key(&self, uri: &str) -> LibraryResult<Option<[u8; 32]>> {
         let mut connection = self.acquire_reader().await?;
         let key: Option<Vec<u8>> =
-            sqlx::query_scalar("SELECT loudness_analysis_key FROM tracks WHERE media_uri=?1")
+            sqlx::query_scalar("SELECT details.loudness_analysis_key FROM tracks JOIN track_details details USING(track_key) WHERE media_uri=?1")
                 .bind(uri)
                 .fetch_optional(&mut *connection)
                 .await?;
@@ -44,19 +44,15 @@ impl Catalog {
         let mut transaction = writer.begin().await?;
         let changed = write_on(&mut transaction, row).await?;
         transaction.commit().await?;
-        drop(writer);
-        if changed {
-            self.cache_written();
-        }
         Ok(changed)
     }
 }
 
-pub(crate) async fn current_record_on(
+async fn current_record_on(
     connection: &mut SqliteConnection,
     uri: &str,
 ) -> LibraryResult<Option<serde_json::Value>> {
-    let row = sqlx::query("SELECT cache.analysis_key,cache.peaks FROM waveform_cache cache JOIN tracks track USING(media_uri) WHERE cache.media_uri=?1 AND cache.analysis_key=track.loudness_analysis_key")
+    let row = sqlx::query("SELECT cache.analysis_key,cache.peaks FROM waveform_cache cache JOIN tracks track USING(media_uri) JOIN track_details details USING(track_key) WHERE cache.media_uri=?1 AND cache.analysis_key=details.loudness_analysis_key")
         .bind(uri).fetch_optional(&mut *connection).await?;
     row.map(|row| {
         let key: Vec<u8> = row.get(0);
@@ -69,23 +65,6 @@ pub(crate) async fn current_record_on(
         })?)
     })
     .transpose()
-}
-
-pub(crate) async fn apply_record_on(
-    connection: &mut SqliteConnection,
-    uri: &str,
-    value: Option<&serde_json::Value>,
-) -> LibraryResult<bool> {
-    let Some(value) = value else {
-        return Ok(false);
-    };
-    let row: WaveformCacheRow = serde_json::from_value(value.clone())?;
-    if row.media_uri != uri {
-        return Err(LibraryError::InvalidRequest(
-            "waveform identity does not match its audio".into(),
-        ));
-    }
-    write_on(connection, &row).await
 }
 
 async fn write_on(
@@ -104,11 +83,6 @@ async fn write_on(
             "invalid waveform peaks".into(),
         ));
     }
-    let changed=sqlx::query("INSERT INTO waveform_cache(media_uri,analysis_key,peaks) SELECT ?1,?2,?3 WHERE EXISTS(SELECT 1 FROM tracks WHERE media_uri=?1 AND loudness_analysis_key=?2) ON CONFLICT(media_uri) DO UPDATE SET analysis_key=excluded.analysis_key,peaks=excluded.peaks WHERE (analysis_key,peaks) IS NOT(excluded.analysis_key,excluded.peaks)")
-        .bind(&row.media_uri).bind(row.analysis_key.as_slice()).bind(serde_json::to_string(&row.peaks)?).execute(&mut *connection).await?.rows_affected()>0;
-    if changed {
-        crate::connect::mark_current_on(connection, "analysis:waveform", &row.media_uri, false)
-            .await?;
-    }
-    Ok(changed)
+    Ok(sqlx::query("INSERT INTO waveform_cache(media_uri,analysis_key,peaks) SELECT ?1,?2,?3 WHERE EXISTS(SELECT 1 FROM tracks JOIN track_details details USING(track_key) WHERE media_uri=?1 AND details.loudness_analysis_key=?2) ON CONFLICT(media_uri) DO UPDATE SET analysis_key=excluded.analysis_key,peaks=excluded.peaks WHERE (analysis_key,peaks) IS NOT(excluded.analysis_key,excluded.peaks)")
+        .bind(&row.media_uri).bind(row.analysis_key.as_slice()).bind(serde_json::to_string(&row.peaks)?).execute(&mut *connection).await?.rows_affected()>0)
 }

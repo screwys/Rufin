@@ -87,10 +87,10 @@ impl SubsonicSource {
             .await
         {
             Ok(()) => {
-                if let Some(stamp) = stamp {
+                if stamp.is_some() {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(stamp, &["playlist"], None)
+                        .complete_source_observation(&["playlist"], None)
                         .await?;
                 }
             }
@@ -282,10 +282,10 @@ impl SubsonicSource {
                             break;
                         }
                     }
-                    if let Some(stamp) = stamp {
+                    if stamp.is_some() {
                         check_cancelled(cancelled)?;
                         observation
-                            .complete_source_observation(stamp, &[entity], None)
+                            .complete_source_observation(&[entity], None)
                             .await?;
                     }
                     Ok(())
@@ -306,16 +306,16 @@ impl SubsonicSource {
                 observation
                     .apply_catalog(
                         &library::CatalogBatch {
-                            genres,
+                            tags: genres,
                             ..Default::default()
                         },
                         true,
                     )
                     .await?;
-                if let Some(stamp) = stamp {
+                if stamp.is_some() {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(stamp, &["genre"], None)
+                        .complete_source_observation(&["genre"], None)
                         .await?;
                 }
             }
@@ -400,18 +400,18 @@ impl SubsonicSource {
                 progress(stage(SourceReadStage::Tracks, emitted));
             }
             if let Some(folder) = folder
-                && let Some(stamp) = stamp
+                && stamp.is_some()
             {
                 check_cancelled(cancelled)?;
                 observation
-                    .complete_source_folder_membership(&folder.object_id, stamp)
+                    .complete_source_folder_membership(&folder.object_id)
                     .await?;
             }
         }
-        if let Some(stamp) = stamp {
+        if stamp.is_some() {
             check_cancelled(cancelled)?;
             observation
-                .complete_source_observation(stamp, &["track"], None)
+                .complete_source_observation(&["track"], None)
                 .await?;
         }
         Ok(())
@@ -437,7 +437,7 @@ impl SubsonicSource {
             .collect())
     }
 
-    async fn read_genres(&self) -> SourceResult<Vec<library::GenreObservation>> {
+    async fn read_genres(&self) -> SourceResult<Vec<library::TagObservation>> {
         let body: Value = self.get_json("getGenres", &[]).await?;
         Ok(json::items(&body["genres"]["genre"])
             .iter()
@@ -445,13 +445,14 @@ impl SubsonicSource {
                 let name = json::field::<String>(genre, "value")
                     .or_else(|| json::field(genre, "name"))
                     .filter(|name| !name.trim().is_empty())?;
-                Some(library::GenreObservation {
+                Some(library::TagObservation {
+                    kind: library::TagKind::Genre,
                     object_id: self.id("genre", &name),
                     metadata: library::TagMetadata {
                         sort_text: Some(name.to_lowercase()),
                         name,
                     },
-                    ..Default::default()
+                    artwork_binding: None,
                 })
             })
             .collect())
@@ -715,13 +716,7 @@ mod tests {
                     .await;
                 result
             };
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                result
-            }
-            .unwrap();
+            result.unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
             let rows = library::ListRead {
                 playlist_scope: Default::default(),
@@ -842,11 +837,7 @@ mod tests {
         let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let marker = library::Freshness::new(b"unchanged catalog".to_vec()).unwrap();
         catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
@@ -901,36 +892,29 @@ mod tests {
         }
         .unwrap();
         (async {
-            let update = {
-                if let Some(stamp) = stamp {
-                    observation
-                        .complete_source_observation(
-                            stamp,
-                            &[
-                                "track", "album", "artist", "genre", "mood", "folder", "playlist",
-                            ],
-                            (Some(marker.clone())).as_ref(),
-                        )
-                        .await
-                        .unwrap();
-                }
-                if let Some(stamp) = stamp {
-                    observation
-                        .complete_source_observation(stamp, &[], Some(&marker))
-                        .await
-                        .unwrap();
-                }
-                Ok::<_, library::LibraryError>(observation.changes().clone())
-            }?;
-            catalog
-                .publish_catalog_update(&catalog_source_id, update)
-                .await;
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker))
+                    .await
+                    .unwrap();
+            }
             Ok::<_, library::LibraryError>(())
         })
         .await
         .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
         for (next, expected) in [(2, true), (1, false), (0, true)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
@@ -941,13 +925,7 @@ mod tests {
                     .await;
                 result
             };
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                result
-            }
-            .unwrap();
+            result.unwrap();
             for (kind, id) in [("track", "track"), ("album", "album"), ("artist", "artist")] {
                 let uri = library::source_entity_uri(
                     &crate::SourceId::new("source"),
@@ -1006,11 +984,7 @@ mod tests {
                 i64::from(next != 1)
             );
         }
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        crate::published(&mut updates);
         let catalog_source_id = ("source").to_string();
         let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
         let result = {
@@ -1019,16 +993,10 @@ mod tests {
                 .await;
             result
         };
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            result
-        }
-        .unwrap();
-        assert!(!observation.changes().changed());
+        result.unwrap();
+        assert!(!observation.changed());
         assert!(
-            updates.try_recv().is_err(),
+            crate::published(&mut updates).is_none(),
             "unchanged native data stays quiet"
         );
     }
@@ -1104,11 +1072,7 @@ mod tests {
             let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap();
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            catalog.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            let mut updates = catalog.changes();
             let marker = library::Freshness::new(b"server-observation".to_vec()).unwrap();
             if folders_available {
                 catalog
@@ -1125,7 +1089,7 @@ mod tests {
                 let batch=library::CatalogBatch {
                     albums:vec![super::album_from_json(source,"source",&serde_json::json!({"id":"album","name":"Album","artist":"Artist"})).unwrap().unwrap()],
                     tracks:vec![super::track_from_json(source,"source",&serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap().unwrap()],
-                    genres:vec![library::GenreObservation {object_id:"cached-genre".into(),metadata:library::TagMetadata {name:"Cached".into(),sort_text:Some("cached".into())},..Default::default()}],
+                    tags:vec![library::TagObservation {kind:library::TagKind::Genre,object_id:"cached-genre".into(),metadata:library::TagMetadata {name:"Cached".into(),sort_text:Some("cached".into())},artwork_binding:None}],
                     playlists:vec![library::PlaylistObservation {object_id:"cached-playlist".into(),name:"Cached".into(),sort_text:"cached".into(),..Default::default()}],..Default::default()
                 };
                 observation.apply_catalog(&batch, true).await.unwrap();
@@ -1155,10 +1119,9 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.into_changes())
-                    .await;
-                updates.try_recv().expect("initial catalog update");
+                crate::published(&mut updates)
+                    .expect("initial catalog update")
+                    .1;
             }
             let progress = std::sync::Mutex::new(Vec::new());
             catalog
@@ -1186,27 +1149,17 @@ mod tests {
             }
             .unwrap();
             (async {
-                let update = {
-                    if let Some(stamp) = stamp {
-                        observation
-                            .complete_source_observation(
-                                stamp,
-                                &[],
-                                Some(&marker).filter(|_| complete),
-                            )
-                            .await?;
-                    }
-                    Ok::<_, library::LibraryError>(observation.changes().clone())
-                }?;
-                catalog
-                    .publish_catalog_update(&catalog_source_id, update)
-                    .await;
+                if stamp.is_some() {
+                    observation
+                        .complete_source_observation(&[], Some(&marker).filter(|_| complete))
+                        .await?;
+                }
                 Ok::<_, library::LibraryError>(())
             })
             .await
             .unwrap();
-            let publication = updates.try_recv().expect("catalog update");
-            assert!(publication.metadata);
+            let publication = crate::published(&mut updates).expect("catalog update").1;
+            assert!(publication.intersects(sources::Shown::CATALOG));
             let cancellation = library::ReadCancellation::new();
             let home = catalog
                 .home_page(
@@ -1386,7 +1339,7 @@ mod tests {
                 .await
                 .unwrap();
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates).is_none(),
                 "unchanged automatic acquisition stays quiet"
             );
             assert!(

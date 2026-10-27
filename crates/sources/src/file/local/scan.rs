@@ -228,7 +228,7 @@ pub(crate) async fn catch_up(
         }
     }
     acquire_imported_paths(observation, local, None, &|_| {}, cancelled).await?;
-    if observation.changes().metadata {
+    if observation.changed() {
         observation.record_imported_files(None).await?;
     }
     check_cancelled(cancelled)?;
@@ -1587,7 +1587,6 @@ pub(crate) async fn acquire_imported_paths(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<usize> {
     let catalog = observation.catalog;
-    let source_id = observation.source_id;
     let stamp = observation.observed;
     let mut after = String::new();
     let parsers = local_workers();
@@ -1598,10 +1597,8 @@ pub(crate) async fn acquire_imported_paths(
             break;
         }
         after = page.last().unwrap().0.clone();
-        let mut staged = catalog
+        let mut staged = observation
             .source_observed_media_uris(
-                source_id,
-                stamp.unwrap_or(0),
                 &page.iter().map(|(uri, _)| uri.as_str()).collect::<Vec<_>>(),
             )
             .await?
@@ -1705,10 +1702,8 @@ pub(crate) async fn acquire_imported_paths(
             });
             uris.dedup_by(|a, b| a.0 == b.0);
             staged.extend(
-                catalog
+                observation
                     .source_observed_media_uris(
-                        source_id,
-                        stamp.unwrap_or(0),
                         &uris
                             .iter()
                             .map(|(uri, _, _)| uri.as_str())

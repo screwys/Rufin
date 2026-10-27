@@ -11,7 +11,7 @@ use crate::{
 };
 
 const LYRICS_SEARCH_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS lyrics_documents (
+CREATE TABLE lyrics_documents (
     document_key INTEGER PRIMARY KEY,
     media_uri TEXT NOT NULL,
     authority TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS lyrics_documents (
 ) STRICT;
 
 -- Only the display text of each version-4 lyric document is searchable.
-CREATE VIEW IF NOT EXISTS lyrics_search_input AS
+CREATE VIEW lyrics_search_input AS
 SELECT cache.rowid cache_rowid, cache.media_uri, cache.authority, cache.role,
     cache.language, cache.script, CAST(document.key AS INTEGER) ordinal,
     (SELECT group_concat(text, char(10)) FROM (
@@ -41,28 +41,28 @@ FROM lyrics_cache cache,
             THEN json_extract(cache.lyrics, '$.bundle.content.Documents') END
         END) document;
 
-CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
+CREATE VIRTUAL TABLE lyrics_fts USING fts5(
     text, content='lyrics_documents', content_rowid='document_key',
     tokenize='rufin_lyrics', prefix='3'
 );
 
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_insert AFTER INSERT ON lyrics_documents BEGIN
+CREATE TRIGGER lyrics_documents_insert AFTER INSERT ON lyrics_documents BEGIN
     INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
 END;
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_delete AFTER DELETE ON lyrics_documents BEGIN
+CREATE TRIGGER lyrics_documents_delete AFTER DELETE ON lyrics_documents BEGIN
     INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
 END;
-CREATE TRIGGER IF NOT EXISTS lyrics_documents_update AFTER UPDATE OF text ON lyrics_documents BEGIN
+CREATE TRIGGER lyrics_documents_update AFTER UPDATE OF text ON lyrics_documents BEGIN
     INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
     INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
 END;
 
-CREATE TRIGGER IF NOT EXISTS lyrics_search_insert AFTER INSERT ON lyrics_cache BEGIN
+CREATE TRIGGER lyrics_search_insert AFTER INSERT ON lyrics_cache BEGIN
     INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text)
         SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input
         WHERE cache_rowid=new.rowid AND length(trim(text))>0;
 END;
-CREATE TRIGGER IF NOT EXISTS lyrics_search_update AFTER UPDATE OF lyrics ON lyrics_cache
+CREATE TRIGGER lyrics_search_update AFTER UPDATE OF lyrics ON lyrics_cache
 WHEN old.lyrics IS NOT new.lyrics BEGIN
     DELETE FROM lyrics_documents WHERE media_uri=new.media_uri AND authority=new.authority
         AND role=new.role AND language=new.language AND script=new.script;
@@ -72,30 +72,10 @@ WHEN old.lyrics IS NOT new.lyrics BEGIN
 END;
 "#;
 
-pub(crate) async fn initialize(
-    connection: &mut SqliteConnection,
-    backfill: bool,
-) -> LibraryResult<()> {
+pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql(LYRICS_SEARCH_SCHEMA)
         .execute(&mut *connection)
         .await?;
-    if backfill {
-        let mut after = 0;
-        loop {
-            let page: Vec<i64> = sqlx::query_scalar(
-                "SELECT rowid FROM lyrics_cache WHERE rowid>?1 ORDER BY rowid LIMIT 128",
-            )
-            .bind(after)
-            .fetch_all(&mut *connection)
-            .await?;
-            let Some(last) = page.last().copied() else {
-                break;
-            };
-            sqlx::query("INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text) SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input WHERE cache_rowid>?1 AND cache_rowid<=?2 AND length(trim(text))>0")
-                .bind(after).bind(last).execute(&mut *connection).await?;
-            after = last;
-        }
-    }
     Ok(())
 }
 
@@ -141,11 +121,8 @@ impl Catalog {
                 break;
             }
         }
-        let tracks = crate::tracks::load_track_requested(
-            &mut transaction,
-            crate::query::RequestedKeys::batch(&keys)?,
-        )
-        .await?;
+        let keys = keys.into_iter().map(TrackKey::from_raw).collect::<Vec<_>>();
+        let tracks = crate::tracks::load_track_rows(self, &mut transaction, &keys).await?;
         transaction.commit().await?;
         Ok(SearchResults {
             tracks,

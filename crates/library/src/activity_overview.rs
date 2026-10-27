@@ -83,7 +83,7 @@ impl Catalog {
     ) -> LibraryResult<ActivityOverview> {
         let (from, until) = period.range();
         let (previous_from, previous_until) = period.previous().range();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let totals_sql = format!("{PERIOD_ACTIVITY} SELECT COALESCE(sum(plays),0) plays,COALESCE(sum(duration_millis),0) duration_millis,
             count(DISTINCT media_uri) tracks,count(DISTINCT NULLIF(artist_name,'')) artists
             FROM period_activity");
@@ -122,9 +122,9 @@ impl Catalog {
                 .fetch_all(&mut *connection)
                 .await?;
         let artist_sql = format!("{PERIOD_ACTIVITY} SELECT artist.artist_key,sum(plays) plays FROM period_activity listen
-             JOIN tracks track USING(media_uri) JOIN track_artists credit USING(track_key)
-             JOIN artists artist USING(artist_key)
-             GROUP BY artist.artist_key ORDER BY plays DESC,artist.sort_text,artist.artist_key LIMIT ?3");
+             JOIN tracks track USING(media_uri) JOIN track_links credit ON credit.track_key=track.track_key AND credit.role={}
+             JOIN artists artist ON artist.artist_key=credit.target
+             GROUP BY artist.artist_key ORDER BY plays DESC,coalesce(artist.sort_text,lower(artist.name)),artist.artist_key LIMIT ?3", crate::schema::LINK_ARTIST);
         let artists =
             sqlx::query_as::<_, (crate::ArtistKey, i64)>(sqlx::AssertSqlSafe(artist_sql.as_str()))
                 .bind(&from)
@@ -134,9 +134,10 @@ impl Catalog {
                 .await?;
         let genre_sql = format!(
             "{PERIOD_ACTIVITY} SELECT genre.name,sum(plays) plays FROM period_activity listen
-             JOIN tracks track USING(media_uri) JOIN track_genres credit USING(track_key)
-             JOIN genres genre USING(genre_key)
-             GROUP BY genre.name ORDER BY plays DESC,genre.name LIMIT ?3"
+             JOIN tracks track USING(media_uri) JOIN track_links credit ON credit.track_key=track.track_key AND credit.role={}
+             JOIN tags genre ON genre.tag_key=credit.target
+             GROUP BY genre.name ORDER BY plays DESC,genre.name LIMIT ?3",
+            crate::schema::LINK_GENRE
         );
         let genres = sqlx::query_as::<_, GenreActivity>(sqlx::AssertSqlSafe(genre_sql.as_str()))
             .bind(&from)
@@ -145,25 +146,21 @@ impl Catalog {
             .fetch_all(&mut *connection)
             .await?;
         let keys = tracks.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut track_rows = crate::tracks::load_track_rows(&mut connection, &keys).await?;
-        crate::activity::overlay_history(&mut connection, &mut track_rows, None).await?;
+        let mut track_rows = crate::tracks::load_track_rows(self, &mut connection, &keys).await?;
+        crate::activity::overlay_history(self, &mut connection, &mut track_rows, None).await?;
         for (row, (_, count)) in track_rows.iter_mut().zip(tracks) {
             row.state.play_count = count;
         }
         let keys = albums.iter().map(|(key, _)| *key).collect::<Vec<_>>();
         let mut album_rows =
-            crate::collections::load_album_rows(&mut connection, &keys, false).await?;
+            crate::collections::load_album_rows(self, &mut connection, &keys, false).await?;
         for (row, (_, count)) in album_rows.iter_mut().zip(albums) {
             row.state.play_count = count;
         }
         let keys = artists.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut artist_rows = crate::collections::load_artist_requested(
-            &mut connection,
-            crate::query::RequestedKeys::batch(&keys)?,
-            false,
-            false,
-        )
-        .await?;
+        let mut artist_rows =
+            crate::collections::load_artist_rows(self, &mut connection, &keys, false, false)
+                .await?;
         for (row, (_, count)) in artist_rows.iter_mut().zip(artists) {
             row.state.play_count = count;
         }

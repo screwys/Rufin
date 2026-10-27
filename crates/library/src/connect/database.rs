@@ -1,5 +1,6 @@
-//! Indexed Connect snapshots keep SQLite's canonical keys and ready indexes.
+//! Whole-Store profile copies for joining a profile.
 use super::*;
+use sqlx::Connection;
 
 impl Catalog {
     pub(crate) async fn connect_prepare_export_on(
@@ -17,14 +18,98 @@ impl Catalog {
             DELETE FROM favorite_outbox; DELETE FROM listen_outbox; DELETE FROM native_playlist_pending;
             DELETE FROM local_locators; DELETE FROM local_access_metadata; DELETE FROM connect_media_files;
             DELETE FROM playlist_file_links; DELETE FROM playlist_file_ignored; DELETE FROM playlist_file_settings;
-            DELETE FROM waveform_cache WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.media_uri=waveform_cache.media_uri AND tracks.source_loudness_analysis_key=waveform_cache.analysis_key);
-            UPDATE tracks SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
+            DELETE FROM waveform_cache WHERE NOT EXISTS(SELECT 1 FROM tracks JOIN track_details details USING(track_key) WHERE tracks.media_uri=waveform_cache.media_uri AND details.source_loudness_analysis_key=waveform_cache.analysis_key);
+            UPDATE track_details SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
             UPDATE albums SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
-            DELETE FROM loudness_measurements WHERE(entity_kind='track' AND NOT EXISTS(SELECT 1 FROM tracks WHERE track_key=entity_key AND loudness_analysis_key=analysis_key)) OR(entity_kind='album' AND NOT EXISTS(SELECT 1 FROM albums WHERE album_key=entity_key AND loudness_analysis_key=analysis_key));
+            DELETE FROM loudness_measurements WHERE(entity_kind='track' AND NOT EXISTS(SELECT 1 FROM track_details WHERE track_key=entity_key AND loudness_analysis_key=analysis_key)) OR(entity_kind='album' AND NOT EXISTS(SELECT 1 FROM albums WHERE album_key=entity_key AND loudness_analysis_key=analysis_key));
             DELETE FROM local_file_observations WHERE NOT(root LIKE 'http://%' OR root LIKE 'https://%' OR root LIKE 'smb://%');
             DELETE FROM local_file_access_roots WHERE NOT(root LIKE 'http://%' OR root LIKE 'https://%' OR root LIKE 'smb://%');
-            UPDATE connect_profile SET enabled=0,receiving=0;")
+            UPDATE connect_profile SET enabled=0;")
             .execute(connection).await?;
+        Ok(())
+    }
+
+    /// Downloaded Connect media the incoming profile may not know, with the local rows that
+    /// follow each track.
+    pub(crate) async fn downloaded_references_on(
+        connection: &mut SqliteConnection,
+    ) -> LibraryResult<Vec<Value>> {
+        let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT json_object('media_uri',track.media_uri,'metadata',json({}),'artwork',CASE WHEN details.native_artwork IS NULL THEN NULL ELSE hex(details.native_artwork) END,'source_loudness',hex(details.source_loudness_analysis_key),'loudness',hex(details.loudness_analysis_key),'source_path',details.source_path,'cue_path',details.cue_path,'cue_start_millis',details.cue_start_millis,'cue_end_millis',details.cue_end_millis,
+            'locators',(SELECT json_group_array(json_object('source_id',source.object_id,'origin',locator.origin,'path',locator.path,'root',locator.root,'relative_path',locator.relative_path,'access_uri',locator.access_uri)) FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE locator.media_uri=track.media_uri),
+            'access',(SELECT json_group_array(json_object('access_uri',metadata.access_uri,'size_bytes',metadata.size_bytes,'mtime_ns',metadata.mtime_ns,'device_id',metadata.device_id,'inode',metadata.inode,'parser_version',metadata.parser_version,'loudness_analysis_key',CASE WHEN metadata.loudness_analysis_key IS NULL THEN NULL ELSE hex(metadata.loudness_analysis_key) END)) FROM local_access_metadata metadata WHERE metadata.access_uri IN(SELECT access_uri FROM local_locators WHERE media_uri=track.media_uri)),
+            'waveform',(SELECT peaks FROM waveform_cache WHERE media_uri=track.media_uri AND analysis_key=details.loudness_analysis_key),
+            'measurement',(SELECT json_array(integrated_lufs,true_peak) FROM loudness_measurements WHERE entity_kind='track' AND entity_key=track.track_key AND analysis_key=details.loudness_analysis_key))
+            FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE EXISTS(SELECT 1 FROM connect_media_files file WHERE file.media_uri=track.media_uri) ORDER BY track.media_uri", crate::track_metadata_sql("track", "details"))))
+            .fetch_all(connection).await?;
+        rows.iter()
+            .map(|row| Ok(serde_json::from_str(row)?))
+            .collect()
+    }
+
+    /// Puts the downloaded references the adopted Store lacks back as they were.
+    pub(crate) async fn keep_downloaded_references(
+        write: &mut crate::catalog::write::Write<'_>,
+        kept: &[Value],
+    ) -> LibraryResult<()> {
+        use crate::catalog::records::Track;
+        for reference in kept {
+            let uri = reference["media_uri"].as_str().unwrap_or_default();
+            if write.by_natural::<Track>(uri).await?.is_some() {
+                continue;
+            }
+            let key = write
+                .put_reference(&crate::TrackReference {
+                    media_uri: uri.to_owned(),
+                    metadata: serde_json::from_value(reference["metadata"].clone())?,
+                    artwork_binding: hex_bytes(&reference["artwork"]),
+                })
+                .await?;
+            // A known track with the same source identity keeps its own facts.
+            let Some(mut track) = write
+                .get::<Track>(key.raw())
+                .await?
+                .filter(|track| track.uri == uri)
+            else {
+                continue;
+            };
+            track.source_path = reference["source_path"].as_str().map(str::to_owned);
+            track.cue_path = reference["cue_path"].as_str().map(str::to_owned);
+            track.cue_start = reference["cue_start_millis"].as_i64();
+            track.cue_end = reference["cue_end_millis"].as_i64();
+            let extras = [
+                (
+                    "metadata",
+                    crate::metadata::track_details_value(reference["metadata"].clone()),
+                ),
+                (
+                    "source_loudness_analysis_key",
+                    reference["source_loudness"].clone(),
+                ),
+                ("loudness_analysis_key", reference["loudness"].clone()),
+            ];
+            write.put(
+                track,
+                extras
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value))
+                    .collect(),
+            );
+            write.keep();
+            write.touch_download(uri);
+            let connection = write.connection().await?;
+            sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT (SELECT source_key FROM sources WHERE object_id=locator.value->>'$.source_id'),?1,locator.value->>'$.origin',locator.value->>'$.path',locator.value->>'$.root',locator.value->>'$.relative_path',locator.value->>'$.access_uri' FROM json_each(?2) locator")
+                .bind(uri).bind(reference["locators"].to_string()).execute(&mut *connection).await?;
+            sqlx::query("INSERT OR IGNORE INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key) SELECT access.value->>'$.access_uri',access.value->>'$.size_bytes',access.value->>'$.mtime_ns',access.value->>'$.device_id',access.value->>'$.inode',access.value->>'$.parser_version',unhex(access.value->>'$.loudness_analysis_key') FROM json_each(?1) access")
+                .bind(reference["access"].to_string()).execute(&mut *connection).await?;
+            if let Some(peaks) = reference["waveform"].as_str() {
+                sqlx::query("INSERT OR IGNORE INTO waveform_cache(media_uri,analysis_key,peaks) VALUES(?1,unhex(?2),?3)")
+                    .bind(uri).bind(reference["loudness"].as_str()).bind(peaks).execute(&mut *connection).await?;
+            }
+            if let Some(measurement) = reference["measurement"].as_array() {
+                sqlx::query("INSERT OR IGNORE INTO loudness_measurements SELECT track.source_key,'track',track.track_key,details.loudness_analysis_key,?2,?3 FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key=?1")
+                    .bind(key).bind(measurement.first().and_then(Value::as_f64)).bind(measurement.get(1).and_then(Value::as_f64)).execute(&mut *connection).await?;
+            }
+        }
         Ok(())
     }
 
@@ -47,38 +132,15 @@ impl Catalog {
             .execute(&mut *snapshot)
             .await?;
         let mut tx = snapshot.begin().await?;
-        let mut after = String::new();
-        loop {
-            let tracks: Vec<(String, String, Option<Vec<u8>>)> = sqlx::query_as("SELECT track.media_uri,coalesce(json(track.metadata),'{}'),track.native_artwork FROM receiving.tracks track WHERE track.media_uri>?1 AND EXISTS(SELECT 1 FROM receiving.connect_media_files file WHERE file.media_uri=track.media_uri) AND NOT EXISTS(SELECT 1 FROM main.tracks current WHERE current.media_uri=track.media_uri) ORDER BY track.media_uri LIMIT 128")
-                    .bind(&after).fetch_all(&mut *tx).await?;
-            let Some(last) = tracks.last() else {
-                break;
-            };
-            after = last.0.clone();
-            for (media_uri, metadata, artwork_binding) in tracks {
-                let key = crate::catalog::remember_track(
-                    &mut tx,
-                    &crate::TrackReference {
-                        media_uri,
-                        metadata: serde_json::from_str(&metadata)?,
-                        artwork_binding,
-                    },
-                )
-                .await?;
-                sqlx::query("UPDATE tracks SET metadata=old.metadata,source_loudness_analysis_key=old.source_loudness_analysis_key,loudness_analysis_key=old.loudness_analysis_key,source_path=old.source_path,cue_path=old.cue_path,cue_start_millis=old.cue_start_millis,cue_end_millis=old.cue_end_millis FROM receiving.tracks old WHERE tracks.track_key=?1 AND tracks.media_uri=old.media_uri")
-                        .bind(key).execute(&mut *tx).await?;
-            }
-        }
         // Device observations keep their own stat values under the shared file identity.
         sqlx::raw_sql("DELETE FROM local_file_observations WHERE NOT(root LIKE 'http://%' OR root LIKE 'https://%' OR root LIKE 'smb://%');
                 DELETE FROM local_file_access_roots WHERE NOT(root LIKE 'http://%' OR root LIKE 'https://%' OR root LIKE 'smb://%');
                 INSERT OR IGNORE INTO local_file_access_roots(source_key,root,root_id)
                 SELECT source.source_key,access.root,access.root_id FROM receiving.local_file_access_roots access JOIN receiving.sources old USING(source_key) JOIN main.sources source ON source.object_id=old.object_id
                 WHERE NOT(access.root LIKE 'http://%' OR access.root LIKE 'https://%' OR access.root LIKE 'smb://%');
-                UPDATE sources SET observation_stamp=observation_stamp+1;
                 INSERT INTO local_file_observations(local_file_key,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,native_id,revision,observed_stamp,parent_path,parsed_stamp,accepted_facts,state)
-                SELECT file.local_file_key,access.path,access.root,access.relative_path,access.size_bytes,access.mtime_ns,access.device_id,access.inode,access.native_id,access.revision,source.observation_stamp-1,access.parent_path,
-                    CASE WHEN old_file.kind='directory' AND json_extract(access.parsed_stamp,'$[4]')=access.observed_stamp THEN json_set(access.parsed_stamp,'$[4]',source.observation_stamp-1) ELSE access.parsed_stamp END,access.accepted_facts,access.state
+                SELECT file.local_file_key,access.path,access.root,access.relative_path,access.size_bytes,access.mtime_ns,access.device_id,access.inode,access.native_id,access.revision,0,access.parent_path,
+                    CASE WHEN old_file.kind='directory' AND json_extract(access.parsed_stamp,'$[4]')=access.observed_stamp THEN json_set(access.parsed_stamp,'$[4]',0) ELSE access.parsed_stamp END,access.accepted_facts,access.state
                 FROM receiving.local_file_observations access JOIN receiving.local_files old_file USING(local_file_key)
                 JOIN receiving.sources old ON old.source_key=old_file.source_key JOIN main.sources source ON source.object_id=old.object_id
                 JOIN main.local_files file ON file.source_key=source.source_key AND file.root_id=old_file.root_id AND file.relative_path=old_file.relative_path
@@ -96,20 +158,20 @@ impl Catalog {
                 FROM receiving.playlist_file_links link JOIN receiving.playlists old USING(playlist_key) LEFT JOIN receiving.sources old_source ON old_source.source_key=old.source_key
                 LEFT JOIN main.sources source ON source.object_id=old_source.object_id JOIN main.playlists playlist ON playlist.source_key IS source.source_key AND playlist.object_id=old.object_id
                 WHERE EXISTS(SELECT 1 FROM main.sources WHERE object_id=link.source_id);
-                UPDATE tracks SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
-                UPDATE tracks SET loudness_analysis_key=old.loudness_analysis_key FROM receiving.tracks old WHERE tracks.media_uri=old.media_uri AND tracks.source_loudness_analysis_key=old.source_loudness_analysis_key;
+                UPDATE track_details SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
+                UPDATE track_details SET loudness_analysis_key=old.loudness_analysis_key FROM receiving.track_details old JOIN receiving.tracks old_track ON old_track.track_key=old.track_key JOIN main.tracks track ON track.media_uri=old_track.media_uri WHERE track_details.track_key=track.track_key AND track_details.source_loudness_analysis_key=old.source_loudness_analysis_key;
                 UPDATE albums SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
                 UPDATE albums SET loudness_analysis_key=old.loudness_analysis_key FROM receiving.albums old WHERE albums.media_uri=old.media_uri AND albums.source_loudness_analysis_key=old.source_loudness_analysis_key;
                 INSERT OR IGNORE INTO artwork_previews SELECT * FROM receiving.artwork_previews;
-                INSERT OR IGNORE INTO waveform_cache SELECT result.* FROM receiving.waveform_cache result JOIN main.tracks track USING(media_uri) WHERE result.analysis_key=track.loudness_analysis_key;
+                INSERT OR IGNORE INTO waveform_cache SELECT result.* FROM receiving.waveform_cache result JOIN main.tracks track USING(media_uri) JOIN main.track_details details USING(track_key) WHERE result.analysis_key=details.loudness_analysis_key;
                 INSERT OR IGNORE INTO loudness_measurements SELECT track.source_key,'track',track.track_key,measurement.analysis_key,measurement.integrated_lufs,measurement.true_peak
-                FROM receiving.loudness_measurements measurement JOIN receiving.tracks old ON measurement.entity_kind='track' AND old.track_key=measurement.entity_key JOIN main.tracks track USING(media_uri)
-                WHERE measurement.analysis_key=track.loudness_analysis_key;
+                FROM receiving.loudness_measurements measurement JOIN receiving.tracks old ON measurement.entity_kind='track' AND old.track_key=measurement.entity_key JOIN main.tracks track USING(media_uri) JOIN main.track_details details USING(track_key)
+                WHERE measurement.analysis_key=details.loudness_analysis_key;
                 INSERT OR IGNORE INTO loudness_measurements SELECT album.source_key,'album',album.album_key,measurement.analysis_key,measurement.integrated_lufs,measurement.true_peak
                 FROM receiving.loudness_measurements measurement JOIN receiving.albums old ON measurement.entity_kind='album' AND old.album_key=measurement.entity_key JOIN main.albums album USING(media_uri)
                 WHERE measurement.analysis_key=album.loudness_analysis_key;")
                 .execute(&mut *tx).await?;
-        sqlx::query("UPDATE connect_profile SET enabled=?1,actor=?2,clock=max(clock,?3),publisher=?4,receiving=0 WHERE singleton=1").bind(enabled).bind(actor).bind(clock).bind(publisher).execute(&mut *tx).await?;
+        sqlx::query("UPDATE connect_profile SET enabled=?1,actor=?2,clock=max(clock,?3),publisher=?4 WHERE singleton=1").bind(enabled).bind(actor).bind(clock).bind(publisher).execute(&mut *tx).await?;
         tx.commit().await?;
         sqlx::query("DETACH DATABASE receiving")
             .execute(&mut *snapshot)

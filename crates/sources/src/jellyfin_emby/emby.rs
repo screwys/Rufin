@@ -307,13 +307,6 @@ mod tests {
             .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
         let track = catalog
             .track(&(&uri), &library::ReadCancellation::new())
@@ -340,13 +333,6 @@ mod tests {
             .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         let rated = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await

@@ -1318,11 +1318,8 @@ mod tests {
         let artist = crate::file::media::artist_credit("Album Artist".into(), None);
         let artist_uri =
             library::source_entity_uri(&configuration.source_id, "artist", &artist.object_id);
-        let (send, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = send.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
+        crate::published(&mut updates);
         for (uri, kind, title) in [
             (artist_uri, SourceEntityKind::Artist, "Renamed Artist"),
             (
@@ -1352,9 +1349,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(updates.try_recv().unwrap().metadata);
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates)
+                    .expect("catalog update")
+                    .1
+                    .intersects(sources::Shown::CATALOG)
+            );
+            assert!(
+                crate::published(&mut updates).is_none(),
                 "one publication for the collection save"
             );
         }
@@ -1511,9 +1513,6 @@ mod tests {
                 .write_file_observations(&file.into_iter().collect::<Vec<_>>(), vec![facts], true)
                 .await
                 .unwrap();
-            catalog
-                .publish_catalog_update(source.source_id().as_str(), observation.into_changes())
-                .await;
             let after = catalog
                 .track(&(&uri), &library::ReadCancellation::new())
                 .await
@@ -1769,18 +1768,13 @@ mod tests {
                 .iter()
                 .all(|folder| !folder.name.contains("old"))
         );
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
+        crate::published(&mut updates);
         source
             .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .unwrap();
-        while let Ok(update) = updates.try_recv() {
-            assert!(!update.changed());
-        }
+        assert!(crate::published(&mut updates).is_none());
 
         let edit = crate::Source::edit(
             configuration,
@@ -1827,20 +1821,14 @@ mod tests {
                 .iter()
                 .any(|file| Path::new(&file.root) == file_root)
         );
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        crate::published(&mut updates);
         source
             .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .unwrap();
-        while let Ok(update) = updates.try_recv() {
-            assert!(!update.changed());
-        }
+        assert!(crate::published(&mut updates).is_none());
 
-        catalog.delete_playlist(None, playlist).await.unwrap();
+        catalog.delete_playlist(playlist).await.unwrap();
         let edit = crate::Source::edit(
             configuration,
             None,
@@ -2081,10 +2069,7 @@ mod tests {
             folders.folders.is_empty() && folders.tracks.is_empty(),
             "outside-root imports remain outside library folders"
         );
-        catalog
-            .delete_playlist(None, playlist.playlist)
-            .await
-            .unwrap();
+        catalog.delete_playlist(playlist.playlist).await.unwrap();
         assert!(
             catalog
                 .tracks_by_uris(
@@ -2096,7 +2081,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        catalog.delete_playlist(None, second).await.unwrap();
+        catalog.delete_playlist(second).await.unwrap();
         let key = catalog
             .source_identity_key(source.source_id())
             .await

@@ -85,10 +85,7 @@ where
         Err(error) => return Err(string_error(error)),
     };
     let library = Arc::new(catalog);
-    library
-        .set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers)
-        .await
-        .map_err(string_error)?;
+    library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
     let scrobbling_settings = stored.scrobbling_runtime_settings();
@@ -239,7 +236,6 @@ where
     let settings_source = Arc::clone(&source);
     let settings_scrobbling = Arc::clone(&scrobbling);
     let settings_library = Arc::clone(&library);
-    let settings_runtime = runtime.clone();
     let settings_handle = SettingsOwner::new(
         settings.clone(),
         Arc::clone(&secrets),
@@ -247,13 +243,8 @@ where
             if previous.ui.application.prefer_distinct_track_covers
                 != current.ui.application.prefer_distinct_track_covers
             {
-                let library = Arc::clone(&settings_library);
-                let enabled = current.ui.application.prefer_distinct_track_covers;
-                settings_runtime.spawn(async move {
-                    if let Err(error) = library.set_distinct_track_covers(enabled).await {
-                        warn!(%error, "could not update artwork preference");
-                    }
-                });
+                settings_library
+                    .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
             }
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
@@ -328,18 +319,24 @@ where
     backup.start();
     let stored = settings.load();
 
-    for configured in &stored.sources.configured {
-        if let Err(error) = library
-            .reconcile_source(
-                &configured.configuration.source_id,
-                &configured.configuration.kind,
-                &configured.configuration.name,
-            )
-            .await
-        {
-            warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+    // Source rows follow the settings once the Catalog is loaded; the first screen does not
+    // wait for it.
+    let reconciled = Arc::clone(&library);
+    let configured = stored.sources.configured.clone();
+    runtime.spawn(async move {
+        for configured in &configured {
+            if let Err(error) = reconciled
+                .reconcile_source(
+                    &configured.configuration.source_id,
+                    &configured.configuration.kind,
+                    &configured.configuration.name,
+                )
+                .await
+            {
+                warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+            }
         }
-    }
+    });
     if let Err(error) =
         crate::connect::reset_earlier_state(paths.connect_dir(), &library, &settings_handle).await
     {

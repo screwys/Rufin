@@ -1,274 +1,20 @@
 use std::path::Path;
 
-use library::{Catalog, ReadCancellation, SourceId};
+use library::{Catalog, SourceId};
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 
 #[tokio::test]
-async fn reopening_without_statistics_preserves_library_order() {
-    let fixture = super::support::fixture().await;
-    let before = fixture
-        .catalog
-        .selected_track_uris(
-            &library::MemberRead {
-                collection: library::Collection::Source(fixture.source),
-                sort: Some(library::CatalogSort::Title),
-                ..library::MemberRead::new(library::Collection::Source(fixture.source))
-            }
-            .selection(),
-            None,
-            &ReadCancellation::new(),
-        )
-        .await
-        .unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
-    sqlx::raw_sql("DROP TABLE IF EXISTS sqlite_stat1;
-        INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
-            SELECT media_uri,'Captured title','Captured artist','Captured album',100,'1970-01',180000,90000,1 FROM tracks LIMIT 1")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    raw.close().await.unwrap();
-    fixture.catalog.close().await.unwrap();
-    let durable = durable_rows(&fixture.path).await;
-    let catalog = Catalog::open(&fixture.path).await.unwrap();
-    assert_eq!(durable_rows(&fixture.path).await, durable);
-    let after = catalog
-        .selected_track_uris(
-            &library::MemberRead {
-                collection: library::Collection::Source(fixture.source),
-                sort: Some(library::CatalogSort::Title),
-                ..library::MemberRead::new(library::Collection::Source(fixture.source))
-            }
-            .selection(),
-            None,
-            &ReadCancellation::new(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(before, after);
-    assert_eq!(after.len(), fixture.tracks.len());
-    catalog.close().await.unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
-    let schema_version: i64 = sqlx::query_scalar("PRAGMA schema_version")
-        .fetch_one(&mut raw)
-        .await
-        .unwrap();
-    raw.close().await.unwrap();
-    let reopened = Catalog::open(&fixture.path).await.unwrap();
-    assert_eq!(durable_rows(&fixture.path).await, durable);
-    let mut raw = super::support::connection(&fixture.path).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA schema_version")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        schema_version
-    );
-    raw.close().await.unwrap();
-    reopened.close().await.unwrap();
-
-    let mut raw = connection(&fixture.path, false).await;
-    sqlx::raw_sql("DROP VIEW local_track_access;
-        CREATE VIEW local_track_access AS
-        SELECT track.track_key,track.source_key,backing.path source_path,owner.path cue_path,
-            CASE WHEN track.cue_path IS NULL THEN backing.local_file_key ELSE owner.local_file_key END local_file_key
-        FROM tracks track
-        JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
-        JOIN observed_local_files backing ON backing.local_file_key=canonical.local_file_key
-        LEFT JOIN local_files cue ON cue.source_key=track.source_key AND cue.path=track.cue_path
-        LEFT JOIN observed_local_files owner ON owner.local_file_key=cue.local_file_key;
-        PRAGMA user_version=53;")
-        .execute(&mut raw).await.unwrap();
-    raw.close().await.unwrap();
-    let migrated = Catalog::open(&fixture.path).await.unwrap();
-    assert_eq!(durable_rows(&fixture.path).await, durable);
-    let mut raw = connection(&fixture.path, false).await;
-    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as("EXPLAIN QUERY PLAN SELECT access.source_path FROM tracks track JOIN local_track_access access USING(track_key) WHERE media_uri=?1")
-        .bind(&fixture.track_uris[0]).fetch_all(&mut raw).await.unwrap();
-    assert!(
-        plan.iter().all(|step| !step.3.contains("MATERIALIZE")),
-        "{plan:?}"
-    );
-    raw.close().await.unwrap();
-    migrated.close().await.unwrap();
-
-    let old_paths = [
-        fixture.path.with_extension("schema48.sqlite"),
-        fixture.path.with_extension("schema49.sqlite"),
-    ];
-    for path in &old_paths {
-        let mut raw = connection(path, true).await;
-        super::support::catalog::copy_before_index(&mut raw, &fixture.path).await;
-        sqlx::raw_sql("CREATE VIEW local_access_files AS SELECT * FROM local_locators;
-            CREATE VIEW local_track_access AS SELECT track_key,source_key,source_path,cue_path,local_file_key FROM tracks;
-            ALTER TABLE local_access_metadata ADD COLUMN title TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN normalized_title TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN album TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN normalized_album TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN artist TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN normalized_artist TEXT NOT NULL DEFAULT '';
-            ALTER TABLE local_access_metadata ADD COLUMN disc_number INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE local_access_metadata ADD COLUMN track_number INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE local_access_metadata ADD COLUMN duration_millis INTEGER NOT NULL DEFAULT 0;
-            CREATE INDEX local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);")
-            .execute(&mut raw).await.unwrap();
-        raw.close().await.unwrap();
-    }
-    let mut raw = connection(&old_paths[0], false).await;
-    sqlx::query("INSERT INTO albums(source_key,object_id,media_uri,indexed) VALUES(?1,'retired-header','https://example.org/retired-header',1)")
-        .bind(fixture.source).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO tracks(source_key,media_uri,metadata,indexed) VALUES(?1,'https://example.org/retired-alias',jsonb('{\"title\":\"Retired alias\"}'),1)")
-        .bind(fixture.source).execute(&mut raw).await.unwrap();
-    sqlx::query("PRAGMA user_version=48")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    raw.close().await.unwrap();
-    let migrated = Catalog::open(&old_paths[0]).await.unwrap();
-    assert_eq!(
-        migrated
-            .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Source(fixture.source)).selection(),
-                None,
-                &ReadCancellation::new(),
-            )
-            .await
-            .unwrap()
-            .len(),
-        fixture.tracks.len()
-    );
-    let mut raw = connection(&old_paths[0], false).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_schema WHERE name IN('album_order','effective_album_artists','effective_album_genres','effective_album_release_types')")
-            .fetch_one(&mut raw).await.unwrap(),
-        0
-    );
-    raw.close().await.unwrap();
-    let home = migrated
-        .home_page(
-            fixture.source,
-            None,
-            0,
-            0,
-            &library::HomeBlockKind::all(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .unwrap();
-    assert!(home.showcase.is_some());
-    for row in home.showcase.iter().chain(&home.explore) {
-        assert!(!row.title.is_empty());
-        assert!(row.album.summary.track_count > 0);
-        assert_ne!(row.album.object_id, "retired-header");
-    }
-    migrated.close().await.unwrap();
-
-    let mut raw = connection(&old_paths[1], false).await;
-    sqlx::raw_sql("DROP VIEW local_access_files;
-        INSERT INTO tracks(media_uri,metadata,native_metadata) VALUES('https://media.example/legacy-access.flac',jsonb('{\"title\":\"Canonical title\",\"source_format\":\"flac\",\"future\":{\"field\":true}}'),1);
-        INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://media.example/legacy-access.flac','download','/downloads/legacy.flac','/downloads','legacy.flac','file:///downloads/legacy.flac');
-        INSERT INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key,title,album,artist,disc_number,track_number,duration_millis)
-        VALUES('file:///downloads/legacy.flac',111,222,3,4,17,zeroblob(32),'Legacy title','Legacy album','Legacy artist',1,4,1234);
-        PRAGMA user_version=49;")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    raw.close().await.unwrap();
-    let migrated = Catalog::open(&old_paths[1]).await.unwrap();
-    let mut raw = connection(&old_paths[1], false).await;
-    let legacy = migrated
-        .download_metadata("https://media.example/legacy-access.flac")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(legacy.title, "Canonical title");
-    assert_eq!(legacy.album, "Legacy album");
-    assert_eq!(legacy.artist, "Legacy artist");
-    assert_eq!(legacy.duration_millis, 1234);
-    assert_eq!(legacy.source_format.as_deref(), Some("flac"));
-    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT json_extract(metadata,'$.future.field') FROM tracks WHERE media_uri='https://media.example/legacy-access.flac'").fetch_one(&mut raw).await.unwrap(), 1);
-    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64,Vec<u8>)>("SELECT size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key FROM local_access_metadata WHERE access_uri='file:///downloads/legacy.flac'").fetch_one(&mut raw).await.unwrap(), (111,222,3,4,17,vec![0;32]));
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM pragma_table_info('local_access_metadata')"
-        )
-        .fetch_one(&mut raw)
-        .await
-        .unwrap(),
-        7
-    );
-    raw.close().await.unwrap();
-    migrated.close().await.unwrap();
-}
-
-#[tokio::test]
-async fn missing_indexed_column_returns_error_without_replacing_the_library() {
-    let fixture = super::support::fixture().await;
-    fixture.catalog.close().await.unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
-    let triggers: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%local_play_count%'",
-    )
-    .fetch_all(&mut raw)
-    .await
-    .unwrap();
-    for trigger in triggers {
-        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
-            .execute(&mut raw)
-            .await
-            .unwrap();
-    }
-    sqlx::raw_sql(
-        "DROP INDEX tracks_local_play_order_idx; DROP INDEX tracks_global_play_order_idx;
-        DROP INDEX tracks_local_shuffle_idx; DROP INDEX tracks_global_local_shuffle_idx;
-        ALTER TABLE tracks DROP COLUMN local_play_count;",
-    )
-    .execute(&mut raw)
-    .await
-    .unwrap();
-    raw.close().await.unwrap();
-    let before = durable_rows(&fixture.path).await;
-    assert!(Catalog::open(&fixture.path).await.is_err());
-    assert_eq!(durable_rows(&fixture.path).await, before);
-}
-
-#[tokio::test]
-async fn index_setup_failure_returns_error_without_replacing_the_library() {
-    let fixture = super::support::fixture().await;
-    fixture
-        .catalog
-        .create_playlist(
-            None,
-            "Keep me",
-            &library::MemberSelection::Uris((vec![]).into()),
-        )
-        .await
-        .unwrap();
-    fixture.catalog.close().await.unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
-    sqlx::raw_sql(
-        "DROP INDEX tracks_local_shuffle_idx; CREATE TABLE tracks_local_shuffle_idx(value TEXT);",
-    )
-    .execute(&mut raw)
-    .await
-    .unwrap();
-    raw.close().await.unwrap();
-    let before = durable_rows(&fixture.path).await;
-    assert!(Catalog::open(&fixture.path).await.is_err());
-    assert_eq!(durable_rows(&fixture.path).await, before);
-}
-
-#[tokio::test]
 async fn malformed_library_schema_returns_error_without_replacing_the_file() {
-    let fixture = super::support::fixture().await;
-    fixture.catalog.close().await.unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    Catalog::open(&path).await.unwrap().close().await.unwrap();
+    let mut raw = connection(&path, false).await;
     sqlx::raw_sql("PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql,'CREATE TABLE','BROKEN TABLE') WHERE name='sources';").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
-    let before = std::fs::read(&fixture.path).unwrap();
-    assert!(Catalog::open(&fixture.path).await.is_err());
-    assert_eq!(std::fs::read(&fixture.path).unwrap(), before);
+    let before = std::fs::read(&path).unwrap();
+    assert!(Catalog::open(&path).await.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
 }
 
 async fn connection(path: &Path, create: bool) -> SqliteConnection {
@@ -298,7 +44,6 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     fixture
         .catalog
         .create_playlist(
-            None,
             "Durable duplicate list",
             &library::MemberSelection::Uris((vec![uri.clone(), uri.clone()]).into()),
         )
@@ -315,7 +60,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     fixture.catalog.import_local_locators_jsonl(std::io::Cursor::new(format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n",serde_json::to_string(uri).unwrap()))).await.unwrap();
     let mut raw = connection(&path, false).await;
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(NULL,'source',?1,'Snapshot','Artist','Album',100,'1970-01',100000,90000,0)").bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     fixture.catalog.close().await.unwrap();
     let mut before = durable_rows(&path).await;
@@ -379,7 +124,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             .await
             .unwrap();
         let mut observation = catalog.observe("source", None).await.unwrap();
-        let observed = observation.start_observation().await.unwrap();
+        observation.start_observation().await.unwrap();
         observation
             .apply_catalog(
                 &library::CatalogBatch {
@@ -408,9 +153,10 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             .await
             .unwrap();
         observation
-            .complete_source_observation(observed, &["track"], None)
+            .complete_source_observation(&["track"], None)
             .await
             .unwrap();
+        drop(observation);
         let mut raw = connection(&path, false).await;
         assert_eq!(sqlx::query_as::<_,(bool,i64)>("SELECT state.favorite,state.rating FROM tracks track JOIN user_media_state state USING(media_uri) WHERE track.media_uri=?1").bind(uri).fetch_one(&mut raw).await.unwrap(),(true,87));
         assert_eq!(
@@ -464,7 +210,6 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     let catalog = &fixture.catalog;
     catalog
         .create_playlist(
-            None,
             "Snapshot",
             &library::MemberSelection::Uris((vec![fixture.track_uris[0].clone()]).into()),
         )
@@ -505,47 +250,49 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
 
 #[tokio::test]
 async fn unsupported_version_preserves_library_data() {
-    let fixture = super::support::fixture().await;
-    fixture
-        .catalog
-        .create_playlist(
-            None,
-            "Keep me",
-            &library::MemberSelection::Uris((vec![]).into()),
-        )
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    Catalog::open(&path).await.unwrap().close().await.unwrap();
+    let mut raw = connection(&path, false).await;
+    sqlx::raw_sql("INSERT INTO sources(source_key,object_id,kind) VALUES (1,'source','local');
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,indexed) VALUES(1,1,'one','file:///one.flac','One',1);
+        INSERT INTO playlists(playlist_key,object_id,name) VALUES (1,'keep','Keep me');
+        INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(1,'kept',1,0);
+        INSERT INTO user_media_state(media_uri,favorite) VALUES('file:///one.flac',1);")
+        .execute(&mut raw)
         .await
         .unwrap();
-    fixture.catalog.close().await.unwrap();
-    let supported = durable_rows(&fixture.path).await;
-    let mut raw = connection(&fixture.path, false).await;
-    sqlx::raw_sql("ALTER TABLE playlists ADD COLUMN irrelevant TEXT; ALTER TABLE playlists DROP COLUMN artwork_mime; CREATE TABLE extra(value TEXT); INSERT INTO extra VALUES('keep in the original'); PRAGMA user_version=999;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
-    let before = durable_rows(&fixture.path).await;
-    assert!(Catalog::open(&fixture.path).await.is_err());
-    assert_eq!(durable_rows(&fixture.path).await, before);
-    let recovered = Catalog::open_installation(
-        &fixture.path,
-        &fixture.path.with_extension("catalog.sqlite"),
-    )
-    .await
-    .unwrap();
+    let supported = durable_rows(&path).await;
+    // A newer or damaged Store can name rows that no longer exist.
+    let mut raw = connection(&path, false).await;
+    sqlx::raw_sql("PRAGMA foreign_keys=OFF;
+        INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(1,'dangling',99,1);
+        INSERT INTO tracks(track_key,source_key,object_id,media_uri,album_key) VALUES(2,1,'two','file:///two.flac',77);
+        INSERT INTO queue_entries(entry_id,track_key) VALUES(1,98);
+        ALTER TABLE playlists ADD COLUMN irrelevant TEXT; ALTER TABLE playlists DROP COLUMN artwork_mime;
+        CREATE TABLE extra(value TEXT); INSERT INTO extra VALUES('keep in the original');
+        PRAGMA user_version=999;")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    let before = durable_rows(&path).await;
+    assert!(Catalog::open(&path).await.is_err());
+    assert_eq!(durable_rows(&path).await, before);
+    let recovered = Catalog::open_installation(&path, &path.with_extension("catalog.sqlite"))
+        .await
+        .unwrap();
     recovered.close().await.unwrap();
-    let facts = |tables: Vec<(String, Vec<String>)>| {
-        tables
-            .into_iter()
-            .filter(|(table, _)| {
-                !matches!(
-                    table.as_str(),
-                    "folder_children"
-                        | "collection_album_index"
-                        | "collection_totals"
-                        | "playlist_genres"
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(facts(durable_rows(&fixture.path).await), facts(supported));
-    let preserved = std::fs::read_dir(fixture.path.parent().unwrap())
+    // The entry and queue row that name no track go; the track loses the album it named.
+    let mut expected = supported;
+    for (table, rows) in &mut expected {
+        if table == "tracks" {
+            rows.push(r#"[2,1,"two","file:///two.flac",null,null,0,null,0,"","","","",0,0,0,null,null,null,null,null,null,null,0,null,null,null,null]"#.into());
+        }
+    }
+    assert_eq!(durable_rows(&path).await, expected);
+    let preserved = std::fs::read_dir(path.parent().unwrap())
         .unwrap()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -593,7 +340,7 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
     }
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{tables}
         CREATE TABLE sources(source_key INTEGER PRIMARY KEY,object_id TEXT NOT NULL,catalog_complete INTEGER NOT NULL DEFAULT 1);
-        INSERT INTO sources(source_key,object_id) VALUES(7,'source');
+        INSERT INTO sources(source_key,object_id) VALUES (7,'source');
         CREATE TABLE local_files(local_file_key INTEGER PRIMARY KEY,source_key INTEGER NOT NULL,path TEXT NOT NULL,root TEXT NOT NULL,relative_path TEXT NOT NULL,kind TEXT NOT NULL,size_bytes INTEGER,mtime_ns INTEGER NOT NULL,state TEXT NOT NULL);
         INSERT INTO local_files VALUES(1,7,'/music/a.flac','/music','a.flac','media',1,1,'observed');
         CREATE TABLE local_access_metadata(access_uri TEXT PRIMARY KEY,title TEXT,artist TEXT,album TEXT,duration_millis INTEGER,disc_number INTEGER,track_number INTEGER);
@@ -619,44 +366,236 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
     );
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE object_id='played'")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        1
+        sqlx::query_scalar::<_, i64>(
+            "SELECT play_count FROM legacy_activity WHERE track_object_id='played'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        3
     );
     raw.close().await.unwrap();
 }
 
+/// A Store and catalog file as a released version left them upgrade into one Store that keeps
+/// every piece of user data and the library's facts.
 #[tokio::test]
-async fn missing_listen_identity_returns_error_without_replacing_user_data() {
-    let fixture = super::support::fixture().await;
-    fixture
-        .catalog
-        .create_playlist(
-            None,
-            "Keep me",
-            &library::MemberSelection::Uris((vec![]).into()),
-        )
-        .await
-        .unwrap();
-    fixture.catalog.close().await.unwrap();
-    let mut raw = connection(&fixture.path, false).await;
-    let triggers: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%listens%'",
-    )
-    .fetch_all(&mut raw)
-    .await
-    .unwrap();
-    for trigger in triggers {
-        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
-            .execute(&mut raw)
+async fn released_stores_upgrade_with_their_user_data() {
+    for version in ["0.15.0", "0.16.6"] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("rufin-store.sqlite");
+        let catalog = directory.path().join("rufin-catalog.sqlite");
+        for (path, name) in [(&store, "store"), (&catalog, "catalog")] {
+            let fixture = std::fs::read_to_string(format!(
+                "{}/tests/fixtures/{name}-{version}.sql",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let mut raw = connection(path, true).await;
+            sqlx::raw_sql(sqlx::AssertSqlSafe(fixture))
+                .execute(&mut raw)
+                .await
+                .unwrap();
+            raw.close().await.unwrap();
+        }
+        Catalog::open_installation(&store, &catalog)
+            .await
+            .unwrap()
+            .close()
             .await
             .unwrap();
+        let mut raw = connection(&store, false).await;
+        let all = |sql: &'static str| sqlx::query_as::<_, (String,)>(sql);
+        let values = async |raw: &mut SqliteConnection, sql: &'static str| -> Vec<String> {
+            all(sql)
+                .fetch_all(&mut *raw)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(value,)| value)
+                .collect()
+        };
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap(),
+            59,
+            "{version}"
+        );
+        // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(media_uri,favorite,rating) FROM user_media_state ORDER BY media_uri").await,
+            [
+                r#"["file:///music/Album/01.flac",1,60]"#,
+                r#"["file:///music/Gone/old.flac",1,null]"#,
+                r#"["rufin:source/album/local-source/album-1",1,null]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(listen_key,media_uri,track_title,listened_millis) FROM listens ORDER BY listen_key").await,
+            [
+                r#"[1,"file:///music/Album/01.flac","First",200000]"#,
+                r#"[2,"file:///music/Gone/old.flac","Gone Song",100000]"#,
+                r#"[3,"rufin:source/track/server/vanished","Vanished",90000]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(
+                &mut raw,
+                "SELECT json_array(listen_key,service,attempts) FROM listen_outbox"
+            )
+            .await,
+            [r#"[1,"lastfm",2]"#],
+            "{version}"
+        );
+        assert_eq!(
+            values(
+                &mut raw,
+                "SELECT json_array(media_uri,favorite,previous_favorite) FROM favorite_outbox"
+            )
+            .await,
+            [r#"["rufin:source/track/server/s1",0,1]"#],
+            "{version}"
+        );
+        // Carried-over counts keep their names, also for tracks the catalog no longer has.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(period,item_kind,track_object_id,play_count,title,artist,album) FROM legacy_activity ORDER BY period,item_kind").await,
+            [
+                r#"["2017-07","track","vanished",2,"Vanished","Lost Artist","Lost Album"]"#,
+                r#"["lifetime","artist","ar2",9,"Server Artist","Server Artist",""]"#,
+                r#"["lifetime","track","s2",5,"Server Two","Server Artist","Server Album"]"#,
+            ],
+            "{version}"
+        );
+        // Rufin playlists are global and keep their entries, also for missing tracks. The
+        // list order is not kept.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(object_id,owner,source_key IS NULL,name) FROM playlists ORDER BY object_id").await,
+            [
+                r#"["p100","source",0,"Server Mix"]"#,
+                r#"["rufin:playlist:global","rufin",1,"Global Mix"]"#,
+                r#"["rufin:playlist:local","rufin",1,"Local Mix"]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(playlist.object_id,entry.object_id,track.media_uri,track.title) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key) ORDER BY playlist.object_id,entry.position").await,
+            [
+                r#"["p100","pe1","rufin:source/track/server/s1","Server One"]"#,
+                r#"["p100","pe2","rufin:source/track/server/s2","Server Two"]"#,
+                r#"["rufin:playlist:global","e3","rufin:source/track/server/s1","Server One"]"#,
+                r#"["rufin:playlist:global","e4","file:///music/Album/01.flac","First"]"#,
+                r#"["rufin:playlist:local","e1","file:///music/Album/01.flac","First"]"#,
+                r#"["rufin:playlist:local","e2","file:///music/Gone/old.flac","Gone Song"]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(
+                &mut raw,
+                "SELECT json_array(object_id,name) FROM smart_playlists"
+            )
+            .await,
+            [r#"["rufin:smart:recent","Recently Played"]"#],
+            "{version}"
+        );
+        // A missing track stays as a hidden row with the names the playlist kept, and its
+        // 60-day expiry starts at the upgrade.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(indexed,hidden_since IS NOT NULL,title,display_artist,display_album,duration_millis,json_extract(details.metadata,'$.musicbrainz_recording_id')) FROM tracks JOIN track_details details USING(track_key) WHERE media_uri='file:///music/Gone/old.flac'").await,
+            [r#"[0,1,"Gone Song","Old Artist","Old Album",123000,"mb-gone"]"#],
+            "{version}"
+        );
+        // The queue keeps its order, position and repeat mode.
+        assert_eq!(
+            values(&mut raw, "SELECT json_group_array(track.media_uri) FROM (SELECT * FROM queue_positions WHERE order_kind=0 ORDER BY position) position JOIN queue_entries entry USING(entry_id) JOIN tracks track USING(track_key)").await,
+            [r#"["file:///music/Album/01.flac","file:///music/Gone/old.flac","rufin:source/track/server/s1"]"#],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(current_index IS NOT NULL,progress_millis,repeat_mode) FROM queue_state").await,
+            [r#"[1,5000,"all"]"#],
+            "{version}"
+        );
+        // Downloads stay attached to their track.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(media_uri,origin,access_uri,source_key IS NOT NULL) FROM local_locators").await,
+            [r#"["rufin:source/track/server/s1","download","file:///downloads/s1.flac",1]"#],
+            "{version}"
+        );
+        if version == "0.16.6" {
+            assert_eq!(
+                values(&mut raw, "SELECT json_array(media_uri,encoding,backing_uri,source_id) FROM connect_media_files").await,
+                [r#"["rufin:source/track/server/s1","original","rufin:source/track/server/s1","server"]"#]
+            );
+        }
+        // Library facts: typed columns, details, links, the date a track was added and the
+        // favorites a server reported.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(track.media_uri,track.indexed,track.title,track.date_added,track.first_seen_at,track.flags,track.native_favorite,track.native_rating,details.source_path,details.cue_path,details.cue_end_millis) FROM tracks track JOIN track_details details USING(track_key) WHERE track.indexed=1 ORDER BY track.track_key").await,
+            [
+                r#"["file:///music/Album/01.flac",1,"First","2020-01-02T03:04:05Z",1577934245,1,0,null,"/music/Album/01.flac",null,null]"#,
+                r#"["rufin:cue/album-cue%3A1/file%3A%2F%2F%2Fmusic%2FAlbum%2Falbum.flac/0/100000",1,"Cue One",null,1577934245,2,0,null,"/music/Album/album.flac","/music/Album/album.cue",100000]"#,
+                r#"["rufin:source/track/server/s1",1,"Server One","2021-06-07T00:00:00Z",null,1,1,80,null,null,null]"#,
+                r#"["rufin:source/track/server/s2",1,"Server Two",null,null,0,0,null,null,null,null]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(json_extract(metadata,'$.musicbrainz_recording_id'),json_extract(metadata,'$.source_loudness.integrated_lufs'),json_extract(metadata,'$.artists[0].name'),json_extract(metadata,'$.moods[0].name')) FROM track_details WHERE track_key=1").await,
+            [r#"["mb-recording-1",-10.5,"Artist A","Calm"]"#],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(link.role,link.position,coalesce(artist.name,tag.name,folder.name),tag.kind) FROM track_links link LEFT JOIN artists artist ON link.role IN(0,1) AND artist.artist_key=link.target LEFT JOIN tags tag ON link.role IN(2,3) AND tag.tag_key=link.target LEFT JOIN folders folder ON link.role=4 AND folder.folder_key=link.target WHERE link.track_key=1 ORDER BY link.role,link.position").await,
+            [
+                r#"[0,0,"Artist A",null]"#,
+                r#"[2,0,"Rock",0]"#,
+                r#"[3,0,"Calm",1]"#,
+                r#"[4,0,"Album",null]"#,
+            ],
+            "{version}"
+        );
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(album.title,album.date_added,json_extract(album.metadata,'$.release_types'),json_extract(album.metadata,'$.musicbrainz_release_group_id'),(SELECT count(*) FROM album_links WHERE album_key=album.album_key)) FROM albums album WHERE album.media_uri='rufin:source/album/local-source/album-1'").await,
+            [r#"["Album","2020-01-02T03:04:05",["album"],"mb-group",2]"#],
+            "{version}"
+        );
+        assert_eq!(
+            values(
+                &mut raw,
+                "SELECT json_array(media_uri,authority) FROM lyrics_cache"
+            )
+            .await,
+            [r#"["file:///music/Album/01.flac","source"]"#],
+            "{version}"
+        );
+        assert_eq!(
+            values(
+                &mut raw,
+                "SELECT json_array(section_id,entity_kind,title) FROM home_entries"
+            )
+            .await,
+            [r#"["recent","album","Server Album"]"#],
+            "{version}"
+        );
+        // Analysis results are measured again; nothing derived is stored.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array((SELECT count(*) FROM loudness_measurements),(SELECT count(*) FROM waveform_cache),(SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name NOT GLOB 'lyrics_*' AND tbl_name<>'documents'))").await,
+            ["[0,0,0]"],
+            "{version}"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT schema_version FROM connect_profile")
+                .fetch_one(&mut raw)
+                .await
+                .unwrap(),
+            0,
+            "{version}"
+        );
+        raw.close().await.unwrap();
     }
-    sqlx::raw_sql("DROP INDEX listens_media_activity_idx; DROP INDEX listens_connect_key_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
-    raw.close().await.unwrap();
-    let before = durable_rows(&fixture.path).await;
-    assert!(Catalog::open(&fixture.path).await.is_err());
-    assert_eq!(durable_rows(&fixture.path).await, before);
 }

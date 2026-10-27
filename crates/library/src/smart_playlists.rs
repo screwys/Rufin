@@ -3,14 +3,12 @@
 
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{AssertSqlSafe, Connection, FromRow, Row, SqliteConnection};
+use sqlx::{AssertSqlSafe, FromRow, SqliteConnection};
 
 use crate::{
-    Catalog, CatalogSort, FolderKey, LibraryError, LibraryResult, ReadCancellation,
-    SmartPlaylistKey, SourceKey,
+    Catalog, FolderKey, LibraryError, LibraryResult, ReadCancellation, SmartPlaylistKey, SourceKey,
 };
 
-pub(crate) const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
 const SMART_PLAYLIST_RULE_LIMIT: usize = 64;
 const SMART_PLAYLIST_DEFINITION_BYTES: usize = 256 * 1024;
 const MOST_PLAYED_OBJECT_ID: &str = "builtin:most_played";
@@ -267,7 +265,7 @@ pub enum SmartPlaylistActivityPeriod {
 }
 
 impl SmartPlaylistActivityPeriod {
-    fn seconds(self) -> Option<i64> {
+    pub(crate) fn seconds(self) -> Option<i64> {
         match self {
             Self::Weekly => Some(604800),
             Self::Monthly => Some(2592000),
@@ -385,92 +383,143 @@ pub struct SmartPlaylistValueSuggestions {
     pub moods: Vec<String>,
 }
 
-pub(crate) async fn load_smart_playlist_requested(
+/// Totals of smart playlists by key: their members as the Catalog evaluates them now.
+pub(crate) async fn smart_totals(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
-    requested: crate::query::RequestedKeys,
+    keys: &[i64],
     now: i64,
-    calculated: bool,
-) -> LibraryResult<Vec<SmartPlaylistRow>> {
-    Ok(load_smart_items_on(connection, requested, now, calculated)
-        .await?
-        .into_iter()
-        .filter_map(|row| match row {
-            crate::PlaylistListRow::SmartPlaylist(row) => Some(row),
-            _ => None,
-        })
+) -> LibraryResult<std::collections::HashMap<i64, crate::catalog::views::Totals>> {
+    catalog.loaded().await;
+    let definitions = {
+        let snapshot = catalog.snapshot();
+        keys.iter()
+            .filter_map(|key| snapshot.smart_playlists.get(key))
+            .map(|smart| (smart.key, smart.definition.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut inputs = crate::catalog::views::Inputs::default();
+    catalog
+        .read_periods(
+            connection,
+            &mut inputs,
+            definitions
+                .iter()
+                .filter_map(|(_, definition)| crate::catalog::views::smart_period(definition))
+                .collect(),
+            now,
+        )
+        .await?;
+    let snapshot = catalog.snapshot();
+    let context = crate::catalog::views::Context::new(&snapshot, false);
+    Ok(definitions
+        .iter()
+        .map(|(key, definition)| (*key, context.smart_totals(definition, &inputs)))
         .collect())
 }
 
-pub(crate) async fn load_smart_items_on(
+/// Smart playlist rows by key, in the order asked.
+pub(crate) async fn load_smart_playlist_rows(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
-    requested: crate::query::RequestedKeys,
+    keys: &[SmartPlaylistKey],
     now: i64,
-    calculated: bool,
-) -> LibraryResult<Vec<crate::PlaylistListRow>> {
-    let selected = if calculated {
-        format!("WITH displayed AS ({})", requested.sql)
-    } else {
-        let definitions = sqlx::query_as_with::<_, (i64, String), _>(AssertSqlSafe(format!(
-            "WITH requested AS ({}) SELECT playlist.smart_playlist_key,playlist.definition_json FROM smart_playlists playlist WHERE EXISTS(SELECT 1 FROM requested WHERE requested.value=playlist.smart_playlist_key OR -requested.value=playlist.playlist_folder_key)",
-            requested.sql
-        )), requested.arguments.clone()).fetch_all(&mut *connection).await?
-            .into_iter().map(|(key,json)| Ok((key,serde_json::from_str(&json)?)))
-            .collect::<LibraryResult<Vec<_>>>()?;
-        let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
-        format!(
-            "{membership}, totals AS ({}), requested AS ({}), displayed AS (
-             SELECT requested.value,requested.ordinal,coalesce(sum(totals.track_count),0) track_count,
-             coalesce(sum(totals.duration_millis),0) duration_millis,coalesce(sum(totals.downloaded_count),0) downloaded_count
-             FROM requested LEFT JOIN smart_playlists child ON child.smart_playlist_key=requested.value OR child.playlist_folder_key=-requested.value
-             LEFT JOIN totals ON totals.definition_key=child.smart_playlist_key GROUP BY requested.ordinal)",
-            smart_totals_sql(), requested.sql
-        )
-    };
-    let sql = format!(
-        "{selected} SELECT displayed.value smart_playlist_key,-displayed.value folder_key,1 smart,
-         coalesce(playlist.object_id,folder.object_id) object_id,coalesce(playlist.name,folder.name) name,
-         playlist.definition_json,playlist.position,{} artwork_binding,displayed.track_count,displayed.duration_millis,displayed.downloaded_count,
-         coalesce(playlist.object_id,cover.object_id) artwork_object_id
-         FROM displayed LEFT JOIN smart_playlists playlist ON playlist.smart_playlist_key=displayed.value
-         LEFT JOIN playlist_folders folder ON folder.folder_key=-displayed.value AND folder.smart
-         LEFT JOIN smart_playlists cover ON cover.smart_playlist_key=folder.smart_cover_key
-         WHERE playlist.smart_playlist_key IS NOT NULL OR folder.folder_key IS NOT NULL ORDER BY displayed.ordinal",
-        crate::artwork::preview_sql("CASE WHEN displayed.value<0 THEN cover.artwork_binding ELSE playlist.artwork_binding END")
-    );
-    let rows = sqlx::query_with(AssertSqlSafe(sql), requested.arguments)
-        .persistent(false)
-        .fetch_all(connection)
-        .await?;
+) -> LibraryResult<Vec<SmartPlaylistRow>> {
+    let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
+    let totals = smart_totals(catalog, connection, &raw, now).await?;
+    let rows = sqlx::query_as::<_, SmartPlaylistRow>(AssertSqlSafe(format!(
+        "SELECT playlist.smart_playlist_key,playlist.object_id,playlist.name,playlist.definition_json,playlist.position,
+            0 track_count,0 duration_millis,0 downloaded_count,{} artwork_binding
+         FROM json_each(?1) requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value
+         ORDER BY CAST(requested.key AS INTEGER)",
+        crate::artwork::preview_sql("playlist.artwork_binding")
+    )))
+    .bind(serde_json::to_string(&raw)?)
+    .fetch_all(&mut *connection)
+    .await?;
     rows.into_iter()
-        .map(|row| {
-            let binding = row
-                .get::<Option<String>, _>("artwork_object_id")
+        .map(|mut playlist| {
+            normalize_definition(&mut playlist.definition)?;
+            let summary = totals
+                .get(&playlist.smart_playlist_key.raw())
+                .map(crate::catalog::views::Totals::summary)
+                .unwrap_or_default();
+            playlist.track_count = summary.track_count;
+            playlist.duration_millis = summary.duration_millis;
+            playlist.downloaded_count = summary.downloaded_count;
+            playlist.artwork_binding = Some(crate::artwork::playlist_artwork(
+                playlist.artwork_binding.take(),
+                (true, None, playlist.object_id.clone()),
+                (None, None),
+            )?);
+            Ok(playlist)
+        })
+        .collect()
+}
+
+/// Smart playlist folder rows by key: totals of their smart playlists and the first one's
+/// artwork.
+pub(crate) async fn load_smart_folder_rows(
+    catalog: &Catalog,
+    connection: &mut SqliteConnection,
+    folders: &[i64],
+    now: i64,
+) -> LibraryResult<Vec<crate::PlaylistFolderRow>> {
+    let members = {
+        let snapshot = catalog.snapshot();
+        snapshot
+            .smart_playlists
+            .values()
+            .filter(|smart| smart.folder.is_some_and(|folder| folders.contains(&folder)))
+            .map(|smart| (smart.folder.unwrap_or_default(), smart.key))
+            .collect::<Vec<_>>()
+    };
+    let totals = smart_totals(
+        catalog,
+        connection,
+        &members.iter().map(|(_, key)| *key).collect::<Vec<_>>(),
+        now,
+    )
+    .await?;
+    #[derive(FromRow)]
+    struct Row {
+        #[sqlx(flatten)]
+        folder: crate::PlaylistFolderRow,
+        cover: Option<String>,
+    }
+    let rows: Vec<Row> = sqlx::query_as(AssertSqlSafe(format!(
+        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,cover.object_id cover
+         FROM json_each(?1) requested JOIN playlist_folders folder ON folder.folder_key=requested.value AND folder.smart
+         LEFT JOIN smart_playlists cover ON cover.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=folder.folder_key)
+         ORDER BY CAST(requested.key AS INTEGER)",
+        crate::artwork::preview_sql("cover.artwork_binding")
+    )))
+    .bind(serde_json::to_string(folders)?)
+    .fetch_all(&mut *connection)
+    .await?;
+    rows.into_iter()
+        .map(|Row { mut folder, cover }| {
+            for (_, key) in members
+                .iter()
+                .filter(|(owner, _)| *owner == folder.folder_key.raw())
+            {
+                if let Some(totals) = totals.get(key) {
+                    folder.track_count += i64::from(totals.tracks);
+                    folder.duration_millis += totals.duration as i64;
+                }
+            }
+            folder.artwork_binding = cover
                 .map(|id| {
                     crate::artwork::playlist_artwork(
-                        row.get("artwork_binding"),
+                        folder.artwork_binding.take(),
                         (true, None, id),
                         (None, None),
                     )
                 })
                 .transpose()?;
-            if row.get::<i64, _>("smart_playlist_key") < 0 {
-                let mut folder = crate::PlaylistFolderRow::from_row(&row)?;
-                folder.artwork_binding = binding;
-                Ok(crate::PlaylistListRow::Folder(folder))
-            } else {
-                let mut playlist = SmartPlaylistRow::from_row(&row)?;
-                normalize_definition(&mut playlist.definition)?;
-                playlist.artwork_binding = binding;
-                Ok(crate::PlaylistListRow::SmartPlaylist(playlist))
-            }
+            Ok(folder)
         })
         .collect()
-}
-
-fn smart_totals_sql() -> &'static str {
-    "SELECT selected.definition_key,count(*) track_count,coalesce(sum(track.duration_millis),0) duration_millis,
-     count(CASE WHEN track.is_downloaded THEN 1 END) downloaded_count
-     FROM selected JOIN tracks track USING(track_key) GROUP BY selected.definition_key"
 }
 
 pub(crate) async fn create_default_smart_playlists(
@@ -493,61 +542,62 @@ pub(crate) async fn create_default_smart_playlists(
     Ok(())
 }
 
-pub(crate) async fn sync_smart_on(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-) -> LibraryResult<()> {
-    let (identity, position): (String, i64) = sqlx::query_as(
-        "SELECT object_id,position FROM smart_playlists WHERE smart_playlist_key=?1",
-    )
-    .bind(key)
-    .fetch_one(&mut *connection)
-    .await?;
-    crate::connect::mark_current_on(connection, "smart", &identity, false).await?;
-    crate::profile::write_local_on(
-        connection,
-        &[crate::ConnectRecord {
-            kind: "smart_order".into(),
-            key: identity,
-            value: Some(serde_json::json!({"position":position})),
-        }],
-    )
-    .await
-}
-
 impl Catalog {
+    /// Genre and mood names of a source, for rule values.
     pub async fn smart_playlist_value_suggestions(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
-        cancellation: &ReadCancellation,
+        _cancellation: &ReadCancellation,
     ) -> LibraryResult<SmartPlaylistValueSuggestions> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let genres = sqlx::query_scalar::<_, String>(
-            "SELECT genre.name FROM genres genre WHERE genre.source_key=?1
-             AND (?2 IS NULL OR EXISTS (
-               SELECT 1 FROM track_genres relation JOIN track_folders scope USING(track_key)
-               WHERE relation.genre_key=genre.genre_key AND scope.folder_key=?2))
-             ORDER BY genre.sort_text,genre.genre_key LIMIT 100",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let moods = sqlx::query_scalar::<_, String>(
-            "SELECT mood.name FROM moods mood WHERE mood.source_key=?1
-             AND (?2 IS NULL OR EXISTS (
-               SELECT 1 FROM track_moods relation JOIN track_folders scope USING(track_key)
-               WHERE relation.mood_key=mood.mood_key AND scope.folder_key=?2))
-             ORDER BY mood.sort_text,mood.mood_key LIMIT 100",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
-        transaction.commit().await?;
-        Ok(SmartPlaylistValueSuggestions { genres, moods })
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let Some(owner) = snapshot.source_slot(source) else {
+            return Ok(SmartPlaylistValueSuggestions::default());
+        };
+        let scoped = match folder {
+            Some(folder) => {
+                let Some(folder) = snapshot.folders.slot(folder.raw()) else {
+                    return Ok(SmartPlaylistValueSuggestions::default());
+                };
+                Some(
+                    snapshot
+                        .tracks
+                        .iter()
+                        .filter(|(_, track)| snapshot.track_runs(track)[3].contains(&folder))
+                        .flat_map(|(_, track)| snapshot.track_runs(track)[2].iter().copied())
+                        .collect::<std::collections::HashSet<_>>(),
+                )
+            }
+            None => None,
+        };
+        let names = |kind: crate::TagKind| {
+            let mut tags = snapshot
+                .tags
+                .iter()
+                .filter(|(slot, tag)| {
+                    tag.kind == kind
+                        && tag.source == owner
+                        && scoped.as_ref().is_none_or(|scoped| scoped.contains(slot))
+                })
+                .map(|(_, tag)| {
+                    (
+                        snapshot.name_sort(tag.name, tag.sort),
+                        tag.key,
+                        snapshot.text(tag.name).to_owned(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            tags.sort();
+            tags.into_iter()
+                .take(100)
+                .map(|(.., name)| name)
+                .collect::<Vec<_>>()
+        };
+        Ok(SmartPlaylistValueSuggestions {
+            genres: names(crate::TagKind::Genre),
+            moods: names(crate::TagKind::Mood),
+        })
     }
 
     pub async fn smart_playlist_key_by_object(
@@ -570,17 +620,8 @@ impl Catalog {
         now: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<SmartPlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let result = load_smart_playlist_requested(
-            &mut transaction,
-            crate::query::RequestedKeys::batch(keys)?,
-            now,
-            false,
-        )
-        .await?;
-        transaction.commit().await?;
-        Ok(result)
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        load_smart_playlist_rows(self, &mut connection, keys, now).await
     }
 
     pub async fn random_smart_playlist_artwork(
@@ -589,11 +630,11 @@ impl Catalog {
         now: i64,
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
-        let policy = smart_membership_sql(&mut connection, now, Some(&[key])).await?;
+        let members = self.smart_members(&mut connection, key, now).await?;
         let choices =
-            crate::artwork::playlist_artwork_choices_on(&mut connection, &policy, &[], true)
+            crate::artwork::playlist_artwork_choices_on(self, &mut connection, &members, &[], true)
                 .await?;
-        crate::artwork::raw_playlist_artwork_on(&mut connection, &choices)
+        crate::artwork::raw_playlist_artwork_on(self, &mut connection, &choices)
             .await?
             .iter()
             .map(|recipe| serde_json::to_vec(recipe).map_err(Into::into))
@@ -608,8 +649,8 @@ impl Catalog {
     ) -> LibraryResult<SmartPlaylistKey> {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
+        let transaction = write.connection().await?;
         let result = sqlx::query(
             "INSERT INTO smart_playlists(
                  object_id, name, normalized_name,definition_json, position
@@ -624,16 +665,16 @@ impl Catalog {
         .execute(&mut *transaction)
         .await?;
         let key = SmartPlaylistKey::from_raw(result.last_insert_rowid());
-        sync_smart_on(&mut transaction, key).await?;
         if let Some(folder) = folder {
             crate::playlist_folders::move_to_folder_on(
-                &mut transaction,
+                transaction,
                 crate::PlaylistFolderMember::SmartPlaylist { key },
                 Some(folder),
             )
             .await?;
         }
-        transaction.commit().await?;
+        write.touch_smart_playlist(key.raw());
+        write.commit().await?;
         Ok(key)
     }
 
@@ -646,8 +687,8 @@ impl Catalog {
     ) -> LibraryResult<bool> {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
+        let transaction = write.connection().await?;
         let revision = artwork
             .flatten()
             .map(|bytes| blake3::hash(bytes).to_hex().to_string());
@@ -681,58 +722,28 @@ impl Catalog {
         .rows_affected()
             == 1;
         if changed {
-            sync_smart_on(&mut transaction, key).await?;
+            write.touch_smart_playlist(key.raw());
+            // The image itself is read by key.
+            if artwork.is_some() {
+                write.changed(crate::catalog::write::Scope::Smart { key });
+            }
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(changed)
     }
 
     pub async fn delete_smart_playlist(&self, key: SmartPlaylistKey) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
-        let identity: Option<String> = sqlx::query_scalar(
-            "DELETE FROM smart_playlists WHERE smart_playlist_key=?1 RETURNING object_id",
-        )
-        .bind(key)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(identity) = &identity {
-            crate::profile::write_local_on(
-                &mut transaction,
-                &[crate::ConnectRecord {
-                    kind: "smart".into(),
-                    key: identity.clone(),
-                    value: None,
-                }],
-            )
-            .await?;
-        }
-        transaction.commit().await?;
-        Ok(identity.is_some())
+        let mut write = self.write().await?;
+        let deleted = sqlx::query("DELETE FROM smart_playlists WHERE smart_playlist_key=?1")
+            .bind(key)
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected()
+            > 0;
+        write.touch_smart_playlist(key.raw());
+        write.commit().await?;
+        Ok(deleted)
     }
-}
-
-/// Store accepted playlist positions.
-pub(crate) async fn write_positions_on(
-    connection: &mut SqliteConnection,
-    positions: &[(SmartPlaylistKey, i64)],
-) -> LibraryResult<bool> {
-    let mut changed = false;
-    for page in positions.chunks(SMART_PLAYLIST_ROW_LIMIT) {
-        let rows = serde_json::to_string(page)?;
-        changed |= sqlx::query(
-            "WITH input AS MATERIALIZED(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1)),
-             changed AS MATERIALIZED(SELECT input.* FROM input JOIN smart_playlists old ON old.smart_playlist_key=input.id WHERE old.position<>input.position),
-             affected AS MATERIALIZED(SELECT old.smart_playlist_key id,old.position FROM changed input JOIN smart_playlists old ON old.smart_playlist_key=input.id OR old.position=input.position),
-             moved AS MATERIALIZED(SELECT id,(SELECT coalesce(max(position),-1)+1 FROM smart_playlists)+row_number() OVER(ORDER BY position) position FROM (SELECT DISTINCT id,position FROM affected))
-             UPDATE smart_playlists SET position=moved.position FROM moved WHERE smart_playlists.smart_playlist_key=moved.id"
-        ).bind(&rows).execute(&mut *connection).await?.rows_affected()>0;
-        changed |= sqlx::query(
-            "WITH input AS(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1))
-             UPDATE smart_playlists SET position=input.position FROM input WHERE smart_playlists.smart_playlist_key=input.id AND smart_playlists.position<>input.position"
-        ).bind(rows).execute(&mut *connection).await?.rows_affected()>0;
-    }
-    Ok(changed)
 }
 
 fn require_name(name: &str) -> LibraryResult<&str> {
@@ -815,322 +826,6 @@ fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResu
     Ok(())
 }
 
-fn sql_text(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-#[cfg(test)]
-mod source_window_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn recent_played_members_and_row_hydration_do_not_walk_unrelated_catalog() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let catalog = Catalog::open(directory.path().join("store.sqlite"))
-            .await
-            .unwrap();
-        let definition = SmartPlaylistDefinition {
-            source_id: None,
-            match_all: vec![SmartPlaylistRule {
-                field: SmartPlaylistRuleField::PlayCount,
-                operator: SmartPlaylistRuleOperator::Above,
-                value: Some(SmartPlaylistRuleValue::Number(0)),
-            }],
-            activity_period: SmartPlaylistActivityPeriod::Weekly,
-            sort_field: SmartPlaylistSort::PlayCount,
-            descending: true,
-            ..Default::default()
-        };
-        let key = catalog
-            .create_smart_playlist("Recent", &definition, None)
-            .await
-            .unwrap();
-        let mut writer = catalog.writer().await.unwrap();
-        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));\n          INSERT INTO tracks(track_key,indexed,source_key,object_id,media_uri,metadata) VALUES (1,1,1,'one','track:1',jsonb(json_object('title',COALESCE('One',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('one',''),'duration_millis',COALESCE(1000,0))));\n          INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis)\n          VALUES('track:1','One','','',1000000,'1970-01',1000,1000),\n                ('https://example.test/missing','Missing','','',395200,'1970-01',1000,1000),\n                ('https://example.test/old','Old','','',395199,'1970-01',1000,1000),\n                ('https://example.test/future','Future','','',1000001,'1970-01',1000,1000);")
-            .execute(&mut *writer).await.unwrap();
-        for grow in [false, true] {
-            if grow {
-                sqlx::raw_sql("WITH RECURSIVE n(x) AS (VALUES(2) UNION ALL SELECT x+1 FROM n WHERE x<10000)\n                  INSERT INTO tracks(track_key,indexed,source_key,object_id,media_uri,metadata) SELECT x,1,1,CAST(x AS TEXT),'track:'||x,jsonb(json_object('title',COALESCE('Title',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('title',''),'duration_millis',COALESCE(1000,0))) FROM n;")
-                    .execute(&mut *writer).await.unwrap();
-            }
-            let sql = format!(
-                "{} SELECT media_uri FROM selected ORDER BY {SMART_RESULT_ORDER}",
-                smart_membership_sql(&mut *writer, 1000000, Some(&[key]))
-                    .await
-                    .unwrap()
-            );
-            let work = Arc::new(AtomicUsize::new(0));
-            let counter = work.clone();
-            writer
-                .lock_handle()
-                .await
-                .unwrap()
-                .set_progress_handler(100, move || {
-                    counter.fetch_add(100, Ordering::Relaxed);
-                    true
-                });
-            let order: Vec<String> = sqlx::query_scalar(AssertSqlSafe(sql))
-                .fetch_all(&mut *writer)
-                .await
-                .unwrap();
-            writer
-                .lock_handle()
-                .await
-                .unwrap()
-                .remove_progress_handler();
-            assert_eq!(order, ["track:1"]);
-            assert!(
-                work.load(Ordering::Relaxed) < 5000,
-                "recent membership visited unrelated catalog: {}",
-                work.load(Ordering::Relaxed)
-            );
-        }
-        // Download metadata is another logical view: loading one row must not
-        // materialize every locator even when the catalog owner wins.
-        sqlx::raw_sql(
-            "INSERT INTO main.local_locators(media_uri,origin,path,root,relative_path,access_uri)
-          SELECT media_uri,'download',object_id,'',object_id,media_uri FROM tracks;",
-        )
-        .execute(&mut *writer)
-        .await
-        .unwrap();
-        let work = Arc::new(AtomicUsize::new(0));
-        let counter = work.clone();
-        writer
-            .lock_handle()
-            .await
-            .unwrap()
-            .set_progress_handler(100, move || {
-                counter.fetch_add(100, Ordering::Relaxed);
-                true
-            });
-        let rows = crate::tracks::load_track_rows(&mut *writer, &[crate::TrackKey::from_raw(1)])
-            .await
-            .unwrap();
-        writer
-            .lock_handle()
-            .await
-            .unwrap()
-            .remove_progress_handler();
-        assert_eq!(rows[0].metadata.title, "One");
-        assert!(rows[0].access.is_downloaded);
-        assert!(
-            work.load(Ordering::Relaxed) < 5000,
-            "row hydration visited unrelated downloads: {}",
-            work.load(Ordering::Relaxed)
-        );
-    }
-}
-
-fn source_fact(
-    field: SmartPlaylistRuleField,
-    definition: &SmartPlaylistDefinition,
-    legacy: bool,
-) -> String {
-    use SmartPlaylistRuleField as F;
-    let period = if field == F::Played {
-        None
-    } else {
-        definition.activity_period.seconds()
-    };
-    match field {
-        F::Title => "owner.title".into(),
-        F::Artist => "owner.display_artist".into(),
-        F::Album => "owner.display_album".into(),
-        F::Comment => "json_extract(owner.metadata,'$.comment')".into(),
-        F::Bpm => "owner.bpm".into(),
-        F::Year => "owner.year".into(),
-        F::DateAdded => crate::tracks::added_at!("owner").into(),
-        F::Favorite => "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=owner.media_uri),(SELECT favorite FROM native_media_state WHERE media_uri=owner.media_uri))".into(),
-        F::Rating => "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=owner.media_uri),(SELECT rating FROM native_media_state WHERE media_uri=owner.media_uri))/10".into(),
-        F::Played | F::PlayCount | F::SkipCount | F::LastPlayed => {
-            let column = match field {
-                F::Played | F::PlayCount => "play_count",
-                F::SkipCount => "skip_count",
-                _ => "last_played_at"
-            };
-            let local = match field {
-                F::Played | F::PlayCount if period.is_none() => "owner.local_play_count".into(),
-                F::LastPlayed => "activity.last_played_at".into(),
-                _ => format!("COALESCE(activity.{column},0)")
-            };
-            if period.is_some() || !legacy {
-                return local;
-            }
-            if field == F::LastPlayed {
-                format!("COALESCE(max({local},legacy.{column}),{local},legacy.{column})")
-            } else {
-                format!("({local}+COALESCE(legacy.{column},0))")
-            }
-        }
-        F::Genre | F::Mood => unreachable!("relation rules compile at their owner")
-    }
-}
-
-fn source_rule(
-    rule: &SmartPlaylistRule,
-    definition: &SmartPlaylistDefinition,
-    legacy: bool,
-) -> String {
-    use SmartPlaylistRuleField as F;
-    use SmartPlaylistRuleOperator as O;
-    use SmartPlaylistRuleValue as V;
-    if !rule.field.operators().contains(&rule.operator) {
-        return "0".into();
-    }
-    if matches!(rule.field, F::Genre | F::Mood) {
-        let (relation, table, key) = if rule.field == F::Genre {
-            ("track_genres", "genres", "genre_key")
-        } else {
-            ("track_moods", "moods", "mood_key")
-        };
-        let exists = format!("EXISTS(SELECT 1 FROM {relation} WHERE track_key=owner.track_key)");
-        if rule.operator == O::IsEmpty {
-            return format!("NOT {exists}");
-        }
-        if rule.operator == O::IsNotEmpty {
-            return exists;
-        }
-        let Some(V::Text(value)) = &rule.value else {
-            return "0".into();
-        };
-        let value = sql_text(value.trim());
-        let comparison = if matches!(rule.operator, O::Contains | O::NotContains) {
-            format!("instr(lower(name),lower({value}))>0")
-        } else {
-            format!("lower(name)=lower({value})")
-        };
-        let matched = format!(
-            "EXISTS(SELECT 1 FROM {relation} JOIN {table} USING({key}) WHERE track_key=owner.track_key AND {comparison})"
-        );
-        return if matches!(rule.operator, O::NotContains | O::NotEquals) {
-            format!("({exists} AND NOT {matched})")
-        } else {
-            matched
-        };
-    }
-    let mut fact = source_fact(rule.field, definition, legacy);
-    if rule.field == F::Played {
-        let Some(V::Bool(value)) = rule.value else {
-            return "0".into();
-        };
-        let played = value != (rule.operator == O::IsNot);
-        return format!("{fact}{}0", if played { ">" } else { "=" });
-    }
-    if matches!(rule.field, F::LastPlayed | F::DateAdded) {
-        fact = format!("date({fact},'unixepoch')");
-    }
-    let text = matches!(rule.field, F::Title | F::Artist | F::Album | F::Comment);
-    let date = matches!(rule.field, F::LastPlayed | F::DateAdded);
-    if matches!(rule.operator, O::IsEmpty | O::IsNotEmpty) {
-        let empty = if text {
-            format!("({fact} IS NULL OR trim({fact})='')")
-        } else if date {
-            format!("({fact} IS NULL OR {fact}='')")
-        } else {
-            format!("({fact} IS NULL)")
-        };
-        return if rule.operator == O::IsEmpty {
-            empty
-        } else {
-            format!("NOT {empty}")
-        };
-    }
-    let value = match &rule.value {
-        Some(V::Text(value)) if text => sql_text(value.trim()),
-        Some(V::Date(value)) if date => sql_text(value.trim()),
-        Some(V::Number(value)) => value.to_string(),
-        Some(V::Bool(value)) => i32::from(*value).to_string(),
-        Some(V::NumberRange { min, max }) if rule.operator == O::Between => {
-            return format!("{fact} BETWEEN {} AND {}", min.min(max), min.max(max));
-        }
-        Some(V::DateRange { start, end }) if rule.operator == O::Between => {
-            return format!(
-                "{fact} BETWEEN {} AND {}",
-                sql_text(start.trim().min(end.trim())),
-                sql_text(start.trim().max(end.trim()))
-            );
-        }
-        _ => return "0".into(),
-    };
-    if matches!(rule.operator, O::Contains | O::NotContains) {
-        return format!(
-            "instr(lower({fact}),lower({value})){}0",
-            if rule.operator == O::Contains {
-                ">"
-            } else {
-                "="
-            }
-        );
-    }
-    let operator = match rule.operator {
-        O::Equals | O::Is => "=",
-        O::NotEquals | O::IsNot => "<>",
-        O::Above | O::After => ">",
-        O::Below | O::Before => "<",
-        _ => return "0".into(),
-    };
-    if text {
-        format!("lower({fact}){operator}lower({value})")
-    } else {
-        format!("{fact}{operator}{value}")
-    }
-}
-
-fn source_rules(definition: &SmartPlaylistDefinition, legacy: bool) -> String {
-    let all = definition
-        .match_all
-        .iter()
-        .map(|rule| format!("({})", source_rule(rule, definition, legacy)))
-        .collect::<Vec<_>>();
-    let any = definition
-        .match_any
-        .iter()
-        .map(|rule| format!("({})", source_rule(rule, definition, legacy)))
-        .collect::<Vec<_>>();
-    format!(
-        "({}) AND ({})",
-        if all.is_empty() {
-            "1".into()
-        } else {
-            all.join(" AND ")
-        },
-        if any.is_empty() {
-            "1".into()
-        } else {
-            any.join(" OR ")
-        }
-    )
-}
-
-fn source_sort(definition: &SmartPlaylistDefinition, legacy: bool) -> String {
-    use SmartPlaylistRuleField as F;
-    use SmartPlaylistSort as S;
-    let field = match definition.sort_field {
-        S::Title => return "owner.sort_text".into(),
-        S::Duration => return "owner.duration_millis".into(),
-        S::Artist => F::Artist,
-        S::Album => F::Album,
-        S::Year => F::Year,
-        S::DateAdded => F::DateAdded,
-        S::LastPlayed => F::LastPlayed,
-        S::PlayCount => F::PlayCount,
-        S::SkipCount => F::SkipCount,
-        S::Bpm => F::Bpm,
-        S::Rating => F::Rating,
-    };
-    let fact = source_fact(field, definition, legacy);
-    if field == F::Rating {
-        fact.strip_suffix("/10").unwrap().to_string()
-    } else {
-        fact
-    }
-}
-
 fn validate_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<()> {
     let rules = definition.match_all.len() + definition.match_any.len();
     if rules > SMART_PLAYLIST_RULE_LIMIT {
@@ -1145,185 +840,6 @@ fn validate_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<()
     }
     Ok(())
 }
-
-pub(crate) async fn smart_membership_sql(
-    connection: &mut SqliteConnection,
-    now: i64,
-    keys: Option<&[SmartPlaylistKey]>,
-) -> LibraryResult<String> {
-    let keys_json = keys.map(serde_json::to_string).transpose()?;
-    let definitions = sqlx::query_as::<_, (i64, String)>(
-        "SELECT smart_playlist_key,definition_json FROM smart_playlists
-         WHERE ?1 IS NULL OR smart_playlist_key IN(SELECT value FROM json_each(?1)) ORDER BY smart_playlist_key"
-    ).bind(&keys_json).fetch_all(&mut *connection).await?
-        .into_iter().map(|(key,json)| Ok((key,serde_json::from_str::<SmartPlaylistDefinition>(&json)?)))
-        .collect::<LibraryResult<Vec<_>>>()?;
-    smart_membership_from_definitions(connection, now, &definitions).await
-}
-
-async fn smart_membership_from_definitions(
-    connection: &mut SqliteConnection,
-    now: i64,
-    definitions: &[(i64, SmartPlaylistDefinition)],
-) -> LibraryResult<String> {
-    let has_legacy = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM legacy_activity WHERE period='lifetime' AND item_kind='track')",
-    ).fetch_one(&mut *connection).await?;
-    let admitted = format!(
-        "smart_playlist_key IN (SELECT value FROM json_each({}))",
-        sql_text(&serde_json::to_string(
-            &definitions.iter().map(|(key, _)| key).collect::<Vec<_>>()
-        )?)
-    );
-    let mut sql = format!(
-        "WITH definitions AS (SELECT smart_playlist_key definition_key,position,normalized_name FROM smart_playlists WHERE {admitted})"
-    );
-    let mut members = Vec::new();
-    let mut periods = std::collections::BTreeSet::new();
-    let mut legacy_used = false;
-    for (key, definition) in definitions {
-        use SmartPlaylistRuleField as F;
-        use SmartPlaylistRuleOperator as O;
-        use SmartPlaylistRuleValue as V;
-        use SmartPlaylistSort as S;
-        let period = definition.activity_period.seconds();
-        let sort_field = match definition.sort_field {
-            S::PlayCount => Some(F::PlayCount),
-            S::SkipCount => Some(F::SkipCount),
-            S::LastPlayed => Some(F::LastPlayed),
-            _ => None,
-        };
-        let mut activity = false;
-        let mut legacy = false;
-        for field in definition
-            .match_all
-            .iter()
-            .chain(&definition.match_any)
-            .map(|rule| rule.field)
-            .chain(sort_field)
-        {
-            activity |= matches!(field, F::SkipCount | F::LastPlayed)
-                || (field == F::PlayCount && period.is_some());
-            legacy |= has_legacy
-                && (field == F::Played
-                    || (period.is_none()
-                        && matches!(field, F::PlayCount | F::SkipCount | F::LastPlayed)));
-        }
-        legacy_used |= legacy;
-        if activity {
-            periods.insert(period);
-        }
-
-        let mut scope = "owner.indexed=1".to_string();
-        if let Some(source) = &definition.source_id {
-            scope.push_str(&format!(
-                " AND owner.source_key=(SELECT source_key FROM sources WHERE object_id={})",
-                sql_text(source.as_str())
-            ));
-        }
-        let positive = definition.match_all.iter().find_map(|rule| {
-            match (rule.field, rule.operator, &rule.value) {
-                (field @ (F::PlayCount | F::SkipCount), O::Above, Some(V::Number(min)))
-                    if *min >= 0 =>
-                {
-                    Some(field)
-                }
-                (F::Played, O::Is, Some(V::Bool(true)))
-                | (F::Played, O::IsNot, Some(V::Bool(false))) => Some(F::Played),
-                _ => None,
-            }
-        });
-        let period_name = format!("activity_{}", period.unwrap_or(0));
-        let activity_first =
-            period.is_some() && matches!(positive, Some(F::PlayCount | F::SkipCount));
-        let mut relation = if activity_first {
-            format!("{period_name} activity CROSS JOIN tracks owner USING(media_uri)")
-        } else if let Some(field) = positive.filter(|field| *field == F::SkipCount || legacy) {
-            let (candidates, column) = if field == F::SkipCount {
-                (
-                    format!(
-                        "SELECT track_key FROM {period_name} CROSS JOIN tracks USING(media_uri) WHERE skip_count>0"
-                    ),
-                    "skip_count",
-                )
-            } else {
-                (
-                    "SELECT track_key FROM tracks WHERE indexed=1 AND local_play_count>0".into(),
-                    "play_count",
-                )
-            };
-            let baseline = if legacy {
-                format!(" UNION SELECT track_key FROM legacy WHERE {column}>0")
-            } else {
-                String::new()
-            };
-            format!("({candidates}{baseline}) played CROSS JOIN tracks owner USING(track_key)")
-        } else if activity && definition.match_all.is_empty() && definition.match_any.is_empty() {
-            // Ranking needs only the indexed key, URI and sort fields before the limit.
-            let index = if definition.source_id.is_some() {
-                "tracks_local_play_order_idx"
-            } else {
-                "tracks_global_play_order_idx"
-            };
-            format!("tracks owner INDEXED BY {index}")
-        } else {
-            "tracks owner".into()
-        };
-        if activity && !activity_first {
-            relation.push_str(&format!(
-                " LEFT JOIN {period_name} activity USING(media_uri)"
-            ));
-        }
-        if legacy {
-            relation.push_str(" LEFT JOIN legacy USING(track_key)");
-        }
-        let sort = source_sort(definition, legacy);
-        let rules = source_rules(definition, legacy);
-        let descending = i32::from(definition.descending);
-        let direction = if definition.descending { "DESC" } else { "ASC" };
-        let membership_order = definition.limit.map(|limit| {
-            format!(" ORDER BY sort_value {direction} NULLS LAST,owner.sort_text,owner.media_uri LIMIT {limit}")
-        }).unwrap_or_default();
-        sql.push_str(&format!(
-            ",result_{key} AS NOT MATERIALIZED (SELECT {key} definition_key,owner.track_key,owner.media_uri,{descending} descending,owner.sort_text,{sort} sort_value FROM {relation} WHERE {scope} AND ({rules}){membership_order})"
-        ));
-        members.push(format!("SELECT * FROM result_{key}"));
-    }
-    for period in periods {
-        let lower = period
-            .map(|seconds| format!(" AND started_at>={}", now - seconds))
-            .unwrap_or_default();
-        sql.push_str(&format!(",activity_{} AS MATERIALIZED (
-            SELECT media_uri,count(*) play_count,sum(skipped) skip_count,max(started_at) last_played_at
-            FROM listens WHERE started_at<={now}{lower} GROUP BY media_uri)", period.unwrap_or(0)));
-    }
-    if legacy_used {
-        sql.push_str(",legacy AS MATERIALIZED (
-            SELECT track.track_key,old.play_count,old.skip_count,old.last_played_at
-            FROM legacy_activity old JOIN sources source ON source.object_id=old.source_id
-            CROSS JOIN tracks track ON track.source_key=source.source_key AND track.object_id=old.track_object_id
-            WHERE old.period='lifetime' AND old.item_kind='track')");
-    }
-    if members.is_empty() {
-        members.push("SELECT NULL definition_key,NULL track_key,NULL media_uri,0 descending,NULL sort_text,NULL sort_value WHERE 0".into());
-    }
-    while members.len() > SMART_PLAYLIST_ROW_LIMIT {
-        members = members
-            .chunks(SMART_PLAYLIST_ROW_LIMIT)
-            .map(|batch| format!("SELECT * FROM ({})", batch.join(" UNION ALL ")))
-            .collect();
-    }
-    sql.push_str(&format!(
-        ",selected AS NOT MATERIALIZED ({})",
-        members.join(" UNION ALL ")
-    ));
-    Ok(sql)
-}
-
-const SMART_RESULT_ORDER: &str =
-    "CASE WHEN selected.descending=0 THEN selected.sort_value END ASC NULLS LAST,
-    CASE WHEN selected.descending=1 THEN selected.sort_value END DESC NULLS LAST,
-    selected.sort_text,selected.media_uri";
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct SmartPlaylistWrite {
@@ -1411,15 +927,15 @@ pub(crate) async fn write_smart_playlist(
             })
         });
     let binding = crate::artwork::merge_playlist_artwork(previous.as_deref(), incoming.as_deref())?;
-    let key = sqlx::query_scalar("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding)
+    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding)
        VALUES(?1,?2,lower(?2),?3,CASE WHEN EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
        THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5,?6,?7)
        ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
-       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding RETURNING smart_playlist_key")
+       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding")
        .bind(&record.object_id).bind(&record.name).bind(&record.definition_json).bind(record.position)
        .bind(&record.artwork_bytes).bind(revision).bind(binding)
-       .fetch_one(&mut *connection).await?;
-    sync_smart_on(connection, key).await
+       .execute(&mut *connection).await?;
+    Ok(())
 }
 
 impl Catalog {
@@ -1431,131 +947,25 @@ impl Catalog {
         mode: crate::PlaylistPathMode,
         output: impl std::io::Write,
     ) -> LibraryResult<u64> {
-        use futures_util::TryStreamExt;
         let (_export, mut connection) = self.acquire_export().await?;
+        let members = self.smart_members(&mut connection, key, now).await?;
         let mut output =
             crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;
-        let query = smart_query(&mut connection, key, "", None, false, now).await?;
-        let rows = query.select(&format!(
-            "track.*,row_number() OVER(ORDER BY {}) result_position",
-            query.order.join(",")
-        ));
-        let sql = format!(
-            "WITH export_rows AS ({rows}) SELECT 'm3u:' || result_position object_id,media_uri,json(metadata) metadata,result_position-1 position FROM export_rows ORDER BY result_position"
-        );
-        let mut rows = sqlx::query_as_with::<_, crate::PlaylistEntryWrite, _>(
-            AssertSqlSafe(sql),
-            query.arguments.clone(),
-        )
-        .persistent(false)
-        .fetch(&mut *connection);
-        while let Some(entry) = rows.try_next().await? {
-            output.entry(&entry)?;
+        let metadata = crate::metadata::track_metadata_sql("track", "details");
+        for (page, keys) in members.chunks(512).enumerate() {
+            let entries = sqlx::query_as::<_, crate::PlaylistEntryWrite>(AssertSqlSafe(format!(
+                "SELECT 'm3u:'||(CAST(requested.key AS INTEGER)+?2+1) object_id,track.media_uri,{metadata} metadata,CAST(requested.key AS INTEGER)+?2 position
+                 FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key
+                 ORDER BY CAST(requested.key AS INTEGER)"
+            )))
+            .bind(serde_json::to_string(keys)?)
+            .bind((page * 512) as i64)
+            .fetch_all(&mut *connection)
+            .await?;
+            for entry in &entries {
+                output.entry(entry)?;
+            }
         }
         output.finish()
     }
-}
-
-pub(crate) async fn smart_parent_query(
-    connection: &mut SqliteConnection,
-    now: i64,
-    requested: crate::query::RequestedKeys,
-) -> LibraryResult<crate::query::OrderedQuery> {
-    let definitions=sqlx::query_as_with::<_,(i64,String),_>(AssertSqlSafe(format!(
-        "SELECT playlist.smart_playlist_key,playlist.definition_json FROM ({}) requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value ORDER BY requested.ordinal",requested.sql
-    )),requested.arguments.clone()).fetch_all(&mut *connection).await?.into_iter().map(|(key,json)| Ok((key,serde_json::from_str(&json)?))).collect::<LibraryResult<Vec<_>>>()?;
-    let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
-    Ok(crate::query::OrderedQuery {
-        key: "track.track_key".into(),
-        text: None,
-        from: format!(
-            "({membership} SELECT selected.*,parent.ordinal FROM selected JOIN ({}) parent ON parent.value=selected.definition_key) selected JOIN tracks track USING(track_key)",
-            requested.sql
-        ),
-        predicate: "1".into(),
-        order: vec!["selected.ordinal".into(), SMART_RESULT_ORDER.into()],
-        entry_key: "NULL".into(),
-        arguments: requested.arguments,
-    })
-}
-
-pub(crate) async fn smart_query(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-    filter: &str,
-    sort: Option<crate::CatalogSort>,
-    descending: bool,
-    now: i64,
-) -> LibraryResult<crate::query::OrderedQuery> {
-    let membership = smart_membership_sql(connection, now, Some(&[key])).await?;
-    let mut query = crate::query::OrderedQuery {
-        key: "track.track_key".into(),
-        text: sort.and_then(|sort| sort.section_text(false)),
-        from: format!(
-            "({membership} SELECT * FROM selected) selected JOIN tracks track USING(track_key)"
-        ),
-        predicate: "1".into(),
-        order: sort
-            .map(|sort| sort.order_terms(descending, false))
-            .unwrap_or_else(|| vec![SMART_RESULT_ORDER.into()]),
-        entry_key: "NULL".into(),
-        arguments: Default::default(),
-    };
-    crate::tracks::track_filter(&mut query, None, filter, false);
-    Ok(query)
-}
-
-pub(crate) async fn smart_list_query(
-    connection: &mut SqliteConnection,
-    read: &crate::ListRead,
-    now: i64,
-) -> LibraryResult<crate::query::OrderedQuery> {
-    let sort = read.sort;
-    let descending = read.descending;
-    let filter = &read.filter;
-    let playlist_folder = match read.playlist_scope {
-        crate::PlaylistScope::Folder { key } => Some(key),
-        _ => None,
-    };
-    let text = (sort == CatalogSort::Title).then(|| "playlist.normalized_name".into());
-    let field = match sort {
-        CatalogSort::Position => "playlist.position",
-        CatalogSort::Title => "playlist.normalized_name",
-        CatalogSort::TrackCount => "playlist.track_count",
-        CatalogSort::Duration => "playlist.duration_millis",
-        _ => unreachable!("playlist sort field"),
-    };
-    let from = if matches!(sort, CatalogSort::Position | CatalogSort::Title) {
-        "smart_playlists playlist".into()
-    } else {
-        let scope = playlist_folder
-            .map(|key| format!(" AND playlist_folder_key={}", key.raw()))
-            .unwrap_or_default();
-        let definitions = sqlx::query_as::<_, (i64, String)>(AssertSqlSafe(format!(
-            "SELECT smart_playlist_key,definition_json FROM smart_playlists WHERE instr(normalized_name,{})>0{scope}",
-            crate::query::quote(&filter.trim().to_lowercase())
-        ))).fetch_all(&mut *connection).await?.into_iter()
-            .map(|(key,json)| Ok((key,serde_json::from_str(&json)?)))
-            .collect::<LibraryResult<Vec<_>>>()?;
-        let policy = smart_membership_from_definitions(connection, now, &definitions).await?;
-        format!(
-            "({policy}, totals AS ({}) SELECT playlist.*,coalesce(totals.track_count,0) track_count,coalesce(totals.duration_millis,0) duration_millis,coalesce(totals.downloaded_count,0) downloaded_count FROM definitions JOIN smart_playlists playlist ON playlist.smart_playlist_key=definitions.definition_key LEFT JOIN totals USING(definition_key)) playlist",
-            smart_totals_sql()
-        )
-    };
-    let direction = if descending { "DESC" } else { "ASC" };
-    Ok(crate::query::OrderedQuery {
-        key: "playlist.smart_playlist_key".into(),
-        text,
-        from,
-        predicate: format!(
-            "instr(playlist.normalized_name,{})>0",
-            crate::query::quote(&filter.trim().to_lowercase())
-        ),
-        order: vec![format!(
-            "{field} {direction},playlist.position,playlist.smart_playlist_key"
-        )],
-        entry_key: "NULL".into(),
-        arguments: Default::default(),
-    })
 }

@@ -246,15 +246,10 @@ impl PlexSource {
         complete_membership: bool,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let catalog = observation.catalog;
         let source_id = observation.source_id;
-        let stamp = observation.observed;
-
-        let stamp = if complete_membership && stamp.is_none() {
-            Some(observation.start_observation().await?)
-        } else {
-            stamp
-        };
+        if complete_membership && observation.observed.is_none() {
+            observation.start_observation().await?;
+        }
         let object = match collection {
             crate::SourceCollection::Album(id) | crate::SourceCollection::Artist(id) => id,
         };
@@ -308,8 +303,8 @@ impl PlexSource {
         if complete_membership && let crate::SourceCollection::Album(id) = collection {
             let mut after = None;
             loop {
-                let missing = catalog
-                    .omitted_album_track_page(source_id, id, stamp.unwrap(), after.as_deref(), 100)
+                let missing = observation
+                    .omitted_album_track_page(id, after.as_deref(), 100)
                     .await?;
                 if missing.is_empty() {
                     break;
@@ -324,9 +319,7 @@ impl PlexSource {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            observation
-                .complete_album_observation(&id, stamp.unwrap())
-                .await?;
+            observation.complete_album_observation(&id).await?;
         }
         Ok(())
     }

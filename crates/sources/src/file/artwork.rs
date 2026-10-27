@@ -642,7 +642,11 @@ impl<'a> ArtworkFiles<'a> {
     )> {
         let owner = self.for_path(&track.path);
         let revision = match owner {
-            Self::Local => local::artwork::revision(Path::new(&track.path)),
+            // A file deleted since it was indexed has no pictures; the walk withdraws its track.
+            Self::Local => match local::artwork::revision(Path::new(&track.path)) {
+                Some(revision) => Some(revision),
+                None => return Ok((None, Vec::new(), None)),
+            },
             Self::Remote(_) | Self::Documents => track.revision.clone(),
         };
         if let Some(cached) = track.artist_pictures.as_deref().filter(|_| {

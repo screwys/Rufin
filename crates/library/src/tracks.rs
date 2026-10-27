@@ -1,26 +1,14 @@
-//! Owns complete Track orders, bounded final rows, and details.
-//! Each bounded row query includes its ordered artist and genre links.
+//! Track rows: the one full read of a track, by key. Orders, counts and the values computed
+//! on read come from the resident Catalog; the rest of the row is read from the Store.
 
 use sqlx::{FromRow, Sqlite, SqliteConnection};
 
+use crate::catalog::snapshot::Packed;
+use crate::catalog::views::{Art, Context, favorite, rating};
 use crate::{
-    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult,
-    ReadCancellation, SourceKey, TrackKey,
+    AlbumKey, ArtistKey, Catalog, GenreKey, LibraryError, LibraryResult, ReadCancellation,
+    SourceKey, TrackKey,
 };
-
-// Provider dates take precedence over the preserved first-seen timestamp.
-macro_rules! added_at {
-    ($row:literal) => {
-        concat!(
-            "COALESCE(unixepoch(",
-            $row,
-            ".date_added),",
-            $row,
-            ".first_seen_at)"
-        )
-    };
-}
-pub(crate) use added_at;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CatalogSort {
@@ -48,114 +36,6 @@ impl CatalogSort {
     pub fn activity_sensitive(self) -> bool {
         matches!(self, Self::PlayCount | Self::LastPlayed)
     }
-
-    pub(crate) fn section_text(self, _playlist: bool) -> Option<String> {
-        Some(match self {
-            Self::Title => "track.title",
-            Self::Artist => "track.display_artist",
-            Self::AlbumArtist => "track.album_artist_sort",
-            Self::Album => "track.album_title_sort",
-            Self::Genre => "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)",
-            _ => return None,
-        }.into())
-    }
-
-    pub(crate) fn order_terms(self, descending: bool, playlist: bool) -> Vec<String> {
-        self.order_by(descending, |field| match field {
-            "rating" => "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=track.media_uri),(SELECT rating FROM native_media_state WHERE media_uri=track.media_uri))".into(),
-            "favorite" => "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=track.media_uri),(SELECT favorite FROM native_media_state WHERE media_uri=track.media_uri),0)".into(),
-            "genre" => "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)".into(),
-            "play_count" => displayed_stat("play_count"),
-            "last_played" => displayed_stat("last_played"),
-            "key" if playlist && self == Self::Position => "entry.position".into(),
-            "key" => "track.track_key".into(),
-            "artist_sort" => "track.display_artist".into(),
-            "album_artist_sort" => "track.album_artist_sort".into(),
-            "album_sort" => "track.album_title_sort".into(),
-            "album_year" => "track.album_year_sort".into(),
-            "date_added" => added_at!("track").into(),
-            _ => format!("track.{field}")
-        })
-    }
-
-    pub(crate) fn order_by(self, descending: bool, column: impl Fn(&str) -> String) -> Vec<String> {
-        if self == Self::Position {
-            return vec![format!(
-                "{} {}",
-                column("key"),
-                if descending { "DESC" } else { "ASC" }
-            )];
-        }
-        let field = match self {
-            Self::Position => unreachable!(),
-            Self::Title => "sort_text",
-            Self::TrackNumber => "disc_number",
-            Self::Artist => "artist_sort",
-            Self::AlbumArtist => "album_artist_sort",
-            Self::Album => "album_sort",
-            Self::Year => "year",
-            Self::ReleaseDate => "release_date",
-            Self::DateAdded => "date_added",
-            Self::LastPlayed => "last_played",
-            Self::PlayCount => "play_count",
-            Self::UserRating => "rating",
-            Self::Genre => "genre",
-            Self::Bpm => "bpm",
-            Self::Duration => "duration_millis",
-            Self::Favorite => "favorite",
-            Self::AlbumCount | Self::TrackCount => unreachable!("track sort field"),
-        };
-        let mut fields = vec![field];
-        match self {
-            Self::Artist | Self::AlbumArtist => {
-                fields.extend([
-                    "album_year",
-                    "album_sort",
-                    "album_key",
-                    "disc_number",
-                    "track_number",
-                ]);
-            }
-            Self::Album => fields.extend(["album_key", "disc_number", "track_number"]),
-            Self::TrackNumber => fields.push("track_number"),
-            _ => {}
-        }
-        if self != Self::Title {
-            fields.push("sort_text");
-        }
-        fields.push("key");
-        fields
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, field)| {
-                let direction =
-                    if descending && (index == 0 || (self == Self::TrackNumber && index == 1)) {
-                        "DESC"
-                    } else {
-                        "ASC"
-                    };
-                let column = column(field);
-                if matches!(
-                    field,
-                    "album_artist_sort" | "album_year" | "album_key" | "date_added"
-                ) {
-                    return vec![
-                        format!("({column} IS NULL) ASC"),
-                        format!("{column} {direction}"),
-                    ];
-                }
-                let nulls = if matches!(
-                    field,
-                    "year" | "release_date" | "last_played" | "rating" | "genre" | "bpm"
-                ) {
-                    " NULLS LAST"
-                } else {
-                    ""
-                };
-                vec![format!("{column} {direction}{nulls}")]
-            })
-            .collect()
-    }
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -165,12 +45,6 @@ pub struct TrackArtistLink {
     pub media_uri: String,
     pub name: String,
 }
-
-// Included only in bounded rows, with track and album joined by identity.
-pub(crate) const TRACK_ARTISTS: &str = "(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
-    FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key)";
-pub(crate) const TRACK_ALBUM_ARTISTS: &str = "(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
-    FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=track.album_key)";
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -320,350 +194,118 @@ impl Catalog {
     }
 }
 
-pub(crate) fn downloaded_filter(query: &mut crate::query::OrderedQuery) {
-    query.predicate.push_str(" AND track.is_downloaded=1");
+/// The part of a track row the Catalog holds: state and the values computed on read.
+struct Resident {
+    state: TrackState,
+    downloaded: bool,
+    /// The row may name its album: the track is listed, or its album lists another track.
+    album: bool,
+    art: Art,
 }
 
-pub(crate) fn track_filter(
-    query: &mut crate::query::OrderedQuery,
-    folder: Option<FolderKey>,
-    filter: &str,
-    favorites_only: bool,
-) {
-    if let Some(folder) = folder {
-        query.predicate.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key={})",folder.raw()));
-    }
-    if favorites_only {
-        query.predicate.push_str(&format!(
-            " AND track.media_uri IN({})",
-            crate::favorites::FAVORITE_URIS
-        ));
-    }
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    if !filter.is_empty() {
-        let filter = crate::query::quote(&filter);
-        query
-            .predicate
-            .push_str(&format!(" AND instr(track.normalized_search,{filter})>0"));
-    }
-}
-
-pub(crate) fn displayed_stat(field: &str) -> String {
-    format!("track.displayed_{field}")
-}
-
-pub(crate) fn local_stat(field: &str) -> &'static str {
-    match field {
-        "play_count" => {
-            "track.local_play_count+COALESCE((SELECT play_count FROM legacy_activity old JOIN sources origin ON origin.object_id=old.source_id WHERE origin.source_key=track.source_key AND old.track_object_id=track.object_id AND period='lifetime' AND item_kind='track'),0)"
-        }
-        "skip_count" => {
-            "COALESCE((SELECT sum(skipped) FROM listens WHERE media_uri=track.media_uri),0)+COALESCE((SELECT skip_count FROM legacy_activity old JOIN sources origin ON origin.object_id=old.source_id WHERE origin.source_key=track.source_key AND old.track_object_id=track.object_id AND period='lifetime' AND item_kind='track'),0)"
-        }
-        "last_played" => {
-            "(SELECT max(value) FROM (SELECT max(started_at) value FROM listens WHERE media_uri=track.media_uri UNION ALL SELECT last_played_at FROM legacy_activity old JOIN sources origin ON origin.object_id=old.source_id WHERE origin.source_key=track.source_key AND old.track_object_id=track.object_id AND period='lifetime' AND item_kind='track'))"
-        }
-        _ => unreachable!(),
+impl Catalog {
+    fn resident_tracks(&self, keys: &[TrackKey]) -> Vec<Option<Resident>> {
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot, self.distinct_track_covers());
+        let derived = self.covers(&context);
+        keys.iter()
+            .map(|key| {
+                let slot = snapshot.tracks.slot(key.raw())?;
+                let record = &snapshot.tracks.records[slot as usize];
+                let played = context.played(slot, record);
+                Some(Resident {
+                    state: TrackState {
+                        favorite: favorite(record.flags).unwrap_or(false),
+                        rating: rating(record.rating, record.native_rating)
+                            .map(|rating| i64::from(rating / 10)),
+                        last_played: played.last.map(i64::from),
+                        play_count: i64::from(played.plays),
+                        skip_count: i64::from(played.skips),
+                    },
+                    downloaded: record.flags & crate::catalog::snapshot::DOWNLOADED != 0,
+                    album: record.indexed()
+                        || context
+                            .album_of(record)
+                            .is_some_and(|album| derived.albums[album as usize].tracks > 0),
+                    art: context.track_art(&derived, record),
+                })
+            })
+            .collect()
     }
 }
 
+/// Track rows by key, in the order asked. Keys the Store does not hold are skipped.
 pub(crate) async fn load_track_rows(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     keys: &[TrackKey],
 ) -> LibraryResult<Vec<TrackView>> {
-    load_track_requested(connection, crate::query::RequestedKeys::batch(keys)?).await
-}
-
-pub(crate) async fn load_track_requested(
-    connection: &mut SqliteConnection,
-    requested: crate::query::RequestedKeys,
-) -> LibraryResult<Vec<TrackView>> {
-    let sql = track_requested_sql(&requested);
-    Ok(
-        sqlx::query_as_with(sqlx::AssertSqlSafe(sql), requested.arguments)
-            .fetch_all(connection)
-            .await?,
-    )
-}
-
-pub(crate) fn track_requested_sql(requested: &crate::query::RequestedKeys) -> String {
-    format!(
-        "WITH requested AS ({})
-        SELECT requested.ordinal __ordinal,track.track_key,track.source_key,source.object_id source_id,track.object_id,track.media_uri,
-        json_patch(track.metadata,json_object('title',coalesce(nullif(track.title,''),track.media_uri),'date_added',date(COALESCE(unixepoch(track.date_added),track.first_seen_at),'unixepoch'),'album_display_artist',COALESCE(album.display_artist,json_extract(track.metadata,'$.album_display_artist')),'musicbrainz_album_id',COALESCE(album.musicbrainz_release_id,json_extract(track.metadata,'$.musicbrainz_album_id')),'musicbrainz_release_group_id',COALESCE(album.musicbrainz_release_group_id,json_extract(track.metadata,'$.musicbrainz_release_group_id')),'primary_artist_musicbrainz_id',COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),json_extract(track.metadata,'$.primary_artist_musicbrainz_id')))) metadata,COALESCE(source.display_name,'') source_name,
-        CASE WHEN source.kind='local' THEN(SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE track.source_path END source_path,
-        coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),track.cue_path) cue_path,
-        track.cue_start_millis,track.cue_end_millis,track.loudness_analysis_key,
-        CASE WHEN album.indexed OR track.indexed OR album.track_count>0 THEN track.album_key END album_key,
-        CASE WHEN album.indexed OR track.indexed OR album.track_count>0 THEN album.media_uri END album_media_uri,
-        COALESCE(state.favorite,native.favorite,0) favorite,COALESCE(state.rating,native.rating)/10 rating,
-        {} last_played,{} play_count,{} skip_count,
-        track.is_downloaded,
-        {} artists,{} album_artists,
-        (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position)
-            FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key) genres,
-        {} artwork_binding
-        FROM requested CROSS JOIN tracks track ON track.track_key=requested.value
-        LEFT JOIN sources source ON source.source_key=track.source_key LEFT JOIN albums album ON album.album_key=track.album_key
-        LEFT JOIN user_media_state state ON state.media_uri=track.media_uri
-        LEFT JOIN native_media_state native ON native.media_uri=track.media_uri
-        ORDER BY requested.ordinal",
-        requested.sql, displayed_stat("last_played"),displayed_stat("play_count"),displayed_stat("skip_count"),
-        TRACK_ARTISTS, TRACK_ALBUM_ARTISTS, crate::artwork::track_artwork_sql("track")
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{db::open_writer, schema};
-
-    #[tokio::test]
-    async fn bounded_track_row_window_preserves_order_and_relations() {
-        let file = tempfile::NamedTempFile::new().expect("create Track row Store");
-        let mut connection = open_writer(file.path())
-            .await
-            .expect("open Track row Store");
-        schema::initialize_durable(&mut connection)
-            .await
-            .expect("initialize durable Store");
-        crate::connect::initialize(&mut connection).await.unwrap();
-        let source = sqlx::query_scalar::<_, SourceKey>(
-            "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32)) RETURNING source_key",
-        )
-        .fetch_one(&mut connection)
-        .await
-        .expect("insert source");
-        let artist = sqlx::query_scalar::<_, ArtistKey>("INSERT INTO artists(source_key,object_id,media_uri,metadata) VALUES (?1,'artist','rufin:source/artist/%73%6F%75%72%63%65/%61%72%74%69%73%74',jsonb(json_object('name','Artist','sort_text','artist'))) RETURNING artist_key")
-            .bind(source).fetch_one(&mut connection).await.expect("insert Artist");
-        let genre = sqlx::query_scalar::<_, GenreKey>("INSERT INTO genres(source_key,object_id,media_uri,metadata) VALUES (?1,'genre','genre:one',jsonb(json_object('name','Genre','sort_text','genre'))) RETURNING genre_key")
-            .bind(source).fetch_one(&mut connection).await.expect("insert Genre");
-        sqlx::query("WITH RECURSIVE sequence(value) AS (VALUES(0) UNION ALL SELECT value+1 FROM sequence WHERE value<255) INSERT INTO tracks(source_key,object_id,media_uri,normalized_search,indexed,metadata) SELECT ?1,'track-'||value,'file:///track-'||value,'track artist',1,jsonb(json_object('title',COALESCE('Track',''),'album',COALESCE('',''),'artist',COALESCE('Artist',''),'sort_text',COALESCE('track-'||printf('%03d',value),''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(0,0),'track_number',COALESCE(value,0))) FROM sequence")
-            .bind(source).execute(&mut connection).await.expect("insert Track window");
-        sqlx::query("INSERT INTO track_artists(track_key,artist_key,position) SELECT track_key,?1,0 FROM tracks WHERE source_key=?2")
-            .bind(artist).bind(source).execute(&mut connection).await.expect("insert Track Artists");
-        sqlx::query("INSERT INTO track_genres(track_key,genre_key,position) SELECT track_key,?1,0 FROM tracks WHERE source_key=?2")
-            .bind(genre).bind(source).execute(&mut connection).await.expect("insert Track Genres");
-        let mut keys = sqlx::query_scalar::<_, TrackKey>(
-            "SELECT track_key FROM tracks WHERE source_key=?1 ORDER BY track_key",
-        )
-        .bind(source)
-        .fetch_all(&mut connection)
-        .await
-        .expect("read Track window keys");
-        keys.reverse();
-        let one = load_track_rows(&mut connection, &keys[..1])
-            .await
-            .expect("load one Track row");
-        let window = load_track_rows(&mut connection, &keys)
-            .await
-            .expect("load bounded Track row window");
-        assert_eq!(one.len(), 1);
-        assert_eq!(window.len(), 256);
-        assert_eq!(one[0].track_key, keys[0]);
-        for (row, key) in window.iter().zip(&keys) {
-            assert_eq!(row.track_key, *key);
-            assert_eq!(row.links.artists.len(), 1);
-            assert_eq!(row.links.artists[0].artist_key, artist);
-            assert_eq!(row.links.genres.len(), 1);
-            assert_eq!(row.links.genres[0].genre_key, genre);
-        }
-        let album = sqlx::query_scalar::<_, AlbumKey>("INSERT INTO albums(source_key,object_id,media_uri,metadata) VALUES (?1,'album','album:one',jsonb(json_object('title',COALESCE('Album',''),'artist',COALESCE('Artist',''),'sort_text',COALESCE('album',''),'year',2000))) RETURNING album_key")
-            .bind(source).fetch_one(&mut connection).await.unwrap();
-        sqlx::query("UPDATE albums SET title_sort='album',album_artist_sort='artist',year_sort=2000,title_search='album',artist_search='artist' WHERE album_key=?1").bind(album).execute(&mut connection).await.unwrap();
-        sqlx::query("INSERT INTO album_artists VALUES(?1,?2,0)")
-            .bind(album)
-            .bind(artist)
-            .execute(&mut connection)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE tracks SET album_key=?1,album_title_sort='album',album_artist_sort='artist',album_year_sort=2000 WHERE track_number<128")
-            .bind(album)
-            .execute(&mut connection)
-            .await
-            .unwrap();
-        let catalog = Catalog::open(file.path()).await.unwrap();
-        for sort in [
-            CatalogSort::Artist,
-            CatalogSort::AlbumArtist,
-            CatalogSort::Album,
-        ] {
-            for descending in [false, true] {
-                let query = crate::query::member_query_on(
-                    &mut connection,
-                    &crate::MemberRead {
-                        sort: Some(sort),
-                        descending,
-                        ..crate::MemberRead::new(crate::Collection::Source(source))
-                    },
-                )
-                .await
-                .unwrap();
-                let plan =
-                    sqlx::query_as::<_, (i64, i64, i64, String)>(sqlx::AssertSqlSafe(format!(
-                        "EXPLAIN QUERY PLAN {} LIMIT 48",
-                        query.select("track.track_key")
-                    )))
-                    .fetch_all(&mut connection)
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .map(|row| row.3)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                if matches!(sort, CatalogSort::Album | CatalogSort::AlbumArtist) {
-                    assert!(!plan.contains("USE TEMP B-TREE FOR ORDER BY"), "{plan}");
-                }
-                if sort == CatalogSort::AlbumArtist {
-                    let sections = crate::MemberRead {
-                        sort: Some(sort),
-                        descending,
-                        ..crate::MemberRead::new(crate::Collection::Source(source))
-                    }
-                    .sections(&catalog, &ReadCancellation::new())
-                    .await
-                    .unwrap();
-                    assert_eq!(
-                        sections
-                            .iter()
-                            .map(|section| (section.title.as_str(), section.index))
-                            .collect::<Vec<_>>(),
-                        [("A", 0), ("#", 128)]
-                    );
-                }
-            }
-        }
+    if keys.is_empty() {
+        return Ok(Vec::new());
     }
-
-    #[tokio::test]
-    async fn object_identity_order_pages_without_losing_a_large_folder() {
-        let file = tempfile::NamedTempFile::new().expect("create Track identity Store");
-        let mut connection = open_writer(file.path())
-            .await
-            .expect("open Track identity Store");
-        schema::initialize_durable(&mut connection)
-            .await
-            .expect("initialize durable Store");
-        let source = sqlx::query_scalar::<_, SourceKey>(
-            "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32)) RETURNING source_key",
-        )
-        .fetch_one(&mut connection)
-        .await
-        .expect("insert source");
-        sqlx::query("WITH RECURSIVE sequence(value) AS (VALUES(0) UNION ALL SELECT value+1 FROM sequence WHERE value<299) INSERT INTO tracks(source_key,object_id,media_uri,normalized_search,indexed,metadata) SELECT ?1,'track-'||printf('%03d',value),'file:///track-'||printf('%03d',value),'track artist',1,jsonb(json_object('title',COALESCE('Track',''),'album',COALESCE('',''),'artist',COALESCE('Artist',''),'sort_text',COALESCE('track-'||printf('%03d',value),''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(0,0),'track_number',COALESCE(value,0))) FROM sequence")
-            .bind(source).execute(&mut connection).await.expect("insert large Folder Track order");
-        drop(connection);
-
-        let catalog = Catalog::open(file.path())
-            .await
-            .expect("open Track identity Catalog");
-        let object_ids = (0..300)
-            .map(|index| format!("track-{index:03}"))
-            .collect::<Vec<_>>();
-        let cancel = ReadCancellation::new();
-        assert_eq!(
-            catalog
-                .catalog_keys(
-                    crate::CatalogKind::Track,
-                    Some(source),
-                    &object_ids,
-                    &cancel
-                )
-                .await
-                .map(|rows| rows.len() as i64)
-                .unwrap(),
-            300
-        );
-        let query = crate::MemberRead {
-            filter: "track".into(),
-            sort: Some(CatalogSort::Title),
-            ..crate::MemberRead::new(crate::Collection::Objects {
-                source,
-                ids: object_ids
-                    .clone()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .into(),
-            })
+    let resident = catalog.resident_tracks(keys);
+    #[derive(FromRow)]
+    struct Row {
+        ordinal: i64,
+        #[sqlx(flatten)]
+        track: TrackView,
+    }
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(track_rows_sql()))
+        .bind(serde_json::to_string(keys)?)
+        .fetch_all(&mut *connection)
+        .await?;
+    let mut tracks = Vec::with_capacity(rows.len());
+    let mut arts = Vec::with_capacity(rows.len());
+    for Row { ordinal, mut track } in rows {
+        let Some(resident) = resident.get(ordinal as usize).and_then(Option::as_ref) else {
+            arts.push(Art::None);
+            tracks.push(track);
+            continue;
         };
-        assert_eq!((&query).count(&catalog, &cancel).await.unwrap(), 300);
-        let mut ordered = Vec::new();
-        for offset in (0..300).step_by(64) {
-            ordered.extend(
-                (&query)
-                    .rows(&catalog, offset, 64, &cancel)
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .map(|row| row.into_track().track_key),
-            );
+        track.state = resident.state.clone();
+        track.access.is_downloaded = resident.downloaded;
+        if !resident.album {
+            track.links.album_key = None;
+            track.links.album_media_uri = None;
         }
-        assert_eq!(
-            ordered,
-            (0..300)
-                .map(|index| TrackKey::from_raw(index + 1))
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            catalog
-                .selected_track_keys(&query.clone().selection(), &cancel)
-                .await
-                .unwrap(),
-            ordered
-        );
-        assert_eq!(
-            catalog
-                .selected_track_keys(
-                    &crate::MemberSelection::Members {
-                        read: query.clone(),
-                        ranges: Some(vec![1..3, 129..132])
-                    },
-                    &cancel
-                )
-                .await
-                .unwrap(),
-            [2, 3, 130, 131, 132].map(TrackKey::from_raw),
-        );
-        assert_eq!(
-            (&query)
-                .sections(&catalog, &cancel)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|section| (section.title, section.index))
-                .collect::<Vec<_>>(),
-            [("T".to_string(), 0)],
-        );
-        assert!(
-            (&crate::MemberRead {
-                sort: Some(CatalogSort::TrackNumber),
-                ..query.clone()
-            })
-                .disc_sections(&catalog, &cancel)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert_eq!(
-            (&crate::MemberRead {
-                favorites_only: true,
-                ..query.clone()
-            })
-                .count(&catalog, &cancel)
-                .await
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            (&crate::MemberRead {
-                filter: "missing".into(),
-                ..query
-            })
-                .count(&catalog, &cancel)
-                .await
-                .unwrap(),
-            0
-        );
+        arts.push(resident.art);
+        tracks.push(track);
     }
+    let bindings = crate::artwork::art_bindings(connection, &arts).await?;
+    for (track, binding) in tracks.iter_mut().zip(bindings) {
+        track.artwork_binding = binding;
+    }
+    Ok(tracks)
+}
+
+fn track_rows_sql() -> String {
+    use crate::schema::{LINK_ARTIST, LINK_GENRE};
+    let metadata = crate::metadata::track_metadata_sql("track", "details");
+    format!(
+        "SELECT CAST(requested.key AS INTEGER) ordinal,track.track_key,track.source_key,source.object_id source_id,track.object_id,track.media_uri,
+        json_patch({metadata},json_object('title',coalesce(nullif(track.title,''),track.media_uri),
+            'date_added',date(coalesce(unixepoch(track.date_added),track.first_seen_at),'unixepoch'),
+            'album_display_artist',coalesce(nullif(album.display_artist,''),json_extract(details.metadata,'$.album_display_artist')),
+            'musicbrainz_album_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_id'),json_extract(details.metadata,'$.musicbrainz_album_id')),
+            'musicbrainz_release_group_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_group_id'),json_extract(details.metadata,'$.musicbrainz_release_group_id')),
+            'primary_artist_musicbrainz_id',coalesce((SELECT artist.musicbrainz_artist_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST} ORDER BY credit.position LIMIT 1),json_extract(details.metadata,'$.primary_artist_musicbrainz_id')))) metadata,
+        0 favorite,NULL rating,NULL last_played,0 play_count,0 skip_count,
+        CASE WHEN source.kind='local' THEN (SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END source_path,
+        coalesce(source.display_name,'') source_name,
+        coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path) cue_path,
+        details.cue_start_millis,details.cue_end_millis,0 is_downloaded,coalesce(details.loudness_analysis_key,zeroblob(32)) loudness_analysis_key,
+        track.album_key,album.media_uri album_media_uri,
+        (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
+            FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST}) artists,
+        (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
+            FROM album_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.album_key=track.album_key AND credit.role={LINK_ARTIST}) album_artists,
+        (SELECT json_group_array(json_object('genre_key',tag.tag_key,'name',tag.name) ORDER BY credit.position)
+            FROM track_links credit JOIN tags tag ON tag.tag_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_GENRE}) genres,
+        NULL artwork_binding
+        FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value
+        LEFT JOIN track_details details ON details.track_key=track.track_key
+        LEFT JOIN sources source ON source.source_key=track.source_key
+        LEFT JOIN albums album ON album.album_key=track.album_key
+        ORDER BY CAST(requested.key AS INTEGER)"
+    )
 }

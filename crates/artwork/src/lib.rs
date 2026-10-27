@@ -754,12 +754,9 @@ mod tests {
                 .blur_hash
                 .is_some()
         );
-        let (updates, mut received) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, change| {
-            let _ = updates.send(change);
-            std::future::ready(())
-        });
-        let update = {
+        let mut changes = catalog.changes();
+        while changes.try_recv().is_ok() {}
+        {
             let mut observation = catalog.observe("source", None).await.unwrap();
             observation
                 .apply_catalog(
@@ -775,14 +772,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            observation.into_changes()
-        };
+        }
+        let scopes = std::iter::from_fn(|| changes.try_recv().ok())
+            .flat_map(|change| change.scopes.clone())
+            .collect::<Vec<_>>();
         assert!(
-            !update.changed(),
-            "unchanged artwork must not invalidate catalog rows: {update:?}"
+            scopes.is_empty(),
+            "unchanged artwork must not invalidate catalog rows: {scopes:?}"
         );
-        catalog.publish_catalog_update("source", update).await;
-        assert!(received.try_recv().is_err());
         assert_eq!(
             catalog
                 .artwork_bindings(

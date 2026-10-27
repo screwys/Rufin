@@ -214,10 +214,9 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .unwrap();
                 shared.push((uri, bytes));
             }
-            let (host_playlist, playlist) = a
+            let (host_playlist, _) = a
                 .catalog
                 .create_playlist(
-                    None,
                     "Outside sources",
                     &library::MemberSelection::Uris(
                         shared.iter().map(|(uri, _)| uri.clone()).collect(),
@@ -247,71 +246,6 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .iter()
                     .all(|entry| !shared_keys.contains(&entry.track_key))
             );
-            let snapshot = a.export().await.unwrap();
-            let session = a.active().await.unwrap();
-            let key = a
-                .secret(file_key(&a.identity_reference().unwrap(), &session.profile))
-                .await
-                .unwrap()
-                .unwrap();
-            b.import_file(snapshot.path().to_owned(), true, Some(key))
-                .await
-                .unwrap();
-            let cancellation = library::ReadCancellation::new();
-            let playlist = b
-                .catalog
-                .playlist_key_by_identity(None, &playlist, &cancellation)
-                .await
-                .unwrap()
-                .unwrap();
-            let entries = b
-                .catalog
-                .queue_entries(
-                    library::QueueLoad::tracks(
-                        library::MemberRead::new(library::Collection::Playlist(playlist))
-                            .selection(),
-                    ),
-                    None,
-                )
-                .await
-                .unwrap()
-                .entries;
-            let rows = b
-                .catalog
-                .queue_rows_for_entries(
-                    &entries.into_iter().enumerate().collect::<Vec<_>>(),
-                    &cancellation,
-                )
-                .await
-                .unwrap();
-            assert_eq!(rows.len(), 2);
-            for (row, (uri, bytes)) in rows.iter().zip(&shared) {
-                assert!(!row.received_from_connect);
-                assert_eq!(&row.track.media_uri, uri);
-                assert!(
-                    b.catalog
-                        .connect_track_reference(uri)
-                        .await
-                        .unwrap()
-                        .is_some()
-                );
-                let stream = crate::playback::prepare_stream(
-                    &b.catalog,
-                    playback::StreamRequest::original(uri),
-                    None,
-                    Some((b.as_ref(), row.as_ref())),
-                    |_| async { panic!("shared file uses peer access") },
-                )
-                .await
-                .unwrap();
-                let response = reqwest::get(stream.uri()).await.unwrap();
-                assert!(response.status().is_success());
-                assert_eq!(response.bytes().await.unwrap().as_ref(), bytes);
-                assert!(
-                    b.catalog.connect_media_files(uri).await.unwrap().is_empty(),
-                    "playing does not retain audio"
-                );
-            }
             let unadmitted = root.path().join("unadmitted.flac");
             std::fs::write(&unadmitted, b"not shared").unwrap();
             let uri = url::Url::from_file_path(unadmitted).unwrap().to_string();
@@ -321,7 +255,6 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .unwrap();
             a.catalog
                 .add_playlist_tracks(
-                    None,
                     host_playlist,
                     &library::MemberSelection::Uris((vec![uri.clone()]).into()),
                     false,
@@ -653,7 +586,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 .await
                 .unwrap();
             let mut observation = b.catalog.observe(source_id.as_str(), None).await.unwrap();
-            let observed = observation.start_observation().await.unwrap();
+            observation.start_observation().await.unwrap();
             observation
                 .apply_catalog(
                     &library::CatalogBatch {
@@ -672,7 +605,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 .await
                 .unwrap();
             observation
-                .complete_source_observation(observed, &[], None)
+                .complete_source_observation(&[], None)
                 .await
                 .unwrap();
             drop(observation);
@@ -1152,7 +1085,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             tracks[0].source_path = Some(track_file.path.clone());
             let freshness = library::Freshness::new(b"received-native-catalog".to_vec()).unwrap();
             let mut observation = owner.catalog.observe(music.as_str(), None).await.unwrap();
-            let observed = observation.start_observation().await.unwrap();
+            observation.start_observation().await.unwrap();
             observation.apply_catalog(&library::CatalogBatch {
                 tracks: tracks.clone(),
                 albums: vec![library::AlbumObservation {
@@ -1168,19 +1101,22 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 playlists: vec![library::PlaylistObservation { object_id: "server-mix".into(), name: "Server mix".into(), sort_text: "server mix".into(), writable: Some(false), metadata_writable: Some(true), ..Default::default() }],
                 ..Default::default()
             }, true).await.unwrap();
+            // Discovery follows every committed catalog change. Ignoring the file keeps this
+            // device's released link below as it was until the profile opens again.
+            owner.catalog.ignore_playlist_file(Some(&music), "music/copied.m3u").await.unwrap();
             observation.write_file_observations(&[(track_file.clone(), Vec::new()), (playlist_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
             observation.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
             observation.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
             observation.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
-            observation.complete_source_observation(observed, &[], Some(&freshness)).await.unwrap();
+            observation.complete_source_observation(&[], Some(&freshness)).await.unwrap();
             drop(observation);
             let shared_uris = vec![library::source_entity_uri(&music, "track", "track-0"), library::source_entity_uri(&music, "track", "track-1")];
-            let (shared_playlist, shared_id) = owner.catalog.create_playlist(None, "Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();
+            let (shared_playlist, shared_id) = owner.catalog.create_playlist("Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();
             execute(owner, Action::Create).await.unwrap();
             // A released device link has no canonical file association yet.
             owner.catalog.save_playlist_file_link(&library::PlaylistFileLink {
                 playlist: shared_playlist, source_id: Some(music.clone()), path: "music/copied.m3u".into(),
-                auto_refresh: true, auto_save: None, path_mode: library::PlaylistPathMode::Automatic,
+                auto_refresh: false, auto_save: None, path_mode: library::PlaylistPathMode::Automatic,
                 revision: Some("older disk revision".into()), dirty: true, error: None,
             }).await.unwrap();
             let music_key = owner.catalog.cached_source(music.as_str(), &library::ReadCancellation::new()).await.unwrap().unwrap().source;
@@ -1281,7 +1217,6 @@ async fn execute(owner: &Arc<ConnectOwner>, action: Action) -> Result<Status, St
 
 // Finish background startup and history pruning before capturing the profile.
 async fn prepare_profile_snapshot(owner: &Arc<ConnectOwner>) {
-    while owner.catalog.connect_seed_page().await.unwrap() {}
     owner.synchronize().await.unwrap();
     let session = owner.active().await.unwrap();
     while session

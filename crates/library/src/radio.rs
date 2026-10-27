@@ -1,8 +1,13 @@
-//! Selects only the requested bounded Radio or random candidates.
+//! Selects only the requested bounded Radio or random candidates from the resident Catalog.
 //! The persisted queue is the complete exclusion authority; request-local exclusions stay bounded.
+
+use std::collections::HashSet;
 
 use sqlx::{QueryBuilder, Sqlite};
 
+use crate::catalog::snapshot::Packed;
+use crate::catalog::snapshot::TrackRec;
+use crate::catalog::views::Context;
 use crate::{
     AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult, PlaylistKey,
     ReadCancellation, SourceKey, TrackKey,
@@ -28,16 +33,6 @@ pub enum PlayedFilter {
     All,
     Unplayed,
     Played,
-}
-
-impl PlayedFilter {
-    const fn code(self) -> i64 {
-        match self {
-            Self::All => 0,
-            Self::Unplayed => 1,
-            Self::Played => 2,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,7 +74,7 @@ impl Catalog {
             }
             RadioSeed::Genre(key) => {
                 query
-                    .push("SELECT source_key,object_id FROM genres WHERE genre_key=")
+                    .push("SELECT source_key,object_id FROM tags WHERE tag_key=")
                     .push_bind(key);
             }
             RadioSeed::Playlist(key) => {
@@ -138,161 +133,147 @@ impl Catalog {
             .await?)
     }
 
+    /// Tracks related to a seed by artist, album or genre, from a variation-chosen point in key
+    /// order, then any others when the related ones run out. Queued tracks are left out.
     pub async fn radio_candidates(
         &self,
         source: SourceKey,
         seed: RadioSeed,
         extra_excluded: &[TrackKey],
         requested: usize,
-        require_media: bool,
+        _require_media: bool,
         variation: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let (seed_kind, seed_raw) = if let RadioSeed::Playlist(playlist) = seed {
-            let first = sqlx::query_scalar::<_, TrackKey>("SELECT track.track_key FROM playlist_entries entry JOIN tracks track ON track.track_key=entry.track_key AND track.source_key=?1 WHERE entry.playlist_key=?2 ORDER BY entry.position LIMIT 1")
-                .bind(source).bind(playlist).fetch_optional(&mut *connection).await?;
-            (0, first.map(|key| key.raw()))
-        } else {
-            match seed {
-                RadioSeed::Track(media_uri) => {
-                    let key = sqlx::query_scalar::<_, TrackKey>(
+        let (seed_track, queued) = {
+            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let track = match &seed {
+                RadioSeed::Track(uri) => {
+                    sqlx::query_scalar::<_, i64>(
                         "SELECT track_key FROM tracks WHERE source_key=?1 AND media_uri=?2",
                     )
                     .bind(source)
-                    .bind(media_uri)
+                    .bind(uri)
                     .fetch_optional(&mut *connection)
-                    .await?;
-                    (0, key.map(|key| key.raw()))
+                    .await?
                 }
-                RadioSeed::Album(key) => (1, Some(key.raw())),
-                RadioSeed::Artist(key) => (2, Some(key.raw())),
-                RadioSeed::AlbumArtist(key) => (5, Some(key.raw())),
-                RadioSeed::Genre(key) => (3, Some(key.raw())),
-                RadioSeed::Playlist(_) => unreachable!(),
-            }
+                _ => None,
+            };
+            (track, queued_tracks(&mut connection).await?)
         };
-        let max_key = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE indexed=1 AND source_key=?1",
-        )
-        .bind(source)
-        .fetch_one(&mut *connection)
-        .await?;
-        let pivot = if max_key == 0 {
-            0
-        } else {
-            variation.rem_euclid(max_key + 1)
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot, false);
+        let Some(owner) = snapshot.source_slot(source) else {
+            return Ok(Vec::new());
         };
-        let mut result = Vec::with_capacity(requested);
-        let mut after = pivot - 1;
-        let mut wrapped = false;
-        let mut related = seed_raw.is_some();
-        loop {
-            let mut query = QueryBuilder::<Sqlite>::new("");
-            if related {
-                query
-                    .push("WITH seed(kind,id) AS (VALUES (")
-                    .push_bind(seed_kind)
-                    .push(",")
-                    .push_bind(seed_raw)
-                    .push(
-                        ")), seed_albums AS (
-                        SELECT album_key FROM tracks WHERE track_key IN (SELECT id FROM seed WHERE kind=0)
-                        UNION SELECT id FROM seed WHERE kind=1
-                    ), seed_artists AS (
-                        SELECT artist_key FROM track_artists WHERE track_key IN (SELECT id FROM seed WHERE kind=0)
-                        UNION SELECT artist_key FROM album_artists WHERE album_key IN seed_albums
-                        UNION SELECT id FROM seed WHERE kind IN (2,5)
-                    ), seed_genres AS (
-                        SELECT genre_key FROM track_genres WHERE track_key IN (SELECT id FROM seed WHERE kind=0)
-                        UNION SELECT genre_key FROM album_genres WHERE album_key IN seed_albums
-                        UNION SELECT id FROM seed WHERE kind=3
-                    ), related_albums AS (
-                        SELECT album_key FROM album_artists WHERE artist_key IN seed_artists
-                        UNION SELECT album_key FROM album_genres WHERE genre_key IN seed_genres
-                    ) ",
-                    );
+        let seed_track = match &seed {
+            RadioSeed::Playlist(playlist) => {
+                snapshot.playlists.get(playlist.raw()).and_then(|playlist| {
+                    playlist
+                        .entries
+                        .iter()
+                        .filter_map(|(_, slot)| snapshot.tracks.live(*slot))
+                        .find(|track| track.source == owner)
+                        .map(|track| track.key)
+                })
             }
-            query.push(
-                "SELECT track.track_key FROM tracks AS track
-             WHERE track.indexed=1 AND track.source_key=",
-            );
-            query
-                .push_bind(source)
-                .push(" AND track.track_key>")
-                .push_bind(after)
-                .push(" AND (")
-                .push_bind(seed_kind)
-                .push("<>0 OR track.track_key IS NOT ")
-                .push_bind(seed_raw)
-                .push(")")
-                .push(" AND (")
-                .push_bind(seed_kind)
-                .push("<>1 OR track.album_key IS NULL OR track.album_key<>")
-                .push_bind(seed_raw)
-                .push(")")
-                .push(" AND (")
-                .push_bind(!wrapped)
-                .push(" OR track.track_key<")
-                .push_bind(pivot)
-                .push(") AND (")
-                .push_bind(!require_media)
-                .push(" OR track.media_uri IS NOT NULL)");
-            if related {
-                query.push(" AND ((").push_bind(seed_kind).push(
-                    "<>5 AND track.track_key IN (
-                    SELECT track_key FROM track_artists WHERE artist_key IN seed_artists
-                )) OR track.album_key IN related_albums OR track.track_key IN (
-                    SELECT track_key FROM track_genres WHERE genre_key IN seed_genres
-                ))",
-                );
-            }
-            query.push(" AND track.track_key NOT IN (SELECT track_key FROM queue_entries)");
-            if !extra_excluded.is_empty() || !result.is_empty() {
-                query.push(" AND track.track_key NOT IN (");
-                let mut separated = query.separated(",");
-                for key in extra_excluded.iter().chain(&result) {
-                    separated.push_bind(key);
-                }
-                separated.push_unseparated(")");
-            }
-            query
-                .push(" ORDER BY track.track_key LIMIT ")
-                .push_bind((requested - result.len()) as i64);
-            let page = query
-                .build_query_scalar::<TrackKey>()
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?;
-            if page.is_empty() {
-                if wrapped {
-                    if !related {
-                        break;
-                    }
-                    related = false;
-                    wrapped = false;
-                    after = pivot - 1;
-                    continue;
-                }
-                wrapped = true;
-                after = -1;
-                continue;
-            }
-            for key in page {
-                after = key.raw();
-                result.push(key);
-                if result.len() == requested {
-                    break;
-                }
-            }
-            if result.len() == requested {
-                break;
-            }
+            _ => seed_track,
+        };
+        let seed_track = seed_track.and_then(|key| snapshot.tracks.get(key));
+        let seed_album = match &seed {
+            RadioSeed::Album(key) => snapshot.albums.slot(key.raw()),
+            _ => seed_track.and_then(|track| context.album_of(track)),
+        };
+        let genre = |slot: &u32| {
+            snapshot
+                .tags
+                .live(*slot)
+                .is_some_and(|tag| tag.kind == crate::TagKind::Genre)
+        };
+        let mut artists = HashSet::new();
+        let mut genres = HashSet::new();
+        if let Some(track) = seed_track {
+            let runs = snapshot.track_runs(track);
+            artists.extend(runs[0].iter().copied());
+            genres.extend(runs[2].iter().copied().filter(genre));
         }
-        Ok(result)
+        if let Some(album) = seed_album.and_then(|album| snapshot.albums.live(album)) {
+            let runs = snapshot.album_runs(album);
+            artists.extend(runs[0].iter().copied());
+            genres.extend(runs[1].iter().copied());
+        }
+        match &seed {
+            RadioSeed::Artist(key) | RadioSeed::AlbumArtist(key) => {
+                artists.extend(snapshot.artists.slot(key.raw()));
+            }
+            RadioSeed::Genre(key) => genres.extend(snapshot.tags.slot(key.raw())),
+            _ => {}
+        }
+        let related_seed =
+            seed_track.is_some() || !matches!(seed, RadioSeed::Track(_) | RadioSeed::Playlist(_));
+        let related_albums = snapshot
+            .albums
+            .iter()
+            .filter(|(_, album)| {
+                let runs = snapshot.album_runs(album);
+                runs[0].iter().any(|artist| artists.contains(artist))
+                    || runs[1].iter().any(|genre| genres.contains(genre))
+            })
+            .map(|(slot, _)| slot)
+            .collect::<HashSet<_>>();
+        let excluded = extra_excluded
+            .iter()
+            .map(|key| key.raw())
+            .chain(queued)
+            .collect::<HashSet<_>>();
+        let by_artist = !matches!(seed, RadioSeed::AlbumArtist(_));
+        let candidates = pivoted(
+            snapshot
+                .tracks
+                .iter()
+                .filter(|(_, track)| {
+                    track.source == owner
+                        && track.indexed()
+                        && !excluded.contains(&track.key)
+                        && seed_track.is_none_or(|seed| seed.key != track.key)
+                        && (!matches!(seed, RadioSeed::Album(_))
+                            || seed_album.is_none_or(|album| track.album != album))
+                })
+                .map(|(_, track)| track),
+            variation,
+        );
+        let related = |track: &TrackRec| {
+            let runs = snapshot.track_runs(track);
+            (by_artist && runs[0].iter().any(|artist| artists.contains(artist)))
+                || related_albums.contains(&track.album)
+                || runs[2].iter().any(|genre| genres.contains(genre))
+        };
+        let mut chosen = Vec::with_capacity(requested);
+        if related_seed {
+            chosen.extend(
+                candidates
+                    .iter()
+                    .filter(|track| related(track))
+                    .map(|track| track.key)
+                    .take(requested),
+            );
+        }
+        let picked = chosen.iter().copied().collect::<HashSet<_>>();
+        let rest = requested - chosen.len();
+        chosen.extend(
+            candidates
+                .iter()
+                .map(|track| track.key)
+                .filter(|key| !picked.contains(key))
+                .take(rest),
+        );
+        Ok(chosen.into_iter().map(TrackKey::from_raw).collect())
     }
 
+    /// Visible tracks of a source that match the criteria, from a variation-chosen point in
+    /// key order. Queued tracks are left out.
     pub async fn random_candidates(
         &self,
         source: SourceKey,
@@ -303,107 +284,93 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let max_key = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(track_key),0) FROM tracks WHERE indexed=1 AND source_key=?1",
-        )
-        .bind(source)
-        .fetch_one(&mut *connection)
-        .await?;
-        let pivot = if max_key == 0 {
-            0
-        } else {
-            criteria.variation.rem_euclid(max_key + 1)
+        let queued = {
+            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            queued_tracks(&mut connection).await?
         };
-        let mut result = Vec::with_capacity(requested);
-        let mut after = pivot - 1;
-        let mut wrapped = false;
-        loop {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT track.track_key FROM tracks AS track
-             WHERE track.indexed=1 AND track.source_key=",
-            );
-            query
-                .push_bind(source)
-                .push(" AND track.track_key>")
-                .push_bind(after)
-                .push(" AND (")
-                .push_bind(folder)
-                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
-                .push_bind(folder)
-                .push("))")
-                .push(" AND (")
-                .push_bind(!wrapped)
-                .push(" OR track.track_key<")
-                .push_bind(pivot)
-                .push(")")
-                .push(" AND (")
-                .push_bind(criteria.min_year)
-                .push(" IS NULL OR track.year>=")
-                .push_bind(criteria.min_year)
-                .push(") AND (")
-                .push_bind(criteria.max_year)
-                .push(" IS NULL OR track.year<=")
-                .push_bind(criteria.max_year)
-                .push(") AND (")
-                .push_bind(criteria.genre)
-                .push(
-                    " IS NULL OR EXISTS (
-                 SELECT 1 FROM track_genres AS relation
-                 WHERE relation.track_key=track.track_key AND relation.genre_key=",
-                )
-                .push_bind(criteria.genre)
-                .push(")) AND (")
-                .push_bind(!criteria.require_media)
-                .push(" OR track.media_uri IS NOT NULL) AND (")
-                .push_bind(criteria.played.code())
-                .push("=0 OR (")
-                .push_bind(criteria.played.code())
-                .push("=1 AND (")
-                .push(crate::tracks::displayed_stat("play_count"))
-                .push(")=0) OR (")
-                .push_bind(criteria.played.code())
-                .push("=2 AND (")
-                .push(crate::tracks::displayed_stat("play_count"))
-                .push(")>0))");
-            query.push(" AND track.track_key NOT IN (SELECT track_key FROM queue_entries)");
-            if !extra_excluded.is_empty() {
-                query.push(" AND track.track_key NOT IN (");
-                let mut separated = query.separated(",");
-                for key in extra_excluded {
-                    separated.push_bind(key);
-                }
-                separated.push_unseparated(")");
-            }
-            query
-                .push(" ORDER BY track.track_key LIMIT ")
-                .push_bind((requested - result.len()) as i64);
-            let page = query
-                .build_query_scalar::<TrackKey>()
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?;
-            if page.is_empty() {
-                if wrapped {
-                    break;
-                }
-                wrapped = true;
-                after = -1;
-                continue;
-            }
-            for key in page {
-                after = key.raw();
-                result.push(key);
-                if result.len() == requested {
-                    break;
-                }
-            }
-            if result.len() == requested {
-                break;
-            }
-        }
-        Ok(result)
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot, false);
+        let Some(owner) = snapshot.source_slot(source) else {
+            return Ok(Vec::new());
+        };
+        let folder = match folder {
+            Some(folder) => match snapshot.folders.slot(folder.raw()) {
+                Some(slot) => Some(slot),
+                None => return Ok(Vec::new()),
+            },
+            None => None,
+        };
+        let genre = match criteria.genre {
+            Some(genre) => match snapshot.tags.slot(genre.raw()) {
+                Some(slot) => Some(slot),
+                None => return Ok(Vec::new()),
+            },
+            None => None,
+        };
+        let excluded = extra_excluded
+            .iter()
+            .map(|key| key.raw())
+            .chain(queued)
+            .collect::<HashSet<_>>();
+        let year = |track: &TrackRec| (track.year != i16::MIN).then_some(i64::from(track.year));
+        let candidates = pivoted(
+            snapshot
+                .tracks
+                .iter()
+                .filter(|(slot, track)| {
+                    let runs = snapshot.track_runs(track);
+                    let plays = context.played(*slot, track).plays;
+                    track.source == owner
+                        && track.indexed()
+                        && !excluded.contains(&track.key)
+                        && folder.is_none_or(|folder| runs[3].contains(&folder))
+                        && criteria
+                            .min_year
+                            .is_none_or(|min| year(track).is_some_and(|year| year >= min))
+                        && criteria
+                            .max_year
+                            .is_none_or(|max| year(track).is_some_and(|year| year <= max))
+                        && genre.is_none_or(|genre| runs[2].contains(&genre))
+                        && match criteria.played {
+                            PlayedFilter::All => true,
+                            PlayedFilter::Unplayed => plays == 0,
+                            PlayedFilter::Played => plays > 0,
+                        }
+                })
+                .map(|(_, track)| track),
+            criteria.variation,
+        );
+        Ok(candidates
+            .into_iter()
+            .take(requested)
+            .map(|track| TrackKey::from_raw(track.key))
+            .collect())
     }
+}
+
+/// Tracks in key order from a point a variation picks, wrapping around.
+fn pivoted<'a>(tracks: impl Iterator<Item = &'a TrackRec>, variation: i64) -> Vec<&'a TrackRec> {
+    let mut tracks = tracks.collect::<Vec<_>>();
+    tracks.sort_unstable_by_key(|track| track.key);
+    let max = tracks.last().map_or(0, |track| track.key);
+    let pivot = if max == 0 {
+        0
+    } else {
+        variation.rem_euclid(max + 1)
+    };
+    let split = tracks.partition_point(|track| track.key < pivot);
+    tracks.rotate_left(split);
+    tracks
+}
+
+/// Keys of the tracks in the saved queue.
+async fn queued_tracks(connection: &mut sqlx::SqliteConnection) -> LibraryResult<Vec<i64>> {
+    Ok(
+        sqlx::query_scalar("SELECT DISTINCT track_key FROM queue_entries")
+            .fetch_all(connection)
+            .await?,
+    )
 }
 
 fn require_radio_bounds(extra_excluded: usize, requested: usize) -> LibraryResult<()> {

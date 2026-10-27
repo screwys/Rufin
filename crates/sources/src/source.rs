@@ -754,17 +754,11 @@ impl Source {
         if self.is_retired() {
             return Err(SourceError::Cancelled.into());
         }
-        let mut changes = catalog
+        let mut observation = catalog
             .observe(self.source_id.as_str(), None)
             .await
             .map_err(SourceError::from)?;
-        let result = work(&mut changes).await;
-        if !self.is_retired() {
-            catalog
-                .publish_catalog_update(self.source_id.as_str(), changes.into_changes())
-                .await;
-        }
-        result
+        work(&mut observation).await
     }
 
     fn file_source(&self, path: Option<&str>) -> Option<&crate::file::remote::FileSource> {
@@ -1194,11 +1188,7 @@ impl Source {
                 changes.purge_source_file_absences(stamp.unwrap()).await?;
             }
             changes
-                .complete_source_observation(
-                    stamp.unwrap(),
-                    &[],
-                    freshness.as_ref().filter(|_| complete),
-                )
+                .complete_source_observation(&[], freshness.as_ref().filter(|_| complete))
                 .await?;
             Ok((true, freshness.clone()))
         })
@@ -2783,12 +2773,7 @@ mod refresh_laws {
         let catalog = Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |identity, update| {
-            let source_key = identity.unwrap().1;
-            let _ = sender.send((source_key, update));
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let source = Source::new(
             SourceId::new("mapping-test"),
             Implementation::Local(
@@ -2839,11 +2824,8 @@ mod refresh_laws {
                 .await
                 .unwrap();
         }
-        catalog
-            .publish_catalog_update(&catalog_source_id, observation.into_changes())
-            .await;
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.1.metadata);
+        let publication = crate::published(&mut updates).expect("catalog update");
+        assert!(publication.1.intersects(sources::Shown::CATALOG));
         let cancelled = Arc::new(AtomicBool::new(false));
         let sample = Some("/server/music/Artist/one.flac");
         let (mapped_root, prefix) = source

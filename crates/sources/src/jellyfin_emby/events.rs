@@ -360,11 +360,7 @@ mod tests {
             let catalog = library::Catalog::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            catalog.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            let mut updates = catalog.changes();
             catalog
                 .reconcile_source(
                     &library::SourceId::new("source"),
@@ -411,14 +407,9 @@ mod tests {
             })
             .await
             .unwrap();
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            updates.try_recv().expect("initial catalog update");
+            crate::published(&mut updates)
+                .expect("initial catalog update")
+                .1;
             let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true},{"ItemId":"track","PlayCount":8}]}}"#;
             for repeated in [false, true] {
                 let JellyfinSocketMessage::Change(RemoteItemChange::Items(items)) =
@@ -428,9 +419,9 @@ mod tests {
                 };
                 source.apply_changes(&catalog, items).await.unwrap();
                 if repeated {
-                    assert!(updates.try_recv().is_err());
+                    assert!(crate::published(&mut updates).is_none());
                 } else {
-                    assert!(updates.try_recv().expect("catalog update").changed());
+                    assert!(crate::published(&mut updates).is_some());
                 }
             }
             let cancellation = library::ReadCancellation::new();
@@ -490,11 +481,11 @@ mod tests {
                     .await
                     .is_err()
             );
-            let update = updates.try_recv().unwrap();
-            assert!(update.activity);
-            assert!(!update.metadata);
+            let update = crate::published(&mut updates).expect("catalog update").1;
+            // A server play count is a track column.
+            assert!(update.intersects(sources::Shown::CATALOG));
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates).is_none(),
                 "one catalog notification after partial failure"
             );
             assert_eq!(
@@ -621,11 +612,7 @@ mod tests {
                 .iter()
                 .all(|album| album.media_uri != uri)
             );
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            catalog.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            crate::published(&mut updates);
             catalog
                 .reconcile_source(
                     &library::SourceId::new("source"),
@@ -653,16 +640,9 @@ mod tests {
             })
             .await
             .unwrap();
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            assert!(!observation.changes().changed());
+            assert!(!observation.changed());
             assert!(
-                updates.try_recv().is_err(),
+                crate::published(&mut updates).is_none(),
                 "unchanged native data stays quiet"
             );
         }

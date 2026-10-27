@@ -371,15 +371,10 @@ impl SubsonicSource {
         complete_membership: bool,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let catalog = observation.catalog;
         let source_id = observation.source_id;
-        let stamp = observation.observed;
-
-        let stamp = if complete_membership && stamp.is_none() {
-            Some(observation.start_observation().await?)
-        } else {
-            stamp
-        };
+        if complete_membership && observation.observed.is_none() {
+            observation.start_observation().await?;
+        }
         for page in json::items(&album["song"]).chunks(100) {
             let mut tracks = self.read_tracks(source_id, page).await?;
             for song in &mut tracks {
@@ -395,14 +390,8 @@ impl SubsonicSource {
         if complete_membership {
             let mut after = None;
             loop {
-                let missing = catalog
-                    .omitted_album_track_page(
-                        source_id,
-                        album_id,
-                        stamp.unwrap(),
-                        after.as_deref(),
-                        100,
-                    )
+                let missing = observation
+                    .omitted_album_track_page(album_id, after.as_deref(), 100)
                     .await?;
                 if missing.is_empty() {
                     break;
@@ -415,9 +404,7 @@ impl SubsonicSource {
                 Box::pin(self.acquire_items(observation, ids, false, cancelled)).await?;
             }
             check_cancelled(cancelled)?;
-            observation
-                .complete_album_observation(&album_id, stamp.unwrap())
-                .await?;
+            observation.complete_album_observation(&album_id).await?;
         }
         Ok(())
     }
@@ -1872,16 +1859,17 @@ mod tests {
             .reconcile_source(&source_id, "search", "Search")
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |_, update| {
-            let _ = sender.send(update);
-            std::future::ready(())
-        });
+        let mut updates = catalog.changes();
         let results = source_owner
             .live_search(&catalog, "Track", 60)
             .await
             .unwrap();
-        assert!(updates.try_recv().expect("catalog update").metadata);
+        assert!(
+            crate::published(&mut updates)
+                .expect("catalog update")
+                .1
+                .intersects(sources::Shown::CATALOG)
+        );
         assert_eq!(
             (
                 results.tracks.len(),
@@ -1934,13 +1922,6 @@ mod tests {
                 )
                 .await;
             result
-        }
-        .unwrap();
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
         }
         .unwrap();
         let album = catalog
@@ -2007,23 +1988,18 @@ mod tests {
             if cached {
                 (async { let mut batch = library::CatalogBatch::default(); let result = batch.albums.extend_from_slice(&[(super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
             }
-            {
-                catalog
-                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                    .await;
-                Ok::<_, crate::SourceError>(())
-            }
-            .unwrap();
-            let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            catalog.observe_catalog(move |_, update| {
-                let _ = sender.send(update);
-                std::future::ready(())
-            });
+            let mut updates = catalog.changes();
+            crate::published(&mut updates);
             let results = source_owner
                 .live_search(&catalog, "Match", 10)
                 .await
                 .unwrap();
-            assert!(updates.try_recv().expect("catalog update").metadata);
+            assert!(
+                crate::published(&mut updates)
+                    .expect("catalog update")
+                    .1
+                    .intersects(sources::Shown::CATALOG)
+            );
             assert!(results.albums.is_empty());
             assert_eq!(results.tracks.len(), 1);
             let track = &results.tracks[0];

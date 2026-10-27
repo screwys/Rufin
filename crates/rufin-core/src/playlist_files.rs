@@ -386,17 +386,10 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
             std::fs::remove_file(&link.path).map_err(string_error)?;
         }
         forget_file(&owner, playlist).await?;
-        let source = owner
-            .shared
-            .catalog
-            .playlist_access(playlist, &ReadCancellation::new())
-            .await
-            .map_err(string_error)?
-            .and_then(|access| access.source_key);
         owner
             .shared
             .catalog
-            .delete_playlist(source, playlist)
+            .delete_playlist(playlist)
             .await
             .map_err(string_error)?;
         publish(&owner, Some(playlist)).await;

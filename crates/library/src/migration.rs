@@ -1,6 +1,5 @@
-//! Translates supported released formats into the ordinary user-state writers.
+//! Converts released 0.15.0-0.16.6 Stores into the current schema.
 pub(crate) mod current;
-pub(crate) mod snapshots;
 use crate::LibraryResult;
 pub(crate) use current::import as import_current;
 use sqlx::{Row, sqlite::SqliteRow};
@@ -28,15 +27,10 @@ fn install(pending: &Path, path: &Path) -> LibraryResult<()> {
 }
 
 async fn normalize_stored_artwork(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
-    for table in ["tracks", "playlists", "smart_playlists"] {
-        let column = if table != "tracks" {
-            "artwork_binding"
-        } else {
-            "native_artwork"
-        };
+    for table in ["playlists", "smart_playlists"] {
         let mut after = 0_i64;
         loop {
-            let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,{column} FROM {table} WHERE rowid>?1 AND json_type({column})='object' ORDER BY rowid LIMIT 128"))).bind(after).fetch_all(&mut *connection).await?;
+            let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,artwork_binding FROM {table} WHERE rowid>?1 AND json_type(artwork_binding)='object' ORDER BY rowid LIMIT 128"))).bind(after).fetch_all(&mut *connection).await?;
             if rows.is_empty() {
                 break;
             }
@@ -44,7 +38,7 @@ async fn normalize_stored_artwork(connection: &mut sqlx::SqliteConnection) -> Li
                 after = key;
                 let normalized = crate::normalize_artwork_binding(&binding)?;
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "UPDATE {table} SET {column}=?1 WHERE rowid=?2"
+                    "UPDATE {table} SET artwork_binding=?1 WHERE rowid=?2"
                 )))
                 .bind(normalized)
                 .bind(key)

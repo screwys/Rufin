@@ -1,11 +1,11 @@
 //! Stores accepted artwork bindings and pages them for explicit source downloads.
 //! Catalog writes choose references; fetching, disk caching and decoding stay in Artwork.
 
-use futures_util::TryStreamExt;
 use md5_digest::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Sqlite};
 
+use crate::catalog::views::{Art, Context, Owner, Picture};
 use crate::{Catalog, FolderKey, LibraryError, LibraryResult, ReadCancellation, SourceKey};
 
 const ARTWORK_PAGE_LIMIT: usize = 128;
@@ -259,22 +259,118 @@ impl ArtworkCandidate {
     }
 }
 
-pub(crate) fn entity_artwork_sql(kind: &str, alias: &str) -> String {
-    preview_sql(&if matches!(kind, "album" | "artist") {
-        format!("{alias}.artwork_binding")
-    } else {
-        format!("{alias}.native_artwork")
-    })
+/// Picture bindings of rows, read by key and composed as the Catalog chose them. An artist
+/// lists its own pictures, then the one it borrows, then its name lookups. Mosaic recipes are
+/// these candidates as stored, without preview hashes, so showing a cover never changes them.
+async fn composed_art(
+    connection: &mut sqlx::SqliteConnection,
+    arts: &[Art],
+) -> LibraryResult<Vec<Option<Vec<ArtworkCandidate>>>> {
+    let mut keys: [Vec<i64>; 3] = Default::default();
+    for art in arts {
+        match *art {
+            Art::None => {}
+            Art::Track(key) => keys[0].push(key),
+            Art::Album(key) => keys[1].push(key),
+            Art::Artist(key, borrowed) => {
+                keys[2].push(key);
+                match borrowed {
+                    Some(Picture::Track(key)) => keys[0].push(key),
+                    Some(Picture::Album(key)) => keys[1].push(key),
+                    None => {}
+                }
+            }
+        }
+    }
+    let mut stored: [std::collections::HashMap<i64, Vec<ArtworkCandidate>>; 3] = Default::default();
+    for ((table, column), (keys, stored)) in [
+        ("track_details", "track_key"),
+        ("albums", "album_key"),
+        ("artists", "artist_key"),
+    ]
+    .into_iter()
+    .zip(keys.iter().zip(&mut stored))
+    {
+        if keys.is_empty() {
+            continue;
+        }
+        let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {column},native_artwork FROM {table} WHERE {column} IN (SELECT value FROM json_each(?1)) AND native_artwork IS NOT NULL"
+        )))
+        .bind(serde_json::to_string(keys)?)
+        .fetch_all(&mut *connection)
+        .await?;
+        for (key, binding) in rows {
+            stored.insert(key, serde_json::from_slice(&binding)?);
+        }
+    }
+    let picture = |picture: Picture| match picture {
+        Picture::Track(key) => stored[0].get(&key),
+        Picture::Album(key) => stored[1].get(&key),
+    };
+    let composed = arts
+        .iter()
+        .map(|art| match *art {
+            Art::None => None,
+            Art::Track(key) => stored[0].get(&key).cloned(),
+            Art::Album(key) => stored[1].get(&key).cloned(),
+            Art::Artist(key, borrowed) => {
+                let own = stored[2].get(&key).map(Vec::as_slice).unwrap_or_default();
+                let lookup = |candidate: &&ArtworkCandidate| {
+                    matches!(
+                        candidate.image,
+                        ArtworkImage::Artist { .. } | ArtworkImage::Album(_)
+                    )
+                };
+                let candidates = own
+                    .iter()
+                    .filter(|candidate| !lookup(candidate))
+                    .chain(borrowed.and_then(picture).into_iter().flatten())
+                    .chain(own.iter().filter(lookup))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (!candidates.is_empty()).then_some(candidates)
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(composed)
 }
 
-pub(crate) fn raw_track_artwork_sql(alias: &str) -> String {
-    format!(
-        "CASE {alias}.artwork_kind WHEN 1 THEN {alias}.native_artwork WHEN 2 THEN(SELECT artwork_binding FROM albums WHERE album_key={alias}.album_key) WHEN 3 THEN(SELECT artwork_binding FROM artists WHERE artist_key={alias}.artwork_artist_key) END"
-    )
-}
-
-pub(crate) fn track_artwork_sql(alias: &str) -> String {
-    preview_sql(&raw_track_artwork_sql(alias))
+/// The bindings rows show: the composed candidates with the preview hashes known for them.
+pub(crate) async fn art_bindings(
+    connection: &mut sqlx::SqliteConnection,
+    arts: &[Art],
+) -> LibraryResult<Vec<Option<Vec<u8>>>> {
+    let mut composed = composed_art(connection, arts).await?;
+    let families = composed
+        .iter()
+        .flatten()
+        .flatten()
+        .filter(|candidate| candidate.blur_hash.is_none())
+        .map(|candidate| candidate.key.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if !families.is_empty() {
+        let previews: std::collections::HashMap<String, String> =
+            sqlx::query_as("SELECT family,hash FROM artwork_previews WHERE family IN (SELECT value FROM json_each(?1))")
+                .bind(serde_json::to_string(&families)?)
+                .fetch_all(&mut *connection)
+                .await?
+                .into_iter()
+                .collect();
+        for candidate in composed.iter_mut().flatten().flatten() {
+            if candidate.blur_hash.is_none() {
+                candidate.blur_hash = previews.get(&candidate.key).cloned();
+            }
+        }
+    }
+    composed
+        .into_iter()
+        .map(|candidates| {
+            candidates
+                .map(|candidates| serde_json::to_vec(&candidates).map_err(Into::into))
+                .transpose()
+        })
+        .collect()
 }
 
 pub(crate) fn preview_sql(binding: &str) -> String {
@@ -428,74 +524,22 @@ pub fn merge_playlist_artwork(
     Ok(Some(serde_json::to_vec(&candidates)?))
 }
 
+/// Pictures of tracks by URI, as their rows show them. A URI the Store does not hold has none.
 pub(crate) async fn raw_playlist_artwork_on(
+    catalog: &Catalog,
     connection: &mut sqlx::SqliteConnection,
     uris: &[String],
 ) -> LibraryResult<Vec<Vec<ArtworkCandidate>>> {
-    let rows: Vec<Option<Vec<u8>>> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT {} FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value LEFT JOIN albums album USING(album_key) ORDER BY requested.key", raw_track_artwork_sql("track"))))
-        .bind(serde_json::to_string(uris)?).fetch_all(connection).await?;
-    rows.into_iter()
-        .map(|binding| {
-            Ok(binding
-                .map(|binding| serde_json::from_slice(&binding))
-                .transpose()?
-                .unwrap_or_default())
-        })
-        .collect()
-}
-
-pub(crate) async fn refresh_mosaics(
-    connection: &mut sqlx::SqliteConnection,
-    tracks: &[i64],
-    albums: &[i64],
-    artists: &[i64],
-) -> LibraryResult<()> {
-    for table in ["playlists", "smart_playlists"] {
-        let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT owner.rowid,owner.artwork_binding FROM {table} owner WHERE EXISTS(
-              SELECT 1 FROM json_each(owner.artwork_binding) candidate
-              JOIN json_each(candidate.value,'$.image.automatic.chosen') chosen
-              JOIN tracks track ON track.media_uri=chosen.value
-              WHERE track.track_key IN(SELECT value FROM json_each(?1)) OR track.album_key IN(SELECT value FROM json_each(?2)) OR track.artwork_artist_key IN(SELECT value FROM json_each(?3)))"
-        ))).bind(serde_json::to_string(tracks)?).bind(serde_json::to_string(albums)?).bind(serde_json::to_string(artists)?).fetch_all(&mut *connection).await?;
-        for (key, binding) in rows {
-            let mut candidates: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
-            for candidate in &mut candidates {
-                if let ArtworkImage::Playlist {
-                    automatic: Some(manifest),
-                    resolved,
-                    revision,
-                    ..
-                } = &mut candidate.image
-                {
-                    let recipes = raw_playlist_artwork_on(connection, &manifest.chosen).await?;
-                    if resolved.as_ref() == Some(&recipes) {
-                        continue;
-                    }
-                    manifest.pending |= recipes.iter().any(Vec::is_empty);
-                    *revision = format!(
-                        "{}:{:x}",
-                        if manifest.pending { "pending" } else { "auto" },
-                        Md5::digest(serde_json::to_vec(&recipes)?)
-                    );
-                    *resolved = (!manifest.pending).then_some(recipes);
-                    *candidate = ArtworkCandidate::new(candidate.image.clone(), None);
-                }
-            }
-            let next = serde_json::to_vec(&candidates)?;
-            if next != binding {
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "UPDATE {table} SET artwork_binding=?2 WHERE rowid=?1"
-                )))
-                .bind(key)
-                .bind(next)
-                .execute(&mut *connection)
-                .await?;
-            }
-        }
-    }
-    Ok(())
+    let keys: Vec<Option<i64>> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value ORDER BY requested.key")
+        .bind(serde_json::to_string(uris)?)
+        .fetch_all(&mut *connection)
+        .await?;
+    let arts = catalog.arts(keys.into_iter().map(|key| key.map(Owner::Track)));
+    Ok(composed_art(connection, &arts)
+        .await?
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect())
 }
 
 pub(crate) fn playlist_artwork(
@@ -533,45 +577,86 @@ pub(crate) fn playlist_artwork(
     Ok(serde_json::to_vec(&candidates)?)
 }
 
+/// Up to four member URIs whose pictures differ, one per album: the chosen ones first, then
+/// albums in URI order, or shuffled.
 pub(crate) async fn playlist_artwork_choices_on(
+    catalog: &Catalog,
     connection: &mut sqlx::SqliteConnection,
-    prefix: &str,
+    members: &[crate::TrackKey],
     chosen: &[String],
     random: bool,
 ) -> LibraryResult<Vec<String>> {
     let mut result = chosen.to_vec();
-    let mut assets: std::collections::HashSet<String> = raw_playlist_artwork_on(connection, chosen)
-        .await?
+    let mut assets: std::collections::HashSet<String> =
+        raw_playlist_artwork_on(catalog, connection, chosen)
+            .await?
+            .iter()
+            .filter_map(|recipe| recipe.first().map(ArtworkCandidate::asset_identity))
+            .collect();
+    let rows: Vec<(i64, String, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT DISTINCT track.track_key,track.media_uri,track.album_key,album.media_uri FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value LEFT JOIN albums album ON album.album_key=track.album_key",
+    )
+    .bind(serde_json::to_string(members)?)
+    .fetch_all(&mut *connection)
+    .await?;
+    let arts = catalog.arts(rows.iter().map(|(key, ..)| Some(Owner::Track(*key))));
+    let pictured = rows
         .iter()
-        .filter_map(|recipe| recipe.first().map(ArtworkCandidate::asset_identity))
-        .collect();
-    let order = if random { "random()" } else { "cover_group" };
-    let sql = format!("{prefix},cover_groups AS MATERIALIZED (
-        SELECT coalesce(album.media_uri,track.media_uri) cover_group,min(track.media_uri) first_uri,min(track.album_key) album_key
-        FROM selected JOIN tracks track USING(track_key) LEFT JOIN albums album USING(album_key)
-        GROUP BY cover_group ORDER BY {order}
-    ) SELECT cover.media_uri,{} binding FROM cover_groups groups
-    CROSS JOIN tracks first ON first.media_uri=groups.first_uri
-    CROSS JOIN tracks cover ON cover.media_uri=coalesce(CASE WHEN {} IS NOT NULL THEN groups.first_uri END,
-        (SELECT candidate.media_uri FROM selected remaining JOIN tracks candidate USING(track_key)
-         WHERE candidate.album_key=groups.album_key AND {} IS NOT NULL ORDER BY candidate.media_uri LIMIT 1))",
-        raw_track_artwork_sql("cover"),raw_track_artwork_sql("first"),raw_track_artwork_sql("candidate"));
-    let mut rows =
-        sqlx::query_as::<_, (String, Vec<u8>)>(sqlx::AssertSqlSafe(sql)).fetch(connection);
-    while result.len() < 4
-        && let Some((uri, binding)) = rows.try_next().await?
-    {
-        let recipe: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
-        if let Some(asset) = recipe.first().map(ArtworkCandidate::asset_identity)
-            && assets.insert(asset)
-        {
-            result.push(uri);
+        .zip(&arts)
+        .filter(|(_, art)| **art != Art::None)
+        .map(|((key, uri, album, _), _)| (*key, uri.as_str(), *album))
+        .collect::<Vec<_>>();
+    // Each album, or each track without one, is a group; its cover is its first member with a
+    // picture.
+    let mut groups = std::collections::BTreeMap::<&str, (&str, Option<i64>)>::new();
+    for (_, uri, album, album_uri) in &rows {
+        let group = groups
+            .entry(album_uri.as_deref().unwrap_or(uri))
+            .or_insert((uri, *album));
+        group.0 = group.0.min(uri);
+    }
+    let mut covers = groups
+        .into_values()
+        .filter_map(|(first, album)| {
+            pictured
+                .iter()
+                .find(|(_, uri, _)| *uri == first)
+                .or_else(|| {
+                    pictured
+                        .iter()
+                        .filter(|(_, _, member)| album.is_some() && *member == album)
+                        .min_by_key(|(_, uri, _)| *uri)
+                })
+                .map(|(key, uri, _)| (*key, uri.to_string()))
+        })
+        .collect::<Vec<_>>();
+    if random {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        crate::shuffle_order(&mut covers, seed);
+    }
+    for batch in covers.chunks(16) {
+        if result.len() >= 4 {
+            break;
+        }
+        let arts = catalog.arts(batch.iter().map(|(key, _)| Some(Owner::Track(*key))));
+        for ((_, uri), recipe) in batch.iter().zip(composed_art(connection, &arts).await?) {
+            let Some(recipe) = recipe else { continue };
+            if result.len() < 4
+                && let Some(asset) = recipe.first().map(ArtworkCandidate::asset_identity)
+                && assets.insert(asset)
+            {
+                result.push(uri.clone());
+            }
         }
     }
     Ok(result)
 }
 
 async fn refresh_automatic_playlist_artwork_on(
+    catalog: &Catalog,
     connection: &mut sqlx::SqliteConnection,
     key: i64,
     candidate: &mut ArtworkCandidate,
@@ -585,43 +670,41 @@ async fn refresh_automatic_playlist_artwork_on(
         ..
     } = &mut candidate.image
     {
-        if !*smart
-            && !manifest.chosen.is_empty()
-            && !sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM playlist_entries WHERE playlist_key=?1)",
-            )
-            .bind(key)
-            .fetch_one(&mut *connection)
-            .await?
-        {
+        let members = if *smart {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            catalog
+                .smart_members(connection, crate::SmartPlaylistKey::from_raw(key), now)
+                .await?
+        } else {
+            catalog
+                .snapshot()
+                .playlist(key)
+                .map(|playlist| {
+                    playlist
+                        .entries
+                        .into_iter()
+                        .map(|(_, track)| track)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        if !*smart && members.is_empty() {
             manifest.chosen.clear();
         }
-        let recipes = raw_playlist_artwork_on(connection, &manifest.chosen).await?;
+        let recipes = raw_playlist_artwork_on(catalog, connection, &manifest.chosen).await?;
         manifest.chosen = manifest
             .chosen
             .iter()
             .zip(recipes)
             .filter_map(|(uri, recipe)| (!recipe.is_empty()).then(|| uri.clone()))
             .collect();
-        let prefix = if *smart {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            crate::smart_playlists::smart_membership_sql(
-                connection,
-                now,
-                Some(&[crate::SmartPlaylistKey::from_raw(key)]),
-            )
-            .await?
-        } else {
-            format!(
-                "WITH selected AS (SELECT track_key FROM playlist_entries WHERE playlist_key={key})"
-            )
-        };
         manifest.chosen =
-            playlist_artwork_choices_on(connection, &prefix, &manifest.chosen, false).await?;
-        let recipes = raw_playlist_artwork_on(connection, &manifest.chosen).await?;
+            playlist_artwork_choices_on(catalog, connection, &members, &manifest.chosen, false)
+                .await?;
+        let recipes = raw_playlist_artwork_on(catalog, connection, &manifest.chosen).await?;
         manifest.pending = false;
         *revision = format!("auto:{:x}", Md5::digest(serde_json::to_vec(&recipes)?));
         *resolved = Some(recipes);
@@ -642,28 +725,26 @@ pub enum RepresentativeArtworkScope {
 
 pub struct ArtworkCacheRetention<'a> {
     _permit: tokio::sync::MutexGuard<'a, ()>,
+    catalog: &'a Catalog,
     connection: sqlx::pool::PoolConnection<Sqlite>,
-    active: String,
-    after: i64,
+    /// Downloaded and active tracks not paged yet, last first.
+    tracks: Vec<i64>,
 }
 
 impl ArtworkCacheRetention<'_> {
+    /// Pictures of the next downloaded or active tracks.
     pub async fn next_bindings(&mut self) -> LibraryResult<Vec<Vec<u8>>> {
-        let page: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT track.track_key,{}
-             FROM tracks track LEFT JOIN albums album USING(album_key)
-             WHERE track.track_key>?1 AND ({}) IS NOT NULL
-               AND (EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='download')
-                    OR track.media_uri IN (SELECT value FROM json_each(?2)))
-             ORDER BY track.track_key LIMIT 128",raw_track_artwork_sql("track"),raw_track_artwork_sql("track"))))
-        .bind(self.after)
-        .bind(&self.active)
-        .fetch_all(&mut *self.connection)
-        .await?;
-        if let Some((key, _)) = page.last() {
-            self.after = *key;
-        }
-        Ok(page.into_iter().map(|(_, binding)| binding).collect())
+        let page = self
+            .tracks
+            .split_off(self.tracks.len().saturating_sub(ARTWORK_PAGE_LIMIT));
+        let arts = self
+            .catalog
+            .arts(page.into_iter().rev().map(|key| Some(Owner::Track(key))));
+        Ok(art_bindings(&mut self.connection, &arts)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 
     pub async fn retain(&mut self, families: &[String]) -> LibraryResult<()> {
@@ -750,37 +831,26 @@ impl Catalog {
                     let mut candidates: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
                     for candidate in &mut candidates {
                         if candidate.is_automatic_playlist() {
-                            refresh_automatic_playlist_artwork_on(&mut *writer, key, candidate)
-                                .await?;
+                            refresh_automatic_playlist_artwork_on(
+                                self,
+                                &mut writer,
+                                key,
+                                candidate,
+                            )
+                            .await?;
                         }
                     }
                     let next = serde_json::to_vec(&candidates)?;
                     if next == binding {
                         continue;
                     }
-                    let mut transaction = writer.begin().await?;
                     sqlx::query(sqlx::AssertSqlSafe(format!(
                         "UPDATE {table} SET artwork_binding=?2 WHERE rowid=?1"
                     )))
                     .bind(key)
                     .bind(next)
-                    .execute(&mut *transaction)
+                    .execute(&mut *writer)
                     .await?;
-                    if table == "smart_playlists" {
-                        crate::smart_playlists::sync_smart_on(
-                            &mut transaction,
-                            crate::SmartPlaylistKey::from_raw(key),
-                        )
-                        .await?;
-                    } else {
-                        crate::playlists::sync_playlist_header_on(
-                            &mut transaction,
-                            crate::PlaylistKey::from_raw(key),
-                        )
-                        .await?;
-                    }
-                    transaction.commit().await?;
-                    self.cache_written();
                 }
             }
         }
@@ -803,9 +873,19 @@ impl Catalog {
         hash: &str,
         refresh: bool,
     ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO artwork_previews(family,hash) VALUES(?1,?2) ON CONFLICT(family) DO UPDATE SET hash=excluded.hash WHERE ?3 AND hash IS NOT excluded.hash")
-            .bind(family).bind(hash).bind(refresh).execute(&mut *writer).await?;
+        let mut write = self.write().await?;
+        let written = sqlx::query("INSERT INTO artwork_previews(family,hash) VALUES(?1,?2) ON CONFLICT(family) DO UPDATE SET hash=excluded.hash WHERE ?3 AND hash IS NOT excluded.hash")
+            .bind(family)
+            .bind(hash)
+            .bind(refresh)
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected();
+        // Previews ride on artwork reads; showing one changes nothing a client lists.
+        if written != 0 {
+            write.keep();
+        }
+        write.commit().await?;
         Ok(())
     }
 
@@ -818,14 +898,30 @@ impl Catalog {
         connection.close_on_drop();
         sqlx::raw_sql("PRAGMA query_only=OFF; CREATE TEMP TABLE retained_artwork_families(family TEXT PRIMARY KEY) WITHOUT ROWID;")
             .execute(&mut *connection).await?;
+        let active: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value")
+            .bind(serde_json::to_string(active_media_uris)?)
+            .fetch_all(&mut *connection)
+            .await?;
+        self.loaded().await;
+        let mut tracks = self
+            .snapshot()
+            .tracks
+            .iter()
+            .filter(|(_, record)| record.flags & crate::catalog::snapshot::DOWNLOADED != 0)
+            .map(|(_, record)| record.key)
+            .chain(active)
+            .collect::<Vec<_>>();
+        tracks.sort_unstable_by(|left, right| right.cmp(left));
+        tracks.dedup();
         Ok(ArtworkCacheRetention {
             _permit: permit,
+            catalog: self,
             connection,
-            active: serde_json::to_string(active_media_uris)?,
-            after: 0,
+            tracks,
         })
     }
 
+    /// Pictures of tracks, albums and artists by URI, as their rows show them.
     pub async fn artwork_bindings(
         &self,
         media_uris: &[String],
@@ -837,21 +933,22 @@ impl Catalog {
             ));
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT {} FROM json_each(?1) requested
+        let owners: Vec<(Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT track.track_key,album.album_key,artist.artist_key FROM json_each(?1) requested
              LEFT JOIN tracks track ON track.media_uri=requested.value
              LEFT JOIN albums album ON album.media_uri=requested.value
              LEFT JOIN artists artist ON artist.media_uri=requested.value ORDER BY requested.key",
-            preview_sql(&format!(
-                "coalesce({}, {}, {})",
-                raw_track_artwork_sql("track"),
-                "album.artwork_binding",
-                "artist.artwork_binding"
-            ))
-        )))
+        )
         .bind(serde_json::to_string(media_uris)?)
         .fetch_all(&mut *connection)
-        .await?)
+        .await?;
+        let arts = self.arts(owners.into_iter().map(|(track, album, artist)| {
+            track
+                .map(Owner::Track)
+                .or(album.map(Owner::Album))
+                .or(artist.map(Owner::Artist))
+        }));
+        art_bindings(&mut connection, &arts).await
     }
 
     pub async fn playlist_artwork_binding(
@@ -941,35 +1038,16 @@ impl Catalog {
             if !manifest.pending && resolved.is_some() {
                 return Ok(Some(selected));
             }
-            refresh_automatic_playlist_artwork_on(&mut connection, key, &mut selected).await?;
+            refresh_automatic_playlist_artwork_on(self, &mut connection, key, &mut selected)
+                .await?;
             drop(connection);
             {
                 let mut writer = self.writer().await?;
-                let mut transaction = writer.begin().await?;
                 let path = format!(
                     "(SELECT '$['||key||']' FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1)"
                 );
-                let changed = sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET artwork_binding=CAST(CASE WHEN {path} IS NULL THEN json_insert(coalesce(artwork_binding,'[]'),'$[#]',json(?1)) ELSE json_set(artwork_binding,{path},json(?1)) END AS BLOB) WHERE rowid=?2 AND (SELECT json(value) FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) IS json(?3)")))
-                    .bind(serde_json::to_string(&selected)?).bind(key).bind(previous).execute(&mut *transaction).await?.rows_affected()>0;
-                if changed {
-                    if smart {
-                        crate::smart_playlists::sync_smart_on(
-                            &mut transaction,
-                            crate::SmartPlaylistKey::from_raw(key),
-                        )
-                        .await?;
-                    } else {
-                        crate::playlists::sync_playlist_header_on(
-                            &mut transaction,
-                            crate::PlaylistKey::from_raw(key),
-                        )
-                        .await?;
-                    }
-                }
-                transaction.commit().await?;
-                if changed {
-                    self.cache_written();
-                }
+                sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET artwork_binding=CAST(CASE WHEN {path} IS NULL THEN json_insert(coalesce(artwork_binding,'[]'),'$[#]',json(?1)) ELSE json_set(artwork_binding,{path},json(?1)) END AS BLOB) WHERE rowid=?2 AND (SELECT json(value) FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) IS json(?3)")))
+                    .bind(serde_json::to_string(&selected)?).bind(key).bind(previous).execute(&mut *writer).await?;
             }
             connection = self.acquire_reader().await?;
             let winner: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT (SELECT value FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) FROM {table} WHERE rowid=?1"))).bind(key).fetch_optional(&mut *connection).await?.flatten();
@@ -984,19 +1062,29 @@ impl Catalog {
         &self,
         playlist: crate::PlaylistKey,
     ) -> LibraryResult<Vec<Vec<u8>>> {
+        self.loaded().await;
+        let members = self
+            .snapshot()
+            .playlist(playlist.raw())
+            .map(|playlist| {
+                playlist
+                    .entries
+                    .into_iter()
+                    .map(|(_, track)| track)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut connection = self.acquire_reader().await?;
-        let prefix = format!(
-            "WITH selected AS (SELECT track_key FROM playlist_entries WHERE playlist_key={})",
-            playlist.raw()
-        );
-        let choices = playlist_artwork_choices_on(&mut connection, &prefix, &[], true).await?;
-        raw_playlist_artwork_on(&mut connection, &choices)
+        let choices =
+            playlist_artwork_choices_on(self, &mut connection, &members, &[], true).await?;
+        raw_playlist_artwork_on(self, &mut connection, &choices)
             .await?
             .iter()
             .map(|recipe| Ok(serde_json::to_vec(recipe)?))
             .collect()
     }
 
+    /// Pictures of tracks by URI, skipping tracks without one.
     pub async fn track_artwork_bindings(
         &self,
         media_uris: &[String],
@@ -1011,19 +1099,19 @@ impl Catalog {
             result = self.acquire_reader() => result?,
             () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
         };
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT {} FROM json_each(?1) requested
-             JOIN tracks track ON track.media_uri=requested.value
-             LEFT JOIN albums album USING(album_key)
-             WHERE ({}) IS NOT NULL ORDER BY requested.key",
-            track_artwork_sql("track"),
-            raw_track_artwork_sql("track")
-        )))
-        .bind(serde_json::to_string(media_uris)?)
-        .fetch_all(&mut *connection)
-        .await?)
+        let keys: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value ORDER BY requested.key")
+            .bind(serde_json::to_string(media_uris)?)
+            .fetch_all(&mut *connection)
+            .await?;
+        let arts = self.arts(keys.into_iter().map(|key| Some(Owner::Track(key))));
+        Ok(art_bindings(&mut connection, &arts)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect())
     }
 
+    /// Distinct pictures of a source's tracks in a scope, in track sort order.
     pub async fn representative_artwork_page(
         &self,
         source: SourceKey,
@@ -1032,33 +1120,99 @@ impl Catalog {
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Vec<u8>>> {
-        let limit = limit.clamp(1, ARTWORK_PAGE_LIMIT) as i64;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new(format!("SELECT {} FROM (", preview_sql("binding")));
-        query.push(format!(
-            "SELECT {} binding FROM tracks track WHERE track.source_key=",
-            raw_track_artwork_sql("track")
-        ));
-        query.push_bind(source);
-        match scope {
-            RepresentativeArtworkScope::AllTracks => {}
-            RepresentativeArtworkScope::FavoriteTracks => {
-                query.push(" AND COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),(SELECT favorite FROM native_media_state WHERE media_uri=track.media_uri))=1");
-            }
-            RepresentativeArtworkScope::PlaylistTracks => {
-                query.push(" AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)");
-            }
-            RepresentativeArtworkScope::LatestAlbums(album_limit) => {
-                query.push(" AND track.album_key IN (SELECT latest.album_key FROM albums latest WHERE latest.source_key=").push_bind(source).push(" ORDER BY ").push(crate::tracks::added_at!("latest")).push(" DESC NULLS LAST,latest.album_key LIMIT ").push_bind(album_limit.clamp(1, 100) as i64).push(")");
-            }
+        let limit = limit.clamp(1, ARTWORK_PAGE_LIMIT);
+        self.loaded().await;
+        let arts = {
+            let snapshot = self.snapshot();
+            let context = Context::new(&snapshot, self.distinct_track_covers());
+            let derived = self.covers(&context);
+            let Some(owner) = snapshot.source_slot(source) else {
+                return Ok(Vec::new());
+            };
+            let folder = match folder {
+                Some(folder) => match snapshot.folders.slot(folder.raw()) {
+                    Some(slot) => Some(slot),
+                    None => return Ok(Vec::new()),
+                },
+                None => None,
+            };
+            let latest = match scope {
+                RepresentativeArtworkScope::LatestAlbums(albums) => {
+                    let mut latest = snapshot
+                        .albums
+                        .iter()
+                        .filter(|(_, album)| album.source == owner)
+                        .map(|(slot, album)| (album.added, album.key, slot))
+                        .collect::<Vec<_>>();
+                    latest.sort_by(|left, right| {
+                        (left.0 == u32::MAX)
+                            .cmp(&(right.0 == u32::MAX))
+                            .then(right.0.cmp(&left.0))
+                            .then(left.1.cmp(&right.1))
+                    });
+                    latest.truncate(albums.clamp(1, 100));
+                    Some(
+                        latest
+                            .into_iter()
+                            .map(|(.., slot)| slot)
+                            .collect::<std::collections::HashSet<_>>(),
+                    )
+                }
+                _ => None,
+            };
+            let held = if scope == RepresentativeArtworkScope::PlaylistTracks {
+                snapshot
+                    .playlists
+                    .iter()
+                    .flat_map(|(_, playlist)| playlist.entries.iter().map(|(_, track)| *track))
+                    .collect::<std::collections::HashSet<_>>()
+            } else {
+                Default::default()
+            };
+            let mut tracks = snapshot
+                .tracks
+                .iter()
+                .filter(|(slot, record)| {
+                    record.source == owner
+                        && folder
+                            .is_none_or(|folder| snapshot.track_runs(record)[3].contains(&folder))
+                        && match scope {
+                            RepresentativeArtworkScope::AllTracks => true,
+                            RepresentativeArtworkScope::FavoriteTracks => {
+                                crate::catalog::views::favorite(record.flags) == Some(true)
+                            }
+                            RepresentativeArtworkScope::PlaylistTracks => held.contains(slot),
+                            RepresentativeArtworkScope::LatestAlbums(_) => latest
+                                .as_ref()
+                                .is_some_and(|latest| latest.contains(&record.album)),
+                        }
+                })
+                .map(|(_, record)| {
+                    (
+                        snapshot.track_sort(record),
+                        record.key,
+                        context.track_art(&derived, record),
+                    )
+                })
+                .filter(|(.., art)| *art != Art::None)
+                .collect::<Vec<_>>();
+            tracks.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+            let mut seen = std::collections::HashSet::new();
+            tracks
+                .into_iter()
+                .map(|(.., art)| art)
+                .filter(|art| seen.insert(*art))
+                .take(limit)
+                .collect::<Vec<_>>()
         };
-        query.push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders folder_scope WHERE folder_scope.track_key=track.track_key AND folder_scope.folder_key=").push_bind(folder).push(")) AND binding IS NOT NULL GROUP BY binding ORDER BY min(track.sort_text),min(track.track_key) LIMIT ").push_bind(limit).push(")");
-        Ok(query
-            .build_query_scalar::<Vec<u8>>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?)
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut seen = std::collections::HashSet::new();
+        Ok(art_bindings(&mut connection, &arts)
+            .await?
+            .into_iter()
+            .flatten()
+            .filter(|binding| seen.insert(binding.clone()))
+            .collect())
     }
 
     pub async fn source_artwork_page(
@@ -1073,10 +1227,10 @@ impl Catalog {
         let mut transaction = connection.begin().await?;
         let mut query = QueryBuilder::<Sqlite>::new("");
         for (index, table) in [
-            "tracks",
+            "track_details JOIN tracks USING(track_key)",
             "albums",
             "artists",
-            "genres",
+            "tags",
             "folders",
             "playlists",
         ]

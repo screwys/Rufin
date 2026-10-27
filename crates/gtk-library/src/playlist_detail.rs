@@ -695,6 +695,7 @@ mod tests {
                 duration_millis: 1,
                 downloaded_count: 0,
                 genres: Vec::new(),
+                holds_hidden: false,
             },
         };
 

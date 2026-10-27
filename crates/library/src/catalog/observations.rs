@@ -1,5 +1,6 @@
 use crate::{
-    AlbumMetadata, ArtistMetadata, FolderMetadata, NativeUserState, TagMetadata, TrackMetadata,
+    AlbumMetadata, ArtistMetadata, FolderMetadata, NativeUserState, TagKind, TagMetadata,
+    TrackMetadata,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,15 +41,9 @@ pub struct ArtistObservation {
     pub user_data: NativeUserState,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct GenreObservation {
-    pub object_id: String,
-    pub metadata: TagMetadata,
-    pub artwork_binding: Option<Vec<u8>>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MoodObservation {
+#[derive(Clone, Debug, PartialEq)]
+pub struct TagObservation {
+    pub kind: TagKind,
     pub object_id: String,
     pub metadata: TagMetadata,
     pub artwork_binding: Option<Vec<u8>>,
@@ -84,8 +79,7 @@ pub struct CatalogBatch {
     pub tracks: Vec<TrackObservation>,
     pub albums: Vec<AlbumObservation>,
     pub artists: Vec<ArtistObservation>,
-    pub genres: Vec<GenreObservation>,
-    pub moods: Vec<MoodObservation>,
+    pub tags: Vec<TagObservation>,
     pub folders: Vec<FolderObservation>,
     pub playlists: Vec<PlaylistObservation>,
 }

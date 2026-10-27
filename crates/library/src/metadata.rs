@@ -35,6 +35,82 @@ pub struct TrackMetadata {
     pub album_loudness: Option<NativeGain>,
 }
 
+/// The TrackMetadata fields stored as typed `tracks` columns. `track_details.metadata` holds
+/// the rest.
+const THIN_TRACK_FIELDS: [&str; 13] = [
+    "title",
+    "artist",
+    "album",
+    "sort_text",
+    "duration_millis",
+    "disc_number",
+    "track_number",
+    "year",
+    "release_date",
+    "date_added",
+    "source_format",
+    "comment",
+    "bpm",
+];
+
+/// The AlbumMetadata fields stored as typed `albums` columns.
+const THIN_ALBUM_FIELDS: [&str; 7] = [
+    "title",
+    "artist",
+    "sort_text",
+    "year",
+    "release_date",
+    "date_added",
+    "is_compilation",
+];
+
+fn without(value: impl Serialize, fields: &[&str]) -> serde_json::Result<String> {
+    serde_json::to_string(&strip(serde_json::to_value(value)?, fields))
+}
+
+fn strip(mut value: serde_json::Value, fields: &[&str]) -> serde_json::Value {
+    if let Some(object) = value.as_object_mut() {
+        for field in fields {
+            object.remove(*field);
+        }
+        object.retain(|_, value| {
+            !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty())
+        });
+    }
+    value
+}
+
+/// The details row's JSON of whole TrackMetadata JSON, unknown fields included.
+pub(crate) fn track_details_value(value: serde_json::Value) -> serde_json::Value {
+    strip(value, &THIN_TRACK_FIELDS)
+}
+
+/// The album row's metadata JSON of whole AlbumMetadata JSON, unknown fields included.
+pub(crate) fn album_details_value(value: serde_json::Value) -> serde_json::Value {
+    strip(value, &THIN_ALBUM_FIELDS)
+}
+
+impl TrackMetadata {
+    /// The details row's JSON: everything the typed columns do not hold.
+    pub(crate) fn details_json(&self) -> serde_json::Result<String> {
+        without(self, &THIN_TRACK_FIELDS)
+    }
+}
+
+impl AlbumMetadata {
+    /// The album row's metadata JSON: everything the typed columns do not hold.
+    pub(crate) fn details_json(&self) -> serde_json::Result<String> {
+        without(self, &THIN_ALBUM_FIELDS)
+    }
+}
+
+/// SQL for the whole TrackMetadata JSON of a track row and its LEFT JOINed details row.
+pub(crate) fn track_metadata_sql(track: &str, details: &str) -> String {
+    format!(
+        "json_patch(coalesce(json({details}.metadata),'{{}}'),json_object('title',{track}.title,'artist',{track}.display_artist,'album',{track}.display_album,'sort_text',{track}.sort_text,'duration_millis',{track}.duration_millis,'disc_number',{track}.disc_number,'track_number',{track}.track_number,'year',{track}.year,'release_date',{track}.release_date,'date_added',{track}.date_added,'source_format',{track}.source_format,'comment',{track}.comment,'bpm',{track}.bpm))"
+    )
+}
+
 /// None on TrackMetadata means the old cache never observed raw album tags.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

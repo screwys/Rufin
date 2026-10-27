@@ -653,7 +653,6 @@ impl ConnectOwner {
         let mut configuration = self.source.configuration_changes();
         let mut catalog = self.source.catalog_changes();
         let mut settings = self.settings_apply.shared_changes();
-        let mut cache = self.catalog.subscribe_cache_writes();
         self.runtime.spawn(async move {
             stop.run_until_cancelled(async move {
                 let mut configure = true;
@@ -666,10 +665,6 @@ impl ConnectOwner {
                     }
                     loop {
                         let mut busy = false;
-                        match owner.catalog.connect_seed_page().await {
-                            Ok(seeded) => busy |= seeded,
-                            Err(error) => owner.failed(error.to_string()),
-                        }
                         if let Err(error) = owner.synchronize().await {
                             owner.failed(error);
                         }
@@ -696,7 +691,6 @@ impl ConnectOwner {
                         _ = configuration.changed() => true,
                         _ = catalog.changed() => false,
                         _ = settings.changed() => false,
-                        _ = cache.changed() => false,
                     };
                     catalog.borrow_and_update();
                     if !configure
@@ -1097,13 +1091,7 @@ impl ConnectOwner {
     }
 
     async fn create_profile(self: &Arc<Self>) -> Result<(), String> {
-        self.open(ConnectNetwork::new_profile_id(), true).await?;
-        self.catalog
-            .connect_initialize_profile()
-            .await
-            .map_err(error)?;
-        self.catalog.connect_seed_page().await.map_err(error)?;
-        Ok(())
+        self.open(ConnectNetwork::new_profile_id(), true).await
     }
 
     async fn active(&self) -> Result<Arc<Session>, String> {
@@ -2935,32 +2923,6 @@ impl ConnectOwner {
                 return Err(
                     "The source device did not provide a portable document identity".into(),
                 );
-            } else if self.is_local_media(&current.media_uri).await?
-                && self
-                    .catalog
-                    .connect_track_reference(&current.media_uri)
-                    .await
-                    .map_err(error)?
-                    .is_none()
-            {
-                let reference = self
-                    .request(
-                        peer,
-                        Request::TrackReference {
-                            uri: current.media_uri.clone(),
-                        },
-                    )
-                    .await?;
-                if !reference.is_null() {
-                    self.catalog
-                        .connect_apply(&[ConnectRecord {
-                            kind: "track".into(),
-                            key: current.media_uri.clone(),
-                            value: Some(reference),
-                        }])
-                        .await
-                        .map_err(error)?;
-                }
             }
             let prepared = self
                 .playback
@@ -3048,25 +3010,6 @@ impl ConnectOwner {
         Ok(())
     }
 
-    async fn prepare_snapshot(&self, session: &Arc<Session>) -> Result<(), String> {
-        loop {
-            if !self
-                .session
-                .read()
-                .await
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, session))
-            {
-                break;
-            }
-            if !self.catalog.connect_seed_page().await.map_err(error)? {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        self.synchronize().await
-    }
-
     async fn export(&self) -> Result<tempfile::NamedTempFile, String> {
         self.export_profile(&self.active().await?).await
     }
@@ -3076,7 +3019,7 @@ impl ConnectOwner {
         session: &Arc<Session>,
     ) -> Result<tempfile::NamedTempFile, String> {
         crate::playlist_files::backfill_file_playlists(&self.source).await?;
-        self.prepare_snapshot(session).await?;
+        self.synchronize().await?;
         let key: age::x25519::Identity = self
             .secret(file_key(&self.identity_reference()?, &session.profile))
             .await?

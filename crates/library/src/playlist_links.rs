@@ -65,7 +65,6 @@ mod tests {
         for index in [2, 1, 0] {
             let playlist = catalog
                 .create_playlist(
-                    None,
                     &format!("Root {index}"),
                     &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
                 )
@@ -135,7 +134,11 @@ mod tests {
         let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         {
             let mut writer = catalog.writer().await?;
-            sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(&mut *writer).await?;
+            sqlx::query(
+                "INSERT INTO sources(source_key,object_id,display_name) VALUES (1,'files','Files')",
+            )
+            .execute(&mut *writer)
+            .await?;
         }
         let files = [
             (
@@ -225,11 +228,7 @@ mod tests {
         check_eq!(next.len(), 1);
         check_eq!(next[0].path, "album/other.pls");
         let playlist = catalog
-            .create_playlist(
-                None,
-                "Shared",
-                &crate::MemberSelection::Uris((Vec::new()).into()),
-            )
+            .create_playlist("Shared", &crate::MemberSelection::Uris((Vec::new()).into()))
             .await?
             .unwrap()
             .0;
@@ -246,7 +245,7 @@ mod tests {
             .await?;
         check_eq!(associated[0].playlist, Some(playlist));
         check!(associated[0].playlist_identity.is_some());
-        catalog.delete_playlist(None, playlist).await?;
+        catalog.delete_playlist(playlist).await?;
         let deleted = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
@@ -262,7 +261,6 @@ mod tests {
         let catalog = Catalog::open(&path).await?;
         let playlist = catalog
             .create_playlist(
-                None,
                 "Music",
                 &crate::MemberSelection::Uris(
                     ((&["file:///song.flac".into(), "file:///two.flac".into()]).to_vec()).into(),
@@ -287,7 +285,6 @@ mod tests {
         check!(!catalog.save_playlist_file_link(&link).await?);
         let second = catalog
             .create_playlist(
-                None,
                 "Second",
                 &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
@@ -306,7 +303,7 @@ mod tests {
             .await?;
         check!(
             !catalog
-                .update_playlist(None, playlist, Some("Music"), None)
+                .update_playlist(playlist, Some("Music"), None)
                 .await?
         );
         check!(
@@ -319,7 +316,6 @@ mod tests {
         check_eq!(
             catalog
                 .add_playlist_tracks(
-                    None,
                     playlist,
                     &crate::MemberSelection::Uris(
                         ((&["file:///song.flac".into()]).to_vec()).into()
@@ -337,7 +333,7 @@ mod tests {
                 .dirty
         );
         catalog
-            .update_playlist(None, playlist, Some("New name"), None)
+            .update_playlist(playlist, Some("New name"), None)
             .await?;
         check!(
             catalog
@@ -351,7 +347,6 @@ mod tests {
             .await?;
         catalog
             .add_playlist_tracks(
-                None,
                 playlist,
                 &crate::MemberSelection::Uris(((&["file:///three.flac".into()]).to_vec()).into()),
                 false,
@@ -383,9 +378,7 @@ mod tests {
                     .map(|entry| entry.playlist_entry_key)
                     .collect::<Vec<_>>()
             })?;
-        catalog
-            .move_playlist_entry(None, playlist, entries[0], 0)
-            .await?;
+        catalog.move_playlist_entry(playlist, entries[0], 0).await?;
         check!(
             !catalog
                 .get_playlist_file_link(playlist)
@@ -393,9 +386,7 @@ mod tests {
                 .unwrap()
                 .dirty
         );
-        catalog
-            .move_playlist_entry(None, playlist, entries[0], 2)
-            .await?;
+        catalog.move_playlist_entry(playlist, entries[0], 2).await?;
         check!(
             catalog
                 .get_playlist_file_link(playlist)
@@ -405,7 +396,7 @@ mod tests {
         );
         catalog.mark_playlist_file_synced(playlist, "third").await?;
         catalog
-            .remove_playlist_entries(None, playlist, &[entries[1]])
+            .remove_playlist_entries(playlist, &[entries[1]])
             .await?;
         check!(
             catalog
@@ -417,7 +408,7 @@ mod tests {
         catalog.mark_playlist_file_synced(playlist, "third").await?;
         check_eq!(
             catalog
-                .remove_playlist_entries(None, playlist, &[entries[1]])
+                .remove_playlist_entries(playlist, &[entries[1]])
                 .await?,
             0
         );
@@ -442,7 +433,7 @@ mod tests {
                 .is_playlist_file_ignored(Some(&source), "0/ignored.pls")
                 .await?
         );
-        catalog.delete_playlist(None, playlist).await?;
+        catalog.delete_playlist(playlist).await?;
         check!(catalog.get_playlist_file_link(playlist).await?.is_none());
         catalog.close().await
     }
@@ -453,7 +444,6 @@ mod tests {
         let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         let playlist = catalog
             .create_playlist(
-                None,
                 "Playlist",
                 &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
@@ -735,22 +725,9 @@ impl Catalog {
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let mut transaction = writer.begin().await?;
-        let mut changed = std::collections::BTreeMap::<i64, Vec<String>>::new();
         for (path, playlist) in files {
-            let row: Option<(i64, String)> = sqlx::query_as("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target) RETURNING source_key,path")
-                .bind(source.as_str()).bind(path).bind(playlist).fetch_optional(&mut *transaction).await?;
-            if let Some((source, path)) = row {
-                changed.entry(source).or_default().push(path);
-            }
-        }
-        for (source, paths) in changed {
-            crate::connect::catalog::mark_files_on(
-                &mut transaction,
-                source,
-                &paths.iter().map(String::as_str).collect::<Vec<_>>(),
-                false,
-            )
-            .await?;
+            sqlx::query("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target)")
+                .bind(source.as_str()).bind(path).bind(playlist).execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())

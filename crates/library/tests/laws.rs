@@ -25,7 +25,7 @@ proptest! {
                 .collect::<Vec<_>>();
             let playlist = fixture
                 .catalog
-                .create_playlist(Some(fixture.source), "Property Playlist", &library::MemberSelection::Uris((expected.clone()).into()))
+                .create_playlist("Property Playlist", &library::MemberSelection::Uris((expected.clone()).into()))
                 .await
                 .expect("create property Playlist")
                 .expect("all property Tracks exist")

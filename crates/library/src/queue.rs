@@ -205,7 +205,7 @@ enum SavedContext<S> {
 }
 
 async fn decode_queue_export(
-    connection: &mut SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     mut value: serde_json::Value,
 ) -> LibraryResult<QueueRestore> {
     if let Some(entries) = value
@@ -214,14 +214,12 @@ async fn decode_queue_export(
     {
         for entry in entries {
             if let Some(uri) = entry.get("media_uri").and_then(serde_json::Value::as_str) {
-                let key = crate::catalog::remember_track(
-                    connection,
-                    &TrackReference {
+                let key = write
+                    .put_reference(&TrackReference {
                         media_uri: uri.to_owned(),
                         ..Default::default()
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 entry["track_key"] = serde_json::to_value(key)?;
             }
         }
@@ -314,7 +312,7 @@ impl Catalog {
             )));
         }
         let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
-        track_references_for_uris_on(&mut connection, media_uris).await
+        track_references_for_uris_on(self, &mut connection, media_uris).await
     }
 }
 
@@ -326,21 +324,21 @@ impl Catalog {
         offset: u64,
         limit: u32,
     ) -> LibraryResult<(Vec<usize>, u64)> {
-        let (_permit, mut reader) = self.acquire_general(&ReadCancellation::new()).await?;
-        let mut transaction = reader.begin().await?;
         let filter = filter.trim().to_lowercase();
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let context = crate::catalog::views::Context::new(&snapshot, false);
         let mut positions = Vec::new();
         let mut total = 0;
-        for (page, order) in queue.order.chunks(4096).enumerate() {
-            let keys = order
-                .iter()
-                .map(|i| queue.entries[*i as usize].track_key)
-                .collect::<Vec<_>>();
-            let matches=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE instr(normalized_search,?2)>0 ORDER BY CAST(requested.key AS INTEGER)")
-                .bind(serde_json::to_string(&keys)?).bind(&filter).fetch_all(&mut *transaction).await?;
-            for position in matches {
+        for (position, index) in queue.order.iter().enumerate() {
+            let key = queue.entries[*index as usize].track_key;
+            let matched = snapshot
+                .tracks
+                .get(key.raw())
+                .is_some_and(|record| context.track_search(record).contains(&filter));
+            if matched {
                 if total >= offset && positions.len() < limit as usize {
-                    positions.push(page * 4096 + position as usize);
+                    positions.push(position);
                 }
                 total += 1;
             }
@@ -415,8 +413,7 @@ impl Catalog {
         total: usize,
         current: usize,
     ) -> LibraryResult<QueueRestore> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
         let mut entries = vec![None; total];
         let mut order = Vec::new();
         let mut rows = Vec::new();
@@ -426,7 +423,7 @@ impl Catalog {
             )
             .bind(transfer)
             .bind(offset as i64)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(write.connection().await?)
             .await?;
             let mut page: QueueTransferPage = serde_json::from_str(&payload.ok_or_else(|| {
                 LibraryError::InvalidRequest("Queue transfer is incomplete".into())
@@ -448,12 +445,13 @@ impl Catalog {
                 row.received_from_connect = true;
                 *slot = Some(QueueEntry {
                     received_from_connect: true,
-                    track_key: persist_metadata(&mut transaction, &row.item).await?,
+                    track_key: write.put_reference(&row.item).await?,
                     provenance: row.provenance.clone(),
                 });
                 if row.position == current {
                     let song = crate::tracks::load_track_rows(
-                        &mut transaction,
+                        self,
+                        write.connection().await?,
                         &[slot.as_ref().unwrap().track_key],
                     )
                     .await?
@@ -475,7 +473,7 @@ impl Catalog {
                 "Invalid queue current position".into(),
             ));
         }
-        transaction.commit().await?;
+        write.commit().await?;
         let entries = entries.into_iter().map(Option::unwrap).collect::<Vec<_>>();
         let current_index = Some(current);
         Ok(QueueRestore {
@@ -531,22 +529,19 @@ impl Catalog {
         &self,
         uris: &[String],
     ) -> LibraryResult<Vec<crate::TrackKey>> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = self.write().await?;
         let mut keys = Vec::with_capacity(uris.len());
         for uri in uris {
             keys.push(
-                crate::catalog::remember_track(
-                    &mut transaction,
-                    &TrackReference {
+                write
+                    .put_reference(&TrackReference {
                         media_uri: uri.clone(),
                         ..Default::default()
-                    },
-                )
-                .await?,
+                    })
+                    .await?,
             );
         }
-        transaction.commit().await?;
+        write.commit().await?;
         Ok(keys)
     }
 
@@ -564,7 +559,8 @@ impl Catalog {
                 for (selection, provenance) in groups {
                     let resolve_anchor = !matches!(selection, crate::MemberSelection::Concat(_));
                     let songs =
-                        crate::selection::selected_tracks_on(&mut transaction, &selection).await?;
+                        crate::selection::selected_tracks_on(self, &mut transaction, &selection)
+                            .await?;
                     for (rank, (track_key, entry_key)) in songs.into_iter().enumerate() {
                         if resolve_anchor
                             && selected.is_some_and(|(key, entry)| {
@@ -587,12 +583,11 @@ impl Catalog {
                 transaction.commit().await?;
             }
             QueueLoad::Items(_) | QueueLoad::Uris(_, _) => {
-                let mut writer = self.writer().await?;
-                let mut transaction = writer.begin().await?;
+                let mut write = self.write().await?;
                 match input {
                     QueueLoad::Items(items) => {
                         for (item, provenance) in items {
-                            let track_key = persist_metadata(&mut transaction, &item).await?;
+                            let track_key = write.put_reference(&item).await?;
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
@@ -602,14 +597,12 @@ impl Catalog {
                     }
                     QueueLoad::Uris(uris, provenance) => {
                         for (rank, uri) in uris.iter().enumerate() {
-                            let track_key = crate::catalog::remember_track(
-                                &mut transaction,
-                                &TrackReference {
+                            let track_key = write
+                                .put_reference(&TrackReference {
                                     media_uri: uri.clone(),
                                     ..Default::default()
-                                },
-                            )
-                            .await?;
+                                })
+                                .await?;
                             let mut provenance = provenance.clone();
                             if let QueueProvenance::Context { source_rank, .. } = &mut provenance {
                                 *source_rank += rank;
@@ -623,7 +616,7 @@ impl Catalog {
                     }
                     _ => unreachable!(),
                 }
-                transaction.commit().await?;
+                write.commit().await?;
             }
             QueueLoad::Captured(captured) => entries.extend(captured.iter().cloned()),
         }
@@ -648,7 +641,7 @@ impl Catalog {
             .iter()
             .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
-        let songs = crate::tracks::load_track_rows(&mut connection, &keys).await?;
+        let songs = crate::tracks::load_track_rows(self, &mut connection, &keys).await?;
         Ok(entries
             .iter()
             .zip(songs)
@@ -706,14 +699,13 @@ impl Catalog {
 
     pub async fn export_queue_jsonl(&self, output: impl std::io::Write) -> LibraryResult<()> {
         let (_export, mut connection) = self.acquire_export().await?;
-        export_queue_jsonl_on(&mut connection, output).await
+        export_queue_jsonl_on(self, &mut connection, output).await
     }
 
     pub async fn import_queue_jsonl(&self, input: impl std::io::BufRead) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer.begin().await?;
-        import_queue_jsonl_on(&mut transaction, input).await?;
-        transaction.commit().await?;
+        let mut write = self.write().await?;
+        import_queue_jsonl_on(&mut write, input).await?;
+        write.commit().await?;
         Ok(())
     }
 
@@ -987,6 +979,7 @@ impl LegacyQueueRow {
 }
 
 pub(crate) async fn export_queue_jsonl_on(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     mut output: impl std::io::Write,
 ) -> LibraryResult<()> {
@@ -1011,7 +1004,7 @@ pub(crate) async fn export_queue_jsonl_on(
     output.write_all(b"\n")?;
     let mut seen = HashSet::new();
     for page in uris.chunks(QUEUE_CONTEXT_LIMIT) {
-        for item in track_references_for_uris_on(connection, page).await? {
+        for item in track_references_for_uris_on(catalog, connection, page).await? {
             if seen.insert(item.media_uri.clone()) {
                 serde_json::to_writer(&mut output, &item)?;
                 output.write_all(b"\n")?;
@@ -1021,7 +1014,7 @@ pub(crate) async fn export_queue_jsonl_on(
     Ok(())
 }
 pub(crate) async fn import_queue_jsonl_on(
-    connection: &mut sqlx::SqliteConnection,
+    write: &mut crate::catalog::write::Write<'_>,
     mut input: impl std::io::BufRead,
 ) -> LibraryResult<()> {
     let mut line = String::new();
@@ -1034,20 +1027,31 @@ pub(crate) async fn import_queue_jsonl_on(
                 input.read_line(&mut line)? != 0
             } {
                 if !line.trim().is_empty() {
-                    persist_metadata(connection, &serde_json::from_str::<TrackReference>(&line)?)
+                    write
+                        .put_reference(&serde_json::from_str::<TrackReference>(&line)?)
                         .await?;
                 }
             }
-            decode_queue_export(connection, header["queue"].clone()).await?
+            decode_queue_export(write, header["queue"].clone()).await?
         }
         Some(3) => {
             let rows: Vec<LegacyQueueRow> = serde_json::from_value(header["snapshots"].clone())?;
             for row in &rows {
-                persist_metadata(connection, &row.item).await?;
+                write.put_reference(&row.item).await?;
             }
-            legacy::decode_saved(connection, header["queue"].clone())
-                .await?
-                .0
+            let saved = legacy::decode_saved(header["queue"].clone())?;
+            let mut keys = Vec::with_capacity(saved.uris.len());
+            for uri in &saved.uris {
+                keys.push(
+                    write
+                        .put_reference(&TrackReference {
+                            media_uri: uri.clone(),
+                            ..Default::default()
+                        })
+                        .await?,
+                );
+            }
+            saved.restore(keys).0
         }
         _ => {
             return Err(LibraryError::InvalidRequest(
@@ -1055,7 +1059,7 @@ pub(crate) async fn import_queue_jsonl_on(
             ));
         }
     };
-    save_queue_on(connection, &state).await
+    save_queue_on(write.connection().await?, &state).await
 }
 #[allow(non_upper_case_globals)]
 impl QueuePlacement {
@@ -1068,13 +1072,6 @@ impl QueuePlacement {
             other => other,
         }
     }
-}
-
-async fn persist_metadata(
-    connection: &mut SqliteConnection,
-    item: &TrackReference,
-) -> LibraryResult<crate::TrackKey> {
-    crate::catalog::remember_track(connection, item).await
 }
 
 /// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
@@ -1098,12 +1095,13 @@ async fn track_uris_on(
 }
 
 async fn track_references_for_uris_on(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     uris: &[String],
 ) -> LibraryResult<Vec<TrackReference>> {
     let keys = sqlx::query_scalar::<_, crate::TrackKey>("SELECT track_key FROM json_each(?1) requested JOIN tracks ON media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
         .bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?;
-    let songs = crate::tracks::load_track_rows(connection, &keys).await?;
+    let songs = crate::tracks::load_track_rows(catalog, connection, &keys).await?;
     let songs = songs
         .into_iter()
         .map(|song| (song.media_uri.clone(), TrackReference::from(song)))

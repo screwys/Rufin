@@ -316,12 +316,13 @@ pub(super) fn genre_from_item(
     server: ServerKind,
     source: &str,
     item: &Value,
-) -> library::LibraryResult<Option<library::GenreObservation>> {
+) -> library::LibraryResult<Option<library::TagObservation>> {
     let Some(item_id) = id(&item["Id"]) else {
         return Ok(None);
     };
     let name = field(item, "Name").unwrap_or_else(|| "Unknown Genre".to_string());
-    Ok(Some(library::GenreObservation {
+    Ok(Some(library::TagObservation {
+        kind: library::TagKind::Genre,
         object_id: server.object_id("genre", &item_id),
         metadata: library::TagMetadata {
             sort_text: Some(name.to_lowercase()),
@@ -526,13 +527,6 @@ mod tests {
             .await
             .unwrap();
         }
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         let catalog_source_id = ("emby").to_string();
         let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
         for album in &albums {
@@ -552,13 +546,6 @@ mod tests {
             .await
             .unwrap();
         }
-        {
-            catalog
-                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
-                .await;
-            Ok::<_, crate::SourceError>(())
-        }
-        .unwrap();
         for album in albums {
             let object = format!("emby:album:{}", album["Id"].as_str().unwrap());
             let uri = library::source_entity_uri(&crate::SourceId::new("emby"), "album", &object);

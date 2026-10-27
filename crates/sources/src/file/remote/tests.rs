@@ -99,12 +99,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let catalog = Catalog::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
-        let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
-        catalog.observe_catalog(move |identity, update| {
-            let source_key = identity.unwrap().1;
-            let _ = sender.send((source_key, update));
-            std::future::ready(())
-        });
+        let mut emit = catalog.changes();
         catalog
             .reconcile_source(source.source_id(), "webdav", "DAV")
             .await
@@ -131,8 +126,8 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             assert_eq!(counts.last(), Some(&2));
             assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
         }
-        let (catalog_source, publication) = emit.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+        let (catalog_source, publication) = crate::published(&mut emit).expect("catalog update");
+        assert!(publication.intersects(sources::Shown::CATALOG));
         let rows = catalog
             .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
@@ -309,12 +304,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
     let catalog = Catalog::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
-    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
-    catalog.observe_catalog(move |identity, update| {
-        let source_key = identity.unwrap().1;
-        let _ = sender.send((source_key, update));
-        std::future::ready(())
-    });
+    let mut emit = catalog.changes();
     let mut identities = Vec::new();
     catalog
         .reconcile_source(source.source_id(), "webdav", "Nextcloud")
@@ -335,7 +325,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
             .await
             .unwrap();
         let publication = if round == 1 {
-            assert!(emit.try_recv().is_err());
+            assert!(crate::published(&mut emit).is_none());
             catalog
                 .cached_source(source.source_id().as_str(), &ReadCancellation::new())
                 .await
@@ -343,8 +333,8 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
                 .unwrap()
                 .source
         } else {
-            let (catalog_source, update) = emit.try_recv().expect("catalog update");
-            assert!(update.metadata);
+            let (catalog_source, update) = crate::published(&mut emit).expect("catalog update");
+            assert!(update.intersects(sources::Shown::CATALOG));
             catalog_source
         };
         let requests = server.received_requests().await.unwrap();
@@ -465,12 +455,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
     let directory = tempfile::tempdir().unwrap();
     let database_path = directory.path().join("library.sqlite3");
     let catalog = Catalog::open(&database_path).await.unwrap();
-    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
-    catalog.observe_catalog(move |identity, update| {
-        let source_key = identity.unwrap().1;
-        let _ = sender.send((source_key, update));
-        std::future::ready(())
-    });
+    let mut emit = catalog.changes();
     let mut first_uri = String::new();
     let mut reads_after_first = 0;
     for round in 0..5 {
@@ -525,18 +510,10 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             .await
             .unwrap();
         observation.purge_source_file_absences(stamp).await.unwrap();
-        let changes = observation.into_changes();
-        catalog
-            .publish_catalog_update(&catalog_source_id, changes.clone())
-            .await;
-        if changes.changed() || !changes.track_rekeys.is_empty() {
-            let (published_source, publication) = emit.try_recv().expect("catalog update");
+        let publication = crate::published(&mut emit);
+        if let Some((published_source, _)) = publication {
             assert_eq!(published_source, catalog_source);
-            assert_eq!(publication, changes);
-        } else {
-            assert!(emit.try_recv().is_err());
         }
-        let publication = changes;
         if sync_supported && matches!(round, 1 | 2 | 4) {
             let requests = server.received_requests().await.unwrap();
             let current = &requests[before..];
@@ -552,7 +529,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
         }
         if matches!(round, 1 | 2) {
             assert!(
-                !publication.changed(),
+                publication.is_none(),
                 "unchanged inventory: {publication:?}"
             );
             assert_eq!(
@@ -578,7 +555,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             )
             .await
             .unwrap();
-            sqlx::query("UPDATE tracks SET metadata=jsonb_remove(metadata,'$.album_tags')")
+            sqlx::query("UPDATE track_details SET metadata=jsonb_remove(metadata,'$.album_tags')")
                 .execute(&mut stored)
                 .await
                 .unwrap();
@@ -723,12 +700,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     let catalog = Catalog::open(folder.path().join("library.sqlite3"))
         .await
         .unwrap();
-    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
-    catalog.observe_catalog(move |identity, update| {
-        let source_key = identity.unwrap().1;
-        let _ = sender.send((source_key, update));
-        std::future::ready(())
-    });
+    let mut emit = catalog.changes();
     let mut original_uris = Vec::new();
     let mut previous_reads = 0;
     for pass in 0..5 {
@@ -751,20 +723,12 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             .await
             .unwrap();
         observation.purge_source_file_absences(stamp).await.unwrap();
-        let changes = observation.into_changes();
-        catalog
-            .publish_catalog_update(&catalog_source_id, changes.clone())
-            .await;
-        if changes.changed() || !changes.track_rekeys.is_empty() {
-            let (published_source, publication) = emit.try_recv().expect("catalog update");
+        let publication = crate::published(&mut emit);
+        if let Some((published_source, _)) = publication {
             assert_eq!(published_source, catalog_source);
-            assert_eq!(publication, changes);
-        } else {
-            assert!(emit.try_recv().is_err());
         }
-        let publication = changes;
         if pass == 1 {
-            assert!(!publication.changed(), "{publication:?}");
+            assert!(publication.is_none(), "{publication:?}");
             assert_eq!(
                 reads.load(Ordering::Relaxed),
                 previous_reads,

@@ -38,7 +38,7 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
     }
     let mut connection = connection(&fixture.path).await;
     // A mapping or file change can invalidate a key behind the active cursor.
-    sqlx::query("UPDATE tracks SET loudness_analysis_key=?2 WHERE track_key=?1")
+    sqlx::query("UPDATE track_details SET loudness_analysis_key=?2 WHERE track_key=?1")
         .bind(fixture.tracks[0])
         .bind([99u8; 32].as_slice())
         .execute(&mut connection)
@@ -277,12 +277,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
-    };
     assert!(
         fixture
             .catalog
@@ -330,19 +324,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.catalog.observe_catalog(move |_, update| {
-        let _ = updates_tx.send(update);
-        std::future::ready(())
-    });
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
-    };
-    let update = updates.try_recv().unwrap();
-    assert!(update.metadata);
+    assert!(scan_observation.changed());
     let changed = fixture
         .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
@@ -389,12 +371,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         };
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
-    };
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
     };
     assert!(
         !fixture
@@ -552,7 +528,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     }
     .await
     .expect("begin membership-changing Inventory");
-    let scan = scan_observation.start_observation().await.unwrap();
+    scan_observation.start_observation().await.unwrap();
     for (id, title, artist, sort, date) in [
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
@@ -644,37 +620,20 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             scan_observation.apply_catalog(&write, true).await.unwrap();
         };
     }
-    let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.catalog.observe_catalog(move |_, update| {
-        let _ = updates_tx.send(update);
-        std::future::ready(())
-    });
-    {
-        let update = {
-            scan_observation
-                .complete_source_observation(
-                    scan,
-                    &[
-                        "track", "album", "artist", "genre", "mood", "folder", "playlist",
-                    ],
-                    None,
-                )
-                .await
-                .unwrap();
-
-            scan_observation
-                .complete_source_observation(scan, &[], None)
-                .await
-                .unwrap();
-
-            scan_observation.into_changes()
-        };
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
-    };
-    let update = updates.try_recv().unwrap();
-    assert!(update.metadata);
+    scan_observation
+        .complete_source_observation(
+            &[
+                "track", "album", "artist", "genre", "mood", "folder", "playlist",
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    scan_observation
+        .complete_source_observation(&[], None)
+        .await
+        .unwrap();
+    assert!(scan_observation.changed());
     assert!(
         fixture
             .catalog
@@ -768,12 +727,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
-    };
     assert!(
         fixture
             .catalog
@@ -811,7 +764,7 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
 
 #[tokio::test]
 async fn source_artwork_pages_distinct_bindings() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let binding = |id: &str| {
         serde_json::to_vec(&[library::ArtworkCandidate::new(
             library::ArtworkImage::Native {
@@ -828,7 +781,7 @@ async fn source_artwork_pages_distinct_bindings() {
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE tracks SET native_artwork=?2 WHERE track_key=?1")
+    sqlx::query("INSERT INTO track_details(track_key,native_artwork) VALUES(?1,?2) ON CONFLICT(track_key) DO UPDATE SET native_artwork=excluded.native_artwork")
         .bind(fixture.tracks[0])
         .bind(binding("binding-a").as_slice())
         .execute(&mut raw)
@@ -862,8 +815,9 @@ async fn source_artwork_pages_distinct_bindings() {
     expected_first.sort();
     assert_eq!(first, expected_first[..1]);
     assert_eq!(second, expected_first[1..]);
-    sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)\n        INSERT INTO tracks(source_key,object_id,media_uri,native_artwork,metadata,normalized_search,indexed) SELECT ?1,'artwork-'||n,'test:artwork-'||n,NULL,jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.comment'),'')),1 FROM numbers")
+    sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)\n        INSERT INTO tracks(source_key,object_id,media_uri,title,display_album,display_artist,sort_text,duration_millis,indexed) SELECT ?1,'artwork-'||n,'test:artwork-'||n,COALESCE('',''),COALESCE('',''),COALESCE('',''),COALESCE('',''),COALESCE(0,0),1 FROM numbers")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     fixture
         .catalog
         .observe("source", None)
@@ -882,7 +836,7 @@ async fn source_artwork_pages_distinct_bindings() {
         )
         .await
         .unwrap();
-    sqlx::query("UPDATE genres SET native_artwork=NULL WHERE genre_key=?1")
+    sqlx::query("UPDATE tags SET native_artwork=NULL WHERE tag_key=?1")
         .bind(fixture.genre)
         .execute(&mut raw)
         .await
@@ -893,7 +847,7 @@ async fn source_artwork_pages_distinct_bindings() {
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position,artwork_binding) VALUES(?1,'source','artwork','Artwork','artwork','artwork',(SELECT COALESCE(max(position),-1)+1 FROM playlists),?2)")
+    sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,artwork_binding) VALUES (?1,'source','artwork','Artwork',?2)")
         .bind(fixture.source).bind(binding("binding-playlist").as_slice())
         .execute(&mut raw).await.unwrap();
     let mut expected = Vec::new();
@@ -927,6 +881,7 @@ async fn source_artwork_pages_distinct_bindings() {
     assert_eq!(actual, expected);
     sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) SELECT media_uri,'download',media_uri,'','',media_uri FROM tracks WHERE object_id LIKE 'artwork-%' AND CAST(substr(object_id,9) AS INTEGER)%2=0")
         .execute(&mut raw).await.unwrap();
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut retention = fixture
         .catalog
         .artwork_cache_retention(&["test:artwork-1".into()])
@@ -1118,7 +1073,7 @@ async fn local_mapping_selects_one_exact_or_representative_track_without_a_libra
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET source_path='/server/music/track.flac' WHERE track_key=?1")
+    sqlx::query("INSERT INTO track_details(track_key,source_path) VALUES(?1,'/server/music/track.flac') ON CONFLICT(track_key) DO UPDATE SET source_path=excluded.source_path")
         .bind(fixture.tracks[0])
         .execute(&mut raw)
         .await
@@ -1146,7 +1101,7 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     sqlx::query(
-        "UPDATE tracks SET source_path=CASE track_key\n           WHEN ?1 THEN '/music/Artist/Album/Track.flac'\n           ELSE 'Other/Album/Track.flac' END WHERE source_key=?2",
+        "INSERT INTO track_details(track_key,source_path) SELECT track_key,CASE track_key WHEN ?1 THEN '/music/Artist/Album/Track.flac' ELSE 'Other/Album/Track.flac' END FROM tracks WHERE source_key=?2 ON CONFLICT(track_key) DO UPDATE SET source_path=excluded.source_path",
     )
     .bind(fixture.tracks[0])
     .bind(fixture.source)
@@ -1497,12 +1452,6 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         };
 
         scan_observation.apply_catalog(&write, true).await.unwrap();
-    };
-    {
-        let update = scan_observation.into_changes();
-        (&fixture.catalog)
-            .publish_catalog_update("source", update)
-            .await;
     };
     let queue_media = fixture
         .catalog

@@ -1,6 +1,7 @@
 //! Source configuration, browsing selection, and source work.
 pub mod authorization;
 mod availability;
+mod changes;
 mod download;
 pub mod folders;
 mod integrations;
@@ -27,9 +28,7 @@ use crate::runtime::{
 use artwork::Artwork;
 use async_channel::{Receiver, Sender};
 use downloads::Downloads;
-use library::{
-    Catalog, CatalogUpdate, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey,
-};
+use library::{Catalog, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey};
 use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
     CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceEntityKind,
@@ -477,26 +476,9 @@ impl SourceOwner {
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
-        shared.catalog.observe_catalog(move |source, update| {
-            let shared = weak.upgrade();
-            async move {
-                if let Some(shared) = shared {
-                    if let Some((id, key)) = source {
-                        SourceOwner { shared }
-                            .catalog_updated(id, key, update)
-                            .await;
-                    } else if update.activity {
-                        shared
-                            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                                source_key: None,
-                                favorite: None,
-                                change: CatalogChange::Activity,
-                            }))
-                            .await;
-                    }
-                }
-            }
-        });
+        shared
+            .runtime
+            .spawn(changes::run(weak.clone(), shared.catalog.changes()));
         Arc::new(Self { shared })
     }
 
@@ -1461,38 +1443,97 @@ impl SourceOwner {
         Ok(())
     }
 
-    async fn catalog_updated(
-        &self,
-        source_id: SourceId,
-        source: library::SourceKey,
-        update: CatalogUpdate,
-    ) {
-        let source_id = &source_id;
-        if !update.track_rekeys.is_empty()
+    /// Publishes committed catalog changes as the catalog publications clients read today.
+    async fn publish_changes(&self, pending: changes::Pending) {
+        if !pending.rekeys.is_empty()
             && let Ok(playback) = self.shared.playback()
         {
-            playback.rekey_tracks(update.track_rekeys.clone());
+            playback.rekey_tracks(pending.rekeys.into());
         }
-        if !update.changed() {
+        // A reload, such as the one that follows the first load, changes no playlist members.
+        let changed = !pending.playlists.is_empty()
+            || pending.sources.values().any(|changed| changed.catalog);
+        if (changed || pending.activity)
+            && let Err(error) = self
+                .shared
+                .catalog
+                .refresh_incomplete_playlist_artwork(None, !changed)
+                .await
+        {
+            warn!(%error, "could not update incomplete playlist artwork");
+        }
+        if pending.reloaded {
+            self.shared
+                .send(SourceEvent::CatalogPublished(CatalogPublication {
+                    source_key: None,
+                    favorite: None,
+                    change: CatalogChange::Broad,
+                }))
+                .await;
+            self.request_asset_downloads();
+        }
+        if pending.activity {
+            self.shared
+                .send(SourceEvent::CatalogPublished(CatalogPublication {
+                    source_key: None,
+                    favorite: None,
+                    change: CatalogChange::Activity,
+                }))
+                .await;
+        }
+        let mut playlists = pending.playlists;
+        playlists.dedup();
+        for playlist in playlists {
+            self.shared
+                .send(SourceEvent::CatalogPublished(CatalogPublication {
+                    source_key: None,
+                    favorite: None,
+                    change: CatalogChange::Playlists(playlist),
+                }))
+                .await;
+        }
+        let mut sources = pending.sources;
+        for source in pending.home {
+            sources.entry(source).or_default().home = true;
+        }
+        for (source, changed) in sources {
+            // A removed source has nothing left to show.
+            if let Some(source_id) = self.shared.catalog.source_id(source) {
+                self.source_changed(&source_id, source, changed).await;
+            }
+        }
+    }
+
+    /// One source's changes: its side effects, then the publication clients refresh for.
+    async fn source_changed(
+        &self,
+        source_id: &SourceId,
+        source: SourceKey,
+        changed: changes::SourceChanged,
+    ) {
+        let changes::SourceChanged {
+            catalog: metadata,
+            playlists,
+            activity,
+            home,
+        } = changed;
+        if !(metadata || playlists || activity || home) {
             return;
         }
-        if update.metadata || update.playlists {
+        if metadata || playlists {
             crate::playlist_files::discover(self, source_id, source).await;
         }
-        let change = if update.metadata
-            || update.artwork
-            || (update.playlists && (update.home || update.activity))
-        {
+        let change = if metadata || (playlists && (home || activity)) {
             CatalogChange::Broad
-        } else if update.playlists {
+        } else if playlists {
             CatalogChange::Playlists(None)
-        } else if update.activity {
+        } else if activity {
             CatalogChange::Activity
         } else {
             CatalogChange::Home
         };
         {
-            if update.metadata
+            if metadata
                 && let Some(selected) = self.shared.selected()
                 && selected.source_key == source
                 && let Ok(configured) =
@@ -1517,13 +1558,13 @@ impl SourceOwner {
                 }
             }
         }
-        if update.metadata || update.artwork || update.playlists {
+        if metadata || playlists {
             self.request_asset_downloads();
         }
-        if update.metadata || update.playlists {
+        if metadata || playlists {
             self.shared.downloads.library_changed(source_id.clone());
         }
-        if update.metadata {
+        if metadata {
             if let Err(error) = self.shared.refresh_source_counts(source_id, source).await {
                 self.shared.warn_nonfatal(&error);
             }
@@ -2879,7 +2920,6 @@ impl SourceOwner {
                 .spawn(crate::album_release::run_selected_album_release_lookup(
                     self.shared.catalog.clone(),
                     self.shared.settings.clone(),
-                    self.shared.outputs.events.clone(),
                     selected.source_key,
                 ));
         *active = Some(task.abort_handle());
@@ -4076,6 +4116,14 @@ mod source_tests {
         owner.release_selected().await;
         assert!(!observer.cancellation().load(Ordering::Acquire));
         assert!(!owner.start_observer(selected_library.clone(), client, false));
+        let facts = |metadata: bool, activity: bool, playlists: bool, artwork: bool, home: bool| {
+            changes::SourceChanged {
+                catalog: metadata || artwork,
+                playlists,
+                activity,
+                home,
+            }
+        };
         for (metadata, activity, artwork, selected, visible) in [
             (false, false, false, true, false),
             (false, false, true, true, false),
@@ -4090,17 +4138,10 @@ mod source_tests {
             let configuration = owner.configuration_changes();
             let catalog = owner.catalog_changes();
             owner
-                .catalog_updated(
-                    source_id.clone(),
+                .source_changed(
+                    &source_id,
                     cached.source,
-                    CatalogUpdate {
-                        metadata,
-                        activity,
-                        playlists: false,
-                        artwork,
-                        home: false,
-                        track_rekeys: Arc::from([]),
-                    },
+                    facts(metadata, activity, false, artwork, false),
                 )
                 .await;
             assert!(
@@ -4127,14 +4168,10 @@ mod source_tests {
         let before = changes.borrow().clone();
         for (metadata, activity) in [(true, false), (false, true)] {
             owner
-                .catalog_updated(
-                    source_id.clone(),
+                .source_changed(
+                    &source_id,
                     cached.source,
-                    CatalogUpdate {
-                        metadata,
-                        activity,
-                        ..Default::default()
-                    },
+                    facts(metadata, activity, false, false, false),
                 )
                 .await;
         }
@@ -4149,21 +4186,17 @@ mod source_tests {
             (false, false, CatalogChange::Playlists(None)),
         ] {
             owner
-                .catalog_updated(
-                    source_id.clone(),
+                .source_changed(
+                    &source_id,
                     cached.source,
-                    CatalogUpdate {
-                        metadata: false,
-                        activity: false,
-                        playlists: true,
-                        artwork,
-                        home,
-                        track_rekeys: Arc::from([]),
-                    },
+                    facts(false, false, true, artwork, home),
                 )
                 .await;
-            let SourceEvent::CatalogPublished(publication) = receiver.recv().await.unwrap() else {
-                panic!("scan changes publish catalog content");
+            // Pictures are catalog rows, so they also refresh the source list first.
+            let publication = loop {
+                if let SourceEvent::CatalogPublished(publication) = receiver.recv().await.unwrap() {
+                    break publication;
+                }
             };
             assert_eq!(publication.change, expected);
         }
@@ -4377,7 +4410,7 @@ mod source_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let update = {
+            {
                 let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
                 observation
                     .apply_catalog(
@@ -4410,11 +4443,7 @@ mod source_tests {
                     )
                     .await
                     .unwrap();
-                observation.into_changes()
-            };
-            catalog
-                .publish_catalog_update(source_id.as_str(), update)
-                .await;
+            }
             let settings = SettingsFile::memory();
             settings.update(|stored| {
             stored.sources.configured.push(ConfiguredSource {
@@ -4463,9 +4492,10 @@ mod source_tests {
                 },
             );
             owner.shared.load_source_counts().await.unwrap();
+            // An album is listed only while it has a listed track.
             assert_eq!(
                 owner.shared.configured_sources(None).local_access[0].album_count,
-                1
+                0
             );
             let completion = owner.select_source(source_id.clone());
             let selected = tokio::time::timeout(Duration::from_secs(2), completion)
@@ -4481,7 +4511,7 @@ mod source_tests {
                         selected,
                     } = receiver.recv().await.unwrap()
                     {
-                        assert_eq!(configured.local_access[0].album_count, 1);
+                        assert_eq!(configured.local_access[0].album_count, 0);
                         break selected;
                     }
                 }
@@ -4559,7 +4589,7 @@ mod source_tests {
                     Ok(())
                 })
                 .unwrap();
-            let update = {
+            {
                 let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
                 observation
                     .apply_catalog(
@@ -4598,11 +4628,7 @@ mod source_tests {
                     )
                     .await
                     .unwrap();
-                observation.into_changes()
-            };
-            catalog
-                .publish_catalog_update(source_id.as_str(), update)
-                .await;
+            }
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
                     if let SourceEvent::CatalogPublished(CatalogPublication {
@@ -4679,17 +4705,13 @@ mod source_tests {
                     (1, 1)
                 );
                 assert_eq!(configured.local_access[1].track_count, 0);
-                let update = {
+                {
                     let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
                     observation
                         .remove_source_items("track", &["new-track".to_string()])
                         .await
                         .unwrap();
-                    observation.into_changes()
-                };
-                catalog
-                    .publish_catalog_update(source_id.as_str(), update)
-                    .await;
+                }
                 tokio::time::timeout(Duration::from_secs(2), async {
                     loop {
                         if matches!(receiver.recv().await.unwrap(),
