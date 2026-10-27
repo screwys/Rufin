@@ -80,18 +80,10 @@ pub struct PreferencesState {
     pub dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub release_history: RefCell<rufin_core::runtime::ReleaseHistory>,
     pub release_history_view: RefCell<Option<dialogs::release_notes::ReleaseHistoryView>>,
-    pub release_check_source: RefCell<Option<gtk::glib::SourceId>>,
+    pub release_checks: std::sync::Arc<rufin_core::release_update::PeriodicReleaseChecks>,
     pub preview_windows_updates: bool,
     pub release_notification_toast: RefCell<Option<adw::Toast>>,
     pub release_updating: RefCell<Option<String>>,
-}
-
-impl Drop for PreferencesState {
-    fn drop(&mut self) {
-        if let Some(source) = self.release_check_source.get_mut().take() {
-            source.remove();
-        }
-    }
 }
 
 impl PreferencesState {
@@ -1065,15 +1057,11 @@ fn general_page(
         let Some(&hours) = intervals.get(row.selected() as usize) else {
             return;
         };
-        if shell
+        shell
             .settings
             .set_app_setting("release check interval", hours, |settings| {
                 &mut settings.application.release_check_interval_hours
-            })
-            .is_some()
-        {
-            dialogs::release_notes::schedule_periodic_release_checks(&shell);
-        }
+            });
     });
 
     control_notifications_row.set_active(settings.application.control_notifications_enabled);

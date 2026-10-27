@@ -95,7 +95,6 @@ internal fun BackupsPage(model: RufinConnection, preferences: PreferencesConnect
             } },
             confirmButton = { TextButton({ staged?.let { backup -> run { owner ->
                 val report = owner.restore(backup)
-                preferences.refreshApplicationSettings()
                 message = translate("Backup restored") + report.warnings.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "\n").orEmpty()
                 dismiss()
             } } }, enabled = !busy) { Text(translate("Restore")) } },

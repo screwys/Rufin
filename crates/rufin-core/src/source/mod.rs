@@ -2110,6 +2110,58 @@ impl SourceOwner {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {
+    /// Turns a download rule on or off. A rule turned off gives up its downloads, which are
+    /// deleted when asked. Returns whether the rule changed.
+    pub fn set_download_rule(
+        &self,
+        source_id: SourceId,
+        rule: downloads::DownloadRule,
+        enabled: bool,
+        delete_downloads: bool,
+    ) -> sources::SourceResult<bool> {
+        let changed = self
+            .shared
+            .settings
+            .edit(|stored| {
+                let mut rules = stored.ui.download_rules(&source_id);
+                rules.set(rule, enabled);
+                Ok(stored.ui.set_download_rules(source_id.clone(), rules))
+            })
+            .map_err(SourceError::Other)?;
+        // Like source setup, this writes the file directly, so Downloads hears it here.
+        if changed {
+            self.shared
+                .downloads
+                .settings_changed(self.shared.settings.load().ui.downloads);
+            if !enabled {
+                self.shared
+                    .downloads
+                    .remove_rule(source_id, rule, delete_downloads);
+            }
+        }
+        Ok(changed)
+    }
+
+    /// Turns every download rule off and deletes the source's downloads.
+    pub fn clear_download_rules(&self, source_id: SourceId) -> sources::SourceResult<()> {
+        let changed = self
+            .shared
+            .settings
+            .edit(|stored| {
+                Ok(stored
+                    .ui
+                    .set_download_rules(source_id.clone(), downloads::DownloadRules::default()))
+            })
+            .map_err(SourceError::Other)?;
+        if changed {
+            self.shared
+                .downloads
+                .settings_changed(self.shared.settings.load().ui.downloads);
+        }
+        self.shared.downloads.clear(source_id, true);
+        Ok(())
+    }
+
     pub fn set_half_stars(&self, source_id: SourceId, enabled: bool) {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {

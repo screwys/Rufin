@@ -1,7 +1,45 @@
-use super::{SettingsError, SettingsOwner, app};
+use std::sync::Arc;
+
+use super::{PlayerPreferences, SettingsError, SettingsOwner, app};
+
+/// Committed preferences for one observer. The first call returns the current value.
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct PreferenceSubscription {
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Arc<app::Settings>>>,
+}
+
+impl PreferenceSubscription {
+    async fn next(&self) -> Result<Arc<app::Settings>, SettingsError> {
+        let mut changes = self.changes.lock().await;
+        changes
+            .changed()
+            .await
+            .map_err(|error| SettingsError::from(error.to_string()))?;
+        Ok(Arc::clone(&changes.borrow_and_update()))
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl PreferenceSubscription {
+    pub async fn next_application(&self) -> Result<app::ApplicationPreferences, SettingsError> {
+        Ok(self.next().await?.application.clone())
+    }
+
+    pub async fn next_player(&self) -> Result<PlayerPreferences, SettingsError> {
+        Ok(PlayerPreferences::from(self.next().await?.as_ref()))
+    }
+}
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
+    pub fn subscribe_preferences(&self) -> Arc<PreferenceSubscription> {
+        let mut changes = self.preference_changes();
+        changes.mark_changed();
+        Arc::new(PreferenceSubscription {
+            changes: tokio::sync::Mutex::new(changes),
+        })
+    }
+
     pub fn application_preferences(&self) -> app::ApplicationPreferences {
         self.file
             .value

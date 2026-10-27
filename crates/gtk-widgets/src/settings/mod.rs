@@ -1,20 +1,43 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 
+use tokio::sync::watch;
 use tracing::warn;
 
 use rufin_core::settings::app::{Settings, SettingsHandle};
 
+/// `current` holds the committed preferences as of the last `sync`.
 pub struct SettingsState {
     pub current: RefCell<Settings>,
     pub persistence: SettingsHandle,
+    changes: RefCell<watch::Receiver<Arc<Settings>>>,
 }
 
 impl SettingsState {
-    pub fn new(current: Settings, persistence: SettingsHandle) -> Self {
+    pub fn new(persistence: SettingsHandle) -> Self {
+        let changes = persistence.preference_changes();
+        let current = Settings::clone(&changes.borrow());
         Self {
             current: RefCell::new(current),
             persistence,
+            changes: RefCell::new(changes),
         }
+    }
+
+    pub fn changes(&self) -> watch::Receiver<Arc<Settings>> {
+        self.changes.borrow().clone()
+    }
+
+    /// Takes the latest committed preferences and returns the ones they replaced.
+    pub fn sync(&self) -> Option<Settings> {
+        let next = {
+            let mut changes = self.changes.borrow_mut();
+            if !changes.has_changed().unwrap_or(false) {
+                return None;
+            }
+            Arc::clone(&changes.borrow_and_update())
+        };
+        Some(self.current.replace(Settings::clone(&next)))
     }
 
     pub fn set_app_setting<T: PartialEq>(
@@ -45,9 +68,8 @@ impl SettingsState {
         });
         match result {
             Ok(()) => {
-                let committed = self.persistence.load();
-                *self.current.borrow_mut() = committed.clone();
-                changed.then_some(committed)
+                self.sync();
+                changed.then(|| self.current.borrow().clone())
             }
             Err(error) => {
                 warn!(%error, action = warning_action, "failed to save settings");
@@ -67,11 +89,10 @@ impl SettingsState {
         update: impl FnOnce(&mut rufin_core::settings::LibraryListSettings),
     ) -> bool {
         match self.persistence.update_library_list_settings(key, update) {
-            Ok(Some(committed)) => {
-                *self.current.borrow_mut() = committed;
-                true
+            Ok(changed) => {
+                self.sync();
+                changed
             }
-            Ok(None) => false,
             Err(error) => {
                 warn!(%error, "failed to save library list settings");
                 false

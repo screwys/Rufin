@@ -86,7 +86,6 @@ pub(super) fn bind(
     web_allow_remote.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
             save(
-                &shell,
                 &status,
                 shell
                     .settings
@@ -100,7 +99,6 @@ pub(super) fn bind(
     web_port.connect_value_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
             save(
-                &shell,
                 &status,
                 shell
                     .settings
@@ -165,7 +163,6 @@ fn bind_controls(
     web_enabled.connect_active_notify(move |row| {
         if let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) {
             save(
-                &shell,
                 &status,
                 shell
                     .settings
@@ -338,13 +335,11 @@ fn bind_address_action(
 }
 
 fn save(
-    shell: &Preferences,
     status: &adw::ActionRow,
     result: Result<ControllerSettings, rufin_core::settings::SettingsError>,
 ) {
-    match result {
-        Ok(_) => *shell.settings.current.borrow_mut() = shell.settings.persistence.load(),
-        Err(error) => status.set_subtitle(&error.to_string()),
+    if let Err(error) = result {
+        status.set_subtitle(&error.to_string());
     }
 }
 

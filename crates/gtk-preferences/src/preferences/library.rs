@@ -8,6 +8,7 @@ use downloads::{DownloadQueueState, DownloadRule};
 use gtk::gio;
 
 use localization::{msgid, tr, trn_with};
+use tracing::warn;
 
 use super::{
     PreferencesNavigationControls,
@@ -751,22 +752,14 @@ fn add_download_rules(
             let Some(row) = add_row.upgrade() else {
                 return;
             };
-            if add_shell
-                .settings
-                .update_app_settings("add download rule", |settings| {
-                    let mut rules = settings.download_rules(&add_source_id);
-                    rules.set(rule, true);
-                    settings.set_download_rules(add_source_id.clone(), rules)
-                })
-                .is_some()
-                || add_shell
-                    .settings
-                    .current
-                    .borrow()
-                    .download_rules(&add_source_id)
-                    .contains(rule)
-            {
-                row.set_visible(true);
+            match add_shell.products.source.set_download_rule(
+                add_source_id.clone(),
+                rule,
+                true,
+                false,
+            ) {
+                Ok(_) => row.set_visible(true),
+                Err(error) => warn!(%error, "failed to add download rule"),
             }
         });
         actions.add_action(&action);
@@ -792,20 +785,14 @@ fn remove_download_rule(
     delete_downloads: bool,
     row: &adw::ActionRow,
 ) {
-    let removed = shell
-        .settings
-        .update_app_settings("remove download rule", |settings| {
-            let mut rules = settings.download_rules(&source_id);
-            rules.set(rule, false);
-            settings.set_download_rules(source_id.clone(), rules)
-        })
-        .is_some();
-    if removed {
-        shell
-            .products
-            .downloads
-            .remove_rule(source_id, rule, delete_downloads);
-        row.set_visible(false);
+    match shell
+        .products
+        .source
+        .set_download_rule(source_id, rule, false, delete_downloads)
+    {
+        Ok(true) => row.set_visible(false),
+        Ok(false) => {}
+        Err(error) => warn!(%error, "failed to remove download rule"),
     }
 }
 
@@ -1194,25 +1181,17 @@ fn confirm_remove_all_downloads(
     let preferences_dialog = preferences_dialog.downgrade();
     dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
         if response.as_str() == "remove" {
-            let rules_are_empty = shell
-                .settings
-                .current
-                .borrow()
-                .download_rules(&source_id)
-                .is_empty();
-            let rules_disabled = rules_are_empty
-                || shell
-                    .settings
-                    .update_app_settings("remove all downloads", |settings| {
-                        settings
-                            .set_download_rules(source_id.clone(), crate::DownloadRules::default())
-                    })
-                    .is_some();
-            if rules_disabled {
-                shell.products.downloads.clear(source_id.clone(), true);
-                if let Some(preferences_dialog) = preferences_dialog.upgrade() {
-                    preferences_dialog.close();
+            match shell
+                .products
+                .source
+                .clear_download_rules(source_id.clone())
+            {
+                Ok(()) => {
+                    if let Some(preferences_dialog) = preferences_dialog.upgrade() {
+                        preferences_dialog.close();
+                    }
                 }
+                Err(error) => warn!(%error, "failed to remove all downloads"),
             }
         }
     });

@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 use crate::Preferences;
 use adw::prelude::*;
@@ -41,28 +40,6 @@ struct CivilDate {
 
 pub fn check_for_release_update(shell: &Rc<Preferences>) {
     shell.products.release_updates.check_and_update();
-}
-
-pub fn schedule_periodic_release_checks(shell: &Rc<Preferences>) {
-    if let Some(source) = shell.state.release_check_source.borrow_mut().take() {
-        source.remove();
-    }
-    let hours = shell
-        .settings
-        .current
-        .borrow()
-        .application
-        .release_check_interval_hours;
-    let weak_shell = Rc::downgrade(shell);
-    let source =
-        glib::timeout_add_local(Duration::from_secs(u64::from(hours) * 60 * 60), move || {
-            let Some(shell) = weak_shell.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            shell.products.release_updates.check();
-            glib::ControlFlow::Continue
-        });
-    shell.state.release_check_source.replace(Some(source));
 }
 
 fn current_civil_date() -> Option<CivilDate> {

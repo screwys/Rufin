@@ -61,7 +61,6 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
     private var overviewPrepared by mutableStateOf(false)
     private var autoplayPending = false
     private val preferenceEdits = Mutex()
-    private var releaseCheckIntervalHours by mutableLongStateOf(6)
 
     init {
         scope.launch {
@@ -74,6 +73,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                 val releaseOwner = runtime.releaseUpdates()
                 val settings = runtime.settings()
                 val changes = runtime.releaseEvents()
+                val periodicChecks = releaseOwner.checkPeriodically()
                 releasesOwner = releaseOwner
                 settingsOwner = settings
                 try {
@@ -104,16 +104,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { connection.runAction { throw error } }
-                finally { bridge = null; releasesOwner = null; settingsOwner = null; changes.destroy(); owner.destroy(); releaseOwner.destroy(); settings.destroy() }
-            }
-        }
-        scope.launch {
-            snapshotFlow { releasesOwner to releaseCheckIntervalHours }.collectLatest { (owner, hours) ->
-                if (owner == null) return@collectLatest
-                while (isActive) {
-                    delay(hours * 60 * 60 * 1000)
-                    owner.check()
-                }
+                finally { bridge = null; releasesOwner = null; settingsOwner = null; periodicChecks.destroy(); changes.destroy(); owner.destroy(); releaseOwner.destroy(); settings.destroy() }
             }
         }
         scope.launch {
@@ -184,7 +175,6 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
     }
 
     fun retryOverview() { if (overviewPrepared) reportRevision++ else prepareOverview(autoplay = false) }
-    fun setReleaseCheckInterval(hours: Long) { releaseCheckIntervalHours = hours }
     fun chooseYearly(value: Boolean) { yearly = value; prepareOverview(autoplay = false) }
     fun movePeriod(older: Boolean) {
         val index = periods.indexOf(selectedPeriod)

@@ -44,7 +44,6 @@ impl Preferences {
     pub(super) async fn set_secret_storage_mode(self: &Rc<Self>, mode: SecretStorageMode) -> bool {
         match self.products.source.change_secret_storage(mode).await {
             Ok(()) => {
-                *self.settings.current.borrow_mut() = self.settings.persistence.load();
                 self.products.scrobbling.storage_reset();
                 true
             }
@@ -79,8 +78,6 @@ impl Preferences {
         gtk::glib::spawn_future_local(async move {
             match shell.products.scrobbling.save_credential(edit).await {
                 Ok(committed) => {
-                    shell.settings.current.borrow_mut().lastfm_api_key =
-                        committed.lastfm.api_key.clone();
                     if previous.lastfm.api_key != committed.lastfm.api_key {
                         shell.retry_external_artwork(warning_action);
                     }

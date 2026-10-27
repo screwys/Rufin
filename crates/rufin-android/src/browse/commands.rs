@@ -193,16 +193,14 @@ impl AndroidLibrary {
         grid_spacing: DisplaySize,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
         let key = library_list_key(&route, CollectionCategory::from_name(&category));
-        let effective = self
-            .settings
+        self.settings
             .update_library_list_settings(key, |settings| {
                 settings.layout = layout;
                 settings.display.size = size;
                 settings.display.grid_spacing = grid_spacing;
             })
-            .map_err(error)?
-            .unwrap_or_else(|| self.settings.load());
-        Ok(browse_display(key, &effective.library_list(key)))
+            .map_err(error)?;
+        Ok(browse_display(key, &self.settings.load().library_list(key)))
     }
     pub fn set_browse_sort(
         &self,

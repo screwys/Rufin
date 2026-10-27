@@ -1796,7 +1796,6 @@ impl crate::PlayerUi {
         if !local {
             return;
         }
-        self.settings.current.borrow_mut().playback.volume = volume;
         if let Some(source) = self.controls.volume_persist_source.borrow_mut().take() {
             source.remove();
         }
@@ -1810,14 +1809,6 @@ impl crate::PlayerUi {
 
     pub fn apply_user_muted(&self, muted: bool) {
         self.playback_owner.set_muted(muted);
-        let local = self
-            .selected_playback()
-            .as_deref()
-            .map(|player| player.controls.playback_output.is_local())
-            .unwrap_or_else(|| self.playback_owner.playback_output().is_local());
-        if local {
-            self.settings.current.borrow_mut().playback.muted = muted;
-        }
     }
 }
 

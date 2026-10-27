@@ -26,7 +26,6 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StorageSettingsPage(model: RufinConnection, preferences: PreferencesConnection) {
-    LaunchedEffect(preferences) { preferences.refreshApplicationSettings() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var summary by remember { mutableStateOf<StorageSummary?>(null) }

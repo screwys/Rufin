@@ -915,7 +915,6 @@ impl Downloads {
     }
 }
 
-#[cfg_attr(feature = "bindings", uniffi::export)]
 impl Downloads {
     pub fn remove_rule(&self, source_id: SourceId, rule: DownloadRule, delete_downloads: bool) {
         self.send(Command::RemoveRule {
@@ -924,9 +923,7 @@ impl Downloads {
             delete_downloads,
         });
     }
-}
 
-impl Downloads {
     pub fn cancel(&self, source_id: SourceId, job_id: String) {
         self.cancel_job(Some(source_id), job_id);
     }
@@ -983,14 +980,11 @@ impl Downloads {
     }
 }
 
-#[cfg_attr(feature = "bindings", uniffi::export)]
 impl Downloads {
     pub fn clear(&self, source_id: SourceId, notify: bool) {
         self.send(Command::Clear { source_id, notify });
     }
-}
 
-impl Downloads {
     fn send(&self, command: Command) {
         if self.commands.try_send(command).is_err() {
             warn!("download operation lane is unavailable");

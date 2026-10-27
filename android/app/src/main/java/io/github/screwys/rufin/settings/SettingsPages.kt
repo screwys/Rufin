@@ -104,8 +104,6 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
     navigate: (MoreDestination) -> Unit) {
     var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
     LaunchedEffect(destination, model.ready, player.bridge) {
-        preferences.refreshApplicationSettings()
-        player.refreshSettings()
         if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
     }
     val state = preferences.applicationSettings

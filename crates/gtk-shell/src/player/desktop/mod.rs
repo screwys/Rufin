@@ -232,25 +232,15 @@ impl Shell {
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn set_tray_enabled(self: &Rc<Self>, enabled: bool) {
-        if self
+        let Some(committed) = self
             .settings
-            .update_app_settings("tray setting", |settings| {
-                if settings.tray_enabled == enabled
-                    || (!enabled && settings.keep_running_after_close)
-                {
-                    return false;
-                }
-                settings.tray_enabled = enabled;
-                if !enabled {
-                    settings.start_minimized = false;
-                }
-                true
+            .set_app_setting("tray setting", enabled, |settings| {
+                &mut settings.tray_enabled
             })
-            .is_none()
-        {
+        else {
             return;
-        }
-        if enabled {
+        };
+        if committed.tray_enabled {
             self.ensure_tray();
         } else {
             self.shutdown_tray();
@@ -259,23 +249,14 @@ impl Shell {
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn set_keep_running_after_close(self: &Rc<Self>, enabled: bool) {
-        if self
-            .settings
-            .update_app_settings("keep running after close setting", |settings| {
-                if settings.keep_running_after_close == enabled {
-                    return false;
-                }
-                settings.keep_running_after_close = enabled;
-                if enabled {
-                    settings.tray_enabled = true;
-                }
-                true
-            })
-            .is_none()
-        {
+        let Some(committed) = self.settings.set_app_setting(
+            "keep running after close setting",
+            enabled,
+            |settings| &mut settings.keep_running_after_close,
+        ) else {
             return;
-        }
-        if enabled {
+        };
+        if committed.keep_running_after_close {
             self.ensure_tray();
             self.request_background_access();
         }
@@ -352,20 +333,15 @@ impl Shell {
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn set_start_minimized_enabled(self: &Rc<Self>, enabled: bool) {
-        if self
-            .settings
-            .update_app_settings("start minimized setting", |settings| {
-                if settings.start_minimized == enabled || (enabled && !settings.tray_enabled) {
-                    return false;
-                }
-                settings.start_minimized = enabled;
-                true
-            })
-            .is_none()
-        {
+        let Some(committed) =
+            self.settings
+                .set_app_setting("start minimized setting", enabled, |settings| {
+                    &mut settings.start_minimized
+                })
+        else {
             return;
-        }
-        if enabled {
+        };
+        if committed.start_minimized {
             self.ensure_tray();
             self.request_background_access();
         }

@@ -106,7 +106,6 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val verticalOffset = remember { Animatable(0f) }
     val trackOffset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 48.dp.toPx() }
-    LaunchedEffect(player) { player.refreshSettings() }
     LaunchedEffect(lyricsEnabled, visualizerEnabled) {
         if (surface == PlayerSurface.LYRICS && !lyricsEnabled || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
     }

@@ -545,8 +545,6 @@ async fn connect_scrobbling(
                 }
             }
             ScrobblingConnectionEvent::Connected { username } => {
-                let preferences = shell.products.scrobbling.preferences();
-                shell.settings.current.borrow_mut().lastfm_api_key = preferences.lastfm.api_key;
                 if refresh_external_artwork {
                     shell.retry_external_artwork("Last.fm connection setting");
                 }

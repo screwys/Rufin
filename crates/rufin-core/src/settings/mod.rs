@@ -3,6 +3,7 @@ mod player;
 mod preferences;
 pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPreferences};
 pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
+pub use preferences::PreferenceSubscription;
 pub mod app;
 mod connect;
 pub mod context_menu;
@@ -197,6 +198,7 @@ impl StoredSettings {
 #[derive(Clone)]
 pub struct SettingsFile {
     shared: tokio::sync::watch::Sender<u64>,
+    preferences: tokio::sync::watch::Sender<Arc<UiSettings>>,
     sidebar: tokio::sync::watch::Sender<SidebarSettings>,
     appearance: tokio::sync::watch::Sender<AppearancePreferences>,
     web_controller: tokio::sync::watch::Sender<crate::settings::ControllerSettings>,
@@ -215,6 +217,10 @@ pub struct SettingsFile {
 impl SettingsFile {
     pub(crate) fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
         self.sidebar.subscribe()
+    }
+
+    pub(crate) fn preference_changes(&self) -> tokio::sync::watch::Receiver<Arc<UiSettings>> {
+        self.preferences.subscribe()
     }
 
     pub(crate) fn config_dir(&self) -> &Path {
@@ -249,6 +255,7 @@ impl SettingsFile {
         }
         Ok(Self {
             shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
+            preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
@@ -277,6 +284,7 @@ impl SettingsFile {
         Self {
             path: None,
             shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
+            preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
@@ -532,6 +540,13 @@ impl SettingsFile {
             *revision = next;
             true
         });
+        self.preferences.send_if_modified(|current| {
+            if **current == stored.ui {
+                return false;
+            }
+            *current = Arc::new(stored.ui.clone());
+            true
+        });
         self.appearance.send_if_modified(|current| {
             if *current == stored.ui.appearance {
                 return false;
@@ -580,6 +595,11 @@ impl SettingsOwner {
 
     pub fn appearance_changes(&self) -> tokio::sync::watch::Receiver<AppearancePreferences> {
         self.file.appearance.subscribe()
+    }
+
+    /// Every committed preference change, whichever writer made it.
+    pub fn preference_changes(&self) -> tokio::sync::watch::Receiver<Arc<UiSettings>> {
+        self.file.preference_changes()
     }
 
     pub fn load(&self) -> UiSettings {
@@ -693,24 +713,6 @@ impl SettingsOwner {}
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn set_download_rule(
-        &self,
-        source_id: SourceId,
-        rule: DownloadRule,
-        enabled: bool,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            let mut rules = ui.download_rules(&source_id);
-            rules.set(rule, enabled);
-            ui.set_download_rules(source_id, rules);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl SettingsOwner {
     pub fn set_download_quality(
         &self,
         source_id: SourceId,
@@ -718,17 +720,6 @@ impl SettingsOwner {
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_quality(source_id, quality);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl SettingsOwner {
-    pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.set_download_rules(source_id, DownloadRules::default());
             Ok(())
         })
         .map_err(Into::into)

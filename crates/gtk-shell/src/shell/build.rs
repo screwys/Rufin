@@ -22,9 +22,7 @@ use crate::player::desktop::DesktopState;
 use crate::player::desktop::lifecycle::install_application_quit;
 use crate::player::right_panel::RightPanelWidgets;
 use crate::player::{install_desktop_lifecycle, present_initial_window};
-use crate::preferences::dialogs::release_notes::{
-    check_for_release_update, schedule_periodic_release_checks,
-};
+use crate::preferences::dialogs::release_notes::check_for_release_update;
 use crate::preferences::source::SourceState;
 use gtk_player::lyrics::state::LyricsState;
 use gtk_player::state::PlaybackState;
@@ -158,7 +156,7 @@ pub async fn build(
         "loaded music source presentation"
     );
     let defer_initial_route = configured_sources.selected_source_id.is_some();
-    let settings_state = Rc::new(SettingsState::new(settings.clone(), settings_handle));
+    let settings_state = Rc::new(SettingsState::new(settings_handle));
     let navigation = NavigationState::new(
         rufin_core::route::sidebar_route_descriptor(settings.application.starting_page).root_route,
     );
@@ -199,7 +197,7 @@ pub async fn build(
         dialog: gtk::glib::WeakRef::new(),
         release_history: RefCell::new(release_history),
         release_history_view: RefCell::new(None),
-        release_check_source: RefCell::new(None),
+        release_checks: products.release_updates.clone().check_periodically(),
         preview_windows_updates: window_bar_preview
             == Some(crate::application::WindowBarPreview::Windows),
         release_notification_toast: RefCell::new(None),
@@ -500,7 +498,7 @@ pub async fn build(
         }
     });
     shell.preferences.bind_controller_appearance();
-    shell.bind_sidebar_settings();
+    shell.follow_settings();
     let weak = Rc::downgrade(&shell);
     app.connect_shutdown(move |_| {
         settings_errors_task.abort();
@@ -677,7 +675,6 @@ pub async fn build(
             }
         });
     }
-    schedule_periodic_release_checks(&shell.preferences);
     if defer_initial_route && !shell.source.operation.borrow().blocks_library() {
         shell.prepare_startup_route_content();
     }

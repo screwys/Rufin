@@ -22,7 +22,6 @@ import io.github.screwys.rufin.player.PlayerLayoutPreferences
 
 @Composable
 internal fun CustomizationSettingsPage(preferences: PreferencesConnection, browse: BrowseConnection, player: PlayerConnection) {
-    LaunchedEffect(preferences) { preferences.refreshApplicationSettings(); player.refreshSettings() }
     SettingsPage {
         preferences.state?.let {
             SettingsGroup(translate("Accessibility")) {

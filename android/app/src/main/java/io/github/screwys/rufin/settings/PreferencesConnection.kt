@@ -71,17 +71,26 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                 installedCatalogIds = null
                 bridge = preferences
                 val subscription = preferences.subscribe(packaged.map { it.removeSuffix(".po") })
+                val owner = settings!!
+                val changes = owner.subscribePreferences()
                 try {
-                    applicationSettings = settings!!.applicationPreferences()
-                    castNetworkInterface = settings!!.castNetworkInterface()
-                    connection.more.setReleaseCheckInterval(applicationSettings!!.releaseCheckIntervalHours.toLong())
-                    while (currentCoroutineContext().isActive) {
-                        val next = withContext(Dispatchers.Default) { subscription.next() }
-                        applyLanguage(next.language)
-                        state = next
+                    coroutineScope {
+                        launch {
+                            while (isActive) {
+                                val next = withContext(Dispatchers.Default) { changes.nextApplication() }
+                                castNetworkInterface = owner.castNetworkInterface()
+                                applicationSettings = next
+                            }
+                        }
+                        while (currentCoroutineContext().isActive) {
+                            val next = withContext(Dispatchers.Default) { subscription.next() }
+                            applyLanguage(next.language)
+                            state = next
+                        }
                     }
                 } finally {
                     bridge = null
+                    changes.destroy()
                     subscription.destroy()
                     preferences.destroy()
                     settings?.destroy(); settings = null
@@ -125,15 +134,8 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
     } }
     private var settings: SettingsOwner? = null
     private var scrobbling: ScrobblingOwner? = null
-    fun refreshApplicationSettings() = connection.runAction { refreshSettings() }
-    private fun refreshSettings() {
-        applicationSettings = settings?.applicationPreferences()
-        castNetworkInterface = settings?.castNetworkInterface()
-        applicationSettings?.let { connection.more.setReleaseCheckInterval(it.releaseCheckIntervalHours.toLong()) }
-    }
     fun changePreference(edit: SettingsOwner.() -> Unit) = connection.runAction {
         withContext(Dispatchers.IO) { settings?.edit() }
-        refreshSettings()
     }
     fun nativeSettings(): SettingsOwner = checkNotNull(settings)
     fun nativeScrobbling(): ScrobblingOwner = checkNotNull(scrobbling)
@@ -146,7 +148,6 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                 "config-file" -> io.github.screwys.rufin.shared.secrets.SecretStorageMode.CONFIG_FILE
                 else -> error("Unknown secret storage")
             })
-            refreshSettings()
         } finally { source.destroy() }
     }
     fun selectThemeAccent(theme: String, id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setThemeAccent(theme, id) } }

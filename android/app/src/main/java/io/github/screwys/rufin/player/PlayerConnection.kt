@@ -137,10 +137,15 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 outputChoices = emptyList()
                 val lyricSubscription = player.subscribeLyrics()
                 val visualizerSubscription = player.subscribeVisualizer()
+                val preferenceChanges = owner.subscribePreferences()
                 try {
                     withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
-                    settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
+                        launch {
+                            while (isActive) {
+                                settings = withContext(Dispatchers.Default) { preferenceChanges.nextPlayer() }
+                            }
+                        }
                         launch {
                             service.outputs.routes.map { routes -> routes.firstOrNull { it.selected }?.id }
                                 .distinctUntilChanged().collect { route ->
@@ -236,6 +241,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     levels = emptyList()
                     lyricSubscription.destroy()
                     visualizerSubscription.destroy()
+                    preferenceChanges.destroy()
                     playbackOwner?.destroy()
                     playbackOwner = null
                     lyricsOwner?.destroy()
@@ -257,13 +263,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     private fun action(block: suspend () -> Unit) = connection.runAction(block)
     private suspend fun changeSettings(change: (SettingsOwner) -> Unit) {
         val current = settingsOwner ?: return
-        val projected = withContext(Dispatchers.IO) {
-            change(current)
-            current.playerPreferences()
-        }
-        if (settingsOwner === current) settings = projected
+        withContext(Dispatchers.IO) { change(current) }
     }
-    fun refreshSettings() = action { changeSettings {} }
     fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun visualizerAppearance(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }

@@ -27,7 +27,7 @@ import io.github.screwys.rufin.settings.SettingsRow
 internal fun DownloadSettingsPage(model: RufinConnection, preferences: PreferencesConnection, embedded: Boolean = false) {
     val downloads = model.downloads
     val translation = LocalTranslationRevision.current
-    LaunchedEffect(translation) { downloads.refreshSources(); preferences.refreshApplicationSettings() }
+    LaunchedEffect(translation) { downloads.refreshSources() }
     val sources = downloads.sources
     fun DownloadSource.directory() = when (val directory = settings.directory) { is DownloadDirectory.Native -> directory.v1; is DownloadDirectory.Document -> directory.uri; null -> null }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }

@@ -435,7 +435,7 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
         {
             Ok(report) => {
                 shell.complete_add_server_dialog();
-                *shell.settings.current.borrow_mut() = shell.settings.persistence.load();
+                shell.settings.sync();
                 if let Some(dialog) = shell.state.active_dialog() {
                     dialog.close();
                 }

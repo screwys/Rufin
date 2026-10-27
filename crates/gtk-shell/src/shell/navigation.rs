@@ -134,19 +134,22 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
 }
 
 impl Shell {
-    pub(crate) fn bind_sidebar_settings(self: &Rc<Self>) {
+    /// Keeps the settings mirror on the committed preferences and rebuilds the sidebar when
+    /// a change it did not see yet moved it.
+    pub(crate) fn follow_settings(self: &Rc<Self>) {
         request_sidebar_pins(self);
-        let mut changes = self.settings.persistence.sidebar_changes();
+        let mut changes = self.settings.changes();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             while changes.changed().await.is_ok() {
+                changes.borrow_and_update();
                 let Some(shell) = weak.upgrade() else { break };
-                let next = changes.borrow_and_update().clone();
-                if shell.settings.current.borrow().sidebar == next {
+                let Some(previous) = shell.settings.sync() else {
                     continue;
+                };
+                if previous.sidebar != shell.settings.current.borrow().sidebar {
+                    shell.rebuild_sidebar_navigation();
                 }
-                shell.settings.current.borrow_mut().sidebar = next;
-                shell.rebuild_sidebar_navigation();
             }
         });
     }

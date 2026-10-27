@@ -302,7 +302,6 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
             initialCurrentSource = hasSource && preferences.applicationSettings?.newPlaylistCurrent != false,
         ) { name, sourceId, public ->
             player.createQueuePlaylist(name, sourceId, public)
-            preferences.refreshApplicationSettings()
             create = false
         }
     }

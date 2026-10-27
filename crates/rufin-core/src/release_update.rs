@@ -1056,10 +1056,54 @@ mod tests {
     }
 }
 
+/// Keeps periodic release checks running until it is dropped.
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct PeriodicReleaseChecks(tokio::task::AbortHandle);
+
+impl Drop for PeriodicReleaseChecks {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl ReleaseUpdateOwner {
     pub fn check(&self) {
         self.check_with_automatic_update(false, None);
+    }
+
+    /// Checks once per configured interval. Changing the interval starts a new wait.
+    pub fn check_periodically(self: Arc<Self>) -> Arc<PeriodicReleaseChecks> {
+        fn interval(settings: &crate::settings::Settings) -> Duration {
+            Duration::from_secs(
+                u64::from(settings.application.release_check_interval_hours) * 60 * 60,
+            )
+        }
+        let mut changes = self.settings.preference_changes();
+        let task = self.runtime.clone().spawn(async move {
+            let mut period = interval(&changes.borrow_and_update());
+            let wait = tokio::time::sleep(period);
+            tokio::pin!(wait);
+            loop {
+                tokio::select! {
+                    () = &mut wait => {
+                        self.check();
+                        wait.as_mut().reset(tokio::time::Instant::now() + period);
+                    }
+                    changed = changes.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        let next = interval(&changes.borrow_and_update());
+                        if next != period {
+                            period = next;
+                            wait.as_mut().reset(tokio::time::Instant::now() + period);
+                        }
+                    }
+                }
+            }
+        });
+        Arc::new(PeriodicReleaseChecks(task.abort_handle()))
     }
 
     pub async fn check_now(&self) -> bool {
