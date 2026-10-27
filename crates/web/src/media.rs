@@ -134,7 +134,7 @@ async fn random_settings(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let scoped = catalog::scope(
+    let (source, folder) = catalog::scope(
         &products,
         required(&parameters, "source")?,
         parameters.get("folder").map(String::as_str),
@@ -144,8 +144,8 @@ async fn random_settings(
     let (total, rows) = products
         .library
         .genre_choices(
-            scoped.source_key,
-            scoped.music_folder_key,
+            source,
+            folder,
             parameters.get("q").map(String::as_str).unwrap_or(""),
             offset..offset.saturating_add(64),
             &library::ReadCancellation::new(),
@@ -153,11 +153,16 @@ async fn random_settings(
         .await
         .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
-    let selected_genre =
-        rufin_core::radio::saved_random_genre(&products.library, &settings, &scoped)
-            .await
-            .map_err(internal)?
-            .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
+    let selected_genre = rufin_core::radio::saved_random_genre(
+        &products.library,
+        &settings,
+        &sources::SourceId::new(required(&parameters, "source")?),
+        source,
+        parameters.get("folder").map(String::as_str),
+    )
+    .await
+    .map_err(internal)?
+    .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
     let total = boolean(&parameters, "total")?.then_some(total as i64);
     Ok(json_response(
         StatusCode::OK,
@@ -182,8 +187,8 @@ async fn random(
         mode: String,
     }
     let input: Input = body(request).await?;
-    let scoped = catalog::scope(&products, &input.source, input.folder.as_deref()).await?;
-    let (source, folder) = (scoped.source_key, scoped.music_folder_key);
+    let (source, folder) =
+        catalog::scope(&products, &input.source, input.folder.as_deref()).await?;
     let placement = match input.mode.as_str() {
         "replace" => rufin_core::playback::QueuePlacement::Now,
         "next" => rufin_core::playback::QueuePlacement::Next,
@@ -323,13 +328,12 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let source = catalog::scope(
+        let (source, _) = catalog::scope(
             &products,
             required(&parameters, "source")?,
             parameters.get("folder").map(String::as_str),
         )
-        .await?
-        .source_key;
+        .await?;
         products
             .library
             .genres(&[key::<library::GenreKey>(&parameters, "genre")?], &cancel)

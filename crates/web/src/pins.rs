@@ -34,36 +34,43 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         .await
         .map_err(internal)?;
     catalog
-        .pin_totals(&mut rows, catalog::now(), &cancellation)
+        .complete_pin_rows(&mut rows, catalog::now(), &cancellation)
         .await
         .map_err(internal)?;
     let mut items = Vec::new();
     for (pin, row) in rows {
-        let mut row = match (&pin, row) {
-            (SidebarPin::Album { source_id, .. }, PinRow::Album(row)) => {
-                json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source_id,"title":row.metadata.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
+        let source = match &pin {
+            SidebarPin::Album { source_id, .. }
+            | SidebarPin::Artist { source_id, .. }
+            | SidebarPin::Genre { source_id, .. } => Some(source_id),
+            _ => None,
+        };
+        let mut row = match row {
+            PinRow::Album(row) => {
+                json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source,"title":row.metadata.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
             }
-            (
-                SidebarPin::Artist {
-                    source_id,
-                    album_artist,
-                    ..
-                },
-                PinRow::Artist(row),
-            ) => {
-                json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
+            PinRow::Artist(row) => {
+                let album_artist = matches!(
+                    pin,
+                    SidebarPin::Artist {
+                        album_artist: true,
+                        ..
+                    }
+                );
+                json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source,"name":row.metadata.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
             }
-            (SidebarPin::Genre { source_id, .. }, PinRow::Genre(row)) => {
-                json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))})
+            PinRow::Genre(row) => {
+                json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))})
             }
-            (_, PinRow::Playlist(row)) => {
+            PinRow::Playlist(row) => {
                 let artwork = row.artwork_binding.as_slice();
                 json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork),"artwork_previews":artwork_previews(&products, artwork)})
             }
-            (_, PinRow::SmartPlaylist(row)) => {
+            PinRow::SmartPlaylist(row) => {
                 json!({"kind":"smart-playlist","id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row.object_id, &row.name),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_revision":artwork_revision(row.artwork_binding.as_slice()),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_slice()),"source":None::<String>})
             }
-            _ => continue,
+            // Filtered out above: the web lists no folder pins.
+            PinRow::PlaylistFolder(_) => continue,
         };
         if matches!(
             pin,

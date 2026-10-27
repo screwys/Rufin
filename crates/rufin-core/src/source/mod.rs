@@ -913,7 +913,7 @@ impl SourceOwner {
 
     /// The library a source and one of its music folders make, without selecting it. The folder
     /// key is None while the Store holds no such folder.
-    pub async fn library(
+    async fn library(
         &self,
         source_id: SourceId,
         source_key: SourceKey,

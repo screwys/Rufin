@@ -718,7 +718,7 @@ impl SidebarPinItem {
                         }) as PinMenu
                     }),
                 SidebarPin::PlaylistFolder { folder_id, .. } => catalog
-                    .playlist_folder_by_id(&folder_id, None, None, &cancel)
+                    .playlist_folder_by_id(&folder_id, &cancel)
                     .await?
                     .map(|row| {
                         Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {

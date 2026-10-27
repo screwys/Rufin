@@ -186,8 +186,6 @@ impl Catalog {
     pub async fn playlist_folder_by_id(
         &self,
         id: &str,
-        source: Option<SourceKey>,
-        music_folder: Option<FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistFolderRow>> {
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
@@ -199,7 +197,7 @@ impl Catalog {
         let Some((key, smart)) = folder else {
             return Ok(None);
         };
-        let mut read = ListRead::new(
+        let read = ListRead::new(
             if smart {
                 ListKind::SmartPlaylists {
                     now: chrono::Utc::now().timestamp(),
@@ -207,10 +205,9 @@ impl Catalog {
             } else {
                 ListKind::Playlists
             },
-            source,
+            None,
             CatalogSort::Title,
         );
-        read.folder = music_folder;
         Ok(load_items(self, &mut connection, &read, &[-key])
             .await?
             .into_iter()
@@ -221,29 +218,38 @@ impl Catalog {
     }
 }
 
-/// Totals of the playlists each playlist folder holds, as a list read counts them.
-pub(crate) async fn folder_totals(
-    catalog: &Catalog,
-    read: &ListRead,
-) -> std::collections::HashMap<i64, crate::catalog::views::Totals> {
-    let mut children = read.clone();
-    children.filter.clear();
-    if read.playlist_scope == PlaylistScope::All {
-        children.source = None;
-    }
-    catalog.loaded().await;
-    let snapshot = catalog.snapshot();
-    crate::catalog::views::Context::new(&snapshot, false).playlist_folder_totals(&children)
-}
-
 /// Playlist folder rows: totals of the playlists each holds and its first playlist's artwork.
-async fn load_folder_rows(
+pub(crate) async fn load_folder_rows(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
     read: &ListRead,
     folders: &[i64],
 ) -> LibraryResult<Vec<PlaylistFolderRow>> {
-    let totals = folder_totals(catalog, read).await;
+    let totals = {
+        let mut children = read.clone();
+        children.filter.clear();
+        if read.playlist_scope == PlaylistScope::All {
+            children.source = None;
+        }
+        catalog.loaded().await;
+        let snapshot = catalog.snapshot();
+        crate::catalog::views::Context::new(&snapshot, false).playlist_folder_totals(&children)
+    };
+    let mut rows = load_folder_headers(connection, folders).await?;
+    for folder in &mut rows {
+        if let Some(totals) = totals.get(&folder.folder_key.raw()) {
+            folder.track_count = i64::from(totals.tracks);
+            folder.duration_millis = totals.duration as i64;
+        }
+    }
+    Ok(rows)
+}
+
+/// Playlist folder rows by key without their totals: the first playlist's artwork.
+pub(crate) async fn load_folder_headers(
+    connection: &mut SqliteConnection,
+    folders: &[i64],
+) -> LibraryResult<Vec<PlaylistFolderRow>> {
     #[derive(FromRow)]
     struct Row {
         #[sqlx(flatten)]
@@ -265,10 +271,6 @@ async fn load_folder_rows(
     .await?;
     rows.into_iter()
         .map(|mut row| {
-            if let Some(totals) = totals.get(&row.folder.folder_key.raw()) {
-                row.folder.track_count = i64::from(totals.tracks);
-                row.folder.duration_millis = totals.duration as i64;
-            }
             row.folder.artwork_binding = match row.cover_object_id {
                 Some(id) => crate::artwork::playlist_artwork(
                     row.folder.artwork_binding.take(),

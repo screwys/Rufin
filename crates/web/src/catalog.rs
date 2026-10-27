@@ -1,5 +1,5 @@
 use super::*;
-use library::{CatalogSort, ReadCancellation};
+use library::{CatalogSort, FolderKey, ReadCancellation, SourceKey};
 
 pub(super) async fn track_query(
     products: &ProductHandles,
@@ -17,13 +17,13 @@ pub(super) async fn track_query(
         && parameters.contains_key("source")
         && (parameters.contains_key("folder") || matches!(kind, "source" | "tracks"))
     {
-        let scoped = scope(
+        let (source, folder) = scope(
             products,
             required(parameters, "source")?,
             parameters.get("folder").map(String::as_str),
         )
         .await?;
-        (Some(scoped.source_key), scoped.music_folder_key)
+        (Some(source), folder)
     } else {
         (None, None)
     };
@@ -101,26 +101,28 @@ pub(super) async fn scope(
     products: &ProductHandles,
     source: &str,
     folder: Option<&str>,
-) -> Result<rufin_core::runtime::SelectedLibrary, Error> {
+) -> Result<(SourceKey, Option<FolderKey>), Error> {
     if source.is_empty() {
         return Err(bad_request("source is required"));
     }
-    let source_id = sources::SourceId::new(source);
-    let source_key = products
+    let source = products
         .library
-        .source_identity_key(&source_id)
+        .source_identity_key(&sources::SourceId::new(source))
         .await
         .map_err(internal)?
         .ok_or_else(|| bad_request("Source not found"))?;
-    let scoped = products
-        .source
-        .library(source_id, source_key, folder.map(str::to_owned))
-        .await
-        .map_err(internal)?;
-    if folder.is_some() && scoped.music_folder_key.is_none() {
-        return Err(bad_request("Folder not found"));
-    }
-    Ok(scoped)
+    let folder = match folder {
+        Some(folder) => Some(
+            products
+                .library
+                .folder_identity_key(source, folder)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| bad_request("Folder not found"))?,
+        ),
+        None => None,
+    };
+    Ok((source, folder))
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -210,13 +212,12 @@ pub(super) async fn home_data(
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
     use library::HomeBlockKind;
-    let scoped = scope(
+    let (source, folder) = scope(
         products,
         required(parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let (source, folder) = (scoped.source_key, scoped.music_folder_key);
     let mut blocks = products.settings.load().application.home_blocks;
     if let Some(block) = parameters.get("block") {
         let selected: HomeBlockKind =
@@ -313,13 +314,12 @@ pub(super) async fn artists_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let scoped = scope(
+    let (source, folder) = scope(
         products,
         required(parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let (source, folder) = (scoped.source_key, scoped.music_folder_key);
     let sort = match parameters
         .get("sort")
         .map(String::as_str)
@@ -417,13 +417,13 @@ pub(super) async fn smart_playlists_data(
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
     let (source, folder) = if parameters.contains_key("source") {
-        let scoped = scope(
+        let (source, folder) = scope(
             products,
             required(parameters, "source")?,
             parameters.get("folder").map(String::as_str),
         )
         .await?;
-        (Some(scoped.source_key), scoped.music_folder_key)
+        (Some(source), folder)
     } else {
         (None, None)
     };
@@ -518,13 +518,12 @@ pub(super) async fn albums_data(
     let descending = boolean(parameters, "descending")?;
     let favorites = boolean(parameters, "favorites")?;
     let cancellation = ReadCancellation::new();
-    let scoped = scope(
+    let (source, folder) = scope(
         products,
         required(parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let (source, folder) = (scoped.source_key, scoped.music_folder_key);
     let sort = match parameters
         .get("sort")
         .map(String::as_str)
@@ -615,13 +614,12 @@ async fn folders(
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let cancellation = ReadCancellation::new();
-    let scoped = scope(
+    let (source, folder) = scope(
         products,
         required(parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let (source, folder) = (scoped.source_key, scoped.music_folder_key);
     let parent = if let Some(parent) = parameters.get("parent") {
         Some(
             products

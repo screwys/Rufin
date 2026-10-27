@@ -456,7 +456,14 @@ impl AndroidLibrary {
         let genre = self
             .runtime
             .spawn(async move {
-                rufin_core::radio::saved_random_genre(&catalog, &settings, &selected).await
+                rufin_core::radio::saved_random_genre(
+                    &catalog,
+                    &settings,
+                    &selected.source_id,
+                    selected.source_key,
+                    selected.music_folder_object_id.as_deref(),
+                )
+                .await
             })
             .await
             .map_err(error)?
@@ -676,7 +683,7 @@ impl AndroidLibrary {
                     .map_err(error)?
                     .as_secs() as i64;
                 catalog
-                    .pin_totals(&mut pinned, now, &cancel)
+                    .complete_pin_rows(&mut pinned, now, &cancel)
                     .await
                     .map_err(error)?;
                 let mut rows = Vec::new();

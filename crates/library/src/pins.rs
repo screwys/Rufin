@@ -5,7 +5,7 @@ use crate::{
     ReadCancellation, SmartPlaylistRow, SourceId,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{AssertSqlSafe, FromRow};
+use sqlx::AssertSqlSafe;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -176,7 +176,8 @@ impl Catalog {
     }
 
     /// Rows of the pins the Store still holds, in pin order. Smart playlists and playlist folders
-    /// come without totals, which take an evaluation.
+    /// come without totals, which take an evaluation, and smart playlists without their
+    /// definitions; `complete_pin_rows` reads both.
     pub async fn pin_rows(
         &self,
         pins: &[SidebarPin],
@@ -224,45 +225,48 @@ impl Catalog {
                 .await?
                 .pop()
                 .map(PinRow::Playlist),
-                SidebarPin::SmartPlaylist { .. } => {
-                    crate::smart_playlists::load_smart_playlist_headers(
-                        &mut connection,
-                        &[crate::SmartPlaylistKey::from_raw(key)],
-                    )
-                    .await?
-                    .pop()
-                    .map(PinRow::SmartPlaylist)
-                }
-                SidebarPin::PlaylistFolder { .. } => {
-                    #[derive(FromRow)]
-                    struct Folder {
-                        #[sqlx(flatten)]
-                        row: PlaylistFolderRow,
-                        cover_id: Option<String>,
-                        cover_source: Option<String>,
-                        mosaic: Option<String>,
-                    }
-                    let mut folder: Folder = sqlx::query_as(AssertSqlSafe(format!(
-                        "SELECT item.folder_key,item.object_id,item.name,item.smart,{} artwork_binding,0 track_count,0 duration_millis,coalesce(smart.object_id,regular.object_id) cover_id,source.object_id cover_source,CASE WHEN item.smart THEN smart.mosaic ELSE regular.mosaic END mosaic
-                        FROM playlist_folders item
-                        LEFT JOIN playlists regular ON NOT item.smart AND regular.playlist_key=(SELECT min(child.playlist_key) FROM playlists child WHERE child.playlist_folder_key=item.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed))
-                        LEFT JOIN smart_playlists smart ON item.smart AND smart.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=item.folder_key)
-                        LEFT JOIN sources source ON source.source_key=regular.source_key
-                        WHERE item.folder_key=?1",
-                        crate::artwork::preview_sql("CASE WHEN item.smart THEN smart.artwork_binding ELSE regular.artwork_binding END")
+                SidebarPin::SmartPlaylist { playlist_id } => {
+                    // The definition is left unread, so a playlist this build cannot read
+                    // still lists.
+                    let (name, position, binding, mosaic): (
+                        String,
+                        i64,
+                        Option<Vec<u8>>,
+                        Option<String>,
+                    ) = sqlx::query_as(AssertSqlSafe(format!(
+                        "SELECT name,position,{},mosaic FROM smart_playlists WHERE smart_playlist_key=?1",
+                        crate::artwork::preview_sql("artwork_binding")
                     )))
                     .bind(key)
                     .fetch_one(&mut *connection)
                     .await?;
-                    folder.row.artwork_binding = match folder.cover_id {
-                        Some(id) => crate::artwork::playlist_artwork(
-                            folder.row.artwork_binding.take(),
-                            (folder.row.smart, folder.cover_source, id),
-                            folder.mosaic.as_deref(),
+                    Some(PinRow::SmartPlaylist(SmartPlaylistRow {
+                        smart_playlist_key: crate::SmartPlaylistKey::from_raw(key),
+                        object_id: playlist_id.clone(),
+                        name,
+                        definition: Default::default(),
+                        position,
+                        track_count: 0,
+                        duration_millis: 0,
+                        downloaded_count: 0,
+                        artwork_binding: crate::artwork::playlist_artwork(
+                            binding,
+                            (true, None, playlist_id.clone()),
+                            mosaic.as_deref(),
                         )?,
-                        None => None,
-                    };
-                    Some(PinRow::PlaylistFolder(folder.row))
+                    }))
+                }
+                SidebarPin::PlaylistFolder { smart: true, .. } => {
+                    crate::smart_playlists::load_smart_folder_headers(&mut connection, &[key])
+                        .await?
+                        .pop()
+                        .map(PinRow::PlaylistFolder)
+                }
+                SidebarPin::PlaylistFolder { smart: false, .. } => {
+                    crate::playlist_folders::load_folder_headers(&mut connection, &[key])
+                        .await?
+                        .pop()
+                        .map(PinRow::PlaylistFolder)
                 }
             };
             if let Some(row) = row {
@@ -272,9 +276,9 @@ impl Catalog {
         Ok(rows)
     }
 
-    /// Totals of pinned smart playlists and playlist folders, evaluated now. Folders count what
-    /// the playlist list counts for them.
-    pub async fn pin_totals(
+    /// Reads pinned smart playlists and playlist folders again as the playlist lists show them:
+    /// with their definitions and totals, evaluated now.
+    pub async fn complete_pin_rows(
         &self,
         rows: &mut [(SidebarPin, PinRow)],
         now: i64,
@@ -282,50 +286,61 @@ impl Catalog {
     ) -> LibraryResult<()> {
         let mut smart = Vec::new();
         let mut smart_folders = Vec::new();
-        let mut regular_folders = false;
+        let mut folders = Vec::new();
         for (_, row) in rows.iter() {
             match row {
-                PinRow::SmartPlaylist(row) => smart.push(row.smart_playlist_key.raw()),
+                PinRow::SmartPlaylist(row) => smart.push(row.smart_playlist_key),
                 PinRow::PlaylistFolder(row) if row.smart => {
                     smart_folders.push(row.folder_key.raw())
                 }
-                PinRow::PlaylistFolder(_) => regular_folders = true,
+                PinRow::PlaylistFolder(row) => folders.push(row.folder_key.raw()),
                 _ => {}
             }
         }
-        if smart.is_empty() && smart_folders.is_empty() && !regular_folders {
+        if smart.is_empty() && smart_folders.is_empty() && folders.is_empty() {
             return Ok(());
         }
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let totals =
-            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now).await?;
-        let smart_folders =
-            crate::smart_playlists::smart_folder_totals(self, &mut connection, &smart_folders, now)
-                .await?;
-        let folders = if regular_folders {
-            crate::playlist_folders::folder_totals(
-                self,
-                &crate::ListRead::new(crate::ListKind::Playlists, None, crate::CatalogSort::Title),
-            )
-            .await
-        } else {
-            HashMap::new()
-        };
+        let mut smart =
+            crate::smart_playlists::load_smart_playlist_rows(self, &mut connection, &smart, now)
+                .await?
+                .into_iter()
+                .map(|row| (row.smart_playlist_key, row))
+                .collect::<HashMap<_, _>>();
+        let mut full_folders = HashMap::new();
+        if !smart_folders.is_empty() {
+            full_folders.extend(
+                crate::smart_playlists::load_smart_folder_rows(
+                    self,
+                    &mut connection,
+                    &smart_folders,
+                    now,
+                )
+                .await?
+                .into_iter()
+                .map(|row| (row.folder_key, row)),
+            );
+        }
+        if !folders.is_empty() {
+            let read =
+                crate::ListRead::new(crate::ListKind::Playlists, None, crate::CatalogSort::Title);
+            full_folders.extend(
+                crate::playlist_folders::load_folder_rows(self, &mut connection, &read, &folders)
+                    .await?
+                    .into_iter()
+                    .map(|row| (row.folder_key, row)),
+            );
+        }
         for (_, row) in rows {
             match row {
                 PinRow::SmartPlaylist(row) => {
-                    crate::smart_playlists::set_smart_totals(row, &totals)
-                }
-                PinRow::PlaylistFolder(row) if row.smart => {
-                    (row.track_count, row.duration_millis) = smart_folders
-                        .get(&row.folder_key.raw())
-                        .copied()
-                        .unwrap_or_default();
+                    if let Some(full) = smart.remove(&row.smart_playlist_key) {
+                        *row = full;
+                    }
                 }
                 PinRow::PlaylistFolder(row) => {
-                    if let Some(totals) = folders.get(&row.folder_key.raw()) {
-                        row.track_count = i64::from(totals.tracks);
-                        row.duration_millis = totals.duration as i64;
+                    if let Some(full) = full_folders.remove(&row.folder_key) {
+                        *row = full;
                     }
                 }
                 _ => {}
@@ -334,50 +349,41 @@ impl Catalog {
         Ok(())
     }
 
-    /// Totals of pinned smart playlists and playlist folders, which take an evaluation.
+    /// Totals of pinned smart playlists and playlist folders, which take an evaluation. Folders
+    /// count the listed playlists of every source.
     pub async fn sidebar_pin_totals(
         &self,
         mut rows: Vec<SidebarPinRow>,
         now: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<SidebarPinRow>> {
-        if !rows.iter().any(|row| {
-            matches!(
-                row.pin,
-                SidebarPin::SmartPlaylist { .. } | SidebarPin::PlaylistFolder { .. }
-            )
-        }) {
+        let keys = |pinned: fn(&SidebarPin) -> bool| {
+            rows.iter()
+                .filter(|row| pinned(&row.pin))
+                .map(|row| row.key)
+                .collect::<Vec<_>>()
+        };
+        let smart = keys(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }));
+        let pinned_folders = keys(|pin| matches!(pin, SidebarPin::PlaylistFolder { .. }));
+        if smart.is_empty() && pinned_folders.is_empty() {
             return Ok(rows);
         }
-        self.loaded().await;
-        let smart = self
-            .snapshot()
-            .smart_playlists
-            .values()
-            .map(|smart| (smart.key, smart.folder))
-            .collect::<Vec<_>>();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let totals = crate::smart_playlists::smart_totals(
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let totals =
+            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now).await?;
+        let mut folders = crate::smart_playlists::smart_folder_totals(
             self,
             &mut connection,
-            &smart.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            &pinned_folders,
             now,
         )
         .await?;
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot, false);
-        let mut folders = HashMap::<i64, (i64, i64)>::new();
         for (_, playlist) in snapshot.playlists.iter() {
-            if playlist.folder != 0 && context.listed_playlist(playlist) {
+            if pinned_folders.contains(&playlist.folder) && context.listed_playlist(playlist) {
                 let total = context.playlist_totals(playlist, None);
                 let folder = folders.entry(playlist.folder).or_default();
-                folder.0 += i64::from(total.tracks);
-                folder.1 += total.duration as i64;
-            }
-        }
-        for (key, folder) in &smart {
-            if let (Some(folder), Some(total)) = (folder, totals.get(key)) {
-                let folder = folders.entry(*folder).or_default();
                 folder.0 += i64::from(total.tracks);
                 folder.1 += total.duration as i64;
             }
