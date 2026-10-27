@@ -1418,10 +1418,9 @@ impl AlbumTrackSlot {
                             if let Some(shell) = favorite_shell.upgrade()
                                 && let Some(track) = row
                             {
-                                shell.set_favorite_with_feedback(
+                                shell.set_favorite(
                                     library::FavoriteTarget::Track(track.media_uri.clone()),
                                     !favorite_button_is_active(button),
-                                    Some(button),
                                 );
                             }
                         });

@@ -658,9 +658,9 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(false);
     }
 
-    pub(crate) fn apply_favorite_settlement_to_mounted_route(
+    pub(crate) fn apply_favorite_state_to_mounted_route(
         &self,
-        settlement: rufin_core::runtime::FavoriteSettlement,
+        state: rufin_core::runtime::FavoriteState,
     ) {
         if let Some(view) = self
             .route_viewport
@@ -669,7 +669,7 @@ impl Shell {
             .as_ref()
             .map(|entry| entry.view.clone())
         {
-            view.apply_favorite_settlement(settlement);
+            view.apply_favorite_state(state);
         }
     }
 

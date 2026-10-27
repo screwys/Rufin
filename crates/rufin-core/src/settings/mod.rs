@@ -8,7 +8,6 @@ mod connect;
 pub mod context_menu;
 pub mod layout;
 mod library_lists;
-mod pins;
 pub mod presentation;
 pub mod right_panel;
 mod storage_reset;

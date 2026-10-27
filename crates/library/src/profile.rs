@@ -307,16 +307,26 @@ impl ProfileStore {
             .ok()
             .context("The Connect directory is not absolute")?
             .to_string();
-        let mut writer = catalog.writer().await?;
-        let mut transaction = writer.begin().await?;
+        let mut write = catalog.write().await?;
+        let connection = write.connection().await?;
         sqlx::raw_sql("DELETE FROM documents; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; UPDATE file_revision SET revision=0 WHERE id=1;
             DELETE FROM queue_transfer_pages;")
-            .execute(&mut *transaction).await?;
-        sqlx::query("DELETE FROM connect_media_files WHERE substr(path,1,length(?1))=?1; DELETE FROM local_locators WHERE substr(access_uri,1,length(?1))=?1; DELETE FROM local_access_metadata WHERE substr(access_uri,1,length(?1))=?1;")
-            .bind(files).execute(&mut *transaction).await?;
+            .execute(&mut *connection).await?;
+        let removed: Vec<String> = sqlx::query_scalar(
+            "DELETE FROM downloads WHERE substr(path,1,length(?1))=?1 RETURNING media_uri",
+        )
+        .bind(&files)
+        .fetch_all(&mut *connection)
+        .await?;
+        sqlx::query("DELETE FROM local_locators WHERE substr(access_uri,1,length(?1))=?1; DELETE FROM local_access_metadata WHERE substr(access_uri,1,length(?1))=?1;")
+            .bind(&files).execute(&mut *connection).await?;
         sqlx::query("UPDATE connect_profile SET profile=NULL,publisher=NULL,actor='0',clock=0,enabled=0,schema_version=?1 WHERE singleton=1")
-            .bind(SCHEMA_VERSION).execute(&mut *transaction).await?;
-        transaction.commit().await?;
+            .bind(SCHEMA_VERSION).execute(&mut *connection).await?;
+        for uri in &removed {
+            write.touch_download(uri);
+        }
+        write.keep();
+        write.commit().await?;
         Ok(())
     }
 }

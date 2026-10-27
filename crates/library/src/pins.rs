@@ -154,7 +154,6 @@ impl Catalog {
                     self,
                     &mut connection,
                     &[crate::GenreKey::from_raw(key)],
-                    None,
                 )
                 .await?
                 .pop()
@@ -184,9 +183,9 @@ impl Catalog {
                     )
                 }),
                 SidebarPin::SmartPlaylist { playlist_id } => {
-                    let (name, binding): (String, Option<Vec<u8>>) =
+                    let (name, binding, mosaic): (String, Option<Vec<u8>>, Option<String>) =
                         sqlx::query_as(AssertSqlSafe(format!(
-                            "SELECT name,{} FROM smart_playlists WHERE smart_playlist_key=?1",
+                            "SELECT name,{},mosaic FROM smart_playlists WHERE smart_playlist_key=?1",
                             crate::artwork::preview_sql("artwork_binding")
                         )))
                         .bind(key)
@@ -195,9 +194,9 @@ impl Catalog {
                     let artwork = crate::artwork::playlist_artwork(
                         binding,
                         (true, None, playlist_id.clone()),
-                        (None, None),
+                        mosaic.as_deref(),
                     )?;
-                    Some((name, None, vec![artwork]))
+                    Some((name, None, artwork.into_iter().collect()))
                 }
                 SidebarPin::PlaylistFolder { smart, .. } => {
                     #[derive(FromRow)]
@@ -206,9 +205,10 @@ impl Catalog {
                         binding: Option<Vec<u8>>,
                         cover_id: Option<String>,
                         cover_source: Option<String>,
+                        mosaic: Option<String>,
                     }
                     let folder: Folder = sqlx::query_as(AssertSqlSafe(format!(
-                        "SELECT item.name,{} binding,coalesce(smart.object_id,regular.object_id) cover_id,source.object_id cover_source
+                        "SELECT item.name,{} binding,coalesce(smart.object_id,regular.object_id) cover_id,source.object_id cover_source,CASE WHEN item.smart THEN smart.mosaic ELSE regular.mosaic END mosaic
                         FROM playlist_folders item
                         LEFT JOIN playlists regular ON NOT item.smart AND regular.playlist_key=(SELECT min(child.playlist_key) FROM playlists child WHERE child.playlist_folder_key=item.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed))
                         LEFT JOIN smart_playlists smart ON item.smart AND smart.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=item.folder_key)
@@ -219,16 +219,14 @@ impl Catalog {
                     .bind(key)
                     .fetch_one(&mut *connection)
                     .await?;
-                    let artwork = folder
-                        .cover_id
-                        .map(|id| {
-                            crate::artwork::playlist_artwork(
-                                folder.binding,
-                                (*smart, folder.cover_source, id),
-                                (None, None),
-                            )
-                        })
-                        .transpose()?;
+                    let artwork = match folder.cover_id {
+                        Some(id) => crate::artwork::playlist_artwork(
+                            folder.binding,
+                            (*smart, folder.cover_source, id),
+                            folder.mosaic.as_deref(),
+                        )?,
+                        None => None,
+                    };
                     Some((folder.name, None, artwork.into_iter().collect()))
                 }
             };

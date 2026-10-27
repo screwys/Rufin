@@ -10,9 +10,7 @@ pub(crate) async fn separate_file_access(connection: &mut SqliteConnection) -> L
     sqlx::raw_sql("INSERT OR IGNORE INTO file_identity SELECT local_file_key,local_file_key FROM local_files file WHERE local_file_key NOT IN(SELECT physical FROM file_identity) OR EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.source_key=file.source_key AND file.path IN(details.source_path,details.cue_path));
         INSERT OR REPLACE INTO local_file_observations(local_file_key,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,native_id,revision,observed_stamp,parent_path,parsed_stamp,accepted_facts,state)
         SELECT identity.canonical,file.path,file.root,file.relative_path,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.observed_stamp,file.parent_path,file.parsed_stamp,file.parsed_stamp,file.state
-        FROM file_identity identity JOIN local_files file ON file.local_file_key=identity.physical JOIN local_file_access_roots access USING(source_key,root)
-        WHERE NOT EXISTS(SELECT 1 FROM connect_media_files receipt JOIN local_locators locator ON locator.media_uri=receipt.media_uri AND locator.origin='download' WHERE receipt.managed AND locator.path=file.path)
-            OR EXISTS(SELECT 1 FROM local_files directory WHERE directory.source_key=file.source_key AND directory.root=file.root AND directory.kind='directory');
+        FROM file_identity identity JOIN local_files file ON file.local_file_key=identity.physical JOIN local_file_access_roots access USING(source_key,root);
         DROP TABLE file_identity;")
         .execute(&mut *connection).await?;
     let roots: Vec<(i64,String,String,Option<String>)> = sqlx::query_as("SELECT DISTINCT file.source_key,source.object_id,file.root,(SELECT id FROM connect_roots shared WHERE shared.source_id=source.object_id AND shared.root=file.root LIMIT 1) FROM local_files file JOIN sources source USING(source_key)")
@@ -83,12 +81,14 @@ async fn has_table(
     .await?)
 }
 
+/// Copies the rows of a table that pass `filter` into the columns the target shares with it.
 async fn copy_table(
     connection: &mut SqliteConnection,
     schema: &str,
     from: &str,
     to: &str,
     overrides: &[(&str, &str)],
+    filter: &str,
 ) -> LibraryResult<()> {
     let old = columns(connection, schema, from).await?;
     if old.is_empty() {
@@ -119,7 +119,7 @@ async fn copy_table(
         .collect::<Vec<_>>()
         .join(",");
     sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO main.{to}({names}) SELECT {expressions} FROM {schema}.{from} old"
+        "INSERT INTO main.{to}({names}) SELECT {expressions} FROM {schema}.{from} old WHERE {filter}"
     )))
     .execute(connection)
     .await?;
@@ -219,7 +219,7 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
             if !has_table(&mut transaction, "old_store", &table).await? {
                 continue;
             }
-            copy_table(&mut transaction, "old_store", &table, &table, &[]).await?;
+            copy_table(&mut transaction, "old_store", &table, &table, &[], "true").await?;
             copied += 1;
         }
         if copied == 0 {
@@ -747,6 +747,7 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 "source_key",
                 "(SELECT source_key FROM migration_source_keys WHERE old_key=old.source_key)",
             )],
+            "true",
         )
         .await?;
     }
@@ -775,6 +776,7 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
         "lyrics_cache",
         "lyrics_cache",
         &[],
+        "true",
     )
     .await?;
     copy_table(
@@ -783,6 +785,7 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
         "local_access_metadata",
         "local_access_metadata",
         &[],
+        "true",
     )
     .await?;
     separate_file_access(connection).await?;
@@ -1019,18 +1022,25 @@ async fn copy_native_playlists(connection: &mut SqliteConnection) -> LibraryResu
             FROM old_catalog.native_playlists old JOIN migration_playlist_keys mapping ON mapping.old_key=old.playlist_key JOIN migration_source_keys source ON source.old_key=old.source_key WHERE true
             ON CONFLICT(playlist_key) DO UPDATE SET owner='source',indexed=1,name=excluded.name,artwork_binding=COALESCE(playlists.artwork_binding,excluded.artwork_binding),writable=excluded.writable,metadata_writable=excluded.metadata_writable,provider_revision=excluded.provider_revision,valid_until=excluded.valid_until;")))
             .execute(&mut *connection).await?;
-    sqlx::raw_sql("DELETE FROM playlist_entries WHERE playlist_key IN (SELECT playlist_key FROM migration_playlist_keys);
-            INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,position)
-            SELECT (SELECT COALESCE(max(playlist_entry_key),0) FROM playlist_entries)+row_number() OVER(ORDER BY old.playlist_entry_key),mapping.playlist_key,old.object_id,track.track_key,old.position
+    let rank = crate::rank::nth_sql(
+        "row_number() OVER(PARTITION BY mapping.playlist_key ORDER BY old.position,old.playlist_entry_key)-1",
+    );
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DELETE FROM playlist_entries WHERE playlist_key IN (SELECT playlist_key FROM migration_playlist_keys);
+            INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,rank)
+            SELECT (SELECT COALESCE(max(playlist_entry_key),0) FROM playlist_entries)+row_number() OVER(ORDER BY old.playlist_entry_key),mapping.playlist_key,old.object_id,track.track_key,{rank}
             FROM old_catalog.native_playlist_entries old JOIN migration_playlist_keys mapping ON mapping.old_key=old.playlist_key JOIN tracks track ON track.media_uri=old.media_uri;
-            UPDATE home_entries SET entity_key=(SELECT playlist_key FROM migration_playlist_keys WHERE old_key=-home_entries.entity_key) WHERE entity_kind='playlist' AND entity_key<0;")
+            UPDATE home_entries SET entity_key=(SELECT playlist_key FROM migration_playlist_keys WHERE old_key=-home_entries.entity_key) WHERE entity_kind='playlist' AND entity_key<0;")))
             .execute(&mut *connection).await?;
     Ok(())
 }
 
-/// Released playlists keep their entries. Their list order and the source scope of Rufin
-/// playlists made for a file source are not kept: every Rufin playlist is global.
+/// Released playlists keep their entries, in their order as ranks. Their list order and the
+/// source scope of Rufin playlists made for a file source are not kept: every Rufin playlist
+/// is global.
 async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryResult<()> {
+    let rank = crate::rank::nth_sql(
+        "row_number() OVER(PARTITION BY old.playlist_key ORDER BY old.position,old.playlist_entry_key)-1",
+    );
     copy_table(
         connection,
         "old_store",
@@ -1047,6 +1057,7 @@ async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
                 "CASE WHEN old.name IS NULL THEN old.source_key END",
             ),
         ],
+        "true",
     )
     .await?;
     sqlx::query("UPDATE playlists SET artwork_binding=CAST(json_object('kind','playlist','source_id',(SELECT object_id FROM sources WHERE source_key=playlists.source_key),'object_id',object_id,'revision',artwork_revision) AS BLOB) WHERE artwork_revision IS NOT NULL")
@@ -1056,10 +1067,14 @@ async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
         "old_store",
         "playlist_entries",
         "playlist_entries",
-        &[(
-            "track_key",
-            "(SELECT track_key FROM tracks WHERE media_uri=old.media_uri)",
-        )],
+        &[
+            (
+                "track_key",
+                "(SELECT track_key FROM tracks WHERE media_uri=old.media_uri)",
+            ),
+            ("rank", rank.as_str()),
+        ],
+        "true",
     )
     .await?;
     if catalog {
@@ -1070,8 +1085,86 @@ async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
         "playlist_file_ignored",
         "playlist_file_settings",
     ] {
-        copy_table(connection, "old_store", table, table, &[]).await?;
+        copy_table(connection, "old_store", table, table, &[], "true").await?;
     }
+    Ok(())
+}
+
+/// Favorites and ratings, pending favorite deliveries, local file access and download records.
+/// A released download was a receipt plus a locator, or a locator alone before 0.16; it becomes
+/// one record, with the size its access metadata held. A download without a receipt has an
+/// unknown quality until the downloads owner reads its record file.
+async fn user_data(connection: &mut SqliteConnection, catalog: bool) -> LibraryResult<()> {
+    copy_table(
+        connection,
+        "old_store",
+        "user_media_state",
+        "user_state",
+        &[("changed_at", "unixepoch()")],
+        "true",
+    )
+    .await?;
+    copy_table(
+        connection,
+        "old_store",
+        "favorite_outbox",
+        "outbox",
+        &[("kind", "'favorite'"), ("value", "old.favorite")],
+        "true",
+    )
+    .await?;
+    if !has_table(connection, "old_store", "local_locators").await? {
+        return Ok(());
+    }
+    copy_table(
+        connection,
+        "old_store",
+        "local_locators",
+        "local_locators",
+        &[],
+        "old.origin<>'download'",
+    )
+    .await?;
+    let present = columns(connection, "old_store", "local_locators").await?;
+    let locator = |name: &str, absent: &str| {
+        if present.iter().any(|column| column == name) {
+            format!("locator.{name}")
+        } else {
+            absent.to_owned()
+        }
+    };
+    let (source, root, relative) = (
+        locator("source_key", "NULL"),
+        locator("root", "''"),
+        locator("relative_path", "''"),
+    );
+    let sized = catalog
+        && columns(connection, "old_catalog", "local_access_metadata")
+            .await?
+            .iter()
+            .any(|column| column == "size_bytes");
+    let size = |access: &str| {
+        if sized {
+            format!(
+                "(SELECT size_bytes FROM old_catalog.local_access_metadata metadata WHERE metadata.access_uri={access})"
+            )
+        } else {
+            "NULL".to_owned()
+        }
+    };
+    if has_table(connection, "old_store", "connect_media_files").await? {
+        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,revision,size,path,source_id,root,relative_path,managed)
+            SELECT receipt.media_uri,receipt.encoding,receipt.revision,{},receipt.path,
+                coalesce((SELECT object_id FROM sources WHERE source_key={source}),(SELECT source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=receipt.media_uri)),
+                coalesce({root},''),coalesce({relative},''),receipt.managed
+            FROM old_store.connect_media_files receipt
+            LEFT JOIN old_store.local_locators locator ON locator.media_uri=receipt.media_uri AND locator.origin='download' AND locator.access_uri=receipt.path", size("receipt.path"))))
+            .execute(&mut *connection).await?;
+    }
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,revision,size,path,source_id,root,relative_path,managed)
+        SELECT locator.media_uri,'unknown','',{},locator.access_uri,(SELECT object_id FROM sources WHERE source_key={source}),{root},{relative},1
+        FROM old_store.local_locators locator WHERE locator.origin='download' AND NOT EXISTS(SELECT 1 FROM downloads WHERE downloads.media_uri=locator.media_uri)", size("locator.access_uri"))))
+        .execute(&mut *connection).await?;
     Ok(())
 }
 
@@ -1249,51 +1342,19 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
     playlists(&mut transaction, has_catalog).await?;
     for table in [
         "smart_playlists",
-        "favorite_outbox",
-        "user_media_state",
         "listens",
         "listen_outbox",
         "legacy_activity",
-        "local_locators",
-        "connect_media_files",
     ] {
-        copy_table(&mut transaction, "old_store", table, table, &[]).await?;
+        copy_table(&mut transaction, "old_store", table, table, &[], "true").await?;
     }
+    user_data(&mut transaction, has_catalog).await?;
     legacy_copies(&mut transaction).await?;
     sqlx::query("DROP TABLE migration_metadata")
         .execute(&mut *transaction)
         .await?;
     sqlx::query("UPDATE smart_playlists SET artwork_binding=CAST(json_object('kind','playlist','smart',json('true'),'source_id',NULL,'object_id',object_id,'revision',artwork_revision) AS BLOB) WHERE artwork_revision IS NOT NULL").execute(&mut *transaction).await?;
     super::normalize_stored_artwork(&mut transaction).await?;
-    let has_received_media = has_table(&mut transaction, "old_store", "connect_collection").await?;
-    loop {
-        let files:Vec<(String,String)>=sqlx::query_as("SELECT media_uri,encoding FROM connect_media_files WHERE backing_uri IS NULL LIMIT 128").fetch_all(&mut *transaction).await?;
-        if files.is_empty() {
-            break;
-        }
-        for (uri, encoding) in files {
-            let received_backing = if has_received_media {
-                sqlx::query_scalar::<_,Option<String>>("SELECT json_extract(payload,'$.backing_id') FROM old_store.connect_collection WHERE media_uri=?1")
-                    .bind(&uri).fetch_optional(&mut *transaction).await?.flatten()
-            } else {
-                None
-            };
-            let backing = received_backing
-                .or_else(|| crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing))
-                .unwrap_or_else(|| uri.clone());
-            sqlx::query(
-                "UPDATE connect_media_files SET backing_uri=?1 WHERE media_uri=?2 AND encoding=?3",
-            )
-            .bind(backing)
-            .bind(uri)
-            .bind(encoding)
-            .execute(&mut *transaction)
-            .await?;
-        }
-    }
-    sqlx::raw_sql("UPDATE connect_media_files AS download SET source_id=source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE download.source_id IS NULL AND download.media_uri=track.media_uri;
-        UPDATE local_locators AS locator SET source_key=track.source_key FROM tracks track WHERE locator.source_key IS NULL AND locator.origin='download' AND locator.media_uri=track.media_uri AND track.source_key IS NOT NULL;")
-        .execute(&mut *transaction).await?;
     restore_saved_queue(&mut transaction).await?;
     // Hidden rows start their 60-day expiry at the upgrade.
     sqlx::query("UPDATE tracks SET hidden_since=unixepoch() WHERE indexed=0")

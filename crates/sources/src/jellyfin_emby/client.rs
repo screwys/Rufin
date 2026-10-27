@@ -1871,9 +1871,10 @@ mod tests {
                             shown |= part;
                         }
                     }
-                    // Server favorites show in catalog rows; server plays are activity.
+                    // Server favorites are state and server plays activity.
+                    assert!(!shown.intersects(sources::Shown::CATALOG));
                     assert_eq!(
-                        shown.contains(sources::Shown::CATALOG),
+                        shown.contains(sources::Shown::STATE),
                         prior.state.favorite != favorite
                     );
                     assert_eq!(

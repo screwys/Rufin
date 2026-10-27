@@ -318,7 +318,7 @@ pub async fn fixture() -> Fixture {
 }
 
 /// What clients refresh for after a test's committed Writes: the catalog rows of a source,
-/// its playlists, its plays or its Home rows.
+/// its playlists, its plays, its Home rows or favorites and ratings.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Shown(u8);
 
@@ -327,6 +327,7 @@ impl Shown {
     pub const PLAYLIST: Self = Self(1 << 1);
     pub const STATS: Self = Self(1 << 2);
     pub const HOME: Self = Self(1 << 3);
+    pub const STATE: Self = Self(1 << 4);
 
     pub fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
@@ -357,6 +358,7 @@ impl Shown {
                 | Scope::Folders => Some((None, Self::PLAYLIST)),
                 Scope::Listened { .. } => Some((None, Self::STATS)),
                 Scope::Home { source } => Some((Some(*source), Self::HOME)),
+                Scope::State { .. } => Some((None, Self::STATE)),
                 Scope::Reload => Some((None, Self::CATALOG)),
                 _ => None,
             })

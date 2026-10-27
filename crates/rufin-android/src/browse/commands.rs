@@ -431,7 +431,7 @@ impl AndroidLibrary {
         self.runtime
             .spawn(async move {
                 let genre = catalog
-                    .genres(&[key], selected.music_folder_key, &ReadCancellation::new())
+                    .genres(&[key], &ReadCancellation::new())
                     .await
                     .map_err(error)?
                     .pop()
@@ -561,7 +561,7 @@ impl AndroidLibrary {
             .spawn(async move {
                 let cancellation = ReadCancellation::new();
                 let user_rating = catalog
-                    .user_media_state(target.media_uri(), &cancellation)
+                    .user_state(target.media_uri(), &cancellation)
                     .await
                     .map_err(error)?
                     .and_then(|(_, rating)| rating);
@@ -685,7 +685,7 @@ impl AndroidLibrary {
                         } => {
                             let uri = library::source_entity_uri(source_id, "genre", genre_id);
                             catalog
-                                .genre(&uri, None, &cancel)
+                                .genre(&uri, &cancel)
                                 .await
                                 .map_err(error)?
                                 .map(Into::into)

@@ -259,7 +259,7 @@ impl ConnectOwner {
         let encoding_key = library::media_encoding_key(request.encoding);
         let mut receipt = self
             .catalog
-            .connect_media_file(uri, &encoding_key)
+            .download_file(uri, &encoding_key)
             .await
             .map_err(error)?
             .filter(|file| {
@@ -273,7 +273,7 @@ impl ConnectOwner {
         {
             receipt = self
                 .catalog
-                .connect_backing_media_file(uri, &encoding_key, &revision(reference))
+                .shared_download_file(uri, &encoding_key, &revision(reference))
                 .await
                 .map_err(error)?;
         }
@@ -305,7 +305,7 @@ impl ConnectOwner {
             };
             if self
                 .catalog
-                .connect_media_files(uri)
+                .download_files(uri)
                 .await
                 .map_err(error)?
                 .iter()

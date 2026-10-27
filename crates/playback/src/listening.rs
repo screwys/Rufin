@@ -75,8 +75,12 @@ pub enum RunEndReason {
     Failed,
 }
 
+/// How long a track must be heard to count as played. A track of unknown length counts after
+/// four minutes, so it does not count the moment it starts.
 pub fn qualified_play_threshold_millis(duration_millis: u64) -> u64 {
-    if duration_millis <= 10_000 {
+    if duration_millis == 0 {
+        240_000
+    } else if duration_millis <= 10_000 {
         duration_millis
     } else if duration_millis < 60_000 {
         (duration_millis / 2).max(5_000)
@@ -104,6 +108,7 @@ mod tests {
 
     #[test]
     fn qualified_play_threshold_preserves_short_half_and_clamped_law() {
+        assert_eq!(qualified_play_threshold_millis(0), 240_000);
         assert_eq!(qualified_play_threshold_millis(9_500), 9_500);
         assert_eq!(qualified_play_threshold_millis(31_000), 15_500);
         assert_eq!(qualified_play_threshold_millis(10_000), 10_000);

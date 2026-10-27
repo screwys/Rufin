@@ -397,13 +397,9 @@ pub async fn build(
             },
             {
                 let weak = weak.clone();
-                Rc::new(move |uri, favorite, button| {
+                Rc::new(move |uri, favorite| {
                     if let Some(shell) = weak.upgrade() {
-                        shell.set_favorite_with_feedback(
-                            library::FavoriteTarget::Track(uri),
-                            favorite,
-                            Some(button),
-                        );
+                        shell.set_favorite(library::FavoriteTarget::Track(uri), favorite);
                     }
                 })
             },

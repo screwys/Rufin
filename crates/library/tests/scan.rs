@@ -225,7 +225,7 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
         assert_eq!(observed.path, observation.path);
         assert_eq!(observed.revision, observation.revision);
         if !renamed {
-            sqlx::query("INSERT INTO user_media_state(media_uri,favorite) VALUES(?1,1)")
+            sqlx::query("INSERT INTO user_state(media_uri,favorite,changed_at) VALUES(?1,1,1)")
                 .bind(&uri)
                 .execute(&mut connection(&path).await)
                 .await
@@ -244,12 +244,11 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
             assert_eq!(candidates[0].path, observed.path);
         }
     }
-    let favorite: bool =
-        sqlx::query_scalar("SELECT favorite FROM user_media_state WHERE media_uri=?1")
-            .bind(&uri)
-            .fetch_one(&mut connection(&path).await)
-            .await
-            .unwrap();
+    let favorite: bool = sqlx::query_scalar("SELECT favorite FROM user_state WHERE media_uri=?1")
+        .bind(&uri)
+        .fetch_one(&mut connection(&path).await)
+        .await
+        .unwrap();
     assert!(favorite);
     catalog.close().await.unwrap();
 }
@@ -914,8 +913,8 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         (20, 0, Some(1_700_000_000))
     );
     sqlx::query(
-        "INSERT INTO user_media_state(media_uri,favorite,rating)
-         SELECT media_uri,1,90 FROM tracks WHERE object_id='track-one'",
+        "INSERT INTO user_state(media_uri,favorite,rating,changed_at)
+         SELECT media_uri,1,90,1 FROM tracks WHERE object_id='track-one'",
     )
     .execute(&mut outside)
     .await
@@ -952,8 +951,8 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
              (SELECT track_key FROM tracks WHERE object_id='track-one'),
              (SELECT playlist_entry_key FROM playlist_entries
               WHERE object_id='entry-track-one'),
-             (SELECT state.favorite FROM user_media_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one'),
-             (SELECT state.rating FROM user_media_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one')",
+             (SELECT state.favorite FROM user_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one'),
+             (SELECT state.rating FROM user_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one')",
     )
     .fetch_one(&mut outside)
     .await
@@ -1760,7 +1759,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         "track",
         "known",
     ));
-    catalog.set_favorite(&favorite, true).await.unwrap();
+    catalog.set_favorite(&favorite, true, false).await.unwrap();
 
     {
         for (kind, id, state) in &[(
@@ -2252,15 +2251,15 @@ async fn duplicate_provider_entries_keep_first_occurrence_and_dense_positions() 
     let mut outside = connection(&path).await;
     assert_eq!(
         sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT entry.object_id,track.object_id,entry.position FROM playlist_entries entry
+            "SELECT entry.object_id,track.object_id,row_number() OVER(ORDER BY entry.rank)-1 FROM playlist_entries entry
              JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key)
-             WHERE playlist.object_id='playlist-one' ORDER BY entry.position",
+             WHERE playlist.object_id='playlist-one' ORDER BY entry.rank",
         )
         .fetch_all(&mut outside)
         .await
         .expect("read normalized occurrence order"),
         [
-            ("duplicate-a".into(), "track-two".into(), 0),
+            ("duplicate-a".into(), "track-one".into(), 0),
             ("duplicate-b".into(), "track-one".into(), 1)
         ]
     );

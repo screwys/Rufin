@@ -19,7 +19,6 @@ struct FavoriteControl {
 #[derive(Default)]
 pub struct FavoriteSessionState {
     controls: RefCell<Vec<FavoriteControl>>,
-    pending_intents: rufin_core::favorites::FavoriteIntents,
 }
 
 pub fn album_favorite_key(media_uri: &str) -> FavoriteControlKey {
@@ -105,12 +104,6 @@ impl FavoriteSessionState {
     pub fn clear_favorite_controls(&self) {
         self.controls.borrow_mut().clear();
     }
-    pub fn projected_item_favorite(&self, item: &FavoriteTarget, fallback: bool) -> bool {
-        self.pending_intents.projected_item_favorite(item, fallback)
-    }
-    pub fn set_pending(&self, item: FavoriteTarget, favorite: bool) {
-        self.pending_intents.set_pending(item, favorite);
-    }
     pub fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
         self.controls.borrow_mut().retain(|control| {
             let Some(button) = control.button.upgrade() else {
@@ -121,9 +114,5 @@ impl FavoriteSessionState {
             }
             true
         });
-    }
-    pub fn response_matches_pending(&self, item: &FavoriteTarget, requested: bool) -> bool {
-        self.pending_intents
-            .response_matches_pending(item, requested)
     }
 }

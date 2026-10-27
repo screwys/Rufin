@@ -408,7 +408,7 @@ impl Catalog {
         media_uris: &[String],
     ) -> LibraryResult<Vec<LocalLocatorWrite>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("WITH ranked AS(SELECT source.object_id source_id,locator.*,row_number() OVER(PARTITION BY media_uri ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key) choice FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE media_uri IN(SELECT value FROM json_each(?1)) AND origin<>'download') SELECT source_id,media_uri,origin,path,root,relative_path,access_uri FROM ranked WHERE choice=1")
+        Ok(sqlx::query_as("WITH ranked AS(SELECT source.object_id source_id,locator.*,row_number() OVER(PARTITION BY media_uri ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key) choice FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE media_uri IN(SELECT value FROM json_each(?1))) SELECT source_id,media_uri,origin,path,root,relative_path,access_uri FROM ranked WHERE choice=1")
             .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
     }
 
@@ -464,8 +464,11 @@ impl Catalog {
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let owner: Option<i64> = match item {
             DownloadItem::Track { media_uri } => {
-                let (total, downloaded): (i64, i64) = sqlx::query_as("SELECT 1,EXISTS(SELECT 1 FROM local_locators WHERE media_uri=?1 AND origin='download')")
-                    .bind(media_uri).fetch_one(&mut *connection).await?;
+                let (total, downloaded): (i64, i64) =
+                    sqlx::query_as("SELECT 1,EXISTS(SELECT 1 FROM downloads WHERE media_uri=?1)")
+                        .bind(media_uri)
+                        .fetch_one(&mut *connection)
+                        .await?;
                 return Ok(DownloadStatus {
                     total: total as u64,
                     downloaded: downloaded as u64,
@@ -537,17 +540,14 @@ impl Catalog {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         let count = if let Some(source_id) = source_id {
             sqlx::query_scalar::<_, i64>(
-                "SELECT count(*) FROM main.local_locators
-                 WHERE source_key=(SELECT source_key FROM main.sources WHERE object_id=?1)
-                   AND origin='download'",
+                "SELECT count(DISTINCT media_uri) FROM main.downloads WHERE source_id=?1",
             )
             .bind(source_id)
             .fetch_one(&mut *connection)
             .await
         } else {
             sqlx::query_scalar::<_, i64>(
-                "SELECT count(*) FROM main.local_locators
-                 WHERE source_key IS NULL AND origin='download'",
+                "SELECT count(DISTINCT media_uri) FROM main.downloads WHERE source_id IS NULL",
             )
             .fetch_one(&mut *connection)
             .await
@@ -561,7 +561,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<i64> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar("SELECT count(DISTINCT media_uri) FROM main.local_locators WHERE origin='download' AND media_uri IN (SELECT value FROM json_each(?1))")
+        Ok(sqlx::query_scalar("SELECT count(DISTINCT media_uri) FROM main.downloads WHERE media_uri IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(media_uris)?).fetch_one(&mut *connection).await?)
     }
 
@@ -571,7 +571,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar("SELECT DISTINCT media_uri FROM main.local_locators WHERE origin='download' AND media_uri IN (SELECT value FROM json_each(?1))")
+        Ok(sqlx::query_scalar("SELECT DISTINCT media_uri FROM main.downloads WHERE media_uri IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
     }
 
@@ -597,8 +597,11 @@ impl Catalog {
         let mut connection = self.acquire_reader().await?;
         let access = sqlx::query_as::<_, (String, LocalAccessOrigin, bool)>(
             "SELECT location,origin,is_path FROM (
+                SELECT path location,'download' origin,0 is_path,0 priority,rowid key
+                FROM downloads WHERE media_uri=?1
+                UNION ALL
                 SELECT access_uri location,origin,0 is_path,
-                    CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END priority,
+                    CASE origin WHEN 'mapping' THEN 1 ELSE 2 END priority,
                     local_access_file_key key
                 FROM local_access_files WHERE media_uri=?1
                 UNION ALL
@@ -639,6 +642,7 @@ impl Catalog {
             "SELECT requested.value,
                 (SELECT json_group_array(path) FROM (
                     SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
+                    UNION SELECT path FROM main.downloads WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
                     UNION SELECT location.source_path FROM main.tracks track JOIN sources source USING(source_key) JOIN local_track_access location USING(track_key)
                       WHERE media_uri=requested.value AND source.kind='local')),
                 EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=track.track_key) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
@@ -657,6 +661,12 @@ impl Catalog {
                     .map(|path| {
                         if path.starts_with("content:") {
                             Ok(LocalMediaLocation::Document(path))
+                        } else if path.starts_with("file:") {
+                            crate::file_media_path(&path)
+                                .map(LocalMediaLocation::File)
+                                .ok_or(LibraryError::InvalidRequest(
+                                    "Download has no local path".into(),
+                                ))
                         } else if path.starts_with("rufin-document:") {
                             crate::document_access_uri(&path)
                                 .map(LocalMediaLocation::Document)
@@ -948,7 +958,7 @@ impl Catalog {
 
     pub async fn original_file(&self, media_uri: &str) -> LibraryResult<Option<LocalLocatorWrite>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 AND origin<>'download' ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1")
+        Ok(sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1")
             .bind(media_uri).fetch_optional(&mut *connection).await?)
     }
 
@@ -961,7 +971,7 @@ impl Catalog {
             UNION ALL
             SELECT metadata.size_bytes FROM local_locators locator
             JOIN local_access_metadata metadata USING(access_uri)
-            WHERE locator.media_uri=?1 AND locator.origin<>'download'
+            WHERE locator.media_uri=?1
         ) WHERE size_bytes IS NOT NULL LIMIT 1")
             .bind(media_uri).fetch_optional(&mut *connection).await?)
     }
@@ -995,15 +1005,15 @@ impl Catalog {
     }
 }
 
-/// Stages each track's loudness key from its best local access file, download first, then
-/// mapping, else the key its source reported. Returns the albums of the tracks that changed.
+/// Stages each track's loudness key from its best local access file, mapping first, else the
+/// key its source reported. Returns the albums of the tracks that changed.
 async fn refresh_access_audio(
     write: &mut Write<'_>,
     tracks: &[i64],
 ) -> LibraryResult<Vec<crate::AlbumKey>> {
     let mut albums = Vec::new();
     for page in tracks.chunks(128) {
-        let changed: Vec<(i64, Vec<u8>, Vec<u8>, Option<i64>, Option<i64>)> = sqlx::query_as("SELECT track_key,chosen,source_loudness_analysis_key,cue_start_millis,cue_end_millis FROM(SELECT track.track_key,details.source_loudness_analysis_key,details.loudness_analysis_key,details.cue_start_millis,details.cue_end_millis,coalesce((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),details.source_loudness_analysis_key) chosen FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))) WHERE loudness_analysis_key IS NOT chosen")
+        let changed: Vec<(i64, Vec<u8>, Vec<u8>, Option<i64>, Option<i64>)> = sqlx::query_as("SELECT track_key,chosen,source_loudness_analysis_key,cue_start_millis,cue_end_millis FROM(SELECT track.track_key,details.source_loudness_analysis_key,details.loudness_analysis_key,details.cue_start_millis,details.cue_end_millis,coalesce((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1),details.source_loudness_analysis_key) chosen FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))) WHERE loudness_analysis_key IS NOT chosen")
             .bind(serde_json::to_string(page)?).fetch_all(write.connection().await?).await?;
         for (key, chosen, _, _, _) in changed {
             let Some(track) = write.get::<Track>(key).await? else {
@@ -1213,7 +1223,7 @@ pub(crate) async fn export_local_locators_jsonl_on(
 ) -> LibraryResult<u64> {
     use futures_util::TryStreamExt;
     output.write_all(b"{\"version\":1}\n")?;
-    let mut rows = sqlx::query_as::<_, LocalLocatorWrite>("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE locator.origin<>'download' ORDER BY locator.local_access_file_key").fetch(&mut *connection);
+    let mut rows = sqlx::query_as::<_, LocalLocatorWrite>("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) ORDER BY locator.local_access_file_key").fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
         serde_json::to_writer(&mut output, &row)?;
@@ -1222,24 +1232,11 @@ pub(crate) async fn export_local_locators_jsonl_on(
     }
     Ok(count)
 }
+/// Restores imported and mapped locators. Downloads are not part of a backup; lines of
+/// released backups that name a download are skipped.
 pub(crate) async fn import_local_locators_jsonl_on(
     write: &mut Write<'_>,
     input: impl std::io::BufRead,
-) -> LibraryResult<u64> {
-    read_local_locators(write, input, false).await
-}
-
-pub(crate) async fn import_local_locators_jsonl_preserving_downloads_on(
-    write: &mut Write<'_>,
-    input: impl std::io::BufRead,
-) -> LibraryResult<u64> {
-    read_local_locators(write, input, true).await
-}
-
-async fn read_local_locators(
-    write: &mut Write<'_>,
-    input: impl std::io::BufRead,
-    preserve_downloads: bool,
 ) -> LibraryResult<u64> {
     let mut lines = input.lines();
     let header = lines
@@ -1258,7 +1255,9 @@ async fn read_local_locators(
     let mut count = 0;
     for line in lines {
         let locator = serde_json::from_str::<LocalLocatorWrite>(&line?)?;
-        if preserve_downloads && locator.origin=="download" && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.local_locators WHERE origin='download' AND media_uri=?1)").bind(&locator.media_uri).fetch_one(write.connection().await?).await? { continue; }
+        if locator.origin == "download" {
+            continue;
+        }
         write_local_locator(write, &locator).await?;
         count += 1;
     }
@@ -1276,7 +1275,7 @@ impl Catalog {
             "SELECT imported.media_uri,(SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key AND access.local_file_key IS NOT NULL) FROM (SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key)
             WHERE (?1 IS NULL OR entry.playlist_key=?1) AND track.media_uri>?2
               AND (track.media_uri LIKE 'file:%' OR track.media_uri LIKE 'rufin:cue/%' OR track.media_uri LIKE 'rufin:document/%' OR track.media_uri LIKE 'content:%')
-            UNION SELECT media_uri FROM user_media_state WHERE ?1 IS NULL AND media_uri>?2
+            UNION SELECT media_uri FROM user_state WHERE ?1 IS NULL AND media_uri>?2
               AND (favorite=1 OR rating IS NOT NULL)
               AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%' OR media_uri LIKE 'rufin:document/%' OR media_uri LIKE 'content:%')
             UNION SELECT media_uri FROM local_locators WHERE ?1 IS NULL AND origin='import' AND media_uri>?2
@@ -1304,14 +1303,14 @@ impl crate::Observation<'_> {
             let (owner, cursor, references) = if playlist.is_some() {
                 (
                     "playlist_entries requested CROSS JOIN tracks track USING(track_key)",
-                    "requested.position",
-                    "requested.playlist_key=?3 AND requested.position>?2",
+                    "requested.playlist_entry_key",
+                    "requested.playlist_key=?3 AND requested.playlist_entry_key>?2",
                 )
             } else {
                 (
                     "tracks track NOT INDEXED",
                     "track.track_key",
-                    "track.track_key>?2 AND(EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key) OR EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=track.media_uri AND(state.favorite=1 OR state.rating IS NOT NULL))) AND ?3 IS NULL",
+                    "track.track_key>?2 AND(EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key) OR EXISTS(SELECT 1 FROM user_state state WHERE state.media_uri=track.media_uri AND(state.favorite=1 OR state.rating IS NOT NULL))) AND ?3 IS NULL",
                 )
             };
             let rows: Vec<(i64,String,String,String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(

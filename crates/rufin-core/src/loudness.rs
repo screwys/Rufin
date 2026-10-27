@@ -1,12 +1,15 @@
-//! Sequential bounded loudness analysis for one missing Track or Album.
+//! Sequential bounded loudness analysis for one missing Track or Album. While normalization
+//! is EBU R128 it follows the change feed: tracks added to the selected source start a pass
+//! over what is missing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
-use library::{Catalog, LoudnessMeasurement, ReadCancellation, SourceKey};
+use library::{Catalog, LoudnessMeasurement, ReadCancellation, Scope, SourceKey};
 use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
+use tokio::sync::broadcast::error::RecvError;
 use tracing::{info, warn};
 
 use crate::playback::prepare_stream;
@@ -35,6 +38,10 @@ pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
     active: Mutex<Option<ActiveAnalysis>>,
     blocked: Mutex<AnalysisFailureBlock>,
+    /// The scope and tag writing while normalization is EBU R128.
+    current: Mutex<Option<(LoudnessNormalizationScope, bool)>>,
+    /// Hears the change feed while normalization is EBU R128.
+    watcher: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 #[derive(Default)]
@@ -60,7 +67,60 @@ impl LoudnessAnalysisOwner {
             runtime,
             active: Mutex::new(None),
             blocked: Mutex::new(AnalysisFailureBlock::default()),
+            current: Mutex::new(None),
+            watcher: Mutex::new(None),
         })
+    }
+
+    /// Starts hearing the change feed unless it already does.
+    fn watch(self: &Arc<Self>, source_owner: &Arc<SourceOwner>) {
+        let mut watcher = self.watcher.lock().unwrap_or_else(|p| p.into_inner());
+        if watcher.is_some() {
+            return;
+        }
+        let owner = Arc::downgrade(self);
+        let source = Arc::downgrade(source_owner);
+        let mut changes = source_owner.shared.catalog.changes();
+        *watcher = Some(
+            self.runtime
+                .spawn(async move {
+                    loop {
+                        let relevant = match changes.recv().await {
+                            Ok(change) => {
+                                let selected = source
+                                    .upgrade()
+                                    .and_then(|source| source.selected_library())
+                                    .map(|selected| selected.source_key);
+                                change.scopes.iter().any(|scope| match scope {
+                                    Scope::Reload => true,
+                                    Scope::Tracks {
+                                        source: Some(source),
+                                        added,
+                                        ..
+                                    } => !added.is_empty() && Some(*source) == selected,
+                                    _ => false,
+                                })
+                            }
+                            Err(RecvError::Lagged(_)) => true,
+                            Err(RecvError::Closed) => return,
+                        };
+                        let (Some(owner), Some(source)) = (owner.upgrade(), source.upgrade())
+                        else {
+                            return;
+                        };
+                        let current = *owner.current.lock().unwrap_or_else(|p| p.into_inner());
+                        if relevant && let Some((scope, write_tags)) = current {
+                            owner.library_changed(
+                                LoudnessNormalization::EbuR128,
+                                scope,
+                                write_tags,
+                                Some(source),
+                            );
+                        }
+                    }
+                })
+                .abort_handle(),
+        );
     }
 
     pub(crate) fn settings_changed(
@@ -71,6 +131,15 @@ impl LoudnessAnalysisOwner {
         source_owner: Option<Arc<SourceOwner>>,
     ) {
         if normalization != LoudnessNormalization::EbuR128 {
+            *self.current.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            if let Some(watcher) = self
+                .watcher
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take()
+            {
+                watcher.abort();
+            }
             self.cancel();
             return;
         }
@@ -78,6 +147,8 @@ impl LoudnessAnalysisOwner {
             self.cancel();
             return;
         };
+        *self.current.lock().unwrap_or_else(|p| p.into_inner()) = Some((scope, write_tags));
+        self.watch(&source_owner);
         let Some(selected) = source_owner.selected_library() else {
             self.cancel();
             return;

@@ -18,7 +18,7 @@ pub use diagnostics::DiagnosticsHandle;
 pub use downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use events::ProductReceivers;
 pub use inputs::{
-    CatalogChange, CatalogPublication, CatalogRevision, FavoriteSettlement, RuntimeInputs,
+    CatalogChange, CatalogPublication, CatalogRevision, FavoriteState, RuntimeInputs,
     SelectedLibrary, SourceEvent, SourceNotice, SourceNoticeKind, VisualizerPublication,
 };
 pub use release_update::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};

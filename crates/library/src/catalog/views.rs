@@ -164,7 +164,7 @@ impl<'a> Context<'a> {
     }
 
     /// The tags a track counts toward: its own, and its album's genres.
-    fn tags_of(&self, record: &TrackRec, into: &mut Vec<u32>) {
+    pub(crate) fn tags_of(&self, record: &TrackRec, into: &mut Vec<u32>) {
         into.clear();
         into.extend_from_slice(self.snapshot.track_runs(record)[2]);
         if let Some(album) = self.snapshot.albums.live(record.album) {
@@ -779,15 +779,15 @@ impl Context<'_> {
                 playlist
                     .entries
                     .iter()
-                    .filter(|(_, slot)| {
+                    .filter(|entry| {
                         snapshot
                             .tracks
-                            .live(*slot)
+                            .live(entry.track)
                             .is_some_and(|record| !scoped || self.in_folder(record, folder))
                     })
-                    .map(|(entry, track)| Member {
-                        track: *track,
-                        entry: *entry,
+                    .map(|entry| Member {
+                        track: entry.track,
+                        entry: entry.key,
                     })
                     .collect()
             }
@@ -1099,8 +1099,8 @@ impl Context<'_> {
     pub(crate) fn playlist_totals(&self, record: &PlaylistRec, folder: Option<u32>) -> Totals {
         let mut totals = Totals::default();
         let scoped = record.source != NO_SOURCE;
-        for (_, slot) in &record.entries {
-            if let Some(track) = self.snapshot.tracks.live(*slot)
+        for entry in &record.entries {
+            if let Some(track) = self.snapshot.tracks.live(entry.track)
                 && (!scoped || self.in_folder(track, folder))
             {
                 totals.add(track, Played::default());
@@ -2082,7 +2082,7 @@ impl Catalog {
                 continue;
             }
             let rows = sqlx::query_as::<_, (i64, i64, i64, i64)>(
-                "SELECT track.track_key,count(*),sum(listen.skipped),max(listen.started_at) FROM listens listen JOIN tracks track USING(media_uri) WHERE listen.started_at<=?1 AND listen.started_at>=?2 GROUP BY track.track_key",
+                "SELECT track.track_key,sum(listen.skipped=0),sum(listen.skipped),max(listen.started_at) FROM listens listen JOIN tracks track USING(media_uri) WHERE listen.started_at<=?1 AND listen.started_at>=?2 GROUP BY track.track_key",
             )
             .bind(now)
             .bind(now - seconds)
@@ -2243,15 +2243,14 @@ impl Catalog {
             .collect()
     }
 
-    /// A smart playlist's members in its own order.
-    pub(crate) async fn smart_members(
+    /// A collection's members in its own order.
+    pub(crate) async fn members(
         &self,
         connection: &mut SqliteConnection,
-        key: crate::SmartPlaylistKey,
-        now: i64,
+        collection: Collection,
     ) -> LibraryResult<Vec<crate::TrackKey>> {
         let order = self
-            .member_order(connection, &MemberRead::new(Collection::Smart { key, now }))
+            .member_order(connection, &MemberRead::new(collection))
             .await?;
         Ok(self
             .member_keys(&order)
@@ -2353,52 +2352,6 @@ impl Context<'_> {
             })
             .collect()
     }
-
-    /// Up to four covers of each tag's albums, by album sort text.
-    pub(crate) fn galleries(&self, derived: &Derived, tags: &[u32]) -> Vec<Vec<Art>> {
-        let snapshot = self.snapshot;
-        let wanted = tags.iter().copied().collect::<HashSet<_>>();
-        let mut albums = HashMap::<u32, HashSet<u32>>::new();
-        let mut owned = Vec::new();
-        for (_, record) in snapshot.tracks.iter() {
-            if !record.indexed() {
-                continue;
-            }
-            let Some(album) = self.album_of(record) else {
-                continue;
-            };
-            self.tags_of(record, &mut owned);
-            for tag in owned.iter().filter(|tag| wanted.contains(tag)) {
-                albums.entry(*tag).or_default().insert(album);
-            }
-        }
-        tags.iter()
-            .map(|tag| {
-                let mut members = albums
-                    .get(tag)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|slot| {
-                        let record = &snapshot.albums.records[slot as usize];
-                        (snapshot.text(record.sort), record.key, slot)
-                    })
-                    .collect::<Vec<_>>();
-                members.sort();
-                let mut covers = Vec::new();
-                for (.., slot) in members {
-                    let art = self.album_art(derived, slot);
-                    if art != Art::None && !covers.contains(&art) {
-                        covers.push(art);
-                        if covers.len() == 4 {
-                            break;
-                        }
-                    }
-                }
-                covers
-            })
-            .collect()
-    }
 }
 
 impl Context<'_> {
@@ -2421,10 +2374,10 @@ impl Context<'_> {
                         playlist
                             .entries
                             .iter()
-                            .filter(|(_, slot)| snapshot.tracks.live(*slot).is_some())
-                            .map(|(entry, track)| Member {
-                                track: *track,
-                                entry: *entry,
+                            .filter(|entry| snapshot.tracks.live(entry.track).is_some())
+                            .map(|entry| Member {
+                                track: entry.track,
+                                entry: entry.key,
                             })
                     })
                     .collect();

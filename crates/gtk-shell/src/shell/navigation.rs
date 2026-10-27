@@ -135,7 +135,6 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
 impl Shell {
     pub(crate) fn bind_sidebar_settings(self: &Rc<Self>) {
         request_sidebar_pins(self);
-        self.import_remote_playlist_pins_once();
         let mut changes = self.settings.persistence.sidebar_changes();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -154,27 +153,6 @@ impl Shell {
     pub(crate) fn rebuild_sidebar_navigation(self: &Rc<Self>) {
         rebuild_navigation(self);
         self.update_layout();
-    }
-
-    pub(crate) fn import_remote_playlist_pins_once(self: &Rc<Self>) {
-        let result = self
-            .products
-            .source
-            .import_playlist_pins_once(self.products.settings.clone());
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let result = result.recv().await;
-            let Some(shell) = weak.upgrade() else { return };
-            match result {
-                Ok(Ok(true)) => {
-                    *shell.settings.current.borrow_mut() = shell.products.settings.load();
-                    request_sidebar_pins(&shell);
-                }
-                Ok(Ok(false)) => {}
-                Ok(Err(error)) => warn!(%error, "failed to import remote playlist Pins"),
-                Err(error) => warn!(%error, "failed to import remote playlist Pins"),
-            }
-        });
     }
 
     pub(crate) fn set_sidebar_pin(self: &Rc<Self>, pin: SidebarPin, pinned: bool) {
@@ -690,7 +668,6 @@ impl SidebarPinItem {
                 } => catalog
                     .genre(
                         &library::source_entity_uri(&source_id, "genre", &genre_id),
-                        None,
                         &cancel,
                     )
                     .await?

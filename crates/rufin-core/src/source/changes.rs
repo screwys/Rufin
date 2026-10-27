@@ -1,7 +1,7 @@
 //! Publishes the Catalog's Changes as the catalog publications clients read today and runs the
 //! side effects that follow them. A source's catalog changes publish at most once a second
 //! while a sync commits page after page, and at once when its listing completes. Plays,
-//! playlists and Home rows publish at once.
+//! favorites, ratings, playlists and Home rows publish at once.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
@@ -37,6 +37,8 @@ pub(super) struct Pending {
     pub(super) activity: bool,
     pub(super) playlists: Vec<Option<PlaylistKey>>,
     pub(super) home: Vec<SourceKey>,
+    /// Tracks, albums and artists whose shown favorite or rating changed.
+    pub(super) states: Vec<library::StateChange>,
 }
 
 impl Pending {
@@ -64,8 +66,9 @@ impl Pending {
                 }
                 Scope::Home { source } => self.home.push(*source),
                 Scope::Rekey { old, new } => self.rekeys.push((*old, *new)),
+                Scope::State { items } => self.states.extend(items.iter().cloned()),
                 Scope::Tracks { source: None, .. }
-                | Scope::State { .. }
+                | Scope::Queue
                 | Scope::Downloads { .. }
                 | Scope::Lyrics { .. } => {}
             }
@@ -110,6 +113,7 @@ impl Pending {
             activity: std::mem::take(&mut self.activity),
             playlists: std::mem::take(&mut self.playlists),
             home: std::mem::take(&mut self.home),
+            states: std::mem::take(&mut self.states),
         }
     }
 
@@ -120,6 +124,7 @@ impl Pending {
             && !self.activity
             && self.playlists.is_empty()
             && self.home.is_empty()
+            && self.states.is_empty()
     }
 }
 

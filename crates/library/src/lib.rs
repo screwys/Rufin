@@ -33,6 +33,7 @@ pub mod profile;
 pub use connect::connect_current_kind;
 mod connect_media;
 mod db;
+mod downloads;
 mod favorites;
 mod fingerprint;
 mod home;
@@ -43,6 +44,7 @@ mod lyrics;
 mod lyrics_search;
 mod lyrics_tokenizer;
 mod migration;
+mod mosaics;
 mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
@@ -51,10 +53,10 @@ mod pins;
 mod playlists;
 pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
+pub mod rank;
 mod waveform;
-pub use connect_media::{
-    CatalogFile, CatalogFileDependency, CatalogFileStamp, ConnectMediaFile, media_encoding_key,
-};
+pub use connect_media::{CatalogFile, CatalogFileDependency, CatalogFileStamp};
+pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
 mod radio;
 mod scroll_sections;
@@ -76,15 +78,14 @@ pub use activity::{
     ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
 pub use artwork::{
-    AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, PlaylistArtworkManifest,
-    RepresentativeArtworkScope, authored_playlist_artwork, automatic_playlist_artwork,
-    merge_playlist_artwork, normalize_artwork_binding,
+    AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
+    authored_playlist_artwork, automatic_playlist_artwork, normalize_artwork_binding,
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
     AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FolderObservation,
     Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation, PlaylistObservation,
-    Scope, SourcePhase, TagObservation, TrackObservation,
+    Scope, SourcePhase, StateChange, TagObservation, TrackObservation,
 };
 pub use collections::{
     AlbumArtistLink, AlbumDetailIndex, AlbumDetailRow, AlbumGenreLink, AlbumLinks,
@@ -93,7 +94,7 @@ pub use collections::{
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
 pub use db::{Catalog, ReadCancellation};
-pub use favorites::{FavoriteTarget, NativeUserState, UserMediaStateWrite};
+pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
     HomeSectionKind, HomeSectionRows, HomeTrackRow,
@@ -113,18 +114,19 @@ pub use local::{
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
+pub use mosaics::MosaicOwner;
 pub use playlist_format::{
     PlaylistFile, PlaylistFileEntry, PlaylistFormat, PlaylistImportReport, PlaylistPathMode,
     playlist_host_path, playlist_locator,
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistAccess, PlaylistEditEntry, PlaylistEntryRemovals, PlaylistEntryView,
-    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow,
+    PlaylistAccess, PlaylistEditEntry, PlaylistEntryView, PlaylistEntryWrite, PlaylistGenreLink,
+    PlaylistIdentity, PlaylistRow,
 };
 pub use queue::{
-    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueueOrderUpdate,
-    QueuePlacement, QueueProvenance, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
+    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,
+    QueueProvenance, QueueRank, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
     QueueTransferPage, QueueTransferRow, QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};

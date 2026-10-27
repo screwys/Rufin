@@ -13,10 +13,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use audio_processing::ResolvedStream;
-use library::{Catalog, FolderKey, SourceKey, TrackKey};
+use library::{Catalog, Change, FolderKey, Scope, SourceKey, TrackKey};
 use serde::{Deserialize, Serialize};
 use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
+use tokio::sync::broadcast::{self, error::RecvError};
 use tracing::warn;
 
 mod quality;
@@ -85,9 +86,6 @@ enum Command {
     Remove {
         media_uris: Vec<String>,
         notify: bool,
-    },
-    LibraryChanged {
-        source_id: SourceId,
     },
     SettingsChanged(Vec<SourceDownloadSettings>),
     RemoveRule {
@@ -912,10 +910,6 @@ impl Downloads {
         self.send(Command::ConnectChanged);
     }
 
-    pub fn library_changed(&self, source_id: SourceId) {
-        self.send(Command::LibraryChanged { source_id });
-    }
-
     pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
         self.send(Command::SettingsChanged(settings));
     }
@@ -1004,6 +998,15 @@ impl Downloads {
     }
 }
 
+async fn next_change(
+    feed: &mut Option<broadcast::Receiver<Arc<Change>>>,
+) -> Result<Arc<Change>, RecvError> {
+    match feed {
+        Some(feed) => feed.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
 async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiver<PreparedRules>) {
     if let Err(error) = migrate_download_records(&actor.root, &actor.catalog, None, None).await {
         warn!(%error, "could not restore direct download access");
@@ -1019,7 +1022,10 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
+    // The change feed, heard only while some source has download rules.
+    let mut feed = None;
     loop {
+        actor.follow_rules(&mut feed);
         if receiver.is_closed() {
             actor.abort_matching(&mut active, true, |_| true).await;
             break;
@@ -1049,6 +1055,7 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
                     let current = active.swap_remove(index);
                     actor.finish(current, result, &mut active).await;
                 }
+                change = next_change(&mut feed) => actor.library_changed(change, &mut feed),
                 _ = retry.tick() => actor.retry_waiting(),
             }
             continue;
@@ -1063,6 +1070,7 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
             Ok(prepared) = rule_results.recv() => {
                 actor.apply_prepared_rules(prepared, &mut active).await;
             }
+            change = next_change(&mut feed) => actor.library_changed(change, &mut feed),
             _ = retry.tick() => {
                 actor.retry_waiting();
             }
@@ -1222,9 +1230,6 @@ impl Actor {
                     self.force_remove(source_id.as_ref(), media_uris, notify)
                         .await;
                 }
-            }
-            Command::LibraryChanged { source_id } => {
-                self.reconcile_all_rules(&source_id);
             }
             Command::SettingsChanged(settings) => {
                 self.apply_settings(settings, active).await;
@@ -1391,6 +1396,60 @@ impl Actor {
             }
         }
         for source_id in source_ids {
+            self.reconcile_all_rules(&source_id);
+        }
+    }
+
+    /// Hears the change feed while some source has rules, and stops hearing it when none has.
+    fn follow_rules(&self, feed: &mut Option<broadcast::Receiver<Arc<Change>>>) {
+        if !self
+            .settings
+            .values()
+            .any(|settings| !settings.rules.is_empty())
+        {
+            *feed = None;
+        } else if feed.is_none() {
+            *feed = Some(self.catalog.changes());
+        }
+    }
+
+    /// Reconciles the rules of the sources a Change touched: their tracks for every rule,
+    /// favorites for the favorites rule and playlists for the playlists rule.
+    fn library_changed(
+        &mut self,
+        change: Result<Arc<Change>, RecvError>,
+        feed: &mut Option<broadcast::Receiver<Arc<Change>>>,
+    ) {
+        if matches!(change, Err(RecvError::Closed)) {
+            *feed = None;
+            return;
+        }
+        let sources = self
+            .attached
+            .iter()
+            .filter(|(source_id, attached)| {
+                let rules = self.settings_for(source_id).rules;
+                !rules.is_empty()
+                    && change.as_ref().map_or(true, |change| {
+                        change.scopes.iter().any(|scope| match scope {
+                            Scope::Reload => true,
+                            Scope::Tracks {
+                                source: Some(source),
+                                ..
+                            }
+                            | Scope::Collections { source }
+                            | Scope::Source { key: source, .. } => *source == attached.source_key,
+                            Scope::State { .. } => rules.favorites,
+                            Scope::Playlist { entries: true, .. } | Scope::Playlists => {
+                                rules.all_playlists
+                            }
+                            _ => false,
+                        })
+                    })
+            })
+            .map(|(source_id, _)| source_id.clone())
+            .collect::<Vec<_>>();
+        for source_id in sources {
             self.reconcile_all_rules(&source_id);
         }
     }
@@ -1605,7 +1664,7 @@ impl Actor {
         let encoding = library::media_encoding_key(quality.encoding());
         let previous = self
             .catalog
-            .connect_media_file(media_uri, &encoding)
+            .download_file(media_uri, &encoding)
             .await
             .map_err(|error| error.to_string())?;
         let revision = reference
@@ -1624,14 +1683,14 @@ impl Actor {
         {
             saved = self
                 .catalog
-                .connect_backing_media_file(media_uri, &encoding, revision)
+                .shared_download_file(media_uri, &encoding, revision)
                 .await
                 .map_err(|error| error.to_string())?;
         }
         if saved.is_none() && reference.is_none() && !replace_unknown {
             saved = self
                 .catalog
-                .connect_media_file(media_uri, "unknown")
+                .download_file(media_uri, "unknown")
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -1661,7 +1720,7 @@ impl Actor {
                 ),
                 library::LocalMediaLocation::Document(uri) => (uri.clone(), uri, String::new()),
             };
-            saved = Some(library::ConnectMediaFile {
+            saved = Some(library::DownloadFile {
                 media_uri: media_uri.into(),
                 encoding,
                 revision: revision.unwrap_or_default(),
@@ -1715,15 +1774,12 @@ impl Actor {
             return Ok(true);
         }
         file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
-        let source = source_id
-            .and_then(|source| self.attached.get(source))
-            .map(|source| source.source_key);
-        let access = download_access(&self.catalog, media_uri, &paths, file.completed_size).await?;
-        file.storage_root = access.root.clone();
-        file.relative_path = access.relative_path.clone();
-        file.completed_size = Some(access.size_bytes);
+        let placement = download_placement(&paths, file.completed_size).await?;
+        file.storage_root = placement.root;
+        file.relative_path = placement.relative_path;
+        file.completed_size = Some(placement.size);
         self.catalog
-            .commit_download(&file, source, &access)
+            .save_download(&file)
             .await
             .map_err(|error| error.to_string())?;
         if let Some(previous) =
@@ -2147,10 +2203,7 @@ impl Actor {
                 {
                     let previous = self
                         .catalog
-                        .connect_media_file(
-                            &media_uri,
-                            &library::media_encoding_key(quality.encoding()),
-                        )
+                        .download_file(&media_uri, &library::media_encoding_key(quality.encoding()))
                         .await
                         .ok()
                         .flatten();
@@ -2424,7 +2477,7 @@ impl Actor {
         quality: DownloadQuality,
         revision: Option<String>,
     ) -> Result<DownloadPaths, DownloadFailure> {
-        let mut file = library::ConnectMediaFile {
+        let mut file = library::DownloadFile {
             media_uri: media_uri.into(),
             encoding: library::media_encoding_key(quality.encoding()),
             revision: revision.unwrap_or_default(),
@@ -2433,7 +2486,7 @@ impl Actor {
         };
         let previous = self
             .catalog
-            .connect_media_file(media_uri, &file.encoding)
+            .download_file(media_uri, &file.encoding)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
         let finished = finalize_download(paths, previous.as_ref())
@@ -2468,7 +2521,7 @@ impl Actor {
         {
             let used = self
                 .catalog
-                .connect_media_file_users(previous)
+                .download_file_shared(previous)
                 .await
                 .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
             if !used {
@@ -2477,22 +2530,13 @@ impl Actor {
         }
         file.retired_documents = serde_json::to_string(&retired)
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
-        let source = source_id
-            .as_ref()
-            .and_then(|id| self.attached.get(id))
-            .map(|source| source.source_key);
-        let access = download_access(
-            &self.catalog,
-            media_uri,
-            &finished.paths,
-            file.completed_size,
-        )
-        .await
-        .map_err(DownloadFailure::NeedsAttention)?;
-        file.storage_root = access.root.clone();
-        file.relative_path = access.relative_path.clone();
+        let placement = download_placement(&finished.paths, file.completed_size)
+            .await
+            .map_err(DownloadFailure::NeedsAttention)?;
+        file.storage_root = placement.root;
+        file.relative_path = placement.relative_path;
         self.catalog
-            .commit_download(&file, source, &access)
+            .save_download(&file)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
         self.events
@@ -2513,10 +2557,7 @@ impl Actor {
         Ok(finished.paths)
     }
 
-    async fn retire_previous_files(
-        &self,
-        file: &mut library::ConnectMediaFile,
-    ) -> Result<(), String> {
+    async fn retire_previous_files(&self, file: &mut library::DownloadFile) -> Result<(), String> {
         let mut retired: Vec<String> = serde_json::from_str(if file.retired_documents.is_empty() {
             "[]"
         } else {
@@ -2524,7 +2565,7 @@ impl Actor {
         })
         .map_err(|error| error.to_string())?;
         while let Some(path) = retired.first() {
-            let old = library::ConnectMediaFile {
+            let old = library::DownloadFile {
                 path: path.clone(),
                 managed: true,
                 ..file.clone()
@@ -2534,7 +2575,7 @@ impl Actor {
             file.retired_documents =
                 serde_json::to_string(&retired).map_err(|error| error.to_string())?;
             self.catalog
-                .connect_save_media_file(file)
+                .save_download(file)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -2859,7 +2900,7 @@ impl Actor {
         let mut removed = 0;
         let mut failed = 0;
         for uri in media_uris {
-            match self.catalog.connect_media_files(&uri).await {
+            match self.catalog.download_files(&uri).await {
                 Ok(files) => {
                     for file in files {
                         match self.retire_receipt(&file).await {
@@ -2882,11 +2923,11 @@ impl Actor {
 
     async fn remove_representation_bytes(
         &self,
-        file: &library::ConnectMediaFile,
+        file: &library::DownloadFile,
     ) -> Result<usize, String> {
         let used = self
             .catalog
-            .connect_media_file_users(file)
+            .download_file_shared(file)
             .await
             .map_err(|error| error.to_string())?;
         if !file.managed || used {
@@ -2896,17 +2937,17 @@ impl Actor {
         remove_download_files(&paths).await.map(usize::from)
     }
 
-    async fn retire_receipt(&self, file: &library::ConnectMediaFile) -> Result<usize, String> {
+    async fn retire_receipt(&self, file: &library::DownloadFile) -> Result<usize, String> {
         let mut file = file.clone();
         self.retire_previous_files(&mut file).await?;
         let removed = self.remove_representation_bytes(&file).await?;
         self.catalog
-            .connect_forget_media_file(&file)
+            .forget_download(&file)
             .await
             .map_err(|error| error.to_string())?;
         let downloaded = !self
             .catalog
-            .connect_media_files(&file.media_uri)
+            .download_files(&file.media_uri)
             .await
             .map_err(|error| error.to_string())?
             .is_empty();
@@ -3073,7 +3114,7 @@ impl Actor {
 
     async fn store_owners(
         &self,
-        file: &mut library::ConnectMediaFile,
+        file: &mut library::DownloadFile,
         owners: HashSet<DownloadOwner>,
     ) -> Result<(), String> {
         if owners.is_empty() {
@@ -3081,7 +3122,7 @@ impl Actor {
         } else {
             file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
             self.catalog
-                .connect_save_media_file(file)
+                .save_download(file)
                 .await
                 .map_err(|error| error.to_string())
         }
@@ -3534,7 +3575,7 @@ mod tests {
             .unwrap();
         let receipt = actor
             .catalog
-            .connect_media_file(&media_uri, "original")
+            .download_file(&media_uri, "original")
             .await
             .unwrap()
             .unwrap();
@@ -3725,13 +3766,7 @@ mod tests {
         let paths = download_paths(root.path(), Some(&source), &uri);
         std::fs::create_dir_all(paths.audio_part.parent().unwrap()).unwrap();
         std::fs::write(&paths.audio_part, b"verified peer bytes").unwrap();
-        assert!(
-            catalog
-                .connect_media_file(&uri, "mp3")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(catalog.download_file(&uri, "mp3").await.unwrap().is_none());
         let active = ActiveDownload {
             source_id: Some(source.clone()),
             job_id: actor.jobs[&Some(source.clone())][0].id.clone(),
@@ -3749,11 +3784,7 @@ mod tests {
             b"verified peer bytes"
         );
         assert!(!paths.audio_part.exists());
-        let saved = catalog
-            .connect_media_file(&uri, "mp3")
-            .await
-            .unwrap()
-            .unwrap();
+        let saved = catalog.download_file(&uri, "mp3").await.unwrap().unwrap();
         assert_eq!(saved.revision, "original-revision-2");
         assert_eq!(
             library::file_media_path(&saved.path),

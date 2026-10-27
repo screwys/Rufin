@@ -19,7 +19,7 @@ pub(crate) mod strings;
 pub(crate) mod views;
 pub(crate) mod write;
 pub use observations::*;
-pub use write::{Change, Scope, SourcePhase};
+pub use write::{Change, Scope, SourcePhase, StateChange};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Freshness(Vec<u8>);
@@ -53,6 +53,8 @@ pub struct Observation<'a> {
     pub(crate) changed: bool,
     /// Folder members this walk listed, by folder.
     pub(crate) memberships: HashMap<i64, HashSet<i64>>,
+    /// The entries of a source playlist read so far, until its last page.
+    pub(crate) playlist_entries: Vec<(String, crate::TrackKey)>,
 }
 
 /// The table and key column of a source-owned record kind.
@@ -129,6 +131,7 @@ impl Catalog {
             walk: None,
             changed: false,
             memberships: HashMap::new(),
+            playlist_entries: Vec::new(),
         })
     }
 

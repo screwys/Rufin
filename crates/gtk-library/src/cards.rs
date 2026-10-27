@@ -95,10 +95,9 @@ impl AlbumCover {
             if let Some(shell) = favorite_shell.upgrade()
                 && let Some(album) = row.borrow().clone()
             {
-                shell.set_favorite_with_feedback(
+                shell.set_favorite(
                     library::FavoriteTarget::Album(album.media_uri.clone()),
                     !favorite_button_is_active(button),
-                    Some(button),
                 );
             }
         });

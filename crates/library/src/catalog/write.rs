@@ -17,13 +17,16 @@ use sqlx_core::transaction::TransactionManager;
 use super::families::{self, Row, Run};
 use super::records::*;
 use super::snapshot::{
-    Playlist, PlaylistFolder, SmartPlaylist, Snapshot, Stats, UserItem, UserState,
+    Entry, Playlist, PlaylistFolder, SmartPlaylist, Snapshot, Stats, UserItem, UserState,
 };
 use crate::db::{Mark, WriterGuard};
 use crate::tags::TagKind;
 use crate::{
     Catalog, LibraryError, LibraryResult, PlaylistKey, SmartPlaylistKey, SourceKey, TrackKey,
 };
+
+/// The favorite and rating a row shows.
+type Shown = (Option<bool>, Option<u8>);
 
 const PERSIST_ROWS: usize = 256;
 const READ_KEYS: usize = 256;
@@ -47,6 +50,8 @@ pub enum Scope {
     Tracks {
         source: Option<SourceKey>,
         keys: Vec<TrackKey>,
+        /// The keys of tracks the Store did not hold before.
+        added: Vec<TrackKey>,
     },
     /// Albums, artists, tags or folders of a source.
     Collections {
@@ -56,9 +61,9 @@ pub enum Scope {
         key: SourceKey,
         phase: SourcePhase,
     },
-    /// Favorites and ratings of these media URIs.
+    /// Favorites and ratings rows show that changed.
     State {
-        uris: Vec<String>,
+        items: Vec<StateChange>,
     },
     Listened {
         track: TrackKey,
@@ -74,6 +79,8 @@ pub enum Scope {
     },
     /// Playlist folders.
     Folders,
+    /// The saved queue or its playback state.
+    Queue,
     Downloads {
         uris: Vec<String>,
     },
@@ -87,6 +94,16 @@ pub enum Scope {
         old: TrackKey,
         new: TrackKey,
     },
+}
+
+/// A track, album or artist whose shown favorite or rating changed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateChange {
+    pub target: crate::FavoriteTarget,
+    /// The favorite it shows now.
+    pub favorite: bool,
+    /// Whether the rating it shows changed.
+    pub rating: bool,
 }
 
 /// One committed Write, as clients and features see it.
@@ -166,19 +183,34 @@ impl<R: PartialEq> Staged<R> {
 }
 
 impl<R: Resident> Staged<R> {
-    /// Whether the row changed only in the plays its source reports. Clients show plays as
-    /// activity, so such a row changes no catalog page.
-    fn played(&self) -> bool {
+    /// When the row changed only in the favorite, rating or plays its source reports: whether
+    /// the plays changed. Clients show plays as activity and favorites and ratings as state, so
+    /// such a row changes no catalog page.
+    fn native_only(&self) -> Option<bool> {
         let (Some(before), Some(current)) = (&self.before, &self.current) else {
-            return false;
+            return None;
         };
         let (mut before, mut current) = (before.clone(), current.clone());
         let (Some(prior), Some(state)) = (before.state(), current.state()) else {
+            return None;
+        };
+        let played = (prior.play_count, prior.last_played) != (state.play_count, state.last_played);
+        *state = prior.clone();
+        (!self.extra && current == before).then_some(played)
+    }
+
+    /// Whether the favorite or rating the row's source reports changed.
+    fn rated(&self) -> bool {
+        let (Some(mut before), Some(mut current)) = (self.before.clone(), self.current.clone())
+        else {
             return false;
         };
-        state.play_count = prior.play_count;
-        state.last_played = prior.last_played;
-        !self.extra && current == before
+        before
+            .state()
+            .zip(current.state())
+            .is_some_and(|(prior, state)| {
+                (prior.favorite, prior.rating) != (state.favorite, state.rating)
+            })
     }
 }
 
@@ -240,6 +272,10 @@ pub(crate) trait Resident: Row {
     fn state(&mut self) -> Option<&mut NativeState> {
         None
     }
+    /// The row as the user favorites and rates it, with its URI.
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -257,7 +293,12 @@ struct Touched {
     states: BTreeSet<String>,
     listened: BTreeSet<String>,
     downloads: BTreeSet<String>,
+    /// Playlists whose header is read back.
     playlists: BTreeSet<i64>,
+    /// Playlists whose entries are read back.
+    entries: BTreeSet<i64>,
+    /// Entries operations removed and put, by playlist, applied to the resident entries.
+    edits: BTreeMap<i64, (Vec<i64>, Vec<Entry<TrackKey>>)>,
     smart: BTreeSet<i64>,
     folders: bool,
 }
@@ -710,8 +751,30 @@ impl<'a> Write<'a> {
         self.touched.downloads.insert(uri.to_owned());
     }
 
+    /// Names a playlist whose header plain SQL may have changed, added or removed.
     pub(crate) fn touch_playlist(&mut self, key: i64) {
         self.touched.playlists.insert(key);
+    }
+
+    /// Names a playlist whose entries plain SQL replaced; they are read back before the commit.
+    pub(crate) fn touch_playlist_entries(&mut self, key: i64) {
+        self.touched.entries.insert(key);
+    }
+
+    /// Entries plain SQL inserted into a playlist or gave another rank or track.
+    pub(crate) fn put_entries(&mut self, playlist: i64, entries: Vec<Entry<TrackKey>>) {
+        if !entries.is_empty() {
+            let edits = self.touched.edits.entry(playlist).or_default();
+            edits.1.extend(entries);
+        }
+    }
+
+    /// Entries plain SQL removed from a playlist.
+    pub(crate) fn remove_entries(&mut self, playlist: i64, keys: Vec<i64>) {
+        if !keys.is_empty() {
+            let edits = self.touched.edits.entry(playlist).or_default();
+            edits.0.extend(keys);
+        }
     }
 
     pub(crate) fn touch_smart_playlist(&mut self, key: i64) {
@@ -796,6 +859,11 @@ impl<'a> Write<'a> {
         if self.reload && !scopes.contains(&Scope::Reload) {
             scopes.insert(0, Scope::Reload);
         }
+        let shown = if self.reload {
+            Vec::new()
+        } else {
+            self.shown_before(&user)
+        };
         // A commit of rows memory does not hold leaves the Catalog, its revision and the image
         // as they are.
         let resident =
@@ -825,6 +893,9 @@ impl<'a> Write<'a> {
         if resident {
             self.catalog.committed();
         }
+        if let Some(scope) = self.shown_after(shown) {
+            scopes.push(scope);
+        }
         self.catalog
             .record_seen(self.walk, std::mem::take(&mut self.seen));
         if scopes.is_empty() {
@@ -833,6 +904,61 @@ impl<'a> Write<'a> {
         let change = Arc::new(Change { revision, scopes });
         self.catalog.publish(Arc::clone(&change));
         Ok(Some(change))
+    }
+
+    /// The tracks, albums and artists whose shown favorite or rating this Write may change,
+    /// with their URIs and what they show before it applies.
+    fn shown_before(&self, user: &UserChanges) -> Vec<(UserItem, String, Shown)> {
+        fn rated<R: Resident>(overlay: &Overlay<R>, items: &mut BTreeMap<UserItem, String>) {
+            for key in &overlay.order {
+                let staged = &overlay.rows[key];
+                if staged.rated()
+                    && let Some((item, uri)) = staged.current.as_ref().and_then(R::user_item)
+                {
+                    items.insert(item, uri.to_owned());
+                }
+            }
+        }
+        let mut items = user
+            .states
+            .iter()
+            .map(|(item, _, uri)| (*item, uri.clone()))
+            .collect::<BTreeMap<_, _>>();
+        rated(&self.tracks, &mut items);
+        rated(&self.albums, &mut items);
+        rated(&self.artists, &mut items);
+        let snapshot = self.catalog.snapshot();
+        items
+            .into_iter()
+            .map(|(item, uri)| {
+                let shown = snapshot.shown_state(item).unwrap_or_default();
+                (item, uri, shown)
+            })
+            .collect()
+    }
+
+    /// The State scope for what the applied Write changed of what these rows show.
+    fn shown_after(&self, before: Vec<(UserItem, String, Shown)>) -> Option<Scope> {
+        if before.is_empty() {
+            return None;
+        }
+        let snapshot = self.catalog.snapshot();
+        let items = before
+            .into_iter()
+            .filter_map(|(item, uri, before)| {
+                let after = snapshot.shown_state(item)?;
+                (after != before).then(|| StateChange {
+                    target: match item {
+                        UserItem::Track(_) => crate::FavoriteTarget::Track(uri),
+                        UserItem::Album(_) => crate::FavoriteTarget::Album(uri),
+                        UserItem::Artist(_) => crate::FavoriteTarget::Artist(uri),
+                    },
+                    favorite: after.0.unwrap_or(false),
+                    rating: after.1 != before.1,
+                })
+            })
+            .collect::<Vec<_>>();
+        (!items.is_empty()).then_some(Scope::State { items })
     }
 
     /// Reads back the user data operations touched, and the user data of rows this Write
@@ -893,9 +1019,35 @@ impl<'a> Write<'a> {
                 }
             }
         }
-        for key in &touched.playlists {
-            let playlist = read_playlist(connection, *key).await?;
+        let playlists = touched
+            .playlists
+            .iter()
+            .chain(&touched.entries)
+            .chain(touched.edits.keys())
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for key in &playlists {
             let resident = catalog.snapshot().playlist(*key);
+            let mut playlist = match &resident {
+                Some(resident)
+                    if !touched.playlists.contains(key) && !touched.entries.contains(key) =>
+                {
+                    Some(resident.clone())
+                }
+                _ => read_playlist(connection, *key).await?,
+            };
+            if let Some(playlist) = &mut playlist {
+                // A playlist memory does not hold yet comes with its entries from the Store.
+                match &resident {
+                    Some(resident) if !touched.entries.contains(key) => {
+                        playlist.entries.clone_from(&resident.entries);
+                        if let Some((removed, put)) = touched.edits.remove(key) {
+                            edit_entries(&mut playlist.entries, &removed, put);
+                        }
+                    }
+                    _ => playlist.entries = read_entries(connection, *key).await?,
+                }
+            }
             if playlist != resident {
                 let entries = playlist.as_ref().map(|playlist| &playlist.entries)
                     != resident.as_ref().map(|playlist| &playlist.entries);
@@ -934,15 +1086,17 @@ impl<'a> Write<'a> {
         let mut scopes = Vec::new();
         let snapshot = self.catalog.snapshot();
         let source_of = |key: i64| Track::resident_source(&snapshot, key);
-        let mut tracks = BTreeMap::<Option<SourceKey>, Vec<TrackKey>>::new();
+        let mut tracks = BTreeMap::<Option<SourceKey>, (Vec<TrackKey>, Vec<TrackKey>)>::new();
         let mut played = Vec::new();
         for key in &self.tracks.order {
             let staged = &self.tracks.rows[key];
             if !staged.changed() {
                 continue;
             }
-            if staged.played() {
-                played.push(TrackKey::from_raw(*key));
+            if let Some(plays) = staged.native_only() {
+                if plays {
+                    played.push(TrackKey::from_raw(*key));
+                }
                 continue;
             }
             let mut sources = staged
@@ -955,17 +1109,23 @@ impl<'a> Write<'a> {
                 sources.push(source_of(*key));
             }
             sources.dedup();
+            let added = staged.before.is_none() && staged.current.is_some();
             for source in sources {
-                tracks
-                    .entry(source)
-                    .or_default()
-                    .push(TrackKey::from_raw(*key));
+                let (keys, new) = tracks.entry(source).or_default();
+                keys.push(TrackKey::from_raw(*key));
+                if added {
+                    new.push(TrackKey::from_raw(*key));
+                }
             }
         }
         scopes.extend(
             tracks
                 .into_iter()
-                .map(|(source, keys)| Scope::Tracks { source, keys }),
+                .map(|(source, (keys, added))| Scope::Tracks {
+                    source,
+                    keys,
+                    added,
+                }),
         );
         let mut collections = BTreeSet::new();
         collect_sources(&self.albums, &snapshot, &mut collections);
@@ -1010,15 +1170,6 @@ impl<'a> Write<'a> {
             {
                 scopes.push(Scope::Playlists);
             }
-        }
-        if !user.states.is_empty() {
-            let mut uris = user
-                .states
-                .iter()
-                .map(|(_, _, uri)| uri.clone())
-                .collect::<Vec<_>>();
-            uris.dedup();
-            scopes.push(Scope::State { uris });
         }
         scopes.extend(
             user.listened
@@ -1162,8 +1313,9 @@ fn collect_sources<R: Resident>(
 ) {
     for key in &overlay.order {
         let staged = &overlay.rows[key];
-        // Plays the source reports for an album or artist follow the plays of its tracks.
-        if !staged.changed() || staged.played() {
+        // Plays the source reports for an album or artist follow the plays of its tracks, and
+        // its favorite and rating are state.
+        if !staged.changed() || staged.native_only().is_some() {
             continue;
         }
         sources.extend(
@@ -1351,7 +1503,7 @@ async fn read_states(
              items AS(SELECT 'track' kind,track_key key,media_uri FROM tracks WHERE media_uri IN(SELECT uri FROM input)
                 UNION ALL SELECT 'album',album_key,media_uri FROM albums WHERE media_uri IN(SELECT uri FROM input)
                 UNION ALL SELECT 'artist',artist_key,media_uri FROM artists WHERE media_uri IN(SELECT uri FROM input))
-             SELECT items.kind,items.key,items.media_uri,state.favorite,state.rating FROM items LEFT JOIN user_media_state state USING(media_uri)",
+             SELECT items.kind,items.key,items.media_uri,state.favorite,state.rating FROM items LEFT JOIN user_state state USING(media_uri)",
         )
         .bind(serde_json::to_string(page)?)
         .fetch_all(&mut *connection)
@@ -1381,7 +1533,7 @@ pub(crate) fn listened_sql(condition: &str) -> String {
     format!(
         "SELECT track_key,plays+coalesce(legacy_plays,0),skips+coalesce(legacy_skips,0),max(coalesce(last,legacy_last),coalesce(legacy_last,last)) FROM(
             SELECT track.track_key,
-                (SELECT count(*) FROM listens listen WHERE listen.media_uri=track.media_uri) plays,
+                (SELECT count(*) FROM listens listen WHERE listen.media_uri=track.media_uri AND listen.skipped=0) plays,
                 (SELECT count(*) FROM listens listen WHERE listen.media_uri=track.media_uri AND listen.skipped=1) skips,
                 (SELECT max(started_at) FROM listens listen WHERE listen.media_uri=track.media_uri) last,
                 legacy.play_count legacy_plays,legacy.skip_count legacy_skips,legacy.last_played_at legacy_last
@@ -1416,7 +1568,7 @@ async fn read_downloads(
 ) -> LibraryResult<Vec<(TrackKey, bool, String)>> {
     let mut downloads = Vec::new();
     for page in uris.iter().collect::<Vec<_>>().chunks(READ_KEYS) {
-        let rows: Vec<(i64, bool, String)> = sqlx::query_as("SELECT track.track_key,EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='download'),track.media_uri FROM tracks track WHERE track.media_uri IN(SELECT value FROM json_each(?1))")
+        let rows: Vec<(i64, bool, String)> = sqlx::query_as("SELECT track.track_key,EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=track.media_uri),track.media_uri FROM tracks track WHERE track.media_uri IN(SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(page)?)
             .fetch_all(&mut *connection)
             .await?;
@@ -1443,7 +1595,7 @@ pub(crate) type PlaylistRow = (
     bool,
 );
 
-pub(crate) fn playlist(row: PlaylistRow, entries: Vec<(i64, TrackKey)>) -> Playlist {
+pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playlist {
     let (key, source, owned_by_source, indexed, name, folder, created, writable, metadata_writable) =
         row;
     Playlist {
@@ -1460,6 +1612,7 @@ pub(crate) fn playlist(row: PlaylistRow, entries: Vec<(i64, TrackKey)>) -> Playl
     }
 }
 
+/// A playlist header; its entries are read apart.
 async fn read_playlist(
     connection: &mut SqliteConnection,
     key: i64,
@@ -1470,22 +1623,42 @@ async fn read_playlist(
     .bind(key)
     .fetch_optional(&mut *connection)
     .await?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let entries: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT playlist_entry_key,track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY position",
+    Ok(row.map(|row| playlist(row, Vec::new())))
+}
+
+async fn read_entries(
+    connection: &mut SqliteConnection,
+    playlist: i64,
+) -> LibraryResult<Vec<Entry<TrackKey>>> {
+    let entries: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
+        "SELECT playlist_entry_key,rank,track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key",
     )
-    .bind(key)
+    .bind(playlist)
     .fetch_all(&mut *connection)
     .await?;
-    Ok(Some(playlist(
-        row,
-        entries
-            .into_iter()
-            .map(|(entry, track)| (entry, TrackKey::from_raw(track)))
-            .collect(),
-    )))
+    Ok(entries
+        .into_iter()
+        .map(|(key, rank, track)| Entry {
+            key,
+            rank: rank.into(),
+            track: TrackKey::from_raw(track),
+        })
+        .collect())
+}
+
+/// Applies removed and put entries to entries in rank order. A put entry replaces the one
+/// with its key.
+fn edit_entries(entries: &mut Vec<Entry<TrackKey>>, removed: &[i64], put: Vec<Entry<TrackKey>>) {
+    let gone = removed
+        .iter()
+        .chain(put.iter().map(|entry| &entry.key))
+        .collect::<std::collections::HashSet<_>>();
+    entries.retain(|entry| !gone.contains(&entry.key));
+    for entry in put {
+        let at =
+            entries.partition_point(|other| (&other.rank, other.key) < (&entry.rank, entry.key));
+        entries.insert(at, entry);
+    }
 }
 
 pub(crate) const SMART_COLUMNS: &str =
@@ -1617,6 +1790,10 @@ impl Resident for Track {
     fn state(&mut self) -> Option<&mut NativeState> {
         Some(&mut self.state)
     }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Track(self.key.raw()), &self.uri))
+    }
 }
 
 impl Resident for Album {
@@ -1653,6 +1830,10 @@ impl Resident for Album {
     fn state(&mut self) -> Option<&mut NativeState> {
         Some(&mut self.state)
     }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Album(self.key.raw()), &self.uri))
+    }
 }
 
 impl Resident for Artist {
@@ -1676,6 +1857,10 @@ impl Resident for Artist {
 
     fn state(&mut self) -> Option<&mut NativeState> {
         Some(&mut self.state)
+    }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Artist(self.key.raw()), &self.uri))
     }
 }
 
@@ -1932,8 +2117,8 @@ mod tests {
 
         // User data written with plain SQL and read back by key.
         let target = FavoriteTarget::Track(one.uri.clone());
-        catalog.set_favorite(&target, true).await.unwrap();
-        catalog.set_rating(&target, Some(8)).await.unwrap();
+        catalog.set_favorite(&target, true, true).await.unwrap();
+        catalog.set_rating(&target, Some(8), false).await.unwrap();
         let listen: crate::ListenWrite = serde_json::from_value(serde_json::json!({
             "external_id":"listen-1", "media_uri": one.uri,
             "title":"One", "artist":"Alpha", "album":"First", "duration_millis":180000,
@@ -1962,22 +2147,16 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut write = catalog.write().await.unwrap();
-        crate::local::write_local_locator(
-            &mut write,
-            &crate::LocalLocatorWrite {
-                source_id: None,
+        catalog
+            .save_download(&crate::DownloadFile {
                 media_uri: one.uri.clone(),
-                origin: "download".into(),
-                path: "/downloads/one.flac".into(),
-                root: "/downloads".into(),
-                relative_path: "one.flac".into(),
-                access_uri: "file:///downloads/one.flac".into(),
-            },
-        )
-        .await
-        .unwrap();
-        write.commit().await.unwrap();
+                encoding: "original".into(),
+                path: "file:///downloads/one.flac".into(),
+                managed: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_reloads(&catalog).await;
         {
             let snapshot = catalog.snapshot();

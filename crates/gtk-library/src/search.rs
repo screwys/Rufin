@@ -336,11 +336,7 @@ impl SearchGridCell {
             else {
                 return;
             };
-            favorite_shell.set_favorite_with_feedback(
-                target,
-                !favorite_button_is_active(button),
-                Some(button),
-            );
+            favorite_shell.set_favorite(target, !favorite_button_is_active(button));
         });
         let menu = controls.imp().menu.get();
         let overlay = controls.imp().overlay.get();
@@ -1301,11 +1297,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
             else {
                 return;
             };
-            click_shell.set_favorite_with_feedback(
-                target,
-                !favorite_button_is_active(button),
-                Some(button),
-            );
+            click_shell.set_favorite(target, !favorite_button_is_active(button));
         });
     });
     connect_sparse_bind(&factory, move |item| {

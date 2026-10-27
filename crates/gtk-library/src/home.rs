@@ -714,10 +714,9 @@ impl CatalogUi {
             let favorite_shell = Rc::clone(self);
             let favorite_media_uri = album.media_uri.clone();
             button.connect_clicked(move |button| {
-                favorite_shell.set_favorite_with_feedback(
+                favorite_shell.set_favorite(
                     library::FavoriteTarget::Album(favorite_media_uri.clone()),
                     !favorite_button_is_active(button),
-                    Some(button),
                 );
             });
         }

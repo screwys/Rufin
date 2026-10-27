@@ -292,6 +292,16 @@ impl Catalog {
     }
 
     /// Waits until the first load finished.
+    /// Whether the first load finished; the Reload that follows it may still be on its way.
+    pub fn is_loaded(&self) -> bool {
+        *self.inner.loaded.borrow()
+    }
+
+    /// The revision of the last committed Change.
+    pub fn revision(&self) -> u64 {
+        self.snapshot().revision
+    }
+
     pub(crate) async fn loaded(&self) {
         let mut loaded = self.inner.loaded.subscribe();
         let _ = loaded.wait_for(|loaded| *loaded).await;

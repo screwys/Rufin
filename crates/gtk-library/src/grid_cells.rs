@@ -61,11 +61,7 @@ fn install_grid_favorite<T: 'static>(
         };
         let current = click_current.borrow();
         let Some(row) = current.as_ref() else { return };
-        shell.set_favorite_with_feedback(
-            click_target(row),
-            !favorite_button_is_active(button),
-            Some(button),
-        );
+        shell.set_favorite(click_target(row), !favorite_button_is_active(button));
     });
     let favorite_current = Rc::clone(current);
     shell.register_dynamic_favorite_button(

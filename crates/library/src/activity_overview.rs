@@ -147,7 +147,7 @@ impl Catalog {
             .await?;
         let keys = tracks.iter().map(|(key, _)| *key).collect::<Vec<_>>();
         let mut track_rows = crate::tracks::load_track_rows(self, &mut connection, &keys).await?;
-        crate::activity::overlay_history(self, &mut connection, &mut track_rows, None).await?;
+        crate::activity::overlay_history(self, &mut connection, &mut track_rows).await?;
         for (row, (_, count)) in track_rows.iter_mut().zip(tracks) {
             row.state.play_count = count;
         }

@@ -54,7 +54,7 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedDownloadChange = Rc<dyn Fn(&downloads::DownloadEvent)>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
-pub type MountedFavoriteSettlement = Rc<dyn Fn(rufin_core::runtime::FavoriteSettlement)>;
+pub type MountedFavoriteState = Rc<dyn Fn(rufin_core::runtime::FavoriteState)>;
 pub type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
@@ -383,7 +383,7 @@ pub struct MountedRoute {
     pub layout_cycle: Option<MountedRouteCommand>,
     pub tab_cycle: Option<MountedRouteCommand>,
     pub initial_demand: MountedRouteResume,
-    pub favorite_settlement: Option<MountedFavoriteSettlement>,
+    pub favorite_state: Option<MountedFavoriteState>,
     pub download_change: Option<MountedDownloadChange>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
@@ -400,7 +400,7 @@ impl MountedRoute {
             layout_cycle: None,
             tab_cycle: None,
             initial_demand: Rc::new(|| {}),
-            favorite_settlement: None,
+            favorite_state: None,
             download_change: None,
             home_page_apply: None,
         }
@@ -459,8 +459,8 @@ impl MountedRoute {
         self
     }
 
-    pub fn with_favorite_settlement(mut self, apply: MountedFavoriteSettlement) -> Self {
-        self.favorite_settlement = Some(apply);
+    pub fn with_favorite_state(mut self, apply: MountedFavoriteState) -> Self {
+        self.favorite_state = Some(apply);
         self
     }
 
@@ -480,9 +480,9 @@ impl MountedRoute {
         self
     }
 
-    pub fn apply_favorite_settlement(&self, settlement: rufin_core::runtime::FavoriteSettlement) {
-        if let Some(apply) = &self.favorite_settlement {
-            apply(settlement);
+    pub fn apply_favorite_state(&self, state: rufin_core::runtime::FavoriteState) {
+        if let Some(apply) = &self.favorite_state {
+            apply(state);
         }
     }
 

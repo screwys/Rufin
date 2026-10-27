@@ -13,7 +13,7 @@ pub(crate) async fn pragma(
             .await?,
     )
 }
-pub(crate) const STORE_VERSION: i64 = 59;
+pub(crate) const STORE_VERSION: i64 = 60;
 
 /// Bits of `tracks.flags`, copied from the details row so the Catalog load never reads it.
 pub(crate) const TRACK_HAS_PICTURE: i64 = 1;
@@ -26,7 +26,7 @@ pub(crate) const LINK_GENRE: i64 = 2;
 pub(crate) const LINK_MOOD: i64 = 3;
 pub(crate) const LINK_FOLDER: i64 = 4;
 
-pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 59;
+pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA user_version = 60;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -148,6 +148,8 @@ CREATE TABLE tags (
     name TEXT NOT NULL DEFAULT '',
     sort_text TEXT,
     native_artwork BLOB,
+    -- The album URIs of the set-once mosaic a genre or mood without a picture shows.
+    mosaic TEXT,
     UNIQUE(source_key,kind,object_id)
 ) STRICT;
 
@@ -291,28 +293,24 @@ CREATE VIEW observed_file_dependencies AS
     LEFT JOIN local_files backing ON backing.source_key=owner.source_key AND backing.path=edge.dependency_path
     LEFT JOIN local_file_observations access ON access.local_file_key=backing.local_file_key;
 
-CREATE TABLE native_playlist_pending (
-    playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
-    object_id TEXT NOT NULL, track_key INTEGER NOT NULL REFERENCES tracks,
-    position INTEGER NOT NULL,
-    PRIMARY KEY(playlist_key,object_id)
-) STRICT;
-
-CREATE TABLE user_media_state (
+-- The user's own favorite and rating. They override the source's values until a delivery the
+-- source accepted drops them.
+CREATE TABLE user_state (
     media_uri TEXT PRIMARY KEY CHECK (media_uri <> ''),
     favorite INTEGER CHECK (favorite IS NULL OR favorite IN (0,1)),
-    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 0 AND 100)
+    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 0 AND 100),
+    changed_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE favorite_outbox (
-    outbox_key INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
-    favorite INTEGER NOT NULL CHECK (favorite IN (0, 1)),
-    previous_favorite INTEGER NOT NULL CHECK (previous_favorite IN (0, 1)),
-    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-    next_attempt_at INTEGER NOT NULL CHECK (next_attempt_at >= 0)
+-- Favorites and ratings waiting for their server. A cleared rating has no value.
+CREATE TABLE outbox (
+    media_uri TEXT NOT NULL CHECK (media_uri <> ''),
+    kind TEXT NOT NULL CHECK (kind IN ('favorite','rating')),
+    value INTEGER,
+    next_attempt_at INTEGER NOT NULL CHECK (next_attempt_at >= 0),
+    PRIMARY KEY (media_uri, kind)
 ) STRICT;
-CREATE INDEX favorite_outbox_due_idx ON favorite_outbox(next_attempt_at, outbox_key);
+CREATE INDEX outbox_due_idx ON outbox(next_attempt_at);
 
 CREATE TABLE listens (
     listen_key INTEGER PRIMARY KEY,
@@ -385,6 +383,8 @@ CREATE TABLE playlists (
     playlist_folder_key INTEGER REFERENCES playlist_folders(folder_key) ON DELETE SET NULL,
     provider_revision TEXT,
     valid_until INTEGER,
+    -- The track URIs of the set-once mosaic.
+    mosaic TEXT,
     UNIQUE (source_key, object_id)
 ) STRICT;
 CREATE UNIQUE INDEX playlists_global_object_idx ON playlists(object_id) WHERE source_key IS NULL;
@@ -395,10 +395,11 @@ CREATE TABLE playlist_entries (
     playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
     track_key INTEGER NOT NULL REFERENCES tracks,
-    position INTEGER NOT NULL CHECK (position >= 0),
-    UNIQUE (playlist_key, object_id),
-    UNIQUE (playlist_key, position)
+    -- A fractional rank key; entries sort by rank, then by key.
+    rank BLOB NOT NULL,
+    UNIQUE (playlist_key, object_id)
 ) STRICT;
+CREATE INDEX playlist_entries_rank_idx ON playlist_entries(playlist_key, rank);
 CREATE INDEX playlist_entries_track_idx ON playlist_entries(track_key);
 
 CREATE TABLE playlist_file_links (
@@ -436,6 +437,8 @@ CREATE TABLE smart_playlists (
     artwork_revision TEXT,
     artwork_binding BLOB,
     position INTEGER NOT NULL CHECK (position >= 0),
+    -- The track URIs of the set-once mosaic.
+    mosaic TEXT,
     UNIQUE (object_id),
     UNIQUE (position)
 ) STRICT;
@@ -446,9 +449,12 @@ CREATE TABLE queue_contexts (
     context TEXT NOT NULL UNIQUE
 ) STRICT;
 
+-- The queue in its order by rank, and in its play order by shuffle_rank while shuffle is on.
 CREATE TABLE queue_entries (
     entry_id INTEGER PRIMARY KEY,
     track_key INTEGER NOT NULL REFERENCES tracks,
+    rank BLOB NOT NULL,
+    shuffle_rank BLOB,
     provenance TEXT,
     context_key INTEGER REFERENCES queue_contexts,
     source_rank INTEGER,
@@ -456,13 +462,6 @@ CREATE TABLE queue_entries (
 ) STRICT;
 CREATE INDEX queue_entries_track_idx ON queue_entries(track_key);
 CREATE INDEX queue_entries_context_idx ON queue_entries(context_key) WHERE context_key IS NOT NULL;
-
-CREATE TABLE queue_positions (
-    order_kind INTEGER NOT NULL,
-    position INTEGER NOT NULL,
-    entry_id INTEGER NOT NULL,
-    PRIMARY KEY(order_kind,position)
-) STRICT, WITHOUT ROWID;
 
 CREATE TABLE queue_state (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -472,37 +471,40 @@ CREATE TABLE queue_state (
     shuffled INTEGER NOT NULL DEFAULT 0 CHECK (shuffled IN (0, 1))
 ) STRICT;
 
-CREATE TABLE connect_media_files (
+-- A downloaded copy per track and quality, written after its file lands. A quality change
+-- keeps the old copy until the new one lands. The reason names the requests and rules that
+-- keep it; root and relative_path place a copy in its storage; a copy that is not managed is
+-- the track's own local file, which removal leaves alone; retired lists replaced documents
+-- that still wait for deletion.
+CREATE TABLE downloads (
     media_uri TEXT NOT NULL,
-    encoding TEXT NOT NULL,
+    quality TEXT NOT NULL,
     revision TEXT NOT NULL,
+    size INTEGER,
     path TEXT NOT NULL,
-    managed INTEGER NOT NULL,
-    backing_uri TEXT,
+    reason TEXT NOT NULL DEFAULT '[]',
     source_id TEXT,
-    owners TEXT NOT NULL DEFAULT '[]',
-    storage_root TEXT NOT NULL DEFAULT '',
+    root TEXT NOT NULL DEFAULT '',
     relative_path TEXT NOT NULL DEFAULT '',
-    completed_size INTEGER,
-    retired_documents TEXT NOT NULL DEFAULT '[]',
-    PRIMARY KEY (media_uri, encoding)
+    managed INTEGER NOT NULL,
+    retired TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (media_uri, quality)
 ) STRICT;
-CREATE INDEX connect_media_files_path_idx ON connect_media_files(path,encoding,revision);
-CREATE INDEX connect_media_files_backing_idx ON connect_media_files(backing_uri,encoding,revision);
-CREATE INDEX download_source_idx ON connect_media_files(source_id,media_uri,encoding);
+CREATE INDEX downloads_path_idx ON downloads(path);
+CREATE INDEX downloads_source_idx ON downloads(source_id, media_uri, quality);
 
 CREATE TABLE local_locators (
     local_access_file_key INTEGER PRIMARY KEY,
     source_key INTEGER REFERENCES sources ON DELETE CASCADE,
     media_uri TEXT NOT NULL CHECK(media_uri<>''),
-    origin TEXT NOT NULL CHECK(origin IN ('local','mapping','download','import')),
+    origin TEXT NOT NULL CHECK(origin IN ('local','mapping','import')),
     path TEXT NOT NULL CHECK(path<>''), root TEXT NOT NULL, relative_path TEXT NOT NULL,
     access_uri TEXT NOT NULL CHECK(access_uri<>''),
     UNIQUE(media_uri,origin)
 ) STRICT;
 CREATE INDEX local_locators_source_idx ON local_locators(source_key,origin);
 CREATE INDEX local_locators_path_idx ON local_locators(source_key,path);
-CREATE INDEX local_locators_precedence_idx ON local_locators(media_uri,CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,local_access_file_key);
+CREATE INDEX local_locators_precedence_idx ON local_locators(media_uri,CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key);
 
 CREATE TABLE local_access_metadata (
     access_uri TEXT PRIMARY KEY,

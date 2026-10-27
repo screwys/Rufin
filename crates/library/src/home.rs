@@ -393,7 +393,7 @@ impl Catalog {
                     .copied()
                     .map(crate::GenreKey::from_raw)
                     .collect::<Vec<_>>();
-                crate::collections::load_genre_rows(self, &mut transaction, &keys, folder).await?
+                crate::collections::load_genre_rows(self, &mut transaction, &keys).await?
             } else {
                 Vec::new()
             },

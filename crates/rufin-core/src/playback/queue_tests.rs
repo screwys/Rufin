@@ -31,6 +31,7 @@ async fn replace_queue(
 fn assert_restored_state(restored: &QueueRestore, expected: &QueueRestore) {
     assert_eq!(restored.ids, expected.ids);
     assert_eq!(restored.entries, expected.entries);
+    assert_eq!(restored.ranks, expected.ranks);
     assert_eq!(restored.order, expected.order);
     assert_eq!(restored.current_index, expected.current_index);
     assert_eq!(restored.progress_millis, expected.progress_millis);
@@ -65,14 +66,12 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
         let pending = pending.lock().unwrap();
         let update = pending.as_ref().unwrap();
         assert_eq!(update.entries.len(), 511);
-        assert_eq!(update.ordinary.as_ref().unwrap().rows.len(), 511);
-        assert_eq!(update.order.as_ref().unwrap().rows.len(), 511);
         let current = sequence.snapshot();
         assert!(
             update
                 .entries
                 .values()
-                .all(|entry| current.entries.contains(entry)),
+                .all(|(entry, _)| current.entries.contains(entry)),
             "superseded membership must not remain in pending Store work"
         );
     }
@@ -107,15 +106,19 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
 
     sequence.shuffle(true, 19);
     let update = sequence.take_persistence().unwrap();
-    assert!(update.entries.is_empty());
-    assert!(update.order.is_some());
+    assert_eq!(update.entries.len(), 24);
+    assert!(
+        update
+            .entries
+            .values()
+            .all(|(_, rank)| rank.shuffle.is_some())
+    );
     enqueue_queue_save(&pending, &sender, update);
 
     sequence.advance_index(false);
     sequence.set_repeat_mode(RepeatMode::All);
     let update = sequence.take_persistence().unwrap();
     assert!(update.entries.is_empty());
-    assert!(update.order.is_none());
     enqueue_queue_save(&pending, &sender, update);
 
     sequence.set_progress_millis(42_000);
@@ -150,7 +153,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         let update = pending.as_ref().unwrap();
         assert!(!update.replace);
         assert!(update.entries.is_empty());
-        assert!(update.order.is_some());
+        assert!(update.unshuffled);
     }
     let expected = sequence.snapshot();
     assert_eq!(work.len(), 1);
@@ -167,7 +170,6 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     sequence.persist_state();
     let update = sequence.take_persistence().unwrap();
     assert!(update.entries.is_empty());
-    assert!(update.order.is_none());
     let expected = sequence.snapshot();
     enqueue_queue_save(&pending, &sender, update);
     assert!(matches!(

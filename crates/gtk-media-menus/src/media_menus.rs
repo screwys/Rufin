@@ -89,7 +89,6 @@ pub struct MediaMenus {
     pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub settings: Rc<gtk_widgets::settings::SettingsState>,
     pub navigate: Rc<dyn Fn(Route)>,
-    pub projected_item_favorite: Rc<dyn Fn(&FavoriteTarget, bool) -> bool>,
     pub half_stars_enabled: Rc<dyn Fn(&str, Option<&str>) -> bool>,
     pub set_favorite: Rc<dyn Fn(FavoriteTarget, bool)>,
     pub edit_metadata: Rc<dyn Fn(MetadataItemId)>,
@@ -143,7 +142,7 @@ pub fn present_track_menu(
     } else {
         "track"
     };
-    let favorite = menus.projected_track_favorite(&track.media_uri, track.state.favorite);
+    let favorite = track.state.favorite;
     let surface = ContextMenuSurface::new(target, action_group, position);
     crate::media_details::append_header(
         &surface,
@@ -413,7 +412,7 @@ pub fn present_playlist_entry_menu(
     _playlist: library::PlaylistKey,
     removal: Option<PlaylistEntrySelectionSnapshot>,
 ) {
-    let favorite = menus.projected_track_favorite(&row.track.media_uri, row.track.state.favorite);
+    let favorite = row.track.state.favorite;
     let surface = ContextMenuSurface::new(target, "playlist-entry", position);
     crate::media_details::append_header(
         &surface,
@@ -905,10 +904,7 @@ pub fn present_album_context_menu(
     if present_collection_selection_menu(target, menus, playback.clone(), position) {
         return;
     }
-    let favorite = (menus.projected_item_favorite)(
-        &FavoriteTarget::Album(album.media_uri.clone()),
-        album.state.favorite,
-    );
+    let favorite = album.state.favorite;
     let surface = ContextMenuSurface::new(target, "album", position);
     crate::media_details::append_header(
         &surface,
@@ -1056,10 +1052,7 @@ pub fn present_artist_context_menu(
     ) {
         return;
     }
-    let favorite = (menus.projected_item_favorite)(
-        &FavoriteTarget::Artist(artist.media_uri.clone()),
-        artist.state.favorite,
-    );
+    let favorite = artist.state.favorite;
     let surface = ContextMenuSurface::new(target, "artist", position);
     crate::media_details::append_header(
         &surface,
@@ -1778,9 +1771,4 @@ fn append_context_menu_picker(
     target: PlayRequest,
 ) {
     (menus.picker_target)(surface, target);
-}
-impl MediaMenus {
-    fn projected_track_favorite(&self, media_uri: &str, fallback: bool) -> bool {
-        (self.projected_item_favorite)(&FavoriteTarget::Track(media_uri.to_string()), fallback)
-    }
 }

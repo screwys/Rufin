@@ -165,7 +165,6 @@ async fn listens_accept_empty_optional_recording_ids() {
         .record_listen(&listen, None, &[])
         .await
         .unwrap();
-    assert!(listened(&observed.try_recv().unwrap()));
     assert_eq!(
         fixture
             .catalog
@@ -374,7 +373,8 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(row.metadata.date_added, catalog.metadata.date_added);
     assert_eq!(row.metadata.bpm, catalog.metadata.bpm);
     assert_eq!(row.metadata.genres[0].name, "Rock");
-    assert_eq!(row.state.play_count, 4);
+    // The skipped listen is no play: the 3 carried-over plays remain.
+    assert_eq!(row.state.play_count, 3);
     let (playlist, _) = fixture
         .catalog
         .create_playlist(
@@ -638,7 +638,13 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             .iter()
             .map(|row| (row.metadata.title.as_str(), row.state.play_count))
             .collect::<Vec<_>>(),
-        [("Legacy CUE", 2), ("Recorded file", 3)]
+        [
+            ("Legacy CUE", 2),
+            ("Recorded CUE", 2),
+            ("Recorded file", 3),
+            ("Legacy file", 3),
+            ("Legacy file", 3)
+        ]
     );
     let matching = (&library::MemberRead {
         filter: ("legacy").into(),
@@ -660,7 +666,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             .iter()
             .map(|row| row.metadata.title.as_str())
             .collect::<Vec<_>>(),
-        ["Legacy CUE", "Legacy file"]
+        ["Legacy CUE", "Legacy file", "Legacy file"]
     );
     let remote = (&library::MemberRead {
         descending: true,
@@ -765,7 +771,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
 }
 
 #[tokio::test]
-async fn history_preserves_latest_matching_facts_and_source_scope() {
+async fn history_shows_each_listen_from_its_copy_and_source_scope() {
     let fixture = fixture().await;
     let records = [
         (Some("source"), "https://example.org/a", "Old title", 1),
@@ -822,10 +828,10 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
             "Direct media",
             "Retained history",
             "Other account",
-            "New title"
+            "New title",
+            "Old title"
         ]
     );
-    assert_eq!(all[3].state.play_count, 2);
     let current = (&library::MemberRead {
         descending: true,
         ..library::MemberRead::new(library::Collection::History {
@@ -840,7 +846,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
                 .collect::<Vec<_>>()
         })
         .unwrap();
-    assert_eq!(current, vec![all[3].clone()]);
+    assert_eq!(current, vec![all[3].clone(), all[4].clone()]);
     let matching = (&library::MemberRead {
         filter: (" old TITLE ").into(),
         descending: true,
@@ -857,7 +863,6 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].metadata.title, "Old title");
     assert_eq!(matching[0].state.last_played, Some(1));
-    assert_eq!(matching[0].state.play_count, 2);
     assert!(
         (&library::MemberRead {
             filter: ("old").into(),

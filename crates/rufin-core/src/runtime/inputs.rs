@@ -36,7 +36,8 @@ pub struct VisualizerPublication {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogPublication {
     pub source_key: Option<SourceKey>,
-    pub favorite: Option<FavoriteSettlement>,
+    /// Favorites a committed change set, as clients show them now.
+    pub favorites: Vec<FavoriteState>,
     pub change: CatalogChange,
 }
 
@@ -46,6 +47,8 @@ pub enum CatalogChange {
     Activity,
     Scope,
     Broad,
+    /// Only favorites changed; the publication carries them.
+    Favorites,
     Home,
     Playlists(Option<PlaylistKey>),
     Album(String),
@@ -61,10 +64,9 @@ pub struct CatalogRevision {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct FavoriteSettlement {
+pub struct FavoriteState {
     pub target: library::FavoriteTarget,
-    pub requested: bool,
-    pub effective: bool,
+    pub favorite: bool,
 }
 
 #[derive(Clone, Debug)]

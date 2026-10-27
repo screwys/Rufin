@@ -669,7 +669,7 @@ impl crate::source::SourceOwner {
                     )
                 }),
             Route::GenreDetail(key) => catalog
-                .genres(&[*key], folder, cancel)
+                .genres(&[*key], cancel)
                 .await?
                 .pop()
                 .filter(|row| row.summary.track_count > 0)
@@ -680,7 +680,7 @@ impl crate::source::SourceOwner {
                     )
                 }),
             Route::MoodDetail(key) => catalog
-                .moods(&[*key], folder, cancel)
+                .moods(&[*key], cancel)
                 .await?
                 .pop()
                 .filter(|row| row.summary.track_count > 0)

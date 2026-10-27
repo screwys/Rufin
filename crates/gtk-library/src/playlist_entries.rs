@@ -451,10 +451,9 @@ fn playlist_entry_actions_column(
             let Some(entry) = click_current() else {
                 return;
             };
-            click_shell.set_favorite_with_feedback(
+            click_shell.set_favorite(
                 library::FavoriteTarget::Track(entry.track.media_uri.clone()),
                 !favorite_button_is_active(button),
-                Some(button),
             );
         });
     });

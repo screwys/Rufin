@@ -1,10 +1,10 @@
-//! Owns Favorite and Rating overrides plus bounded remote Favorite delivery.
-//! Source clients perform network delivery and retry scheduling decisions.
+//! The user's favorites and ratings, and the outbox that delivers them to servers. Source
+//! clients send the deliveries and decide when to retry.
 
 use serde_json::Map;
 use sqlx::sqlite::SqliteConnection;
 
-use crate::catalog::records::{Album, Artist, Track};
+use crate::catalog::records::{Album, Artist, NativeState, Track};
 
 use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
 
@@ -64,20 +64,53 @@ impl FavoriteTarget {
     }
 }
 
+/// What a delivery writes to the source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeliveryKind {
+    Favorite,
+    Rating,
+}
+
+impl DeliveryKind {
+    /// The outbox kind, which is also the user_state column it holds.
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Favorite => "favorite",
+            Self::Rating => "rating",
+        }
+    }
+}
+
+/// A favorite or rating waiting for its server. A favorite's value is 0 or 1, a rating's
+/// 0..100, and a cleared rating has none.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Delivery {
+    pub media_uri: String,
+    pub kind: DeliveryKind,
+    pub value: Option<i64>,
+}
+
 impl Catalog {
     pub async fn favorite(&self, target: &FavoriteTarget) -> LibraryResult<bool> {
         let mut connection = self.acquire_reader().await?;
-        effective_favorite(&mut connection, target).await
+        let sql = format!(
+            "SELECT COALESCE((SELECT favorite FROM user_state WHERE media_uri=?1),(SELECT native_favorite FROM {}s WHERE media_uri=?1),0)",
+            target.kind()
+        );
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(target.media_uri())
+            .fetch_one(&mut *connection)
+            .await?)
     }
 
-    pub async fn user_media_state(
+    pub async fn user_state(
         &self,
         media_uri: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<(Option<bool>, Option<u8>)>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let result = sqlx::query_as::<_, (Option<bool>, Option<i64>)>(
-            "SELECT favorite,rating/10 FROM user_media_state WHERE media_uri=?1",
+            "SELECT favorite,rating/10 FROM user_state WHERE media_uri=?1",
         )
         .bind(media_uri)
         .fetch_optional(&mut *connection)
@@ -94,237 +127,230 @@ impl Catalog {
             .transpose()
     }
 
+    /// Sets the user's favorite. With `deliver`, the favorite also waits in the outbox until
+    /// its server accepts it.
+    pub async fn set_favorite(
+        &self,
+        target: &FavoriteTarget,
+        favorite: bool,
+        deliver: bool,
+    ) -> LibraryResult<()> {
+        self.set_user_value(
+            target,
+            DeliveryKind::Favorite,
+            Some(i64::from(favorite)),
+            deliver,
+        )
+        .await
+    }
+
+    /// Sets the user's rating out of 10. With `deliver`, the rating also waits in the outbox
+    /// until its server accepts it.
     pub async fn set_rating(
         &self,
         target: &FavoriteTarget,
         rating: Option<u8>,
-    ) -> LibraryResult<bool> {
+        deliver: bool,
+    ) -> LibraryResult<()> {
         if rating.is_some_and(|rating| rating > 10) {
             return Err(LibraryError::InvalidRequest(
                 "Ratings must be between 0 and 10".to_string(),
             ));
         }
+        let value = rating.map(|rating| i64::from(rating) * 10);
+        self.set_user_value(target, DeliveryKind::Rating, value, deliver)
+            .await
+    }
+
+    async fn set_user_value(
+        &self,
+        target: &FavoriteTarget,
+        kind: DeliveryKind,
+        value: Option<i64>,
+        deliver: bool,
+    ) -> LibraryResult<()> {
+        let uri = target.media_uri();
+        let column = kind.as_str();
         let mut write = self.write().await?;
         let connection = write.connection().await?;
-        sqlx::query(
-            "INSERT INTO user_media_state(media_uri,rating) VALUES (?1,?2)
-             ON CONFLICT(media_uri) DO UPDATE SET rating=excluded.rating",
-        )
-        .bind(target.media_uri())
-        .bind(rating.map(|rating| i64::from(rating) * 10))
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO user_state(media_uri,{column},changed_at) VALUES(?1,?2,unixepoch())
+             ON CONFLICT(media_uri) DO UPDATE SET {column}=excluded.{column},changed_at=excluded.changed_at
+             WHERE {column} IS NOT excluded.{column}"
+        )))
+        .bind(uri)
+        .bind(value)
         .execute(&mut *connection)
         .await?;
-        if rating.is_none() {
-            cleanup_empty_state(connection, target.media_uri()).await?;
+        if deliver {
+            sqlx::query(
+                "INSERT INTO outbox(media_uri,kind,value,next_attempt_at) VALUES(?1,?2,?3,unixepoch())
+                 ON CONFLICT(media_uri,kind) DO UPDATE SET value=excluded.value,next_attempt_at=excluded.next_attempt_at",
+            )
+            .bind(uri)
+            .bind(kind.as_str())
+            .bind(value)
+            .execute(&mut *connection)
+            .await?;
+            write.keep();
         }
-        write.touch_state(target.media_uri());
+        write.touch_state(uri);
         write.commit().await?;
-        Ok(true)
+        Ok(())
     }
 
-    pub async fn set_favorite(
-        &self,
-        target: &FavoriteTarget,
-        favorite: bool,
-    ) -> LibraryResult<bool> {
-        let mut write = self.write().await?;
-        let changed = update_favorite(write.connection().await?, target, Some(favorite)).await?;
-        write.touch_state(target.media_uri());
-        write.commit().await?;
-        Ok(changed)
-    }
-
-    pub async fn queue_remote_favorite(
-        &self,
-        target: &FavoriteTarget,
-        favorite: bool,
-        next_attempt_at: i64,
-    ) -> LibraryResult<bool> {
-        if next_attempt_at < 0 {
-            return Err(LibraryError::InvalidRequest(
-                "Favorite delivery time cannot be negative".to_string(),
-            ));
-        }
-        let mut write = self.write().await?;
-        let connection = write.connection().await?;
-        let previous = effective_favorite(connection, target).await?;
-        sqlx::query(
-            "INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at)
-             VALUES (?1,?2,?3,0,?4)
-             ON CONFLICT(media_uri) DO UPDATE SET
-                 favorite=excluded.favorite,
-                 previous_favorite=favorite_outbox.previous_favorite,
-                 attempts=0,next_attempt_at=excluded.next_attempt_at",
+    /// Deliveries due at `now`, oldest first.
+    pub async fn due_deliveries(&self, now: i64, limit: usize) -> LibraryResult<Vec<Delivery>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT media_uri,kind,value FROM outbox WHERE next_attempt_at<=?1
+             ORDER BY next_attempt_at,media_uri,kind LIMIT ?2",
         )
-        .bind(target.media_uri())
-        .bind(favorite)
-        .bind(previous)
-        .bind(next_attempt_at)
-        .execute(&mut *connection)
+        .bind(now)
+        .bind(limit as i64)
+        .fetch_all(&mut *connection)
         .await?;
-        update_favorite(connection, target, Some(favorite)).await?;
-        write.keep();
-        write.touch_state(target.media_uri());
-        write.commit().await?;
-        Ok(true)
+        Ok(rows
+            .into_iter()
+            .map(|(media_uri, kind, value)| Delivery {
+                media_uri,
+                kind: if kind == "rating" {
+                    DeliveryKind::Rating
+                } else {
+                    DeliveryKind::Favorite
+                },
+                value,
+            })
+            .collect())
     }
 
-    pub async fn acknowledge_remote_favorite(
-        &self,
-        target: &FavoriteTarget,
-        favorite: bool,
-    ) -> LibraryResult<bool> {
-        let mut write = self.write().await?;
-        let current = sqlx::query_scalar::<_, i64>(
-            "DELETE FROM favorite_outbox WHERE media_uri=?1 AND favorite=?2 RETURNING outbox_key",
+    /// When the next waiting delivery is due, if any waits.
+    pub async fn next_delivery_at(&self) -> LibraryResult<Option<i64>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(
+            sqlx::query_scalar("SELECT min(next_attempt_at) FROM outbox")
+                .fetch_one(&mut *connection)
+                .await?,
         )
-        .bind(target.media_uri())
-        .bind(favorite)
-        .fetch_optional(write.connection().await?)
-        .await?;
-        if current.is_none() {
+    }
+
+    /// The server accepted a delivery. Unless Rufin keeps its own copy, the value becomes the
+    /// source's and Rufin's copy goes. A delivery the user changed since waits for the newer
+    /// value and changes nothing.
+    pub async fn delivered(&self, delivery: &Delivery, keep_copy: bool) -> LibraryResult<bool> {
+        let mut write = self.write().await?;
+        let removed =
+            sqlx::query("DELETE FROM outbox WHERE media_uri=?1 AND kind=?2 AND value IS ?3")
+                .bind(&delivery.media_uri)
+                .bind(delivery.kind.as_str())
+                .bind(delivery.value)
+                .execute(write.connection().await?)
+                .await?
+                .rows_affected()
+                > 0;
+        if !removed {
             return Ok(false);
         }
         write.keep();
-        let uri = target.media_uri();
-        let known = match target {
-            FavoriteTarget::Track(_) => write
-                .by_natural::<Track>(uri)
-                .await?
-                .map(|mut row| {
-                    row.state.favorite = Some(favorite);
-                    write.put(row, Map::new());
-                })
-                .is_some(),
-            FavoriteTarget::Album(_) => write
-                .by_natural::<Album>(uri)
-                .await?
-                .map(|mut row| {
-                    row.state.favorite = Some(favorite);
-                    write.put(row, Map::new());
-                })
-                .is_some(),
-            FavoriteTarget::Artist(_) => write
-                .by_natural::<Artist>(uri)
-                .await?
-                .map(|mut row| {
-                    row.state.favorite = Some(favorite);
-                    write.put(row, Map::new());
-                })
-                .is_some(),
-        };
-        if known {
-            update_favorite(write.connection().await?, target, None).await?;
+        if !keep_copy {
+            let uri = delivery.media_uri.as_str();
+            let apply = |state: &mut NativeState| match delivery.kind {
+                DeliveryKind::Favorite => state.favorite = delivery.value.map(|value| value != 0),
+                DeliveryKind::Rating => state.rating = delivery.value,
+            };
+            if let Some(mut row) = write.by_natural::<Track>(uri).await? {
+                apply(&mut row.state);
+                write.put(row, Map::new());
+            } else if let Some(mut row) = write.by_natural::<Album>(uri).await? {
+                apply(&mut row.state);
+                write.put(row, Map::new());
+            } else if let Some(mut row) = write.by_natural::<Artist>(uri).await? {
+                apply(&mut row.state);
+                write.put(row, Map::new());
+            }
+            drop_copy(write.connection().await?, uri, delivery.kind).await?;
             write.touch_state(uri);
         }
         write.commit().await?;
-        Ok(known)
+        Ok(true)
     }
 
-    pub async fn due_remote_favorites(
+    /// The server could not take a delivery now; it waits until `next_attempt_at`.
+    pub async fn defer_delivery(
         &self,
-        now: i64,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(String, bool)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_as(
-            "SELECT media_uri,favorite FROM favorite_outbox WHERE next_attempt_at<=?1
-             ORDER BY next_attempt_at,outbox_key LIMIT ?2",
-        )
-        .bind(now)
-        .bind(limit.clamp(1, 64) as i64)
-        .fetch_all(&mut *connection)
-        .await?)
-    }
-
-    pub async fn defer_remote_favorite(
-        &self,
-        target: &FavoriteTarget,
-        favorite: bool,
+        delivery: &Delivery,
         next_attempt_at: i64,
-    ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        Ok(sqlx::query(
-            "UPDATE favorite_outbox SET attempts=attempts+1,next_attempt_at=?3
-             WHERE media_uri=?1 AND favorite=?2",
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        sqlx::query(
+            "UPDATE outbox SET next_attempt_at=?4 WHERE media_uri=?1 AND kind=?2 AND value IS ?3",
         )
-        .bind(target.media_uri())
-        .bind(favorite)
+        .bind(&delivery.media_uri)
+        .bind(delivery.kind.as_str())
+        .bind(delivery.value)
         .bind(next_attempt_at)
-        .execute(&mut *writer)
-        .await?
-        .rows_affected()
-            == 1)
+        .execute(write.connection().await?)
+        .await?;
+        write.keep();
+        write.commit().await?;
+        Ok(())
     }
 
-    pub async fn reject_remote_favorite(
-        &self,
-        target: &FavoriteTarget,
-        favorite: bool,
-    ) -> LibraryResult<Option<bool>> {
+    /// Drops a delivery no server will take. Without `keep_copy`, Rufin's copy goes too, so the
+    /// source's own value shows again.
+    pub async fn drop_delivery(&self, delivery: &Delivery, keep_copy: bool) -> LibraryResult<bool> {
         let mut write = self.write().await?;
-        let previous = sqlx::query_scalar::<_, bool>(
-            "DELETE FROM favorite_outbox WHERE media_uri=?1 AND favorite=?2
-             RETURNING previous_favorite",
-        )
-        .bind(target.media_uri())
-        .bind(favorite)
-        .fetch_optional(write.connection().await?)
-        .await?;
-        if let Some(previous) = previous {
-            update_favorite(write.connection().await?, target, Some(previous)).await?;
+        let removed =
+            sqlx::query("DELETE FROM outbox WHERE media_uri=?1 AND kind=?2 AND value IS ?3")
+                .bind(&delivery.media_uri)
+                .bind(delivery.kind.as_str())
+                .bind(delivery.value)
+                .execute(write.connection().await?)
+                .await?
+                .rows_affected()
+                > 0;
+        if removed {
             write.keep();
-            write.touch_state(target.media_uri());
+        }
+        if removed && !keep_copy {
+            drop_copy(
+                write.connection().await?,
+                &delivery.media_uri,
+                delivery.kind,
+            )
+            .await?;
+            write.touch_state(&delivery.media_uri);
         }
         write.commit().await?;
-        Ok(previous)
+        Ok(removed)
     }
 }
 
-async fn effective_favorite(
-    connection: &mut SqliteConnection,
-    target: &FavoriteTarget,
-) -> LibraryResult<bool> {
-    let sql = format!(
-        "SELECT COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=?1),(SELECT native_favorite FROM {}s WHERE media_uri=?1),0)",
-        target.kind()
-    );
-    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
-        .bind(target.media_uri())
-        .fetch_one(connection)
-        .await?)
-}
-
-async fn update_favorite(
-    connection: &mut SqliteConnection,
-    target: &FavoriteTarget,
-    favorite: Option<bool>,
-) -> LibraryResult<bool> {
-    sqlx::query(
-        "INSERT INTO user_media_state(media_uri,favorite) VALUES (?1,?2)
-         ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite",
-    )
-    .bind(target.media_uri())
-    .bind(favorite)
-    .execute(&mut *connection)
-    .await?;
-    if favorite.is_none() {
-        cleanup_empty_state(connection, target.media_uri()).await?;
-    }
-    Ok(true)
-}
-
-async fn cleanup_empty_state(
+/// Drops Rufin's copy of one value: the whole row when it holds no other value.
+async fn drop_copy(
     connection: &mut SqliteConnection,
     media_uri: &str,
+    kind: DeliveryKind,
 ) -> LibraryResult<()> {
-    sqlx::query(
-        "DELETE FROM user_media_state WHERE media_uri=?1 AND favorite IS NULL AND rating IS NULL",
-    )
+    let (column, other) = match kind {
+        DeliveryKind::Favorite => ("favorite", "rating"),
+        DeliveryKind::Rating => ("rating", "favorite"),
+    };
+    let removed = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM user_state WHERE media_uri=?1 AND {other} IS NULL"
+    )))
     .bind(media_uri)
     .execute(&mut *connection)
-    .await?;
+    .await?
+    .rows_affected();
+    if removed == 0 {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE user_state SET {column}=NULL,changed_at=unixepoch() WHERE media_uri=?1 AND {column} IS NOT NULL"
+        )))
+        .bind(media_uri)
+        .execute(&mut *connection)
+        .await?;
+    }
     Ok(())
 }
 
@@ -355,7 +381,7 @@ pub(crate) async fn export_user_media_state_jsonl_on(
     use futures_util::TryStreamExt;
     output.write_all(b"{\"version\":1}\n")?;
     let mut rows = sqlx::query_as::<_, UserMediaStateWrite>(
-        "SELECT media_uri,favorite,rating FROM user_media_state ORDER BY media_uri",
+        "SELECT media_uri,favorite,rating FROM user_state ORDER BY media_uri",
     )
     .fetch(connection);
     let mut count = 0;
@@ -401,14 +427,22 @@ pub(crate) async fn write_user_media_state(
             "invalid user media state".into(),
         ));
     }
+    if state.favorite.is_none() && state.rating.is_none() {
+        sqlx::query("DELETE FROM user_state WHERE media_uri=?1")
+            .bind(&state.media_uri)
+            .execute(&mut *connection)
+            .await?;
+        return Ok(());
+    }
     sqlx::query(
-        "INSERT INTO user_media_state(media_uri,favorite,rating) VALUES(?1,?2,?3)
-        ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating",
+        "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,?2,?3,unixepoch())
+        ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating,changed_at=excluded.changed_at
+        WHERE (favorite,rating) IS NOT (excluded.favorite,excluded.rating)",
     )
     .bind(&state.media_uri)
     .bind(state.favorite)
     .bind(state.rating)
     .execute(&mut *connection)
     .await?;
-    cleanup_empty_state(connection, &state.media_uri).await
+    Ok(())
 }

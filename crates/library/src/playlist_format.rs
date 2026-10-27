@@ -457,38 +457,12 @@ pub(crate) async fn import_playlist_on(
         .fetch_one(write.connection().await?)
         .await?
         != before;
-    let entries_changed = if target.is_some() {
-        let mut rows = sqlx::query_scalar::<_, crate::TrackKey>(
-            "SELECT track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY position",
-        )
-        .bind(key)
-        .fetch(write.connection().await?);
-        let mut changed = false;
-        for track in &tracks {
-            if rows.try_next().await?.as_ref() != Some(track) {
-                changed = true;
-                break;
-            }
-        }
-        changed || rows.try_next().await?.is_some()
-    } else {
-        true
-    };
-    if entries_changed {
-        changed = true;
-        sqlx::query("DELETE FROM main.playlist_entries WHERE playlist_key=?1")
-            .bind(key)
-            .execute(write.connection().await?)
-            .await?;
-        for (mut entry, track) in entries.into_iter().zip(tracks) {
-            if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM main.playlist_entries WHERE playlist_key=?1 AND object_id=?2)").bind(key).bind(&entry.object_id).fetch_one(write.connection().await?).await? {
-            entry.object_id = sqlx::query_scalar("SELECT 'playlist:' || lower(hex(randomblob(16)))").fetch_one(write.connection().await?).await?;
-        }
-            sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(?1,?2,?3,?4)")
-                .bind(key).bind(&entry.object_id).bind(track).bind(entry.position)
-                .execute(write.connection().await?).await?;
-        }
-    }
+    let wanted = entries
+        .into_iter()
+        .zip(tracks)
+        .map(|(entry, track)| (entry.object_id, track))
+        .collect::<Vec<_>>();
+    changed |= crate::playlists::write_entries(write, key.raw(), &wanted, true).await?;
     write.touch_playlist(key.raw());
     Ok(PlaylistImportReport {
         playlist: key,
@@ -536,15 +510,15 @@ async fn export_playlist_as_on(
         Some(&identity),
     )?;
     let mut entries = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SELECT entry.object_id,track.media_uri,{} metadata,entry.position,
+        "SELECT entry.object_id,track.media_uri,{} metadata,row_number() OVER(ORDER BY entry.rank,entry.playlist_entry_key)-1 position,
                 CASE WHEN ?2 THEN coalesce((
                     SELECT access_uri FROM local_locators
-                    WHERE media_uri=track.media_uri AND origin<>'download' AND access_uri LIKE 'content:%'
+                    WHERE media_uri=track.media_uri AND access_uri LIKE 'content:%'
                     ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1
                 ),details.source_path) END document_locator
          FROM playlist_entries entry JOIN tracks track USING(track_key)
          LEFT JOIN track_details details USING(track_key)
-         WHERE entry.playlist_key=?1 ORDER BY entry.position",
+         WHERE entry.playlist_key=?1 ORDER BY entry.rank,entry.playlist_entry_key",
         crate::track_metadata_sql("track", "details")
     ))).bind(playlist).bind(file.to_str().is_some_and(|file| file.starts_with("content:"))).fetch(&mut *connection);
     while let Some(row) = entries.try_next().await? {
@@ -1199,7 +1173,7 @@ mod tests {
                 .await
                 .unwrap();
             let actual: Vec<String> = sqlx::query_scalar(
-                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_key=?1 ORDER BY position",
+                "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key",
             )
             .bind(imported.playlist)
             .fetch_all(&mut *connection)
@@ -1236,10 +1210,7 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.entries[0].locator, uri);
         let local_document = "content://documents.example/document/22";
-        for (origin, access_uri) in [
-            ("download", "content://documents.example/document/download"),
-            ("import", local_document),
-        ] {
+        for (origin, access_uri) in [("import", local_document)] {
             catalog
                 .upsert_local_locator(&crate::LocalLocatorWrite {
                     source_id: None,
@@ -1627,7 +1598,7 @@ mod tests {
             .unwrap();
         {
             let mut writer = catalog.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (5,'source','Source');\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name) VALUES(8,5,'source','native','Native');\n              INSERT INTO tracks(track_key,media_uri,title) VALUES (1,'https://example.test/song','Song');\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name) VALUES (5,'source','Source');\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name) VALUES(8,5,'source','native','Native');\n              INSERT INTO tracks(track_key,media_uri,title) VALUES (1,'https://example.test/song','Song');\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) VALUES(8,'one',1,X'8000'),(8,'two',1,X'8001');")
               .execute(&mut *writer).await.unwrap();
         }
         // The rows were written behind the Catalog, so it loads them before the next write.

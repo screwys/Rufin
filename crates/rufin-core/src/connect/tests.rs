@@ -143,7 +143,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 );
                 assert!(
                     b.catalog
-                        .connect_media_file(&uri, "original")
+                        .download_file(&uri, "original")
                         .await
                         .unwrap()
                         .is_none()
@@ -666,7 +666,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 "track",
                 "cached-track",
             ));
-            b.catalog.set_favorite(&favorite, true).await.unwrap();
+            b.catalog.set_favorite(&favorite, true, false).await.unwrap();
             a.connected_network()
                 .await
                 .unwrap()
@@ -1174,19 +1174,19 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 let access = received.playlist_access(playlist, &cancellation).await.unwrap().unwrap();
                 assert!(!access.writable);
                 assert!(access.metadata_writable);
-                let entries = received.playlist_entry_uri_page(playlist, -1).await.unwrap();
+                let entries = received.playlist_entry_uri_page(playlist, 0).await.unwrap();
                 assert_eq!(entries.len(), 130);
-                assert_eq!(entries[0].2, uri);
+                assert_eq!(entries[0].1, uri);
                 assert!(received.source_playlist_is_fresh(music.as_str(), "server-mix", Some("revision-one"), 0).await.unwrap());
                 let home = received.home_page(source.source, None, 0, 0, &[], &cancellation).await.unwrap();
                 assert_eq!(home.provider_sections[0].section_id, "featured");
                 assert_eq!(home.provider_sections[0].rows.tracks[0].track.media_uri, uri);
                 let shared = received.playlist_key_by_identity(None, &shared_id, &cancellation).await.unwrap().unwrap();
                 assert!(received.get_playlist_file_link(shared).await.unwrap().is_none(), "device file permissions are not imported");
-                crate::playlist_files::discover(&receiving.products.source, &music, source.source).await;
+                crate::playlist_files::discover(&receiving.products.source, &music).await;
                 let associated = received.find_playlist_file_link(Some(&music), "music/copied.m3u").await.unwrap().unwrap();
                 assert_eq!(associated.playlist, shared, "automatic discovery reuses the existing random playlist identity");
-                assert_eq!(received.playlist_entry_uri_page(shared, -1).await.unwrap().into_iter().map(|entry| entry.2).collect::<Vec<_>>(), shared_uris, "the stale physical playlist does not overwrite shared edits");
+                assert_eq!(received.playlist_entry_uri_page(shared, 0).await.unwrap().into_iter().map(|entry| entry.1).collect::<Vec<_>>(), shared_uris, "the stale physical playlist does not overwrite shared edits");
                 let copy = receiving.products.source.client(&music).unwrap().import_playlist_file(received, "music/copied.m3u", None).await.unwrap();
                 assert_ne!(copy.playlist, shared, "explicit import as a copy remains independent");
                 receiving_owner.leave_profile().await.unwrap();

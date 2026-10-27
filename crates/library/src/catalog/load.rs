@@ -11,7 +11,7 @@ use sqlx::{Connection, SqliteConnection};
 
 use super::records::*;
 use super::rows::{Handle, Rows};
-use super::snapshot::{Names, Packing, Snapshot, Stats, TrackInput, TrackPart, UserItem};
+use super::snapshot::{Entry, Names, Packing, Snapshot, Stats, TrackInput, TrackPart, UserItem};
 use super::write;
 use crate::schema::{LINK_ALBUM_ARTIST, LINK_ARTIST, LINK_FOLDER, LINK_GENRE, LINK_MOOD};
 use crate::{
@@ -376,9 +376,9 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
 /// Favorites, ratings, plays, downloads and playlists, once every track is resident.
 fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> {
     let mut rows = handle.prepare(
-        "SELECT 0,track.track_key,state.favorite,state.rating FROM user_media_state state JOIN tracks track USING(media_uri)
-         UNION ALL SELECT 1,album.album_key,state.favorite,state.rating FROM user_media_state state JOIN albums album USING(media_uri)
-         UNION ALL SELECT 2,artist.artist_key,state.favorite,state.rating FROM user_media_state state JOIN artists artist USING(media_uri)",
+        "SELECT 0,track.track_key,state.favorite,state.rating FROM user_state state JOIN tracks track USING(media_uri)
+         UNION ALL SELECT 1,album.album_key,state.favorite,state.rating FROM user_state state JOIN albums album USING(media_uri)
+         UNION ALL SELECT 2,artist.artist_key,state.favorite,state.rating FROM user_state state JOIN artists artist USING(media_uri)",
     )?;
     while rows.step()? {
         let key = rows.int(1);
@@ -392,7 +392,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
     }
     let mut listened = HashMap::<i64, (i64, i64, Option<i64>)>::new();
     let mut rows = handle.prepare(
-        "SELECT track.track_key,counted.plays,counted.skips,counted.last FROM(SELECT media_uri,count(*) plays,sum(skipped) skips,max(started_at) last FROM listens GROUP BY media_uri) counted JOIN tracks track USING(media_uri)",
+        "SELECT track.track_key,counted.plays,counted.skips,counted.last FROM(SELECT media_uri,sum(skipped=0) plays,sum(skipped) skips,max(started_at) last FROM listens GROUP BY media_uri) counted JOIN tracks track USING(media_uri)",
     )?;
     while rows.step()? {
         listened.insert(
@@ -413,20 +413,21 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
         snapshot.set_listened(TrackKey::from_raw(key), Stats::listened(plays, skips, last));
     }
     let mut rows = handle.prepare(
-        "SELECT DISTINCT track.track_key FROM local_locators locator JOIN tracks track USING(media_uri) WHERE locator.origin='download'",
+        "SELECT DISTINCT track.track_key FROM downloads download JOIN tracks track USING(media_uri)",
     )?;
     while rows.step()? {
         snapshot.set_downloaded(TrackKey::from_raw(rows.int(0)), true);
     }
-    let mut entries = HashMap::<i64, Vec<(i64, TrackKey)>>::new();
+    let mut entries = HashMap::<i64, Vec<Entry<TrackKey>>>::new();
     let mut rows = handle.prepare(
-        "SELECT playlist_key,playlist_entry_key,track_key FROM playlist_entries ORDER BY playlist_key,position",
+        "SELECT playlist_key,playlist_entry_key,rank,track_key FROM playlist_entries ORDER BY playlist_key,rank,playlist_entry_key",
     )?;
     while rows.step()? {
-        entries
-            .entry(rows.int(0))
-            .or_default()
-            .push((rows.int(1), TrackKey::from_raw(rows.int(2))));
+        entries.entry(rows.int(0)).or_default().push(Entry {
+            key: rows.int(1),
+            rank: rows.blob(2).unwrap_or_default().into(),
+            track: TrackKey::from_raw(rows.int(3)),
+        });
     }
     let mut rows = handle.prepare(&format!(
         "SELECT {} FROM playlists ORDER BY playlist_key",

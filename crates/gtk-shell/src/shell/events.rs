@@ -225,25 +225,9 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         }
         shell.search_session.set_selected(Some(selected));
     }
-    if matches!(
-        publication.change,
-        CatalogChange::Broad | CatalogChange::Playlists(_)
-    ) {
-        shell.import_remote_playlist_pins_once();
-    }
-    if let Some(favorite) = publication.favorite {
-        shell.apply_favorite_settlement(
-            favorite.target.clone(),
-            favorite.requested,
-            favorite.effective,
-        );
-        if favorite.requested != favorite.effective {
-            shell
-                .control_feedback
-                .show_feedback_toast(tr("Could not update favorites"));
-        }
-        shell.apply_favorite_settlement_to_mounted_route(favorite);
-        return;
+    for state in publication.favorites {
+        shell.apply_favorite_state(&state.target, state.favorite);
+        shell.apply_favorite_state_to_mounted_route(state);
     }
     let current = shell.navigation.routes.borrow().current().clone();
     let affects_current = publication.source_key.is_none()
@@ -317,6 +301,8 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
                 }
             }
         }
+        // The hearts were set above.
+        CatalogChange::Favorites => {}
         CatalogChange::Home => {
             if affects_current && current == Route::Home {
                 shell.refresh_mounted_home();

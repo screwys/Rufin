@@ -1771,7 +1771,6 @@ mod tests {
         for (media_uri, origin, path) in [
             (&mapped_uri, "mapping", &audio),
             (&downloaded_uri, "mapping", &original),
-            (&downloaded_uri, "download", &audio),
         ] {
             locators.push_str(
                 &serde_json::to_string(&library::LocalLocatorWrite {
@@ -1797,6 +1796,16 @@ mod tests {
             .import_local_locators_jsonl(std::io::Cursor::new(locators))
             .await
             .expect("local access");
+        catalog
+            .save_download(&library::DownloadFile {
+                media_uri: downloaded_uri.clone(),
+                encoding: "original".into(),
+                path: file_uri.clone(),
+                managed: true,
+                ..Default::default()
+            })
+            .await
+            .expect("download record");
         let (events, received) = async_channel::unbounded();
         let runtime = tokio::runtime::Handle::current();
         let source_owner = crate::source::SourceOwner::open_dormant(

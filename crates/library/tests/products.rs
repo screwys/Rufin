@@ -255,7 +255,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .unwrap()
         .2;
     let genre = catalog
-        .genres(&[fixture.genre], None, &cancel)
+        .genres(&[fixture.genre], &cancel)
         .await
         .unwrap()
         .pop()
@@ -1108,13 +1108,11 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
             assert_eq!(candidates, expected, "{seed:?}, variation {variation}");
         }
     }
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&fixture.track_uris[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
-        .execute(&mut raw).await.unwrap();
     for seed in [
         RadioSeed::Album(fixture.albums[0]),
         RadioSeed::Track(fixture.track_uris[0].clone()),
@@ -1151,7 +1149,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,writable) VALUES (?1,'source','native','Native',0)")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) SELECT playlist_key,'entry',(SELECT track_key FROM tracks WHERE media_uri=?1),0 FROM playlists WHERE object_id='native'")
+    sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT playlist_key,'entry',(SELECT track_key FROM tracks WHERE media_uri=?1),X'8000' FROM playlists WHERE object_id='native'")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let native = fixture
@@ -1181,13 +1179,11 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         .await
         .unwrap()
         .unwrap();
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&fixture.track_uris[1])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
-        .execute(&mut raw).await.unwrap();
     for (seed, object_id) in [
         (RadioSeed::Playlist(native), Some("native")),
         (RadioSeed::Playlist(local), None),
@@ -1870,13 +1866,11 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
     ).bind(other).fetch_one(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES('source',?1,'Historical title','Artist','Album',100,'1970-01',42000,42000,0)")
         .bind(uri).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(uri)
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
-        .execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let catalog = &fixture.catalog;
 
@@ -1969,7 +1963,6 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 assert!(order.contains(&global));
                 let row = rows.iter().find(|row| row.playlist_key == global).unwrap();
                 assert_eq!(row.track_count, 2);
-                assert!(row.artwork_binding.is_some());
             }
             let detail = library::MemberRead {
                 folder,
@@ -2017,15 +2010,10 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .unwrap();
             let row = rows.iter().find(|row| &row.media_uri == uri).unwrap();
             assert_eq!(row.artwork_binding, expected_binding);
-            // Mosaics are set once, so a later picture does not change a resolved recipe.
-            assert!(summary.artwork_binding.is_some());
+            assert!(summary.artwork_binding.is_none());
         }
         let current_rows = catalog.playlists(&[current], &cancel).await.unwrap();
-        assert!(
-            library::authored_playlist_artwork(current_rows[0].artwork_binding.as_ref().unwrap())
-                .unwrap()
-                .is_none()
-        );
+        assert!(current_rows[0].artwork_binding.is_none());
         let preview = catalog
             .track_artwork_bindings(
                 &[
@@ -2148,42 +2136,40 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
         .expect("initial Track rows");
     assert!(rows.iter().all(|row| !row.access.is_downloaded));
 
-    for (index, origin) in [LocalAccessOrigin::Mapping, LocalAccessOrigin::Download]
-        .into_iter()
-        .enumerate()
-    {
-        let track = &rows[index];
-        fixture
-            .catalog
-            .write_local_access(
-                Some(fixture.source),
-                &[&LocalAccessWrite {
-                    media_uri: track.media_uri.clone(),
-                    origin,
-                    path: format!(
-                        "/validated/{}.flac",
-                        track.object_id.as_deref().expect("indexed track object")
-                    ),
-                    root: "/validated".to_string(),
-                    relative_path: format!(
-                        "{}.flac",
-                        track.object_id.as_deref().expect("indexed track object")
-                    ),
-                    size_bytes: 10,
-                    mtime_ns: 1,
-                    device_id: Some(1),
-                    inode: Some(index as i64 + 1),
-                    parser_version: 1,
-                    access_uri: format!(
-                        "file:///validated/{}.flac",
-                        track.object_id.as_deref().expect("indexed track object")
-                    ),
-                    loudness_analysis_key: Some(track.access.loudness_analysis_key),
-                }],
-            )
-            .await
-            .expect("write accepted Local access provenance");
-    }
+    let object = |index: usize| rows[index].object_id.clone().expect("indexed track object");
+    fixture
+        .catalog
+        .write_local_access(
+            Some(fixture.source),
+            &[&LocalAccessWrite {
+                media_uri: rows[0].media_uri.clone(),
+                origin: LocalAccessOrigin::Mapping,
+                path: format!("/validated/{}.flac", object(0)),
+                root: "/validated".to_string(),
+                relative_path: format!("{}.flac", object(0)),
+                size_bytes: 10,
+                mtime_ns: 1,
+                device_id: Some(1),
+                inode: Some(1),
+                parser_version: 1,
+                access_uri: format!("file:///validated/{}.flac", object(0)),
+                loudness_analysis_key: Some(rows[0].access.loudness_analysis_key),
+            }],
+        )
+        .await
+        .expect("write accepted Local access provenance");
+    fixture
+        .catalog
+        .save_download(&library::DownloadFile {
+            media_uri: rows[1].media_uri.clone(),
+            encoding: "original".into(),
+            path: format!("file:///validated/{}.flac", object(1)),
+            completed_size: Some(10),
+            managed: true,
+            ..Default::default()
+        })
+        .await
+        .expect("record a download");
     let rows = fixture
         .catalog
         .tracks(&fixture.tracks[..2], &cancel)
@@ -2217,7 +2203,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     assert_eq!(artist.summary.downloaded_count, 1);
     let genre = fixture
         .catalog
-        .genres(&[fixture.genre], None, &cancel)
+        .genres(&[fixture.genre], &cancel)
         .await
         .expect("Genre download aggregate")
         .pop()
@@ -2225,7 +2211,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     assert_eq!(genre.summary.downloaded_count, 1);
     let mood = fixture
         .catalog
-        .moods(&[fixture.mood], None, &cancel)
+        .moods(&[fixture.mood], &cancel)
         .await
         .expect("Mood download aggregate")
         .pop()
@@ -2258,7 +2244,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     let genre = library::GenreKey::from_raw(55);
     let row = fixture
         .catalog
-        .genres(&[genre], None, &cancel)
+        .genres(&[genre], &cancel)
         .await
         .unwrap()
         .pop()
@@ -2266,7 +2252,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     assert_eq!(row.source_id, "other-source");
     let detail = fixture
         .catalog
-        .genres(&[genre], None, &cancel)
+        .genres(&[genre], &cancel)
         .await
         .map(|rows| {
             let mut rows = rows;
@@ -2277,7 +2263,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     assert_eq!(detail.source_id, row.source_id);
     let original = fixture
         .catalog
-        .genres(&[fixture.genre], None, &cancel)
+        .genres(&[fixture.genre], &cancel)
         .await
         .unwrap()
         .pop()
@@ -2341,8 +2327,8 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         None
     );
     sqlx::raw_sql("INSERT INTO tracks(track_key,media_uri,indexed,title) VALUES (55,'https://example.test/unavailable',0,'Known');
-        INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,position) VALUES
-        (550,55,'first',55,0),(551,55,'second',55,1),(560,56,'first',55,0),(561,56,'second',55,1);")
+        INSERT INTO playlist_entries(playlist_entry_key,playlist_key,object_id,track_key,rank) VALUES
+        (550,55,'first',55,X'8000'),(551,55,'second',55,X'8001'),(560,56,'first',55,X'8000'),(561,56,'second',55,X'8001');")
         .execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     for (key, entry_keys) in [(keys[0], [550, 551]), (keys[1], [560, 561])] {
@@ -2452,10 +2438,15 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
         };
     }
     drop(raw);
+    fixture
+        .catalog
+        .pick_mosaics(&[library::MosaicOwner::Tag(fixture.genre.raw())])
+        .await
+        .unwrap();
 
     let row = fixture
         .catalog
-        .genres(&[fixture.genre], None, &ReadCancellation::new())
+        .genres(&[fixture.genre], &ReadCancellation::new())
         .await
         .expect("read Genre row")
         .pop()
@@ -2514,7 +2505,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
             fixture.track_uris[fixture.tracks.iter().position(|key| key == track).unwrap()].clone();
         fixture
             .catalog
-            .set_favorite(&library::FavoriteTarget::Track(media_uri), false)
+            .set_favorite(&library::FavoriteTarget::Track(media_uri), false, false)
             .await
             .unwrap();
     }
@@ -2523,6 +2514,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
         .set_favorite(
             &library::FavoriteTarget::Track(fixture.track_uris[0].clone()),
             true,
+            false,
         )
         .await
         .unwrap();
@@ -3149,7 +3141,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO tracks(media_uri,indexed,title,display_artist,display_album,duration_millis) VALUES (?1,0,COALESCE('Direct Signal',''),COALESCE('Outside Artist',''),COALESCE('Outside Album',''),COALESCE(42000,0))")
         .bind(&direct).execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&direct).execute(&mut raw).await.unwrap();
     drop(raw);
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
@@ -3296,23 +3288,16 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         .unwrap();
     fixture
         .catalog
-        .write_local_access(
-            None,
-            &[&LocalAccessWrite {
-                media_uri: direct.clone(),
-                origin: LocalAccessOrigin::Download,
-                path: "/downloads/direct.flac".to_string(),
-                root: "/downloads".to_string(),
-                relative_path: "direct.flac".to_string(),
-                size_bytes: 10,
-                mtime_ns: 1,
-                device_id: None,
-                inode: None,
-                parser_version: 5,
-                access_uri: "file:///downloads/direct.flac".to_string(),
-                loudness_analysis_key: None,
-            }],
-        )
+        .save_download(&library::DownloadFile {
+            media_uri: direct.clone(),
+            encoding: "original".into(),
+            path: "file:///downloads/direct.flac".into(),
+            storage_root: "/downloads".into(),
+            relative_path: "direct.flac".into(),
+            completed_size: Some(10),
+            managed: true,
+            ..Default::default()
+        })
         .await
         .expect("record completed direct download");
     assert_eq!(
@@ -3586,7 +3571,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
     .execute(&mut raw)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&queue_uri).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES('retained','absent',?1,'Listened','Artist','Album',1,'1970-01',1000,1000)")
         .bind(&listen_uri).execute(&mut raw).await.unwrap();
@@ -3658,7 +3643,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
             .await
             .unwrap();
     };
-    sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'download','/music/track.flac','/music','track.flac','file:///music/track.flac')")
+    sqlx::query("INSERT INTO downloads(media_uri,quality,revision,path,root,relative_path,managed) VALUES(?1,'original','','file:///music/track.flac','/music','track.flac',1)")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     for index in 0..70 {
         let definition = SmartPlaylistDefinition {
@@ -4490,13 +4475,11 @@ async fn home_search_and_radio_results_stay_bounded() {
         .await
         .expect("bounded Radio candidates");
     assert_eq!(radio.len(), 3);
-    sqlx::query("INSERT INTO queue_entries(track_key,provenance) SELECT track_key,'\"Manual\"' FROM tracks WHERE media_uri=?1")
+    sqlx::query("INSERT INTO queue_entries(track_key,rank,provenance) SELECT track_key,X'8000','\"Manual\"' FROM tracks WHERE media_uri=?1")
         .bind(&fixture.track_uris[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO queue_positions(order_kind,position,entry_id) SELECT kind,row_number() OVER(PARTITION BY kind ORDER BY entry_id)-1,entry_id FROM queue_entries CROSS JOIN (SELECT 0 kind UNION ALL SELECT 1) WHERE true ON CONFLICT(order_kind,position) DO UPDATE SET entry_id=excluded.entry_id")
-        .execute(&mut raw).await.unwrap();
     assert_eq!(
         fixture
             .catalog

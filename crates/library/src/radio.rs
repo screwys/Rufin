@@ -78,7 +78,7 @@ impl Catalog {
                     .push_bind(key);
             }
             RadioSeed::Playlist(key) => {
-                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) source_key,CASE WHEN playlist.owner='source' THEN playlist.object_id END object_id FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
+                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.rank,entry.playlist_entry_key LIMIT 1)) source_key,CASE WHEN playlist.owner='source' THEN playlist.object_id END object_id FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
             }
         }
         query.push(") seed JOIN sources ON sources.source_key=seed.source_key");
@@ -121,7 +121,7 @@ impl Catalog {
             }
             RadioSeed::Playlist(key) => {
                 query.push(" AND track.media_uri IS NOT (SELECT seed.media_uri FROM playlist_entries entry JOIN tracks seed USING(track_key) WHERE entry.playlist_key=").push_bind(key)
-                    .push(" AND seed.source_key=").push_bind(source).push(" ORDER BY entry.position LIMIT 1)");
+                    .push(" AND seed.source_key=").push_bind(source).push(" ORDER BY entry.rank,entry.playlist_entry_key LIMIT 1)");
             }
             _ => {}
         }
@@ -174,7 +174,7 @@ impl Catalog {
                     playlist
                         .entries
                         .iter()
-                        .filter_map(|(_, slot)| snapshot.tracks.live(*slot))
+                        .filter_map(|entry| snapshot.tracks.live(entry.track))
                         .find(|track| track.source == owner)
                         .map(|track| track.key)
                 })

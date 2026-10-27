@@ -92,6 +92,7 @@ impl RufinPlayback {
                 .map_err(string_error)?;
             Some(library::QueueRestore {
                 ids: Arc::from([]),
+                ranks: Arc::from([]),
                 entries: page.entries.into(),
                 order: (0..state.rows.len() as u32).collect(),
                 current_index: state

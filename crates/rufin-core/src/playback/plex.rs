@@ -572,6 +572,7 @@ impl PlexPlayback {
             entries: entries.into(),
             rows,
             ids: Arc::from([]),
+            ranks: Arc::from([]),
             current_index: window
                 .items
                 .iter()

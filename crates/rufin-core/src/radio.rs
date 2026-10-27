@@ -78,11 +78,7 @@ pub async fn saved_random_genre(
         return Ok(None);
     };
     catalog
-        .genres(
-            &[library::GenreKey::from_raw(key)],
-            selected.music_folder_key,
-            &cancellation,
-        )
+        .genres(&[library::GenreKey::from_raw(key)], &cancellation)
         .await
         .map(|mut genres| genres.pop())
         .map_err(|error| error.to_string())

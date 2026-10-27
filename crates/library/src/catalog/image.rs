@@ -16,7 +16,7 @@ use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
 /// Raised whenever the layout of a record changes.
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 /// The Store's identity and commit counter.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -264,20 +264,26 @@ mod field {
 
     pub(super) mod entries {
         use super::*;
+        use crate::catalog::snapshot::Entry;
 
-        pub(crate) fn put(value: &[(i64, u32)], out: &mut Out) {
+        pub(crate) fn put(value: &[Entry<u32>], out: &mut Out) {
             out.len(value.len());
-            for (entry, slot) in value {
-                out.i64(*entry);
-                out.u32(*slot);
+            for entry in value {
+                out.i64(entry.key);
+                out.bytes(&entry.rank);
+                out.u32(entry.track);
             }
         }
 
-        pub(crate) fn take(input: &mut In<'_>) -> Option<Vec<(i64, u32)>> {
+        pub(crate) fn take(input: &mut In<'_>) -> Option<Vec<Entry<u32>>> {
             let len = input.len()?;
             let mut entries = Vec::with_capacity(len.min(1 << 20));
             for _ in 0..len {
-                entries.push((input.i64()?, input.u32()?));
+                entries.push(Entry {
+                    key: input.i64()?,
+                    rank: input.bytes()?.into(),
+                    track: input.u32()?,
+                });
             }
             Some(entries)
         }

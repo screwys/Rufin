@@ -1,12 +1,16 @@
 //! File association and synchronization for authored playlists.
 use std::{
+    collections::HashSet,
     future::Future,
     path::{Path, PathBuf},
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
 };
 
 use async_channel::Receiver;
 use gio::prelude::*;
-use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation, SourceId};
+use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation, Scope, SourceId};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
     runtime::{CatalogChange, CatalogPublication, SourceEvent},
@@ -17,6 +21,109 @@ const LOCAL_CONFLICT: &str =
     "Both the playlist and its file have changed. Reload the file or save the Rufin version.";
 pub(crate) const FILE_CONFLICT: &str =
     "The playlist file has changed. Reload the file or replace it with the Rufin version.";
+
+/// How often linked files are checked for changes made outside Rufin.
+const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Linked playlist files, installed while some playlist is linked: a check of the files every
+/// five minutes, and edits heard on the change feed save the file when it saves automatically.
+/// The edit itself marks its link changed.
+#[derive(Default)]
+pub(crate) struct Links {
+    linked: HashSet<PlaylistKey>,
+    task: Option<tokio::task::AbortHandle>,
+}
+
+/// Reads which playlists are linked, and installs or removes the feature to match.
+pub(crate) async fn links_changed(owner: &SourceOwner) {
+    let linked = match owner.shared.catalog.linked_playlists().await {
+        Ok(linked) => linked,
+        Err(error) => {
+            owner.shared.warn_nonfatal(&error.to_string());
+            return;
+        }
+    };
+    let mut links = owner.shared.links.lock().unwrap_or_else(|p| p.into_inner());
+    if !links.set(linked) || links.task.is_some() || !owner.shared.started.load(Ordering::Acquire) {
+        return;
+    }
+    let weak = Arc::downgrade(&owner.shared);
+    let mut changes = owner.shared.catalog.changes();
+    links.task = Some(
+        owner
+            .shared
+            .runtime
+            .spawn(async move {
+                let mut interval = tokio::time::interval(CHECK_INTERVAL);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let Some(shared) = weak.upgrade() else { return };
+                            refresh_links(&SourceOwner { shared }, None).await;
+                        }
+                        change = changes.recv() => match change {
+                            Ok(change) => {
+                                let Some(shared) = weak.upgrade() else { return };
+                                edited(&SourceOwner { shared }, &change).await;
+                            }
+                            // The next check finds what was saved meanwhile.
+                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Closed) => return,
+                        },
+                    }
+                }
+            })
+            .abort_handle(),
+    );
+}
+
+impl Links {
+    /// Takes the linked playlists as the Store holds them; with none left the feature goes.
+    /// Whether some remain.
+    fn set(&mut self, linked: Vec<PlaylistKey>) -> bool {
+        self.linked = linked.into_iter().collect();
+        if self.linked.is_empty()
+            && let Some(task) = self.task.take()
+        {
+            task.abort();
+        }
+        !self.linked.is_empty()
+    }
+}
+
+/// Linked playlists a Change touched are saved when their links are marked changed and save
+/// automatically.
+async fn edited(owner: &SourceOwner, change: &library::Change) {
+    let mut listed = false;
+    let mut edited = Vec::new();
+    {
+        let links = owner.shared.links.lock().unwrap_or_else(|p| p.into_inner());
+        for scope in &change.scopes {
+            match scope {
+                Scope::Playlist { key, .. } if links.linked.contains(key) => edited.push(*key),
+                Scope::Playlists | Scope::Reload => listed = true,
+                _ => {}
+            }
+        }
+    }
+    for playlist in edited {
+        after_edit(owner, playlist).await;
+    }
+    if listed {
+        match owner.shared.catalog.linked_playlists().await {
+            Ok(linked) => {
+                owner
+                    .shared
+                    .links
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .set(linked);
+            }
+            Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
+        }
+    }
+}
 
 pub fn is_conflict(error: &str) -> bool {
     matches!(error, LOCAL_CONFLICT | FILE_CONFLICT)
@@ -40,7 +147,9 @@ where
     Work: Future<Output = Result<T, String>> + Send + 'static,
 {
     let (sender, receiver) = async_channel::bounded(1);
-    owner.spawn_serialized(move |owner| async move {
+    let task = owner.clone();
+    owner.shared.runtime.spawn(async move {
+        let owner = task;
         let result = work(owner.clone()).await;
         if let Err(error) = &result {
             owner.shared.warn_nonfatal(error);
@@ -163,11 +272,9 @@ pub fn update(
             artwork.as_ref(),
         )
         .await?
+            && settings_changed
         {
-            after_edit(&owner, playlist).await;
-            if settings_changed {
-                publish(&owner, Some(playlist)).await;
-            }
+            publish(&owner, Some(playlist)).await;
         }
         Ok(())
     })
@@ -264,6 +371,7 @@ async fn link_on(
         return Err(error);
     }
     associate(owner, &link).await?;
+    links_changed(owner).await;
     publish(owner, Some(playlist)).await;
     Ok(())
 }
@@ -334,6 +442,7 @@ pub fn unlink(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Result<(),
             .unlink_playlist_file(playlist)
             .await
             .map_err(string_error)?;
+        links_changed(&owner).await;
         publish(&owner, Some(playlist)).await;
         Ok(())
     })
@@ -625,7 +734,9 @@ pub(crate) async fn remember(
         .save_playlist_file_link(&link)
         .await
         .map_err(string_error)?;
-    associate(owner, &link).await
+    associate(owner, &link).await?;
+    links_changed(owner).await;
+    Ok(())
 }
 
 async fn associate(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<(), String> {
@@ -651,6 +762,17 @@ async fn reload_on(
 ) -> Result<bool, String> {
     if link.dirty && !discard {
         return Err(LOCAL_CONFLICT.into());
+    }
+    if link.dirty {
+        // The file replaces Rufin's changes, so an automatic save must not write them meanwhile.
+        let mut clean = link.clone();
+        clean.dirty = false;
+        owner
+            .shared
+            .catalog
+            .save_playlist_file_link(&clean)
+            .await
+            .map_err(string_error)?;
     }
     let before = revision(owner, link).await?;
     let report = if let Some(source) = &link.source_id {
@@ -761,7 +883,8 @@ async fn save_on(
         .catalog
         .mark_playlist_file_synced(link.playlist, &next)
         .await
-        .map_err(string_error)
+        .map_err(string_error)?;
+    Ok(())
 }
 
 pub(crate) async fn export_local_on(
@@ -814,7 +937,7 @@ pub(crate) async fn export_local_on(
     Ok(())
 }
 
-pub(crate) async fn after_edit(owner: &SourceOwner, playlist: PlaylistKey) {
+async fn after_edit(owner: &SourceOwner, playlist: PlaylistKey) {
     let Ok(Some(link)) = owner.shared.catalog.get_playlist_file_link(playlist).await else {
         return;
     };
@@ -950,15 +1073,16 @@ pub(crate) async fn backfill_file_playlists(owner: &SourceOwner) -> Result<(), S
     Ok(())
 }
 
-pub(crate) async fn discover(
-    owner: &SourceOwner,
-    source_id: &SourceId,
-    source_key: library::SourceKey,
-) {
+/// Imports the playlist files a file source holds that no playlist is made from yet, and
+/// checks the linked ones. Runs after each refresh of the source.
+pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
     let Some(configuration) = owner
         .configuration(source_id)
         .filter(|source| source.is_file_library())
     else {
+        return;
+    };
+    let Ok(Some(source_key)) = owner.shared.catalog.source_identity_key(source_id).await else {
         return;
     };
     let mut after = None;
@@ -1039,7 +1163,7 @@ async fn publish(owner: &SourceOwner, playlist: Option<PlaylistKey>) {
         .shared
         .send(SourceEvent::CatalogPublished(CatalogPublication {
             source_key: None,
-            favorite: None,
+            favorites: Vec::new(),
             change: CatalogChange::Playlists(playlist),
         }))
         .await;

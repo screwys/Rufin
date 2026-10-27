@@ -590,7 +590,7 @@ impl MetadataBatch {
             .await;
         if source.is_none() && matches!(result, Ok(()) | Err(Error::PartiallySaved { .. })) {
             self.source
-                .publish_current_catalog(None, crate::runtime::CatalogChange::Broad)
+                .publish_current_catalog(crate::runtime::CatalogChange::Broad)
                 .await;
         }
         if artwork_changed {

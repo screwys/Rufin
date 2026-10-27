@@ -1023,7 +1023,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                         let revision = catalog.borrow_and_update().clone();
                         let changed = revision.catalog != previous_catalog.catalog;
                         let activity = revision.activity != previous_catalog.activity;
-                        let value = json!({"catalog_acquired": changed && matches!(revision.change, Some(rufin_core::runtime::CatalogChange::Broad)), "pins_changed":changed || (activity && products.settings.load().sidebar.pins_use_activity()), "activity_changed":activity});
+                        let value = json!({"catalog_acquired": changed && matches!(revision.change, Some(rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites)), "pins_changed":changed || (activity && products.settings.load().sidebar.pins_use_activity()), "activity_changed":activity});
                         previous_catalog = revision;
                         value
                     },

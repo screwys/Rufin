@@ -50,7 +50,6 @@ pub(super) enum DownloadAudio {
 
 pub(super) struct DownloadFileMetadata {
     pub size: Option<u64>,
-    pub mtime_ns: i64,
 }
 
 impl DownloadAudio {
@@ -87,13 +86,6 @@ impl DownloadAudio {
             Self::Native { path, .. } => match std::fs::metadata(path) {
                 Ok(metadata) if metadata.is_file() => Ok(Some(DownloadFileMetadata {
                     size: Some(metadata.len()),
-                    mtime_ns: metadata
-                        .modified()
-                        .ok()
-                        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map_or(0, |value| {
-                            i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
-                        }),
                 })),
                 Ok(_) => Ok(None),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -102,10 +94,9 @@ impl DownloadAudio {
             Self::Document {
                 file: Some(file), ..
             } => match sources::stat_document(file) {
-                Ok(entry) if !entry.directory => Ok(Some(DownloadFileMetadata {
-                    size: entry.size,
-                    mtime_ns: 0,
-                })),
+                Ok(entry) if !entry.directory => {
+                    Ok(Some(DownloadFileMetadata { size: entry.size }))
+                }
                 Ok(_) | Err(sources::SourceError::NotFound) => Ok(None),
                 Err(error) => Err(error.to_string()),
             },

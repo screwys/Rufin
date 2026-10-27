@@ -51,27 +51,31 @@ impl TryFrom<LyricsScalar> for LyricsCacheRow {
 }
 
 impl Catalog {
+    /// Tracks of a source without source lyrics, all of them or only these.
     pub async fn uncached_source_lyrics_page(
         &self,
         source: crate::SourceKey,
         input: [u8; 32],
         after: Option<crate::TrackKey>,
+        only: Option<&[crate::TrackKey]>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as("SELECT track_key,media_uri FROM tracks track
             WHERE source_key=?1 AND indexed=1 AND track_key>?2
+              AND (?4 IS NULL OR track_key IN (SELECT value FROM json_each(?4)))
               AND NOT EXISTS(SELECT 1 FROM lyrics_cache lyrics
                 WHERE lyrics.media_uri=track.media_uri AND lyrics.authority='source'
                   AND lyrics.cache_input_digest=CASE WHEN track.media_uri LIKE 'rufin:source/%' THEN ?3 ELSE zeroblob(32) END)
             ORDER BY track_key LIMIT 128")
             .bind(source).bind(after.map_or(0, crate::TrackKey::raw)).bind(input.as_slice())
+            .bind(only.map(serde_json::to_string).transpose()?)
             .fetch_all(&mut *connection).await?)
     }
 
     pub async fn clear_lyrics_cache(&self, active_media_uris: &[String]) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        if sqlx::query("DELETE FROM lyrics_cache WHERE NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=lyrics_cache.media_uri AND locator.origin='download') AND media_uri NOT IN (SELECT value FROM json_each(?1))")
+        if sqlx::query("DELETE FROM lyrics_cache WHERE NOT EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=lyrics_cache.media_uri) AND media_uri NOT IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(active_media_uris)?)
             .execute(write.connection().await?).await?.rows_affected() != 0
         {

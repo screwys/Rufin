@@ -147,6 +147,8 @@ struct RunContext {
     backend_loaded: bool,
     seekable: bool,
     bitstream: bool,
+    /// A seek was sent; the position that answers it is saved.
+    seeking: bool,
 }
 
 impl RunContext {
@@ -168,10 +170,15 @@ impl RunContext {
             backend_loaded: false,
             seekable: true,
             bitstream: false,
+            seeking: false,
         }
     }
 
+    /// The listen of this run; a run nothing was heard of records none.
     fn listen(&self, skipped: bool) -> Option<library::ListenWrite> {
+        if self.audible_millis == 0 {
+            return None;
+        }
         let track = &self.row.track;
         let metadata = &track.metadata;
         Some(library::ListenWrite {
@@ -1964,6 +1971,9 @@ impl Player {
                 run,
                 position_millis,
             });
+            if let Some(current) = self.current_run.as_mut() {
+                current.seeking = true;
+            }
         } else {
             // Nothing plays this run yet; its start uses the stored position.
             self.sequence.set_progress_millis(position_millis);
@@ -2254,6 +2264,9 @@ impl Player {
             millis.min(current.duration_millis)
         };
         let changed = self.sequence.progress_millis() != playhead_millis;
+        if std::mem::take(&mut current.seeking) {
+            self.sequence.persist_state();
+        }
         if !changed && current.status == TransportStatus::Paused {
             return;
         }
@@ -2941,7 +2954,6 @@ impl Player {
                 report.volume = self.output_volume;
                 report.muted = self.output_muted;
                 self.owner().report_source(report);
-                self.sequence.persist_state();
             }
             self.owner().publish(projection, current_media_changed);
         }

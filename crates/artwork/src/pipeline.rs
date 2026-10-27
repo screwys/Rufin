@@ -709,26 +709,23 @@ fn resolve_request(
         return Ok(Resolution::Missing);
     }
     if let library::ArtworkImage::Playlist {
-        automatic: Some(_),
-        resolved,
+        mosaic: Some(picks),
         ..
     } = &candidate.image
     {
-        let Some(recipes) = resolved else {
-            let catalog = shared
-                .fetch
-                .catalog()
-                .ok_or("Playlist artwork storage is unavailable")?;
-            return match shared
-                .runtime
-                .block_on(catalog.resolve_playlist_artwork(candidate.clone()))
-                .map_err(|error| error.to_string())?
-            {
-                Some(resolved) => resolve_request(shared, work, &resolved),
-                None => Ok(Resolution::Invalidated),
-            };
-        };
-        return compose_playlist(shared, work, candidate, recipes);
+        let catalog = shared
+            .fetch
+            .catalog()
+            .ok_or("Playlist artwork storage is unavailable")?;
+        let recipes = shared
+            .runtime
+            .block_on(catalog.track_artwork_bindings(picks, &library::ReadCancellation::new()))
+            .map_err(|error| error.to_string())?
+            .iter()
+            .map(|binding| serde_json::from_slice::<Vec<Candidate>>(binding))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        return compose_playlist(shared, work, candidate, &recipes);
     }
     match shared.fetch.fetch(
         &shared.runtime,

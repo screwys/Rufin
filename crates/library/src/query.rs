@@ -521,13 +521,13 @@ list_windows!(artists, page_artists, ArtistView, catalog, connection, read, keys
     let keys = keys.iter().copied().map(ArtistKey::from_raw).collect::<Vec<_>>();
     crate::collections::load_artist_rows(catalog, connection, &keys, album_artist, read.activity).await
 });
-list_windows!(genres, page_genres, GenreView, catalog, connection, read, keys => async {
+list_windows!(genres, page_genres, GenreView, catalog, connection, _read, keys => async {
     let keys = keys.iter().copied().map(GenreKey::from_raw).collect::<Vec<_>>();
-    crate::collections::load_genre_rows(catalog, connection, &keys, read.folder).await
+    crate::collections::load_genre_rows(catalog, connection, &keys).await
 });
-list_windows!(moods, page_moods, MoodView, catalog, connection, read, keys => async {
+list_windows!(moods, page_moods, MoodView, catalog, connection, _read, keys => async {
     let keys = keys.iter().copied().map(MoodKey::from_raw).collect::<Vec<_>>();
-    crate::collections::load_mood_rows(catalog, connection, &keys, read.folder).await
+    crate::collections::load_mood_rows(catalog, connection, &keys).await
 });
 list_windows!(playlists, , PlaylistRow, catalog, connection, read, keys => async {
     let _ = read;
@@ -636,8 +636,24 @@ macro_rules! collection_points {
 }
 collection_points!(album,albums,"albums","album_key",AlbumKey,AlbumView,load_album_rows,activity:bool);
 collection_points!(artist,artists,"artists","artist_key",ArtistKey,ArtistView,load_artist_rows,album_artist:bool,activity:bool);
-collection_points!(genre,genres,"tags","tag_key",GenreKey,GenreView,load_genre_rows,folder:Option<FolderKey>);
-collection_points!(mood,moods,"tags","tag_key",MoodKey,MoodView,load_mood_rows,folder:Option<FolderKey>);
+collection_points!(
+    genre,
+    genres,
+    "tags",
+    "tag_key",
+    GenreKey,
+    GenreView,
+    load_genre_rows,
+);
+collection_points!(
+    mood,
+    moods,
+    "tags",
+    "tag_key",
+    MoodKey,
+    MoodView,
+    load_mood_rows,
+);
 
 pub(crate) fn selection_ranges(
     ranges: Option<&[std::ops::Range<usize>]>,

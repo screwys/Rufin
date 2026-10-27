@@ -696,7 +696,7 @@ pub(super) async fn encode_download(
 }
 
 pub(super) fn download_owners(
-    file: &library::ConnectMediaFile,
+    file: &library::DownloadFile,
 ) -> Result<HashSet<DownloadOwner>, String> {
     let mut owners: HashSet<DownloadOwner> = serde_json::from_str(if file.owners.is_empty() {
         "[]"
@@ -712,7 +712,7 @@ pub(super) fn download_owners(
 
 pub(super) fn completed_download_paths(
     root: &Path,
-    file: &library::ConnectMediaFile,
+    file: &library::DownloadFile,
 ) -> Result<DownloadPaths, String> {
     let source = file.source_id.as_deref().map(SourceId::new);
     let mut paths = download_paths(root, source.as_ref(), &file.media_uri);
@@ -741,7 +741,7 @@ pub(super) fn completed_download_paths(
 
 pub(super) async fn finalize_download(
     paths: &DownloadPaths,
-    previous: Option<&library::ConnectMediaFile>,
+    previous: Option<&library::DownloadFile>,
 ) -> Result<FinishedDownload, String> {
     let completed_size = tokio::fs::metadata(&paths.audio_part)
         .await
@@ -762,39 +762,31 @@ pub(super) async fn finalize_download(
     })
 }
 
-pub(super) async fn download_access(
-    catalog: &Catalog,
-    media_uri: &str,
+/// Where a landed copy sits in its storage, and its size.
+pub(super) struct Placement {
+    pub(super) root: String,
+    pub(super) relative_path: String,
+    pub(super) size: i64,
+}
+
+pub(super) async fn download_placement(
     paths: &DownloadPaths,
     completed_size: Option<i64>,
-) -> Result<library::LocalAccessWrite, String> {
-    let loudness_analysis_key = catalog
-        .audio_analysis_key(media_uri)
-        .await
-        .map_err(|error| error.to_string())?;
+) -> Result<Placement, String> {
     let metadata = paths
         .audio
         .inspect()
         .await?
         .ok_or("The downloaded file is unavailable")?;
     let (root, relative_path) = local_access_projection(paths)?;
-    Ok(library::LocalAccessWrite {
-        media_uri: media_uri.into(),
-        origin: library::LocalAccessOrigin::Download,
-        path: paths.audio.location()?,
+    Ok(Placement {
         root,
         relative_path,
-        size_bytes: metadata
+        size: metadata
             .size
             .and_then(|size| i64::try_from(size).ok())
             .or(completed_size)
             .ok_or("The download has no completed size")?,
-        mtime_ns: metadata.mtime_ns,
-        device_id: None,
-        inode: None,
-        parser_version: RECORD_VERSION as i64,
-        access_uri: paths.audio.access_uri()?,
-        loudness_analysis_key,
     })
 }
 
@@ -806,9 +798,7 @@ async fn import_download_record(
     custom_directory: Option<&DownloadDirectory>,
 ) -> Result<(), String> {
     let paths = record_download_paths(root, source.map(|(_, id)| id), &record, custom_directory)?;
-    let access = download_access(
-        catalog,
-        &record.media_uri,
+    let placement = download_placement(
         &paths,
         record
             .completed_size
@@ -817,18 +807,18 @@ async fn import_download_record(
     .await?;
     if record
         .completed_size
-        .is_some_and(|size| access.size_bytes as u64 != size)
+        .is_some_and(|size| placement.size as u64 != size)
     {
         return Err("The downloaded file size changed".into());
     }
     let path = paths.audio.access_uri()?;
     let mut file = catalog
-        .connect_media_files(&record.media_uri)
+        .download_files(&record.media_uri)
         .await
         .map_err(|error| error.to_string())?
         .into_iter()
         .find(|file| file.path == path)
-        .unwrap_or(library::ConnectMediaFile {
+        .unwrap_or(library::DownloadFile {
             media_uri: record.media_uri,
             encoding: record
                 .quality
@@ -864,13 +854,13 @@ async fn import_download_record(
     let source = source.or(inferred_key.zip(inferred.as_ref()));
     file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
     file.source_id = source.map(|(_, id)| id.to_string());
-    file.storage_root = access.root.clone();
-    file.relative_path = access.relative_path.clone();
-    file.completed_size = Some(access.size_bytes);
+    file.storage_root = placement.root;
+    file.relative_path = placement.relative_path;
+    file.completed_size = Some(placement.size);
     file.retired_documents =
         serde_json::to_string(&record.retired_documents).map_err(|error| error.to_string())?;
     catalog
-        .commit_download(&file, source.map(|(key, _)| key), &access)
+        .save_download(&file)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1759,13 +1749,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            catalog
-                .connect_media_files(&identity)
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(catalog.download_files(&identity).await.unwrap().is_empty());
         assert!(audio.is_file());
         assert!(
             record_path

@@ -69,7 +69,7 @@ pub(crate) async fn selected_tracks_on(
                     rows.extend(
                         in_ranges(&order, ranges.as_deref())
                             .into_iter()
-                            .map(|(key, _)| (key, None)),
+                            .filter_map(|(key, _)| Some((key?, None))),
                     );
                 } else {
                     let order = catalog.member_order(connection, read).await?;

@@ -14,9 +14,9 @@ impl Catalog {
                     .bind(&source).bind(root.id).bind(root.label).execute(&mut *connection).await?;
             }
         }
-        sqlx::raw_sql("DELETE FROM queue_state; DELETE FROM queue_positions; DELETE FROM queue_entries; DELETE FROM queue_contexts; DELETE FROM queue_transfer_pages;
-            DELETE FROM favorite_outbox; DELETE FROM listen_outbox; DELETE FROM native_playlist_pending;
-            DELETE FROM local_locators; DELETE FROM local_access_metadata; DELETE FROM connect_media_files;
+        sqlx::raw_sql("DELETE FROM queue_state; DELETE FROM queue_entries; DELETE FROM queue_contexts; DELETE FROM queue_transfer_pages;
+            DELETE FROM outbox; DELETE FROM listen_outbox;
+            DELETE FROM local_locators; DELETE FROM local_access_metadata; DELETE FROM downloads;
             DELETE FROM playlist_file_links; DELETE FROM playlist_file_ignored; DELETE FROM playlist_file_settings;
             DELETE FROM waveform_cache WHERE NOT EXISTS(SELECT 1 FROM tracks JOIN track_details details USING(track_key) WHERE tracks.media_uri=waveform_cache.media_uri AND details.source_loudness_analysis_key=waveform_cache.analysis_key);
             UPDATE track_details SET loudness_analysis_key=source_loudness_analysis_key WHERE loudness_analysis_key<>source_loudness_analysis_key;
@@ -39,7 +39,7 @@ impl Catalog {
             'access',(SELECT json_group_array(json_object('access_uri',metadata.access_uri,'size_bytes',metadata.size_bytes,'mtime_ns',metadata.mtime_ns,'device_id',metadata.device_id,'inode',metadata.inode,'parser_version',metadata.parser_version,'loudness_analysis_key',CASE WHEN metadata.loudness_analysis_key IS NULL THEN NULL ELSE hex(metadata.loudness_analysis_key) END)) FROM local_access_metadata metadata WHERE metadata.access_uri IN(SELECT access_uri FROM local_locators WHERE media_uri=track.media_uri)),
             'waveform',(SELECT peaks FROM waveform_cache WHERE media_uri=track.media_uri AND analysis_key=details.loudness_analysis_key),
             'measurement',(SELECT json_array(integrated_lufs,true_peak) FROM loudness_measurements WHERE entity_kind='track' AND entity_key=track.track_key AND analysis_key=details.loudness_analysis_key))
-            FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE EXISTS(SELECT 1 FROM connect_media_files file WHERE file.media_uri=track.media_uri) ORDER BY track.media_uri", crate::track_metadata_sql("track", "details"))))
+            FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE EXISTS(SELECT 1 FROM downloads file WHERE file.media_uri=track.media_uri) ORDER BY track.media_uri", crate::track_metadata_sql("track", "details"))))
             .fetch_all(connection).await?;
         rows.iter()
             .map(|row| Ok(serde_json::from_str(row)?))
@@ -150,7 +150,7 @@ impl Catalog {
                 SELECT source.source_key,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM receiving.local_locators locator LEFT JOIN receiving.sources old USING(source_key)
                 LEFT JOIN main.sources source ON source.object_id=old.object_id WHERE EXISTS(SELECT 1 FROM main.tracks WHERE media_uri=locator.media_uri);
                 INSERT INTO local_access_metadata SELECT metadata.* FROM receiving.local_access_metadata metadata WHERE EXISTS(SELECT 1 FROM main.local_locators WHERE access_uri=metadata.access_uri);
-                INSERT INTO connect_media_files SELECT * FROM receiving.connect_media_files;
+                INSERT INTO downloads SELECT * FROM receiving.downloads;
                 INSERT INTO playlist_file_settings SELECT settings.* FROM receiving.playlist_file_settings settings WHERE EXISTS(SELECT 1 FROM main.sources WHERE object_id=settings.source_id);
                 INSERT INTO playlist_file_ignored SELECT ignored.* FROM receiving.playlist_file_ignored ignored WHERE EXISTS(SELECT 1 FROM main.sources WHERE object_id=ignored.source_id);
                 INSERT INTO playlist_file_links(playlist_key,source_id,path,auto_refresh,auto_save,path_mode,revision,dirty,error)

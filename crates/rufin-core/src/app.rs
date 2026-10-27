@@ -293,12 +293,12 @@ where
                     current.ui.application.private_mode,
                 );
             }
-            if (!previous.ui.application.download_artwork_automatically
-                && current.ui.application.download_artwork_automatically)
-                || (!previous.ui.application.download_lyrics_automatically
-                    && current.ui.application.download_lyrics_automatically)
+            if previous.ui.application.download_artwork_automatically
+                != current.ui.application.download_artwork_automatically
+                || previous.ui.application.download_lyrics_automatically
+                    != current.ui.application.download_lyrics_automatically
             {
-                settings_source.request_asset_downloads();
+                settings_source.asset_downloads_changed();
             }
             if previous.ui.downloads != current.ui.downloads {
                 settings_downloads.settings_changed(current.ui.downloads.clone());

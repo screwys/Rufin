@@ -217,11 +217,19 @@ pub(crate) struct PlaylistRec {
     pub(crate) created: u32,
     pub(crate) source: u16,
     pub(crate) flags: u16,
-    /// Entry keys and track slots in position order.
-    pub(crate) entries: Vec<(i64, u32)>,
+    /// Entries with their track slots, in rank order.
+    pub(crate) entries: Vec<Entry<u32>>,
 }
 
-/// A Rufin or source playlist as the Store holds it, with its entries in position order.
+/// A playlist entry: its key, its rank in the playlist's order and its track.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Entry<T> {
+    pub(crate) key: i64,
+    pub(crate) rank: Box<[u8]>,
+    pub(crate) track: T,
+}
+
+/// A Rufin or source playlist as the Store holds it, with its entries in rank order.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Playlist {
     pub(crate) key: i64,
@@ -233,7 +241,7 @@ pub(crate) struct Playlist {
     pub(crate) created: i64,
     pub(crate) writable: bool,
     pub(crate) metadata_writable: bool,
-    pub(crate) entries: Vec<(i64, TrackKey)>,
+    pub(crate) entries: Vec<Entry<TrackKey>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -846,6 +854,29 @@ impl Snapshot {
         Some(UserState::of(flags, rating))
     }
 
+    /// The favorite and rating a track, album or artist shows: the user's own, else its
+    /// source's.
+    pub(crate) fn shown_state(&self, item: UserItem) -> Option<(Option<bool>, Option<u8>)> {
+        let (flags, rating, native) = match item {
+            UserItem::Track(key) => self
+                .tracks
+                .get(key)
+                .map(|record| (record.flags, record.rating, record.native_rating))?,
+            UserItem::Album(key) => self
+                .albums
+                .get(key)
+                .map(|record| (record.flags, record.rating, record.native_rating))?,
+            UserItem::Artist(key) => self
+                .artists
+                .get(key)
+                .map(|record| (record.flags, record.rating, record.native_rating))?,
+        };
+        Some((
+            super::views::favorite(flags),
+            super::views::rating(rating, native),
+        ))
+    }
+
     pub(crate) fn set_user_state(&mut self, item: UserItem, state: UserState) {
         let rating = state.rating.unwrap_or(UNRATED);
         let flags = state.flags();
@@ -897,8 +928,12 @@ impl Snapshot {
             entries: record
                 .entries
                 .iter()
-                .filter_map(|(entry, slot)| {
-                    Some((*entry, TrackKey::from_raw(self.tracks.key_of(*slot)?)))
+                .filter_map(|entry| {
+                    Some(Entry {
+                        key: entry.key,
+                        rank: entry.rank.clone(),
+                        track: TrackKey::from_raw(self.tracks.key_of(entry.track)?),
+                    })
                 })
                 .collect(),
         })
@@ -913,7 +948,11 @@ impl Snapshot {
         let entries = playlist
             .entries
             .iter()
-            .map(|(entry, track)| (*entry, self.tracks.slot(track.raw()).unwrap_or(NONE)))
+            .map(|entry| Entry {
+                key: entry.key,
+                rank: entry.rank.clone(),
+                track: self.tracks.slot(entry.track.raw()).unwrap_or(NONE),
+            })
             .collect();
         self.playlists.place(PlaylistRec {
             key: playlist.key,
@@ -1076,7 +1115,14 @@ impl Snapshot {
                 .playlists
                 .records
                 .iter()
-                .map(|playlist| playlist.entries.capacity() * 16)
+                .map(|playlist| {
+                    playlist.entries.capacity() * 32
+                        + playlist
+                            .entries
+                            .iter()
+                            .map(|entry| entry.rank.len())
+                            .sum::<usize>()
+                })
                 .sum::<usize>()
     }
 

@@ -5,11 +5,13 @@ mod changes;
 mod download;
 pub mod folders;
 mod integrations;
+mod mosaics;
+mod outbox;
 mod pins;
 pub mod search;
 pub use integrations::FileIntegration;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +24,7 @@ use crate::runtime::source::{
     SourceProgressStage, SourceSummary,
 };
 use crate::runtime::{
-    CatalogChange, CatalogPublication, CatalogRevision, FavoriteSettlement, SelectedLibrary,
-    SourceEvent, SourceNotice, SourceNoticeKind,
+    CatalogChange, CatalogPublication, CatalogRevision, SelectedLibrary, SourceEvent,
 };
 use artwork::Artwork;
 use async_channel::{Receiver, Sender};
@@ -31,8 +32,8 @@ use downloads::Downloads;
 use library::{Catalog, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey};
 use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
-    CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceEntityKind,
-    SourceError, SourceId, SourceReadProgress, SourceReadStage, SourceSettingsChange, SourceSetup,
+    CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceError,
+    SourceId, SourceReadProgress, SourceReadStage, SourceSettingsChange, SourceSetup,
 };
 use tracing::{info, warn};
 
@@ -124,13 +125,19 @@ pub(crate) struct Shared {
     selection_intent: Mutex<Weak<AtomicBool>>,
     connection: Mutex<Option<tokio::task::AbortHandle>>,
     album_release: Mutex<Option<tokio::task::AbortHandle>>,
+    /// Automatic artwork and lyrics downloads, installed while either is on.
     asset_download: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    asset_download_requested: Arc<tokio::sync::Notify>,
-    pub(crate) lane: tokio::sync::Mutex<()>,
+    pub(crate) links: Mutex<crate::playlist_files::Links>,
+    /// Set-once mosaics, installed while some mosaic is incomplete.
+    mosaics: Mutex<Option<tokio::task::AbortHandle>>,
+    /// The edits of each playlist, which run one at a time.
+    playlist_edits: Mutex<HashMap<library::PlaylistKey, Arc<tokio::sync::Mutex<()>>>>,
     playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
-    maintenance: Arc<tokio::sync::Notify>,
-    started: AtomicBool,
+    /// Whether the delivery worker runs; it is held while the worker decides to stop.
+    outbox_running: tokio::sync::Mutex<bool>,
+    outbox_wake: Arc<tokio::sync::Notify>,
+    pub(crate) started: AtomicBool,
 }
 
 impl Shared {
@@ -468,11 +475,13 @@ impl SourceOwner {
             connection: Mutex::new(None),
             album_release: Mutex::new(None),
             asset_download: Mutex::new(None),
-            asset_download_requested: Arc::new(tokio::sync::Notify::new()),
-            lane: tokio::sync::Mutex::new(()),
+            links: Mutex::new(Default::default()),
+            mosaics: Mutex::new(None),
+            playlist_edits: Mutex::new(HashMap::new()),
             playback: Mutex::new(Weak::new()),
             connect: Mutex::new(Weak::new()),
-            maintenance: Arc::new(tokio::sync::Notify::new()),
+            outbox_running: tokio::sync::Mutex::new(false),
+            outbox_wake: Arc::new(tokio::sync::Notify::new()),
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
@@ -494,7 +503,8 @@ impl SourceOwner {
         if self.shared.started.swap(true, Ordering::AcqRel) {
             return Err("the source owner is already running".to_string());
         }
-        self.start_asset_downloader();
+        self.asset_downloads_changed();
+        self.ensure_mosaics();
         if let Some(source_id) = self.shared.settings.load().sources.selected_source_id {
             let owner = self.clone();
             self.shared.runtime.spawn(async move {
@@ -511,26 +521,10 @@ impl SourceOwner {
                 .send(SourceEvent::Configured(owner.list_sources()))
                 .await;
         });
-        let weak = Arc::downgrade(&self.shared);
-        let maintenance = Arc::clone(&self.shared.maintenance);
+        let owner = self.clone();
         self.shared.runtime.spawn(async move {
-            let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                let check_links = tokio::select! {
-                    _ = interval.tick() => true,
-                    _ = maintenance.notified() => false,
-                };
-                let Some(shared) = weak.upgrade() else {
-                    break;
-                };
-                let owner = SourceOwner { shared };
-                if check_links {
-                    let _lane = owner.shared.lane.lock().await;
-                    crate::playlist_files::refresh_links(&owner, None).await;
-                }
-                owner.deliver_pending_favorites().await;
-            }
+            owner.deliver_outbox().await;
+            crate::playlist_files::links_changed(&owner).await;
         });
         Ok(())
     }
@@ -565,7 +559,6 @@ impl SourceOwner {
         F: FnOnce() -> Work,
         Work: Future<Output = Result<T, String>>,
     {
-        let _lane = self.shared.lane.lock().await;
         if setup {
             self.release_selected().await;
         }
@@ -578,10 +571,11 @@ impl SourceOwner {
         {
             self.shared.warn_nonfatal(&error);
         }
-        if result.is_ok()
-            && let Err(error) = self.shared.load_source_counts().await
-        {
-            self.shared.warn_nonfatal(&error);
+        if result.is_ok() {
+            if let Err(error) = self.shared.load_source_counts().await {
+                self.shared.warn_nonfatal(&error);
+            }
+            crate::playlist_files::links_changed(self).await;
         }
         if setup && self.shared.started.load(Ordering::Acquire) {
             let current = self.shared.settings.load();
@@ -605,16 +599,12 @@ impl SourceOwner {
             ))
             .await;
         self.publish_operation(SourceOperation::Idle).await;
-        if result.is_ok() {
-            self.request_asset_downloads();
-        }
         result
     }
 
     /// Called only for an applied Connect page. Empty synchronization passes do not
     /// publish catalog events or rebuild the selected source.
     pub(crate) async fn connect_changed(&self, sources_changed: bool) -> Result<(), String> {
-        let _lane = self.shared.lane.lock().await;
         let current = self.shared.settings.load();
         if sources_changed {
             self.shared.retire_changed_clients(false).await?;
@@ -669,11 +659,10 @@ impl SourceOwner {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: None,
-                favorite: None,
+                favorites: Vec::new(),
                 change: CatalogChange::Broad,
             }))
             .await;
-        self.request_asset_downloads();
         Ok(())
     }
 
@@ -741,17 +730,23 @@ impl SourceOwner {
         }
     }
 
-    pub(crate) fn spawn_serialized<F, Work>(&self, work: F)
-    where
-        F: FnOnce(SourceOwner) -> Work + Send + 'static,
-        Work: Future<Output = ()> + Send + 'static,
-    {
-        let shared = Arc::clone(&self.shared);
-        self.shared.runtime.spawn(async move {
-            let lane_owner = Arc::clone(&shared);
-            let _lane = lane_owner.lane.lock().await;
-            work(SourceOwner { shared }).await;
-        });
+    /// Waits until earlier edits of the playlist are done. A server names entries by position,
+    /// so an edit reads them only after the previous edit's result is in the Store. No Store
+    /// lock is held meanwhile.
+    pub(crate) async fn edit_playlist(
+        &self,
+        playlist: library::PlaylistKey,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let edit = {
+            let mut edits = self
+                .shared
+                .playlist_edits
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            edits.retain(|_, edit| Arc::strong_count(edit) > 1);
+            Arc::clone(edits.entry(playlist).or_default())
+        };
+        edit.lock_owned().await
     }
 
     async fn publish_operation(&self, operation: SourceOperation) {
@@ -876,7 +871,7 @@ impl SourceOwner {
                 });
             }
             if let Ok(playback) = owner.shared.playback() {
-                playback.catalog_changed();
+                playback.source_selected();
             }
         });
         *self
@@ -1116,7 +1111,9 @@ impl SourceOwner {
             return;
         }
         if result.is_ok() {
-            self.shared.maintenance.notify_one();
+            self.deliver_outbox().await;
+            self.import_playlist_pins_once(source_id).await;
+            crate::playlist_files::discover(self, source_id).await;
         }
         {
             let mut clients = self
@@ -1439,44 +1436,41 @@ impl SourceOwner {
                     .configured_sources(self.shared.selected().as_ref()),
             ))
             .await;
-        self.request_asset_downloads();
         Ok(())
     }
 
     /// Publishes committed catalog changes as the catalog publications clients read today.
     async fn publish_changes(&self, pending: changes::Pending) {
+        // Playlists, genres and moods may have been added; the mosaics feature picks covers
+        // for them.
+        if pending.reloaded
+            || !pending.playlists.is_empty()
+            || pending.sources.values().any(|changed| changed.catalog)
+        {
+            self.ensure_mosaics();
+        }
         if !pending.rekeys.is_empty()
             && let Ok(playback) = self.shared.playback()
         {
             playback.rekey_tracks(pending.rekeys.into());
         }
-        // A reload, such as the one that follows the first load, changes no playlist members.
-        let changed = !pending.playlists.is_empty()
-            || pending.sources.values().any(|changed| changed.catalog);
-        if (changed || pending.activity)
-            && let Err(error) = self
-                .shared
-                .catalog
-                .refresh_incomplete_playlist_artwork(None, !changed)
-                .await
-        {
-            warn!(%error, "could not update incomplete playlist artwork");
-        }
         if pending.reloaded {
             self.shared
                 .send(SourceEvent::CatalogPublished(CatalogPublication {
                     source_key: None,
-                    favorite: None,
+                    favorites: Vec::new(),
                     change: CatalogChange::Broad,
                 }))
                 .await;
-            self.request_asset_downloads();
+        }
+        if !pending.states.is_empty() {
+            self.publish_favorites(pending.states).await;
         }
         if pending.activity {
             self.shared
                 .send(SourceEvent::CatalogPublished(CatalogPublication {
                     source_key: None,
-                    favorite: None,
+                    favorites: Vec::new(),
                     change: CatalogChange::Activity,
                 }))
                 .await;
@@ -1487,7 +1481,7 @@ impl SourceOwner {
             self.shared
                 .send(SourceEvent::CatalogPublished(CatalogPublication {
                     source_key: None,
-                    favorite: None,
+                    favorites: Vec::new(),
                     change: CatalogChange::Playlists(playlist),
                 }))
                 .await;
@@ -1502,6 +1496,29 @@ impl SourceOwner {
                 self.source_changed(&source_id, source, changed).await;
             }
         }
+    }
+
+    /// Favorites and ratings changed: clients set the hearts they show to the committed state,
+    /// and refresh what shows ratings when one changed.
+    async fn publish_favorites(&self, states: Vec<library::StateChange>) {
+        let change = if states.iter().any(|state| state.rating) {
+            CatalogChange::Broad
+        } else {
+            CatalogChange::Favorites
+        };
+        self.shared
+            .send(SourceEvent::CatalogPublished(CatalogPublication {
+                source_key: self.shared.selected().map(|selected| selected.source_key),
+                favorites: states
+                    .into_iter()
+                    .map(|state| crate::runtime::FavoriteState {
+                        target: state.target,
+                        favorite: state.favorite,
+                    })
+                    .collect(),
+                change,
+            }))
+            .await;
     }
 
     /// One source's changes: its side effects, then the publication clients refresh for.
@@ -1519,9 +1536,6 @@ impl SourceOwner {
         } = changed;
         if !(metadata || playlists || activity || home) {
             return;
-        }
-        if metadata || playlists {
-            crate::playlist_files::discover(self, source_id, source).await;
         }
         let change = if metadata || (playlists && (home || activity)) {
             CatalogChange::Broad
@@ -1558,12 +1572,6 @@ impl SourceOwner {
                 }
             }
         }
-        if metadata || playlists {
-            self.request_asset_downloads();
-        }
-        if metadata || playlists {
-            self.shared.downloads.library_changed(source_id.clone());
-        }
         if metadata {
             if let Err(error) = self.shared.refresh_source_counts(source_id, source).await {
                 self.shared.warn_nonfatal(&error);
@@ -1581,7 +1589,7 @@ impl SourceOwner {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: Some(source),
-                favorite: None,
+                favorites: Vec::new(),
                 change,
             }))
             .await;
@@ -1604,7 +1612,7 @@ impl SourceOwner {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: Some(source),
-                favorite: None,
+                favorites: Vec::new(),
                 change,
             }))
             .await;
@@ -1616,30 +1624,21 @@ impl SourceOwner {
         }
     }
 
-    async fn publish_catalog(
-        &self,
-        selected: &SelectedLibrary,
-        favorite: Option<FavoriteSettlement>,
-        change: CatalogChange,
-    ) {
+    async fn publish_catalog(&self, selected: &SelectedLibrary, change: CatalogChange) {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: Some(selected.source_key),
-                favorite,
+                favorites: Vec::new(),
                 change,
             }))
             .await;
     }
 
-    pub(crate) async fn publish_current_catalog(
-        &self,
-        favorite: Option<FavoriteSettlement>,
-        change: CatalogChange,
-    ) {
+    pub(crate) async fn publish_current_catalog(&self, change: CatalogChange) {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: self.shared.selected().map(|selected| selected.source_key),
-                favorite,
+                favorites: Vec::new(),
                 change,
             }))
             .await;
@@ -2716,7 +2715,8 @@ impl SourceOwner {
             self.shared.publish_operation(SourceOperation::Idle);
         }
         let (sender, receiver) = async_channel::bounded(1);
-        self.spawn_serialized(move |owner| async move {
+        let owner = self.clone();
+        self.shared.runtime.spawn(async move {
             let stored = owner.shared.settings.load();
             let configured = stored
                 .sources
@@ -2872,18 +2872,13 @@ impl SourceOwner {
         favorite: bool,
     ) -> sources::SourceResult<bool> {
         info!(kind = target.kind(), favorite, "Favorite requested");
-        let (sender, receiver) = async_channel::bounded(1);
-        self.spawn_serialized(move |owner| async move {
-            let result = match owner.apply_favorite(target, favorite).await {
-                Ok(()) => Ok(favorite),
-                Err(error) => Err(error),
-            };
-            let _ = sender.try_send(result);
-        });
-        receiver
-            .recv()
+        let owner = self.clone();
+        self.shared
+            .runtime
+            .spawn(async move { owner.apply_favorite(target, favorite).await })
             .await
             .map_err(|error| SourceError::Other(error.to_string()))?
+            .map(|()| favorite)
             .map_err(SourceError::Other)
     }
 }
@@ -2950,9 +2945,7 @@ impl SourceOwner {
                     .selected_library()
                     .filter(|selected| selected.source_id == source_id)
                 {
-                    owner
-                        .publish_catalog(&selected, None, CatalogChange::Home)
-                        .await;
+                    owner.publish_catalog(&selected, CatalogChange::Home).await;
                 }
                 return Ok(());
             }
@@ -3028,7 +3021,7 @@ impl SourceOwner {
                     .shared
                     .send(SourceEvent::CatalogPublished(CatalogPublication {
                         source_key: Some(source_key),
-                        favorite: None,
+                        favorites: Vec::new(),
                         change: CatalogChange::Scope,
                     }))
                     .await;
@@ -3074,10 +3067,11 @@ impl SourceOwner {
         Ok((source, publication.source))
     }
 
-    async fn favorite_source(
+    /// The configured source a favorite or rating belongs to, and its kind.
+    async fn rating_source(
         &self,
         target: &FavoriteTarget,
-    ) -> Option<(SourceId, SourceKey, bool)> {
+    ) -> Option<(SourceId, SourceKey, String)> {
         let source_id = match library::source_entity_parts(target.media_uri()) {
             Some((source_id, kind, _)) if kind == target.kind() => source_id,
             _ => match target {
@@ -3100,78 +3094,57 @@ impl SourceOwner {
             .flatten()?
             .source;
         let configuration = self.configuration(&source_id)?;
-        let local = configuration.is_file_library() || configuration.kind == "plex";
-        Some((source_id, source_key, local))
+        Some((source_id, source_key, configuration.kind))
     }
 
+    /// Writes the favorite. A server that takes favorites gets it from the outbox; a server
+    /// item's URI names its source, so no read comes first.
     async fn apply_favorite(&self, target: FavoriteTarget, favorite: bool) -> Result<(), String> {
-        let source = self.favorite_source(&target).await;
-        let changed = if source.as_ref().is_some_and(|(_, _, local)| !local) {
-            self.shared
-                .catalog
-                .queue_remote_favorite(&target, favorite, unix_seconds())
-                .await
-        } else {
-            self.shared.catalog.set_favorite(&target, favorite).await
-        }
-        .map_err(string_error)?;
-        if !changed {
-            return Ok(());
-        }
-        self.publish_current_catalog(
-            Some(FavoriteSettlement {
-                target: target.clone(),
-                requested: favorite,
-                effective: favorite,
-            }),
-            CatalogChange::Broad,
-        )
-        .await;
-        if source.is_some_and(|(_, _, local)| !local) {
-            self.shared.maintenance.notify_one();
+        let deliver = library::source_entity_parts(target.media_uri())
+            .filter(|(_, kind, _)| kind == target.kind())
+            .and_then(|(source_id, _, _)| self.configuration(&source_id))
+            .is_some_and(|configuration| {
+                outbox::delivers(&configuration.kind, library::DeliveryKind::Favorite)
+            });
+        self.shared
+            .catalog
+            .set_favorite(&target, favorite, deliver)
+            .await
+            .map_err(string_error)?;
+        if deliver {
+            self.deliver_outbox().await;
         }
         Ok(())
     }
 
+    /// Writes the rating. A server that takes ratings gets it from the outbox; a file source
+    /// writes it into the file's tags.
     async fn apply_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
-        let lane = self.shared.lane.lock().await;
-        if !self
+        let source = self.rating_source(&target).await;
+        let deliver = source
+            .as_ref()
+            .is_some_and(|(_, _, kind)| outbox::delivers(kind, library::DeliveryKind::Rating));
+        if let Err(error) = self
             .shared
             .catalog
-            .set_rating(&target, rating)
+            .set_rating(&target, rating, deliver)
             .await
-            .unwrap_or(false)
         {
+            self.shared.warn_nonfatal(&error.to_string());
             return;
         }
-        let source = self
-            .favorite_source(&target)
-            .await
-            .and_then(|(id, key, local)| {
-                self.client(&id).ok().map(|source| (source, id, key, local))
-            });
-        drop(lane);
-        self.publish_current_catalog(None, CatalogChange::Broad)
-            .await;
-        if let Some((source, source_id, source_key, local)) = source {
-            match &target {
-                FavoriteTarget::Track(uri) if local => {
-                    if let Err(error) = source
-                        .write_file_track_rating(&self.shared.catalog, source_key, uri, rating)
-                        .await
-                    {
-                        warn!(%error,"could not write file Track rating");
-                    }
-                }
-                _ if !local => {
-                    if let Some((_, object_id)) = favorite_object(&source_id, &target)
-                        && let Err(error) = source.set_rating(&object_id, rating).await
-                    {
-                        warn!(%error, "could not write source rating");
-                    }
-                }
-                _ => {}
-            }
+        if deliver {
+            self.deliver_outbox().await;
+            return;
+        }
+        if let Some((source_id, source_key, _)) = source
+            && let FavoriteTarget::Track(uri) = &target
+            && let Ok(source) = self.client(&source_id)
+            && let Err(error) = source
+                .write_file_track_rating(&self.shared.catalog, source_key, uri, rating)
+                .await
+        {
+            warn!(%error, "could not write file Track rating");
         }
     }
 
@@ -3375,153 +3348,6 @@ impl SourceOwner {
             .ok()
             .map(|configured| configured.configuration)
     }
-
-    async fn deliver_favorite(
-        &self,
-        source_id: SourceId,
-        source_key: SourceKey,
-        target: FavoriteTarget,
-        favorite: bool,
-    ) -> bool {
-        let Ok(source) = self.open_client(source_id.clone()).await else {
-            return true;
-        };
-        let Some((kind, object_id)) = favorite_object(&source_id, &target) else {
-            return false;
-        };
-        match source.set_favorite(kind, &object_id, favorite).await {
-            Ok(()) => {
-                let acknowledgement = self
-                    .shared
-                    .catalog
-                    .acknowledge_remote_favorite(&target, favorite)
-                    .await;
-                info!(
-                    favorite,
-                    acknowledged = matches!(acknowledgement, Ok(true)),
-                    "Favorite delivered"
-                );
-                if acknowledgement.is_err() {
-                    return true;
-                }
-            }
-            Err(error) if source_error_is_temporary(&error) => {
-                info!(favorite, "Favorite delivery deferred");
-                let _ = self
-                    .shared
-                    .catalog
-                    .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
-                    .await;
-                return true;
-            }
-            Err(_) => {
-                info!(favorite, "Favorite delivery rejected");
-                let previous = match self
-                    .shared
-                    .catalog
-                    .reject_remote_favorite(&target, favorite)
-                    .await
-                {
-                    Ok(previous) => previous,
-                    Err(_) => return true,
-                };
-                if let Some(previous) = previous {
-                    self.publish_current_catalog(
-                        Some(FavoriteSettlement {
-                            target,
-                            requested: favorite,
-                            effective: previous,
-                        }),
-                        CatalogChange::Broad,
-                    )
-                    .await;
-                    self.shared
-                        .send(SourceEvent::Notice(SourceNotice {
-                            source_key: self
-                                .shared
-                                .selected()
-                                .map_or(source_key, |selected| selected.source_key),
-                            kind: SourceNoticeKind::FavoriteRejected,
-                        }))
-                        .await;
-                }
-            }
-        }
-        false
-    }
-
-    async fn deliver_pending_favorites(&self) {
-        let now = unix_seconds();
-        let pending = match self
-            .shared
-            .catalog
-            .due_remote_favorites(now, 64, &ReadCancellation::new())
-            .await
-        {
-            Ok(pending) => pending,
-            Err(error) => {
-                self.shared.warn_nonfatal(&error.to_string());
-                return;
-            }
-        };
-        let full = pending.len() == 64;
-        let mut completed = true;
-        let mut unavailable = HashSet::new();
-        for (media_uri, favorite) in pending {
-            let Some((source_id, kind, _)) = library::source_entity_parts(&media_uri) else {
-                completed = false;
-                continue;
-            };
-            let target = match kind.as_str() {
-                "track" => FavoriteTarget::Track(media_uri),
-                "album" => FavoriteTarget::Album(media_uri),
-                "artist" => FavoriteTarget::Artist(media_uri),
-                _ => {
-                    completed = false;
-                    continue;
-                }
-            };
-            if unavailable.contains(&source_id) {
-                let _ = self
-                    .shared
-                    .catalog
-                    .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
-                    .await;
-                completed = false;
-                continue;
-            }
-            let Some((_, source_key, false)) = self.favorite_source(&target).await else {
-                completed = false;
-                continue;
-            };
-            if self
-                .deliver_favorite(source_id.clone(), source_key, target, favorite)
-                .await
-            {
-                unavailable.insert(source_id);
-                completed = false;
-            }
-        }
-        if full && completed {
-            self.shared.maintenance.notify_one();
-        }
-    }
-}
-
-fn favorite_object(
-    source: &SourceId,
-    target: &FavoriteTarget,
-) -> Option<(SourceEntityKind, String)> {
-    let (source_id, kind, object_id) = library::source_entity_parts(target.media_uri())?;
-    if &source_id != source || kind != target.kind() {
-        return None;
-    }
-    let kind = match target {
-        FavoriteTarget::Track(_) => SourceEntityKind::Track,
-        FavoriteTarget::Album(_) => SourceEntityKind::Album,
-        FavoriteTarget::Artist(_) => SourceEntityKind::Artist,
-    };
-    Some((kind, object_id))
 }
 
 fn source_error_is_cancelled(error: &SourceError) -> bool {
@@ -4207,6 +4033,13 @@ mod source_tests {
             "title":"Direct", "artist":"", "album":"", "duration_millis":1000,
             "started_at":1_700_000_000,"local_period":"2023-11","listened_millis":1000,"skipped":false
         })).unwrap();
+        // Playback plays only tracks the Store holds, so the listen has its track.
+        owner
+            .shared
+            .catalog
+            .remember_media_uris(std::slice::from_ref(&listen.media_uri))
+            .await
+            .unwrap();
         owner
             .shared
             .catalog
@@ -4728,6 +4561,8 @@ mod source_tests {
                     owner.shared.configured_sources(None).local_access[0].track_count,
                     0
                 );
+                // The connection and the delivery worker each read the held credential.
+                release.send(()).unwrap();
                 release.send(()).unwrap();
                 tokio::time::timeout(Duration::from_secs(2), async {
                     while owner.cached_client(&source_id).is_none() || !connection.is_finished() {
@@ -4740,6 +4575,7 @@ mod source_tests {
                 assert!(owner.selected_library().unwrap().music_folders.is_empty());
                 continue;
             }
+            release.send(()).unwrap();
             release.send(()).unwrap();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while owner.cached_client(&source_id).is_none() || !connection.is_finished() {
@@ -4769,22 +4605,32 @@ mod source_tests {
                 ),
                 (1, 1)
             );
-            owner.deliver_pending_favorites().await;
-            assert!(!catalog.favorite(&favorite).await.unwrap());
-            assert!(
-                catalog
-                    .due_remote_favorites(unix_seconds(), 64, &ReadCancellation::new())
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !catalog
+                    .due_deliveries(unix_seconds(), 64)
                     .await
                     .unwrap()
-                    .is_empty(),
-                "offline delivery is deferred without losing the local edit"
+                    .is_empty()
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("offline delivery is deferred");
+            assert!(
+                !catalog.favorite(&favorite).await.unwrap(),
+                "a deferred delivery keeps the local edit"
             );
             assert_eq!(
                 catalog
-                    .due_remote_favorites(unix_seconds() + 60, 64, &ReadCancellation::new())
+                    .due_deliveries(unix_seconds() + 60, 64)
                     .await
                     .unwrap(),
-                vec![(favorite.media_uri().to_owned(), false)]
+                vec![library::Delivery {
+                    media_uri: favorite.media_uri().to_owned(),
+                    kind: library::DeliveryKind::Favorite,
+                    value: Some(0),
+                }]
             );
         }
     }
@@ -4864,8 +4710,6 @@ mod source_tests {
             assert!(!error.to_string().is_empty());
             assert!(owner.selected_library().is_none());
 
-            // A pending playlist edit must not hold up source selection.
-            let lane = owner.shared.lane.lock().await;
             let mut superseded = Box::pin(owner.select_source(second.clone()));
             let mut initial = Box::pin(owner.select_source(first.clone()));
             assert!(futures_util::poll!(superseded.as_mut()).is_pending());
@@ -4893,7 +4737,6 @@ mod source_tests {
                 assert_eq!(owner.list_sources().selected_source_id.as_ref(), Some(id));
                 assert_eq!(owner.selected_library().unwrap().source_id, *id);
             }
-            drop(lane);
             tokio::time::timeout(Duration::from_secs(5), owner.forget_source(second.clone()))
                 .await
                 .expect("removal completes without consuming events")

@@ -418,11 +418,15 @@ mod tests {
                     panic!("user data must retain the item boundary");
                 };
                 source.apply_changes(&catalog, items).await.unwrap();
-                if repeated {
-                    assert!(crate::published(&mut updates).is_none());
-                } else {
-                    assert!(crate::published(&mut updates).is_some());
+                let mut shown = sources::Shown::default();
+                while let Ok(change) = updates.try_recv() {
+                    for (_, part) in sources::Shown::of(&change) {
+                        shown |= part;
+                    }
                 }
+                // A favorite is state and a play count activity, not a catalog change.
+                assert!(!shown.intersects(sources::Shown::CATALOG));
+                assert_eq!(shown.is_empty(), repeated);
             }
             let cancellation = library::ReadCancellation::new();
             let track = catalog

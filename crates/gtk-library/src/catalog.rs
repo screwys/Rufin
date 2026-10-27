@@ -170,12 +170,6 @@ impl CatalogUi {
             favorites.register_dynamic_favorite_button(key, button);
         }
     }
-    pub fn projected_track_favorite(&self, uri: &str, fallback: bool) -> bool {
-        (self.media_menus.projected_item_favorite)(
-            &library::FavoriteTarget::Track(uri.to_string()),
-            fallback,
-        )
-    }
     pub fn update_visible_favorite_buttons(
         &self,
         target: &library::FavoriteTarget,
@@ -185,15 +179,8 @@ impl CatalogUi {
             favorites.update_visible_favorite_buttons(target, favorite);
         }
     }
-    pub fn set_favorite_with_feedback(
-        &self,
-        target: library::FavoriteTarget,
-        favorite: bool,
-        button: Option<&gtk::Button>,
-    ) {
-        if let Some(button) = button {
-            gtk_widgets::favorites::set_favorite_button_active(button, favorite);
-        }
+    /// Hearts change when the favorite is committed, from the publication that follows.
+    pub fn set_favorite(&self, target: library::FavoriteTarget, favorite: bool) {
         (self.media_menus.set_favorite)(target, favorite);
     }
     pub fn reapply_current_track(&self) {

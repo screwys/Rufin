@@ -301,9 +301,7 @@ impl EditSession {
                 .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
                 .is_none()
         {
-            owner
-                .publish_current_catalog(None, CatalogChange::Broad)
-                .await;
+            owner.publish_current_catalog(CatalogChange::Broad).await;
         }
         result?;
         if let Some(lyrics) = lyrics {

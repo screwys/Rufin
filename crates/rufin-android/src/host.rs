@@ -278,10 +278,7 @@ impl AndroidRuntime {
     }
 
     pub fn subscribe_playback(&self) -> Arc<AndroidPlaybackSubscription> {
-        Arc::new(AndroidPlaybackSubscription::new(
-            &self.products,
-            self.library_events.intents(),
-        ))
+        Arc::new(AndroidPlaybackSubscription::new(&self.products))
     }
 
     pub fn subscribe_network(&self) -> Arc<crate::network::AndroidNetworkSubscription> {

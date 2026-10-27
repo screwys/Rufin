@@ -157,7 +157,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         .execute(&mut raw).await.unwrap();
     let catalog = super::support::reopen(catalog, &path).await;
     let mut changes = super::support::Changes::of(&catalog);
-    // Native favorites show in catalog rows; native play counts alone are activity.
+    // Native favorites are state and native play counts activity; neither changes catalog rows.
     for (favorite, plays, changed, played) in [
         (true, 1, true, true),
         (true, 1, false, false),
@@ -231,7 +231,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         );
         let publication = changes.facts();
         assert_eq!(
-            publication.intersects(super::support::Shown::CATALOG),
+            publication.intersects(super::support::Shown::STATE),
             changed
         );
         assert_eq!(publication.contains(super::support::Shown::STATS), played);
@@ -282,7 +282,7 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
     let mut raw = super::support::connection(&path).await;
     let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
     catalog
-        .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
+        .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true, false)
         .await
         .unwrap();
     for (favorite, changed) in [(false, true), (false, false), (true, true)] {
@@ -312,7 +312,8 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             );
         }
         let outcome = changes.facts();
-        assert_eq!(outcome.intersects(super::support::Shown::CATALOG), changed);
+        assert!(!outcome.intersects(super::support::Shown::CATALOG));
+        assert_eq!(outcome.intersects(super::support::Shown::STATE), changed);
         assert!(
             catalog
                 .favorite(&library::FavoriteTarget::Track(uri.clone()))
@@ -549,7 +550,7 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
                 && !update.contains(super::support::Shown::HOME)
         );
         let rows = sqlx::query_as::<_, (String, i64)>(
-            "SELECT object_id,playlist_entry_key FROM playlist_entries ORDER BY position",
+            "SELECT object_id,playlist_entry_key FROM playlist_entries ORDER BY rank,playlist_entry_key",
         )
         .fetch_all(&mut raw)
         .await

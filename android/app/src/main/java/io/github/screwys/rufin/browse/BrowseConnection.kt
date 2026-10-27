@@ -289,13 +289,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         rememberSearchResult(item)
     }
     fun favorite(item: BrowseItem) {
-        val value = !connection.projectedFavorite(item.row.kind, item.row.mediaUri, item.row.favorite)
-        connection.setFavoriteIntent(item.row.kind, item.row.mediaUri, value)
+        val value = !item.row.favorite
         connection.runAction {
-            try { connection.sourceOwner?.setFavoriteWithResult(favoriteTarget(item.row.kind, item.row.mediaUri), value) }
-            finally {
-                connection.releaseFavoriteIntent(item.row.kind, item.row.mediaUri, value)
-            }
+            connection.sourceOwner?.setFavoriteWithResult(favoriteTarget(item.row.kind, item.row.mediaUri), value)
         }
     }
     fun radio(item: BrowseItem, placement: String) = connection.runAction {

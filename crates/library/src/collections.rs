@@ -4,7 +4,7 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::catalog::snapshot::Packed;
-use crate::catalog::views::{Art, Context, Totals, favorite, rating};
+use crate::catalog::views::{Art, Context, Owner, Totals, favorite, rating};
 use crate::{
     AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult, MoodKey,
     ReadCancellation, SourceKey, TrackView,
@@ -254,37 +254,6 @@ impl Catalog {
             })
             .collect()
     }
-
-    /// Covers of the albums of each genre or mood. In a music folder a tag shows its covers
-    /// only while it holds a track there.
-    fn galleries(&self, keys: &[i64], folder: Option<FolderKey>) -> Vec<Vec<Art>> {
-        let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, self.distinct_track_covers());
-        let derived = self.derived(&context, None);
-        let slots = keys
-            .iter()
-            .map(|key| snapshot.tags.slot(*key).unwrap_or(u32::MAX))
-            .collect::<Vec<_>>();
-        let mut galleries = context.galleries(&derived, &slots);
-        if let Some(folder) = folder {
-            let scoped = snapshot
-                .folders
-                .slot(folder.raw())
-                .map(|folder| self.derived(&context, Some(folder)));
-            for (gallery, slot) in galleries.iter_mut().zip(&slots) {
-                let held = scoped.as_ref().is_some_and(|scoped| {
-                    scoped
-                        .tags
-                        .get(*slot as usize)
-                        .is_some_and(|totals| totals.tracks > 0)
-                });
-                if !held {
-                    gallery.clear();
-                }
-            }
-        }
-        galleries
-    }
 }
 
 pub(crate) async fn load_album_rows(
@@ -426,21 +395,33 @@ pub(crate) async fn load_artist_rows(
     Ok(artists)
 }
 
-/// Gallery bindings of each row, in order.
+/// The bindings of each row's mosaic, in order: covers of the tracks it picked.
 async fn gallery_bindings(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
-    keys: &[i64],
-    folder: Option<FolderKey>,
+    mosaics: &[Option<String>],
 ) -> LibraryResult<Vec<Vec<Vec<u8>>>> {
-    let galleries = catalog.galleries(keys, folder);
-    let arts = galleries.iter().flatten().copied().collect::<Vec<_>>();
+    let picks = mosaics
+        .iter()
+        .map(|mosaic| {
+            mosaic
+                .as_deref()
+                .map(serde_json::from_str::<Vec<String>>)
+                .transpose()
+                .map(Option::unwrap_or_default)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let keys: Vec<Option<i64>> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value ORDER BY requested.key")
+        .bind(serde_json::to_string(&picks.iter().flatten().collect::<Vec<_>>())?)
+        .fetch_all(&mut *connection)
+        .await?;
+    let arts = catalog.arts(keys.into_iter().map(|key| key.map(Owner::Track)));
     let mut bindings = crate::artwork::art_bindings(connection, &arts)
         .await?
         .into_iter();
-    Ok(galleries
+    Ok(picks
         .iter()
-        .map(|gallery| bindings.by_ref().take(gallery.len()).flatten().collect())
+        .map(|picks| bindings.by_ref().take(picks.len()).flatten().collect())
         .collect())
 }
 
@@ -448,7 +429,6 @@ pub(crate) async fn load_genre_rows(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
     keys: &[GenreKey],
-    folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<GenreView>> {
     catalog.loaded().await;
     let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
@@ -456,11 +436,12 @@ pub(crate) async fn load_genre_rows(
     #[derive(FromRow)]
     struct Row {
         ordinal: i64,
+        mosaic: Option<String>,
         #[sqlx(flatten)]
         genre: GenreView,
     }
-    let mut rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT CAST(requested.key AS INTEGER) ordinal,genre.tag_key genre_key,genre.source_key,source.object_id source_id,genre.object_id,
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT CAST(requested.key AS INTEGER) ordinal,genre.mosaic,genre.tag_key genre_key,genre.source_key,source.object_id source_id,genre.object_id,
         json_object('name',genre.name,'sort_text',genre.sort_text) metadata,0 album_count,0 track_count,0 duration_millis,0 downloaded_count,{} artwork_binding
         FROM json_each(?1) requested JOIN tags genre ON genre.tag_key=requested.value AND genre.kind=0 JOIN sources source ON source.source_key=genre.source_key
         ORDER BY CAST(requested.key AS INTEGER)",
@@ -469,27 +450,24 @@ pub(crate) async fn load_genre_rows(
     .bind(serde_json::to_string(&raw)?)
     .fetch_all(&mut *connection)
     .await?;
-    let without = rows
+    let mosaics = rows
         .iter()
-        .filter(|row| row.genre.artwork_binding.is_none())
-        .map(|row| row.genre.genre_key.raw())
-        .collect::<Vec<_>>();
-    let galleries = without
-        .iter()
-        .copied()
-        .zip(gallery_bindings(catalog, connection, &without, folder).await?)
-        .collect::<std::collections::HashMap<_, _>>();
-    Ok(rows
-        .iter_mut()
         .map(|row| {
-            let mut genre = row.genre.clone();
+            row.mosaic
+                .clone()
+                .filter(|_| row.genre.artwork_binding.is_none())
+        })
+        .collect::<Vec<_>>();
+    let galleries = gallery_bindings(catalog, connection, &mosaics).await?;
+    Ok(rows
+        .into_iter()
+        .zip(galleries)
+        .map(|(row, gallery)| {
+            let mut genre = row.genre;
             if let Some(resident) = resident.get(row.ordinal as usize).copied().flatten() {
                 genre.summary = resident.totals.summary();
             }
-            genre.representative_artwork = galleries
-                .get(&genre.genre_key.raw())
-                .cloned()
-                .unwrap_or_default();
+            genre.representative_artwork = gallery;
             genre
         })
         .collect())
@@ -499,7 +477,6 @@ pub(crate) async fn load_mood_rows(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
     keys: &[MoodKey],
-    folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<MoodView>> {
     catalog.loaded().await;
     let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
@@ -507,11 +484,12 @@ pub(crate) async fn load_mood_rows(
     #[derive(FromRow)]
     struct Row {
         ordinal: i64,
+        mosaic: Option<String>,
         #[sqlx(flatten)]
         mood: MoodView,
     }
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT CAST(requested.key AS INTEGER) ordinal,mood.tag_key mood_key,mood.source_key,
+        "SELECT CAST(requested.key AS INTEGER) ordinal,mood.mosaic,mood.tag_key mood_key,mood.source_key,
         json_object('name',mood.name,'sort_text',mood.sort_text) metadata,0 album_count,0 track_count,0 duration_millis,0 downloaded_count
         FROM json_each(?1) requested JOIN tags mood ON mood.tag_key=requested.value AND mood.kind=1
         ORDER BY CAST(requested.key AS INTEGER)",
@@ -519,11 +497,11 @@ pub(crate) async fn load_mood_rows(
     .bind(serde_json::to_string(&raw)?)
     .fetch_all(&mut *connection)
     .await?;
-    let found = rows
+    let mosaics = rows
         .iter()
-        .map(|row| row.mood.mood_key.raw())
+        .map(|row| row.mosaic.clone())
         .collect::<Vec<_>>();
-    let galleries = gallery_bindings(catalog, connection, &found, folder).await?;
+    let galleries = gallery_bindings(catalog, connection, &mosaics).await?;
     Ok(rows
         .into_iter()
         .zip(galleries)

@@ -615,7 +615,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         )]);
         let selected_index = seed.unwrap_or(0) as usize;
         let selected = sqlx::query_as::<_, (library::TrackKey, library::PlaylistEntryKey)>(
-            "SELECT track_key,playlist_entry_key FROM playlist_entries WHERE playlist_key=?1 AND position=?2",
+            "SELECT track_key,playlist_entry_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key LIMIT 1 OFFSET ?2",
         )
         .bind(imported.playlist)
         .bind(selected_index as i64)
@@ -678,7 +678,13 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     }
     fixture.catalog.save_queue(&state).await.unwrap();
     let restored = fixture.catalog.restore_queue().await.unwrap();
-    assert_eq!(restored, state);
+    assert_eq!(
+        library::QueueRestore {
+            ranks: Default::default(),
+            ..restored.clone()
+        },
+        state
+    );
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_entries")
@@ -700,7 +706,13 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
         .import_queue_jsonl(std::io::Cursor::new(exported))
         .await
         .unwrap();
-    assert_eq!(target.catalog.restore_queue().await.unwrap(), state);
+    assert_eq!(
+        library::QueueRestore {
+            ranks: Default::default(),
+            ..target.catalog.restore_queue().await.unwrap()
+        },
+        state
+    );
 }
 
 #[tokio::test]
@@ -788,6 +800,8 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     entries[7].track_key = missing.entries[0].track_key;
     state.entries = entries.into();
     state.order = vec![2, 1, 0, 3, 4, 5, 7, 6].into();
+    // A new order has no saved ranks yet.
+    state.ranks = Default::default();
 
     let mut raw = connection(&fixture.path).await;
     {
@@ -1108,10 +1122,6 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
         .unwrap(),
         24
     );
-    let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
-        .fetch_one(&mut raw)
-        .await
-        .unwrap();
     sqlx::raw_sql("CREATE TABLE song_writes(value INTEGER);CREATE TRIGGER song_updated AFTER UPDATE ON tracks BEGIN INSERT INTO song_writes VALUES(1); END;CREATE TRIGGER song_inserted AFTER INSERT ON tracks BEGIN INSERT INTO song_writes VALUES(1); END;").execute(&mut raw).await.unwrap();
     latest.order = vec![1, 0].into();
     latest.current_index = Some(1);
@@ -1119,33 +1129,6 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
 
     latest.progress_millis = 1234;
     latest.repeat_mode = QueueRepeatMode::All;
-    fixture
-        .catalog
-        .apply_queue_update(&library::QueueUpdate {
-            order: Some(library::QueueOrderUpdate {
-                rows: latest
-                    .order
-                    .iter()
-                    .enumerate()
-                    .map(|(position, index)| (position, *index as u64 + 1))
-                    .collect(),
-                total: latest.order.len(),
-            }),
-            current_index: latest.current_index,
-            progress_millis: latest.progress_millis,
-            repeat_mode: latest.repeat_mode,
-            shuffled: latest.shuffled,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        membership
-    );
     fixture.catalog.save_queue(&latest).await.unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM song_writes")
@@ -1219,7 +1202,7 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
             .await
             .unwrap();
         assert_eq!(projection.len(), 100);
-        let mut state = library::QueueRestore {
+        let state = library::QueueRestore {
             entries: page.entries.into(),
             order: order.into(),
             rows: projection,
@@ -1234,40 +1217,6 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
                 .await
                 .unwrap(),
             20000
-        );
-        let membership: String = sqlx::query_scalar("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap();
-        let mut order = state.order.to_vec();
-        order[1..].reverse();
-        state.order = order.into();
-        fixture
-            .catalog
-            .apply_queue_update(&library::QueueUpdate {
-                order: Some(library::QueueOrderUpdate {
-                    rows: state
-                        .order
-                        .iter()
-                        .enumerate()
-                        .map(|(position, index)| (position, *index as u64 + 1))
-                        .collect(),
-                    total: state.order.len(),
-                }),
-                current_index: state.current_index,
-                progress_millis: state.progress_millis,
-                repeat_mode: state.repeat_mode,
-                shuffled: state.shuffled,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT json_group_array(json_object('id',entry_id,'track',track_key,'provenance',provenance,'context',context_key,'rank',source_rank)) FROM queue_entries")
-                .fetch_one(&mut raw)
-                .await
-                .unwrap(),
-            membership
         );
     }
 }

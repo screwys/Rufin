@@ -10,7 +10,6 @@ pub mod browse;
 pub mod connect;
 pub mod detail_links;
 pub mod diagnostics;
-pub mod favorites;
 mod loudness;
 pub mod paths;
 pub mod playback;

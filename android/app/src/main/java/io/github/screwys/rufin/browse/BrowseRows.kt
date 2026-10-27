@@ -271,13 +271,13 @@ internal fun favoriteTarget(kind: String, uri: String): io.github.screwys.rufin.
     "artist" -> io.github.screwys.rufin.shared.library.FavoriteTarget.Artist(uri)
     else -> error("This item has no favorite action")
 }
-internal val io.github.screwys.rufin.shared.rufin_core.FavoriteSettlement.kind: String
+internal val io.github.screwys.rufin.shared.rufin_core.FavoriteState.kind: String
     get() = when (target) {
         is io.github.screwys.rufin.shared.library.FavoriteTarget.Track -> "track"
         is io.github.screwys.rufin.shared.library.FavoriteTarget.Album -> "album"
         is io.github.screwys.rufin.shared.library.FavoriteTarget.Artist -> "artist"
     }
-internal val io.github.screwys.rufin.shared.rufin_core.FavoriteSettlement.mediaUri: String
+internal val io.github.screwys.rufin.shared.rufin_core.FavoriteState.mediaUri: String
     get() = when (val item = target) {
         is io.github.screwys.rufin.shared.library.FavoriteTarget.Track -> item.v1
         is io.github.screwys.rufin.shared.library.FavoriteTarget.Album -> item.v1

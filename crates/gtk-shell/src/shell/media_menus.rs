@@ -43,7 +43,7 @@ pub(super) fn build(
             let weak = weak.clone();
             Rc::new(move |target, favorite| {
                 if let Some(shell) = weak.upgrade() {
-                    shell.set_favorite_with_feedback(target, favorite, None);
+                    shell.set_favorite(target, favorite);
                 }
             })
         },
@@ -167,14 +167,6 @@ pub(super) fn build(
                 if let Some(shell) = weak.upgrade() {
                     crate::shell::catalog_actions::remove_download(target, &shell);
                 }
-            })
-        },
-        projected_item_favorite: {
-            let weak = weak.clone();
-            Rc::new(move |target, fallback| {
-                weak.upgrade().map_or(fallback, |shell| {
-                    shell.projected_item_favorite(target, fallback)
-                })
             })
         },
         half_stars_enabled: {

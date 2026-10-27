@@ -732,10 +732,9 @@ fn artist_detail_header_restored(
         let favorite_shell = Rc::clone(shell);
         let favorite_media_uri = favorite_media_uri.clone();
         button.connect_clicked(move |button| {
-            favorite_shell.set_favorite_with_feedback(
+            favorite_shell.set_favorite(
                 library::FavoriteTarget::Artist(favorite_media_uri.clone()),
                 !favorite_button_is_active(button),
-                Some(button),
             );
         });
     }

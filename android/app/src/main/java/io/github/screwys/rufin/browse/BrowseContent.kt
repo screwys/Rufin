@@ -362,11 +362,11 @@ internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, it
     var effective by remember(kind, item.row.mediaUri) { mutableStateOf(item.row.favorite) }
     LaunchedEffect(item.row.favorite) { effective = item.row.favorite }
     LaunchedEffect(model, kind, item.row.mediaUri) {
-        model.favoriteSettlements.collect { settlement ->
-            if (settlement.kind == kind && settlement.mediaUri == item.row.mediaUri) effective = settlement.effective
+        model.favoriteStates.collect { state ->
+            if (state.kind == kind && state.mediaUri == item.row.mediaUri) effective = state.favorite
         }
     }
-    return item.copy(row = item.row.withFavorite(model.projectedFavorite(kind, item.row.mediaUri, effective)))
+    return item.copy(row = item.row.withFavorite(effective))
 }
 
 @Composable

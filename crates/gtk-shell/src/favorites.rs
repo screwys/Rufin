@@ -1,5 +1,5 @@
 use crate::shell::Shell;
-use gtk_widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
+use gtk_widgets::favorites::favorite_button_is_active;
 use library::FavoriteTarget;
 use std::rc::Rc;
 impl Shell {
@@ -20,33 +20,9 @@ impl Shell {
         else {
             return;
         };
-        let target = FavoriteTarget::Track(media_uri);
-        let favorite = !self.projected_item_favorite(
-            &target,
-            favorite_button_is_active(&self.player_ui.views.player_controls.favorite_button),
-        );
-        self.set_favorite_with_feedback(
-            target,
-            favorite,
-            Some(&self.player_ui.views.player_controls.favorite_button),
-        );
-    }
-
-    pub(crate) fn projected_track_favorite(
-        &self,
-        media_uri: &str,
-        playback_fallback: bool,
-    ) -> bool {
-        self.projected_item_favorite(
-            &FavoriteTarget::Track(media_uri.to_string()),
-            playback_fallback,
-        )
-    }
-
-    pub(crate) fn projected_item_favorite(&self, item: &FavoriteTarget, fallback: bool) -> bool {
-        self.selected_ui.session().map_or(fallback, |session| {
-            session.favorites.projected_item_favorite(item, fallback)
-        })
+        let favorite =
+            !favorite_button_is_active(&self.player_ui.views.player_controls.favorite_button);
+        self.set_favorite(FavoriteTarget::Track(media_uri), favorite);
     }
 
     pub(crate) fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
@@ -57,42 +33,14 @@ impl Shell {
         }
     }
 
-    pub(crate) fn set_favorite_with_feedback(
-        self: &Rc<Self>,
-        item_id: FavoriteTarget,
-        favorite: bool,
-        button: Option<&gtk::Button>,
-    ) {
-        if let Some(session) = self.selected_ui.session() {
-            session.favorites.set_pending(item_id.clone(), favorite);
-        }
-        if let Some(button) = button {
-            set_favorite_button_active(button, favorite);
-        }
-        self.update_visible_favorite_buttons(&item_id, favorite);
-        self.player_ui
-            .set_bottom_player_favorite(&item_id, favorite);
-        self.products.source.set_favorite(item_id.clone(), favorite);
+    /// Hearts change when the favorite is committed, from the publication that follows.
+    pub(crate) fn set_favorite(self: &Rc<Self>, item: FavoriteTarget, favorite: bool) {
+        self.products.source.set_favorite(item, favorite);
     }
 
-    pub(crate) fn apply_favorite_settlement(
-        self: &Rc<Self>,
-        item_id: FavoriteTarget,
-        requested: bool,
-        effective: bool,
-    ) -> bool {
-        if !self.favorite_response_matches_pending(&item_id, requested) {
-            return false;
-        }
-        self.update_visible_favorite_buttons(&item_id, effective);
-        self.player_ui
-            .set_bottom_player_favorite(&item_id, effective);
-        true
-    }
-
-    fn favorite_response_matches_pending(&self, item: &FavoriteTarget, requested: bool) -> bool {
-        self.selected_ui
-            .session()
-            .is_some_and(|session| session.favorites.response_matches_pending(item, requested))
+    /// Shows a committed favorite on every visible heart of the item.
+    pub(crate) fn apply_favorite_state(&self, item: &FavoriteTarget, favorite: bool) {
+        self.update_visible_favorite_buttons(item, favorite);
+        self.player_ui.set_bottom_player_favorite(item, favorite);
     }
 }

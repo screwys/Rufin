@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use library::ListenWrite;
 use library::TrackMetadata;
-use library::{Catalog, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
+use library::{Catalog, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation, Scope};
 use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use tracing::warn;
@@ -17,7 +17,8 @@ use crate::{AudioscrobblerSettings, ListenBrainzSettings, Settings};
 const NOTIFICATION_CAPACITY: usize = 1;
 const DELIVERY_BATCH_SIZE: usize = 50;
 const NOW_PLAYING_STABLE_DELAY: Duration = Duration::from_secs(1);
-const RETRY_POLL: Duration = Duration::from_secs(30);
+/// How long the worker waits after it could not read its work.
+const ERROR_RETRY: Duration = Duration::from_secs(30);
 pub(crate) const USER_AGENT: &str = concat!(
     "Rufin/",
     env!("CARGO_PKG_VERSION"),
@@ -189,10 +190,13 @@ fn take_stable_now_playing(
     stable.then(|| pending.take().expect("stable update must be pending").0)
 }
 
+/// The delivery thread, which runs while an account exists. It wakes for listens on the
+/// change feed, for now-playing updates and when a deferred scrobble is due.
 struct Worker {
     sender: SyncSender<()>,
     pending: Arc<Mutex<PendingWork>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    listens: tokio::task::AbortHandle,
 }
 
 impl Worker {
@@ -201,22 +205,62 @@ impl Worker {
         runtime: tokio::runtime::Handle,
         state: Arc<Mutex<DeliveryState>>,
     ) -> Result<Self, String> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(6))
-            .user_agent(USER_AGENT)
-            .build()
-            .map_err(|error| error.to_string())?;
         let (sender, receiver) = sync_channel(NOTIFICATION_CAPACITY);
         let pending = Arc::new(Mutex::new(PendingWork::default()));
         let worker_pending = Arc::clone(&pending);
+        let mut changes = catalog.changes();
+        let thread_runtime = runtime.clone();
         let thread = std::thread::Builder::new()
             .name("rufin-scrobbling".to_string())
-            .spawn(move || run_worker(client, catalog, runtime, state, receiver, worker_pending))
+            .spawn(move || {
+                let client = match Client::builder()
+                    .timeout(Duration::from_secs(6))
+                    .user_agent(USER_AGENT)
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(error) => {
+                        warn!(%error, "could not start external scrobbling");
+                        return;
+                    }
+                };
+                run_worker(
+                    client,
+                    catalog,
+                    thread_runtime,
+                    state,
+                    receiver,
+                    worker_pending,
+                );
+            })
             .map_err(|error| error.to_string())?;
+        let woken = Arc::clone(&pending);
+        let wake = sender.clone();
+        let listens = runtime
+            .spawn(async move {
+                use tokio::sync::broadcast::error::RecvError;
+                loop {
+                    let listened = match changes.recv().await {
+                        Ok(change) => change
+                            .scopes
+                            .iter()
+                            .any(|scope| matches!(scope, Scope::Listened { .. })),
+                        Err(RecvError::Lagged(_)) => true,
+                        Err(RecvError::Closed) => return,
+                    };
+                    if listened && let Ok(mut pending) = woken.lock() {
+                        pending.wake = true;
+                        drop(pending);
+                        let _ = wake.try_send(());
+                    }
+                }
+            })
+            .abort_handle();
         Ok(Self {
             sender,
             pending,
             thread: Mutex::new(Some(thread)),
+            listens,
         })
     }
 
@@ -240,6 +284,7 @@ impl Worker {
     }
 
     fn shutdown(&self) {
+        self.listens.abort();
         if let Ok(mut pending) = self.pending.lock() {
             pending.closed = true;
         }
@@ -260,12 +305,38 @@ pub struct Scrobbler {
     catalog: Catalog,
     runtime: tokio::runtime::Handle,
     state: Arc<Mutex<DeliveryState>>,
-    worker: Worker,
+    /// Present while an account exists.
+    worker: Mutex<Option<Worker>>,
 }
 
 impl Scrobbler {
     pub fn shutdown(&self) {
-        self.worker.shutdown();
+        if let Some(worker) = self.worker.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            worker.shutdown();
+        }
+    }
+
+    /// Starts the worker when an account exists and stops it when none does.
+    fn follow_accounts(&self, accounts: bool) -> Result<(), String> {
+        let mut worker = self.worker.lock().unwrap_or_else(|p| p.into_inner());
+        if !accounts {
+            if let Some(worker) = worker.take() {
+                worker.shutdown();
+            }
+        } else if worker.is_none() {
+            *worker = Some(Worker::new(
+                self.catalog.clone(),
+                self.runtime.clone(),
+                Arc::clone(&self.state),
+            )?);
+        }
+        Ok(())
+    }
+
+    fn wake(&self) {
+        if let Some(worker) = &*self.worker.lock().unwrap_or_else(|p| p.into_inner()) {
+            worker.wake();
+        }
     }
 
     pub fn new(
@@ -275,17 +346,18 @@ impl Scrobbler {
         private_mode: bool,
     ) -> Result<Self, String> {
         settings.sanitize();
-        let state = Arc::new(Mutex::new(DeliveryState {
-            settings,
-            private_mode,
-        }));
-        let worker = Worker::new(catalog.clone(), runtime.clone(), Arc::clone(&state))?;
-        Ok(Self {
+        let accounts = !known_accounts(&settings).is_empty();
+        let scrobbler = Self {
             catalog,
             runtime,
-            state,
-            worker,
-        })
+            state: Arc::new(Mutex::new(DeliveryState {
+                settings,
+                private_mode,
+            })),
+            worker: Mutex::new(None),
+        };
+        scrobbler.follow_accounts(accounts)?;
+        Ok(scrobbler)
     }
 
     pub fn settings(&self) -> Settings {
@@ -316,7 +388,7 @@ impl Scrobbler {
             settings.listenbrainz.now_playing_enabled;
         drop(current);
         if !private_mode {
-            self.worker.wake();
+            self.wake();
         }
         Ok(())
     }
@@ -388,6 +460,7 @@ impl Scrobbler {
             }
             (previous, current, reauthorized, state.private_mode)
         };
+        self.follow_accounts(!current_accounts.is_empty())?;
         for (service, account_id) in previous_accounts {
             if !current_accounts
                 .iter()
@@ -411,7 +484,7 @@ impl Scrobbler {
                 .map_err(|error| error.to_string())?;
         }
         if !private_mode {
-            self.worker.wake();
+            self.wake();
         }
         Ok(())
     }
@@ -421,8 +494,9 @@ impl Scrobbler {
             .state
             .lock()
             .is_ok_and(|state| !state.private_mode && !targets(&state.settings, true).is_empty());
-        self.worker
-            .now_playing(track.filter(|_| enabled).and_then(SubmissionTrack::capture));
+        if let Some(worker) = &*self.worker.lock().unwrap_or_else(|p| p.into_inner()) {
+            worker.now_playing(track.filter(|_| enabled).and_then(SubmissionTrack::capture));
+        }
     }
 
     pub fn listen_delivery_targets(
@@ -454,12 +528,6 @@ impl Scrobbler {
             })
             .collect()
     }
-
-    pub fn listen_recorded(&self, delivery_count: usize) {
-        if delivery_count > 0 {
-            self.worker.wake();
-        }
-    }
 }
 
 fn run_worker(
@@ -470,7 +538,8 @@ fn run_worker(
     receiver: Receiver<()>,
     pending: Arc<Mutex<PendingWork>>,
 ) {
-    let mut retry_at = Instant::now() + RETRY_POLL;
+    // Scrobbles left from earlier runs are looked at once at start.
+    let mut retry_at = Some(Instant::now());
     loop {
         let now = Instant::now();
         let wake = match pending.lock() {
@@ -482,9 +551,12 @@ fn run_worker(
             }
             Err(_) => return,
         };
-        if wake || now >= retry_at {
-            deliver_due(&client, &catalog, &runtime, &state, &pending);
-            retry_at = Instant::now() + RETRY_POLL;
+        if wake || retry_at.is_some_and(|at| now >= at) {
+            retry_at = if deliver_due(&client, &catalog, &runtime, &state, &pending) {
+                Some(Instant::now())
+            } else {
+                next_retry(&catalog, &runtime)
+            };
             continue;
         }
         let (track, deadline) = match pending.lock() {
@@ -493,8 +565,10 @@ fn run_worker(
                 let deadline = pending
                     .now_playing
                     .as_ref()
-                    .map(|(_, changed_at)| (*changed_at + NOW_PLAYING_STABLE_DELAY).min(retry_at))
-                    .unwrap_or(retry_at);
+                    .map(|(_, changed_at)| *changed_at + NOW_PLAYING_STABLE_DELAY)
+                    .into_iter()
+                    .chain(retry_at)
+                    .min();
                 (track, deadline)
             }
             Err(_) => return,
@@ -503,11 +577,34 @@ fn run_worker(
             deliver_now_playing(&client, &state, &pending, track);
             continue;
         }
-        match receiver.recv_timeout(deadline.saturating_duration_since(now)) {
-            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
+        let woken = match deadline {
+            Some(deadline) => receiver
+                .recv_timeout(deadline.saturating_duration_since(now))
+                .or_else(|error| match error {
+                    RecvTimeoutError::Timeout => Ok(()),
+                    RecvTimeoutError::Disconnected => Err(()),
+                }),
+            None => receiver.recv().map_err(|_| ()),
+        };
+        if woken.is_err() {
+            return;
         }
     }
+}
+
+/// When the next deferred scrobble is due. Scrobbles due now that the last pass left waiting,
+/// in private mode or for a switched-off account, wait for the settings change that wakes the
+/// worker; with none deferred, only a wake starts the next pass.
+fn next_retry(catalog: &Catalog, runtime: &tokio::runtime::Handle) -> Option<Instant> {
+    let now = unix_seconds();
+    let next = match runtime.block_on(catalog.next_listen_delivery_at(now)) {
+        Ok(next) => next?,
+        Err(error) => {
+            warn!(%error, "could not read external scrobbling work");
+            return Some(Instant::now() + ERROR_RETRY);
+        }
+    };
+    Some(Instant::now() + Duration::from_secs(next.saturating_sub(now).max(0) as u64))
 }
 
 fn deliver_now_playing(
@@ -533,15 +630,16 @@ fn deliver_now_playing(
     }
 }
 
+/// One pass over the due scrobbles. Whether it settled any, so more may be due at once.
 fn deliver_due(
     client: &Client,
     catalog: &Catalog,
     runtime: &tokio::runtime::Handle,
     state: &Arc<Mutex<DeliveryState>>,
     work: &Mutex<PendingWork>,
-) {
+) -> bool {
     if state.lock().map_or(true, |state| state.private_mode) {
-        return;
+        return false;
     }
     let now = unix_seconds();
     let cancellation = ReadCancellation::new();
@@ -553,16 +651,18 @@ fn deliver_due(
         Ok(pending) => pending,
         Err(error) => {
             warn!(%error, "could not read external scrobbling work");
-            return;
+            return false;
         }
     };
+    let mut settled = false;
     let mut stopped = std::collections::HashSet::new();
     for pending in pending {
         if work.lock().map_or(true, |work| work.closed) {
-            return;
+            return false;
         }
         let Some(service) = DeliveryService::parse(&pending.service) else {
             let _ = runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key));
+            settled = true;
             continue;
         };
         let account = (service, pending.account_id.clone());
@@ -576,17 +676,20 @@ fn deliver_due(
             track: SubmissionTrack::from_pending(&pending),
             started_at_unix_seconds: pending.started_at,
         };
-        if finish_delivery(
+        match finish_delivery(
             catalog,
             runtime,
             pending,
             now,
             submit(client, &current, &submission),
-        ) == DeliveryFlow::StopAccount
-        {
-            stopped.insert(account);
+        ) {
+            DeliveryFlow::Continue => settled = true,
+            DeliveryFlow::StopAccount => {
+                stopped.insert(account);
+            }
         }
     }
+    settled
 }
 
 fn finish_delivery(

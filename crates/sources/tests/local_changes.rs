@@ -2047,6 +2047,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
                         .into(),
                     ),
                     true,
+                    false,
                 )
                 .await
                 .unwrap();

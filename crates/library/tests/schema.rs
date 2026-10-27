@@ -158,7 +158,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             .unwrap();
         drop(observation);
         let mut raw = connection(&path, false).await;
-        assert_eq!(sqlx::query_as::<_,(bool,i64)>("SELECT state.favorite,state.rating FROM tracks track JOIN user_media_state state USING(media_uri) WHERE track.media_uri=?1").bind(uri).fetch_one(&mut raw).await.unwrap(),(true,87));
+        assert_eq!(sqlx::query_as::<_,(bool,i64)>("SELECT state.favorite,state.rating FROM tracks track JOIN user_state state USING(media_uri) WHERE track.media_uri=?1").bind(uri).fetch_one(&mut raw).await.unwrap(),(true,87));
         assert_eq!(
             sqlx::query_scalar::<_, String>("SELECT title FROM tracks WHERE media_uri=?1")
                 .bind(uri)
@@ -218,11 +218,13 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     let mut raw = connection(&fixture.path, false).await;
     for kind in ["track", "album", "artist"] {
         let uri = library::source_entity_uri(&SourceId::new("source"), kind, "owned");
-        sqlx::query("INSERT INTO user_media_state(media_uri,favorite,rating) VALUES(?1,1,87)")
-            .bind(uri)
-            .execute(&mut raw)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,1,87,1)",
+        )
+        .bind(uri)
+        .execute(&mut raw)
+        .await
+        .unwrap();
     }
     raw.close().await.unwrap();
     assert!(
@@ -233,7 +235,7 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     );
     let mut raw = connection(&fixture.path, false).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM user_media_state")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM user_state")
             .fetch_one(&mut raw)
             .await
             .unwrap(),
@@ -257,8 +259,8 @@ async fn unsupported_version_preserves_library_data() {
     sqlx::raw_sql("INSERT INTO sources(source_key,object_id,kind) VALUES (1,'source','local');
         INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,indexed) VALUES(1,1,'one','file:///one.flac','One',1);
         INSERT INTO playlists(playlist_key,object_id,name) VALUES (1,'keep','Keep me');
-        INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(1,'kept',1,0);
-        INSERT INTO user_media_state(media_uri,favorite) VALUES('file:///one.flac',1);")
+        INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) VALUES(1,'kept',1,X'8000');
+        INSERT INTO user_state(media_uri,favorite,changed_at) VALUES('file:///one.flac',1,1);")
         .execute(&mut raw)
         .await
         .unwrap();
@@ -267,9 +269,9 @@ async fn unsupported_version_preserves_library_data() {
     // A newer or damaged Store can name rows that no longer exist.
     let mut raw = connection(&path, false).await;
     sqlx::raw_sql("PRAGMA foreign_keys=OFF;
-        INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(1,'dangling',99,1);
+        INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) VALUES(1,'dangling',99,X'8001');
         INSERT INTO tracks(track_key,source_key,object_id,media_uri,album_key) VALUES(2,1,'two','file:///two.flac',77);
-        INSERT INTO queue_entries(entry_id,track_key) VALUES(1,98);
+        INSERT INTO queue_entries(entry_id,track_key,rank) VALUES(1,98,X'8000');
         ALTER TABLE playlists ADD COLUMN irrelevant TEXT; ALTER TABLE playlists DROP COLUMN artwork_mime;
         CREATE TABLE extra(value TEXT); INSERT INTO extra VALUES('keep in the original');
         PRAGMA user_version=999;")
@@ -420,12 +422,12 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
-            59,
+            60,
             "{version}"
         );
         // Favorites, ratings, listens, scrobbles and pending deliveries stay as they were.
         assert_eq!(
-            values(&mut raw, "SELECT json_array(media_uri,favorite,rating) FROM user_media_state ORDER BY media_uri").await,
+            values(&mut raw, "SELECT json_array(media_uri,favorite,rating) FROM user_state WHERE changed_at>0 ORDER BY media_uri").await,
             [
                 r#"["file:///music/Album/01.flac",1,60]"#,
                 r#"["file:///music/Gone/old.flac",1,null]"#,
@@ -454,10 +456,10 @@ async fn released_stores_upgrade_with_their_user_data() {
         assert_eq!(
             values(
                 &mut raw,
-                "SELECT json_array(media_uri,favorite,previous_favorite) FROM favorite_outbox"
+                "SELECT json_array(media_uri,kind,value) FROM outbox"
             )
             .await,
-            [r#"["rufin:source/track/server/s1",0,1]"#],
+            [r#"["rufin:source/track/server/s1","favorite",0]"#],
             "{version}"
         );
         // Carried-over counts keep their names, also for tracks the catalog no longer has.
@@ -482,7 +484,7 @@ async fn released_stores_upgrade_with_their_user_data() {
             "{version}"
         );
         assert_eq!(
-            values(&mut raw, "SELECT json_array(playlist.object_id,entry.object_id,track.media_uri,track.title) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key) ORDER BY playlist.object_id,entry.position").await,
+            values(&mut raw, "SELECT json_array(playlist.object_id,entry.object_id,track.media_uri,track.title) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key) ORDER BY playlist.object_id,entry.rank").await,
             [
                 r#"["p100","pe1","rufin:source/track/server/s1","Server One"]"#,
                 r#"["p100","pe2","rufin:source/track/server/s2","Server Two"]"#,
@@ -491,6 +493,12 @@ async fn released_stores_upgrade_with_their_user_data() {
                 r#"["rufin:playlist:local","e1","file:///music/Album/01.flac","First"]"#,
                 r#"["rufin:playlist:local","e2","file:///music/Gone/old.flac","Gone Song"]"#,
             ],
+            "{version}"
+        );
+        // Entry order becomes ranks a list built by appends has.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(entry.object_id,hex(entry.rank)) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.object_id='rufin:playlist:local' ORDER BY entry.rank").await,
+            [r#"["e1","8000"]"#, r#"["e2","8001"]"#],
             "{version}"
         );
         assert_eq!(
@@ -511,7 +519,7 @@ async fn released_stores_upgrade_with_their_user_data() {
         );
         // The queue keeps its order, position and repeat mode.
         assert_eq!(
-            values(&mut raw, "SELECT json_group_array(track.media_uri) FROM (SELECT * FROM queue_positions WHERE order_kind=0 ORDER BY position) position JOIN queue_entries entry USING(entry_id) JOIN tracks track USING(track_key)").await,
+            values(&mut raw, "SELECT json_group_array(track.media_uri) FROM (SELECT * FROM queue_entries ORDER BY rank) entry JOIN tracks track USING(track_key)").await,
             [r#"["file:///music/Album/01.flac","file:///music/Gone/old.flac","rufin:source/track/server/s1"]"#],
             "{version}"
         );
@@ -520,18 +528,21 @@ async fn released_stores_upgrade_with_their_user_data() {
             [r#"[1,5000,"all"]"#],
             "{version}"
         );
-        // Downloads stay attached to their track.
+        // Downloads stay attached to their track, as one record each.
         assert_eq!(
-            values(&mut raw, "SELECT json_array(media_uri,origin,access_uri,source_key IS NOT NULL) FROM local_locators").await,
-            [r#"["rufin:source/track/server/s1","download","file:///downloads/s1.flac",1]"#],
+            values(&mut raw, "SELECT json_array(media_uri,quality,path,source_id,size,root,managed) FROM downloads").await,
+            [if version == "0.16.6" {
+                r#"["rufin:source/track/server/s1","original","file:///downloads/s1.flac","server",900,"/downloads",1]"#
+            } else {
+                r#"["rufin:source/track/server/s1","unknown","file:///downloads/s1.flac","server",900,"/downloads",1]"#
+            }],
             "{version}"
         );
-        if version == "0.16.6" {
-            assert_eq!(
-                values(&mut raw, "SELECT json_array(media_uri,encoding,backing_uri,source_id) FROM connect_media_files").await,
-                [r#"["rufin:source/track/server/s1","original","rufin:source/track/server/s1","server"]"#]
-            );
-        }
+        assert_eq!(
+            values(&mut raw, "SELECT json_array(count(*)) FROM local_locators").await,
+            ["[0]"],
+            "{version}"
+        );
         // Library facts: typed columns, details, links, the date a track was added and the
         // favorites a server reported.
         assert_eq!(

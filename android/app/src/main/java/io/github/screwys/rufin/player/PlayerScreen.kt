@@ -321,7 +321,7 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
             }
             val favorite by remember(player) { derivedStateOf {
                 val state = player.playback
-                state?.transport?.current?.id?.mediaUri?.let { player.projectedFavorite(it, player.favorite) } == true
+                state?.transport?.current?.id?.mediaUri != null && player.favorite
             } }
             IconButton(player::favorite, Modifier.size(48.dp)) {
                 RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",

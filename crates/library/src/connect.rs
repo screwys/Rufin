@@ -69,10 +69,9 @@ pub struct ConnectRoot {
 
 pub(crate) const NEEDED_TRACK_KEYS: &str = "SELECT entry.track_key FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.owner='rufin'
     UNION SELECT track_key FROM queue_entries
-    UNION SELECT track.track_key FROM local_locators locator JOIN tracks track USING(media_uri) WHERE locator.origin='download'
-    UNION SELECT track.track_key FROM (SELECT artwork_binding FROM playlists UNION ALL SELECT artwork_binding FROM smart_playlists) artwork
-    CROSS JOIN json_each(artwork.artwork_binding) candidate
-    CROSS JOIN json_each(candidate.value,'$.image.automatic.chosen') chosen
+    UNION SELECT track.track_key FROM downloads download JOIN tracks track USING(media_uri)
+    UNION SELECT track.track_key FROM (SELECT mosaic FROM playlists UNION ALL SELECT mosaic FROM smart_playlists) artwork
+    CROSS JOIN json_each(artwork.mosaic) chosen
     JOIN tracks track ON track.media_uri=chosen.value";
 
 fn portable_relative(value: &mut Value) {

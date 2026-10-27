@@ -1,4 +1,4 @@
-use library::{CatalogSort, FavoriteTarget, ReadCancellation};
+use library::{CatalogSort, Delivery, DeliveryKind, FavoriteTarget, ReadCancellation};
 
 use super::support::{connection, fixture};
 
@@ -574,7 +574,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
 }
 
 #[tokio::test]
-async fn playlist_automatic_covers_keep_distinct_saved_choices() {
+async fn playlist_mosaics_pick_distinct_covers_and_keep_them() {
     let fixture = fixture().await;
     let [first, second] = ["first-album", "second-album"].map(|item_id| {
         serde_json::to_vec(&[library::ArtworkCandidate::new(
@@ -621,44 +621,42 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         .expect("create Playlist")
         .expect("all Tracks exist")
         .0;
-    let row = fixture
+    let (incomplete, _) = fixture
         .catalog
-        .playlists(&[playlist], &ReadCancellation::new())
+        .pick_mosaics(&[library::MosaicOwner::Playlist(playlist)])
         .await
-        .expect("Playlist cover samples")
-        .pop()
-        .expect("Playlist row");
-    let candidate =
-        serde_json::from_slice::<Vec<library::ArtworkCandidate>>(&row.artwork_binding.unwrap())
-            .unwrap()
-            .remove(0);
-    let candidate = fixture
-        .catalog
-        .resolve_playlist_artwork(candidate)
-        .await
-        .unwrap()
         .unwrap();
+    assert_eq!(incomplete, [library::MosaicOwner::Playlist(playlist)]);
+    let mosaic = || async {
+        let row = fixture
+            .catalog
+            .playlists(&[playlist], &ReadCancellation::new())
+            .await
+            .expect("Playlist cover samples")
+            .pop()
+            .expect("Playlist row");
+        library::automatic_playlist_artwork(&row.artwork_binding.unwrap()).unwrap()
+    };
+    let saved = mosaic().await.expect("mosaic");
+    let candidate = serde_json::from_slice::<Vec<library::ArtworkCandidate>>(&saved)
+        .unwrap()
+        .remove(0);
     let library::ArtworkImage::Playlist {
-        automatic: Some(manifest),
-        resolved: Some(recipes),
+        mosaic: Some(picks),
         ..
     } = candidate.image
     else {
-        panic!("automatic playlist image")
+        panic!("mosaic playlist image")
     };
-    assert_eq!(manifest.chosen.len(), 2);
-    assert_eq!(recipes.len(), 2);
-    let actual = recipes
-        .iter()
-        .map(|recipe| serde_json::to_vec(recipe).unwrap())
+    assert_eq!(picks.len(), 2);
+    let actual = fixture
+        .catalog
+        .track_artwork_bindings(&picks, &ReadCancellation::new())
+        .await
+        .unwrap()
+        .into_iter()
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(actual, [first, second].into_iter().collect());
-    let saved: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
     fixture
         .catalog
         .update_playlist(
@@ -668,33 +666,13 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         )
         .await
         .unwrap();
-    let replaced: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
-    assert!(
-        library::authored_playlist_artwork(&replaced)
-            .unwrap()
-            .is_some()
-    );
-    assert_eq!(
-        library::automatic_playlist_artwork(&replaced).unwrap(),
-        Some(saved.clone())
-    );
+    assert_eq!(mosaic().await, Some(saved.clone()));
     fixture
         .catalog
         .update_playlist(playlist, None, Some(None))
         .await
         .unwrap();
-    let restored: Vec<u8> =
-        sqlx::query_scalar("SELECT artwork_binding FROM playlists WHERE playlist_key=?1")
-            .bind(playlist)
-            .fetch_one(&mut connection(&fixture.path).await)
-            .await
-            .unwrap();
-    assert_eq!(restored, saved);
+    assert_eq!(mosaic().await, Some(saved));
 }
 
 #[tokio::test]
@@ -858,187 +836,149 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
 }
 
 #[tokio::test]
-async fn rating_favorite_and_delivery_are_uri_owned() {
+async fn deliveries_wait_until_accepted_and_then_drop_rufins_copy() {
     let mut fixture = fixture().await;
-    let cancellation = ReadCancellation::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     let target = FavoriteTarget::Track(fixture.track_uris[0].clone());
+    let cancellation = ReadCancellation::new();
     assert_eq!(
         fixture
             .catalog
-            .user_media_state(target.media_uri(), &ReadCancellation::new())
+            .user_state(target.media_uri(), &cancellation)
             .await
-            .expect("read absent user state"),
+            .unwrap(),
         None
     );
-    assert!(
-        fixture
-            .catalog
-            .set_rating(&target, Some(8))
-            .await
-            .expect("set Rating")
-    );
-    assert!(
-        fixture
-            .catalog
-            .set_favorite(&target, true)
-            .await
-            .expect("set Favorite")
-    );
+    fixture
+        .catalog
+        .set_rating(&target, Some(8), false)
+        .await
+        .unwrap();
+    fixture
+        .catalog
+        .set_favorite(&target, true, false)
+        .await
+        .unwrap();
     let row = fixture
         .catalog
-        .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
+        .tracks(&[fixture.tracks[0]], &cancellation)
         .await
-        .expect("read Track")
+        .unwrap()
         .remove(0);
     assert_eq!(row.state.rating, Some(8));
     assert!(row.state.favorite);
-    assert_eq!(
-        fixture
-            .catalog
-            .user_media_state(target.media_uri(), &ReadCancellation::new())
-            .await
-            .expect("read URI-owned user state"),
-        Some((Some(true), Some(8)))
-    );
-
     assert!(
         fixture
             .catalog
-            .queue_remote_favorite(&target, false, 100)
-            .await
-            .expect("queue delivery")
-    );
-    assert!(
-        fixture
-            .catalog
-            .due_remote_favorites(99, 64, &cancellation)
+            .due_deliveries(now + 60, 64)
             .await
             .unwrap()
             .is_empty()
     );
+
+    // A favorite for a server waits in the outbox; Rufin shows it meanwhile.
+    fixture
+        .catalog
+        .set_favorite(&target, false, true)
+        .await
+        .unwrap();
     let album = FavoriteTarget::Album(fixture.album_uris[0].clone());
     fixture
         .catalog
-        .queue_remote_favorite(&album, true, 100)
+        .set_favorite(&album, true, true)
         .await
         .unwrap();
-    assert_eq!(
-        fixture
-            .catalog
-            .due_remote_favorites(100, 1, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), false)]
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .due_remote_favorites(100, 64, &cancellation)
-            .await
-            .unwrap(),
-        [
-            (target.media_uri().to_string(), false),
-            (album.media_uri().to_string(), true)
-        ]
-    );
+    let track_delivery = Delivery {
+        media_uri: target.media_uri().into(),
+        kind: DeliveryKind::Favorite,
+        value: Some(0),
+    };
+    let album_delivery = Delivery {
+        media_uri: album.media_uri().into(),
+        kind: DeliveryKind::Favorite,
+        value: Some(1),
+    };
+    let mut due = fixture.catalog.due_deliveries(now + 60, 64).await.unwrap();
+    due.sort_by(|a, b| a.media_uri.cmp(&b.media_uri));
+    let mut expected = vec![track_delivery.clone(), album_delivery.clone()];
+    expected.sort_by(|a, b| a.media_uri.cmp(&b.media_uri));
+    assert_eq!(due, expected);
+    assert!(!fixture.catalog.favorite(&target).await.unwrap());
+
+    // Accepted: the value becomes the source's and Rufin's copy goes.
     assert!(
         fixture
             .catalog
-            .acknowledge_remote_favorite(&album, true)
+            .delivered(&album_delivery, false)
             .await
             .unwrap()
     );
     assert!(fixture.catalog.favorite(&album).await.unwrap());
-    assert!(
-        fixture
-            .catalog
-            .defer_remote_favorite(&target, false, 200)
-            .await
-            .expect("defer delivery")
-    );
-    fixture.catalog.clone().close().await.unwrap();
-    fixture.catalog = library::Catalog::open(&fixture.path).await.unwrap();
-    assert!(!fixture.catalog.favorite(&target).await.unwrap());
-    assert!(
-        fixture
-            .catalog
-            .due_remote_favorites(199, 64, &cancellation)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     assert_eq!(
         fixture
             .catalog
-            .due_remote_favorites(200, 64, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), false)]
-    );
-    fixture
-        .catalog
-        .queue_remote_favorite(&target, true, 201)
-        .await
-        .unwrap();
-    assert!(
-        !fixture
-            .catalog
-            .acknowledge_remote_favorite(&target, false)
-            .await
-            .unwrap()
-    );
-    assert!(
-        !fixture
-            .catalog
-            .defer_remote_favorite(&target, false, 300)
-            .await
-            .unwrap()
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .reject_remote_favorite(&target, false)
+            .user_state(album.media_uri(), &cancellation)
             .await
             .unwrap(),
         None
     );
-    assert!(fixture.catalog.favorite(&target).await.unwrap());
-    assert_eq!(
-        fixture
-            .catalog
-            .due_remote_favorites(201, 64, &cancellation)
-            .await
-            .unwrap(),
-        [(target.media_uri().to_string(), true)]
-    );
+
+    // A deferred delivery waits for its time, across a restart.
     fixture
         .catalog
-        .queue_remote_favorite(&target, false, 202)
+        .defer_delivery(&track_delivery, now + 300)
         .await
         .unwrap();
-    assert_eq!(
-        fixture
-            .catalog
-            .reject_remote_favorite(&target, false)
-            .await
-            .expect("reject delivery"),
-        Some(true)
-    );
+    fixture.catalog.clone().close().await.unwrap();
+    fixture.catalog = library::Catalog::open(&fixture.path).await.unwrap();
     assert!(
         fixture
             .catalog
-            .due_remote_favorites(300, 64, &cancellation)
+            .due_deliveries(now + 60, 64)
             .await
             .unwrap()
             .is_empty()
     );
+    assert_eq!(
+        fixture.catalog.next_delivery_at().await.unwrap(),
+        Some(now + 300)
+    );
+
+    // A newer value replaces the waiting one; the older one's acceptance changes nothing.
+    fixture
+        .catalog
+        .set_favorite(&target, true, true)
+        .await
+        .unwrap();
     assert!(
+        !fixture
+            .catalog
+            .delivered(&track_delivery, false)
+            .await
+            .unwrap()
+    );
+    let newer = Delivery {
+        value: Some(1),
+        ..track_delivery
+    };
+    assert_eq!(
+        fixture.catalog.due_deliveries(now + 60, 64).await.unwrap(),
+        std::slice::from_ref(&newer)
+    );
+
+    // Refused: the delivery and Rufin's copy go, so the source's own value shows.
+    assert!(fixture.catalog.drop_delivery(&newer, false).await.unwrap());
+    assert!(!fixture.catalog.favorite(&target).await.unwrap());
+    assert_eq!(
         fixture
             .catalog
-            .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
+            .user_state(target.media_uri(), &cancellation)
             .await
-            .expect("restored Track")[0]
-            .state
-            .favorite
+            .unwrap(),
+        Some((None, Some(8)))
     );
+    assert_eq!(fixture.catalog.next_delivery_at().await.unwrap(), None);
 }

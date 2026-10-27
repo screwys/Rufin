@@ -517,12 +517,12 @@ impl CatalogUi {
                     models.resume_initial_demand();
                 })
             })
-            .with_favorite_settlement(Rc::new(move |settlement| {
-                let library::FavoriteTarget::Album(album) = settlement.target else {
+            .with_favorite_state(Rc::new(move |state| {
+                let library::FavoriteTarget::Album(album) = state.target else {
                     return;
                 };
                 let models = favorite_models.borrow().clone();
-                models.update_favorite(&album, settlement.effective);
+                models.update_favorite(&album, state.favorite);
                 let settings = applied_settings.borrow().clone();
                 if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(rufin_core::browse::list_display(
@@ -832,13 +832,13 @@ impl CatalogUi {
                 let projection = projection.clone();
                 Rc::new(move || projection.resume_initial_demand())
             })
-            .with_favorite_settlement(Rc::new(move |settlement| {
-                let library::FavoriteTarget::Track(track) = settlement.target else {
+            .with_favorite_state(Rc::new(move |state| {
+                let library::FavoriteTarget::Track(track) = state.target else {
                     return;
                 };
                 favorite_projection
                     .model
-                    .update_favorite(&track, settlement.effective);
+                    .update_favorite(&track, state.favorite);
                 let projection_request = favorite_projection.query();
                 if favorite_requery.is_some_and(|favorites_only| {
                     favorites_only

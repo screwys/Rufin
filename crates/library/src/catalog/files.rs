@@ -984,7 +984,7 @@ async fn merge_local_file_uris_on(
             .fetch_all(write.connection().await?)
             .await?;
             for playlist in playlists {
-                write.touch_playlist(playlist);
+                write.touch_playlist_entries(playlist);
             }
             sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
                 .bind(old_key)
@@ -1003,19 +1003,19 @@ async fn merge_local_file_uris_on(
             merged = true;
         }
         sqlx::query(
-            "INSERT INTO user_media_state(media_uri,favorite,rating)
-            SELECT ?2,favorite,rating FROM user_media_state WHERE media_uri=?1
+            "INSERT INTO user_state(media_uri,favorite,rating,changed_at)
+            SELECT ?2,favorite,rating,changed_at FROM user_state WHERE media_uri=?1
             ON CONFLICT(media_uri) DO UPDATE SET
-                favorite=COALESCE(user_media_state.favorite,excluded.favorite),
-                rating=COALESCE(user_media_state.rating,excluded.rating)
-            WHERE (user_media_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
-               OR (user_media_state.rating IS NULL AND excluded.rating IS NOT NULL)",
+                favorite=COALESCE(user_state.favorite,excluded.favorite),
+                rating=COALESCE(user_state.rating,excluded.rating)
+            WHERE (user_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
+               OR (user_state.rating IS NULL AND excluded.rating IS NOT NULL)",
         )
         .bind(previous)
         .bind(current)
         .execute(write.connection().await?)
         .await?;
-        sqlx::query("DELETE FROM user_media_state WHERE media_uri=?1")
+        sqlx::query("DELETE FROM user_state WHERE media_uri=?1")
             .bind(previous)
             .execute(write.connection().await?)
             .await?;
@@ -1053,6 +1053,8 @@ async fn merge_local_file_uris_on(
         if crate::cue_media_parts(current).is_some() {
             sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT source_key,?2,origin,path,root,relative_path,access_uri FROM local_locators WHERE media_uri=?1 ON CONFLICT(media_uri,origin) DO NOTHING")
                 .bind(previous).bind(current).execute(write.connection().await?).await?;
+            sqlx::query("INSERT INTO downloads(media_uri,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired) SELECT ?2,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired FROM downloads WHERE media_uri=?1 ON CONFLICT DO NOTHING")
+                .bind(previous).bind(current).execute(write.connection().await?).await?;
             write.touch_download(current);
         }
         if let Some(path) = crate::file_media_path(current) {
@@ -1088,8 +1090,8 @@ async fn merge_local_file_uris_on(
                 uri: current.clone(),
             });
         }
-        sqlx::query("INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at) SELECT ?2,favorite,previous_favorite,attempts,next_attempt_at FROM favorite_outbox WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(write.connection().await?).await?;
-        sqlx::query("DELETE FROM favorite_outbox WHERE media_uri=?1")
+        sqlx::query("INSERT INTO outbox(media_uri,kind,value,next_attempt_at) SELECT ?2,kind,value,next_attempt_at FROM outbox WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(write.connection().await?).await?;
+        sqlx::query("DELETE FROM outbox WHERE media_uri=?1")
             .bind(previous)
             .execute(write.connection().await?)
             .await?;
@@ -1101,19 +1103,13 @@ async fn merge_local_file_uris_on(
     ] {
         let keys: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH aliases AS(
             SELECT json_extract(value,'$[0]') previous,json_extract(value,'$[1]') current FROM json_each(?1)
-        ) UPDATE {table} AS owner SET artwork_binding=CAST((
-            SELECT json_group_array(json(CASE WHEN json_type(candidate.value,'$.image.automatic.chosen')='array'
-                THEN json_set(candidate.value,'$.image.automatic.chosen',json((
-                    SELECT json_group_array(uri ORDER BY ordinal) FROM (
-                        SELECT coalesce((SELECT current FROM aliases WHERE previous=chosen.value LIMIT 1),chosen.value) uri,
-                               min(CAST(chosen.key AS INTEGER)) ordinal
-                        FROM json_each(candidate.value,'$.image.automatic.chosen') chosen GROUP BY uri)))
-                ) ELSE candidate.value END) ORDER BY CAST(candidate.key AS INTEGER))
-            FROM json_each(owner.artwork_binding) candidate
-        ) AS BLOB) WHERE EXISTS(
-            SELECT 1 FROM json_each(owner.artwork_binding) candidate
-            CROSS JOIN json_each(candidate.value,'$.image.automatic.chosen') chosen
-            JOIN aliases ON aliases.previous=chosen.value) RETURNING {key}")))
+        ) UPDATE {table} AS owner SET mosaic=(
+            SELECT json_group_array(uri ORDER BY ordinal) FROM (
+                SELECT coalesce((SELECT current FROM aliases WHERE previous=chosen.value LIMIT 1),chosen.value) uri,
+                       min(CAST(chosen.key AS INTEGER)) ordinal
+                FROM json_each(owner.mosaic) chosen GROUP BY uri)
+        ) WHERE EXISTS(
+            SELECT 1 FROM json_each(owner.mosaic) chosen JOIN aliases ON aliases.previous=chosen.value) RETURNING {key}")))
             .bind(serde_json::to_string(aliases)?).fetch_all(write.connection().await?).await?;
         for key in keys {
             write.changed(if table == "playlists" {

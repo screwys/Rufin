@@ -161,10 +161,9 @@ impl CatalogUi {
             let shell = Rc::clone(self);
             let favorite_media_uri = favorite_media_uri.clone();
             button.connect_clicked(move |button| {
-                shell.set_favorite_with_feedback(
+                shell.set_favorite(
                     FavoriteTarget::Album(favorite_media_uri.clone()),
                     !favorite_button_is_active(button),
-                    Some(button),
                 );
             });
         }

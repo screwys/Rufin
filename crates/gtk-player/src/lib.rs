@@ -232,6 +232,6 @@ pub type QueueMenu = Rc<
         Option<(f64, f64)>,
     ),
 >;
-pub type TrackFavorite = Rc<dyn Fn(String, bool, &gtk::Button)>;
+pub type TrackFavorite = Rc<dyn Fn(String, bool)>;
 
 pub mod playback_settings;

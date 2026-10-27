@@ -1082,7 +1082,7 @@ pub(super) mod tests {
         }
         drop(unavailable_stations);
         catalog
-            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
+            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true, false)
             .await
             .unwrap();
         let mut updated = track();

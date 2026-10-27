@@ -1807,6 +1807,19 @@ impl Source {
         .await
     }
 
+    /// Reads these playlists again after an edit, without the relations a feed update reads.
+    pub async fn apply_playlists(
+        &self,
+        catalog: &Catalog,
+        upserts: Vec<String>,
+        removals: Vec<String>,
+    ) -> SourceResult<()> {
+        self.catalog_operation(catalog, async |changes| {
+            self.acquire_items(changes, upserts, removals).await
+        })
+        .await
+    }
+
     pub(crate) async fn apply_changes(
         &self,
         catalog: &Catalog,

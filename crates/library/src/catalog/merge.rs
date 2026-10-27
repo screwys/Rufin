@@ -454,12 +454,12 @@ async fn index_track_credits(
     Ok(())
 }
 
-/// The best local access loudness key of each URI, download first, then mapping.
+/// The best local access loudness key of each URI, mapping first.
 async fn access_loudness(
     write: &mut Write<'_>,
     uris: &[String],
 ) -> LibraryResult<HashMap<String, Vec<u8>>> {
-    let rows: Vec<(String, Option<Vec<u8>>)> = sqlx::query_as("SELECT input.value,(SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=input.value ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1) FROM json_each(?1) input")
+    let rows: Vec<(String, Option<Vec<u8>>)> = sqlx::query_as("SELECT input.value,(SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=input.value ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1) FROM json_each(?1) input")
         .bind(serde_json::to_string(uris)?).fetch_all(write.connection().await?).await?;
     Ok(rows
         .into_iter()
@@ -1490,9 +1490,8 @@ async fn expire(write: &mut Write<'_>, source: SourceKey) -> LibraryResult<bool>
     let cutoff = chrono::Utc::now().timestamp() - EXPIRY_SECONDS;
     let expired: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks track WHERE source_key=?1 AND indexed=0 AND hidden_since<?2
             AND NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)
-            AND NOT EXISTS(SELECT 1 FROM native_playlist_pending entry WHERE entry.track_key=track.track_key)
             AND NOT EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=track.track_key)
-            AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='download')
+            AND NOT EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=track.media_uri)
             ORDER BY track_key LIMIT ?3")
         .bind(source)
         .bind(cutoff)
@@ -1681,8 +1680,8 @@ impl Catalog {
         })
     }
 
-    /// Forgets a source in one Write: its catalog, favorites, ratings, lyrics, Home rows and
-    /// playlists go. A track a Rufin playlist or the queue still holds stays as a hidden row
+    /// Forgets a source in one Write: its catalog, favorites, ratings, lyrics, download records,
+    /// Home rows and playlists go. A track a Rufin playlist or the queue still holds stays as a hidden row
     /// without a source. Listens stay, since they carry their own copy.
     pub async fn remove_source(&self, source_id: &SourceId) -> LibraryResult<bool> {
         let mut write = self.write().await?;
@@ -1692,14 +1691,14 @@ impl Catalog {
             .map(|source| source.key);
         for kind in crate::keys::source_entity_kinds() {
             let prefix = crate::keys::source_entity_prefix(source_id, kind);
-            let uris: Vec<String> = sqlx::query_scalar("DELETE FROM user_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN(SELECT media_uri FROM tracks WHERE source_key=?2) RETURNING media_uri")
+            let uris: Vec<String> = sqlx::query_scalar("DELETE FROM user_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN(SELECT media_uri FROM tracks WHERE source_key=?2) RETURNING media_uri")
                 .bind(&prefix).bind(key).fetch_all(write.connection().await?).await?;
             for uri in &uris {
                 write.touch_state(uri);
             }
             for query in [
                 "DELETE FROM lyrics_cache WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
-                "DELETE FROM favorite_outbox WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
+                "DELETE FROM outbox WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
             ] {
                 sqlx::query(query)
                     .bind(&prefix)
@@ -1709,6 +1708,10 @@ impl Catalog {
             }
         }
         sqlx::query("DELETE FROM local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN sources identity USING(source_key) WHERE identity.object_id=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.source_key IS NOT ?2)").bind(source_id.as_str()).bind(key).execute(write.connection().await?).await?;
+        sqlx::query("DELETE FROM downloads WHERE source_id=?1")
+            .bind(source_id.as_str())
+            .execute(write.connection().await?)
+            .await?;
         let Some(source) = key else {
             write.keep();
             write.commit().await?;

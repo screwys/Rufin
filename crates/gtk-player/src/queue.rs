@@ -646,8 +646,7 @@ fn queue_actions_column(shell: &Rc<crate::PlayerUi>, field: LibraryField) -> gtk
                 return;
             };
             let favorite = !favorite_button_is_active(button);
-            (click_shell.set_track_favorite)(row.track.media_uri.clone(), favorite, button);
-            set_favorite_button_active(button, favorite);
+            (click_shell.set_track_favorite)(row.track.media_uri.clone(), favorite);
         });
     });
     connect_sparse_bind(&factory, |item| {

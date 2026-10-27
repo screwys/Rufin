@@ -328,21 +328,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun favorite() {
         val current = playback ?: return
         val uri = current.transport.current?.id?.mediaUri ?: return
-        val effective = connection.projectedFavorite("track", uri, favorite)
-        val favorite = !effective
-        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${currentId?.run} effective=$effective requested=$favorite")
-        connection.setFavoriteIntent("track", uri, favorite)
-        this.favorite = favorite
-        action {
-            try {
-                val result = sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(uri), favorite)
-                if (result != null && currentId?.mediaUri == uri && projectedFavorite(uri, favorite) == favorite)
-                    this.favorite = result
-            }
-            finally {
-                connection.releaseFavoriteIntent("track", uri, favorite)
-            }
-        }
+        val favorite = !this.favorite
+        if (connection.debugLogging) Log.d("Rufin", "Player favorite clicked run=${currentId?.run} requested=$favorite")
+        action { sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(uri), favorite) }
     }
     fun shuffle() = action {
         val enabled = playback?.controls?.shuffleEnabled != true
@@ -369,13 +357,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
     suspend fun queueFavorite(mediaUri: String, favorite: Boolean): Boolean? {
         if (connection.debugLogging) Log.d("Rufin", "Queue favorite clicked run=${currentId?.run} current=${currentId?.mediaUri == mediaUri} requested=$favorite")
-        connection.setFavoriteIntent("track", mediaUri, favorite)
-        return try { sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(mediaUri), favorite) }
-        finally {
-            connection.releaseFavoriteIntent("track", mediaUri, favorite)
-        }
+        return sourceOwner?.setFavoriteWithResult(FavoriteTarget.Track(mediaUri), favorite)
     }
-    internal fun projectedFavorite(uri: String, fallback: Boolean) = connection.projectedFavorite("track", uri, fallback)
     fun activateQueue(position: ULong) = action { playbackOwner?.activate(position) }
     fun removeQueue(position: ULong) = action { playbackOwner?.remove(position) }
     suspend fun moveQueue(position: ULong, target: ULong?, after: Boolean = false) {

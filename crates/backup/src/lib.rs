@@ -601,7 +601,7 @@ mod tests {
             .unwrap();
         let read = tokio::time::timeout(
             std::time::Duration::from_secs(1),
-            catalog.user_media_state(
+            catalog.user_state(
                 "https://example.test/song",
                 &library::ReadCancellation::new(),
             ),
@@ -619,7 +619,7 @@ mod tests {
         let target = catalog(directory.path(), "target").await;
         let uri = "https://example.test/song";
         target
-            .set_rating(&library::FavoriteTarget::Track(uri.into()), Some(2))
+            .set_rating(&library::FavoriteTarget::Track(uri.into()), Some(2), false)
             .await
             .unwrap();
         let mut contents = BackupContents {
@@ -654,7 +654,7 @@ mod tests {
             restore_backup(&target, &staged, requested).await.unwrap();
             assert_eq!(
                 target
-                    .user_media_state(uri, &library::ReadCancellation::new())
+                    .user_state(uri, &library::ReadCancellation::new())
                     .await
                     .unwrap(),
                 Some((None, Some(2)))
@@ -665,7 +665,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     target
-                        .user_media_state(uri, &library::ReadCancellation::new())
+                        .user_state(uri, &library::ReadCancellation::new())
                         .await
                         .unwrap(),
                     None
@@ -681,8 +681,8 @@ mod tests {
         let target = catalog(directory.path(), "target").await;
         let uri = "https://example.test/song";
         let favorite = library::FavoriteTarget::Track(uri.into());
-        source.set_rating(&favorite, Some(7)).await.unwrap();
-        target.set_rating(&favorite, Some(2)).await.unwrap();
+        source.set_rating(&favorite, Some(7), false).await.unwrap();
+        target.set_rating(&favorite, Some(2), false).await.unwrap();
         let bytes = archive(&source, None).await;
         let staged = stage_backup(Cursor::new(bytes), || None).unwrap();
         assert_eq!(staged.settings().unwrap(), br#"{"sources":[]}"#);
@@ -694,7 +694,7 @@ mod tests {
         assert_eq!(report.user_states, 1);
         assert_eq!(
             target
-                .user_media_state(uri, &library::ReadCancellation::new())
+                .user_state(uri, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
             Some((None, Some(7)))

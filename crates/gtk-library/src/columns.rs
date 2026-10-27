@@ -336,10 +336,9 @@ impl AlbumTableCell {
                     };
                     let row = cell.imp().row.borrow().clone();
                     if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
-                        shell.set_favorite_with_feedback(
+                        shell.set_favorite(
                             library::FavoriteTarget::Album(row.media_uri.clone()),
                             !favorite_button_is_active(button),
-                            Some(button),
                         );
                     }
                 });
@@ -1548,11 +1547,8 @@ pub fn artist_actions_column(
                 return;
             };
             let favorite = !favorite_button_is_active(button);
-            favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Artist(artist.media_uri),
-                favorite,
-                Some(button),
-            );
+            favorite_shell
+                .set_favorite(library::FavoriteTarget::Artist(artist.media_uri), favorite);
         });
     });
 
@@ -1638,15 +1634,10 @@ where
                 return;
             };
             let favorite = !favorite_button_is_active(button);
-            favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Track(track),
-                favorite,
-                Some(button),
-            );
+            favorite_shell.set_favorite(library::FavoriteTarget::Track(track), favorite);
         });
     });
 
-    let bind_shell = Rc::clone(&shell);
     let bind_favorite_value = Rc::clone(&favorite_value);
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -1656,7 +1647,7 @@ where
             .item()
             .and_then(|object| object_item::<T, _>(object, |row| bind_favorite_value(row)))
             .flatten()
-            .map(|(track, favorite)| bind_shell.projected_track_favorite(&track, favorite));
+            .map(|(_, favorite)| favorite);
         if let Some(button) = favorite_cell_button(item) {
             set_placeholder_favorite(&button, favorite);
         }

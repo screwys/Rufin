@@ -242,7 +242,16 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
     drop(raw);
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let cancel = ReadCancellation::new();
-    for (folder, count) in [(None, 4), (Some(fixture.folder), 4)] {
+    fixture
+        .catalog
+        .pick_mosaics(&[
+            library::MosaicOwner::Tag(fixture.genre.raw()),
+            library::MosaicOwner::Tag(fixture.mood.raw()),
+        ])
+        .await
+        .unwrap();
+    {
+        let count = 4;
         let genres = fixture
             .catalog
             .genres(
@@ -251,7 +260,6 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
                     library::GenreKey::from_raw(-100),
                     fixture.genre,
                 ],
-                folder,
                 &cancel,
             )
             .await
@@ -262,7 +270,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         assert_eq!(genres[0].representative_artwork, covers);
         let single = fixture
             .catalog
-            .genres(&[fixture.genre], folder, &cancel)
+            .genres(&[fixture.genre], &cancel)
             .await
             .unwrap();
         assert_eq!(
@@ -271,7 +279,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         );
         let moods = fixture
             .catalog
-            .moods(&[fixture.mood, fixture.mood], folder, &cancel)
+            .moods(&[fixture.mood, fixture.mood], &cancel)
             .await
             .unwrap();
         assert_eq!(moods.len(), 2);
@@ -280,7 +288,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         assert_eq!(moods[0].representative_artwork, covers);
         let single = fixture
             .catalog
-            .moods(&[fixture.mood], folder, &cancel)
+            .moods(&[fixture.mood], &cancel)
             .await
             .unwrap();
         assert_eq!(
@@ -301,10 +309,9 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
         .unwrap();
     drop(raw);
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
-    let folder = Some(fixture.folder);
     let genre = fixture
         .catalog
-        .genres(&[fixture.genre], folder, &cancel)
+        .genres(&[fixture.genre], &cancel)
         .await
         .unwrap()
         .pop()
@@ -321,7 +328,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
         .catalog
-        .moods(&[fixture.mood], folder, &cancel)
+        .moods(&[fixture.mood], &cancel)
         .await
         .unwrap()
         .pop()
@@ -337,7 +344,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     assert!(mood.representative_artwork.is_empty());
     let genre = fixture
         .catalog
-        .genres(&[fixture.genre], folder, &cancel)
+        .genres(&[fixture.genre], &cancel)
         .await
         .map(|rows| {
             let mut rows = rows;
@@ -356,7 +363,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
         .catalog
-        .moods(&[fixture.mood], folder, &cancel)
+        .moods(&[fixture.mood], &cancel)
         .await
         .map(|rows| {
             let mut rows = rows;
@@ -375,7 +382,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             kind: library::ListKind::Genres,
             source: Some(fixture.source),
             sort: sort,
-            folder: folder,
+            folder: Some(fixture.folder),
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
@@ -396,7 +403,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             kind: library::ListKind::Moods,
             source: Some(fixture.source),
             sort: sort,
-            folder: folder,
+            folder: Some(fixture.folder),
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
@@ -722,7 +729,11 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
     let cancellation = ReadCancellation::new();
     fixture
         .catalog
-        .set_favorite(&FavoriteTarget::Album(fixture.album_uris[0].clone()), true)
+        .set_favorite(
+            &FavoriteTarget::Album(fixture.album_uris[0].clone()),
+            true,
+            false,
+        )
         .await
         .expect("favorite Album");
     fixture
@@ -730,6 +741,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         .set_favorite(
             &FavoriteTarget::Artist(fixture.artist_uris[1].clone()),
             true,
+            false,
         )
         .await
         .expect("favorite Artist");
@@ -1413,7 +1425,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .catalog
-            .genres(&[fixture.genre], Some(fixture.folder), &cancel)
+            .genres(&[fixture.genre], &cancel)
             .await
             .map(|rows| {
                 let mut rows = rows;
@@ -1577,7 +1589,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .catalog
-            .moods(&[fixture.mood], Some(fixture.folder), &cancel)
+            .moods(&[fixture.mood], &cancel)
             .await
             .map(|rows| {
                 let mut rows = rows;
@@ -1964,10 +1976,15 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
     };
 
     let cancel = ReadCancellation::new();
+    fixture
+        .catalog
+        .pick_mosaics(&[library::MosaicOwner::Tag(fixture.genre.raw())])
+        .await
+        .unwrap();
     for folder in [None, Some(fixture.folder)] {
         let detail = fixture
             .catalog
-            .genres(&[fixture.genre], folder, &cancel)
+            .genres(&[fixture.genre], &cancel)
             .await
             .map(|rows| {
                 let mut rows = rows;

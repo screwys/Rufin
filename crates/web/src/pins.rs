@@ -55,10 +55,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
             } => {
                 let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                let row = catalog
-                    .genre(&uri, None, &cancellation)
-                    .await
-                    .map_err(internal)?;
+                let row = catalog.genre(&uri, &cancellation).await.map_err(internal)?;
                 row.map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))}))
             }
             SidebarPin::Playlist {

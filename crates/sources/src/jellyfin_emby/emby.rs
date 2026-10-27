@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(track.state.rating, Some(7));
         assert!(track.state.last_played.is_some());
         catalog
-            .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9))
+            .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9), false)
             .await
             .unwrap();
         source.set_rating("emby:track:11", Some(9)).await.unwrap();

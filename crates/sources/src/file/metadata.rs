@@ -1646,11 +1646,11 @@ mod tests {
         let imported_uri = url::Url::from_file_path(&imported).unwrap().to_string();
         assert_eq!(
             catalog
-                .playlist_entry_uri_page(playlist, -1)
+                .playlist_entry_uri_page(playlist, 0)
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|(_, _, uri)| uri)
+                .map(|(_, uri)| uri)
                 .collect::<Vec<_>>(),
             vec![imported_uri.clone()],
             "import retains the selected already-indexed file"
@@ -1748,9 +1748,9 @@ mod tests {
         assert!(tracks.iter().any(|track| track.media_uri == new_uri));
         assert!(tracks.iter().any(|track| track.media_uri == imported_uri));
         assert!(tracks.iter().all(|track| track.media_uri != uri));
-        let entries = catalog.playlist_entry_uri_page(playlist, -1).await.unwrap();
+        let entries = catalog.playlist_entry_uri_page(playlist, 0).await.unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].2, imported_uri);
+        assert_eq!(entries[0].1, imported_uri);
         let inventory = catalog
             .local_file_page(key, None, 128, &library::ReadCancellation::new())
             .await
@@ -1977,11 +1977,11 @@ mod tests {
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
         let entries = catalog
-            .playlist_entry_uri_page(playlist.playlist, -1)
+            .playlist_entry_uri_page(playlist.playlist, 0)
             .await
             .unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().all(|(_, _, value)| value == &uri));
+        assert!(entries.iter().all(|(_, value)| value == &uri));
         fs::write(&path, format!("#EXTM3U\n{contents}")).unwrap();
         let reloaded =
             crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)
@@ -1990,7 +1990,7 @@ mod tests {
         assert!(!reloaded.changed);
         assert_eq!(
             catalog
-                .playlist_entry_uri_page(playlist.playlist, -1)
+                .playlist_entry_uri_page(playlist.playlist, 0)
                 .await
                 .unwrap(),
             entries
@@ -2006,11 +2006,11 @@ mod tests {
                 .unwrap();
             let other_uri = url::Url::from_file_path(&other).unwrap().to_string();
             let retargeted = catalog
-                .playlist_entry_uri_page(playlist.playlist, -1)
+                .playlist_entry_uri_page(playlist.playlist, 0)
                 .await
                 .unwrap();
             assert_eq!(retargeted.len(), 2);
-            assert!(retargeted.iter().all(|(_, _, value)| value == &other_uri));
+            assert!(retargeted.iter().all(|(_, value)| value == &other_uri));
             fs::remove_file(&imported_path).unwrap();
             std::os::unix::fs::symlink(&audio, &imported_path).unwrap();
             crate::import_local_playlist_file(&catalog, &path, Some(playlist.playlist), |_| None)

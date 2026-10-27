@@ -244,9 +244,10 @@ async fn load_folder_rows(
         folder: PlaylistFolderRow,
         source_id: Option<String>,
         cover_object_id: Option<String>,
+        mosaic: Option<String>,
     }
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,source.object_id source_id,cover.object_id cover_object_id
+        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,source.object_id source_id,cover.object_id cover_object_id,cover.mosaic
          FROM json_each(?1) requested JOIN playlist_folders folder ON folder.folder_key=requested.value AND NOT folder.smart
          LEFT JOIN playlists cover ON cover.playlist_key=(SELECT min(child.playlist_key) FROM playlists child WHERE child.playlist_folder_key=folder.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed))
          LEFT JOIN sources source ON source.source_key=cover.source_key
@@ -262,16 +263,14 @@ async fn load_folder_rows(
                 row.folder.track_count = i64::from(totals.tracks);
                 row.folder.duration_millis = totals.duration as i64;
             }
-            row.folder.artwork_binding = row
-                .cover_object_id
-                .map(|id| {
-                    crate::artwork::playlist_artwork(
-                        row.folder.artwork_binding.take(),
-                        (false, row.source_id, id),
-                        (None, None),
-                    )
-                })
-                .transpose()?;
+            row.folder.artwork_binding = match row.cover_object_id {
+                Some(id) => crate::artwork::playlist_artwork(
+                    row.folder.artwork_binding.take(),
+                    (false, row.source_id, id),
+                    row.mosaic.as_deref(),
+                )?,
+                None => None,
+            };
             Ok(row.folder)
         })
         .collect()

@@ -502,13 +502,12 @@ impl PlaybackOwner {
 
     async fn store_activity(&self, current_track: library::TrackKey, listen: ListenWrite) {
         let deliveries = self.scrobbler.listen_delivery_targets(&listen);
-        match self
+        if let Err(error) = self
             .catalog
             .record_listen(&listen, Some(current_track), &deliveries)
             .await
         {
-            Ok(_) => self.scrobbler.listen_recorded(deliveries.len()),
-            Err(error) => warn!(%error, "could not record Rufin Activity"),
+            warn!(%error, "could not record Rufin Activity");
         }
     }
 
@@ -632,14 +631,19 @@ impl PlaybackOwner {
     pub(crate) fn catalog_changed(&self) {
         if self.active().is_some() {
             self.send(Command::CatalogChanged);
-            let playback = self.settings.load().ui.playback;
-            self.loudness.library_changed(
-                playback.loudness_normalization,
-                playback.loudness_normalization_scope,
-                playback.write_ebu_r128_tags,
-                self.source_owner(),
-            );
         }
+    }
+
+    /// A source was selected: loudness analysis turns to it.
+    pub(crate) fn source_selected(&self) {
+        self.catalog_changed();
+        let playback = self.settings.load().ui.playback;
+        self.loudness.library_changed(
+            playback.loudness_normalization,
+            playback.loudness_normalization_scope,
+            playback.write_ebu_r128_tags,
+            self.source_owner(),
+        );
     }
     pub(crate) fn current_media(&self) -> Option<Arc<playback::CurrentMedia>> {
         self.updates
@@ -1525,23 +1529,15 @@ mod tests {
         std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
         catalog
-            .write_local_access(
-                None,
-                &[&library::LocalAccessWrite {
-                    media_uri: occurrence.track.media_uri.clone(),
-                    origin: library::LocalAccessOrigin::Download,
-                    path: path.to_string_lossy().into_owned(),
-                    root: folder.path().to_string_lossy().into_owned(),
-                    relative_path: "track.opus".into(),
-                    size_bytes: 0,
-                    mtime_ns: 0,
-                    device_id: None,
-                    inode: None,
-                    parser_version: 1,
-                    access_uri: uri.clone(),
-                    loudness_analysis_key: None,
-                }],
-            )
+            .save_download(&library::DownloadFile {
+                media_uri: occurrence.track.media_uri.clone(),
+                encoding: "mp3".into(),
+                path: uri.clone(),
+                storage_root: folder.path().to_string_lossy().into_owned(),
+                relative_path: "track.opus".into(),
+                managed: true,
+                ..Default::default()
+            })
             .await
             .unwrap();
         let stream = super::prepare_stream(

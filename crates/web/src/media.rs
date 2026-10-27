@@ -338,7 +338,7 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let (source, folder) = catalog::scope(
+        let (source, _) = catalog::scope(
             &products,
             required(&parameters, "source")?,
             parameters.get("folder").map(String::as_str),
@@ -346,11 +346,7 @@ async fn artwork(
         .await?;
         products
             .library
-            .genres(
-                &[key::<library::GenreKey>(&parameters, "genre")?],
-                folder,
-                &cancel,
-            )
+            .genres(&[key::<library::GenreKey>(&parameters, "genre")?], &cancel)
             .await
             .map_err(internal)?
             .into_iter()

@@ -115,7 +115,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                     }
                 }
                 PlayerIconButton("rufin-speaker-front-symbolic", "Audio output", onOutput)
-                val favorite = player.projectedFavorite(current.uri, player.favorite)
+                val favorite = player.favorite
                 PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     "Favorite current track", player::favorite, selected = favorite)
                 IconButton(player::togglePlayback) {

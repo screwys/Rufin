@@ -433,8 +433,14 @@ pub(crate) async fn load_smart_playlist_rows(
 ) -> LibraryResult<Vec<SmartPlaylistRow>> {
     let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
     let totals = smart_totals(catalog, connection, &raw, now).await?;
-    let rows = sqlx::query_as::<_, SmartPlaylistRow>(AssertSqlSafe(format!(
-        "SELECT playlist.smart_playlist_key,playlist.object_id,playlist.name,playlist.definition_json,playlist.position,
+    #[derive(FromRow)]
+    struct Row {
+        mosaic: Option<String>,
+        #[sqlx(flatten)]
+        playlist: SmartPlaylistRow,
+    }
+    let rows = sqlx::query_as::<_, Row>(AssertSqlSafe(format!(
+        "SELECT playlist.mosaic,playlist.smart_playlist_key,playlist.object_id,playlist.name,playlist.definition_json,playlist.position,
             0 track_count,0 duration_millis,0 downloaded_count,{} artwork_binding
          FROM json_each(?1) requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value
          ORDER BY CAST(requested.key AS INTEGER)",
@@ -444,22 +450,27 @@ pub(crate) async fn load_smart_playlist_rows(
     .fetch_all(&mut *connection)
     .await?;
     rows.into_iter()
-        .map(|mut playlist| {
-            normalize_definition(&mut playlist.definition)?;
-            let summary = totals
-                .get(&playlist.smart_playlist_key.raw())
-                .map(crate::catalog::views::Totals::summary)
-                .unwrap_or_default();
-            playlist.track_count = summary.track_count;
-            playlist.duration_millis = summary.duration_millis;
-            playlist.downloaded_count = summary.downloaded_count;
-            playlist.artwork_binding = Some(crate::artwork::playlist_artwork(
-                playlist.artwork_binding.take(),
-                (true, None, playlist.object_id.clone()),
-                (None, None),
-            )?);
-            Ok(playlist)
-        })
+        .map(
+            |Row {
+                 mosaic,
+                 mut playlist,
+             }| {
+                normalize_definition(&mut playlist.definition)?;
+                let summary = totals
+                    .get(&playlist.smart_playlist_key.raw())
+                    .map(crate::catalog::views::Totals::summary)
+                    .unwrap_or_default();
+                playlist.track_count = summary.track_count;
+                playlist.duration_millis = summary.duration_millis;
+                playlist.downloaded_count = summary.downloaded_count;
+                playlist.artwork_binding = crate::artwork::playlist_artwork(
+                    playlist.artwork_binding.take(),
+                    (true, None, playlist.object_id.clone()),
+                    mosaic.as_deref(),
+                )?;
+                Ok(playlist)
+            },
+        )
         .collect()
 }
 
@@ -492,9 +503,10 @@ pub(crate) async fn load_smart_folder_rows(
         #[sqlx(flatten)]
         folder: crate::PlaylistFolderRow,
         cover: Option<String>,
+        mosaic: Option<String>,
     }
     let rows: Vec<Row> = sqlx::query_as(AssertSqlSafe(format!(
-        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,cover.object_id cover
+        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,cover.object_id cover,cover.mosaic
          FROM json_each(?1) requested JOIN playlist_folders folder ON folder.folder_key=requested.value AND folder.smart
          LEFT JOIN smart_playlists cover ON cover.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=folder.folder_key)
          ORDER BY CAST(requested.key AS INTEGER)",
@@ -504,27 +516,32 @@ pub(crate) async fn load_smart_folder_rows(
     .fetch_all(&mut *connection)
     .await?;
     rows.into_iter()
-        .map(|Row { mut folder, cover }| {
-            for (_, key) in members
-                .iter()
-                .filter(|(owner, _)| *owner == folder.folder_key.raw())
-            {
-                if let Some(totals) = totals.get(key) {
-                    folder.track_count += i64::from(totals.tracks);
-                    folder.duration_millis += totals.duration as i64;
+        .map(
+            |Row {
+                 mut folder,
+                 cover,
+                 mosaic,
+             }| {
+                for (_, key) in members
+                    .iter()
+                    .filter(|(owner, _)| *owner == folder.folder_key.raw())
+                {
+                    if let Some(totals) = totals.get(key) {
+                        folder.track_count += i64::from(totals.tracks);
+                        folder.duration_millis += totals.duration as i64;
+                    }
                 }
-            }
-            folder.artwork_binding = cover
-                .map(|id| {
-                    crate::artwork::playlist_artwork(
+                folder.artwork_binding = match cover {
+                    Some(id) => crate::artwork::playlist_artwork(
                         folder.artwork_binding.take(),
                         (true, None, id),
-                        (None, None),
-                    )
-                })
-                .transpose()?;
-            Ok(folder)
-        })
+                        mosaic.as_deref(),
+                    )?,
+                    None => None,
+                };
+                Ok(folder)
+            },
+        )
         .collect()
 }
 
@@ -636,7 +653,9 @@ impl Catalog {
         now: i64,
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
-        let members = self.smart_members(&mut connection, key, now).await?;
+        let members = self
+            .members(&mut connection, crate::Collection::Smart { key, now })
+            .await?;
         let choices =
             crate::artwork::playlist_artwork_choices_on(self, &mut connection, &members, &[], true)
                 .await?;
@@ -698,18 +717,23 @@ impl Catalog {
         let revision = artwork
             .flatten()
             .map(|bytes| blake3::hash(bytes).to_hex().to_string());
-        let binding =
-            if artwork.is_some() {
-                let (object, previous): (String, Option<Vec<u8>>) = sqlx::query_as(
-                "SELECT object_id,artwork_binding FROM smart_playlists WHERE smart_playlist_key=?1",
-            ).bind(key).fetch_one(&mut *transaction).await?;
-                let incoming = revision.as_ref().map(|revision| {
-                    crate::artwork::playlist_binding(true, None, object, revision.clone())
-                });
-                crate::artwork::merge_playlist_artwork(previous.as_deref(), incoming.as_deref())?
-            } else {
-                None
-            };
+        let binding = match &revision {
+            Some(revision) => {
+                let object: String = sqlx::query_scalar(
+                    "SELECT object_id FROM smart_playlists WHERE smart_playlist_key=?1",
+                )
+                .bind(key)
+                .fetch_one(&mut *transaction)
+                .await?;
+                Some(crate::artwork::playlist_binding(
+                    true,
+                    None,
+                    object,
+                    revision.clone(),
+                ))
+            }
+            None => None,
+        };
         let changed = sqlx::query(
             "UPDATE smart_playlists
              SET name=?2, normalized_name=lower(?2), definition_json=?3,
@@ -853,6 +877,8 @@ pub struct SmartPlaylistWrite {
     pub artwork_bytes: Option<Vec<u8>>,
     #[serde(default)]
     pub artwork_binding: Option<Vec<u8>>,
+    #[serde(default)]
+    pub mosaic: Option<String>,
     pub object_id: String,
     pub name: String,
     pub definition_json: String,
@@ -865,7 +891,7 @@ pub(crate) async fn export_smart_playlists_jsonl_on(
 ) -> LibraryResult<u64> {
     output.write_all(b"{\"version\":1}\n")?;
     let mut rows = sqlx::query_as::<_, SmartPlaylistWrite>(
-        "SELECT object_id,name,definition_json,position,artwork_bytes,artwork_binding FROM smart_playlists ORDER BY position",
+        "SELECT object_id,name,definition_json,position,artwork_bytes,artwork_binding,mosaic FROM smart_playlists ORDER BY position",
     )
     .fetch(connection);
     let mut count = 0;
@@ -911,13 +937,7 @@ pub(crate) async fn write_smart_playlist(
         .artwork_bytes
         .as_ref()
         .map(|bytes| blake3::hash(bytes).to_hex().to_string());
-    let previous: Option<Vec<u8>> =
-        sqlx::query_scalar("SELECT artwork_binding FROM smart_playlists WHERE object_id=?1")
-            .bind(&record.object_id)
-            .fetch_optional(&mut *connection)
-            .await?
-            .flatten();
-    let incoming = record
+    let binding = record
         .artwork_binding
         .as_deref()
         .map(crate::normalize_artwork_binding)
@@ -932,14 +952,13 @@ pub(crate) async fn write_smart_playlist(
                 )
             })
         });
-    let binding = crate::artwork::merge_playlist_artwork(previous.as_deref(), incoming.as_deref())?;
-    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding)
+    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding,mosaic)
        VALUES(?1,?2,lower(?2),?3,CASE WHEN EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
-       THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5,?6,?7)
+       THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5,?6,?7,?8)
        ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
-       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding")
+       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding,mosaic=coalesce(excluded.mosaic,smart_playlists.mosaic)")
        .bind(&record.object_id).bind(&record.name).bind(&record.definition_json).bind(record.position)
-       .bind(&record.artwork_bytes).bind(revision).bind(binding)
+       .bind(&record.artwork_bytes).bind(revision).bind(binding).bind(&record.mosaic)
        .execute(&mut *connection).await?;
     Ok(())
 }
@@ -954,7 +973,9 @@ impl Catalog {
         output: impl std::io::Write,
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
-        let members = self.smart_members(&mut connection, key, now).await?;
+        let members = self
+            .members(&mut connection, crate::Collection::Smart { key, now })
+            .await?;
         let mut output =
             crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;
         let metadata = crate::metadata::track_metadata_sql("track", "details");

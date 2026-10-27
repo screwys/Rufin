@@ -376,8 +376,13 @@ mod tests {
             crate::source::Implementation::OpenSubsonic(provider),
         );
         source.apply_items(&catalog, upserts, vec![]).await.unwrap();
-        let update = crate::published(&mut updates).expect("catalog update").1;
-        assert!(update.intersects(sources::Shown::CATALOG));
+        let mut update = sources::Shown::default();
+        while let Ok(change) = updates.try_recv() {
+            for (_, part) in sources::Shown::of(&change) {
+                update |= part;
+            }
+        }
+        assert!(update.intersects(sources::Shown::STATE));
         let cancellation = library::ReadCancellation::new();
         let uri = library::source_entity_uri(
             &crate::SourceId::new("source"),

@@ -223,13 +223,13 @@ impl CatalogUi {
         let shell = Rc::downgrade(self);
         let favorite_search = search.clone();
         page.mounted_route(resume)
-            .with_favorite_settlement(Rc::new(move |settlement| {
+            .with_favorite_state(Rc::new(move |state| {
                 if !R::FAVORITES {
                     return;
                 }
                 favorites.update_matching(
-                    |row| row.matches_favorite(&settlement.target),
-                    |row| row.set_favorite(settlement.effective),
+                    |row| row.matches_favorite(&state.target),
+                    |row| row.set_favorite(state.favorite),
                 );
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);

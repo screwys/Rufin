@@ -83,6 +83,11 @@ pub fn cue_media_uri(
     )
 }
 
+/// A GLOB that matches the CUE track URIs of one whole file.
+pub(crate) fn cue_file_glob(file_uri: &str) -> String {
+    format!("rufin:cue/*/{}/*", encode(file_uri))
+}
+
 pub fn cue_media_parts(uri: &str) -> Option<(String, String, i64, i64)> {
     let mut parts = uri.strip_prefix("rufin:cue/")?.split('/');
     let cue_identity = decode(parts.next()?)?;

@@ -22,7 +22,7 @@ impl Shell {
         };
         let track = &current.row.track;
         self.player_ui.set_current_rating_and_favorite(
-            self.projected_track_favorite(&track.media_uri, track.state.favorite),
+            track.state.favorite,
             track
                 .state
                 .rating
