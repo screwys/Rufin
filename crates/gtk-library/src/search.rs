@@ -21,6 +21,7 @@ use gtk_widgets::artwork::ArtworkTile;
 use gtk_widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::mounted_route::{MountedRoute, MountedRouteItemNavigation};
+use rufin_core::collection_context::CollectionTarget;
 use rufin_core::runtime::SelectedLibrary;
 
 use super::cards;
@@ -872,21 +873,27 @@ impl CatalogUi {
 
         let download_counts = Rc::downgrade(&projection);
         let download_tracks = Rc::downgrade(&projection);
-        let downloads = crate::collection_download_change(move |identity, downloaded| {
+        let downloads = crate::collection_download_change(move |target, downloaded| {
             if let Some(projection) = download_counts.upgrade() {
                 projection.update_matching(
-                    |row| match row {
-                        SearchItem::Album(row) => {
-                            identity.strip_prefix("album:") == Some(row.media_uri.as_str())
+                    |row| match (row, target) {
+                        (SearchItem::Album(row), CollectionTarget::Album(uri)) => {
+                            row.media_uri == *uri
                                 && (row.summary.downloaded_count == row.summary.track_count)
                                     != downloaded
                         }
-                        SearchItem::Artist(row) => {
-                            identity.strip_prefix("artist:") == Some(row.media_uri.as_str())
+                        (
+                            SearchItem::Artist(row),
+                            CollectionTarget::Artist {
+                                id,
+                                album_artist: false,
+                            },
+                        ) => {
+                            row.media_uri == *id
                                 && (row.summary.downloaded_count == row.summary.track_count)
                                     != downloaded
                         }
-                        SearchItem::Track(..) => false,
+                        _ => false,
                     },
                     |row| match row {
                         SearchItem::Album(row) => {

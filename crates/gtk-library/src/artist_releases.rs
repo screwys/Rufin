@@ -42,7 +42,6 @@ pub struct ArtistReleaseProjections {
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
     pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
-    lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
     scroll: gtk_widgets::mounted_route::NativeListScroll,
     layout: Rc<Cell<LibraryLayout>>,
@@ -760,7 +759,6 @@ impl ArtistReleaseProjections {
             counts,
             selection,
             sparse,
-            lane: Rc::new(super::named_detail::NamedOrderLane::new()),
             surface: owner.upcast(),
             scroll,
             layout,
@@ -785,28 +783,12 @@ impl ArtistReleaseProjections {
         self.sections.get(index).map(|section| section.search())
     }
 
-    pub fn lane(&self) -> Rc<super::named_detail::NamedOrderLane> {
-        Rc::clone(&self.lane)
-    }
-
     pub fn resume_initial_demand(&self) {
         self.sparse.resume_initial_demand();
     }
 
     pub fn filters(&self) -> [String; 6] {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
-    }
-
-    pub fn query(&self, settings: &LibraryListSettings) -> library::ListRead {
-        let mut query = self.query.borrow().clone();
-        if let library::ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
-            *filters = Some(Arc::new(std::array::from_fn(|index| {
-                self.sections[index].search.text().trim().to_string()
-            })));
-        }
-        query.sort = settings.sort_key.catalog_sort();
-        query.descending = settings.descending;
-        query
     }
 
     pub fn replace_page(&self, page: ArtistReleasePage) {

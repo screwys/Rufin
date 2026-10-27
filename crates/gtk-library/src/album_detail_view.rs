@@ -1,4 +1,5 @@
 use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
+use rufin_core::collection_context::CollectionTarget;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -34,7 +35,11 @@ use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
 
 impl CatalogUi {
-    pub fn album_detail_view(self: &Rc<Self>, detail: Option<DetailPage>) -> MountedRoute {
+    pub fn album_detail_view(
+        self: &Rc<Self>,
+        opened: rufin_core::page::Page,
+        detail: Option<DetailPage>,
+    ) -> MountedRoute {
         let Some(DetailPage {
             summary: DetailSummary::Album(album),
             content: DetailContent::Tracks(page),
@@ -48,7 +53,7 @@ impl CatalogUi {
         let album = *album;
         let album_id = album.album_key;
         let current_album = Rc::new(RefCell::new(album.clone()));
-        let context_id = format!("album:{album_id}");
+        let context_id = CollectionTarget::Album(album_id.to_string()).context_id();
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings
                 .current
@@ -206,7 +211,8 @@ impl CatalogUi {
         );
         route_stack.set_visible_child_name("content");
 
-        let refresh = track_projection.connect_read(self, "mounted Album route");
+        let reread =
+            track_projection.page_reread(self, "mounted Album route", opened, |_| {}, |_| {});
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -214,7 +220,7 @@ impl CatalogUi {
             let showcase = showcase_view.clone();
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
-            let refresh = Rc::clone(&refresh);
+            let reread = Rc::clone(&reread);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
@@ -235,20 +241,16 @@ impl CatalogUi {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::AlbumDetailTracks);
-                let previous = track_projection.query();
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
-                let tracks = track_projection.query();
-                if previous != tracks {
-                    refresh();
-                }
+                reread.resume(&shell.settings.current.borrow());
             })
         };
         let download_target = current_album.borrow().media_uri.clone();
         let download_album = Rc::clone(&current_album);
-        let downloads = crate::collection_download_change(move |identity, downloaded| {
-            if identity.strip_prefix("album:") == Some(download_target.as_str()) {
+        let downloads = crate::collection_download_change(move |target, downloaded| {
+            if matches!(target, CollectionTarget::Album(uri) if *uri == download_target) {
                 let mut row = download_album.borrow_mut();
                 row.summary.downloaded_count = if downloaded {
                     row.summary.track_count
@@ -258,7 +260,7 @@ impl CatalogUi {
             }
         });
         MountedRoute::new(route_stack.upcast(), resume)
-            .with_catalog_refresh(refresh)
+            .with_catalog_refresh(Rc::new(move || reread.reread()))
             .with_download_change(downloads)
             .with_download_change(track_projection.download_change())
             .with_search(track_projection.search())

@@ -504,12 +504,12 @@ impl CatalogUi {
 
         let download_counts = projection.clone();
 
-        let counts = crate::collection_download_change(move |identity, downloaded| {
-            let Some(uri) = identity.strip_prefix("album:") else {
+        let counts = crate::collection_download_change(move |target, downloaded| {
+            let rufin_core::collection_context::CollectionTarget::Album(uri) = target else {
                 return;
             };
             if let Some(showcase) = &mut download_counts.home.borrow_mut().showcase
-                && showcase.album.media_uri == uri
+                && showcase.album.media_uri == *uri
             {
                 showcase.album.summary.downloaded_count = if downloaded {
                     showcase.album.summary.track_count
@@ -527,7 +527,7 @@ impl CatalogUi {
             for view in views {
                 view.mounted.update(|item| {
                     if let HomeItem::Album(item) = item
-                        && item.album.media_uri == uri
+                        && item.album.media_uri == *uri
                         && (item.album.summary.downloaded_count == item.album.summary.track_count)
                             != downloaded
                     {

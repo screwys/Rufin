@@ -6,11 +6,13 @@ use library::{
 };
 
 use crate::browse::{
-    AlbumListContent, DetailContent, DetailPage, FolderEntry, OpenOptions, OpenedCollection,
-    library_list_key, uses_activity,
+    AlbumListContent, AlbumListPage, DetailContent, DetailPage, FolderEntry, OpenOptions,
+    OpenedCollection, library_list_key, uses_activity,
 };
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::{CatalogChange, CatalogPublication, SelectedLibrary};
+use crate::settings::app::Settings;
+use crate::settings::{LibraryLayout, LibraryListKey, LibraryListSettings};
 use crate::source::SourceOwner;
 
 /// What a committed change means for an open page.
@@ -55,6 +57,9 @@ pub struct Page {
     owner: SourceOwner,
     route: Route,
     selected: Option<SelectedLibrary>,
+    options: OpenOptions,
+    /// The settings the page read with.
+    settings: Settings,
     opened: OpenedCollection,
 }
 
@@ -63,17 +68,35 @@ impl SourceOwner {
         &self,
         route: Route,
         selected: Option<SelectedLibrary>,
-        options: OpenOptions,
+        mut options: OpenOptions,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Page> {
+        let settings = self.shared.settings.load().ui;
         let opened = self
             .open_collection(&route, selected.as_ref(), &options, window, cancel)
             .await?;
+        // Smart Playlists keep the members they opened with when the page reads again.
+        options.smart_opened = match &opened {
+            OpenedCollection::SmartPlaylists { read, .. } => match read.kind {
+                library::ListKind::SmartPlaylists { now } => Some(now),
+                _ => options.smart_opened,
+            },
+            OpenedCollection::Detail(Some(DetailPage {
+                content: DetailContent::Tracks(page),
+                ..
+            })) => match page.read.collection {
+                Collection::Smart { now, .. } => Some(now),
+                _ => options.smart_opened,
+            },
+            _ => options.smart_opened,
+        };
         Ok(Page {
             owner: self.clone(),
             route,
             selected,
+            options,
+            settings,
             opened,
         })
     }
@@ -82,6 +105,118 @@ impl SourceOwner {
 impl Page {
     pub fn opened(&self) -> &OpenedCollection {
         &self.opened
+    }
+
+    pub fn route(&self) -> &Route {
+        &self.route
+    }
+
+    pub fn options(&self) -> &OpenOptions {
+        &self.options
+    }
+
+    /// The list settings of the route, as the page read with them.
+    pub fn list_settings(&self) -> LibraryListSettings {
+        self.settings
+            .library_list(library_list_key(&self.route, self.options.category))
+    }
+
+    /// Reads the page again with `options` and current settings. A folder keeps the folder it
+    /// opened, so new child folders show when the route opens again.
+    pub async fn reread(
+        &self,
+        options: OpenOptions,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Page> {
+        let (OpenedCollection::Folders(folders), Some(selected)) = (&self.opened, &self.selected)
+        else {
+            return self
+                .owner
+                .open_page(
+                    self.route.clone(),
+                    self.selected.clone(),
+                    options,
+                    window,
+                    cancel,
+                )
+                .await;
+        };
+        let settings = self.owner.shared.settings.load().ui;
+        let opened = OpenedCollection::Folders(
+            self.owner
+                .folder_page(
+                    selected,
+                    folders.projection.clone(),
+                    &options,
+                    window,
+                    cancel,
+                )
+                .await?,
+        );
+        Ok(Page {
+            owner: self.owner.clone(),
+            route: self.route.clone(),
+            selected: self.selected.clone(),
+            options,
+            settings,
+            opened,
+        })
+    }
+
+    /// Whether `current` settings change what the page reads. Named lists read again on every
+    /// settings change.
+    pub fn settings_changed(&self, current: &Settings) -> bool {
+        let lists = |key| (self.settings.library_list(key), current.library_list(key));
+        let order = |key| {
+            let (read, current) = lists(key);
+            read.sort_key != current.sort_key || read.descending != current.descending
+        };
+        match &self.opened {
+            OpenedCollection::Home(_) | OpenedCollection::Search(_) => false,
+            OpenedCollection::Albums(_) => {
+                let (read, current) = lists(LibraryListKey::Albums);
+                (read.layout == LibraryLayout::Detail) != (current.layout == LibraryLayout::Detail)
+                    || read.sort_key != current.sort_key
+                    || read.descending != current.descending
+                    || uses_activity(&Route::Albums, &read)
+                        != uses_activity(&Route::Albums, &current)
+            }
+            OpenedCollection::Artists { .. }
+            | OpenedCollection::Genres { .. }
+            | OpenedCollection::Moods { .. }
+            | OpenedCollection::Playlists { .. }
+            | OpenedCollection::SmartPlaylists { .. } => true,
+            _ if matches!(
+                self.route,
+                Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+            ) =>
+            {
+                order(LibraryListKey::ArtistTracks) || order(LibraryListKey::ArtistAlbums)
+            }
+            _ => order(library_list_key(&self.route, self.options.category)),
+        }
+    }
+
+    /// Whether a favorite change can move or drop rows: the page lists only favorites or sorts
+    /// by them.
+    pub fn favorites_reorder(&self) -> bool {
+        if !matches!(
+            self.route,
+            Route::Tracks | Route::Favorites | Route::Albums | Route::Artists | Route::AlbumArtists
+        ) {
+            return false;
+        }
+        match &self.opened {
+            OpenedCollection::Tracks(page) => {
+                page.read.favorites_only || page.read.sort == Some(library::CatalogSort::Favorite)
+            }
+            OpenedCollection::Albums(AlbumListPage { read, .. })
+            | OpenedCollection::Artists { read, .. } => {
+                read.favorites_only || read.sort == library::CatalogSort::Favorite
+            }
+            _ => false,
+        }
     }
 
     pub fn len(&self) -> usize {

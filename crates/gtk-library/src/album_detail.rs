@@ -1752,7 +1752,11 @@ fn play_album_track(
             QueuePlacement::Now,
             false,
         )
-        .with_context(format!("album:{album}").into())
+        .with_context(
+            rufin_core::collection_context::CollectionTarget::Album(album.to_string())
+                .context_id()
+                .into(),
+        )
         .with_anchor(track_key, None),
     );
 }

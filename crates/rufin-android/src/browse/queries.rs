@@ -14,25 +14,16 @@ impl AndroidBrowseQuery {
     }
 
     pub fn context_id(&self) -> String {
-        let context = match &self.route {
-            Route::AlbumDetail(uri) => format!("album:{uri}"),
-            Route::ArtistDetail(uri)
-            | Route::ArtistTracks(uri)
-            | Route::ArtistFavoriteTracks(uri)
-            | Route::ArtistDiscography(uri) => format!("artist:{uri}"),
-            Route::AlbumArtistDetail(uri)
-            | Route::AlbumArtistTracks(uri)
-            | Route::AlbumArtistFavoriteTracks(uri)
-            | Route::AlbumArtistDiscography(uri) => format!("album-artist:{uri}"),
-            Route::GenreDetail(key) => format!("genre:{key}"),
-            Route::MoodDetail(key) => format!("mood:{key}"),
-            Route::PlaylistDetail(key) => format!("playlist:{key}"),
-            Route::SmartPlaylistDetail(key) => format!("smart-playlist:{key}"),
-            _ => format!(
-                "android:{}",
-                serde_json::to_string(&self.route).expect("Route serialization")
-            ),
-        };
+        let context = rufin_core::collection_context::CollectionTarget::for_route(&self.route)
+            .map_or_else(
+                || {
+                    format!(
+                        "android:{}",
+                        serde_json::to_string(&self.route).expect("Route serialization")
+                    )
+                },
+                |target| target.context_id(),
+            );
         format!(
             "{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
             self.filter,

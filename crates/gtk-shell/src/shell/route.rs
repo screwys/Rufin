@@ -214,13 +214,7 @@ impl Shell {
         let load_selected = selected.clone();
         let task = self.products.runtime.spawn(async move {
             source
-                .open_collection(
-                    &load_route,
-                    load_selected.as_ref(),
-                    &options,
-                    window,
-                    &cancellation,
-                )
+                .open_page(load_route, load_selected, options, window, &cancellation)
                 .await
         });
         let shell = Rc::downgrade(self);
@@ -239,8 +233,8 @@ impl Shell {
             let source_id = source_scoped
                 .then(|| selected.as_ref().map(|selected| selected.source_id.clone()))
                 .flatten();
-            let opened = match result {
-                Ok(Ok(opened)) => opened,
+            let page = match result {
+                Ok(Ok(page)) => page,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, "failed to open collection");
                     shell.show_route_load_error(route, source_id, render_started);
@@ -263,14 +257,13 @@ impl Shell {
             } else {
                 None
             };
-            match (opened, apply_home) {
-                (OpenedCollection::Home(home), Some(apply)) => apply(*home),
-                (opened, _) => shell.replace_mounted_route(
-                    route.clone(),
-                    source_id,
-                    render_started,
-                    move |catalog| catalog.opened_collection_view(route, opened, selected),
-                ),
+            match (page.opened(), apply_home) {
+                (OpenedCollection::Home(home), Some(apply)) => apply(home.as_ref().clone()),
+                _ => {
+                    shell.replace_mounted_route(route, source_id, render_started, move |catalog| {
+                        catalog.opened_collection_view(page, selected)
+                    })
+                }
             }
         });
     }

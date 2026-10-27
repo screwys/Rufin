@@ -2,9 +2,10 @@ use gtk_widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
 use gtk_widgets::sparse_model::item_at_from_item;
+use rufin_core::browse::OpenedCollection;
+use rufin_core::page::Page;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::gio;
@@ -15,7 +16,7 @@ use localization::{album_count_text, msgid, track_count_text};
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey};
 use gtk_widgets::artwork::CoverGroupProjection;
-use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
+use gtk_widgets::mounted_route::MountedRoute;
 
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
@@ -43,67 +44,42 @@ use gtk_widgets::route::Route;
 use gtk_widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
 
 impl CatalogUi {
-    pub fn library_genres_route(
-        self: &Rc<Self>,
-        read: library::ListRead,
-        page: library::Page<GenreView>,
-    ) -> MountedRoute {
+    pub fn library_genres_route(self: &Rc<Self>, page: Page) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::Genres,
             msgid("Nothing here yet"),
             page,
             |row: &GenreView| row.genre_key,
-            read,
         )
     }
 
-    pub fn library_moods_route(
-        self: &Rc<Self>,
-        read: library::ListRead,
-        page: library::Page<MoodView>,
-    ) -> MountedRoute {
+    pub fn library_moods_route(self: &Rc<Self>, page: Page) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::Moods,
             msgid("Nothing here yet"),
             page,
             |row: &MoodView| row.mood_key,
-            read,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn collection_list_route<K, R>(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
-        initial: library::Page<R>,
+        opened: Page,
         row_key: impl Fn(&R) -> K + 'static,
-        captured: library::ListRead,
     ) -> MountedRoute
     where
         K: Clone + Eq + Send + Sync + 'static,
         R: CollectionRow<Key = K>,
     {
+        let (captured, initial) = R::opened(opened.opened()).expect("named collection page");
         let library::Page {
             count,
             first_row_position,
             rows: first_rows,
-        } = initial;
-        let reload_read = captured.clone();
+        } = initial.clone();
         let favorites_only = captured.favorites_only;
-        let favorite_read = captured.clone();
-        let catalog = self.library.clone();
-        let order_load: crate::routes::ListPageLoad<library::Page<R>> =
-            Arc::new(move |request, cancel| {
-                let read = request;
-                let catalog = catalog.clone();
-                Box::pin(async move {
-                    let page = R::page(&read, &catalog, library::RouteSeedWindow::top(), &cancel)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    Ok(page)
-                })
-            });
         let applied = Rc::new(RefCell::new(captured.clone()));
         let load_request = Rc::clone(&applied);
         let row_catalog = self.library.clone();
@@ -150,64 +126,59 @@ impl CatalogUi {
             let page = page.clone();
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
-            Rc::new(
-                move |request: library::ListRead, result: Result<library::Page<R>, String>| {
-                    let Some(shell) = shell.upgrade() else {
-                        return;
-                    };
-                    if !(shell.is_current)() {
-                        return;
-                    }
-                    match result {
-                        Ok(library::Page {
-                            count,
-                            first_row_position,
-                            rows: first_rows,
-                        }) => {
-                            applied.replace(request.clone());
-                            let row_key = Rc::clone(&row_key);
-                            if !sparse.replace_prepared_at(
-                                SparseSource::Query { count },
-                                first_row_position,
-                                first_rows,
-                                Vec::new(),
-                                move |row| row_key(row),
-                            ) {
-                                tracing::warn!("rejected a mismatched prepared named page");
-                                return;
-                            }
-                            let settings = shell.settings.current.borrow().library_list(key);
-                            content.apply_settings(&settings);
-                            page.apply_library_list_settings(key, &settings);
-                            page.set_empty(sparse.len() == 0);
-                        }
-                        Err(error) => tracing::warn!(%error, "failed to refresh named collection"),
-                    }
-                },
-            )
-        };
-        let read = LatestMountedRouteRead::new_with_request(
-            self.runtime.clone(),
-            apply,
-            order_load,
-            "mounted named collection",
-        );
-        let resume = self.collection_reload(key, &search, reload_read, &read, {
-            let content = content.clone();
-            let page = page.clone();
-            move |settings| {
-                content.apply_settings(settings);
-                page.apply_library_list_settings(key, settings);
+            move |opened: &Page| {
+                let (Some(shell), Some((read, rows))) =
+                    (shell.upgrade(), R::opened(opened.opened()))
+                else {
+                    return false;
+                };
+                applied.replace(read.clone());
+                let row_key = Rc::clone(&row_key);
+                if !sparse.replace_prepared_at(
+                    SparseSource::Query { count: rows.count },
+                    rows.first_row_position,
+                    rows.rows.clone(),
+                    Vec::new(),
+                    move |row| row_key(row),
+                ) {
+                    tracing::warn!("rejected a mismatched prepared named page");
+                    return false;
+                }
+                let settings = shell.settings.current.borrow().library_list(key);
+                content.apply_settings(&settings);
+                page.apply_library_list_settings(key, &settings);
+                page.set_empty(sparse.len() == 0);
                 true
             }
-        });
+        };
+        let reread = self.page_reread(
+            "mounted named collection",
+            opened,
+            crate::routes::list_inputs(&search),
+            apply,
+        );
+        crate::routes::connect_list_search(&search, &reread);
+        let resume = {
+            let shell = Rc::downgrade(self);
+            let content = content.clone();
+            let page = page.clone();
+            let reread = Rc::clone(&reread);
+            Rc::new(move || {
+                let Some(shell) = shell.upgrade() else { return };
+                let settings = shell.settings.current.borrow().library_list(key);
+                content.apply_settings(&settings);
+                page.apply_library_list_settings(key, &settings);
+                reread.resume(&shell.settings.current.borrow());
+            })
+        };
 
         let download_rows = Rc::clone(&sparse);
-        let downloads = crate::collection_download_change(move |identity, downloaded| {
+        let downloads = crate::collection_download_change(move |target, downloaded| {
+            let identity = target.context_id();
             download_rows.update_matching(
                 |row| {
                     row.playback(key)
-                        .is_some_and(|target| target.context() == Some(identity))
+                        .is_some_and(|play| play.context() == Some(identity.as_str()))
                         && row.downloaded() != downloaded
                 },
                 |row| row.set_downloaded(downloaded),
@@ -220,9 +191,9 @@ impl CatalogUi {
             );
         }
         let favorites = Rc::clone(&sparse);
-        let shell = Rc::downgrade(self);
-        let favorite_search = search.clone();
+        let refresh = Rc::clone(&reread);
         page.mounted_route(resume)
+            .with_catalog_refresh(Rc::new(move || refresh.reread()))
             .with_favorite_state(Rc::new(move |state| {
                 if !R::FAVORITES {
                     return;
@@ -231,15 +202,7 @@ impl CatalogUi {
                     |row| row.matches_favorite(&state.target),
                     |row| row.set_favorite(state.favorite),
                 );
-                let Some(shell) = shell.upgrade() else { return };
-                let settings = shell.settings.current.borrow().library_list(key);
-                if favorites_only || settings.sort_key == LibraryField::Favorite {
-                    read.request_with(rufin_core::browse::list_display(
-                        &favorite_read,
-                        &favorite_search.text(),
-                        &settings,
-                    ));
-                }
+                reread.favorite_changed();
             }))
             .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
@@ -260,12 +223,8 @@ pub trait CollectionRow: Clone + PartialEq + Send + Sync + 'static {
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a;
-    fn page<'a>(
-        read: &'a library::ListRead,
-        catalog: &'a library::Catalog,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a;
+    /// The read and first rows of a page that lists these rows.
+    fn opened(opened: &OpenedCollection) -> Option<(&library::ListRead, &library::Page<Self>)>;
 
     fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest>;
     fn downloaded(&self) -> bool;
@@ -335,14 +294,11 @@ impl CollectionRow for ArtistView {
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
         read.artists(catalog, offset, limit, cancel)
     }
-    fn page<'a>(
-        read: &'a library::ListRead,
-        catalog: &'a library::Catalog,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_artists(catalog, window, cancel)
+    fn opened(opened: &OpenedCollection) -> Option<(&library::ListRead, &library::Page<Self>)> {
+        match opened {
+            OpenedCollection::Artists { read, page } => Some((read, page)),
+            _ => None,
+        }
     }
     fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(gtk_widgets::selection::artist_play_request(
@@ -387,14 +343,11 @@ impl CollectionRow for GenreView {
         read.genres(catalog, offset, limit, cancel)
     }
 
-    fn page<'a>(
-        read: &'a library::ListRead,
-        catalog: &'a library::Catalog,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_genres(catalog, window, cancel)
+    fn opened(opened: &OpenedCollection) -> Option<(&library::ListRead, &library::Page<Self>)> {
+        match opened {
+            OpenedCollection::Genres { read, page } => Some((read, page)),
+            _ => None,
+        }
     }
 
     fn set_downloaded(&mut self, downloaded: bool) {
@@ -480,14 +433,11 @@ impl CollectionRow for MoodView {
         read.moods(catalog, offset, limit, cancel)
     }
 
-    fn page<'a>(
-        read: &'a library::ListRead,
-        catalog: &'a library::Catalog,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_moods(catalog, window, cancel)
+    fn opened(opened: &OpenedCollection) -> Option<(&library::ListRead, &library::Page<Self>)> {
+        match opened {
+            OpenedCollection::Moods { read, page } => Some((read, page)),
+            _ => None,
+        }
     }
 
     fn set_downloaded(&mut self, downloaded: bool) {
@@ -568,14 +518,12 @@ impl CollectionRow for library::PlaylistListRow {
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
         read.playlist_items(catalog, offset, limit, cancel)
     }
-    fn page<'a>(
-        read: &'a library::ListRead,
-        catalog: &'a library::Catalog,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_playlist_items(catalog, window, cancel)
+    fn opened(opened: &OpenedCollection) -> Option<(&library::ListRead, &library::Page<Self>)> {
+        match opened {
+            OpenedCollection::Playlists { read, page }
+            | OpenedCollection::SmartPlaylists { read, page } => Some((read, page)),
+            _ => None,
+        }
     }
     fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         match self {

@@ -66,7 +66,13 @@ impl CollectionTargets {
                                 rufin_core::playback::QueuePlacement::Now,
                                 true,
                             )
-                            .with_context(format!("smart-playlist:{key}").into())
+                            .with_context(
+                                rufin_core::collection_context::CollectionTarget::SmartPlaylist(
+                                    key,
+                                )
+                                .context_id()
+                                .into(),
+                            )
                         } else {
                             collection_play_request(collection)
                         }

@@ -201,7 +201,7 @@ pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryL
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct OpenOptions {
     pub category: CollectionCategory,
     pub filter: String,
@@ -391,25 +391,6 @@ pub(crate) struct PreparedAlbums {
     index: Arc<library::AlbumDetailIndex>,
 }
 
-pub fn list_display(captured: &ListRead, filter: &str, settings: &LibraryListSettings) -> ListRead {
-    let mut read = captured.clone();
-    read.filter = filter.trim().to_owned();
-    read.sort = settings.sort_key.catalog_sort();
-    read.descending = settings.descending;
-    read.activity = match settings.layout {
-        LibraryLayout::Grid => &settings.grid_fields,
-        _ => &settings.row_fields,
-    }
-    .iter()
-    .chain(if settings.layout == LibraryLayout::Detail {
-        settings.detail_track_fields.as_slice()
-    } else {
-        &[]
-    })
-    .any(|field| field.catalog_sort().activity_sensitive());
-    read
-}
-
 pub fn supports_favorite_filter(route: &Route, category: CollectionCategory) -> bool {
     matches!(
         route,
@@ -521,7 +502,7 @@ impl crate::source::SourceOwner {
         })
     }
 
-    pub async fn open_collection(
+    pub(crate) async fn open_collection(
         &self,
         route: &Route,
         selected: Option<&SelectedLibrary>,
@@ -531,11 +512,7 @@ impl crate::source::SourceOwner {
     ) -> library::LibraryResult<OpenedCollection> {
         let catalog = &self.shared.catalog;
         let settings = self.shared.settings.load();
-        let key = library_list_key(route, options.category);
-        let display = settings.ui.library_list(key);
-        let sort = options.sort.unwrap_or(display.sort_key).catalog_sort();
-        let descending = options.descending.unwrap_or(display.descending);
-        let activity = uses_activity(route, &display) || sort.activity_sensitive();
+        let (sort, descending, activity) = read_order(route, options, &settings.ui);
         let folder = selected.and_then(|selected| selected.music_folder_key);
         let source = selected.map(|selected| selected.source_key);
         let require_source = || {
@@ -757,10 +734,12 @@ impl crate::source::SourceOwner {
                 MemberPage::load(
                     catalog,
                     member(Collection::History {
+                        // History does not follow the selected source, so it may open without one.
                         source: options
                             .history_current_only
-                            .then(|| selected.map(|selected| selected.source_id.clone()))
-                            .flatten(),
+                            .then(|| selected.cloned().or_else(|| self.shared.selected()))
+                            .flatten()
+                            .map(|selected| selected.source_id),
                     }),
                     window,
                     cancel,
@@ -830,21 +809,9 @@ impl crate::source::SourceOwner {
                     cancel,
                 )
                 .await?;
-                let mut read = projection.members(selected.source_key);
-                read.sort = Some(sort);
-                read.descending = descending;
-                read.filter.clone_from(&options.filter);
-                read.activity = activity;
                 OpenedCollection::Folders(
-                    FolderPage::load(
-                        catalog,
-                        selected.source_key,
-                        projection,
-                        read,
-                        window,
-                        cancel,
-                    )
-                    .await?,
+                    self.folder_page(selected, projection, options, window, cancel)
+                        .await?,
                 )
             }
             Route::Home => {
@@ -878,4 +845,48 @@ impl crate::source::SourceOwner {
             _ => unreachable!("collection route was handled above"),
         })
     }
+
+    /// Reads a folder that is already resolved, with current settings.
+    pub(crate) async fn folder_page(
+        &self,
+        selected: &SelectedLibrary,
+        projection: crate::source::folders::FolderProjection,
+        options: &OpenOptions,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<FolderPage> {
+        let settings = self.shared.settings.load();
+        let (sort, descending, activity) =
+            read_order(&Route::Folders { path: Vec::new() }, options, &settings.ui);
+        let mut read = projection.members(selected.source_key);
+        read.sort = Some(sort);
+        read.descending = descending;
+        read.filter.clone_from(&options.filter);
+        read.activity = activity;
+        FolderPage::load(
+            &self.shared.catalog,
+            selected.source_key,
+            projection,
+            read,
+            window,
+            cancel,
+        )
+        .await
+    }
+}
+
+/// The order a route reads in, and whether it reads activity.
+fn read_order(
+    route: &Route,
+    options: &OpenOptions,
+    settings: &crate::settings::app::Settings,
+) -> (library::CatalogSort, bool, bool) {
+    let display = settings.library_list(library_list_key(route, options.category));
+    let sort = options.sort.unwrap_or(display.sort_key).catalog_sort();
+    let descending = options.descending.unwrap_or(display.descending);
+    (
+        sort,
+        descending,
+        uses_activity(route, &display) || sort.activity_sensitive(),
+    )
 }

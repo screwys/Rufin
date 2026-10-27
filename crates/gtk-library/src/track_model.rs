@@ -5,14 +5,12 @@ use std::sync::Arc;
 use library::{Catalog, TrackKey, TrackView};
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 
-use rufin_core::settings::LibraryListSettings;
-
 use gtk_widgets::library_fields::TrackPresentation;
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const TRACK_OVERSCAN: usize = 64;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 enum TrackRead {
     Members(library::MemberRead),
     Keys(Arc<[TrackKey]>),
@@ -43,7 +41,8 @@ impl TrackRead {
 
 struct TrackModelState {
     sparse: Rc<SparseRouteModel<TrackKey, TrackView>>,
-    query: RefCell<TrackRead>,
+    /// The search the page wants; a page read for another search is stale.
+    filter: RefCell<String>,
     applied: Rc<RefCell<TrackRead>>,
 }
 
@@ -62,8 +61,8 @@ impl TrackCollectionModel {
             .into_iter()
             .map(library::MemberRow::into_track)
             .collect();
-        let query = TrackRead::Members(page.read);
-        let applied = Rc::new(RefCell::new(query.clone()));
+        let filter = RefCell::new(page.read.filter.clone());
+        let applied = Rc::new(RefCell::new(TrackRead::Members(page.read)));
         let load_request = applied.clone();
         let sparse = SparseRouteModel::new(
             SparseSource::Query {
@@ -95,7 +94,7 @@ impl TrackCollectionModel {
         Self(Rc::new(TrackModelState {
             sparse,
             applied,
-            query: RefCell::new(query),
+            filter,
         }))
     }
 
@@ -120,11 +119,10 @@ impl TrackCollectionModel {
             }),
         );
         sparse.seed_matching_at(0, rows, |row| row.track_key);
-        let query = TrackRead::Keys(keys);
         Self(Rc::new(TrackModelState {
             sparse,
-            applied: Rc::new(RefCell::new(query.clone())),
-            query: RefCell::new(query),
+            applied: Rc::new(RefCell::new(TrackRead::Keys(keys))),
+            filter: RefCell::default(),
         }))
     }
 
@@ -157,43 +155,12 @@ impl TrackCollectionModel {
         self.0.sparse.len()
     }
 
-    pub fn query(&self) -> library::MemberRead {
-        let TrackRead::Members(query) = &*self.0.query.borrow() else {
-            unreachable!("Related rows have no collection read")
-        };
-        query.clone()
-    }
-
-    pub fn set_query(&self, query: &str) -> bool {
-        let query = query.trim();
-        let mut read = self.0.query.borrow_mut();
-        let TrackRead::Members(current) = &mut *read else {
-            return false;
-        };
-        if current.filter == query {
-            return false;
-        }
-        current.filter = query.to_string();
-        true
-    }
-
-    pub fn set_scope(&self, scope: library::Collection) {
-        if let TrackRead::Members(read) = &mut *self.0.query.borrow_mut() {
-            read.collection = scope;
-        }
-    }
-
-    pub fn apply_settings(&self, settings: &LibraryListSettings) {
-        let mut current = self.0.query.borrow_mut();
-        let TrackRead::Members(query) = &mut *current else {
-            return;
-        };
-        query.sort = Some(settings.sort_key.catalog_sort());
-        query.descending = settings.descending;
+    pub fn set_query(&self, query: &str) {
+        self.0.filter.replace(query.trim().to_string());
     }
 
     pub fn replace_page(&self, page: rufin_core::browse::MemberPage) -> bool {
-        if *self.0.query.borrow() != TrackRead::Members(page.read.clone()) {
+        if page.read.filter != *self.0.filter.borrow() {
             return false;
         }
         let rows = page
@@ -323,7 +290,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pending_projection_survives_presentation_changes_and_refreshes_metadata() {
+    fn page_for_another_search_is_stale_and_rereads_refresh_metadata() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let row = library::TrackView {
             track_key: TrackKey::from_raw(1),
@@ -344,7 +311,9 @@ mod tests {
             access: Default::default(),
             links: Default::default(),
         };
-        let settings = LibraryListSettings::for_key(rufin_core::settings::LibraryListKey::History);
+        let settings = rufin_core::settings::LibraryListSettings::for_key(
+            rufin_core::settings::LibraryListKey::History,
+        );
         let query = library::MemberRead {
             sort: Some(settings.sort_key.catalog_sort()),
             descending: settings.descending,
@@ -358,7 +327,7 @@ mod tests {
             Arc::new(catalog),
             runtime.handle().clone(),
             rufin_core::browse::MemberPage {
-                read: query,
+                read: query.clone(),
                 page: library::Page {
                     count: 1,
                     first_row_position: 0,
@@ -367,7 +336,6 @@ mod tests {
                 disc_sections: Vec::new(),
             },
         );
-        let pending = model.query();
         assert_eq!(
             model.position_for_current_uri("test:track", Some(0)),
             Some(0)
@@ -380,10 +348,6 @@ mod tests {
             model.position_for_current_uri("test:missing", Some(0)),
             None
         );
-        let mut presentation = settings.clone();
-        presentation.layout = rufin_core::settings::LibraryLayout::Grid;
-        presentation.row_fields.reverse();
-        model.apply_settings(&presentation);
         let mut updated = row;
         updated.metadata.title = "After".into();
         let prepared = rufin_core::browse::MemberPage {
@@ -393,10 +357,9 @@ mod tests {
                 first_row_position: 0,
                 rows: vec![library::MemberRow::Track(updated.clone())],
             },
-            read: pending,
+            read: query,
         };
         assert!(model.replace_page(prepared.clone()));
-        assert_eq!(model.query(), prepared.read);
         assert_eq!(
             model.sparse_model().ready(0).unwrap().metadata.title,
             "After"
@@ -418,11 +381,6 @@ mod tests {
         );
 
         let visible_context = model.visible_context_id("history");
-        presentation.descending = !presentation.descending;
-        model.apply_settings(&presentation);
-        assert_eq!(model.visible_context_id("history"), visible_context);
-        assert!(!model.replace_page(prepared.clone()));
-        model.apply_settings(&settings);
         model.set_query("different search");
         assert_eq!(model.visible_context_id("history"), visible_context);
         assert!(!model.replace_page(prepared));

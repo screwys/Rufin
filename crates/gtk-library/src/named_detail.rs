@@ -1,12 +1,10 @@
 use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use rufin_core::collection_context::CollectionTarget;
+use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use library::{GenreKey, GenreView, MoodKey, MoodView, RadioSeed, ReadCancellation};
+use library::{GenreKey, GenreView, MoodKey, MoodView, RadioSeed};
 use localization::{msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -31,47 +29,6 @@ pub enum NamedDetailId {
 pub enum NamedDetailSummary {
     Genre(GenreView),
     Mood(MoodView),
-}
-
-pub struct NamedOrderLane {
-    generation: Cell<u64>,
-    cancellation: RefCell<Option<ReadCancellation>>,
-}
-
-impl NamedOrderLane {
-    pub fn new() -> Self {
-        Self {
-            generation: Cell::new(0),
-            cancellation: RefCell::new(None),
-        }
-    }
-
-    pub fn begin(&self) -> (u64, ReadCancellation) {
-        if let Some(cancellation) = self.cancellation.borrow_mut().take() {
-            cancellation.cancel();
-        }
-        let generation = self.generation.get().wrapping_add(1);
-        self.generation.set(generation);
-        let cancellation = ReadCancellation::new();
-        self.cancellation.replace(Some(cancellation.clone()));
-        (generation, cancellation)
-    }
-
-    pub fn finish(&self, generation: u64) -> bool {
-        if self.generation.get() != generation {
-            return false;
-        }
-        self.cancellation.borrow_mut().take();
-        true
-    }
-}
-
-impl Drop for NamedOrderLane {
-    fn drop(&mut self) {
-        if let Some(cancellation) = self.cancellation.get_mut().take() {
-            cancellation.cancel();
-        }
-    }
 }
 
 impl NamedDetailId {
@@ -103,10 +60,10 @@ impl NamedDetailId {
         }
     }
 
-    fn context_id(self) -> String {
+    fn target(self) -> CollectionTarget {
         match self {
-            Self::Genre(id) => format!("genre:{id}"),
-            Self::Mood(id) => format!("mood:{id}"),
+            Self::Genre(id) => CollectionTarget::Genre(id),
+            Self::Mood(id) => CollectionTarget::Mood(id),
         }
     }
 
@@ -170,6 +127,7 @@ impl CatalogUi {
     pub fn named_detail_view(
         self: &Rc<Self>,
         id: NamedDetailId,
+        opened: rufin_core::page::Page,
         detail: Option<DetailPage>,
     ) -> MountedRoute {
         let Some(DetailPage {
@@ -211,49 +169,46 @@ impl CatalogUi {
             context_menu,
             tracks: page,
             table_context: id.table_context(),
-            playback_context: id.context_id(),
+            playback_context: id.target().context_id(),
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
-        let refresh = tracks.connect_read(self, "mounted named detail");
+        let reread = tracks.page_reread(self, "mounted named detail", opened, |_| {}, |_| {});
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
-            let refresh = Rc::clone(&refresh);
+            let reread = Rc::clone(&reread);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(id.key());
-                let previous = projection.query();
                 projection.apply_library_list_settings(id.key(), &settings);
-                if previous != projection.query() {
-                    refresh();
-                }
+                reread.resume(&shell.settings.current.borrow());
             })
         };
         let download_summary = Rc::clone(&current);
-        let downloads = crate::collection_download_change(move |identity, downloaded| {
+        let downloads = crate::collection_download_change(move |target, downloaded| {
+            if *target != id.target() {
+                return;
+            }
             match &mut *download_summary.borrow_mut() {
-                NamedDetailSummary::Genre(row)
-                    if identity == format!("genre:{}", row.genre_key) =>
-                {
+                NamedDetailSummary::Genre(row) => {
                     row.summary.downloaded_count = if downloaded {
                         row.summary.track_count
                     } else {
                         0
                     };
                 }
-                NamedDetailSummary::Mood(row) if identity == format!("mood:{}", row.mood_key) => {
+                NamedDetailSummary::Mood(row) => {
                     row.summary.downloaded_count = if downloaded {
                         row.summary.track_count
                     } else {
                         0
                     };
                 }
-                _ => {}
             }
         });
         MountedRoute::new(grouped.widget(), resume)
-            .with_catalog_refresh(refresh)
+            .with_catalog_refresh(Rc::new(move || reread.reread()))
             .with_download_change(downloads)
             .with_download_change(tracks.download_change())
             .with_search(grouped.search())

@@ -4,17 +4,17 @@ use std::sync::Arc;
 
 use library::{PlaylistEntryKey, PlaylistEntryView, PlaylistKey};
 
+use rufin_core::collection_context::CollectionTarget;
 use rufin_core::settings::LibraryListSettings;
 
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlaylistEntryProjectionRequest {
-    pub query: library::MemberRead,
-    pub settings: LibraryListSettings,
-    pub first_row_position: usize,
+/// The read the shown entries came from, and the list settings it read with.
+struct AppliedEntries {
+    query: library::MemberRead,
+    settings: LibraryListSettings,
 }
 
 #[derive(Clone)]
@@ -25,8 +25,7 @@ pub struct PlaylistEntryModel {
 struct PlaylistEntryModelState {
     playlist_key: PlaylistKey,
     sparse: Rc<SparseRouteModel<PlaylistEntryKey, PlaylistEntryView>>,
-    request: RefCell<PlaylistEntryProjectionRequest>,
-    applied: Rc<RefCell<PlaylistEntryProjectionRequest>>,
+    applied: Rc<RefCell<AppliedEntries>>,
 }
 
 impl PlaylistEntryModel {
@@ -40,12 +39,10 @@ impl PlaylistEntryModel {
         settings: LibraryListSettings,
         read: library::MemberRead,
     ) -> Self {
-        let request = PlaylistEntryProjectionRequest {
+        let applied = Rc::new(RefCell::new(AppliedEntries {
             query: read,
-            settings: settings.clone(),
-            first_row_position,
-        };
-        let applied = Rc::new(RefCell::new(request.clone()));
+            settings,
+        }));
         let load_request = Rc::clone(&applied);
         let loader_catalog = Arc::clone(&catalog);
         let load = Rc::new(
@@ -53,10 +50,9 @@ impl PlaylistEntryModel {
                   range: std::ops::Range<usize>,
                   cancellation: library::ReadCancellation| {
                 let catalog = Arc::clone(&loader_catalog);
-                let request = load_request.borrow().clone();
+                let query = load_request.borrow().query.clone();
                 Box::pin(async move {
-                    request
-                        .query
+                    query
                         .rows(&catalog, range.start, range.len(), &cancellation)
                         .await
                         .map(|rows| {
@@ -80,7 +76,6 @@ impl PlaylistEntryModel {
                 playlist_key,
                 sparse,
                 applied,
-                request: RefCell::new(request),
             }),
         }
     }
@@ -114,53 +109,31 @@ impl PlaylistEntryModel {
         self.inner.sparse.len() == 0
     }
 
-    pub fn projection_request(&self) -> PlaylistEntryProjectionRequest {
-        let mut request = self.inner.request.borrow().clone();
-        let applied = self.inner.applied.borrow();
-        request.first_row_position = if request.query == applied.query
-            && request.settings.sort_key == applied.settings.sort_key
-            && request.settings.descending == applied.settings.descending
-        {
-            self.inner.sparse.first_live_position().unwrap_or(0)
-        } else {
-            0
-        };
-        request
-    }
-
-    pub fn set_query(&self, query: &str) -> bool {
-        let query = query.trim();
-        let mut request = self.inner.request.borrow_mut();
-        if request.query.filter == query {
-            return false;
-        }
-        request.query.filter = query.to_string();
-        true
-    }
-
-    pub fn apply_settings(&self, settings: LibraryListSettings) -> bool {
-        let mut request = self.inner.request.borrow_mut();
-        if request.settings == settings {
-            return false;
-        }
-        request.query.sort = Some(settings.sort_key.catalog_sort());
-        request.query.descending = settings.descending;
-        request.settings = settings;
-        true
+    /// Where the shown window starts, to read it again in place.
+    pub fn first_live_position(&self) -> usize {
+        self.inner.sparse.first_live_position().unwrap_or(0)
     }
 
     pub fn replace_prepared(
         &self,
-        count: usize,
-        request: PlaylistEntryProjectionRequest,
-        rows: Vec<PlaylistEntryView>,
+        page: &rufin_core::browse::MemberPage,
+        settings: LibraryListSettings,
     ) {
-        let first = request.first_row_position.min(count);
-        self.inner.applied.replace(request);
+        let count = page.page.count;
+        let first = page.page.first_row_position.min(count);
+        self.inner.applied.replace(AppliedEntries {
+            query: page.read.clone(),
+            settings,
+        });
         self.inner.sparse.replace_prepared_at(
             SparseSource::Query { count },
             first,
-            rows,
+            page.page
+                .rows
+                .iter()
+                .cloned()
+                .filter_map(library::MemberRow::into_entry)
+                .collect(),
             Vec::new(),
             |row| row.playlist_entry_key,
         );
@@ -180,8 +153,8 @@ impl PlaylistEntryModel {
     pub fn visible_context_id(&self) -> String {
         let request = self.inner.applied.borrow();
         format!(
-            "playlist:{}|query={}|sort={:?}|descending={}|result={}",
-            self.inner.playlist_key,
+            "{}|query={}|sort={:?}|descending={}|result={}",
+            CollectionTarget::Playlist(self.inner.playlist_key).context_id(),
             request.query.filter,
             request.settings.sort_key,
             request.settings.descending,
@@ -202,7 +175,7 @@ impl PlaylistEntryModel {
                 .filter(|row| row.track.media_uri == media_uri)
                 .map(|_| position);
         }
-        if context_id != format!("playlist:{}", self.inner.playlist_key) {
+        if context_id != CollectionTarget::Playlist(self.inner.playlist_key).context_id() {
             return None;
         }
         self.inner.sparse.ready_position(|row| {

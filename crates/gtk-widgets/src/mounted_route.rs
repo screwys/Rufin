@@ -190,6 +190,99 @@ impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R>
     }
 }
 
+/// A mounted route's open page and its one reread. The route says what it wants read and how a
+/// new page applies; a page the route rejects is not kept.
+pub struct PageReread {
+    page: RefCell<Arc<rufin_core::page::Page>>,
+    inputs: Box<dyn Fn(&rufin_core::browse::OpenOptions) -> rufin_core::browse::OpenOptions>,
+    read: Rc<LatestMountedRouteRead<Result<rufin_core::page::Page, String>, PageRequest>>,
+}
+
+#[derive(Clone)]
+struct PageRequest {
+    page: Arc<rufin_core::page::Page>,
+    options: rufin_core::browse::OpenOptions,
+    window: library::RouteSeedWindow,
+}
+
+impl PageReread {
+    pub fn new(
+        runtime: tokio::runtime::Handle,
+        context: &'static str,
+        page: rufin_core::page::Page,
+        inputs: impl Fn(&rufin_core::browse::OpenOptions) -> rufin_core::browse::OpenOptions + 'static,
+        apply: impl Fn(&rufin_core::page::Page) -> bool + 'static,
+    ) -> Rc<Self> {
+        Rc::new_cyclic(|reread: &std::rc::Weak<Self>| {
+            let reread = reread.clone();
+            let apply = Rc::new(move |_, result: Result<rufin_core::page::Page, String>| {
+                let page = match result {
+                    Ok(page) => page,
+                    Err(error) => {
+                        warn!(%error, context, "failed to read page again");
+                        return;
+                    }
+                };
+                if let Some(reread) = reread.upgrade()
+                    && apply(&page)
+                {
+                    reread.page.replace(Arc::new(page));
+                }
+            });
+            let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
+                Box::pin(async move {
+                    request
+                        .page
+                        .reread(request.options, request.window, &cancel)
+                        .await
+                        .map_err(|error| error.to_string())
+                }) as Pin<Box<dyn Future<Output = _> + Send>>
+            });
+            Self {
+                page: RefCell::new(Arc::new(page)),
+                inputs: Box::new(inputs),
+                read: LatestMountedRouteRead::new_with_request(runtime, apply, load, context),
+            }
+        })
+    }
+
+    /// The page last applied.
+    pub fn page(&self) -> Arc<rufin_core::page::Page> {
+        Arc::clone(&self.page.borrow())
+    }
+
+    /// The options the route wants read now.
+    pub fn wanted(&self) -> rufin_core::browse::OpenOptions {
+        (self.inputs)(self.page.borrow().options())
+    }
+
+    pub fn reread(&self) {
+        self.reread_at(library::RouteSeedWindow::top());
+    }
+
+    pub fn reread_at(&self, window: library::RouteSeedWindow) {
+        self.read.request_with(PageRequest {
+            page: self.page(),
+            options: self.wanted(),
+            window,
+        });
+    }
+
+    /// Reads again when `settings` change what the page reads.
+    pub fn resume(&self, settings: &rufin_core::settings::app::Settings) {
+        if self.page.borrow().settings_changed(settings) {
+            self.reread();
+        }
+    }
+
+    /// Reads again when a favorite change can move or drop the page's rows.
+    pub fn favorite_changed(&self) {
+        if self.page.borrow().favorites_reorder() {
+            self.reread();
+        }
+    }
+}
+
 #[cfg(test)]
 mod latest_mounted_route_read_tests {
     use super::*;

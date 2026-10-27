@@ -7,6 +7,7 @@ mod album_release;
 pub mod app;
 pub mod backup;
 pub mod browse;
+pub mod collection_context;
 pub mod connect;
 pub mod detail_links;
 pub mod diagnostics;

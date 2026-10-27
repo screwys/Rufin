@@ -29,7 +29,7 @@ use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_selection_and_demand,
 };
-use crate::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
+use crate::playlist_entry_model::PlaylistEntryModel;
 
 use super::route_shell::LibraryToolbarProjection;
 use super::table_sizing::route_column_view_initial_width_with_inset;
@@ -89,49 +89,28 @@ impl PlaylistEntriesView {
         self.model.update_downloaded(media_uri, downloaded);
     }
 
-    pub fn connect_search_request(
-        &self,
-        callback: impl Fn(PlaylistEntryProjectionRequest) + 'static,
-    ) {
-        let model = self.model.clone();
-        self.search.connect_search_changed(move |search| {
-            if model.set_query(&search.text()) {
-                callback(model.projection_request());
-            }
-        });
-    }
-
-    pub fn projection_request(&self) -> PlaylistEntryProjectionRequest {
-        self.model.projection_request()
+    pub fn first_live_position(&self) -> usize {
+        self.model.first_live_position()
     }
 
     pub fn replace_prepared(
         &self,
-        request: PlaylistEntryProjectionRequest,
-        count: usize,
-        rows: Vec<PlaylistEntryView>,
+        page: &rufin_core::browse::MemberPage,
+        settings: LibraryListSettings,
     ) {
-        let empty = count == 0;
-        self.model.replace_prepared(count, request, rows);
+        let empty = page.page.count == 0;
+        self.model.replace_prepared(page, settings);
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
     }
 
-    pub fn apply_library_list_settings(
-        &self,
-        key: LibraryListKey,
-        settings: &LibraryListSettings,
-    ) -> bool {
+    pub fn apply_library_list_settings(&self, key: LibraryListKey, settings: &LibraryListSettings) {
         if key != LibraryListKey::PlaylistTracks {
-            return false;
+            return;
         }
-        let previous = self.model.projection_request();
-        self.model.apply_settings(settings.clone());
         self.collection.apply_settings(settings);
         self.toolbar.apply(key, settings);
-        previous.settings.sort_key != settings.sort_key
-            || previous.settings.descending != settings.descending
     }
 }
 

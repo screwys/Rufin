@@ -8,7 +8,9 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
+use gtk_widgets::mounted_route::MountedRoute;
+use rufin_core::browse::OpenedCollection;
+use rufin_core::page::Page;
 
 use gtk_widgets::route::{FolderPathItem, Route};
 use gtk_widgets::sparse_model::{SparseSource, connect_sparse_bind};
@@ -39,6 +41,7 @@ impl CatalogUi {
         self: &Rc<Self>,
         path: Vec<FolderPathItem>,
         selected: &rufin_core::runtime::SelectedLibrary,
+        opened: Page,
         prepared: Result<rufin_core::browse::FolderPage, String>,
     ) -> MountedRoute {
         let wrapper = FoldersRouteView::new();
@@ -59,7 +62,7 @@ impl CatalogUi {
         let (resume, refresh, download_change, initial_demand) = match prepared {
             Ok(prepared) => {
                 let (content, resume, refresh, download_change, initial_demand) =
-                    folder_page(self, selected, path, search.clone(), prepared);
+                    folder_page(self, selected, path, search.clone(), opened, prepared);
                 wrapper.append(&content);
                 (resume, refresh, download_change, initial_demand)
             }
@@ -111,6 +114,7 @@ fn folder_page(
     selected: &rufin_core::runtime::SelectedLibrary,
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
+    opened: Page,
     prepared: rufin_core::browse::FolderPage,
 ) -> (
     gtk::Widget,
@@ -262,92 +266,71 @@ fn folder_page(
         let folder_sparse = Rc::clone(&folder_sparse);
         let track_sparse = Rc::clone(&track_sparse);
         let stack = table_stack.clone();
-        Rc::new(
-            move |_: (library::MemberRead, library::RouteSeedWindow),
-                  result: library::LibraryResult<rufin_core::browse::FolderPage>| {
-                let Ok(page) = result else { return };
-                stack.set_visible_child_name(if page.folder_count + page.track_count == 0 {
-                    "empty"
-                } else {
-                    "content"
-                });
-                applied_query.replace(page.read);
-                folder_sparse.replace_prepared_at(
-                    SparseSource::Query {
-                        count: page.folder_count,
-                    },
-                    page.first_row_position.min(page.folder_count),
-                    page.folders
-                        .into_iter()
-                        .map(FolderTableRow::Folder)
-                        .collect(),
-                    Vec::new(),
-                    |row| match row {
-                        FolderTableRow::Folder(folder) => folder.clone(),
-                        _ => unreachable!(),
-                    },
-                );
-                track_sparse.replace_prepared_at(
-                    SparseSource::Query {
-                        count: page.track_count,
-                    },
-                    page.first_row_position.saturating_sub(page.folder_count),
-                    page.tracks
-                        .into_iter()
-                        .map(library::MemberRow::into_track)
-                        .map(FolderTableRow::Track)
-                        .collect(),
-                    Vec::new(),
-                    |row| match row {
-                        FolderTableRow::Track(track) => track.track_key,
-                        _ => unreachable!(),
-                    },
-                );
-            },
-        )
+        move |page: &Page| {
+            let OpenedCollection::Folders(page) = page.opened() else {
+                return false;
+            };
+            stack.set_visible_child_name(if page.folder_count + page.track_count == 0 {
+                "empty"
+            } else {
+                "content"
+            });
+            applied_query.replace(page.read.clone());
+            folder_sparse.replace_prepared_at(
+                SparseSource::Query {
+                    count: page.folder_count,
+                },
+                page.first_row_position.min(page.folder_count),
+                page.folders
+                    .iter()
+                    .cloned()
+                    .map(FolderTableRow::Folder)
+                    .collect(),
+                Vec::new(),
+                |row| match row {
+                    FolderTableRow::Folder(folder) => folder.clone(),
+                    _ => unreachable!(),
+                },
+            );
+            track_sparse.replace_prepared_at(
+                SparseSource::Query {
+                    count: page.track_count,
+                },
+                page.first_row_position.saturating_sub(page.folder_count),
+                page.tracks
+                    .iter()
+                    .cloned()
+                    .map(library::MemberRow::into_track)
+                    .map(FolderTableRow::Track)
+                    .collect(),
+                Vec::new(),
+                |row| match row {
+                    FolderTableRow::Track(track) => track.track_key,
+                    _ => unreachable!(),
+                },
+            );
+            true
+        }
     };
-    let catalog = Arc::clone(&shell.library);
-    let load = Arc::new(
-        move |(query, window): (library::MemberRead, library::RouteSeedWindow),
-              cancellation: ReadCancellation| {
-            let catalog = Arc::clone(&catalog);
-            let source = source.clone();
-            Box::pin(async move {
-                rufin_core::browse::FolderPage::load(
-                    &catalog,
-                    source_key,
-                    source,
-                    query,
-                    window,
-                    &cancellation,
-                )
-                .await
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        },
-    );
-    let read = LatestMountedRouteRead::new_with_request(
-        shell.runtime.clone(),
-        apply,
-        load,
+    let reread = shell.page_reread(
         "mounted Folder route",
+        opened,
+        crate::routes::list_inputs(&search),
+        apply,
     );
     let request = {
         let shell = Rc::downgrade(shell);
         let folder_sparse = Rc::clone(&folder_sparse);
         let track_sparse = Rc::clone(&track_sparse);
-        let previous = RefCell::new(query);
+        let requested = RefCell::new(query.filter);
         let previous_fields = RefCell::new(settings.row_fields);
-        Rc::new(move |query: String, refresh: bool| {
+        Rc::new(move |filter: String, refresh: bool| {
             let Some(shell) = shell.upgrade() else { return };
             let settings = shell
                 .settings
                 .current
                 .borrow()
                 .library_list(LibraryListKey::Folders);
-            let mut request = previous.borrow().clone();
-            request.filter = query;
-            request.descending = settings.descending;
-            request.sort = Some(settings.sort_key.catalog_sort());
             let name_changed = folder_name_field(&previous_fields.borrow())
                 != folder_name_field(&settings.row_fields);
             table.apply_fields(&settings.row_fields);
@@ -356,8 +339,11 @@ fn folder_page(
                 folder_sparse.update_matching(|_| true, |_| {});
             }
             previous_fields.replace(settings.row_fields);
-            let query_changed = *previous.borrow() != request;
-            previous.replace(request.clone());
+            let query_changed = *requested.borrow() != filter
+                || reread
+                    .page()
+                    .settings_changed(&shell.settings.current.borrow());
+            requested.replace(filter);
             if refresh || query_changed {
                 let position = folder_sparse
                     .first_live_position()
@@ -375,7 +361,7 @@ fn folder_page(
                         position as f64 / total.saturating_sub(1).max(1) as f64,
                     )
                 };
-                read.request_with((request, window));
+                reread.reread_at(window);
             }
         })
     };

@@ -45,21 +45,16 @@ pub use search::session::{SEARCH_PREVIEW_LIMIT, SearchSession};
 mod table_links;
 mod table_sizing;
 pub(crate) fn collection_download_change(
-    apply: impl Fn(&str, bool) + 'static,
+    apply: impl Fn(&CollectionTarget, bool) + 'static,
 ) -> gtk_widgets::mounted_route::MountedDownloadChange {
     Rc::new(move |event| {
-        let DownloadEvent::SubjectChanged {
-            subject: DownloadSubject::Prepared { context_id, .. },
-            downloaded,
-        } = event
-        else {
-            return;
-        };
-        apply(context_id, *downloaded);
+        if let Some((target, downloaded)) = CollectionTarget::downloaded(event) {
+            apply(&target, downloaded);
+        }
     })
 }
 
-use downloads::{DownloadEvent, DownloadSubject};
+use rufin_core::collection_context::CollectionTarget;
 use std::rc::Rc;
 
 pub use artist::artist_detail_route;
