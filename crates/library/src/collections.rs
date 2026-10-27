@@ -597,14 +597,19 @@ impl Catalog {
         context.folder_order(source, parent, filter, descending)
     }
 
+    /// Genres of a source's music folder whose names match `filter`, by title: how many match
+    /// and the ones in `range`.
     pub async fn genre_choices(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
+        filter: &str,
+        range: std::ops::Range<usize>,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<GenreChoice>> {
+    ) -> LibraryResult<(usize, Vec<GenreChoice>)> {
         let read = crate::ListRead {
             folder,
+            filter: filter.to_owned(),
             ..crate::ListRead::new(
                 crate::ListKind::Genres,
                 Some(source),
@@ -613,10 +618,12 @@ impl Catalog {
         };
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let order = self.list_order(&mut connection, &read).await?;
-        Ok(sqlx::query_as("SELECT genre.tag_key genre_key,genre.object_id,genre.name FROM json_each(?1) requested JOIN tags genre ON genre.tag_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-            .bind(serde_json::to_string(order.as_ref())?)
+        let window = &order[range.start.min(order.len())..range.end.min(order.len())];
+        let rows = sqlx::query_as("SELECT genre.tag_key genre_key,genre.object_id,genre.name FROM json_each(?1) requested JOIN tags genre ON genre.tag_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+            .bind(serde_json::to_string(window)?)
             .fetch_all(&mut *connection)
-            .await?)
+            .await?;
+        Ok((order.len(), rows))
     }
 
     /// Track URIs of a source's latest albums, album by album.

@@ -29,7 +29,7 @@ use crate::runtime::{
 use artwork::Artwork;
 use async_channel::{Receiver, Sender};
 use downloads::Downloads;
-use library::{Catalog, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey};
+use library::{Catalog, FavoriteTarget, ReadCancellation, SourceKey};
 use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
     CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceError,
@@ -911,27 +911,33 @@ impl SourceOwner {
         Ok(())
     }
 
-    async fn selected_folders(
+    /// The library a source and one of its music folders make, without selecting it. The folder
+    /// key is None while the Store holds no such folder.
+    pub async fn library(
         &self,
-        configured: &ConfiguredSource,
+        source_id: SourceId,
         source_key: SourceKey,
-    ) -> Result<(Arc<[FolderChoice]>, Option<FolderKey>), String> {
-        let folders = self
-            .shared
-            .catalog
+        music_folder_object_id: Option<String>,
+    ) -> Result<SelectedLibrary, String> {
+        let catalog = &self.shared.catalog;
+        let music_folders = catalog
             .music_folders(source_key)
             .await
             .map_err(string_error)?;
-        let selected = match configured.music_folder_id.as_deref() {
-            Some(object_id) => self
-                .shared
-                .catalog
+        let music_folder_key = match music_folder_object_id.as_deref() {
+            Some(object_id) => catalog
                 .folder_identity_key(source_key, object_id)
                 .await
                 .map_err(string_error)?,
             None => None,
         };
-        Ok((folders.into(), selected))
+        Ok(SelectedLibrary {
+            source_id,
+            source_key,
+            music_folder_key,
+            music_folder_object_id,
+            music_folders: music_folders.into(),
+        })
     }
 
     async fn install_selected(
@@ -941,16 +947,13 @@ impl SourceOwner {
         source_state: library::CachedSource,
         acquisition: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        let (music_folders, music_folder_key) = self
-            .selected_folders(&configured, source_state.source)
+        let selected = self
+            .library(
+                configured.configuration.source_id.clone(),
+                source_state.source,
+                configured.music_folder_id.clone(),
+            )
             .await?;
-        let selected = SelectedLibrary {
-            source_id: configured.configuration.source_id.clone(),
-            source_key: source_state.source,
-            music_folder_key,
-            music_folder_object_id: configured.music_folder_id.clone(),
-            music_folders,
-        };
         if !self.shared.selection_is_current(&acquisition) {
             return Ok(());
         }
@@ -1574,8 +1577,11 @@ impl SourceOwner {
                 && let Ok(configured) =
                     configured_source(&self.shared.settings.load().sources, source_id)
             {
-                match self.selected_folders(&configured, source).await {
-                    Ok((folders, folder_key)) => {
+                match self
+                    .library(source_id.clone(), source, configured.music_folder_id)
+                    .await
+                {
+                    Ok(library) => {
                         if let Some(current) = self
                             .shared
                             .selected
@@ -1584,9 +1590,7 @@ impl SourceOwner {
                             .as_mut()
                             .filter(|current| current.source_key == source)
                         {
-                            current.music_folders = folders;
-                            current.music_folder_key = folder_key;
-                            current.music_folder_object_id = configured.music_folder_id;
+                            *current = library;
                         }
                     }
                     Err(error) => self.shared.warn_nonfatal(&error),

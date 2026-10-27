@@ -433,6 +433,18 @@ pub(crate) async fn load_smart_playlist_rows(
 ) -> LibraryResult<Vec<SmartPlaylistRow>> {
     let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
     let totals = smart_totals(catalog, connection, &raw, now).await?;
+    let mut rows = load_smart_playlist_headers(connection, keys).await?;
+    for row in &mut rows {
+        set_smart_totals(row, &totals);
+    }
+    Ok(rows)
+}
+
+/// Smart playlist rows by key without their totals, which take an evaluation.
+pub(crate) async fn load_smart_playlist_headers(
+    connection: &mut SqliteConnection,
+    keys: &[SmartPlaylistKey],
+) -> LibraryResult<Vec<SmartPlaylistRow>> {
     #[derive(FromRow)]
     struct Row {
         mosaic: Option<String>,
@@ -446,7 +458,7 @@ pub(crate) async fn load_smart_playlist_rows(
          ORDER BY CAST(requested.key AS INTEGER)",
         crate::artwork::preview_sql("playlist.artwork_binding")
     )))
-    .bind(serde_json::to_string(&raw)?)
+    .bind(serde_json::to_string(&keys.iter().map(|key| key.raw()).collect::<Vec<_>>())?)
     .fetch_all(&mut *connection)
     .await?;
     rows.into_iter()
@@ -456,13 +468,6 @@ pub(crate) async fn load_smart_playlist_rows(
                  mut playlist,
              }| {
                 normalize_definition(&mut playlist.definition)?;
-                let summary = totals
-                    .get(&playlist.smart_playlist_key.raw())
-                    .map(crate::catalog::views::Totals::summary)
-                    .unwrap_or_default();
-                playlist.track_count = summary.track_count;
-                playlist.duration_millis = summary.duration_millis;
-                playlist.downloaded_count = summary.downloaded_count;
                 playlist.artwork_binding = crate::artwork::playlist_artwork(
                     playlist.artwork_binding.take(),
                     (true, None, playlist.object_id.clone()),
@@ -474,14 +479,26 @@ pub(crate) async fn load_smart_playlist_rows(
         .collect()
 }
 
-/// Smart playlist folder rows by key: totals of their smart playlists and the first one's
-/// artwork.
-pub(crate) async fn load_smart_folder_rows(
+pub(crate) fn set_smart_totals(
+    playlist: &mut SmartPlaylistRow,
+    totals: &std::collections::HashMap<i64, crate::catalog::views::Totals>,
+) {
+    let summary = totals
+        .get(&playlist.smart_playlist_key.raw())
+        .map(crate::catalog::views::Totals::summary)
+        .unwrap_or_default();
+    playlist.track_count = summary.track_count;
+    playlist.duration_millis = summary.duration_millis;
+    playlist.downloaded_count = summary.downloaded_count;
+}
+
+/// Totals of smart playlist folders by key: of the smart playlists each holds.
+pub(crate) async fn smart_folder_totals(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
     folders: &[i64],
     now: i64,
-) -> LibraryResult<Vec<crate::PlaylistFolderRow>> {
+) -> LibraryResult<std::collections::HashMap<i64, (i64, i64)>> {
     let members = {
         let snapshot = catalog.snapshot();
         snapshot
@@ -498,6 +515,26 @@ pub(crate) async fn load_smart_folder_rows(
         now,
     )
     .await?;
+    let mut folders = std::collections::HashMap::<i64, (i64, i64)>::new();
+    for (folder, key) in members {
+        if let Some(totals) = totals.get(&key) {
+            let folder = folders.entry(folder).or_default();
+            folder.0 += i64::from(totals.tracks);
+            folder.1 += totals.duration as i64;
+        }
+    }
+    Ok(folders)
+}
+
+/// Smart playlist folder rows by key: totals of their smart playlists and the first one's
+/// artwork.
+pub(crate) async fn load_smart_folder_rows(
+    catalog: &Catalog,
+    connection: &mut SqliteConnection,
+    folders: &[i64],
+    now: i64,
+) -> LibraryResult<Vec<crate::PlaylistFolderRow>> {
+    let totals = smart_folder_totals(catalog, connection, folders, now).await?;
     #[derive(FromRow)]
     struct Row {
         #[sqlx(flatten)]
@@ -522,14 +559,9 @@ pub(crate) async fn load_smart_folder_rows(
                  cover,
                  mosaic,
              }| {
-                for (_, key) in members
-                    .iter()
-                    .filter(|(owner, _)| *owner == folder.folder_key.raw())
-                {
-                    if let Some(totals) = totals.get(key) {
-                        folder.track_count += i64::from(totals.tracks);
-                        folder.duration_millis += totals.duration as i64;
-                    }
+                if let Some((tracks, duration)) = totals.get(&folder.folder_key.raw()) {
+                    folder.track_count = *tracks;
+                    folder.duration_millis = *duration;
                 }
                 folder.artwork_binding = match cover {
                     Some(id) => crate::artwork::playlist_artwork(

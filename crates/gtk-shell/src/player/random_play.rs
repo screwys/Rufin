@@ -39,8 +39,12 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let folder = selected.music_folder_key;
     let cancellation = ReadCancellation::new();
     let runtime = shell.products.runtime.clone();
-    let task =
-        runtime.spawn(async move { catalog.genre_choices(source, folder, &cancellation).await });
+    let task = runtime.spawn(async move {
+        catalog
+            .genre_choices(source, folder, "", 0..usize::MAX, &cancellation)
+            .await
+            .map(|(_, genres)| genres)
+    });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let Some(shell) = shell.upgrade() else {

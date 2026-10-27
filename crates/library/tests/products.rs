@@ -350,7 +350,13 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             album_id: "missing".into(),
         },
     ];
-    let headers = catalog.sidebar_pin_rows(&pins, &cancel).await.unwrap();
+    let headers = catalog
+        .pin_rows(&pins, &cancel)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(library::SidebarPinRow::from)
+        .collect::<Vec<_>>();
     assert_eq!(
         headers.iter().map(|row| &row.pin).collect::<Vec<_>>(),
         pins[..10].iter().collect::<Vec<_>>()
@@ -3702,9 +3708,12 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         .collect::<Vec<_>>();
     let headers = fixture
         .catalog
-        .sidebar_pin_rows(&pins, &cancel)
+        .pin_rows(&pins, &cancel)
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .map(library::SidebarPinRow::from)
+        .collect::<Vec<_>>();
     assert_eq!(headers.len(), 70);
     assert!(headers.iter().all(|row| row.totals.is_none()));
     let rows = fixture

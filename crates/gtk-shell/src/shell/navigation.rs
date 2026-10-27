@@ -823,8 +823,13 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     let read_cancel = cancellation.clone();
     let task = runtime.spawn(async move {
         read_database
-            .sidebar_pin_rows(&read_pins, &read_cancel)
+            .pin_rows(&read_pins, &read_cancel)
             .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(library::SidebarPinRow::from)
+                    .collect::<Vec<_>>()
+            })
     });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {

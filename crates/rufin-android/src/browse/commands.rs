@@ -667,113 +667,50 @@ impl AndroidLibrary {
         let consumed = offset.saturating_add(pins.len() as u64);
         let next_offset = (consumed < total).then_some(consumed);
         let catalog = self.catalog.clone();
-        let selected = self.source.selected_library();
         self.runtime
             .spawn(async move {
                 let cancel = ReadCancellation::new();
+                let mut pinned = catalog.pin_rows(&pins, &cancel).await.map_err(error)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(error)?
+                    .as_secs() as i64;
+                catalog
+                    .pin_totals(&mut pinned, now, &cancel)
+                    .await
+                    .map_err(error)?;
                 let mut rows = Vec::new();
-                for pin in pins {
-                    let row = match &pin {
-                        SidebarPin::Album {
-                            source_id,
-                            album_id,
-                        } => {
-                            let uri = library::source_entity_uri(source_id, "album", album_id);
-                            catalog
-                                .album(&uri, false, &cancel)
-                                .await
-                                .map_err(error)?
-                                .map(Into::into)
+                for (pin, row) in pinned {
+                    let mut row: AndroidBrowseRow = match row {
+                        library::PinRow::Album(row) => (*row).into(),
+                        library::PinRow::Artist(row) => artist_row(
+                            row,
+                            matches!(
+                                pin,
+                                SidebarPin::Artist {
+                                    album_artist: true,
+                                    ..
+                                }
+                            ),
+                        ),
+                        library::PinRow::Genre(row) => row.into(),
+                        library::PinRow::Playlist(row) => row.into(),
+                        library::PinRow::SmartPlaylist(row) => row.into(),
+                        library::PinRow::PlaylistFolder(row) => row.into(),
+                    };
+                    row.context_source_id = match &pin {
+                        SidebarPin::Album { source_id, .. }
+                        | SidebarPin::Artist { source_id, .. }
+                        | SidebarPin::Genre { source_id, .. } => Some(source_id.to_string()),
+                        SidebarPin::Playlist { source_id, .. } => {
+                            source_id.as_ref().map(ToString::to_string)
                         }
-                        SidebarPin::Artist {
-                            source_id,
-                            artist_id,
-                            album_artist,
-                        } => {
-                            let uri = library::source_entity_uri(source_id, "artist", artist_id);
-                            catalog
-                                .artist(&uri, *album_artist, false, &cancel)
-                                .await
-                                .map_err(error)?
-                                .map(|row| artist_row(row, *album_artist))
-                        }
-                        SidebarPin::Genre {
-                            source_id,
-                            genre_id,
-                        } => {
-                            let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                            catalog
-                                .genre(&uri, &cancel)
-                                .await
-                                .map_err(error)?
-                                .map(Into::into)
-                        }
-                        SidebarPin::Playlist {
-                            source_id,
-                            playlist_id,
-                        } => {
-                            if let Some(key) = catalog
-                                .playlist_key_by_identity(source_id.as_ref(), playlist_id, &cancel)
-                                .await
-                                .map_err(error)?
-                            {
-                                catalog
-                                    .playlists(&[key], &cancel)
-                                    .await
-                                    .map_err(error)?
-                                    .pop()
-                                    .map(Into::into)
-                            } else {
-                                None
-                            }
-                        }
-                        SidebarPin::PlaylistFolder { folder_id, .. } => catalog
-                            .playlist_folder_by_id(
-                                folder_id,
-                                selected.as_ref().map(|selected| selected.source_key),
-                                selected
-                                    .as_ref()
-                                    .and_then(|selected| selected.music_folder_key),
-                                &cancel,
-                            )
-                            .await
-                            .map_err(error)?
-                            .map(Into::into),
-                        SidebarPin::SmartPlaylist { playlist_id } => {
-                            if let Some(key) = catalog
-                                .smart_playlist_key_by_object(playlist_id, &cancel)
-                                .await
-                                .map_err(error)?
-                            {
-                                let now = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map_err(error)?
-                                    .as_secs() as i64;
-                                catalog
-                                    .smart_playlist_rows(&[key], now, &cancel)
-                                    .await
-                                    .map_err(error)?
-                                    .pop()
-                                    .map(Into::into)
-                            } else {
-                                None
-                            }
+                        SidebarPin::SmartPlaylist { .. } | SidebarPin::PlaylistFolder { .. } => {
+                            None
                         }
                     };
-                    if let Some(mut row) = row {
-                        row.context_source_id = match &pin {
-                            SidebarPin::Album { source_id, .. }
-                            | SidebarPin::Artist { source_id, .. }
-                            | SidebarPin::Genre { source_id, .. } => Some(source_id.to_string()),
-                            SidebarPin::Playlist { source_id, .. } => {
-                                source_id.as_ref().map(ToString::to_string)
-                            }
-                            SidebarPin::SmartPlaylist { .. }
-                            | SidebarPin::PlaylistFolder { .. } => None,
-                        };
-                        row.pin = Some(pin);
-                        rows.push(row);
-                    }
+                    row.pin = Some(pin);
+                    rows.push(row);
                 }
                 Ok(AndroidPinPage {
                     rows,

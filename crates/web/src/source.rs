@@ -126,6 +126,25 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     ))
 }
 
+/// Selects the source unless it is the selected one already.
+pub(super) async fn ensure_selected(
+    products: &ProductHandles,
+    source: sources::SourceId,
+) -> Result<sources::SourceId, Error> {
+    match products
+        .source
+        .selected_library()
+        .filter(|selected| selected.source_id == source)
+    {
+        Some(selected) => Ok(selected.source_id),
+        None => products
+            .source
+            .select_source(source)
+            .await
+            .map_err(bad_request),
+    }
+}
+
 pub(super) async fn select_library(
     State(products): State<ProductHandles>,
     request: Request<Body>,
@@ -136,18 +155,7 @@ pub(super) async fn select_library(
         library: Option<String>,
     }
     let input: Input = body(request).await?;
-    let selected = match products
-        .source
-        .selected_library()
-        .filter(|selected| selected.source_id == input.source)
-    {
-        Some(selected) => selected.source_id,
-        None => products
-            .source
-            .select_source(input.source)
-            .await
-            .map_err(bad_request)?,
-    };
+    let selected = ensure_selected(&products, input.source).await?;
     completion(products.source.set_music_folder(selected, input.library)).await?;
     Ok(accepted())
 }

@@ -221,6 +221,21 @@ impl Catalog {
     }
 }
 
+/// Totals of the playlists each playlist folder holds, as a list read counts them.
+pub(crate) async fn folder_totals(
+    catalog: &Catalog,
+    read: &ListRead,
+) -> std::collections::HashMap<i64, crate::catalog::views::Totals> {
+    let mut children = read.clone();
+    children.filter.clear();
+    if read.playlist_scope == PlaylistScope::All {
+        children.source = None;
+    }
+    catalog.loaded().await;
+    let snapshot = catalog.snapshot();
+    crate::catalog::views::Context::new(&snapshot, false).playlist_folder_totals(&children)
+}
+
 /// Playlist folder rows: totals of the playlists each holds and its first playlist's artwork.
 async fn load_folder_rows(
     catalog: &Catalog,
@@ -228,16 +243,7 @@ async fn load_folder_rows(
     read: &ListRead,
     folders: &[i64],
 ) -> LibraryResult<Vec<PlaylistFolderRow>> {
-    let totals = {
-        let mut children = read.clone();
-        children.filter.clear();
-        if read.playlist_scope == PlaylistScope::All {
-            children.source = None;
-        }
-        catalog.loaded().await;
-        let snapshot = catalog.snapshot();
-        crate::catalog::views::Context::new(&snapshot, false).playlist_folder_totals(&children)
-    };
+    let totals = folder_totals(catalog, read).await;
     #[derive(FromRow)]
     struct Row {
         #[sqlx(flatten)]

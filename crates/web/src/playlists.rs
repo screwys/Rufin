@@ -307,13 +307,13 @@ pub(super) async fn list_data(
 ) -> Result<Value, Error> {
     let cancellation = library::ReadCancellation::new();
     let (source, folder) = if parameters.contains_key("source") {
-        let (source, folder) = catalog::scope(
+        let scoped = catalog::scope(
             products,
             required(parameters, "source")?,
             parameters.get("folder").map(String::as_str),
         )
         .await?;
-        (Some(source), folder)
+        (Some(scoped.source_key), scoped.music_folder_key)
     } else {
         (None, None)
     };
