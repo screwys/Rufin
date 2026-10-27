@@ -854,6 +854,7 @@ fn general_page(
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
         prefer_distinct_track_covers_row: adw::SwitchRow,
+        use_sort_tags_row: adw::SwitchRow,
         external_metadata_row: adw::SwitchRow,
         external_lyrics_row: adw::SwitchRow,
         language_row: adw::ComboRow,
@@ -892,6 +893,16 @@ fn general_page(
                 });
             }
         }
+    });
+
+    use_sort_tags_row.set_active(settings.application.use_sort_tags);
+    let sort_tags_shell = Rc::clone(shell);
+    use_sort_tags_row.connect_active_notify(move |row| {
+        sort_tags_shell
+            .settings
+            .set_app_setting("sort tag setting", row.is_active(), |settings| {
+                &mut settings.application.use_sort_tags
+            });
     });
 
     external_metadata_row.set_active(settings.application.external_metadata_enabled);

@@ -117,7 +117,7 @@ fn cell_key(kind: &str, key: &str) -> String {
 fn shared_preference(key: &str) -> bool {
     matches!(
         key,
-        "prefer_distinct_track_covers" | "external_metadata_enabled"
+        "prefer_distinct_track_covers" | "use_sort_tags" | "external_metadata_enabled"
     )
 }
 fn portable_configuration(

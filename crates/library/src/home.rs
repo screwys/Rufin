@@ -312,7 +312,7 @@ impl Catalog {
                     (a.added == u32::MAX)
                         .cmp(&(b.added == u32::MAX))
                         .then(b.added.cmp(&a.added))
-                        .then_with(|| snapshot.text(a.sort).cmp(snapshot.text(b.sort)))
+                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
                         .then(a.key.cmp(&b.key))
                 });
                 chosen.newly_added = added
@@ -338,7 +338,7 @@ impl Catalog {
                         .then(b.release.cmp(&a.release))
                         .then(year(a.year).is_none().cmp(&year(b.year).is_none()))
                         .then(b.year.cmp(&a.year))
-                        .then_with(|| snapshot.text(a.sort).cmp(snapshot.text(b.sort)))
+                        .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
                         .then(a.key.cmp(&b.key))
                 });
                 chosen.recently_released = released

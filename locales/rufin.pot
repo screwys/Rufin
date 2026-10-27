@@ -3836,6 +3836,9 @@ msgstr ""
 msgid "Song"
 msgstr ""
 
+msgid "Sort artists and albums by their sort tags instead of their names"
+msgstr ""
+
 msgid "Sort by"
 msgstr ""
 
@@ -4234,6 +4237,9 @@ msgid "Use maximum year"
 msgstr ""
 
 msgid "Use minimum year"
+msgstr ""
+
+msgid "Use sort tags"
 msgstr ""
 
 msgid "Use source setting"

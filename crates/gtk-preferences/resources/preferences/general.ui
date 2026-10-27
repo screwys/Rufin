@@ -88,6 +88,12 @@
           </object>
         </child>
         <child>
+          <object class="AdwSwitchRow" id="use_sort_tags_row">
+            <property name="title" translatable="yes">Use sort tags</property>
+            <property name="subtitle" translatable="yes">Sort artists and albums by their sort tags instead of their names</property>
+          </object>
+        </child>
+        <child>
           <object class="AdwSwitchRow" id="external_metadata_row">
             <property name="title" translatable="yes">External metadata lookup</property>
           </object>

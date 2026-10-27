@@ -208,6 +208,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     #[serde(default)]
     prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
     #[serde(default)]
+    use_sort_tags: bool = false => set_use_sort_tags;
+    #[serde(default)]
     download_artwork_automatically: bool = false => set_download_artwork_automatically;
     #[serde(default)]
     download_lyrics_automatically: bool = false => set_download_lyrics_automatically;

@@ -182,7 +182,7 @@ impl<'a> Context<'a> {
         self.snapshot
             .artists
             .live(slot)
-            .map(|artist| self.snapshot.name_sort(artist.name, artist.sort))
+            .map(|artist| self.snapshot.artist_sort(artist))
     }
 
     /// The sort text of an album's first artist.
@@ -567,7 +567,7 @@ struct TrackRow<'a> {
     artist: &'a str,
     sort: Cow<'a, str>,
     played: Played,
-    album_sort: Option<&'a str>,
+    album_sort: Option<Cow<'a, str>>,
     album_year: Option<i16>,
     album_key: Option<i64>,
     album_artist: Option<Cow<'a, str>>,
@@ -590,7 +590,7 @@ impl Context<'_> {
             } else {
                 Played::default()
             },
-            album_sort: album.map(|album| snapshot.text(album.sort)),
+            album_sort: album.map(|album| snapshot.album_sort(album)),
             album_year: album.and_then(|album| year_of(album.year)),
             album_key: album.map(|album| album.key),
             album_artist: if sort == CatalogSort::AlbumArtist {
@@ -613,7 +613,7 @@ impl Context<'_> {
             CatalogSort::Title => snapshot.text(row.record.title).to_owned(),
             CatalogSort::Artist => snapshot.text(row.record.artist).to_owned(),
             CatalogSort::AlbumArtist => row.album_artist.as_deref().unwrap_or_default().to_owned(),
-            CatalogSort::Album => row.album_sort.unwrap_or_default().to_owned(),
+            CatalogSort::Album => row.album_sort.as_deref().unwrap_or_default().to_owned(),
             CatalogSort::Genre => row.genre.as_deref().unwrap_or_default().to_owned(),
             _ => return None,
         })
@@ -1317,7 +1317,7 @@ impl Context<'_> {
     }
 
     fn album_row(&self, derived: &Derived, slot: u32, record: &AlbumRec) -> ListRow<'_> {
-        let mut row = ListRow::new(record.key, Cow::Borrowed(self.snapshot.text(record.sort)));
+        let mut row = ListRow::new(record.key, self.snapshot.album_sort(record));
         row.totals = derived.albums[slot as usize];
         row.rating = rating(record.rating, record.native_rating);
         row.favorite = favorite(record.flags) == Some(true);
@@ -1421,8 +1421,7 @@ impl Context<'_> {
                         && (!read.favorites_only || favorite(record.flags) == Some(true))
                         && (!read.downloaded_only || totals.downloaded > 0)
                     {
-                        let mut row =
-                            ListRow::new(record.key, snapshot.name_sort(record.name, record.sort));
+                        let mut row = ListRow::new(record.key, snapshot.artist_sort(record));
                         row.totals = totals;
                         row.rating = rating(record.rating, record.native_rating);
                         row.favorite = favorite(record.flags) == Some(true);
@@ -1472,8 +1471,8 @@ impl Context<'_> {
                     let slot = snapshot.albums.slot(*key)?;
                     match read.sort {
                         CatalogSort::Title => snapshot
-                            .text(snapshot.albums.records[slot as usize].sort)
-                            .to_owned(),
+                            .album_sort(&snapshot.albums.records[slot as usize])
+                            .into_owned(),
                         CatalogSort::Artist | CatalogSort::AlbumArtist => self
                             .album_artist_sort(slot)
                             .map(Cow::into_owned)
@@ -1486,7 +1485,7 @@ impl Context<'_> {
                         return None;
                     }
                     let artist = snapshot.artists.get(*key)?;
-                    snapshot.name_sort(artist.name, artist.sort).into_owned()
+                    snapshot.artist_sort(artist).into_owned()
                 }
                 ListKind::Genres | ListKind::Moods => {
                     if !matches!(read.sort, CatalogSort::Title | CatalogSort::Artist) {

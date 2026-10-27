@@ -408,6 +408,33 @@ pub(crate) struct Snapshot {
     pub(crate) playlists: Family<PlaylistRec>,
     pub(crate) smart_playlists: BTreeMap<i64, SmartPlaylist>,
     pub(crate) playlist_folders: BTreeMap<i64, PlaylistFolder>,
+    /// Artists and albums sort by their sort tags; otherwise by name past a leading article.
+    pub(crate) sort_tags: bool,
+}
+
+/// Leading articles a name sorts past without sort tags, Navidrome's default list.
+const ARTICLES: [&str; 11] = [
+    "the", "el", "la", "los", "las", "le", "les", "os", "as", "o", "a",
+];
+
+/// Whether a name is written with Latin letters. Without them, as in Japanese names, the sort
+/// tag is the name's reading and is kept.
+fn latin(name: &str) -> bool {
+    name.chars().any(|c| {
+        c.is_ascii_alphabetic()
+            || matches!(c, '\u{c0}'..='\u{24f}' | '\u{1e00}'..='\u{1eff}') && c.is_alphabetic()
+    })
+}
+
+/// A name as it sorts without sort tags: lowercase, past a leading article.
+fn plain_sort(name: &str) -> std::borrow::Cow<'_, str> {
+    let lower = name.to_lowercase();
+    match lower.split_once(' ') {
+        Some((article, rest)) if ARTICLES.contains(&article) && !rest.trim().is_empty() => {
+            rest.trim_start().to_owned().into()
+        }
+        _ => lower.into(),
+    }
 }
 
 impl Default for Snapshot {
@@ -428,6 +455,7 @@ impl Default for Snapshot {
             playlists: Family::default(),
             smart_playlists: BTreeMap::new(),
             playlist_folders: BTreeMap::new(),
+            sort_tags: false,
         }
     }
 }
@@ -528,6 +556,27 @@ impl Snapshot {
             self.text(name).to_lowercase().into()
         } else {
             self.text(sort).into()
+        }
+    }
+
+    /// An artist's sort text: its sort tag when sort tags are on or its name has no Latin
+    /// letters to sort by, else its name as it sorts.
+    pub(crate) fn artist_sort(&self, artist: &ArtistRec) -> std::borrow::Cow<'_, str> {
+        let name = self.text(artist.name);
+        if self.sort_tags || !latin(name) {
+            self.name_sort(artist.name, artist.sort)
+        } else {
+            plain_sort(name)
+        }
+    }
+
+    /// An album's sort text, by the same rule as an artist's.
+    pub(crate) fn album_sort(&self, album: &AlbumRec) -> std::borrow::Cow<'_, str> {
+        let title = self.text(album.title);
+        if self.sort_tags || !latin(title) {
+            self.text(album.sort).into()
+        } else {
+            plain_sort(title)
         }
     }
 

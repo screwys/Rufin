@@ -123,6 +123,8 @@ struct CatalogInner {
     /// Shared with the image thread, which holds no strong handle while it waits.
     image: Arc<(std::sync::Mutex<ImageState>, Condvar)>,
     distinct_track_covers: AtomicBool,
+    /// Read into every Snapshot under its lock, so a load never installs a stale value.
+    sort_tags: AtomicBool,
     views: std::sync::Mutex<crate::catalog::views::Views>,
     /// Held while totals are built, so readers that need the same ones wait for one build.
     deriving: std::sync::Mutex<()>,
@@ -343,6 +345,7 @@ impl Catalog {
         let mut state = self.snapshot_mut();
         snapshot.revision = state.revision + 1;
         snapshot.facts = snapshot.revision;
+        snapshot.sort_tags = self.inner.sort_tags.load(Ordering::Acquire);
         let previous = std::mem::replace(&mut *state, snapshot);
         let revision = state.revision;
         drop(state);
@@ -372,6 +375,25 @@ impl Catalog {
 
     pub fn distinct_track_covers(&self) -> bool {
         self.inner.distinct_track_covers.load(Ordering::Acquire)
+    }
+
+    /// Whether artists and albums sort by their sort tags. Nothing stored depends on it; the
+    /// orders built since the last change are dropped and clients reopen their pages.
+    pub fn set_use_sort_tags(&self, enabled: bool) {
+        let mut snapshot = self.snapshot_mut();
+        if self.inner.sort_tags.swap(enabled, Ordering::AcqRel) == enabled {
+            return;
+        }
+        snapshot.sort_tags = enabled;
+        snapshot.revision += 1;
+        let revision = snapshot.revision;
+        drop(snapshot);
+        if *self.inner.loaded.borrow() {
+            self.publish(Arc::new(Change {
+                revision,
+                scopes: vec![crate::Scope::Reload],
+            }));
+        }
     }
 
     /// Opens the installed Store. A Store imported from a released one gets its albums resolved
@@ -447,6 +469,7 @@ impl Catalog {
             image_current: AtomicBool::new(true),
             image: Arc::new((std::sync::Mutex::new(ImageState::default()), Condvar::new())),
             distinct_track_covers: AtomicBool::new(false),
+            sort_tags: AtomicBool::new(false),
             views: Default::default(),
             deriving: std::sync::Mutex::new(()),
         });
@@ -563,13 +586,13 @@ impl CatalogInner {
                     from_image,
                     "loaded the Catalog"
                 );
-                let previous = std::mem::replace(
-                    &mut *self
-                        .snapshot
-                        .write()
-                        .unwrap_or_else(PoisonError::into_inner),
-                    snapshot,
-                );
+                let mut state = self
+                    .snapshot
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner);
+                snapshot.sort_tags = self.sort_tags.load(Ordering::Acquire);
+                let previous = std::mem::replace(&mut *state, snapshot);
+                drop(state);
                 drop(previous);
                 process_memory::request_reclaim();
                 if !from_image {

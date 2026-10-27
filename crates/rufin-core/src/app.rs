@@ -86,6 +86,7 @@ where
     };
     let library = Arc::new(catalog);
     library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
+    library.set_use_sort_tags(stored.ui.application.use_sort_tags);
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
     let scrobbling_settings = stored.scrobbling_runtime_settings();
@@ -245,6 +246,9 @@ where
             {
                 settings_library
                     .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
+            }
+            if previous.ui.application.use_sort_tags != current.ui.application.use_sort_tags {
+                settings_library.set_use_sort_tags(current.ui.application.use_sort_tags);
             }
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
