@@ -2,31 +2,32 @@ use std::sync::Arc;
 
 use super::{PlayerPreferences, SettingsError, SettingsOwner, app};
 
+/// What the Android mirrors keep of the committed preferences.
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct CommittedPreferences {
+    pub player: PlayerPreferences,
+    pub cast_network_interface: Option<String>,
+}
+
 /// Committed preferences for one observer. The first call returns the current value.
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PreferenceSubscription {
     changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Arc<app::Settings>>>,
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
 impl PreferenceSubscription {
-    async fn next(&self) -> Result<Arc<app::Settings>, SettingsError> {
+    pub async fn next(&self) -> Result<CommittedPreferences, SettingsError> {
         let mut changes = self.changes.lock().await;
         changes
             .changed()
             .await
             .map_err(|error| SettingsError::from(error.to_string()))?;
-        Ok(Arc::clone(&changes.borrow_and_update()))
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl PreferenceSubscription {
-    pub async fn next_application(&self) -> Result<app::ApplicationPreferences, SettingsError> {
-        Ok(self.next().await?.application.clone())
-    }
-
-    pub async fn next_player(&self) -> Result<PlayerPreferences, SettingsError> {
-        Ok(PlayerPreferences::from(self.next().await?.as_ref()))
+        let settings = Arc::clone(&changes.borrow_and_update());
+        Ok(CommittedPreferences {
+            player: PlayerPreferences::from(settings.as_ref()),
+            cast_network_interface: settings.cast_network_interface.clone(),
+        })
     }
 }
 

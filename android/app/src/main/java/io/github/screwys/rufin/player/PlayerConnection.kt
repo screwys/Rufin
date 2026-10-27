@@ -143,7 +143,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     coroutineScope {
                         launch {
                             while (isActive) {
-                                settings = withContext(Dispatchers.Default) { preferenceChanges.nextPlayer() }
+                                settings = withContext(Dispatchers.Default) { preferenceChanges.next() }.player
                             }
                         }
                         launch {

@@ -34,7 +34,6 @@ pub enum Effect {
     MediaControlsChanged,
     PrivateModeChanged,
     WithdrawNotification,
-    PlaylistPickerChanged,
     #[cfg(not(target_os = "macos"))]
     TrayEnabled(bool),
     #[cfg(not(target_os = "macos"))]

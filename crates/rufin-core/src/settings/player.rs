@@ -64,10 +64,6 @@ pub struct PlayerPreferenceOptions {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn cast_network_interface(&self) -> Option<String> {
-        self.load().cast_network_interface
-    }
-
     pub fn set_cast_network_interface(&self, value: Option<String>) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.cast_network_interface = value;

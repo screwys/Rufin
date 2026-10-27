@@ -1,5 +1,8 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
+
+use gtk::glib;
 
 use tokio::sync::watch;
 use tracing::warn;
@@ -24,8 +27,23 @@ impl SettingsState {
         }
     }
 
-    pub fn changes(&self) -> watch::Receiver<Arc<Settings>> {
-        self.changes.borrow().clone()
+    /// Keeps `current` on what every writer commits. `sidebar_moved` runs when such a commit
+    /// changed the sidebar before a local write took it in.
+    pub fn follow(self: &Rc<Self>, sidebar_moved: impl Fn() + 'static) {
+        let mut changes = self.changes.borrow().clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while changes.changed().await.is_ok() {
+                changes.borrow_and_update();
+                let Some(state) = weak.upgrade() else { break };
+                let Some(previous) = state.sync() else {
+                    continue;
+                };
+                if previous.sidebar != state.current.borrow().sidebar {
+                    sidebar_moved();
+                }
+            }
+        });
     }
 
     /// Takes the latest committed preferences and returns the ones they replaced.
@@ -90,7 +108,9 @@ impl SettingsState {
     ) -> bool {
         match self.persistence.update_library_list_settings(key, update) {
             Ok(changed) => {
-                self.sync();
+                if changed {
+                    self.sync();
+                }
                 changed
             }
             Err(error) => {

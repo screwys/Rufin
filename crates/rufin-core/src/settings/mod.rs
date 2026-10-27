@@ -3,7 +3,7 @@ mod player;
 mod preferences;
 pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPreferences};
 pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
-pub use preferences::PreferenceSubscription;
+pub use preferences::{CommittedPreferences, PreferenceSubscription};
 pub mod app;
 mod connect;
 pub mod context_menu;

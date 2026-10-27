@@ -740,7 +740,7 @@ pub(crate) fn toggle_mute_shortcut(shell: &Rc<Shell>) {
     else {
         return;
     };
-    shell.player_ui.apply_user_muted(muted);
+    shell.player_ui.playback_owner.set_muted(muted);
     let title = if muted { tr("Muted") } else { tr("Unmuted") };
     shell.control_feedback.show_control_feedback_toast(title);
 }

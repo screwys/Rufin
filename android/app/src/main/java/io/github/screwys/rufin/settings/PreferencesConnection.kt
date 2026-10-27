@@ -77,9 +77,9 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                     coroutineScope {
                         launch {
                             while (isActive) {
-                                val next = withContext(Dispatchers.Default) { changes.nextApplication() }
-                                castNetworkInterface = owner.castNetworkInterface()
-                                applicationSettings = next
+                                val next = withContext(Dispatchers.Default) { changes.next() }
+                                castNetworkInterface = next.castNetworkInterface
+                                applicationSettings = next.player.application
                             }
                         }
                         while (currentCoroutineContext().isActive) {

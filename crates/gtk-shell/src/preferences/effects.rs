@@ -13,9 +13,6 @@ impl Shell {
             Effect::MediaControlsChanged => self.update_media_controls(),
             Effect::PrivateModeChanged => self.refresh_tray_private_mode(),
             Effect::WithdrawNotification => self.withdraw_now_playing_notification(),
-            Effect::PlaylistPickerChanged => {
-                crate::shell::playlist_picker::refresh_context_playlist_picker(self)
-            }
             #[cfg(not(target_os = "macos"))]
             Effect::TrayEnabled(enabled) => self.set_tray_enabled(enabled),
             #[cfg(not(target_os = "macos"))]

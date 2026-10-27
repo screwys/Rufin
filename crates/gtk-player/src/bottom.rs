@@ -1806,10 +1806,6 @@ impl crate::PlayerUi {
         });
         *self.controls.volume_persist_source.borrow_mut() = Some(source);
     }
-
-    pub fn apply_user_muted(&self, muted: bool) {
-        self.playback_owner.set_muted(muted);
-    }
 }
 
 pub fn connect_bottom_player_resize(shell: &Rc<crate::PlayerUi>) {
@@ -2245,7 +2241,7 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
             else {
                 return;
             };
-            mute_shell.apply_user_muted(muted);
+            mute_shell.playback_owner.set_muted(muted);
         });
     let output_shell = Rc::clone(shell);
     shell

@@ -310,6 +310,8 @@ where
         },
     );
 
+    source.attach_settings(&settings_handle);
+
     let backup = crate::backup::BackupOwner::new(
         Arc::clone(&library),
         settings.clone(),
