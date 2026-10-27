@@ -1602,11 +1602,16 @@ impl Resident for Track {
     /// A track is hidden from when it stops being listed, or from its insertion when nothing
     /// lists it, so the expiry can forget it.
     fn normalize(&mut self, before: Option<&Self>, _extras: &Map<String, Value>) {
-        if self.indexed {
-            self.hidden_since = None;
-        } else if self.hidden_since.is_none() || before.is_some_and(|before| before.indexed) {
-            self.hidden_since = Some(chrono::Utc::now().timestamp());
-        }
+        self.hidden_since = if self.indexed {
+            None
+        } else {
+            match before {
+                Some(before) if !before.indexed => before.hidden_since,
+                Some(_) => None,
+                None => self.hidden_since,
+            }
+            .or_else(|| Some(chrono::Utc::now().timestamp()))
+        };
     }
 
     fn state(&mut self) -> Option<&mut NativeState> {
