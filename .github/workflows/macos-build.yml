@@ -36,11 +36,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - architecture: arm64
-            runner: macos-15
-          - architecture: x86_64
-            runner: macos-15-intel
+        # Intel builds run only for releases.
+        include: ${{ fromJSON(inputs.release_tag != ''
+          && '[{"architecture":"arm64","runner":"macos-15"},{"architecture":"x86_64","runner":"macos-15-intel"}]'
+          || '[{"architecture":"arm64","runner":"macos-15"}]') }}
     runs-on: ${{ matrix.runner }}
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.local/target
