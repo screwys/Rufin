@@ -165,6 +165,23 @@ impl<R: PartialEq> Staged<R> {
     }
 }
 
+impl<R: Resident> Staged<R> {
+    /// Whether the row changed only in the plays its source reports. Clients show plays as
+    /// activity, so such a row changes no catalog page.
+    fn played(&self) -> bool {
+        let (Some(before), Some(current)) = (&self.before, &self.current) else {
+            return false;
+        };
+        let (mut before, mut current) = (before.clone(), current.clone());
+        let (Some(prior), Some(state)) = (before.state(), current.state()) else {
+            return false;
+        };
+        state.play_count = prior.play_count;
+        state.last_played = prior.last_played;
+        !self.extra && current == before
+    }
+}
+
 /// The rows of one family this Write read or staged.
 pub(crate) struct Overlay<R> {
     order: Vec<i64>,
@@ -219,6 +236,10 @@ pub(crate) trait Resident: Row {
     /// Columns the Write keeps consistent: when a track stops being listed, and whether an
     /// album has a header.
     fn normalize(&mut self, _before: Option<&Self>, _extras: &Map<String, Value>) {}
+    /// The favorite, rating and plays the row's source reports, for rows that carry them.
+    fn state(&mut self) -> Option<&mut NativeState> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -914,9 +935,14 @@ impl<'a> Write<'a> {
         let snapshot = self.catalog.snapshot();
         let source_of = |key: i64| Track::resident_source(&snapshot, key);
         let mut tracks = BTreeMap::<Option<SourceKey>, Vec<TrackKey>>::new();
+        let mut played = Vec::new();
         for key in &self.tracks.order {
             let staged = &self.tracks.rows[key];
             if !staged.changed() {
+                continue;
+            }
+            if staged.played() {
+                played.push(TrackKey::from_raw(*key));
                 continue;
             }
             let mut sources = staged
@@ -997,7 +1023,9 @@ impl<'a> Write<'a> {
         scopes.extend(
             user.listened
                 .iter()
-                .map(|(track, _)| Scope::Listened { track: *track }),
+                .map(|(track, _)| *track)
+                .chain(played)
+                .map(|track| Scope::Listened { track }),
         );
         if !user.downloads.is_empty() {
             scopes.push(Scope::Downloads {
@@ -1134,7 +1162,8 @@ fn collect_sources<R: Resident>(
 ) {
     for key in &overlay.order {
         let staged = &overlay.rows[key];
-        if !staged.changed() {
+        // Plays the source reports for an album or artist follow the plays of its tracks.
+        if !staged.changed() || staged.played() {
             continue;
         }
         sources.extend(
@@ -1579,6 +1608,10 @@ impl Resident for Track {
             self.hidden_since = Some(chrono::Utc::now().timestamp());
         }
     }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
+    }
 }
 
 impl Resident for Album {
@@ -1611,6 +1644,10 @@ impl Resident for Album {
             self.input = !input.is_null();
         }
     }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
+    }
 }
 
 impl Resident for Artist {
@@ -1630,6 +1667,10 @@ impl Resident for Artist {
             .artists
             .get(key)
             .and_then(|record| snapshot.source_key(record.source()))
+    }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
     }
 }
 

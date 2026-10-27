@@ -158,7 +158,7 @@ pub(crate) async fn physical(
     observed: Option<i64>,
     accessible: bool,
 ) -> LibraryResult<bool> {
-    let mut changed = false;
+    let mut listed = false;
     for page in files.chunks(128) {
         if page.is_empty() {
             continue;
@@ -170,14 +170,10 @@ pub(crate) async fn physical(
         } else {
             page
         };
-        let input = serde_json::to_string(page)?;
-        let same = "(old.size_bytes,old.mtime_ns,old.revision) IS(json_extract(input.file,'$.size_bytes'),json_extract(input.file,'$.mtime_ns'),json_extract(input.file,'$.revision'))";
-        let mut changed_paths:std::collections::BTreeSet<String>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH input AS(SELECT json_extract(value,'$[0]') file FROM json_each(?2)) SELECT json_extract(input.file,'$.path') FROM input LEFT JOIN local_files old ON old.source_key=?1 AND old.path=json_extract(input.file,'$.path') WHERE coalesce(old.observed_stamp,0)<=coalesce(?3,0) AND(old.path IS NULL OR(old.root,old.relative_path,old.kind,old.size_bytes,old.mtime_ns,old.device_id,old.inode,old.native_id,old.revision,old.picture_index,old.artist_pictures,old.parse_version,old.state) IS NOT(json_extract(input.file,'$.root'),json_extract(input.file,'$.relative_path'),json_extract(input.file,'$.kind'),json_extract(input.file,'$.size_bytes'),json_extract(input.file,'$.mtime_ns'),json_extract(input.file,'$.device_id'),json_extract(input.file,'$.inode'),json_extract(input.file,'$.native_id'),json_extract(input.file,'$.revision'),CASE WHEN json_extract(input.file,'$.artist_pictures') IS NULL AND {same} THEN old.picture_index ELSE json_extract(input.file,'$.picture_index') END,CASE WHEN {same} THEN coalesce(json_extract(input.file,'$.artist_pictures'),old.artist_pictures) ELSE json_extract(input.file,'$.artist_pictures') END,CASE WHEN json_extract(input.file,'$.state')='observed' AND {same} THEN old.parse_version ELSE json_extract(input.file,'$.parse_version') END,CASE WHEN json_extract(input.file,'$.state')='observed' AND {same} THEN old.state ELSE json_extract(input.file,'$.state') END) OR(json_extract(input.file,'$.state') IN('accepted','rejected') AND(json_remove(old.parsed_stamp,'$[4]') IS NOT json_array(json_extract(input.file,'$.size_bytes'),json_extract(input.file,'$.mtime_ns'),json_extract(input.file,'$.revision'),json_extract(input.file,'$.parse_version')) OR(old.kind='directory' AND json_extract(old.parsed_stamp,'$[4]') IS NOT old.observed_stamp))))")))
-            .bind(source).bind(input).bind(observed).fetch_all(&mut *connection).await?.into_iter().collect();
-        changed |= !changed_paths.is_empty()
-            && page
-                .iter()
-                .any(|(file, _)| file.kind == crate::LocalFileKind::Directory);
+        // Folder pages list directories by path; a new or moved directory changes them, its
+        // stamps do not.
+        listed |= sqlx::query_scalar::<_, bool>("WITH input AS(SELECT json_extract(value,'$[0]') file FROM json_each(?2)) SELECT EXISTS(SELECT 1 FROM input LEFT JOIN local_files old ON old.source_key=?1 AND old.path=json_extract(input.file,'$.path') WHERE json_extract(input.file,'$.kind')='directory' AND coalesce(old.observed_stamp,0)<=coalesce(?3,0) AND(old.path IS NULL OR(old.root,old.relative_path,old.kind) IS NOT(json_extract(input.file,'$.root'),json_extract(input.file,'$.relative_path'),json_extract(input.file,'$.kind'))))")
+            .bind(source).bind(serde_json::to_string(page)?).bind(observed).fetch_one(&mut *connection).await?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "INSERT INTO local_files(source_key,path,root,relative_path,parent_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state,observed_stamp,parsed_stamp) ",
         );
@@ -249,15 +245,12 @@ pub(crate) async fn physical(
         }
         let input = serde_json::to_string(&parsed)?;
         let expected = "WITH owners AS(SELECT json_extract(value,'$[0]') path,json_extract(value,'$[1]') dependencies,json_extract(value,'$[2]') accepted FROM json_each(?2)),expected AS(SELECT file.local_file_key,item.value dependency_path,CAST(item.key AS INTEGER) position FROM owners CROSS JOIN local_files file ON file.source_key=?1 AND file.path=owners.path AND file.observed_stamp<=?3 CROSS JOIN json_each(owners.dependencies) item) ";
-        let mut dependency_keys:Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("{expected} DELETE FROM local_file_dependencies AS current WHERE local_file_key IN(SELECT file.local_file_key FROM owners CROSS JOIN local_files file ON file.source_key=?1 AND file.path=owners.path WHERE file.observed_stamp<=?3) AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.local_file_key=current.local_file_key AND expected.dependency_path=current.dependency_path AND expected.position=current.position) RETURNING local_file_key"))).bind(source).bind(&input).bind(observed).fetch_all(&mut *connection).await?;
-        dependency_keys.extend(sqlx::query_scalar::<_,i64>(sqlx::AssertSqlSafe(format!("{expected} INSERT OR IGNORE INTO local_file_dependencies(local_file_key,dependency_path,position) SELECT local_file_key,dependency_path,position FROM expected RETURNING local_file_key"))).bind(source).bind(&input).bind(observed).fetch_all(&mut *connection).await?);
-        dependency_keys.extend(sqlx::query_scalar::<_,i64>("WITH accepted AS MATERIALIZED(SELECT edge.local_file_key,edge.dependency_path,CASE WHEN dependency.path IS NOT NULL THEN json_array(dependency.size_bytes,dependency.mtime_ns,dependency.revision) END inputs FROM json_each(?2) input CROSS JOIN local_files owner ON owner.source_key=?1 AND owner.path=json_extract(input.value,'$[0]') CROSS JOIN local_file_dependencies edge ON edge.local_file_key=owner.local_file_key LEFT JOIN local_files dependency ON dependency.source_key=?1 AND dependency.path=edge.dependency_path WHERE json_extract(input.value,'$[2]') AND owner.observed_stamp<=?3 AND(dependency.path IS NULL OR dependency.observed_stamp<=?3)) UPDATE local_file_dependencies AS edge SET accepted_inputs=accepted.inputs FROM accepted WHERE edge.local_file_key=accepted.local_file_key AND edge.dependency_path=accepted.dependency_path AND edge.accepted_inputs IS NOT accepted.inputs RETURNING local_file_key")
-            .bind(source).bind(&input).bind(observed).fetch_all(&mut *connection).await?);
-        if !dependency_keys.is_empty() {
-            changed_paths.extend(sqlx::query_scalar::<_,String>("SELECT path FROM local_files WHERE local_file_key IN(SELECT value FROM json_each(?1))").bind(serde_json::to_string(&dependency_keys)?).fetch_all(&mut *connection).await?);
-        }
+        sqlx::query(sqlx::AssertSqlSafe(format!("{expected} DELETE FROM local_file_dependencies AS current WHERE local_file_key IN(SELECT file.local_file_key FROM owners CROSS JOIN local_files file ON file.source_key=?1 AND file.path=owners.path WHERE file.observed_stamp<=?3) AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.local_file_key=current.local_file_key AND expected.dependency_path=current.dependency_path AND expected.position=current.position)"))).bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!("{expected} INSERT OR IGNORE INTO local_file_dependencies(local_file_key,dependency_path,position) SELECT local_file_key,dependency_path,position FROM expected"))).bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
+        sqlx::query("WITH accepted AS MATERIALIZED(SELECT edge.local_file_key,edge.dependency_path,CASE WHEN dependency.path IS NOT NULL THEN json_array(dependency.size_bytes,dependency.mtime_ns,dependency.revision) END inputs FROM json_each(?2) input CROSS JOIN local_files owner ON owner.source_key=?1 AND owner.path=json_extract(input.value,'$[0]') CROSS JOIN local_file_dependencies edge ON edge.local_file_key=owner.local_file_key LEFT JOIN local_files dependency ON dependency.source_key=?1 AND dependency.path=edge.dependency_path WHERE json_extract(input.value,'$[2]') AND owner.observed_stamp<=?3 AND(dependency.path IS NULL OR dependency.observed_stamp<=?3)) UPDATE local_file_dependencies AS edge SET accepted_inputs=accepted.inputs FROM accepted WHERE edge.local_file_key=accepted.local_file_key AND edge.dependency_path=accepted.dependency_path AND edge.accepted_inputs IS NOT accepted.inputs")
+            .bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
     }
-    Ok(changed)
+    Ok(listed)
 }
 
 async fn withdrawn_tracks(

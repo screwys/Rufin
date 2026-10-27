@@ -205,13 +205,14 @@ impl MemberRead {
             _ => CatalogSort::Title,
         })
     }
+    /// Whether plays change the rows an open page shows. An open Smart Playlist keeps the list
+    /// it opened with; plays change its members on the next visit.
     pub fn activity_sensitive(&self) -> bool {
-        self.activity
-            || self.effective_sort().activity_sensitive()
-            || matches!(
-                self.collection,
-                Collection::Smart { .. } | Collection::History { .. }
-            )
+        match self.collection {
+            Collection::Smart { .. } => false,
+            Collection::History { .. } => true,
+            _ => self.activity || self.effective_sort().activity_sensitive(),
+        }
     }
     pub fn selection(self) -> MemberSelection {
         MemberSelection::Members {

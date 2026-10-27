@@ -157,12 +157,12 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         .execute(&mut raw).await.unwrap();
     let catalog = super::support::reopen(catalog, &path).await;
     let mut changes = super::support::Changes::of(&catalog);
-    // Native favorites and play counts are columns of the track rows.
-    for (favorite, plays, changed) in [
-        (true, 1, true),
-        (true, 1, false),
-        (true, 2, true),
-        (false, 2, true),
+    // Native favorites show in catalog rows; native play counts alone are activity.
+    for (favorite, plays, changed, played) in [
+        (true, 1, true, true),
+        (true, 1, false, false),
+        (true, 2, false, true),
+        (false, 2, true, false),
     ] {
         changes.facts();
         let mut scan_observation = catalog.observe("source", None).await.unwrap();
@@ -234,7 +234,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
             publication.intersects(super::support::Shown::CATALOG),
             changed
         );
-        assert!(!publication.contains(super::support::Shown::STATS));
+        assert_eq!(publication.contains(super::support::Shown::STATS), played);
     }
 }
 
@@ -589,9 +589,9 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
         let mut scan_observation = catalog.observe("source", None).await.unwrap();
         track(&mut scan_observation, None, Some(5)).await;
         let update = changes.facts();
-        // Server play counts are columns of the track rows.
-        assert_eq!(update.intersects(super::support::Shown::CATALOG), changed);
-        assert!(!update.contains(super::support::Shown::STATS));
+        // Server play counts are activity, not catalog rows.
+        assert!(!update.intersects(super::support::Shown::CATALOG));
+        assert_eq!(update.contains(super::support::Shown::STATS), changed);
         let cancellation = ReadCancellation::new();
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         assert_eq!(

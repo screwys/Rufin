@@ -1865,11 +1865,21 @@ mod tests {
                         "unchanged native data stays quiet"
                     );
                 } else {
-                    let update = crate::published(&mut updates)
-                        .expect("changed user data must publish")
-                        .1;
-                    // Server favorites and play counts are track columns.
-                    assert!(update.intersects(sources::Shown::CATALOG));
+                    let mut shown = sources::Shown::default();
+                    while let Ok(change) = updates.try_recv() {
+                        for (_, part) in sources::Shown::of(&change) {
+                            shown |= part;
+                        }
+                    }
+                    // Server favorites show in catalog rows; server plays are activity.
+                    assert_eq!(
+                        shown.contains(sources::Shown::CATALOG),
+                        prior.state.favorite != favorite
+                    );
+                    assert_eq!(
+                        shown.contains(sources::Shown::STATS),
+                        prior.state.favorite == favorite
+                    );
                 }
                 let after = catalog.track(&(&uri), &cancel).await.unwrap().unwrap();
                 assert_eq!(after.state.favorite, favorite);

@@ -481,13 +481,14 @@ mod tests {
                     .await
                     .is_err()
             );
-            let update = crate::published(&mut updates).expect("catalog update").1;
-            // A server play count is a track column.
-            assert!(update.intersects(sources::Shown::CATALOG));
-            assert!(
-                crate::published(&mut updates).is_none(),
-                "one catalog notification after partial failure"
-            );
+            let mut shown = sources::Shown::default();
+            while let Ok(change) = updates.try_recv() {
+                for (_, part) in sources::Shown::of(&change) {
+                    shown |= part;
+                }
+            }
+            // A server play count is activity, kept after the partial failure.
+            assert_eq!(shown, sources::Shown::STATS);
             assert_eq!(
                 catalog
                     .tracks_by_uris(std::slice::from_ref(&track.media_uri), &cancellation)

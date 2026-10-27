@@ -435,12 +435,16 @@ pub fn supports_downloaded_filter(route: &Route, category: CollectionCategory) -
     ) && category == CollectionCategory::Tracks
 }
 
+/// Whether plays change what an open route shows. An open Smart Playlist keeps the list it
+/// opened with; plays change its members on the next visit.
 pub fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
+    if matches!(route, Route::SmartPlaylistDetail(_)) {
+        return false;
+    }
     matches!(
         route,
         Route::Home
             | Route::SmartPlaylists
-            | Route::SmartPlaylistDetail(_)
             | Route::PlaylistFolder { smart: true, .. }
             | Route::History
     ) || settings.sort_key.catalog_sort().activity_sensitive()
