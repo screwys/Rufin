@@ -11,6 +11,7 @@ pub mod connect;
 pub mod detail_links;
 pub mod diagnostics;
 mod loudness;
+pub mod page;
 pub mod paths;
 pub mod playback;
 pub mod radio;

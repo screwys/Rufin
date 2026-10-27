@@ -2,18 +2,15 @@ use super::*;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    pub fn activity_sensitive(&self) -> bool {
-        let settings = self.settings.load();
-        let display = settings.library_list(library_list_key(&self.route, self.category));
-        rufin_core::browse::uses_activity(&self.route, &display)
-            || self.sort.catalog_sort().activity_sensitive()
-            || (matches!(
-                self.route,
-                Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
-            ) && rufin_core::browse::uses_activity(
-                &self.route,
-                &settings.library_list(LibraryListKey::ArtistTracks),
-            ))
+    /// Whether a committed change means the page reads again.
+    pub fn refresh(&self, publication: rufin_core::runtime::CatalogPublication) -> bool {
+        rufin_core::page::refresh(
+            &self.source,
+            &self.route,
+            self.selected.as_ref(),
+            &self.open_options(),
+            &publication,
+        ) != rufin_core::page::Refresh::Nothing
     }
 
     pub fn context_id(&self) -> String {
@@ -91,33 +88,15 @@ impl AndroidBrowseQuery {
     pub async fn section_positions(
         self: Arc<Self>,
     ) -> Result<Vec<AndroidScrollSection>, AndroidError> {
-        if self.album_detail_layout() || matches!(self.route, Route::History) {
-            return Ok(Vec::new());
-        }
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let sections = if let OpenedCollection::Folders(page) =
-                self.opened(&cancel).await.map_err(error)?
-            {
-                page.projection
-                    .sections(
-                        &self.catalog,
-                        self.selected().source_key,
-                        &page.read,
-                        &cancel,
-                    )
-                    .await
-            } else if let Some(read) = self.members(&cancel).await.map_err(error)? {
-                read.sections(&self.catalog, &cancel).await
-            } else if let Some(read) = self.list(&cancel).await.map_err(error)? {
-                if self.artist_release_identity().is_some() {
-                    return Ok(Vec::new());
-                }
-                read.sections(&self.catalog, &cancel).await
-            } else {
-                Ok(Vec::new())
-            }
-            .map_err(error)?;
+            let sections = self
+                .opened_page(&cancel)
+                .await
+                .map_err(error)?
+                .sections(&cancel)
+                .await
+                .map_err(error)?;
             Ok(sections
                 .into_iter()
                 .map(|section| AndroidScrollSection {
@@ -173,11 +152,11 @@ impl AndroidBrowseQuery {
     pub async fn count(self: Arc<Self>) -> Result<u64, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let opened = self.opened(&cancel).await.map_err(error)?;
-            let count = if matches!(opened, OpenedCollection::Home(_)) {
+            let page = self.opened_page(&cancel).await.map_err(error)?;
+            let count = if matches!(page.opened(), OpenedCollection::Home(_)) {
                 self.home_rows(&cancel).await.map_err(error)?.len()
             } else {
-                self.opened_count(opened)
+                page.len()
             };
             Ok(count as u64)
         })
@@ -275,7 +254,9 @@ impl AndroidBrowseQuery {
                             self.album_tracks.descending
                         ),
                     )
-                } else if let Some(query) = self.members(&cancel).await.map_err(error)? {
+                } else if let Some(query) =
+                    self.opened_page(&cancel).await.map_err(error)?.members()
+                {
                     let entry = if matches!(query.collection, Collection::Playlist(_)) {
                         Some(serde_json::from_str(&row_key).map_err(error)?)
                     } else {
@@ -284,7 +265,7 @@ impl AndroidBrowseQuery {
                     (
                         query.clone().selection(),
                         if let OpenedCollection::Folders(page) =
-                            self.opened(&cancel).await.map_err(error)?
+                            self.opened_page(&cancel).await.map_err(error)?.opened()
                         {
                             index.saturating_sub(page.folder_count)
                         } else {

@@ -12,7 +12,6 @@ use crate::preferences::dialogs::release_notes::apply_release_update;
 use crate::shell::playlist_picker::refresh_context_playlist_picker;
 use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
-use gtk_widgets::route::Route;
 use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{
     DiscoveryStatus, DiscoveryUpdate, SourceOperation, SourceProgress,
@@ -41,6 +40,15 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     glib::spawn_future_local(async move {
         while let Ok(event) = source.recv().await {
             apply_source_event(&event_shell, event);
+        }
+    });
+
+    let event_shell = Rc::clone(shell);
+    let mut publications = shell.products.source.catalog_publications();
+    glib::spawn_future_local(async move {
+        while let Some(publication) = rufin_core::source::next_publication(&mut publications).await
+        {
+            apply_catalog_publication(&event_shell, publication);
         }
     });
 
@@ -136,7 +144,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
             }
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
-        SourceEvent::CatalogPublished(publication) => apply_catalog_publication(shell, publication),
         SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
         SourceEvent::PlaylistSourceMismatch(source_id) => {
             let source_name = shell
@@ -205,7 +212,6 @@ fn apply_selected_source(
 }
 
 fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication) {
-    let mut scope_changed = false;
     if matches!(
         publication.change,
         CatalogChange::Broad | CatalogChange::Scope
@@ -217,124 +223,26 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
     {
         {
             let mut session = shell.selected_ui.session_mut().unwrap();
-            scope_changed = session.library.music_folder_key != selected.music_folder_key
-                || session.library.music_folder_object_id != selected.music_folder_object_id;
             session.library.music_folder_key = selected.music_folder_key;
             session.library.music_folder_object_id = selected.music_folder_object_id.clone();
             session.library.music_folders = Arc::clone(&selected.music_folders);
         }
         shell.search_session.set_selected(Some(selected));
     }
-    for state in publication.favorites {
+    for state in &publication.favorites {
         shell.apply_favorite_state(&state.target, state.favorite);
-        shell.apply_favorite_state_to_mounted_route(state);
+        shell.apply_favorite_state_to_mounted_route(state.clone());
     }
-    let current = shell.navigation.routes.borrow().current().clone();
-    let affects_current = publication.source_key.is_none()
-        || shell
-            .selected_library()
-            .as_deref()
-            .is_some_and(|selected| Some(selected.source_key) == publication.source_key);
-    let source_scoped =
-        current.requires_selected_source() && shell.route_uses_selected_source(&current);
-    match publication.change {
-        CatalogChange::Broad => {
-            refresh_context_playlist_picker(shell);
-            super::navigation::refresh_sidebar_pins(shell);
-            if !affects_current && source_scoped {
-                return;
-            }
-            if scope_changed && shell.route_uses_selected_source(&current) {
-                shell.replace_current_route_when_ready();
-            } else if current == Route::Home {
-                shell.refresh_mounted_home();
-            } else {
-                shell.refresh_mounted_catalog();
-            }
-        }
-        CatalogChange::Activity => {
-            if shell.settings.current.borrow().sidebar.pins_use_activity() {
-                super::navigation::refresh_sidebar_pins(shell);
-            }
-            if !affects_current && source_scoped {
-                return;
-            }
-            let settings = shell.settings.current.borrow();
-            let category = if current == Route::Favorites {
-                shell.navigation.favorite_category.get()
-            } else {
-                rufin_core::route::CollectionCategory::Tracks
-            };
-            let sensitive = [category, rufin_core::route::CollectionCategory::Albums]
-                .into_iter()
-                .take(
-                    if matches!(
-                        current,
-                        Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
-                    ) {
-                        2
-                    } else {
-                        1
-                    },
-                )
-                .any(|category| {
-                    rufin_core::browse::uses_activity(
-                        &current,
-                        &settings
-                            .library_list(rufin_core::browse::library_list_key(&current, category)),
-                    )
-                });
-            drop(settings);
-            if sensitive {
-                if current == Route::Home {
-                    shell.refresh_mounted_home();
-                } else {
-                    shell.refresh_mounted_catalog();
-                }
-            }
-        }
-        CatalogChange::Scope => {
-            if affects_current {
-                refresh_context_playlist_picker(shell);
-                if shell.route_uses_selected_source(&current) {
-                    shell.replace_current_route_when_ready();
-                }
-            }
-        }
-        // The hearts were set above.
-        CatalogChange::Favorites => {}
-        CatalogChange::Home => {
-            if affects_current && current == Route::Home {
-                shell.refresh_mounted_home();
-            }
-        }
-        CatalogChange::Playlists(playlist) => {
-            refresh_context_playlist_picker(shell);
-            super::navigation::refresh_sidebar_pins(shell);
-            if matches!(
-                current,
-                Route::Playlists | Route::SmartPlaylists | Route::PlaylistFolder { .. }
-            ) || (playlist.is_none() && matches!(current, Route::SmartPlaylistDetail(_)))
-                || matches!(current, Route::PlaylistDetail(key) if playlist.is_none_or(|playlist| playlist == key))
-            {
-                shell.refresh_mounted_catalog();
-            }
-        }
-        CatalogChange::Album(album) => {
-            super::navigation::refresh_sidebar_pins(shell);
-            if current == Route::AlbumDetail(album)
-                || matches!(
-                    current,
-                    Route::ArtistDetail(_)
-                        | Route::AlbumArtistDetail(_)
-                        | Route::ArtistDiscography(_)
-                        | Route::AlbumArtistDiscography(_)
-                )
-            {
-                shell.refresh_mounted_catalog();
-            }
-        }
+    if matches!(
+        publication.change,
+        CatalogChange::Broad | CatalogChange::Scope | CatalogChange::Playlists(_)
+    ) {
+        refresh_context_playlist_picker(shell);
     }
+    if rufin_core::page::pins_refresh(&shell.products.source, &publication) {
+        super::navigation::refresh_sidebar_pins(shell);
+    }
+    shell.refresh_mounted_route(&publication);
 }
 
 fn apply_source_notice(shell: &Rc<Shell>, notice: SourceNotice) {

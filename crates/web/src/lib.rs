@@ -978,11 +978,10 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         products.lyrics.current(),
         products.appearance.subscribe(),
         products.settings.sidebar_changes(),
-        products.source.catalog_changes(),
+        products.source.catalog_publications(),
         products.clone(),
         true,
         None,
-        rufin_core::runtime::CatalogRevision::default(),
     );
     let stream = futures_util::stream::unfold(
         receivers,
@@ -996,7 +995,6 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
             products,
             first,
             mut previous,
-            mut previous_catalog,
         )| async move {
             let value = if first {
                 let publication = playback.recv().await.ok()?;
@@ -1008,7 +1006,6 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                 );
                 value["appearance"] = json!(*appearance.borrow_and_update());
                 sidebar.borrow_and_update();
-                previous_catalog = catalog.borrow_and_update().clone();
                 value["pins_changed"] = json!(true);
                 value
             } else {
@@ -1018,14 +1015,9 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)}) },
                     changed = appearance.changed() => { changed.ok()?; json!({"appearance":*appearance.borrow_and_update()}) },
                     changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
-                    changed = catalog.changed() => {
-                        changed.ok()?;
-                        let revision = catalog.borrow_and_update().clone();
-                        let changed = revision.catalog != previous_catalog.catalog;
-                        let activity = revision.activity != previous_catalog.activity;
-                        let value = json!({"catalog_acquired": changed && matches!(revision.change, Some(rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites)), "pins_changed":changed || (activity && products.settings.load().sidebar.pins_use_activity()), "activity_changed":activity});
-                        previous_catalog = revision;
-                        value
+                    publication = rufin_core::source::next_publication(&mut catalog) => {
+                        let publication = publication?;
+                        json!({"catalog_acquired": matches!(publication.change, rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites), "pins_changed": rufin_core::page::pins_refresh(&products.source, &publication), "activity_changed": publication.change == rufin_core::runtime::CatalogChange::Activity})
                     },
                 }
             };
@@ -1034,16 +1026,8 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     "event: update\ndata: {value}\n\n"
                 )))),
                 (
-                    playback,
-                    source,
-                    lyrics,
-                    appearance,
-                    sidebar,
-                    catalog,
-                    products,
-                    false,
+                    playback, source, lyrics, appearance, sidebar, catalog, products, false,
                     previous,
-                    previous_catalog,
                 ),
             ))
         },

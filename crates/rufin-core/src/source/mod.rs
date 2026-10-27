@@ -117,6 +117,7 @@ pub(crate) struct Shared {
     outputs: SourceOutputs,
     operation: tokio::sync::watch::Sender<SourceOperation>,
     catalog_changed: tokio::sync::watch::Sender<CatalogRevision>,
+    publications: tokio::sync::broadcast::Sender<CatalogPublication>,
     configuration_changed: tokio::sync::watch::Sender<()>,
     discovery: tokio::sync::watch::Sender<Option<DiscoveryUpdate>>,
     selected: Mutex<Option<SelectedLibrary>>,
@@ -209,15 +210,17 @@ impl Shared {
         ) {
             self.configuration_changed.send_replace(());
         }
-        if let SourceEvent::CatalogPublished(publication) = &event
-            && publication.change != CatalogChange::Home
-        {
+        let _ = self.outputs.events.send(event).await;
+    }
+
+    /// Tells open pages and the rest of core what a committed change touched.
+    pub(crate) fn publish(&self, publication: CatalogPublication) {
+        if publication.change != CatalogChange::Home {
             self.catalog_changed.send_modify(|revision| {
                 if publication.change == CatalogChange::Activity {
                     revision.activity += 1;
                 } else {
                     revision.catalog += 1;
-                    revision.change = Some(publication.change.clone());
                 }
             });
             if matches!(
@@ -228,7 +231,7 @@ impl Shared {
                 playback.catalog_changed();
             }
         }
-        let _ = self.outputs.events.send(event).await;
+        let _ = self.publications.send(publication);
     }
 
     fn publish_operation(&self, operation: SourceOperation) {
@@ -454,6 +457,7 @@ impl SourceOwner {
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let shared = Arc::new(Shared {
             catalog_changed: tokio::sync::watch::channel(CatalogRevision::default()).0,
+            publications: tokio::sync::broadcast::channel(64).0,
             configuration_changed: tokio::sync::watch::channel(()).0,
             home_showcase_variation: home_variation,
             home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
@@ -656,13 +660,11 @@ impl SourceOwner {
                     .configured_sources(self.shared.selected().as_ref()),
             ))
             .await;
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: None,
-                favorites: Vec::new(),
-                change: CatalogChange::Broad,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: None,
+            favorites: Vec::new(),
+            change: CatalogChange::Broad,
+        });
         Ok(())
     }
 
@@ -1455,36 +1457,30 @@ impl SourceOwner {
             playback.rekey_tracks(pending.rekeys.into());
         }
         if pending.reloaded {
-            self.shared
-                .send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key: None,
-                    favorites: Vec::new(),
-                    change: CatalogChange::Broad,
-                }))
-                .await;
+            self.shared.publish(CatalogPublication {
+                source_key: None,
+                favorites: Vec::new(),
+                change: CatalogChange::Broad,
+            });
         }
         if !pending.states.is_empty() {
             self.publish_favorites(pending.states).await;
         }
         if pending.activity {
-            self.shared
-                .send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key: None,
-                    favorites: Vec::new(),
-                    change: CatalogChange::Activity,
-                }))
-                .await;
+            self.shared.publish(CatalogPublication {
+                source_key: None,
+                favorites: Vec::new(),
+                change: CatalogChange::Activity,
+            });
         }
         let mut playlists = pending.playlists;
         playlists.dedup();
         for playlist in playlists {
-            self.shared
-                .send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key: None,
-                    favorites: Vec::new(),
-                    change: CatalogChange::Playlists(playlist),
-                }))
-                .await;
+            self.shared.publish(CatalogPublication {
+                source_key: None,
+                favorites: Vec::new(),
+                change: CatalogChange::Playlists(playlist),
+            });
         }
         let mut sources = pending.sources;
         for source in pending.home {
@@ -1506,19 +1502,17 @@ impl SourceOwner {
         } else {
             CatalogChange::Favorites
         };
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: self.shared.selected().map(|selected| selected.source_key),
-                favorites: states
-                    .into_iter()
-                    .map(|state| crate::runtime::FavoriteState {
-                        target: state.target,
-                        favorite: state.favorite,
-                    })
-                    .collect(),
-                change,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: self.shared.selected().map(|selected| selected.source_key),
+            favorites: states
+                .into_iter()
+                .map(|state| crate::runtime::FavoriteState {
+                    target: state.target,
+                    favorite: state.favorite,
+                })
+                .collect(),
+            change,
+        });
     }
 
     /// One source's changes: its side effects, then the publication clients refresh for.
@@ -1586,13 +1580,11 @@ impl SourceOwner {
                 ))
                 .await;
         }
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: Some(source),
-                favorites: Vec::new(),
-                change,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: Some(source),
+            favorites: Vec::new(),
+            change,
+        });
     }
 
     pub(crate) async fn artwork_invalidated(&self, source_id: &SourceId, change: CatalogChange) {
@@ -1609,13 +1601,11 @@ impl SourceOwner {
                 return;
             }
         };
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: Some(source),
-                favorites: Vec::new(),
-                change,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: Some(source),
+            favorites: Vec::new(),
+            change,
+        });
     }
 
     async fn check_remote_freshness(&self, source_id: &SourceId, source: &Arc<Source>) {
@@ -1625,23 +1615,19 @@ impl SourceOwner {
     }
 
     async fn publish_catalog(&self, selected: &SelectedLibrary, change: CatalogChange) {
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: Some(selected.source_key),
-                favorites: Vec::new(),
-                change,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: Some(selected.source_key),
+            favorites: Vec::new(),
+            change,
+        });
     }
 
     pub(crate) async fn publish_current_catalog(&self, change: CatalogChange) {
-        self.shared
-            .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: self.shared.selected().map(|selected| selected.source_key),
-                favorites: Vec::new(),
-                change,
-            }))
-            .await;
+        self.shared.publish(CatalogPublication {
+            source_key: self.shared.selected().map(|selected| selected.source_key),
+            favorites: Vec::new(),
+            change,
+        });
     }
 }
 
@@ -1888,8 +1874,12 @@ impl SourceOwner {
         self.shared.operation.subscribe()
     }
 
-    pub fn catalog_changes(&self) -> tokio::sync::watch::Receiver<CatalogRevision> {
+    pub(crate) fn catalog_changes(&self) -> tokio::sync::watch::Receiver<CatalogRevision> {
         self.shared.catalog_changed.subscribe()
+    }
+
+    pub fn catalog_publications(&self) -> tokio::sync::broadcast::Receiver<CatalogPublication> {
+        self.shared.publications.subscribe()
     }
 
     pub fn configuration_changes(&self) -> tokio::sync::watch::Receiver<()> {
@@ -3017,14 +3007,11 @@ impl SourceOwner {
                     .shared
                     .send(SourceEvent::Configured(owner.list_sources()))
                     .await;
-                owner
-                    .shared
-                    .send(SourceEvent::CatalogPublished(CatalogPublication {
-                        source_key: Some(source_key),
-                        favorites: Vec::new(),
-                        change: CatalogChange::Scope,
-                    }))
-                    .await;
+                owner.shared.publish(CatalogPublication {
+                    source_key: Some(source_key),
+                    favorites: Vec::new(),
+                    change: CatalogChange::Scope,
+                });
                 let downloads_owner = owner.clone();
                 owner.shared.runtime.spawn(async move {
                     if let Err(error) = downloads_owner
@@ -3950,6 +3937,7 @@ mod source_tests {
                 home,
             }
         };
+        let mut publications = owner.catalog_publications();
         for (metadata, activity, artwork, selected, visible) in [
             (false, false, false, true, false),
             (false, false, true, true, false),
@@ -3961,6 +3949,7 @@ mod source_tests {
             owner.publish_operation(SourceOperation::Idle).await;
             *owner.shared.selected.lock().unwrap() = selected.then(|| selected_library.clone());
             while receiver.try_recv().is_ok() {}
+            while publications.try_recv().is_ok() {}
             let configuration = owner.configuration_changes();
             let catalog = owner.catalog_changes();
             owner
@@ -3979,14 +3968,13 @@ mod source_tests {
                 metadata || artwork || activity
             );
             let mut refreshing = false;
-            let mut published = false;
             while let Ok(event) = receiver.try_recv() {
                 refreshing |= matches!(
                     event,
                     SourceEvent::Operation(SourceOperation::Refreshing { .. })
                 );
-                published |= matches!(event, SourceEvent::CatalogPublished(_));
             }
+            let published = publications.try_recv().is_ok();
             assert_eq!(refreshing, visible);
             assert_eq!(published, metadata || artwork || activity);
         }
@@ -4004,8 +3992,7 @@ mod source_tests {
         let revision = changes.borrow_and_update().clone();
         assert_eq!(revision.catalog, before.catalog + 1);
         assert_eq!(revision.activity, before.activity + 1);
-        assert_eq!(revision.change, Some(CatalogChange::Broad));
-        while receiver.try_recv().is_ok() {}
+        while publications.try_recv().is_ok() {}
         for (artwork, home, expected) in [
             (false, true, CatalogChange::Broad),
             (true, false, CatalogChange::Broad),
@@ -4018,12 +4005,7 @@ mod source_tests {
                     facts(false, false, true, artwork, home),
                 )
                 .await;
-            // Pictures are catalog rows, so they also refresh the source list first.
-            let publication = loop {
-                if let SourceEvent::CatalogPublished(publication) = receiver.recv().await.unwrap() {
-                    break publication;
-                }
-            };
+            let publication = publications.recv().await.unwrap();
             assert_eq!(publication.change, expected);
         }
         let mut catalog = owner.catalog_changes();
@@ -4046,9 +4028,7 @@ mod source_tests {
             .record_listen(&listen, None, &[])
             .await
             .unwrap();
-        let SourceEvent::CatalogPublished(publication) = receiver.recv().await.unwrap() else {
-            panic!("accepted direct listen publishes activity");
-        };
+        let publication = publications.recv().await.unwrap();
         assert_eq!(publication.source_key, None);
         assert_eq!(publication.change, CatalogChange::Activity);
         let revision = catalog.borrow_and_update().clone();
@@ -4061,7 +4041,7 @@ mod source_tests {
             .await
             .unwrap();
         assert!(!catalog.has_changed().unwrap());
-        assert!(receiver.try_recv().is_err());
+        assert!(publications.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -4324,6 +4304,7 @@ mod source_tests {
                     discovery: async_channel::unbounded().0,
                 },
             );
+            let mut publications = owner.catalog_publications();
             owner.shared.load_source_counts().await.unwrap();
             // An album is listed only while it has a listed track.
             assert_eq!(
@@ -4464,10 +4445,10 @@ mod source_tests {
             }
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
-                    if let SourceEvent::CatalogPublished(CatalogPublication {
+                    if let CatalogPublication {
                         change: CatalogChange::Broad,
                         ..
-                    }) = receiver.recv().await.unwrap()
+                    } = publications.recv().await.unwrap()
                     {
                         assert_eq!(
                             owner.selected_library().unwrap().music_folders[0].object_id,
@@ -4547,8 +4528,8 @@ mod source_tests {
                 }
                 tokio::time::timeout(Duration::from_secs(2), async {
                     loop {
-                        if matches!(receiver.recv().await.unwrap(),
-                            SourceEvent::CatalogPublished(CatalogPublication { source_key: Some(key), .. })
+                        if matches!(publications.recv().await.unwrap(),
+                            CatalogPublication { source_key: Some(key), .. }
                             if key == source_key)
                         {
                             break;
@@ -4989,26 +4970,36 @@ impl SourceOwner {
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct SourceCatalogSubscription {
-    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<CatalogRevision>>,
+    publications: tokio::sync::Mutex<tokio::sync::broadcast::Receiver<CatalogPublication>>,
 }
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {
     pub fn subscribe_catalog(&self) -> Arc<SourceCatalogSubscription> {
-        let mut changes = self.catalog_changes();
-        changes.mark_changed();
         Arc::new(SourceCatalogSubscription {
-            changes: tokio::sync::Mutex::new(changes),
+            publications: tokio::sync::Mutex::new(self.catalog_publications()),
         })
     }
 }
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceCatalogSubscription {
-    pub async fn next(&self) -> sources::SourceResult<CatalogRevision> {
-        let mut changes = self.changes.lock().await;
-        changes
-            .changed()
+    pub async fn next(&self) -> sources::SourceResult<CatalogPublication> {
+        next_publication(&mut *self.publications.lock().await)
             .await
-            .map_err(|error| SourceError::Other(error.to_string()))?;
-        Ok(changes.borrow_and_update().clone())
+            .ok_or_else(|| SourceError::Other("The library closed".into()))
+    }
+}
+
+/// The next committed change; a reader that fell behind hears of a broad one.
+pub async fn next_publication(
+    publications: &mut tokio::sync::broadcast::Receiver<CatalogPublication>,
+) -> Option<CatalogPublication> {
+    match publications.recv().await {
+        Ok(publication) => Some(publication),
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some(CatalogPublication {
+            source_key: None,
+            favorites: Vec::new(),
+            change: CatalogChange::Broad,
+        }),
+        Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
     }
 }

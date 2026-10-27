@@ -57,6 +57,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var searchText by mutableStateOf("")
     var searchMode by mutableStateOf(SearchMode.TITLE)
     private var searchSubmission by mutableIntStateOf(0)
+    private var searchChanges by mutableIntStateOf(0)
     var searchRows by mutableStateOf<List<BrowseItem>>(emptyList())
         private set
     var recentSearchRows by mutableStateOf<List<BrowseItem>>(emptyList())
@@ -101,7 +102,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         ?.let { BrowseLocation(it.route, it.title, it.id, optionsFor(it.id)) }
 
     private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
-        val library: AndroidLibrary?, val source: ConfiguredSources?, val revision: ULong?, val submission: Int)
+        val library: AndroidLibrary?, val source: ConfiguredSources?, val changes: Int, val submission: Int)
 
     fun submitSearch() {
         if (searchMode == SearchMode.LYRICS) searchSubmission++
@@ -131,10 +132,15 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                 finally { library = null; bridge?.destroy() }
             }
         }
+        scope.launch(Dispatchers.Default) {
+            connection.catalogPublications.collect { publication ->
+                if (library?.searchRefresh(searchMode, publication) == true) searchChanges++
+            }
+        }
         scope.launch {
             var submitted = 0
             snapshotFlow { SearchContext(section, searchText, searchMode, library,
-                if (searchMode == SearchMode.TITLE) connection.sources else null, connection.catalogRevision?.catalog, searchSubmission) }
+                if (searchMode == SearchMode.TITLE) connection.sources else null, searchChanges, searchSubmission) }
                 .debounce { if (it.submission != submitted) 0L else 250L }.collectLatest { context ->
                     val explicit = context.submission != submitted
                     submitted = context.submission

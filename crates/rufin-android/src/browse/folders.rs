@@ -1,7 +1,7 @@
 use super::*;
 
 impl AndroidBrowseQuery {
-    fn folder_row(
+    pub(super) fn folder_row(
         &self,
         id: String,
         name: String,
@@ -24,68 +24,5 @@ impl AndroidBrowseQuery {
                 artwork: artwork_identity,
             })
         }
-    }
-
-    pub(super) async fn folder_rows(
-        &self,
-        page: &rufin_core::browse::FolderPage,
-        offset: usize,
-        limit: usize,
-        cancel: &ReadCancellation,
-    ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let folders = if offset < page.folder_count {
-            page.projection
-                .child_page(
-                    &self.catalog,
-                    self.selected().source_key,
-                    &page.read,
-                    offset..offset.saturating_add(limit),
-                    &cancel,
-                )
-                .await?
-                .1
-        } else {
-            Vec::new()
-        };
-        let mut rows = folders
-            .into_iter()
-            .map(|folder| self.folder_row(folder.object_id, folder.name, folder.artwork_binding))
-            .collect::<Vec<_>>();
-        rows.extend(
-            self.member_rows(
-                page.read
-                    .rows(
-                        &self.catalog,
-                        offset.saturating_sub(page.folder_count),
-                        limit.saturating_sub(rows.len()),
-                        &cancel,
-                    )
-                    .await?,
-                offset.saturating_sub(page.folder_count),
-            ),
-        );
-        Ok(rows)
-    }
-
-    pub(super) fn folder_seed(
-        &self,
-        page: &rufin_core::browse::FolderPage,
-    ) -> Vec<AndroidBrowseRow> {
-        let mut rows = page
-            .folders
-            .iter()
-            .map(|folder| {
-                self.folder_row(
-                    folder.object_id.clone(),
-                    folder.name.clone(),
-                    folder.artwork_binding.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        rows.extend(self.member_rows(
-            page.tracks.clone(),
-            page.first_row_position.saturating_sub(page.folder_count),
-        ));
-        rows
     }
 }

@@ -14,8 +14,9 @@ pub use records::{
     AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
 };
 
-use library::{Collection, ListRead, MemberRead, MemberRow, MemberSelection, ReadCancellation};
-use rufin_core::browse::{DetailContent, OpenOptions, OpenedCollection, library_list_key};
+use library::{Collection, MemberRead, MemberRow, MemberSelection, ReadCancellation};
+use rufin_core::browse::{OpenOptions, OpenedCollection, library_list_key};
+use rufin_core::page::{Page, Row};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
     runtime::SelectedLibrary,
@@ -181,7 +182,7 @@ pub struct AndroidBrowseQuery {
     artist_tracks: LibraryListSettings,
     source: rufin_core::runtime::SourceHandle,
     settings: rufin_core::SettingsHandle,
-    opened: tokio::sync::OnceCell<OpenedCollection>,
+    page: tokio::sync::OnceCell<Page>,
 }
 
 fn search_rows(mut rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
@@ -204,16 +205,6 @@ impl AndroidBrowseQuery {
         self.selected
             .as_ref()
             .expect("Source-scoped query has a selected library")
-    }
-
-    fn artist_release_identity(&self) -> Option<(&str, bool)> {
-        match &self.route {
-            Route::ArtistDiscography(uri) => Some((uri, false)),
-            Route::AlbumArtistDiscography(uri) => Some((uri, true)),
-            Route::ArtistDetail(uri) => Some((uri, false)),
-            Route::AlbumArtistDetail(uri) => Some((uri, true)),
-            _ => None,
-        }
     }
 
     fn detail_track_settings(&self) -> &LibraryListSettings {
@@ -241,61 +232,32 @@ impl AndroidBrowseQuery {
         self.display.layout == LibraryLayout::Detail
             && library_list_key(&self.route, self.category) == LibraryListKey::Albums
     }
-    async fn opened(&self, cancel: &ReadCancellation) -> library::LibraryResult<&OpenedCollection> {
-        self.opened
-            .get_or_try_init(|| async {
-                self.source
-                    .open_collection(
-                        &self.route,
-                        self.selected.as_ref(),
-                        &OpenOptions {
-                            category: self.category,
-                            filter: self.filter.clone(),
-                            sort: Some(self.sort),
-                            descending: Some(self.descending),
-                            favorites_only: self.favorites_only,
-                            downloaded_only: self.downloaded_only,
-                            history_current_only: self.history_current_only,
-                            smart_opened: self.smart_opened,
-                            ..Default::default()
-                        },
-                        library::RouteSeedWindow::top(),
-                        cancel,
-                    )
-                    .await
+    fn open_options(&self) -> OpenOptions {
+        OpenOptions {
+            category: self.category,
+            filter: self.filter.clone(),
+            sort: Some(self.sort),
+            descending: Some(self.descending),
+            favorites_only: self.favorites_only,
+            downloaded_only: self.downloaded_only,
+            history_current_only: self.history_current_only,
+            smart_opened: self.smart_opened,
+            ..Default::default()
+        }
+    }
+
+    async fn opened_page(&self, cancel: &ReadCancellation) -> library::LibraryResult<&Page> {
+        self.page
+            .get_or_try_init(|| {
+                self.source.open_page(
+                    self.route.clone(),
+                    self.selected.clone(),
+                    self.open_options(),
+                    library::RouteSeedWindow::top(),
+                    cancel,
+                )
             })
             .await
-    }
-
-    async fn members(
-        &self,
-        cancel: &ReadCancellation,
-    ) -> library::LibraryResult<Option<&MemberRead>> {
-        Ok(match self.opened(&cancel).await? {
-            OpenedCollection::Tracks(page)
-            | OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Tracks(page),
-                ..
-            })) => Some(&page.read),
-            OpenedCollection::Folders(page) => Some(&page.read),
-            _ => None,
-        })
-    }
-
-    async fn list(&self, cancel: &ReadCancellation) -> library::LibraryResult<Option<ListRead>> {
-        Ok(match self.opened(&cancel).await? {
-            OpenedCollection::Albums(page) => Some(page.read.clone()),
-            OpenedCollection::Artists { read, .. }
-            | OpenedCollection::Genres { read, .. }
-            | OpenedCollection::Moods { read, .. }
-            | OpenedCollection::Playlists { read, .. }
-            | OpenedCollection::SmartPlaylists { read, .. } => Some(read.clone()),
-            OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Releases { page, .. },
-                ..
-            })) => Some(page.query.clone()),
-            _ => None,
-        })
     }
 
     fn downloaded(&self) -> bool {
@@ -318,21 +280,11 @@ impl AndroidBrowseQuery {
     pub async fn selection(self: Arc<Self>) -> Result<Arc<MemberSelection>, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            if let Some(read) = self.members(&cancel).await.map_err(error)? {
-                let mut read = read.clone();
-                if !matches!(self.route, Route::Folders { .. }) {
-                    if !matches!(read.collection, Collection::Smart { .. }) {
-                        read.folder = None;
-                    }
-                    read.sort = None;
-                    read.descending = false;
-                }
-                return Ok(Arc::new(read.selection()));
-            }
-            self.list(&cancel)
+            self.opened_page(&cancel)
                 .await
                 .map_err(error)?
-                .map(|read| Arc::new(read.selection()))
+                .selection()
+                .map(Arc::new)
                 .ok_or_else(|| error("Choose a collection"))
         })
         .await

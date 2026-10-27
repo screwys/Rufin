@@ -2,7 +2,7 @@ use library::ReadCancellation;
 use sources::SourceId;
 
 use super::SourceOwner;
-use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
+use crate::runtime::{CatalogChange, CatalogPublication};
 
 impl SourceOwner {
     /// Pins every playlist of a remote source once, after its first successful refresh.
@@ -38,13 +38,11 @@ impl SourceOwner {
         });
         match imported {
             Ok(true) => {
-                self.shared
-                    .send(SourceEvent::CatalogPublished(CatalogPublication {
-                        source_key: None,
-                        favorites: Vec::new(),
-                        change: CatalogChange::Playlists(None),
-                    }))
-                    .await;
+                self.shared.publish(CatalogPublication {
+                    source_key: None,
+                    favorites: Vec::new(),
+                    change: CatalogChange::Playlists(None),
+                });
             }
             Ok(false) => {}
             Err(error) => self.shared.warn_nonfatal(&error),

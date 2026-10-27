@@ -13,7 +13,7 @@ use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation,
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    runtime::{CatalogChange, CatalogPublication, SourceEvent},
+    runtime::{CatalogChange, CatalogPublication},
     source::{SourceOwner, string_error},
 };
 
@@ -1159,12 +1159,9 @@ pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
 }
 
 async fn publish(owner: &SourceOwner, playlist: Option<PlaylistKey>) {
-    owner
-        .shared
-        .send(SourceEvent::CatalogPublished(CatalogPublication {
-            source_key: None,
-            favorites: Vec::new(),
-            change: CatalogChange::Playlists(playlist),
-        }))
-        .await;
+    owner.shared.publish(CatalogPublication {
+        source_key: None,
+        favorites: Vec::new(),
+        change: CatalogChange::Playlists(playlist),
+    });
 }

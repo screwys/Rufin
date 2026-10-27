@@ -17,9 +17,10 @@ pub use backup::{BackupHandle, BackupPreview, BackupSettings};
 pub use diagnostics::DiagnosticsHandle;
 pub use downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use events::ProductReceivers;
+pub(crate) use inputs::CatalogRevision;
 pub use inputs::{
-    CatalogChange, CatalogPublication, CatalogRevision, FavoriteState, RuntimeInputs,
-    SelectedLibrary, SourceEvent, SourceNotice, SourceNoticeKind, VisualizerPublication,
+    CatalogChange, CatalogPublication, FavoriteState, RuntimeInputs, SelectedLibrary, SourceEvent,
+    SourceNotice, SourceNoticeKind, VisualizerPublication,
 };
 pub use release_update::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};
 pub use scrobbling::{

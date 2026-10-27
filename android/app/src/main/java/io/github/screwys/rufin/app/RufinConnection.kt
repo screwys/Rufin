@@ -1,7 +1,7 @@
 package io.github.screwys.rufin.app
 
 import io.github.screwys.rufin.shared.rufin_core.Route
-import io.github.screwys.rufin.shared.rufin_core.CatalogRevision
+import io.github.screwys.rufin.shared.rufin_core.CatalogPublication
 import io.github.screwys.rufin.shared.library.sourceIdForUri
 
 import io.github.screwys.rufin.browse.BrowseConnection
@@ -56,6 +56,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     /** Favorites as they were committed; rows that show them update in place. */
     private val states = MutableSharedFlow<FavoriteState>(extraBufferCapacity = 32)
+    private val publications = MutableSharedFlow<CatalogPublication>(extraBufferCapacity = 64)
+    /** Committed library changes; each page asks its query whether one touches it. */
+    internal val catalogPublications = publications.asSharedFlow()
     internal val favoriteStates = states.asSharedFlow()
     internal var overviewExportName by mutableStateOf<String?>(null)
         private set
@@ -99,7 +102,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     var pendingActions by mutableIntStateOf(0)
         private set
-    var catalogRevision by mutableStateOf<CatalogRevision?>(null)
+    var catalogChanges by mutableLongStateOf(0L)
         private set
     var sourceOperation by mutableStateOf<SourceOperation>(SourceOperation.Idle)
         private set
@@ -168,15 +171,12 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 try {
                     sources = withContext(Dispatchers.Default) { sourceChanges.next() }
                     sourceOperation = withContext(Dispatchers.Default) { operations.next() }
-                    catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
                     ready = true
                     coroutineScope {
                         launch { connected.playbackNotices.collect { showFeedback(it) } }
                         launch {
                             while (isActive) {
-                                val event = withContext(Dispatchers.Default) { events.next() }
-                                event.favorites.forEach { states.emit(it) }
-                                event.notice?.let { showFeedback(it) }
+                                showFeedback(withContext(Dispatchers.Default) { events.next() })
                             }
                         }
                         launch {
@@ -186,7 +186,10 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                         }
                         launch {
                             while (isActive) {
-                                catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
+                                val publication = withContext(Dispatchers.Default) { catalog.next() }
+                                publication.favorites.forEach { states.emit(it) }
+                                catalogChanges++
+                                publications.emit(publication)
                             }
                         }
                         while (isActive) {

@@ -36,9 +36,10 @@ impl AndroidLibrary {
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             let mut read = query
-                .members(&cancel)
+                .opened_page(&cancel)
                 .await
                 .map_err(error)?
+                .members()
                 .expect("Folder query has members")
                 .clone();
             let total = read.count(&catalog, &cancel).await.map_err(error)? as u64;
@@ -136,7 +137,7 @@ impl AndroidLibrary {
             artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
             source: self.source.clone(),
             settings: self.settings.clone(),
-            opened: tokio::sync::OnceCell::new(),
+            page: tokio::sync::OnceCell::new(),
             filter,
             sort,
             descending,
@@ -624,8 +625,27 @@ impl AndroidLibrary {
         self.settings.set_pinned(pin, pinned).map_err(error)
     }
 
-    pub fn pins_use_activity(&self) -> bool {
-        self.settings.load().sidebar.pins_use_activity()
+    /// Whether a committed change can change the pins.
+    pub fn pins_refresh(&self, publication: rufin_core::runtime::CatalogPublication) -> bool {
+        rufin_core::page::pins_refresh(&self.source, &publication)
+    }
+
+    /// Whether a committed change means a search reads again.
+    pub fn search_refresh(
+        &self,
+        mode: library::SearchMode,
+        publication: rufin_core::runtime::CatalogPublication,
+    ) -> bool {
+        rufin_core::page::refresh(
+            &self.source,
+            &Route::Search,
+            None,
+            &OpenOptions {
+                search_mode: mode,
+                ..Default::default()
+            },
+            &publication,
+        ) != rufin_core::page::Refresh::Nothing
     }
 
     pub async fn pins(&self, offset: u64, limit: u32) -> Result<AndroidPinPage, AndroidError> {

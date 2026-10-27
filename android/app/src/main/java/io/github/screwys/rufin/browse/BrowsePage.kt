@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.CatalogRevision
 import io.github.screwys.rufin.shared.rufin_core.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
@@ -57,6 +56,8 @@ internal class BrowsePage(
     var loading by mutableStateOf(true)
         private set
     private var revision by mutableIntStateOf(0)
+    /** Committed library changes this page's query said it shows. */
+    private var changes by mutableIntStateOf(0)
     private var currentQuery by mutableStateOf<AndroidBrowseQuery?>(null)
     private var preparedPage by mutableStateOf<AndroidBrowsePage?>(null)
     private var preparedContext by mutableStateOf<PageContext?>(null)
@@ -90,7 +91,7 @@ internal class BrowsePage(
     }
 
     private data class PageContext(
-        val library: AndroidLibrary?, val sourceId: String?, val catalog: CatalogRevision?,
+        val library: AndroidLibrary?, val sourceId: String?, val changes: Int,
         val route: Route, val category: String, val filter: String, val sort: LibraryField?,
         val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
@@ -133,10 +134,12 @@ internal class BrowsePage(
     suspend fun observe(): Unit = withContext(Dispatchers.IO) { coroutineScope {
         val lifetime = coroutineContext
         fun sameContext(previous: PageContext?, current: PageContext?): Boolean =
-            previous != null && current != null && previous.copy(catalog = current.catalog) == current &&
-                previous.catalog?.catalog == current.catalog?.catalog &&
-                ((if (pins) browse.library?.pinsUseActivity() == false else currentQuery?.activitySensitive() == false) ||
-                    previous.catalog?.activity == current.catalog?.activity)
+            previous != null && previous == current
+        launch {
+            connection.catalogPublications.collect { publication ->
+                if (if (pins) browse.library?.pinsRefresh(publication) == true else currentQuery?.refresh(publication) == true) changes++
+            }
+        }
         var favoriteJob: Job? = null
         launch {
             snapshotFlow { Triple(parent?.active ?: active, browse.labelsVersion, currentQuery) }
@@ -167,7 +170,7 @@ internal class BrowsePage(
         }
         snapshotFlow {
             if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library, connection.sources?.selectedSourceId,
-                if (parent != null) parent.preparedContext?.catalog else connection.catalogRevision,
+                if (parent != null) parent.preparedContext?.changes ?: 0 else changes,
                 location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
                 revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,
                 if (options.downloadedOnly) connection.downloads.state?.revision ?: 0UL else null,

@@ -37,12 +37,12 @@ impl AndroidBrowseQuery {
     ) -> Result<AndroidBrowsePage, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let opened = self.opened(&cancel).await.map_err(error)?;
-            let OpenedCollection::Detail(Some(detail)) = opened else {
+            let page = self.opened_page(&cancel).await.map_err(error)?;
+            let OpenedCollection::Detail(Some(detail)) = page.opened() else {
                 let rows = self
                     .rows(
                         0,
-                        if matches!(opened, OpenedCollection::Home(_)) {
+                        if matches!(page.opened(), OpenedCollection::Home(_)) {
                             usize::MAX
                         } else {
                             64
@@ -51,10 +51,10 @@ impl AndroidBrowseQuery {
                     )
                     .await
                     .map_err(error)?;
-                let count = if matches!(opened, OpenedCollection::Home(_)) {
+                let count = if matches!(page.opened(), OpenedCollection::Home(_)) {
                     rows.len()
                 } else {
-                    self.opened_count(opened)
+                    page.len()
                 };
                 return Ok(AndroidBrowsePage {
                     count: count as u64,

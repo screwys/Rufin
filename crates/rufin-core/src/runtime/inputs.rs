@@ -21,7 +21,6 @@ pub enum SourceEvent {
         selected: SelectedLibrary,
     },
     Operation(SourceOperation),
-    CatalogPublished(CatalogPublication),
     Notice(SourceNotice),
     PlaylistSourceMismatch(sources::SourceId),
     ReleaseSelected,
@@ -34,6 +33,7 @@ pub struct VisualizerPublication {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct CatalogPublication {
     pub source_key: Option<SourceKey>,
     /// Favorites a committed change set, as clients show them now.
@@ -54,12 +54,11 @@ pub enum CatalogChange {
     Album(String),
 }
 
+/// Counts of committed catalog and play changes, for core caches that outlive one change.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct CatalogRevision {
-    pub catalog: u64,
-    pub activity: u64,
-    pub change: Option<CatalogChange>,
+pub(crate) struct CatalogRevision {
+    pub(crate) catalog: u64,
+    pub(crate) activity: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

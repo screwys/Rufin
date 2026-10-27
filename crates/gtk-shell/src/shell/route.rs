@@ -5,6 +5,8 @@
 //! detail have narrow point-update hooks because those operations are
 //! intentionally visible without remounting the whole page.
 use rufin_core::browse::{OpenOptions, OpenedCollection};
+use rufin_core::page::Refresh;
+use rufin_core::runtime::CatalogPublication;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -452,7 +454,12 @@ impl Shell {
             });
             return;
         }
-        let category = if route == Route::Favorites {
+        let options = self.route_options(&route);
+        self.queue_collection_route(route, selected, options, false, render_started);
+    }
+
+    fn route_options(&self, route: &Route) -> OpenOptions {
+        let category = if route == &Route::Favorites {
             self.navigation.favorite_category.get()
         } else if matches!(
             route,
@@ -466,16 +473,34 @@ impl Shell {
         } else {
             CollectionCategory::Tracks
         };
-        self.queue_collection_route(
-            route,
-            selected,
-            OpenOptions {
-                category,
-                ..Default::default()
-            },
-            false,
-            render_started,
-        );
+        OpenOptions {
+            category,
+            search_mode: self.search_session.mode(),
+            ..Default::default()
+        }
+    }
+
+    /// Rereads or reopens the mounted route when a committed change touches it.
+    pub(crate) fn refresh_mounted_route(self: &Rc<Self>, publication: &CatalogPublication) {
+        let route = self.navigation.routes.borrow().current().clone();
+        let selected = self
+            .route_viewport
+            .catalog
+            .borrow()
+            .as_ref()
+            .and_then(|catalog| catalog.selected.clone());
+        match rufin_core::page::refresh(
+            &self.products.source,
+            &route,
+            selected.as_ref(),
+            &self.route_options(&route),
+            publication,
+        ) {
+            Refresh::Nothing => {}
+            Refresh::Reread if route == Route::Home => self.refresh_mounted_home(),
+            Refresh::Reread => self.refresh_mounted_catalog(),
+            Refresh::Reopen => self.replace_current_route_when_ready(),
+        }
     }
 
     fn begin_root_order_read(&self) -> (u64, library::ReadCancellation) {

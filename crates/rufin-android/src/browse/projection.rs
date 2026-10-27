@@ -44,7 +44,7 @@ impl AndroidBrowseQuery {
         self.home_snapshot
             .get_or_try_init(|| async {
                 let filter = &self.filter;
-                let OpenedCollection::Home(home) = self.opened(&cancel).await? else {
+                let OpenedCollection::Home(home) = self.opened_page(&cancel).await?.opened() else {
                     unreachable!("Home rows")
                 };
                 let home = home.clone();
@@ -175,202 +175,62 @@ impl AndroidBrowseQuery {
             .collect()
     }
 
-    pub(super) fn album_rows(&self, rows: Vec<library::AlbumDetailRow>) -> Vec<AndroidBrowseRow> {
-        rows.into_iter()
-            .map(|item| match item {
-                library::AlbumDetailRow::Album { album, .. } => {
-                    let mut row: AndroidBrowseRow = album.into();
-                    row.album_header = true;
-                    row
-                }
-                library::AlbumDetailRow::Track { track, index, .. } => self.track_row(track, index),
-            })
-            .collect()
-    }
-
-    pub(super) fn opened_count(&self, opened: &OpenedCollection) -> usize {
-        match opened {
-            OpenedCollection::Tracks(page)
-            | OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Tracks(page),
-                ..
-            })) => page.page.count,
-            OpenedCollection::Albums(page) => match &page.content {
-                rufin_core::browse::AlbumListContent::Rows(page) => page.count,
-                rufin_core::browse::AlbumListContent::Detail { page, .. } => page.count,
-            },
-            OpenedCollection::Artists { page, .. } => page.count,
-            OpenedCollection::Genres { page, .. } => page.count,
-            OpenedCollection::Moods { page, .. } => page.count,
-            OpenedCollection::Playlists { page, .. } => page.count,
-            OpenedCollection::SmartPlaylists { page, .. } => page.count,
-            OpenedCollection::Folders(page) => page.folder_count + page.track_count,
-            OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Releases { page, .. },
-                ..
-            })) => page.page.count,
-            _ => 0,
-        }
-    }
-
     pub(super) async fn rows(
         &self,
         offset: usize,
         limit: usize,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let catalog = &self.catalog;
-        Ok(match self.opened(&cancel).await? {
-            OpenedCollection::Tracks(page)
-            | OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Tracks(page),
-                ..
-            })) => self.member_rows(
-                prepared_rows(
-                    &page.page,
-                    offset,
-                    limit,
-                    page.read.rows(catalog, offset, limit, cancel),
-                )
-                .await?,
-                offset,
-            ),
-            OpenedCollection::Albums(opened) => match &opened.content {
-                rufin_core::browse::AlbumListContent::Detail { index, page } => self.album_rows(
-                    prepared_rows(
-                        page,
-                        offset,
-                        limit,
-                        index.rows(catalog, offset, limit, cancel),
-                    )
-                    .await?,
-                ),
-                rufin_core::browse::AlbumListContent::Rows(page) => prepared_rows(
-                    page,
-                    offset,
-                    limit,
-                    opened.read.albums(catalog, offset, limit, cancel),
-                )
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            },
-            OpenedCollection::Artists { read, page } => prepared_rows(
-                page,
-                offset,
-                limit,
-                read.artists(catalog, offset, limit, cancel),
-            )
-            .await?
-            .into_iter()
-            .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
-            .collect(),
-            OpenedCollection::Genres { read, page } => prepared_rows(
-                page,
-                offset,
-                limit,
-                read.genres(catalog, offset, limit, cancel),
-            )
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-            OpenedCollection::Moods { read, page } => prepared_rows(
-                page,
-                offset,
-                limit,
-                read.moods(catalog, offset, limit, cancel),
-            )
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-            OpenedCollection::Playlists { read, page } => prepared_rows(
-                page,
-                offset,
-                limit,
-                read.playlist_items(catalog, offset, limit, cancel),
-            )
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-            OpenedCollection::SmartPlaylists { read, page } => prepared_rows(
-                page,
-                offset,
-                limit,
-                read.playlist_items(catalog, offset, limit, cancel),
-            )
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-            OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                content: DetailContent::Releases { page, .. },
-                ..
-            })) => {
-                let read = &page.query;
-                prepared_rows(
-                    &page.page,
-                    offset,
-                    limit,
-                    read.albums(catalog, offset, limit, cancel),
-                )
-                .await?
-                .into_iter()
-                .enumerate()
-                .map(|(index, album)| {
-                    let mut end = 0;
-                    let class = page
-                        .counts
-                        .iter()
-                        .position(|count| {
-                            end += count;
-                            offset + index < end
-                        })
-                        .unwrap_or(4);
-                    release_row(album, class)
-                })
-                .collect()
-            }
-            OpenedCollection::Folders(page) => {
-                if offset == page.first_row_position
-                    && limit.min(page.folder_count + page.track_count - offset)
-                        == page.folders.len() + page.tracks.len()
-                {
-                    self.folder_seed(page)
-                } else {
-                    self.folder_rows(page, offset, limit, cancel).await?
-                }
-            }
-            OpenedCollection::Home(_) => self
-                .home_rows(&cancel)
+        let page = self.opened_page(cancel).await?;
+        if matches!(page.opened(), OpenedCollection::Home(_)) {
+            return Ok(self
+                .home_rows(cancel)
                 .await?
                 .iter()
                 .skip(offset)
                 .take(limit)
                 .map(|(row, _)| row.clone())
-                .collect(),
-            OpenedCollection::Search(_) | OpenedCollection::Detail(None) => Vec::new(),
-        })
-    }
-}
-
-async fn prepared_rows<T: Clone>(
-    page: &library::Page<T>,
-    offset: usize,
-    limit: usize,
-    load: impl std::future::Future<Output = library::LibraryResult<Vec<T>>>,
-) -> library::LibraryResult<Vec<T>> {
-    if offset >= page.count {
-        return Ok(Vec::new());
-    }
-    let end = offset.saturating_add(limit).min(page.count);
-    let first = page.first_row_position;
-    if offset >= first && end <= first + page.rows.len() {
-        Ok(page.rows[offset - first..end - first].to_vec())
-    } else {
-        load.await
+                .collect());
+        }
+        // Folder pages number their tracks after the folders.
+        let first_track = match page.opened() {
+            OpenedCollection::Folders(page) => page.folder_count,
+            _ => 0,
+        };
+        Ok(page
+            .rows(offset, limit, cancel)
+            .await?
+            .into_iter()
+            .zip(offset..)
+            .map(|(row, position)| {
+                let index = position.saturating_sub(first_track);
+                match row {
+                    Row::Track(track) => self.track_row(track, index),
+                    Row::Entry(row) => AndroidBrowseRow {
+                        fields: self.track_field_values(index, |field| {
+                            rufin_core::settings::presentation::track_field(&row.track, field)
+                        }),
+                        ..AndroidBrowseRow::new(AndroidBrowseItem::PlaylistEntry { row })
+                    },
+                    Row::Album(album) => album.into(),
+                    Row::AlbumHeading(album) => AndroidBrowseRow {
+                        album_header: true,
+                        ..album.into()
+                    },
+                    Row::AlbumTrack { track, index } => self.track_row(track, index),
+                    Row::Release { album, group } => release_row(album, group),
+                    Row::Artist {
+                        artist,
+                        album_artist,
+                    } => artist_row(artist, album_artist),
+                    Row::Genre(row) => row.into(),
+                    Row::Mood(row) => row.into(),
+                    Row::PlaylistItem(row) => row.into(),
+                    Row::Folder(folder) => {
+                        self.folder_row(folder.object_id, folder.name, folder.artwork_binding)
+                    }
+                }
+            })
+            .collect())
     }
 }
