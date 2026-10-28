@@ -236,6 +236,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/apple-cf/apple-cf-0.11.7.crate",
+        "sha256": "5a47effd5b5e7afd1c51ef8d1bacf86060565461c1fb6cf67aae433417c4048c",
+        "dest": "cargo/vendor/apple-cf-0.11.7"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"5a47effd5b5e7afd1c51ef8d1bacf86060565461c1fb6cf67aae433417c4048c\", \"files\": {}}",
+        "dest": "cargo/vendor/apple-cf-0.11.7",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/apple-native-keyring-store/apple-native-keyring-store-1.0.2.crate",
         "sha256": "2b350bfd03649e07aa05c0a81b3e15934374e585c98204a57e20b9d49f49bb9a",
         "dest": "cargo/vendor/apple-native-keyring-store-1.0.2"
@@ -2355,14 +2368,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/doom-fish-utils/doom-fish-utils-0.3.3.crate",
-        "sha256": "c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f",
-        "dest": "cargo/vendor/doom-fish-utils-0.3.3"
+        "url": "https://static.crates.io/crates/doom-fish-utils/doom-fish-utils-0.4.2.crate",
+        "sha256": "ed8a3775f0c5683984a22aec1726fbd925c4a109f63e47818b0146c24e1165ea",
+        "dest": "cargo/vendor/doom-fish-utils-0.4.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f\", \"files\": {}}",
-        "dest": "cargo/vendor/doom-fish-utils-0.3.3",
+        "contents": "{\"package\": \"ed8a3775f0c5683984a22aec1726fbd925c4a109f63e47818b0146c24e1165ea\", \"files\": {}}",
+        "dest": "cargo/vendor/doom-fish-utils-0.4.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -5878,14 +5891,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/mediaplayer/mediaplayer-0.4.3.crate",
-        "sha256": "707f1ad053bddf7646f6a525a0b2c74cff23676a792e050b2d58e38c733467fb",
-        "dest": "cargo/vendor/mediaplayer-0.4.3"
+        "url": "https://static.crates.io/crates/mediaplayer/mediaplayer-0.5.1.crate",
+        "sha256": "196bba1a89b591c8fa959ccce77b5ed3996bde09bfbf612529060eff9aeacc5e",
+        "dest": "cargo/vendor/mediaplayer-0.5.1"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"707f1ad053bddf7646f6a525a0b2c74cff23676a792e050b2d58e38c733467fb\", \"files\": {}}",
-        "dest": "cargo/vendor/mediaplayer-0.4.3",
+        "contents": "{\"package\": \"196bba1a89b591c8fa959ccce77b5ed3996bde09bfbf612529060eff9aeacc5e\", \"files\": {}}",
+        "dest": "cargo/vendor/mediaplayer-0.5.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
