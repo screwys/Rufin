@@ -166,7 +166,6 @@ impl AndroidPlayer {
     ) -> Result<Option<AndroidPlayerMetadata>, AndroidError> {
         let catalog = self.products.library.clone();
         let source = self.products.source.clone();
-        let selected = source.selected_library();
         self.products
             .runtime
             .spawn(async move {
@@ -249,33 +248,11 @@ impl AndroidPlayer {
                     Route::AlbumDetail(uri) => Some(uri.as_str()),
                     _ => None,
                 });
-                let mut source_link = rufin_core::detail_links::navigation_source_link(
+                let source_link = rufin_core::detail_links::navigation_source_link(
                     configuration.as_ref(),
                     &media_uri,
                     album_uri,
                 );
-                if let Some(link) = source_link.as_mut()
-                    && link.url.is_none()
-                {
-                    link.url = source
-                        .collection_folder_uri(
-                            media_uri.clone(),
-                            matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
-                            selected
-                                .as_ref()
-                                .filter(|selected| {
-                                    Some(selected.source_id.as_str()) == source_id.as_deref()
-                                })
-                                .and_then(|selected| selected.music_folder_key),
-                        )
-                        .recv()
-                        .await
-                        .ok()
-                        .and_then(Result::ok);
-                    if link.url.is_none() {
-                        source_link = None;
-                    }
-                }
                 let mut artist_links = AndroidArtistLink::from_detail_links(&artists)?;
                 let mut album_links = AndroidArtistLink::from_detail_links(&album)?;
                 let media_uris: Vec<_> = artists
@@ -317,6 +294,33 @@ impl AndroidPlayer {
             })
             .await
             .map_err(error)?
+    }
+
+    /// The folder a Go to sheet's folder link opens, resolved when it is chosen.
+    pub async fn folder_uri(
+        &self,
+        media_uri: String,
+        source_id: Option<String>,
+        origin_route: Option<rufin_core::route::Route>,
+    ) -> Result<String, AndroidError> {
+        let source = &self.products.source;
+        let folder = source
+            .selected_library()
+            .filter(|selected| Some(selected.source_id.as_str()) == source_id.as_deref())
+            .and_then(|selected| selected.music_folder_key);
+        source
+            .collection_folder_uri(
+                media_uri,
+                matches!(
+                    origin_route,
+                    Some(rufin_core::route::Route::AlbumArtistDetail(_))
+                ),
+                folder,
+            )
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
     }
 
     pub fn current_lyrics(

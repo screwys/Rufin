@@ -1017,7 +1017,12 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
                     publication = rufin_core::source::next_publication(&mut catalog) => {
                         let publication = publication?;
-                        json!({"catalog_acquired": matches!(publication.change, rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites), "pins_changed": rufin_core::page::pins_refresh(&products.source, &publication), "activity_changed": publication.change == rufin_core::runtime::CatalogChange::Activity})
+                        let mut value = json!({"catalog_acquired": matches!(publication.change, rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites), "pins_changed": rufin_core::page::pins_refresh(&products.source, &publication), "activity_changed": publication.change == rufin_core::runtime::CatalogChange::Activity});
+                        // The changed playlist, or null when any may have changed.
+                        if let rufin_core::runtime::CatalogChange::Playlists(playlist) = publication.change {
+                            value["playlists"] = json!(playlist);
+                        }
+                        value
                     },
                 }
             };

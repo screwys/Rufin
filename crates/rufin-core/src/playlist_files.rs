@@ -176,43 +176,34 @@ pub fn set_source_auto_save(
     })
 }
 
+/// Saves a linked playlist's file settings. The name and artwork are edited with
+/// `playlists::update_playlist`.
 pub fn update(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    name: String,
     auto_refresh: bool,
     auto_save: Option<bool>,
     path_mode: PlaylistPathMode,
-    artwork: Option<sources::ArtworkChange>,
 ) -> Receiver<Result<(), String>> {
     run(owner, move |owner| async move {
-        let mut settings_changed = false;
-        if let Some(mut link) = owner
+        let Some(mut link) = owner
             .shared
             .catalog
             .get_playlist_file_link(playlist)
             .await
             .map_err(string_error)?
-        {
-            link.auto_refresh = auto_refresh;
-            link.auto_save = auto_save;
-            link.path_mode = path_mode;
-            settings_changed = owner
-                .shared
-                .catalog
-                .save_playlist_file_link(&link)
-                .await
-                .map_err(string_error)?;
-        }
-        if !crate::playlists::update_playlist_on(
-            &owner,
-            playlist,
-            Some(&name),
-            None,
-            artwork.as_ref(),
-        )
-        .await?
-            && settings_changed
+        else {
+            return Ok(());
+        };
+        link.auto_refresh = auto_refresh;
+        link.auto_save = auto_save;
+        link.path_mode = path_mode;
+        if owner
+            .shared
+            .catalog
+            .save_playlist_file_link(&link)
+            .await
+            .map_err(string_error)?
         {
             publish(&owner, Some(playlist)).await;
         }

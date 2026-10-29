@@ -10,7 +10,7 @@ import {
   run,
 } from "./ui.js";
 
-import { disposeHome, loadView, restoreView, viewRequest } from "./library.js";
+import { detail, disposeHome, loadView, restoreView, route, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -167,6 +167,8 @@ async function connect() {
         await loadView();
       });
       else if (value.activity_changed && $("content").querySelector('[data-activity-sensitive="true"]')) run(loadView);
+      else if (Object.hasOwn(value, "playlists") && route === "playlists" &&
+        (value.playlists === null || !detail || detail.id === value.playlists)) run(loadView);
     },
     session.signal,
   );

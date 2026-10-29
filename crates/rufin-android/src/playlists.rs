@@ -140,25 +140,15 @@ impl AndroidLibrary {
     pub async fn update_playlist_file_options(
         &self,
         playlist: PlaylistKey,
-        name: String,
         auto_refresh: bool,
         auto_save: Option<bool>,
         path_mode: PlaylistPathMode,
-        artwork: Option<sources::ArtworkChange>,
     ) -> Result<(), AndroidError> {
-        playlist_files::update(
-            &self.source,
-            playlist,
-            name,
-            auto_refresh,
-            auto_save,
-            path_mode,
-            artwork,
-        )
-        .recv()
-        .await
-        .map_err(error)?
-        .map_err(error)
+        playlist_files::update(&self.source, playlist, auto_refresh, auto_save, path_mode)
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
     }
 
     pub async fn link_playlist_file(

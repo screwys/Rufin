@@ -179,6 +179,8 @@ struct Library<'a> {
     album_tracks: bool,
     activity_sensitive: bool,
     disc_headers: HashMap<usize, String>,
+    /// The collection's name as this read found it.
+    name: &'a str,
 }
 
 impl Library<'_> {
@@ -326,6 +328,7 @@ pub(super) fn render(
                 .unwrap_or_default(),
             album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
             activity_sensitive: value["activity_sensitive"].as_bool().unwrap_or(false),
+            name: value["name"].as_str().unwrap_or_default(),
             disc_headers: value["disc_sections"]
                 .as_array()
                 .into_iter()

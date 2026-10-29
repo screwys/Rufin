@@ -51,7 +51,6 @@ private class PlaylistEditorState(
     private val key: Long,
     initialName: String,
     private val scope: CoroutineScope,
-    private val changed: () -> Unit,
 ) {
     var name by mutableStateOf(initialName)
     private var savedName = initialName
@@ -101,19 +100,14 @@ private class PlaylistEditorState(
     suspend fun save() {
         val source = model.sourceOwner ?: error(translate("The connection no longer exists"))
         val artworkChange = if (removed) ArtworkChange.Remove else image?.let { ArtworkChange.Replace(it) }
-        if (files?.canLink == true) {
-            library.updatePlaylistFileOptions(key, name.trim(), autoRefresh, autoSave, pathMode, artworkChange)
-        } else {
-            updatePlaylist(source, key, name.trim().takeIf { it != savedName }, public?.takeIf { it != savedPublic }, artworkChange)
-        }
+        if (files?.link != null) library.updatePlaylistFileOptions(key, autoRefresh, autoSave, pathMode)
+        updatePlaylist(source, key, name.trim().takeIf { it != savedName }, public?.takeIf { it != savedPublic }, artworkChange)
         image?.destroy()
         image = null
         removed = false
         preview = null
         savedName = name.trim()
         name = savedName
-        load()
-        changed()
     }
 
     suspend fun refresh() {
@@ -124,7 +118,6 @@ private class PlaylistEditorState(
         name = library.playlistName(key)
         savedName = name
         load()
-        changed()
     }
 
     suspend fun renameFile() {
@@ -134,7 +127,6 @@ private class PlaylistEditorState(
             fileName = if (link.path.startsWith("content:")) files?.displayPath.orEmpty()
                 else link.path.substringAfterLast('/').substringAfterLast('\\')
         }
-        changed()
     }
 
     suspend fun setImage(value: ImageBytes) {
@@ -166,7 +158,7 @@ private class PlaylistEditorState(
             "unlink" -> library.unlinkPlaylistFile(key)
             "delete" -> library.deletePlaylistFile(key)
         }
-        if (action != "delete") refresh() else changed()
+        if (action != "delete") refresh()
     }
 
     fun close() { image?.destroy(); image = null }
@@ -176,10 +168,10 @@ private class PlaylistEditorState(
 @Composable
 internal fun PlaylistEditor(
     model: RufinConnection, library: AndroidLibrary, player: PlayerConnection,
-    playlist: Long, initialName: String, onChanged: () -> Unit, onDismiss: () -> Unit,
+    playlist: Long, initialName: String, onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val state = remember(library, playlist) { PlaylistEditorState(model, library, playlist, initialName, scope, onChanged) }
+    val state = remember(library, playlist) { PlaylistEditorState(model, library, playlist, initialName, scope) }
     val context = LocalContext.current
     var linkChoice by remember { mutableStateOf(false) }
     var linkDestination by remember { mutableStateOf(false) }
@@ -240,6 +232,7 @@ internal fun PlaylistEditor(
         replaceLink = replace
         state.action {
             state.save()
+            state.load()
             val selected = model.sources?.selectedSourceId
             val editable = selected?.let { id -> withContext(Dispatchers.IO) { model.sourceOwner?.editable(id) } }
             sourceDestination = editable?.takeIf { it.fileSettings != null }?.source

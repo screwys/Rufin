@@ -376,7 +376,7 @@ internal fun BrowseMenuSheet(
         else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
         else browse.library?.let { library ->
             PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
-                onChanged = browse::refresh, onDismiss = { rename = false; onDismiss() })
+                onDismiss = { rename = false; onDismiss() })
         }
     }
     if (delete) AlertDialog(onDismissRequest = { delete = false },

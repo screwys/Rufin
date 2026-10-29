@@ -206,7 +206,6 @@ impl Shell {
                 let artwork = Rc::downgrade(&artwork);
                 let public_toggle = playlist_public.clone();
                 let current_name = current_name.clone();
-                let can_link = settings.can_link;
                 button.connect_clicked(move |_| {
                     if let Some(shell) = weak_shell.upgrade() {
                         let name = entry.text().trim().to_owned();
@@ -242,23 +241,19 @@ impl Shell {
                         let unlinked_subtitle = unlinked_subtitle.clone();
                         gtk::glib::spawn_future_local(async move {
                             let result: Result<(), String> = async {
-                                if can_link {
+                                if linked {
                                     rufin_core::playlist_files::update(
                                         &shell.products.source,
                                         playlist_id,
-                                        name.clone(),
                                         auto_refresh,
                                         auto_save,
                                         path_mode,
-                                        change,
                                     )
                                     .recv()
                                     .await
                                     .map_err(|error| error.to_string())??;
-                                } else if change.is_some()
-                                    || changed_name
-                                    || changed_public.is_some()
-                                {
+                                }
+                                if change.is_some() || changed_name || changed_public.is_some() {
                                     rufin_core::playlists::update_playlist(
                                         &shell.products.source,
                                         playlist_id,

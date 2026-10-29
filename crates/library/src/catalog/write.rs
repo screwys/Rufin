@@ -74,7 +74,7 @@ pub enum Scope {
         key: PlaylistKey,
         entries: bool,
     },
-    /// Playlists were added, removed or renamed.
+    /// Playlists were added, removed or moved. A rename is a `Playlist` scope.
     Playlists,
     Smart {
         key: SmartPlaylistKey,
@@ -1395,8 +1395,8 @@ impl<'a> Write<'a> {
                     .as_ref()
                     .zip(resident.as_ref())
                     .is_some_and(|(next, before)| {
-                        (&next.name, next.folder, next.indexed, next.created)
-                            != (&before.name, before.folder, before.indexed, before.created)
+                        (next.folder, next.indexed, next.created)
+                            != (before.folder, before.indexed, before.created)
                     });
             scopes.push(Scope::Playlist {
                 key: PlaylistKey::from_raw(*key),

@@ -136,6 +136,7 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
       if (!existing) await fragment(`/api${path}?${query}`, node, lifetime.signal);
       signal.throwIfAborted();
       const data = node.matches("[data-page]") ? node : node.querySelector("[data-page]");
+      if (data.dataset.name && detail) $("title").textContent = detail.title = data.dataset.name;
       if (data.dataset.total !== "") {
         total = Number(data.dataset.total);
         libraryTotal = total;

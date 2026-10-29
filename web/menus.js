@@ -399,7 +399,6 @@ function init() {
         await api("/playlists/file", "POST", { ...input, force: true });
       }
       await loadPlaylistFile();
-      await loadView();
     }));
   }
   $("track-menu").setAttribute("popover", "manual");
@@ -477,7 +476,6 @@ function init() {
       );
       $("name-dialog").close();
       if (result.settings_error) notice(result.settings_error);
-      if (!remoteEdit || changedName) await loadView();
     });
   });
 }

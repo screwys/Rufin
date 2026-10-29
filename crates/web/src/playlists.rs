@@ -165,13 +165,20 @@ async fn file_update(
     completion(rufin_core::playlist_files::update(
         &products.source,
         input.id,
-        input.name,
         input.auto_refresh,
         input.auto_save,
         input.path_mode,
-        None,
     ))
     .await?;
+    rufin_core::playlists::update_playlist(
+        &products.source,
+        input.id,
+        Some(input.name),
+        None,
+        None,
+    )
+    .await
+    .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"changed":true})))
 }
 
@@ -386,8 +393,20 @@ pub(super) async fn entries_data(
         })
         .map_err(internal)?;
     let total = catalog::track_total(products, parameters, &query).await?;
+    // The first page carries the header name, so an open page shows a rename.
+    let name = if offset == 0 {
+        products
+            .library
+            .playlists(&[key(parameters, "id")?], &library::ReadCancellation::new())
+            .await
+            .map_err(internal)?
+            .pop()
+            .map(|playlist| playlist.name)
+    } else {
+        None
+    };
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.track.media_uri,"title":row.track.metadata.title,"artist":row.track.metadata.artist,"album":row.track.metadata.album,"favorite":row.track.state.favorite,"duration_ms":row.track.metadata.duration_millis})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"name":name,"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.track.media_uri,"title":row.track.metadata.title,"artist":row.track.metadata.artist,"album":row.track.metadata.album,"favorite":row.track.state.favorite,"duration_ms":row.track.metadata.duration_millis})).collect::<Vec<_>>()}),
     )
 }
 
