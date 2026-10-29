@@ -598,7 +598,7 @@ async fn folders(
         .into_iter()
         .filter_map(|row| match row {
             Row::Folder(row) => Some(
-                json!({"id":row.object_id,"name":row.name,"track_count":row.summary.track_count}),
+                json!({"id":row.object_id,"name":(!row.name.is_empty()).then_some(row.name),"track_count":row.summary.track_count}),
             ),
             _ => None,
         })
