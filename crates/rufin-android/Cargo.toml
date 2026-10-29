@@ -33,6 +33,7 @@ jni = "0.22.4"
 library.workspace = true
 localization.workspace = true
 lyrics.workspace = true
+ndk-context = "0.1.1"
 playback.workspace = true
 playback-gstreamer.workspace = true
 rufin-core = { workspace = true, features = ["bindings"] }

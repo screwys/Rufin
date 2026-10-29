@@ -7772,6 +7772,7 @@ dependencies = [
  "library",
  "localization",
  "lyrics",
+ "ndk-context",
  "playback",
  "playback-gstreamer",
  "rufin-connect",

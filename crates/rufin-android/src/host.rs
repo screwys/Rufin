@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::media_session::AndroidPlaybackSubscription;
 use gstreamer::{self as gst, prelude::*};
-use jni::{Env, objects::JObject};
+use jni::{Env, JavaVM, objects::JObject};
 use rufin_core::{
     app,
     diagnostics::{Diagnostics, StderrGuard},
@@ -71,7 +71,18 @@ fn initialize<'local>(
     crate::discovery::initialize(env, &context)?;
     crate::documents::initialize(env, &documents)?;
     crate::network::initialize(env, &context)?;
-    rustls_platform_verifier::android::init_with_env(env, context)
+    let process = env.new_global_ref(&context)?;
+    rustls_platform_verifier::android::init_with_env(env, context)?;
+    // netdev, which lists network interfaces for Connect, reads the context through ndk-context.
+    #[allow(unsafe_code)]
+    // SAFETY: Kotlin initializes once per process, and the global reference stays alive.
+    unsafe {
+        ndk_context::initialize_android_context(
+            JavaVM::singleton()?.get_raw().cast(),
+            process.into_raw().cast(),
+        );
+    }
+    Ok(())
 }
 
 #[uniffi::export]
