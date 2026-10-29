@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use library::{
-    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
     QueueRepeatMode, QueueTransferRow, SourceKey, TrackKey,
 };
 use sqlx::Connection;
@@ -19,6 +19,7 @@ pub struct Fixture {
     pub artists: Vec<ArtistKey>,
     pub artist_uris: Vec<String>,
     pub genre: GenreKey,
+    pub mood: MoodKey,
     pub folder: FolderKey,
 }
 
@@ -291,6 +292,10 @@ pub async fn fixture() -> Fixture {
         .fetch_one(&mut connection)
         .await
         .unwrap();
+    let mood = sqlx::query_scalar("SELECT tag_key FROM tags WHERE kind=1")
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
     let folder = sqlx::query_scalar("SELECT folder_key FROM folders")
         .fetch_one(&mut connection)
         .await
@@ -307,6 +312,7 @@ pub async fn fixture() -> Fixture {
         artists,
         artist_uris,
         genre,
+        mood,
         folder,
     }
 }
@@ -443,5 +449,85 @@ pub async fn resolve_queue(
         entries: page.entries.into(),
         rows,
         ..Default::default()
+    }
+}
+
+/// Every row of a list, read in the windows a client scrolls through.
+pub async fn rows(catalog: &Catalog, read: impl Into<ReadOf>) -> Vec<library::Row> {
+    let cancel = library::ReadCancellation::new();
+    let order = catalog.order(&read.into().0, &cancel).await.unwrap();
+    let mut rows = Vec::new();
+    for start in (0..order.len()).step_by(128) {
+        rows.extend(
+            catalog
+                .rows(&order, start..(start + 128).min(order.len()), true, &cancel)
+                .await
+                .unwrap(),
+        );
+    }
+    rows
+}
+
+/// The items of a list in its order.
+pub async fn items(catalog: &Catalog, read: impl Into<ReadOf>) -> Vec<library::Item> {
+    let order = catalog
+        .order(&read.into().0, &library::ReadCancellation::new())
+        .await
+        .unwrap();
+    order.items(0..order.len())
+}
+
+/// The track rows of a member list.
+pub async fn tracks(catalog: &Catalog, read: library::MemberRead) -> Vec<library::TrackRow> {
+    rows(catalog, read)
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Track(track) | library::Row::AlbumTrack { track, .. } => Some(track),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The media URIs of a member list in its order.
+pub async fn uris(catalog: &Catalog, read: library::MemberRead) -> Vec<String> {
+    tracks(catalog, read)
+        .await
+        .into_iter()
+        .map(|row| row.media_uri)
+        .collect()
+}
+
+/// The row of a genre or mood.
+pub async fn tag(catalog: &Catalog, item: library::Item) -> Option<library::TagRow> {
+    match catalog
+        .rows_of(&[item], true, &library::ReadCancellation::new())
+        .await
+        .unwrap()
+        .pop()
+    {
+        Some(library::Row::Tag(row)) => Some(row),
+        _ => None,
+    }
+}
+
+/// A list read: member reads and list reads both convert.
+pub struct ReadOf(pub library::Read);
+
+impl From<library::MemberRead> for ReadOf {
+    fn from(read: library::MemberRead) -> Self {
+        Self(library::Read::Members(read))
+    }
+}
+
+impl From<library::ListRead> for ReadOf {
+    fn from(read: library::ListRead) -> Self {
+        Self(library::Read::List(read))
+    }
+}
+
+impl From<library::Read> for ReadOf {
+    fn from(read: library::Read) -> Self {
+        Self(read)
     }
 }

@@ -1203,6 +1203,151 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn playlist_pages_preserve_positions_after_missing_identity() {
+        let server = MockServer::start().await;
+        for (offset, entries) in [
+            (
+                "0",
+                serde_json::json!([
+                    {"Id":"track","PlaylistItemId":"one","UserData":[]},
+                    {"PlaylistItemId":"missing"}
+                ]),
+            ),
+            (
+                "2",
+                serde_json::json!([{ "Id":"track","PlaylistItemId":"two","Name":{} }]),
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path("/Playlists/list/Items"))
+                .and(query_param("StartIndex", offset))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"Items":entries,"TotalRecordCount":3})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let source = JellyfinEmbySource::open(
+            JellyfinEmbySourceConfig {
+                emby_connect: false,
+                kind: crate::ServerKind::Jellyfin,
+                base_url: server.uri(),
+                server_id: None,
+                user_id: "user".into(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        let owner = crate::Source::new(
+            crate::SourceId::new("source"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
+        let crate::source::Implementation::JellyfinEmby(source) = &owner.implementation else {
+            unreachable!()
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut updates = catalog.changes();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "jellyfin", "Jellyfin")
+            .await
+            .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.tracks.extend_from_slice(&[(track_from_item(
+                crate::ServerKind::Jellyfin,
+                catalog_source_id.as_str(),
+                &serde_json::json!({"Id":"track","Name":"Track"}),
+            )
+            .unwrap()
+            .unwrap())
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .unwrap();
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.playlists.push(library::PlaylistObservation {
+                object_id: ("jellyfin:playlist:list").to_string(),
+                name: ("List").to_string(),
+                sort_text: ("list").to_string(),
+                ..Default::default()
+            });
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .unwrap();
+        source
+            .acquire_playlist_entries(&mut observation, "jellyfin:playlist:list", &|| false)
+            .await
+            .unwrap();
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
+        let cancellation = library::ReadCancellation::new();
+        let key = crate::playlist_key(
+            &catalog,
+            {
+                catalog.loaded().await;
+                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+            }
+            .unwrap(),
+            "jellyfin:playlist:list",
+        )
+        .await
+        .unwrap();
+        let entries = crate::listed_tracks(
+            &catalog,
+            library::MemberRead::new(library::Collection::Playlist(key)),
+        )
+        .await;
+        assert_eq!(
+            entries
+                .iter()
+                .map(|row| row.entry.as_ref().expect("playlist entry").position)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        assert_eq!(
+            catalog
+                .playlist_edit_entries(
+                    key,
+                    &library::MemberSelection::Entries(
+                        (entries
+                            .iter()
+                            .map(|row| row.entry.as_ref().unwrap().key)
+                            .collect::<Vec<_>>())
+                        .into()
+                    ),
+                    &cancellation
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.object_id)
+                .collect::<Vec<_>>(),
+            ["one", "two"]
+        );
+        assert_eq!(entries[0].media_uri, entries[1].media_uri);
+        assert_ne!(entries[0].entry, entries[1].entry);
+    }
+
     #[test]
     fn playlist_entries_keep_provider_occurrences_when_tracks_repeat() {
         let items: Vec<Value> = serde_json::from_value(serde_json::json!([{
@@ -1223,6 +1368,71 @@ mod tests {
         assert_eq!(entries[0].object_id, "entry-one");
         assert_eq!(entries[1].object_id, "entry-two");
         assert_eq!(entries[0].track_id, entries[1].track_id);
+    }
+
+    #[tokio::test]
+    async fn song_only_search_keeps_album_text_and_existing_relationship() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/Items")).and(query_param("IncludeItemTypes", "Audio"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[{
+                "Id":"song","Name":"Match","Type":"Audio","Album":"Nonmatching album","AlbumId":"album","ImageTags":{"Primary":"song-cover","Broken":[]},"UserData":{"Rating":{}},"ArtistItems":[null,{"Id":"artist","Name":"Artist"}]
+            },{"Type":"Audio","Name":"Missing identity"}],"TotalRecordCount":2}))).mount(&server).await;
+        let source = JellyfinEmbySource::open(
+            JellyfinEmbySourceConfig {
+                emby_connect: false,
+                kind: crate::ServerKind::Jellyfin,
+                base_url: server.uri(),
+                server_id: Some("server".into()),
+                user_id: "user".into(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        let owner = crate::Source::new(
+            crate::SourceId::new("song-search"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
+
+        for cached in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let catalog = library::Catalog::open(root.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let source_id = crate::SourceId::new("song-search");
+            catalog
+                .reconcile_source(
+                    &library::SourceId::new(source_id.as_str()),
+                    "search",
+                    "Search",
+                )
+                .await
+                .unwrap();
+            let catalog_source_id = (source_id.as_str()).to_string();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            observation.start_observation().await.unwrap();
+            if cached {
+                (async { let mut batch = library::CatalogBatch::default(); let result = batch.albums.extend_from_slice(&[(album_from_item(crate::ServerKind::Jellyfin, catalog_source_id.as_str(), &serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap()).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
+            }
+            let mut updates = catalog.changes();
+            crate::published(&mut updates);
+            let results = owner.live_search(&catalog, "Match", 10).await.unwrap();
+            assert!(
+                crate::published(&mut updates)
+                    .expect("catalog update")
+                    .1
+                    .intersects(sources::Shown::CATALOG)
+            );
+            assert!(results.albums.is_empty());
+            assert_eq!(results.tracks.len(), 1);
+            let track = &results.tracks[0];
+            assert_eq!(track.album, "Nonmatching album");
+            assert!(track.links.album_key.is_some());
+            assert!(track.artwork_binding.is_some());
+        }
     }
 
     #[test]
@@ -1362,6 +1572,113 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn album_tracks_use_requested_type_and_numeric_metadata_strings() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/Items"))
+            .and(query_param("IncludeItemTypes", "Audio"))
+            .and(query_param("ParentId", "album"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Items":[
+                    {"Id":"track","Name":"Track","RunTimeTicks":"420000000","ProductionYear":"2024"},
+                    {"Id":"second-track","Name":"Second Track","RunTimeTicks":"430000000","ProductionYear":"2024"}
+                ]
+            }))).expect(1).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/Items/album/Ancestors"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"Id":"music","Name":"Music","CollectionType":"music"}
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinEmbySource::open(
+            JellyfinEmbySourceConfig {
+                emby_connect: false,
+                kind: crate::ServerKind::Jellyfin,
+                base_url: server.uri(),
+                server_id: None,
+                user_id: "user".into(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        let owner = crate::Source::new(
+            crate::SourceId::new("source"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
+        let crate::source::Implementation::JellyfinEmby(source) = &owner.implementation else {
+            unreachable!()
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "jellyfin", "Jellyfin")
+            .await
+            .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        source
+            .acquire_collection(
+                &mut observation,
+                &crate::SourceCollection::Album("jellyfin:album:album".into()),
+                None,
+                false,
+                &|| false,
+            )
+            .await
+            .unwrap();
+        let track = catalog
+            .tracks_by_uris(
+                &([(&library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    "track",
+                    "jellyfin:track:track",
+                ))
+                    .to_owned()]),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .map(|rows| rows.into_iter().next())
+            .unwrap()
+            .expect("album track without repeated Type");
+        assert_eq!(track.metadata.duration_millis, 42_000);
+        assert_eq!(track.metadata.year, Some(2024));
+        let cancellation = library::ReadCancellation::new();
+        let source = {
+            catalog.loaded().await;
+            catalog.cached_source("source")
+        }
+        .unwrap()
+        .source;
+        let folder = catalog
+            .catalog_keys(
+                library::CatalogKind::Folder,
+                Some(source),
+                &["jellyfin:music-folder:music".into()],
+                &cancellation,
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .map(library::FolderKey::from_raw)
+            .expect("album music folder");
+        let mut query = library::MemberRead::new(library::Collection::Source(source));
+        query.folder = Some(folder);
+        let page = crate::listed_tracks(&catalog, query).await;
+        assert_eq!(page.len(), 2, "both new tracks keep their music folder");
     }
 
     #[tokio::test]
@@ -1567,5 +1884,162 @@ mod tests {
                 assert_eq!(artist.musicbrainz_artist_id.as_deref(), Some("artist-mbid"));
             }
         }
+    }
+
+    #[tokio::test]
+    async fn exact_track_change_closes_over_its_album_and_removal_does_not_refetch_items() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Items/track-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Id": "track-one",
+                "Name": "Updated Track",
+                "Type": "Audio",
+                "AlbumId": "album-one",
+                "Album": "Updated Album"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Items/album-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Id": "album-one",
+                "Name": "Updated Album",
+                "Type": "MusicAlbum"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Items/track-one/Ancestors"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinEmbySource::open(
+            JellyfinEmbySourceConfig {
+                emby_connect: false,
+                kind: crate::ServerKind::Jellyfin,
+                base_url: server.uri(),
+                server_id: Some("server-one".to_string()),
+                user_id: "user-one".to_string(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "secret-token".to_string(),
+            "device-one".to_string(),
+        )
+        .expect("Jellyfin source");
+        let directory = tempfile::tempdir().expect("Library directory");
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
+            .await
+            .expect("Library Catalog");
+        catalog
+            .reconcile_source(
+                &library::SourceId::new("jellyfin:test"),
+                "jellyfin",
+                "Jellyfin",
+            )
+            .await
+            .unwrap();
+        let catalog_source_id = ("jellyfin:test").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.albums.extend_from_slice(&[(album_from_item(
+                crate::ServerKind::Jellyfin,
+                catalog_source_id.as_str(),
+                &serde_json::from_value(serde_json::json!({
+                    "Id": "album-one", "Name": "Old Album", "Type": "MusicAlbum"
+                }))
+                .expect("old Album"),
+            )
+            .unwrap()
+            .unwrap())
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .expect("stage old Album");
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.tracks.extend_from_slice(&[(track_from_item(
+                crate::ServerKind::Jellyfin,
+                catalog_source_id.as_str(),
+                &serde_json::from_value(serde_json::json!({
+                    "Id": "track-one", "Name": "Old Track", "Type": "Audio",
+                    "AlbumId": "album-one", "Album": "Old Album"
+                }))
+                .expect("old Track"),
+            )
+            .unwrap()
+            .unwrap())
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .expect("stage old Track");
+
+        let source = crate::Source::new(
+            crate::SourceId::new("jellyfin:test"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
+        source
+            .apply_items(&catalog, vec!["track-one".to_string()], Vec::new())
+            .await
+            .expect("apply exact Track change");
+        let source_key = {
+            catalog.loaded().await;
+            catalog.cached_source("jellyfin:test")
+        }
+        .expect("published source")
+        .source;
+        let albums = crate::listed_albums(
+            &catalog,
+            library::ListRead {
+                playlist_scope: Default::default(),
+                kind: library::ListKind::Albums,
+                source: Some(source_key),
+                sort: library::LibraryField::Title,
+                folder: None,
+                filter: ("Updated Album").to_string(),
+                descending: false,
+                favorites_only: false,
+                downloaded_only: false,
+                activity: false,
+            },
+        )
+        .await;
+        assert_eq!(albums[0].title, "Updated Album");
+
+        source
+            .apply_items(&catalog, Vec::new(), vec!["track-one".to_string()])
+            .await
+            .expect("apply exact removal");
+        assert!(
+            crate::listed_tracks(
+                &catalog,
+                library::MemberRead::new(library::Collection::Source(source_key))
+            )
+            .await
+            .is_empty()
+        );
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("Jellyfin requests")
+                .iter()
+                .filter(|request| request.url.path() != "/Items")
+                .count(),
+            3,
+            "the removal path must use accepted Store identity without refetching items"
+        );
     }
 }

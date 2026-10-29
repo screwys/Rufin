@@ -55,6 +55,107 @@ pub(crate) fn published(
     published
 }
 
+/// Every row of a list, read in the windows a client scrolls through.
+#[cfg(test)]
+pub(crate) async fn listed(catalog: &library::Catalog, read: library::Read) -> Vec<library::Row> {
+    let cancel = library::ReadCancellation::new();
+    let order = catalog.order(&read, &cancel).await.unwrap();
+    let mut rows = Vec::new();
+    for start in (0..order.len()).step_by(128) {
+        rows.extend(
+            catalog
+                .rows(&order, start..(start + 128).min(order.len()), true, &cancel)
+                .await
+                .unwrap(),
+        );
+    }
+    rows
+}
+
+/// The track rows of a member list.
+#[cfg(test)]
+pub(crate) async fn listed_tracks(
+    catalog: &library::Catalog,
+    read: library::MemberRead,
+) -> Vec<library::TrackRow> {
+    listed(catalog, library::Read::Members(read))
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Track(track) | library::Row::AlbumTrack { track, .. } => Some(track),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The album rows of a list.
+#[cfg(test)]
+pub(crate) async fn listed_albums(
+    catalog: &library::Catalog,
+    read: library::ListRead,
+) -> Vec<library::AlbumRow> {
+    listed(catalog, library::Read::List(read))
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Album(album) => Some(album),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The artist rows of a list.
+#[cfg(test)]
+pub(crate) async fn listed_artists(
+    catalog: &library::Catalog,
+    read: library::ListRead,
+) -> Vec<library::ArtistRow> {
+    listed(catalog, library::Read::List(read))
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Artist(artist) => Some(artist),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The playlist rows of a list.
+#[cfg(test)]
+pub(crate) async fn listed_playlists(
+    catalog: &library::Catalog,
+    read: library::ListRead,
+) -> Vec<library::PlaylistRow> {
+    listed(catalog, library::Read::List(read))
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Playlist(library::PlaylistListRow::Playlist(playlist)) => Some(playlist),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The key of a source playlist by its object id.
+#[cfg(test)]
+pub(crate) async fn playlist_key(
+    catalog: &library::Catalog,
+    source: library::SourceKey,
+    object: &str,
+) -> Option<library::PlaylistKey> {
+    catalog
+        .catalog_keys(
+            library::CatalogKind::Playlist,
+            Some(source),
+            &[object.to_owned()],
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .first()
+        .map(|key| library::PlaylistKey::from_raw(*key))
+}
+
 #[cfg(test)]
 mod shown {
     /// What clients refresh for after a test's committed Writes: the catalog rows of a source,

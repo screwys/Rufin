@@ -191,6 +191,129 @@ async fn one_local_path_republishes_only_its_component() {
     assert_eq!(after, before);
 }
 
+#[tokio::test]
+async fn local_image_change_updates_artwork_without_changing_metadata() {
+    let root = tempfile::tempdir().expect("music root");
+    let track = root.path().join("track.wav");
+    let image = root.path().join("cover.jpg");
+    write_silent_wav(&track, 1).expect("WAV");
+    fs::write(&image, b"image-change").expect("image observation");
+    let store = tempfile::tempdir().expect("Store");
+    let catalog = Catalog::open(store.path().join("library.sqlite"))
+        .await
+        .expect("Catalog");
+    let mut updates = catalog.changes();
+    let connected = Source::connect(
+        SourceId::new("test-source"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .expect("Local");
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .expect("scan");
+    let initial = sources::published(&mut updates).expect("catalog update");
+    let album = sources::listed_albums(
+        &catalog,
+        library::ListRead {
+            playlist_scope: Default::default(),
+            kind: library::ListKind::Albums,
+            source: Some(initial.0),
+            sort: library::LibraryField::Title,
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+            downloaded_only: false,
+            activity: false,
+        },
+    )
+    .await[0]
+        .album_key;
+    let before = catalog
+        .albums(&[album], false, &ReadCancellation::new())
+        .await
+        .expect("initial Album artwork")[0]
+        .row
+        .artwork_binding
+        .clone();
+    assert!(before.is_some());
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = Arc::clone(&cancelled);
+    let interrupted = source
+        .acquire_catalog(
+            &catalog,
+            &move |progress| {
+                if progress.stage == sources::SourceReadStage::Tracks {
+                    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            },
+            cancelled,
+            true,
+        )
+        .await;
+    assert!(matches!(interrupted, Err(sources::SourceError::Cancelled)));
+    assert_eq!(
+        catalog
+            .albums(&[album], false, &ReadCancellation::new())
+            .await
+            .expect("Album cover after cancelled discovery")[0]
+            .row
+            .artwork_binding,
+        before
+    );
+    assert!(
+        sources::published(&mut updates).is_none(),
+        "cancelled no-op does not publish"
+    );
+    fs::write(&image, b"changed-image").expect("change image");
+    source
+        .apply_local_change(
+            &catalog,
+            initial.0,
+            LocalLiveChange::Paths {
+                paths: vec![image],
+                rename: None,
+            },
+        )
+        .await
+        .expect("image change");
+    let publication = sources::published(&mut updates).expect("catalog update");
+    // A picture is part of the catalog rows that show it.
+    assert!(publication.1.contains(sources::Shown::CATALOG));
+    assert!(
+        !publication
+            .1
+            .intersects(sources::Shown::PLAYLIST | sources::Shown::HOME)
+    );
+    assert_ne!(
+        catalog
+            .albums(&[album], false, &ReadCancellation::new())
+            .await
+            .expect("Album row")[0]
+            .row
+            .artwork_binding,
+        before
+    );
+}
 
 #[tokio::test]
 async fn restart_catch_up_detects_an_in_place_file_edit() {
@@ -610,6 +733,136 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
     assert!(progress.into_inner().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn cue_catch_up_advances_a_shared_backing_media_observation() {
+    let root = tempfile::tempdir().expect("music root");
+    let media = root.path().join("album.wav");
+    let first_cue = root.path().join("first.cue");
+    let second_cue = root.path().join("second.cue");
+    write_silent_wav(&media, 2).expect("WAV");
+    fs::write(
+        &first_cue,
+        "PERFORMER \"Artist\"\nTITLE \"First Album\"\nFILE \"album.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"First Track\"\n    INDEX 01 00:00:00\n",
+    )
+    .expect("first CUE");
+    fs::write(
+        &second_cue,
+        "PERFORMER \"Artist\"\nTITLE \"Second Album\"\nFILE \"album.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"Second Track\"\n    INDEX 01 00:00:00\n",
+    )
+    .expect("second CUE");
+    let store = tempfile::tempdir().expect("Store");
+    let database_path = store.path().join("library.sqlite");
+    let catalog = Catalog::open(&database_path).await.expect("Catalog");
+    let mut updates = catalog.changes();
+    let connected = Source::connect(
+        SourceId::new("test-source"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .expect("Local");
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .expect("scan");
+    let initial = sources::published(&mut updates).expect("catalog update");
+    let albums = sources::listed_albums(
+        &catalog,
+        library::ListRead {
+            playlist_scope: Default::default(),
+            kind: library::ListKind::Albums,
+            source: Some(initial.0),
+            sort: library::LibraryField::Title,
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+            downloaded_only: false,
+            activity: false,
+        },
+    )
+    .await;
+    assert_eq!(albums.len(), 2);
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    let retired_uri = library::cue_media_uri(
+        "retired-cue",
+        url::Url::from_file_path(&media).unwrap().as_str(),
+        0,
+        2_000,
+    );
+    let retired: i64 = sqlx::query_scalar("INSERT INTO tracks(source_key,media_uri) SELECT source_key,?1 FROM tracks JOIN track_details USING(track_key) WHERE cue_path=?2 LIMIT 1 RETURNING track_key")
+        .bind(&retired_uri)
+        .bind(first_cue.canonicalize().unwrap().to_string_lossy().as_ref())
+        .fetch_one(&mut stored)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO track_details(track_key,source_path,cue_path,cue_start_millis,cue_end_millis) SELECT ?1,source_path,cue_path,cue_start_millis,cue_end_millis FROM track_details WHERE cue_path=?2 LIMIT 1")
+        .bind(retired)
+        .bind(first_cue.canonicalize().unwrap().to_string_lossy().as_ref())
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    // Rows written straight to the Store reach the Catalog when it opens again.
+    sqlx::query("UPDATE store_commits SET commits=commits+1")
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    catalog.close().await.expect("close Catalog");
+    let catalog = Catalog::open(&database_path).await.expect("reopen Catalog");
+    let mut updates = catalog.changes();
+    write_silent_wav(&media, 3).expect("edit CUE backing media");
+    source
+        .catch_up_local(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .expect("first catch-up");
+    sources::published(&mut updates).expect("catalog update");
+    source
+        .catch_up_local(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .expect("second catch-up");
+
+    assert!(
+        sources::published(&mut updates).is_none(),
+        "unchanged observations stay quiet"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT indexed FROM tracks WHERE track_key=?1")
+            .bind(retired)
+            .fetch_one(&mut stored)
+            .await
+            .unwrap(),
+        0,
+        "retired CUE aliases stay outside the source catalog"
+    );
+}
 
 #[tokio::test]
 async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
@@ -841,6 +1094,112 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
     );
 }
 
+#[tokio::test]
+async fn local_artist_cover_keeps_album_order_across_point_updates() {
+    let root = tempfile::tempdir().unwrap();
+    let mut covers = Vec::new();
+    for album in ["First", "Second"] {
+        let directory = root.path().join(album);
+        fs::create_dir(&directory).unwrap();
+        write_tagged_wav(
+            &directory.join("track.wav"),
+            "Track",
+            "Artist",
+            album,
+            "Rock",
+        )
+        .unwrap();
+        let cover = directory.join("cover.jpg");
+        fs::write(&cover, album.as_bytes()).unwrap();
+        covers.push(cover.canonicalize().unwrap());
+    }
+    let store = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(store.path().join("library.sqlite"))
+        .await
+        .unwrap();
+    let mut updates = catalog.changes();
+    let connected = Source::connect(
+        SourceId::new("local-art"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .unwrap();
+    let initial = sources::published(&mut updates).expect("catalog update");
+    let artist = sources::listed_artists(
+        &catalog,
+        library::ListRead {
+            playlist_scope: Default::default(),
+            kind: library::ListKind::Artists {
+                album_artist: false,
+            },
+            source: Some(initial.0),
+            sort: library::LibraryField::Title,
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+            downloaded_only: false,
+            activity: false,
+        },
+    )
+    .await
+    .remove(0);
+    for changed in [&covers[1], &covers[0]] {
+        fs::write(changed, b"replacement artwork").unwrap();
+        source
+            .apply_local_change(
+                &catalog,
+                initial.0,
+                LocalLiveChange::Paths {
+                    paths: vec![changed.clone()],
+                    rename: None,
+                },
+            )
+            .await
+            .unwrap();
+        let update = sources::published(&mut updates).expect("catalog update");
+        assert!(update.1.contains(sources::Shown::CATALOG)
+            && !update.1.intersects(sources::Shown::PLAYLIST | sources::Shown::HOME));
+        let current = catalog
+            .artist(&artist.media_uri, false, false, &ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let artwork: Vec<library::ArtworkCandidate> =
+            serde_json::from_slice(current.row.artwork_binding.as_ref().unwrap()).unwrap();
+        let binding = &artwork;
+        assert_eq!(binding[0].source_id().unwrap(), source.source_id());
+        assert!(
+            matches!(&binding[0].image, library::ArtworkImage::Local { path, picture_index: None, .. } if path == & covers[0].to_string_lossy())
+        );
+        if changed == &covers[1] {
+            assert_eq!(current.row.artwork_binding, artist.artwork_binding);
+        } else {
+            assert_ne!(current.row.artwork_binding, artist.artwork_binding);
+        }
+    }
+}
 
 #[tokio::test]
 async fn local_refresh_after_a_deleted_album_track_removes_it() {
@@ -1025,6 +1384,308 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
     }
 }
 
+#[tokio::test]
+async fn local_metadata_save_publishes_album_identity_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().canonicalize().unwrap().join("café %.wav");
+    write_tagged_wav(&path, "Track", "Artist", "Before", "Rock").unwrap();
+    let second_path = root.path().canonicalize().unwrap().join("second.wav");
+    write_tagged_wav(&second_path, "Second", "Artist", "Before", "Rock").unwrap();
+    let other_path = root.path().canonicalize().unwrap().join("other.wav");
+    write_tagged_wav(&other_path, "Other", "Artist", "Aardvark", "Rock").unwrap();
+    let mut other = Probe::open(&other_path).unwrap().read().unwrap();
+    other
+        .primary_tag_mut()
+        .unwrap()
+        .insert_text(ItemKey::ReleaseDate, "2030".into());
+    other
+        .save_to_path(&other_path, WriteOptions::default())
+        .unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(store.path().join("library.sqlite"))
+        .await
+        .unwrap();
+    let mut updates = catalog.changes();
+    let connected = Source::connect(
+        SourceId::new("local-metadata"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .unwrap();
+    let initial = sources::published(&mut updates).expect("catalog update");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let track = catalog
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
+    let album = catalog
+        .albums(
+            &[track.links.album_key.unwrap()],
+            false,
+            &ReadCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    let source = Arc::new(source);
+    let (editor, _metadata) = sources::FileEditSession::open(
+        Some(Arc::clone(&source)),
+        &catalog,
+        album.row.media_uri.clone(),
+        sources::SourceEntityKind::Album,
+    )
+    .await
+    .unwrap();
+    {
+        editor
+            .save_tracks(
+                &catalog,
+                Some(sources::MetadataEdit {
+                    kind: sources::SourceEntityKind::Album,
+                    changes: [("title".into(), "After".into())].into(),
+                    artwork: None,
+                }),
+                [&path, &second_path]
+                    .into_iter()
+                    .map(|path| url::Url::from_file_path(path).unwrap().to_string())
+                    .collect(),
+                |_| async {
+                    Ok((
+                        sources::MetadataEdit {
+                            kind: sources::SourceEntityKind::Track,
+                            changes: Default::default(),
+                            artwork: None,
+                        },
+                        None,
+                        None,
+                    ))
+                },
+                |_, _, _| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+    }
+    assert!(
+        sources::published(&mut updates)
+            .expect("catalog update")
+            .1
+            .intersects(sources::Shown::CATALOG)
+    );
+    let current = catalog
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.track_key, track.track_key);
+    assert_eq!(current.metadata.album, "After");
+    let (editor, _metadata) = sources::FileEditSession::open(
+        Some(Arc::clone(&source)),
+        &catalog,
+        uri.to_string(),
+        sources::SourceEntityKind::Track,
+    )
+    .await
+    .unwrap();
+    {
+        editor
+            .save(
+                &catalog,
+                (sources::MetadataEdit {
+                    kind: sources::SourceEntityKind::Track,
+                    changes: Default::default(),
+                    artwork: None,
+                })
+                .clone(),
+            )
+            .await
+            .unwrap();
+    }
+    assert!(
+        sources::published(&mut updates).is_none(),
+        "no-op save has no catalog change"
+    );
+    for (date, release, original, expected, year) in [
+        ("2001", "", "", Some("2001"), Some(2001)),
+        ("2001-02", "", "", Some("2001-02"), Some(2001)),
+        (
+            "2001-02-03",
+            "",
+            "1995-07-08",
+            Some("2001-02-03"),
+            Some(2001),
+        ),
+        (
+            "2001-02-03",
+            "2004-05-06",
+            "1995-07-08",
+            Some("2004-05-06"),
+            Some(2001),
+        ),
+        ("", "2004-05-06", "", Some("2004-05-06"), Some(2004)),
+        ("", "", "1995-07-08", Some("1995-07-08"), Some(1995)),
+        ("", "", "", None, None),
+    ] {
+        let album = catalog
+            .albums(
+                &[current.links.album_key.unwrap()],
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
+        let (editor, _metadata) = sources::FileEditSession::open(
+            Some(Arc::clone(&source)),
+            &catalog,
+            album.row.media_uri.clone(),
+            sources::SourceEntityKind::Album,
+        )
+        .await
+        .unwrap();
+        {
+            editor
+                .save_tracks(
+                    &catalog,
+                    Some(sources::MetadataEdit {
+                        kind: sources::SourceEntityKind::Album,
+                        changes: [
+                            ("recording_date".to_string(), date.to_string()),
+                            ("release_date".to_string(), release.to_string()),
+                            ("original_release_date".to_string(), original.to_string()),
+                        ]
+                        .into(),
+                        artwork: None,
+                    }),
+                    [&path, &second_path]
+                        .into_iter()
+                        .map(|path| url::Url::from_file_path(path).unwrap().to_string())
+                        .collect(),
+                    |_| async {
+                        Ok((
+                            sources::MetadataEdit {
+                                kind: sources::SourceEntityKind::Track,
+                                changes: Default::default(),
+                                artwork: None,
+                            },
+                            None,
+                            None,
+                        ))
+                    },
+                    |_, _, _| async { Ok(()) },
+                )
+                .await
+                .unwrap();
+        }
+        let album = catalog
+            .albums(
+                &[current.links.album_key.unwrap()],
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
+        for path in [&path, &second_path] {
+            let uri = url::Url::from_file_path(path).unwrap().to_string();
+            let (_editor, metadata) = sources::FileEditSession::open(
+                Some(Arc::clone(&source)),
+                &catalog,
+                uri.to_string(),
+                sources::SourceEntityKind::Track,
+            )
+            .await
+            .unwrap();
+            for (key, value) in [
+                ("recording_date", date),
+                ("release_date", release),
+                ("original_release_date", original),
+            ] {
+                assert_eq!(
+                    metadata
+                        .fields
+                        .iter()
+                        .find(|field| field.key == key)
+                        .unwrap()
+                        .value,
+                    value
+                );
+            }
+            let track = catalog
+                .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+                .await
+                .map(|rows| {
+                    let mut rows = rows;
+                    rows.pop()
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(track.metadata.release_date.as_deref(), expected);
+            assert_eq!(track.metadata.year, year);
+        }
+        assert_eq!(album.metadata.release_date.as_deref(), expected);
+        assert_eq!(album.metadata.year, year);
+        for descending in [false, true] {
+            let albums = sources::listed_albums(
+                &catalog,
+                library::ListRead {
+                    playlist_scope: Default::default(),
+                    kind: library::ListKind::Albums,
+                    source: Some(initial.0),
+                    sort: library::LibraryField::ReleaseDate,
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: descending,
+                    favorites_only: false,
+                    downloaded_only: false,
+                    activity: false,
+                },
+            )
+            .await;
+            let titles = albums
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                titles,
+                if expected.is_none() || descending {
+                    vec!["Aardvark", "After"]
+                } else {
+                    vec!["After", "Aardvark"]
+                }
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_them() {
@@ -1106,6 +1767,115 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
     assert_eq!(track_count(&catalog, &rejected).await, 0);
 }
 
+#[tokio::test]
+async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
+    let root = tempfile::tempdir().expect("music root");
+    fs::write(root.path().join("cover.jpg"), b"album cover").unwrap();
+    let first = root.path().join("first.wav");
+    let second = root.path().join("second.wav");
+    write_tagged_wav(&first, "First", "First Artist", "Shared Album", "Rock")
+        .expect("first tagged WAV");
+    write_tagged_wav(&second, "Second", "Second Artist", "Shared Album", "Jazz")
+        .expect("second tagged WAV");
+    let store = tempfile::tempdir().expect("Store");
+    let database_path = store.path().join("library.sqlite");
+    let catalog = Catalog::open(&database_path).await.expect("Catalog");
+    let mut updates = catalog.changes();
+    let connected = Source::connect(
+        SourceId::new("test-source"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .expect("Local");
+    let (configuration, source, _) = connected.into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .expect("scan");
+    let initial = sources::published(&mut updates).expect("catalog update");
+    let albums = sources::listed_albums(
+        &catalog,
+        library::ListRead {
+            playlist_scope: Default::default(),
+            kind: library::ListKind::Albums,
+            source: Some(initial.0),
+            sort: library::LibraryField::Title,
+            folder: None,
+            filter: ("").to_string(),
+            descending: false,
+            favorites_only: false,
+            downloaded_only: false,
+            activity: false,
+        },
+    )
+    .await
+    .into_iter()
+    .map(|row| row.album_key)
+    .collect::<Vec<_>>();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(album_genres(&catalog, albums[0]).await, ["Rock", "Jazz"]);
+
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE local_files SET parse_version=16,parsed_stamp=json_set(parsed_stamp,'$[3]',16) WHERE kind IN ('media','cue')")
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE track_details SET metadata=jsonb_remove(metadata,'$.album_tags')")
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    stored.close().await.unwrap();
+    set_genre(&first, "Folk").expect("change a Track from the old cache");
+    source
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            true,
+        )
+        .await
+        .expect("refresh the changed album and its old cached sibling");
+    sources::published(&mut updates).expect("catalog update");
+    assert_eq!(album_genres(&catalog, albums[0]).await, ["Folk", "Jazz"]);
+
+    set_genre(&first, "Electronic").expect("change one Track genre");
+    source
+        .apply_local_change(
+            &catalog,
+            initial.0,
+            LocalLiveChange::Paths {
+                paths: vec![first],
+                rename: None,
+            },
+        )
+        .await
+        .expect("exact Track change");
+    sources::published(&mut updates).expect("catalog update");
+    assert_eq!(
+        album_genres(&catalog, albums[0]).await,
+        ["Electronic", "Jazz"]
+    );
+}
 
 #[tokio::test]
 async fn explicit_rename_preserves_track_identity_without_native_file_identity() {
@@ -1254,6 +2024,129 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     );
 }
 
+#[tokio::test]
+async fn initial_local_walk_reports_real_total_free_file_progress() {
+    let root = tempfile::tempdir().expect("music root");
+    let other = tempfile::tempdir().expect("second music root");
+    fs::create_dir(root.path().join("nested")).unwrap();
+    write_silent_wav(&root.path().join("first.wav"), 1).expect("first WAV");
+    write_silent_wav(&root.path().join("second.wav"), 1).expect("second WAV");
+    write_silent_wav(&root.path().join("nested/third.wav"), 1).unwrap();
+    write_silent_wav(&other.path().join("backing.wav"), 1).unwrap();
+    fs::write(root.path().join("notes.txt"), "Not audio").unwrap();
+    fs::write(root.path().join("cover.jpg"), "Not audio").unwrap();
+    fs::write(
+        other.path().join("album.cue"),
+        "FILE \"backing.wav\" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:00:37\n",
+    )
+    .unwrap();
+    let store = tempfile::tempdir().expect("Store");
+    let catalog = Catalog::open(store.path().join("library.sqlite"))
+        .await
+        .expect("Catalog");
+    let mut identities = None;
+    for source_id in ["test-source", "readded-source"] {
+        let (configuration, source, _) = Source::connect(
+            SourceId::new(source_id),
+            SourceSetup::Local {
+                roots: vec![root.path().to_path_buf(), other.path().to_path_buf()],
+            },
+            "",
+        )
+        .await
+        .unwrap()
+        .into_parts();
+        catalog
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        if source_id == "test-source" {
+            catalog
+                .set_favorite(
+                    &library::FavoriteTarget::Track(
+                        url::Url::from_file_path(
+                            root.path().join("first.wav").canonicalize().unwrap(),
+                        )
+                        .unwrap()
+                        .into(),
+                    ),
+                    true,
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let source_key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
+        for _ in 0..2 {
+            let progress = Mutex::new(Vec::new());
+            source
+                .acquire_catalog(
+                    &catalog,
+                    &|update| progress.lock().unwrap().push(update),
+                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    true,
+                )
+                .await
+                .unwrap();
+            let progress = progress.into_inner().unwrap();
+            assert!(progress.iter().all(|update| {
+                update.stage == sources::SourceReadStage::Tracks && update.total.is_none()
+            }));
+            assert!(
+                progress
+                    .windows(2)
+                    .all(|pair| pair[0].completed <= pair[1].completed)
+            );
+            assert_eq!(progress.last().unwrap().completed, 5);
+            assert_eq!(
+                sources::listed_tracks(&catalog, MemberRead::new(Collection::Source(source_key)))
+                    .await
+                    .len(),
+                5,
+                "accepted tracks must also be indexed, including retained tracks from the old source"
+            );
+            let current = catalog
+                .mapping_track_page(source_key, None, None, 10, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|track| (track.track_key, track.media_uri))
+                .collect::<Vec<_>>();
+            if let Some(expected) = &identities {
+                assert_eq!(
+                    &current, expected,
+                    "source reassignment keeps track identities"
+                );
+            } else {
+                assert_eq!(current.len(), 5);
+                identities = Some(current);
+            }
+        }
+        if source_id == "test-source" {
+            write_silent_wav(&root.path().join("first.wav"), 2).unwrap();
+            source
+                .apply_local_change(
+                    &catalog,
+                    source_key,
+                    LocalLiveChange::Paths {
+                        paths: vec![root.path().join("first.wav")],
+                        rename: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(catalog.remove_source(source.source_id()).await.unwrap());
+        }
+    }
+}
 
 async fn track_count(
     catalog: &Catalog,
@@ -1267,6 +2160,19 @@ async fn track_count(
         .await
         .expect("Track count")
         .len()
+}
+
+async fn album_genres(catalog: &Catalog, album: library::AlbumKey) -> Vec<String> {
+    catalog
+        .albums(&[album], false, &ReadCancellation::new())
+        .await
+        .expect("Album row")[0]
+        .row
+        .links
+        .genres
+        .iter()
+        .map(|genre| genre.name.clone())
+        .collect()
 }
 
 fn write_tagged_wav(
@@ -1285,6 +2191,16 @@ fn write_tagged_wav(
     tag.insert_text(ItemKey::AlbumArtist, "Album Artist".to_string());
     tag.set_genre(genre.to_string());
     tagged.insert_tag(tag);
+    tagged.save_to_path(path, WriteOptions::default())?;
+    Ok(())
+}
+
+fn set_genre(path: &Path, genre: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut tagged = Probe::open(path)?.read()?;
+    tagged
+        .primary_tag_mut()
+        .ok_or("missing primary tag")?
+        .set_genre(genre.to_string());
     tagged.save_to_path(path, WriteOptions::default())?;
     Ok(())
 }

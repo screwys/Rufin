@@ -341,3 +341,105 @@ fn epoch_date(seconds: i64) -> String {
     let year = year + era * 400 + i64::from(month <= 2);
     format!("{year:04}-{month:02}-{date:02}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn artist_title_sort_survives_full_import_and_album_track_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut updates = catalog.changes();
+        let artists = [
+            json!({"ratingKey":"608","type":"artist","title":"The Cure","titleSort":"Cure, The"}),
+            json!({"ratingKey":"609","type":"artist","title":"Duran Duran"}),
+        ];
+        let albums = [
+            json!({"ratingKey":"album-608","type":"album","title":"Wish","parentRatingKey":"608","parentTitle":"The Cure"}),
+            json!({"ratingKey":"album-609","type":"album","title":"Rio","parentRatingKey":"609","parentTitle":"Duran Duran"}),
+        ];
+        let tracks = [
+            json!({"ratingKey":"track-608","type":"track","title":"Friday I'm in Love","parentRatingKey":"album-608","parentTitle":"Wish","grandparentRatingKey":"608","grandparentTitle":"The Cure"}),
+            json!({"ratingKey":"track-609","type":"track","title":"Rio","parentRatingKey":"album-609","parentTitle":"Rio","grandparentRatingKey":"609","grandparentTitle":"Duran Duran"}),
+        ];
+        catalog
+            .reconcile_source(&library::SourceId::new("plex"), "plex", "Plex")
+            .await
+            .unwrap();
+        let catalog_source_id = ("plex").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        (async {
+            for batch in read_items(
+                &catalog_source_id,
+                artists
+                    .iter()
+                    .chain(&albums)
+                    .chain(&tracks)
+                    .map(|item| (item, ItemResponse::Complete)),
+            )? {
+                observation.apply_catalog(&batch, true).await?;
+            }
+            Ok::<_, crate::SourceError>(())
+        })
+        .await
+        .unwrap();
+
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
+        for refresh in [false, true] {
+            if refresh {
+                let catalog_source_id = ("plex").to_string();
+                let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+
+                (async {
+                    for batch in read_items(
+                        &catalog_source_id,
+                        albums
+                            .iter()
+                            .chain(&tracks)
+                            .map(|item| (item, ItemResponse::Complete)),
+                    )? {
+                        observation.apply_catalog(&batch, true).await?;
+                    }
+                    Ok::<_, crate::SourceError>(())
+                })
+                .await
+                .unwrap();
+            }
+            let rows = crate::listed_artists(
+                &catalog,
+                library::ListRead {
+                    playlist_scope: Default::default(),
+                    kind: library::ListKind::Artists {
+                        album_artist: false,
+                    },
+                    source: Some(
+                        {
+                            catalog.loaded().await;
+                            catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                        }
+                        .unwrap(),
+                    ),
+                    sort: library::LibraryField::Title,
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false,
+                    downloaded_only: false,
+                    activity: false,
+                },
+            )
+            .await;
+            assert_eq!(
+                rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                ["The Cure", "Duran Duran"]
+            );
+        }
+    }
+}

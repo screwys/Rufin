@@ -615,6 +615,14 @@ pub(super) mod tests {
         .unwrap()
     }
 
+    fn track() -> Value {
+        json!({"type":"track","ratingKey":"track","title":"Song","parentRatingKey":"album","parentTitle":"Album","grandparentRatingKey":"artist","grandparentTitle":"Artist",
+        "librarySectionID":"1","duration":123456,"addedAt":1704067200,"userRating":7,"viewCount":"12","lastViewedAt":1704067200,
+        "year":{},"parentYear":2010,"index":[],"skipCount":-4,"Guid":[null,{"id":"mbid://recording"}],"Genre":[{"tag":"Rock"},{"tag":[]}],"Mood":[{"tag":"Calm"}],
+        "Media":[{"container":"flac","Part":[{"file":"/music/song.flac","Stream":[{"streamType":2,"gain":-4.25,"peak":0.8,"albumGain":-3.5,"loudness":-18.0}]}]}],
+        "thumb":"/library/metadata/album/thumb/1"})
+    }
+
     #[tokio::test]
     async fn live_updates_refresh_newly_added_and_retain_it_on_failure() {
         let server = MockServer::start().await;
@@ -723,5 +731,400 @@ pub(super) mod tests {
             assert_eq!(titles, expected);
             server.verify().await;
         }
+    }
+
+    #[tokio::test]
+    async fn catalog_and_live_items_ingest_independent_facts_and_preserve_occurrences() {
+        let server = MockServer::start().await;
+        let source = source(&server);
+        let source_owner = crate::Source::new(
+            library::SourceId::new("plex-test"),
+            crate::Implementation::Plex(source),
+        );
+        let crate::Implementation::Plex(source) = &source_owner.implementation else {
+            unreachable!()
+        };
+        let valid_title = "İstanbul; 東京; العربية; Ёжик; Édith";
+        let mut damaged_track = track();
+        damaged_track["title"] = json!("__BAD_TITLE__");
+        let mut damaged_detail =
+            serde_json::to_vec(&json!({"MediaContainer":{"Metadata":[damaged_track]}})).unwrap();
+        let start = damaged_detail
+            .windows(13)
+            .position(|value| value == b"__BAD_TITLE__")
+            .unwrap();
+        damaged_detail.splice(start..start + 13, b"Bad \xff title".iter().copied());
+        let bulk_track = Mock::given(method("GET"))
+            .and(path("/library/metadata/track"))
+            .and(query_param("includeStreams", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(damaged_detail))
+            .mount_as_scoped(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/library/metadata/unanalyzed")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Metadata":[{"ratingKey":"unanalyzed","type":"track","title":valid_title,"Media":[{"Part":[{"Stream":[{"streamType":2,"gain":{},"peak":-1}]}]}]}]}}))).mount(&server).await;
+        Mock::given(method("GET")).and(path("/library/sections")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Directory":[null,{"key":"1","type":"artist","title":"Music"}]}}))).mount(&server).await;
+        for (kind, value) in [
+            (
+                "8",
+                json!({"ratingKey":"artist","type":"artist","title":"Artist"}),
+            ),
+            (
+                "9",
+                json!({"ratingKey":"album","type":"album","title":"Album"}),
+            ),
+            ("10", track()),
+        ] {
+            let mut value = value;
+            if kind == "10" {
+                value.as_object_mut().unwrap().remove("Mood");
+                value.as_object_mut().unwrap().remove("Media");
+            }
+            Mock::given(method("GET")).and(path("/library/sections/1/all")).and(query_param("type",kind)).and(query_param("X-Plex-Container-Start","0")).and(query_param("X-Plex-Container-Size","512"))
+                .respond_with({
+                    if kind == "10" { value["title"] = json!("__BAD_TITLE__"); }
+                    let mut body = serde_json::to_vec(&json!({"MediaContainer":{"Metadata":[null,{"title":"No identity"},value],"totalSize":4}})).unwrap();
+                    if kind == "10" {
+                        let start = body.windows(13).position(|value| value == b"__BAD_TITLE__").unwrap();
+                        body.splice(start..start + 13, b"Bad \xff title".iter().copied());
+                    }
+                    ResponseTemplate::new(200).set_body_bytes(body)
+                }).mount(&server).await;
+            Mock::given(method("GET")).and(path("/library/sections/1/all")).and(query_param("type",kind)).and(query_param("X-Plex-Container-Start","3"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Metadata":[if kind == "10" {json!({"ratingKey":"unanalyzed","type":"track","title":valid_title,"Media":[{"Part":[{"Stream":[{"streamType":2,"gain":{},"peak":-1}]}]}]})} else {json!({"ratingKey":[],"title":"Invalid identity"})}],"totalSize":4}}))).mount(&server).await;
+        }
+        let playlist =
+            json!({"ratingKey":"list","type":"playlist","title":"Repeated","smart":true});
+        let mut hubs = Some(Mock::given(method("GET")).and(path("/hubs/sections/1")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer":{"Hub":[
+            {"hubIdentifier":"related","title":"Picked for You","Metadata":[track()]},
+            {"hubIdentifier":"mixes","title":"Mixes","Metadata":[{"type":"playlist","radio":true,"title":"Your Evening Mix","key":"/library/metadata/artist/station/abc?type=10"}]}
+        ]}}))).mount_as_scoped(&server).await);
+        let stations = Mock::given(method("POST"))
+            .and(path("/playQueues"))
+            .and(query_param("type", "audio"))
+            .and(query_param("window", "24"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"MediaContainer":{"Metadata":[track()]}})),
+            )
+            .mount_as_scoped(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/playlists"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"MediaContainer":{"Metadata":[playlist],"totalSize":1}})),
+            )
+            .mount(&server)
+            .await;
+        let mut first = track();
+        first["playlistItemID"] = json!("entry-one");
+        let mut second = track();
+        second["playlistItemID"] = json!("entry-two");
+        Mock::given(method("GET"))
+            .and(path("/playlists/list/items"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({"MediaContainer":{"Metadata":[first,second],"totalSize":2}}),
+                ),
+            )
+            .mount(&server)
+            .await;
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut updates = catalog.changes();
+        catalog
+            .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
+            .await
+            .unwrap();
+        let catalog_source_id = ("plex-test").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+        {
+            let result = source
+                .acquire_catalog(&mut observation, &|_| {}, &|| false)
+                .await;
+            result
+        }
+        .unwrap();
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
+        let cancellation = library::ReadCancellation::new();
+        let uri = library::source_entity_uri(
+            &crate::SourceId::new("plex-test"),
+            "track",
+            "plex:track:track",
+        );
+        let row = catalog
+            .track(&(&uri), &cancellation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.metadata.title, "Bad � title");
+        let later_page = catalog
+            .tracks_by_uris(
+                &([library::source_entity_uri(
+                    &crate::SourceId::new("plex-test"),
+                    "track",
+                    "plex:track:unanalyzed",
+                )]),
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert_eq!(later_page[0].metadata.title, valid_title);
+        assert_eq!(row.metadata.duration_millis, 123456);
+        assert_eq!(row.metadata.year, Some(2010));
+        assert_eq!(row.state.play_count, 12);
+        assert_eq!(row.state.rating, Some(7));
+        assert_eq!(
+            row.metadata.musicbrainz_recording_id.as_deref(),
+            Some("recording")
+        );
+        assert!(row.artwork_binding.is_some());
+        assert_eq!(
+            row.links
+                .genres
+                .iter()
+                .map(|genre| genre.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Rock"]
+        );
+        let source_key = {
+            catalog.loaded().await;
+            catalog.source_key(&library::SourceId::new(&catalog_source_id))
+        }
+        .unwrap();
+        let folders = crate::listed(
+            &catalog,
+            library::Read::Folders(library::FolderRead {
+                source: source_key,
+                parent: None,
+                filter: String::new(),
+                descending: false,
+            }),
+        )
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Folder(folder) => Some(folder),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Music");
+        assert_eq!(folders[0].summary.track_count, 2);
+        let moods = crate::listed(
+            &catalog,
+            library::Read::List(library::ListRead {
+                folder: Some(folders[0].folder_key),
+                ..library::ListRead::new(
+                    library::ListKind::Moods,
+                    Some(source_key),
+                    library::LibraryField::Title,
+                )
+            }),
+        )
+        .await
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Tag(tag) => Some(tag),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(moods.len(), 1);
+        assert_eq!(moods[0].name, "Calm");
+        assert_eq!(moods[0].summary.track_count, 1);
+        assert_eq!(
+            catalog
+                .playback_loudness(&uri, &cancellation)
+                .await
+                .unwrap()
+                .0
+                .unwrap()
+                .replay_gain_db,
+            Some(-4.25)
+        );
+        let playlist_key = crate::playlist_key(
+            &catalog,
+            {
+                catalog.loaded().await;
+                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+            }
+            .unwrap(),
+            "plex:playlist:list",
+        )
+        .await
+        .unwrap();
+        let entries = catalog
+            .playlist_edit_entries(
+                playlist_key,
+                &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.object_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["entry-one", "entry-two"]
+        );
+        assert!(
+            !catalog
+                .playlists(&[playlist_key], &cancellation)
+                .await
+                .unwrap()[0]
+                .writable
+        );
+        let home = catalog
+            .home_page(
+                {
+                    catalog.loaded().await;
+                    catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                }
+                .unwrap(),
+                None,
+                0,
+                0,
+                &library::HomeBlockKind::all(),
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert!(
+            home.provider_sections
+                .iter()
+                .any(|section| section.title.as_deref() == Some("Picked for You")
+                    && section.rows.tracks.len() == 1)
+        );
+        assert!(
+            home.provider_sections
+                .iter()
+                .any(
+                    |section| section.title.as_deref() == Some("Your Evening Mix")
+                        && section.rows.tracks.len() == 1
+                )
+        );
+        catalog
+            .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
+            .await
+            .unwrap();
+        let catalog_source_id = ("plex-test").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
+        {
+            let result = source
+                .acquire_catalog(&mut observation, &|_| {}, &|| false)
+                .await;
+            result
+        }
+        .unwrap();
+        assert!(!observation.changed());
+        assert!(
+            crate::published(&mut updates).is_none(),
+            "unchanged native data stays quiet"
+        );
+        drop(stations);
+        let unavailable_stations = Mock::given(method("POST"))
+            .and(path("/playQueues"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount_as_scoped(&server)
+            .await;
+        for failed_hubs in [false, true] {
+            let unavailable_hubs = if failed_hubs {
+                drop(hubs.take());
+                Some(
+                    Mock::given(method("GET"))
+                        .and(path("/hubs/sections/1"))
+                        .respond_with(ResponseTemplate::new(503))
+                        .mount_as_scoped(&server)
+                        .await,
+                )
+            } else {
+                None
+            };
+            catalog
+                .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
+                .await
+                .unwrap();
+            let catalog_source_id = ("plex-test").to_string();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            observation.start_observation().await.unwrap();
+            {
+                let result = source
+                    .acquire_catalog(&mut observation, &|_| {}, &|| false)
+                    .await;
+                result
+            }
+            .unwrap();
+            assert!(!observation.changed());
+            assert!(
+                crate::published(&mut updates).is_none(),
+                "retained Home stays quiet"
+            );
+            let retained = catalog
+                .home_page(
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                    }
+                    .unwrap(),
+                    None,
+                    0,
+                    0,
+                    &library::HomeBlockKind::all(),
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            assert_eq!(retained.provider_sections, home.provider_sections);
+            drop(unavailable_hubs);
+        }
+        drop(unavailable_stations);
+        catalog
+            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true, false)
+            .await
+            .unwrap();
+        let mut updated = track();
+        drop(bulk_track);
+        updated["title"] = json!("Updated");
+        updated["year"] = json!(2012);
+        updated["userRating"] = json!({"bad":true});
+        updated["Media"] = json!([{"Part":[{"Stream":[{"streamType":2,"gain":{},"loudness":[],"peak":-1,"albumPeak":[]}]}]}]);
+        for (raw, item) in [
+            ("track", updated),
+            (
+                "album",
+                json!({"ratingKey":"album","type":"album","title":"Album","year":[]}),
+            ),
+            (
+                "invalid",
+                json!({"ratingKey":[],"type":"track","title":"Unusable"}),
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(format!("/library/metadata/{raw}")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"MediaContainer":{"Metadata":[item]}})),
+                )
+                .mount(&server)
+                .await;
+        }
+        source_owner
+            .apply_items(&catalog, vec!["invalid".into(), "track".into()], vec![])
+            .await
+            .unwrap();
+        let row = catalog
+            .track(&(&uri), &cancellation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.metadata.title, "Updated");
+        assert_eq!(row.metadata.year, Some(2012));
+        assert_eq!(row.state.play_count, 12);
+        assert!(row.state.favorite);
     }
 }
