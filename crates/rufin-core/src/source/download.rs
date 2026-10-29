@@ -1,93 +1,24 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use async_channel::Receiver;
-use futures_util::future::BoxFuture;
 use library::{Change, Scope, SourceKey, TrackKey};
 use sources::{SourceConfiguration, SourceError, SourceId};
 
 use super::{Shared, SourceOwner};
-use crate::features::{Feature, Next};
+use crate::features::follow;
 use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
 
-/// Automatic artwork and lyrics downloads, installed while either is on. A full pass fetches for
-/// every source; otherwise it fetches only for tracks the change feed reports as added.
-pub(super) struct AssetDownloads(pub(super) Weak<Shared>);
-
-impl Feature for AssetDownloads {
-    fn wanted(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            self.0.upgrade().is_some_and(|shared| {
-                let (artwork, lyrics) = shared.settings.cache_downloads();
-                artwork || lyrics
-            })
-        })
-    }
-
-    fn hears(&self, change: &Change) -> bool {
-        change.scopes.iter().any(|scope| match scope {
-            Scope::Reload => true,
-            Scope::Tracks {
-                source: Some(_),
-                added,
-                ..
-            } => !added.is_empty(),
-            _ => false,
-        })
-    }
-
-    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
-        Box::pin(async move {
-            let Some(shared) = self.0.upgrade() else {
-                return Next::Done;
-            };
-            let mut added = BTreeMap::<SourceKey, Vec<TrackKey>>::new();
-            let mut full = changes.is_none();
-            for scope in changes.iter().flatten().flat_map(|change| &change.scopes) {
-                match scope {
-                    Scope::Reload => full = true,
-                    Scope::Tracks {
-                        source: Some(source),
-                        added: keys,
-                        ..
-                    } => added.entry(*source).or_default().extend(keys),
-                    _ => {}
-                }
-            }
-            SourceOwner { shared }
-                .download_assets((!full).then_some(&added))
-                .await;
-            Next::Wait
-        })
-    }
-
-    fn stopped(&self) {
-        if let Some(shared) = self.0.upgrade() {
-            SourceOwner { shared }.publish_asset_operation(SourceOperation::Idle);
-        }
-    }
-}
-
-/// Download rules, installed while some source has rules. The download queue reconciles the
-/// rules of the sources a Change touched.
-pub(super) struct DownloadRules(pub(super) Weak<Shared>);
-
-impl Feature for DownloadRules {
-    fn wanted(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            self.0.upgrade().is_some_and(|shared| {
-                shared
-                    .settings
-                    .load()
-                    .ui
-                    .downloads
-                    .iter()
-                    .any(|settings| !settings.rules.is_empty())
-            })
-        })
-    }
-
-    fn hears(&self, change: &Change) -> bool {
+/// Download rules: the download queue reconciles the rules of the sources a Change touched.
+pub(super) async fn follow_rules(shared: Arc<Shared>, changes: Option<Vec<Arc<Change>>>) {
+    let ruled = shared
+        .settings
+        .load()
+        .ui
+        .downloads
+        .iter()
+        .any(|settings| !settings.rules.is_empty());
+    let heard = |change: &Arc<Change>| {
         change.scopes.iter().any(|scope| {
             matches!(
                 scope,
@@ -103,20 +34,40 @@ impl Feature for DownloadRules {
                     | Scope::Playlists
             )
         })
-    }
-
-    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
-        Box::pin(async move {
-            let Some(shared) = self.0.upgrade() else {
-                return Next::Done;
-            };
-            shared.downloads.library_changed(changes);
-            Next::Wait
-        })
+    };
+    if ruled
+        && changes
+            .as_ref()
+            .is_none_or(|changes| changes.iter().any(heard))
+    {
+        shared.downloads.library_changed(changes);
     }
 }
 
 impl SourceOwner {
+    /// Installs automatic artwork and lyrics downloads while either is on: one pass over every
+    /// source when installed, then fetches for the tracks the change feed reports as added.
+    pub(crate) fn asset_downloads_changed(&self) {
+        let (artwork, lyrics) = self.shared.settings.cache_downloads();
+        let mut installed = self
+            .shared
+            .asset_downloads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(task) = installed.take() {
+            task.abort();
+            self.publish_asset_operation(SourceOperation::Idle);
+        }
+        if artwork || lyrics {
+            *installed = Some(follow(
+                &self.shared.runtime,
+                &self.shared.catalog,
+                Arc::downgrade(&self.shared),
+                download_added,
+            ));
+        }
+    }
+
     pub(crate) fn source_input_digest(&self, source_id: &SourceId) -> [u8; 32] {
         self.configuration(source_id)
             .and_then(|configuration| configuration.input_identity().ok())
@@ -325,5 +276,28 @@ impl SourceOwner {
 
     pub fn remove_download_media(&self, media_uris: Vec<String>) {
         self.shared.downloads.remove(media_uris, true);
+    }
+}
+
+/// Fetches artwork and lyrics for the tracks the Changes added, or for every source.
+async fn download_added(shared: Arc<Shared>, changes: Option<Vec<Arc<Change>>>) {
+    let mut added = BTreeMap::<SourceKey, Vec<TrackKey>>::new();
+    let mut full = changes.is_none();
+    for scope in changes.iter().flatten().flat_map(|change| &change.scopes) {
+        match scope {
+            Scope::Reload => full = true,
+            Scope::Tracks {
+                source: Some(source),
+                added: keys,
+                ..
+            } => added.entry(*source).or_default().extend(keys),
+            _ => {}
+        }
+    }
+    added.retain(|_, keys| !keys.is_empty());
+    if full || !added.is_empty() {
+        SourceOwner { shared }
+            .download_assets((!full).then_some(&added))
+            .await;
     }
 }

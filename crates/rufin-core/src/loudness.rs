@@ -6,13 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
-use futures_util::future::BoxFuture;
 use library::{Catalog, Change, LoudnessMeasurement, ReadCancellation, Scope, SourceKey};
-use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
+use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{info, warn};
 
-use crate::features::{Feature, Next};
 use crate::playback::{PlaybackOwner, prepare_stream};
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
@@ -58,33 +56,25 @@ impl AnalysisFailureBlock {
     }
 }
 
-/// EBU R128 analysis, installed while normalization is EBU R128.
-pub(crate) struct Loudness(pub(crate) Weak<PlaybackOwner>);
-
-impl Feature for Loudness {
-    fn wanted(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            self.0.upgrade().is_some_and(|playback| {
-                playback
-                    .loudness
-                    .settings
-                    .load()
-                    .ui
-                    .playback
-                    .loudness_normalization
-                    == LoudnessNormalization::EbuR128
-            })
-        })
+/// While normalization is EBU R128, tracks added to the selected source start a pass over what
+/// is missing.
+pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc<Change>>>) {
+    if !playback.ebu_r128() {
+        return;
     }
-
-    fn hears(&self, change: &Change) -> bool {
-        let selected = self
-            .0
-            .upgrade()
-            .and_then(|playback| playback.source_owner())
-            .and_then(|source| source.selected_library())
-            .map(|selected| selected.source_key);
-        change.scopes.iter().any(|scope| match scope {
+    let Some(changes) = changes else {
+        playback.loudness.start(playback.source_owner());
+        return;
+    };
+    let source = playback.source_owner();
+    let selected = source
+        .as_ref()
+        .and_then(|source| source.selected_library())
+        .map(|selected| selected.source_key);
+    let added = changes
+        .iter()
+        .flat_map(|change| &change.scopes)
+        .any(|scope| match scope {
             Scope::Reload => true,
             Scope::Tracks {
                 source: Some(source),
@@ -92,27 +82,9 @@ impl Feature for Loudness {
                 ..
             } => !added.is_empty() && Some(*source) == selected,
             _ => false,
-        })
-    }
-
-    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
-        Box::pin(async move {
-            let Some(playback) = self.0.upgrade() else {
-                return Next::Done;
-            };
-            if changes.is_some() {
-                playback.loudness.library_changed(playback.source_owner());
-            } else {
-                playback.loudness.start(playback.source_owner());
-            }
-            Next::Wait
-        })
-    }
-
-    fn stopped(&self) {
-        if let Some(playback) = self.0.upgrade() {
-            playback.loudness.cancel();
-        }
+        });
+    if added {
+        playback.loudness.library_changed(source);
     }
 }
 
@@ -127,7 +99,7 @@ impl LoudnessAnalysisOwner {
     }
 
     /// Analyzes what the selected source misses, unless that runs already.
-    fn start(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
+    pub(crate) fn start(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
         let Some(source_owner) = source_owner else {
             self.cancel();
             return;

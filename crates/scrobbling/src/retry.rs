@@ -314,14 +314,6 @@ impl Scrobbler {
         }
     }
 
-    /// Whether an account exists, so the worker runs.
-    pub fn has_accounts(&self) -> bool {
-        self.worker
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
-    }
-
     pub fn new(
         catalog: Catalog,
         runtime: tokio::runtime::Handle,

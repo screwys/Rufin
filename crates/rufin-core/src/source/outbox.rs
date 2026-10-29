@@ -6,14 +6,11 @@ use std::collections::HashSet;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures_util::future::BoxFuture;
-use library::{Change, Delivery, DeliveryKind};
+use library::{Delivery, DeliveryKind};
 use sources::{SourceEntityKind, SourceError, SourceId};
-use tokio::time::Instant;
 use tracing::info;
 
 use super::{Shared, SourceOwner, source_error_is_temporary, unix_seconds};
-use crate::features::{Feature, Next};
 use crate::runtime::{SourceEvent, SourceNotice, SourceNoticeKind};
 
 /// How long a server that could not take a delivery waits before the next try.
@@ -36,42 +33,37 @@ fn keeps_copy(kind: &str, delivery: &Delivery) -> bool {
         && (kind == "plex" || (kind == "subsonic" && delivery.value.unwrap_or(0) % 20 != 0))
 }
 
-pub(super) struct Outbox(pub(super) Weak<Shared>);
-
-impl Feature for Outbox {
-    fn wanted(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            let Some(shared) = self.0.upgrade() else {
-                return false;
-            };
-            match shared.catalog.next_delivery_at().await {
-                Ok(next) => next.is_some(),
-                Err(error) => {
-                    shared.warn_nonfatal(&error.to_string());
-                    false
-                }
+/// Delivers what is due, then waits for the next due time or for a delivery just queued.
+pub(super) async fn run(shared: Weak<Shared>) {
+    let Some(catalog) = shared.upgrade().map(|shared| shared.catalog.clone()) else {
+        return;
+    };
+    catalog.loaded().await;
+    loop {
+        let Some(owner) = shared.upgrade().map(|shared| SourceOwner { shared }) else {
+            return;
+        };
+        let next = match owner.shared.catalog.next_delivery_at().await {
+            Ok(next) => next,
+            Err(error) => {
+                owner.shared.warn_nonfatal(&error.to_string());
+                Some(unix_seconds().saturating_add(RETRY_SECONDS))
             }
-        })
-    }
-
-    fn apply(&self, _: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
-        Box::pin(async move {
-            let Some(shared) = self.0.upgrade() else {
-                return Next::Done;
-            };
-            let owner = SourceOwner { shared };
+        };
+        let delay = next.map(|next| next.saturating_sub(unix_seconds()).max(0) as u64);
+        if delay == Some(0) {
             owner.deliver_due().await;
-            let next = match owner.shared.catalog.next_delivery_at().await {
-                Ok(Some(next)) => next,
-                Ok(None) => return Next::Done,
-                Err(error) => {
-                    owner.shared.warn_nonfatal(&error.to_string());
-                    unix_seconds().saturating_add(RETRY_SECONDS)
-                }
-            };
-            let delay = next.saturating_sub(unix_seconds()).max(0) as u64;
-            Next::At(Instant::now() + Duration::from_secs(delay))
-        })
+            continue;
+        }
+        let wake = Arc::clone(&owner.shared.outbox);
+        drop(owner);
+        let woken = wake.notified();
+        match delay {
+            Some(delay) => {
+                let _ = tokio::time::timeout(Duration::from_secs(delay), woken).await;
+            }
+            None => woken.await,
+        }
     }
 }
 

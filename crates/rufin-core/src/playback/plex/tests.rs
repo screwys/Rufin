@@ -159,7 +159,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         catalog.clone(),
-        &crate::features::Features::new(&catalog.clone(), tokio::runtime::Handle::current()),
         downloads,
         settings.clone(),
         secrets,
@@ -195,7 +194,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         .unwrap()
     }));
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
-    let features = crate::features::Features::new(&catalog, tokio::runtime::Handle::current());
     let owner = PlaybackOwner::new(
         catalog,
         settings,
@@ -208,7 +206,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
-        &features,
         |_| Ok(Box::new(Idle)),
     );
     owner.install_source_owner(&source);

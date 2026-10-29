@@ -85,7 +85,6 @@ where
         Err(error) => return Err(string_error(error)),
     };
     let library = Arc::new(catalog);
-    let features = crate::features::Features::new(&library, runtime.clone());
     library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
     library.set_use_sort_tags(stored.ui.application.use_sort_tags);
     let scrobbling_library = library.as_ref().clone();
@@ -140,7 +139,6 @@ where
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         library.clone(),
-        &features,
         downloads.clone(),
         settings.clone(),
         Arc::clone(&secrets),
@@ -212,7 +210,6 @@ where
         observe_playback,
         audio_outputs,
         Arc::clone(&scrobbler),
-        &features,
         start_backend,
     );
     let observed_playback = Arc::clone(&playback);
@@ -228,7 +225,7 @@ where
         Arc::clone(&secrets),
         runtime.clone(),
         scrobbler,
-        &features,
+        &library,
         Arc::clone(&settings_committed),
     );
     scrobbling.start();
@@ -307,11 +304,19 @@ where
                 || previous.ui.application.download_lyrics_automatically
                     != current.ui.application.download_lyrics_automatically
             {
-                settings_source.shared.asset_downloads.restart();
+                settings_source.asset_downloads_changed();
             }
             if previous.ui.downloads != current.ui.downloads {
                 settings_downloads.settings_changed(current.ui.downloads.clone());
-                settings_source.shared.download_rules.check();
+                let rules = |downloads: &[crate::settings::SourceDownloadSettings]| {
+                    downloads
+                        .iter()
+                        .map(|source| source.rules.clone())
+                        .collect::<Vec<_>>()
+                };
+                if rules(&previous.ui.downloads) != rules(&current.ui.downloads) {
+                    settings_downloads.library_changed(None);
+                }
             }
         },
     );

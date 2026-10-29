@@ -79,10 +79,6 @@ pub(in crate::playback) async fn seeded(
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         Arc::new(catalog.clone()),
-        &crate::features::Features::new(
-            &Arc::new(catalog.clone()),
-            tokio::runtime::Handle::current(),
-        ),
         downloads,
         settings.clone(),
         Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
@@ -122,10 +118,6 @@ pub(in crate::playback) async fn seeded(
     let commands = Arc::new(Mutex::new(Vec::new()));
     let backend_commands = commands.clone();
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
-    let features = crate::features::Features::new(
-        &Arc::new(catalog.clone()),
-        tokio::runtime::Handle::current(),
-    );
     let owner = PlaybackOwner::new(
         Arc::new(catalog.clone()),
         settings,
@@ -138,7 +130,6 @@ pub(in crate::playback) async fn seeded(
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
-        &features,
         move |_| Ok(Box::new(IdleBackend(backend_commands.clone()))),
     );
     owner.install_source_owner(&source);
@@ -1570,7 +1561,6 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     let source = SourceOwner::open_dormant(
         artwork,
         Arc::new(catalog.clone()),
-        &crate::features::Features::new(&catalog, tokio::runtime::Handle::current()),
         downloads,
         owner.settings.clone(),
         Arc::new(secrets::SwitchableSecretStore::new(secrets)),

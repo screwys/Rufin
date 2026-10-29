@@ -669,14 +669,20 @@ impl Catalog {
         Ok(removed != 0)
     }
 
-    /// The playlists linked to a file.
-    pub async fn linked_playlists(&self) -> LibraryResult<Vec<PlaylistKey>> {
-        let mut reader = self.acquire_reader().await?;
-        Ok(
-            sqlx::query_scalar("SELECT playlist_key FROM playlist_file_links")
-                .fetch_all(&mut *reader)
-                .await?,
-        )
+    /// Whether this playlist is linked to a file.
+    pub fn is_linked(&self, playlist: PlaylistKey) -> bool {
+        self.snapshot()
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| record.flags & crate::catalog::snapshot::LINKED != 0)
+    }
+
+    /// Whether some playlist is linked to a file.
+    pub fn has_linked_playlists(&self) -> bool {
+        self.snapshot()
+            .playlists
+            .iter()
+            .any(|(_, record)| record.flags & crate::catalog::snapshot::LINKED != 0)
     }
 
     pub async fn mark_playlist_file_synced(

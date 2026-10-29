@@ -23,16 +23,15 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
         .contains(&position_millis)
 }
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::features::{Feature, FeatureHandle, Features, Next};
+use crate::features::follow;
 use crate::runtime::VisualizerPublication;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
-use futures_util::future::BoxFuture;
 use library::QueueUpdate;
-use library::{Catalog, Change, ListenWrite, ReadCancellation, Scope};
+use library::{Catalog, Change, ListenWrite, ReadCancellation};
 use playback::{
     PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
 };
@@ -41,56 +40,11 @@ use scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 
-use crate::loudness::{Loudness, LoudnessAnalysisOwner};
+use crate::loudness::LoudnessAnalysisOwner;
 use crate::lyrics::{LyricsContext, LyricsService};
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 use crate::waveform::{WaveformMedia, WaveformOwner};
-
-/// Follows the change feed for the queue: identity moves, changed tracks it shows and
-/// forgotten sources.
-struct QueueTracks {
-    playback: Weak<PlaybackOwner>,
-    /// The queue restores after the Catalog loaded, so the full pass of the install has nothing
-    /// to read again; later ones follow a lag.
-    installed: std::sync::atomic::AtomicBool,
-}
-
-impl Feature for QueueTracks {
-    fn wanted(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async { true })
-    }
-
-    fn hears(&self, change: &Change) -> bool {
-        change.scopes.iter().any(|scope| {
-            matches!(
-                scope,
-                Scope::Reload
-                    | Scope::Rekey { .. }
-                    | Scope::Tracks { .. }
-                    | Scope::State { .. }
-                    | Scope::Source {
-                        phase: library::SourcePhase::Removed,
-                        ..
-                    }
-            )
-        })
-    }
-
-    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
-        Box::pin(async move {
-            let installed = self
-                .installed
-                .swap(true, std::sync::atomic::Ordering::AcqRel);
-            if (installed || changes.is_some())
-                && let Some(playback) = self.playback.upgrade()
-            {
-                playback.library_changed(changes);
-            }
-            Next::Wait
-        })
-    }
-}
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PlaybackOwner {
@@ -102,7 +56,6 @@ pub struct PlaybackOwner {
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
     pub(crate) loudness: Arc<LoudnessAnalysisOwner>,
-    analysis: FeatureHandle,
     pub(crate) lyrics: Arc<LyricsService>,
     observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
@@ -202,7 +155,6 @@ impl PlaybackOwner {
         observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
         audio_outputs: fn() -> Vec<playback::AudioOutput>,
         scrobbler: Arc<Scrobbler>,
-        features: &Arc<Features>,
         start_backend: StartBackend,
     ) -> Arc<Self>
     where
@@ -230,10 +182,9 @@ impl PlaybackOwner {
                 stream.row.as_ref()?.track.artwork_binding.as_deref(),
             )
         };
-        let owner = Arc::new_cyclic(|weak: &Weak<Self>| Self {
+        let owner = Arc::new(Self {
             catalog,
             loudness: LoudnessAnalysisOwner::new(runtime.clone(), settings.clone()),
-            analysis: features.add(Arc::new(Loudness(weak.clone()))),
             settings,
             runtime: runtime.clone(),
             updates: playback::PlaybackUpdates::default(),
@@ -263,11 +214,27 @@ impl PlaybackOwner {
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
         });
-        features.add(Arc::new(QueueTracks {
-            playback: Arc::downgrade(&owner),
-            installed: std::sync::atomic::AtomicBool::new(false),
-        }));
         let weak = Arc::downgrade(&owner);
+        // The queue restores after the Catalog loaded, so the first full pass has nothing to
+        // read again; later ones follow a lag.
+        let mut restored = false;
+        follow(
+            &owner.runtime,
+            &owner.catalog,
+            weak.clone(),
+            move |owner, changes| {
+                if std::mem::replace(&mut restored, true) || changes.is_some() {
+                    owner.library_changed(changes);
+                }
+                std::future::ready(())
+            },
+        );
+        follow(
+            &owner.runtime,
+            &owner.catalog,
+            weak.clone(),
+            crate::loudness::follow,
+        );
         owner.runtime.spawn(async move {
             while let Ok((source_id, report)) = report_receiver.recv().await {
                 let Some(owner) = weak.upgrade() else { break };
@@ -647,7 +614,10 @@ impl PlaybackOwner {
             settings.loudness_normalization_scope,
             settings.write_ebu_r128_tags,
         ) {
-            self.analysis.restart();
+            self.loudness.cancel();
+            if self.ebu_r128() {
+                self.loudness.start(self.source_owner());
+            }
         }
         self.send(Command::UpdateSettings(settings));
     }
@@ -686,9 +656,14 @@ impl PlaybackOwner {
     /// A source was selected: the queue's rows read again, and loudness analysis turns to it.
     pub(crate) fn source_selected(&self) {
         self.library_changed(None);
-        if self.analysis.installed() {
+        if self.ebu_r128() {
             self.loudness.library_changed(self.source_owner());
         }
+    }
+
+    pub(crate) fn ebu_r128(&self) -> bool {
+        self.settings.load().ui.playback.loudness_normalization
+            == playback::LoudnessNormalization::EbuR128
     }
     pub(crate) fn current_media(&self) -> Option<Arc<playback::CurrentMedia>> {
         self.updates
