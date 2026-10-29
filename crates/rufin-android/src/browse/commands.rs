@@ -278,6 +278,7 @@ impl AndroidLibrary {
             library::RadioSeed::Track(media_uri)
         } else {
             let route = route.ok_or_else(|| error("Choose a radio seed"))?;
+            self.catalog.loaded().await;
             match &route {
                 Route::AlbumDetail(uri)
                 | Route::ArtistDetail(uri)
