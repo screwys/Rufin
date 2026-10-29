@@ -173,7 +173,7 @@ impl Catalog {
         let column = kind.as_str();
         let mut write = self.write().await?;
         let connection = write.connection().await?;
-        sqlx::query(sqlx::AssertSqlSafe(format!(
+        let changed = sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO user_state(media_uri,{column},changed_at) VALUES(?1,?2,unixepoch())
              ON CONFLICT(media_uri) DO UPDATE SET {column}=excluded.{column},changed_at=excluded.changed_at
              WHERE {column} IS NOT excluded.{column}"
@@ -181,7 +181,8 @@ impl Catalog {
         .bind(uri)
         .bind(value)
         .execute(&mut *connection)
-        .await?;
+        .await?
+        .rows_affected();
         if deliver {
             sqlx::query(
                 "INSERT INTO outbox(media_uri,kind,value,next_attempt_at) VALUES(?1,?2,?3,unixepoch())
@@ -192,6 +193,9 @@ impl Catalog {
             .bind(value)
             .execute(&mut *connection)
             .await?;
+        }
+        // A URI the Catalog holds no track for stages nothing resident, so keep its row.
+        if deliver || changed != 0 {
             write.keep();
         }
         write.touch_state(uri);
