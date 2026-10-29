@@ -176,7 +176,7 @@ impl Catalog {
                         .iter()
                         .filter_map(|entry| snapshot.tracks.live(entry.track))
                         .find(|track| track.source == owner)
-                        .map(|track| track.key)
+                        .map(|track| i64::from(track.key))
                 })
             }
             _ => seed_track,
@@ -190,7 +190,7 @@ impl Catalog {
             snapshot
                 .tags
                 .live(*slot)
-                .is_some_and(|tag| tag.kind == crate::TagKind::Genre)
+                .is_some_and(|tag| tag.kind() == crate::TagKind::Genre)
         };
         let mut artists = HashSet::new();
         let mut genres = HashSet::new();
@@ -236,7 +236,7 @@ impl Catalog {
                 .filter(|(_, track)| {
                     track.source == owner
                         && track.indexed()
-                        && !excluded.contains(&track.key)
+                        && !excluded.contains(&i64::from(track.key))
                         && seed_track.is_none_or(|seed| seed.key != track.key)
                         && (!matches!(seed, RadioSeed::Album(_))
                             || seed_album.is_none_or(|album| track.album != album))
@@ -256,7 +256,7 @@ impl Catalog {
                 candidates
                     .iter()
                     .filter(|track| related(track))
-                    .map(|track| track.key)
+                    .map(|track| i64::from(track.key))
                     .take(requested),
             );
         }
@@ -265,7 +265,7 @@ impl Catalog {
         chosen.extend(
             candidates
                 .iter()
-                .map(|track| track.key)
+                .map(|track| i64::from(track.key))
                 .filter(|key| !picked.contains(key))
                 .take(rest),
         );
@@ -323,7 +323,7 @@ impl Catalog {
                     let plays = context.played(*slot, track).plays;
                     track.source == owner
                         && track.indexed()
-                        && !excluded.contains(&track.key)
+                        && !excluded.contains(&i64::from(track.key))
                         && folder.is_none_or(|folder| runs[3].contains(&folder))
                         && criteria
                             .min_year
@@ -344,7 +344,7 @@ impl Catalog {
         Ok(candidates
             .into_iter()
             .take(requested)
-            .map(|track| TrackKey::from_raw(track.key))
+            .map(|track| TrackKey::from_raw(i64::from(track.key)))
             .collect())
     }
 }
@@ -353,13 +353,13 @@ impl Catalog {
 fn pivoted<'a>(tracks: impl Iterator<Item = &'a TrackRec>, variation: i64) -> Vec<&'a TrackRec> {
     let mut tracks = tracks.collect::<Vec<_>>();
     tracks.sort_unstable_by_key(|track| track.key);
-    let max = tracks.last().map_or(0, |track| track.key);
+    let max = tracks.last().map_or(0, |track| i64::from(track.key));
     let pivot = if max == 0 {
         0
     } else {
         variation.rem_euclid(max + 1)
     };
-    let split = tracks.partition_point(|track| track.key < pivot);
+    let split = tracks.partition_point(|track| i64::from(track.key) < pivot);
     tracks.rotate_left(split);
     tracks
 }

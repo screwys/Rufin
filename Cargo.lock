@@ -4771,6 +4771,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "blake3",
+ "bytemuck",
  "chrono",
  "futures-executor",
  "futures-util",

@@ -208,7 +208,7 @@ impl Catalog {
                     .iter()
                     .map(|member| &snapshot.tracks.records[member.track as usize])
                     .filter(|record| matches(&context.track_search(record)))
-                    .map(|record| record.key)
+                    .map(|record| i64::from(record.key))
                     .take(request.limit)
                     .collect::<Vec<_>>(),
                 albums
@@ -240,14 +240,14 @@ impl Catalog {
                                 })
                         })
                     })
-                    .map(|album| album.key)
+                    .map(|album| i64::from(album.key))
                     .take(request.limit)
                     .collect(),
                 artists
                     .iter()
                     .filter_map(|key| snapshot.artists.get(*key))
                     .filter(|artist| matches(&name(artist.name)))
-                    .map(|artist| artist.key)
+                    .map(|artist| i64::from(artist.key))
                     .take(request.limit)
                     .collect(),
             ]

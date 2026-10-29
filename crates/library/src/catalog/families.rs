@@ -113,8 +113,8 @@ pub(crate) static TRACKS: Table = Table {
         Held source_key, Read object_id, Read media_uri, Held album_key, Read local_file_key,
         Held indexed, Read hidden_since, Held native_metadata, Held title, Held display_artist,
         Held display_album, Held sort_text, Read duration_millis, Read disc_number,
-        Read track_number, Read year, Read release_date, Read date_added, Read first_seen_at,
-        Read bpm, Held comment, Held source_format, Held flags, Read native_favorite,
+        Read track_number, Read year, Read release_date, Read date_added, Held released,
+        Held added_at, Read first_seen_at, Read bpm, Held comment, Held source_format, Held flags, Read native_favorite,
         Read native_rating, Read native_play_count, Read native_last_played,
     ],
     details: Some(&TRACK_DETAILS),
@@ -135,10 +135,10 @@ pub(crate) static ALBUMS: Table = Table {
     columns: columns![
         Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
         Held cached_local, Held title, Held display_artist, Held sort_text, Read year,
-        Read release_date, Read date_added, Read is_compilation, Read first_seen_at,
-        Read release_identity, Read release_lookup_identity, Read native_favorite,
-        Read native_rating, Read native_play_count, Read native_last_played,
-        Read native_artwork, Json input_metadata, Json metadata, Written accepted_audio,
+        Read release_date, Read date_added, Held released, Held added_at, Read is_compilation,
+        Read first_seen_at, Read release_identity, Read release_lookup_identity,
+        Read native_favorite, Read native_rating, Read native_play_count,
+        Read native_last_played, Read native_artwork, Held flags, Json input_metadata, Json metadata, Written accepted_audio,
     ],
     details: None,
     tagged: false,
@@ -156,7 +156,7 @@ pub(crate) static ARTISTS: Table = Table {
         Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
         Held name, Held sort_text, Read musicbrainz_artist_id, Read native_favorite,
         Read native_rating, Read native_play_count, Read native_last_played,
-        Read native_artwork,
+        Read native_artwork, Held flags,
     ],
     details: None,
     tagged: false,
@@ -169,7 +169,7 @@ pub(crate) static TAGS: Table = Table {
     natural: "media_uri",
     columns: columns![
         Held source_key, Held kind, Read object_id, Read media_uri, Held indexed,
-        Held native_metadata, Held name, Held sort_text, Read native_artwork,
+        Held native_metadata, Held name, Held sort_text, Read native_artwork, Held flags,
     ],
     details: None,
     tagged: true,
@@ -182,7 +182,7 @@ pub(crate) static FOLDERS: Table = Table {
     natural: "media_uri",
     columns: columns![
         Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
-        Held name, Held sort_text, Read native_artwork,
+        Held name, Held sort_text, Read native_artwork, Held flags,
     ],
     details: None,
     tagged: false,
@@ -638,6 +638,8 @@ impl Row for Track {
             int(facts.year),
             text(facts.release_date.as_deref()),
             text(facts.date_added.as_deref()),
+            num(i64::from(release(facts.release_date.as_deref()))),
+            int(added(facts.date_added.as_deref(), self.first_seen)),
             int(self.first_seen),
             int(facts.bpm),
             text(facts.comment.as_deref()),
@@ -824,6 +826,8 @@ impl Row for Album {
             int(facts.year),
             text(facts.release_date.as_deref()),
             text(facts.date_added.as_deref()),
+            num(i64::from(release(facts.release_date.as_deref()))),
+            int(added(facts.date_added.as_deref(), self.first_seen)),
             int(facts.compilation.map(i64::from)),
             int(self.first_seen),
             text(self.release_identity.as_deref()),
@@ -832,6 +836,7 @@ impl Row for Album {
         cells.extend(state_cells(&self.state));
         cells.extend([
             blob(self.binding.as_deref()),
+            num(picture_flag(self.binding.as_deref())),
             json_cell(self.writes.header.as_ref().map(Option::as_ref)),
             json_cell(self.writes.metadata.as_ref().map(Some)),
             self.writes.clear_accepted_audio.then_some(Cell::Null),
@@ -963,7 +968,10 @@ impl Row for Artist {
             text(self.metadata.musicbrainz_artist_id.as_deref()),
         ];
         cells.extend(state_cells(&self.state));
-        cells.push(blob(self.binding.as_deref()));
+        cells.extend([
+            blob(self.binding.as_deref()),
+            num(picture_flag(self.binding.as_deref())),
+        ]);
         cells
     }
 
@@ -1076,6 +1084,7 @@ impl Row for Tag {
             string(&self.metadata.name),
             text(self.metadata.sort_text.as_deref()),
             blob(self.binding.as_deref()),
+            num(picture_flag(self.binding.as_deref())),
         ]
     }
 
@@ -1087,7 +1096,7 @@ impl Row for Tag {
             source: snapshot
                 .source_key(record.source)
                 .ok_or_else(|| missing("tags", key))?,
-            kind: record.kind,
+            kind: record.kind(),
             object: row.try_get("object_id")?,
             uri: row.try_get("media_uri")?,
             indexed: record.flags & INDEXED != 0,
@@ -1157,6 +1166,7 @@ impl Row for Folder {
             text(self.metadata.name.as_deref()),
             text(self.metadata.sort_text.as_deref()),
             blob(self.binding.as_deref()),
+            num(picture_flag(self.binding.as_deref())),
         ]
     }
 

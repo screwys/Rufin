@@ -646,7 +646,7 @@ impl Catalog {
                         if snapshot
                             .tags
                             .live(*tag)
-                            .is_some_and(|tag| tag.kind == crate::TagKind::Genre)
+                            .is_some_and(|tag| tag.kind() == crate::TagKind::Genre)
                         {
                             *genres.entry(*tag).or_default() += 1;
                         }
@@ -659,7 +659,7 @@ impl Catalog {
                         (
                             std::cmp::Reverse(count),
                             snapshot.name_sort(tag.name, tag.sort),
-                            tag.key,
+                            i64::from(tag.key),
                         )
                     })
                     .collect::<Vec<_>>();

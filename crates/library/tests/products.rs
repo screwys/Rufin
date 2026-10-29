@@ -1657,7 +1657,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,first_seen_at,title,sort_text,duration_millis,indexed) SELECT source_key,'local-track',?1,86400,'Local Track','local track',60000,1 FROM sources WHERE object_id='local'")
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,first_seen_at,added_at,title,sort_text,duration_millis,indexed) SELECT source_key,'local-track',?1,86400,86400,'Local Track','local track',60000,1 FROM sources WHERE object_id='local'")
         .bind(local_uri)
         .execute(&mut raw)
         .await
@@ -2581,7 +2581,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
     let album_owner_uri =
         library::source_entity_uri(&library::SourceId::new("source"), "artist", "album-owner");
     let album_owner = sqlx::query_scalar::<_, library::ArtistKey>(
-        "INSERT INTO artists(source_key,object_id,media_uri,native_artwork,name,sort_text) VALUES (?1,'album-owner',?2,?3,'Album Owner','album owner') RETURNING artist_key",
+        "INSERT INTO artists(source_key,object_id,media_uri,native_artwork,flags,name,sort_text) VALUES (?1,'album-owner',?2,?3,1,'Album Owner','album owner') RETURNING artist_key",
     )
     .bind(fixture.source)
     .bind(album_owner_uri)
@@ -4349,7 +4349,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(initial_home.explore.len(), fixture.albums.len());
     assert_eq!(alternate_explore_home.explore.len(), fixture.albums.len());
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE albums SET first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END,date_added=NULL")
+    sqlx::query("UPDATE albums SET first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END,date_added=NULL,added_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let albums = fixture
@@ -4407,7 +4407,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .albums;
     assert_eq!(newly_added.len(), 2);
     assert_eq!(newly_added[0].album.album_key, fixture.albums[0]);
-    sqlx::query("UPDATE albums SET release_date=NULL,year=0 WHERE album_key=?1")
+    sqlx::query("UPDATE albums SET release_date=NULL,released=0,year=0 WHERE album_key=?1")
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await

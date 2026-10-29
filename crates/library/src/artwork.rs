@@ -725,7 +725,7 @@ impl Catalog {
             .tracks
             .iter()
             .filter(|(_, record)| record.flags & crate::catalog::snapshot::DOWNLOADED != 0)
-            .map(|(_, record)| record.key)
+            .map(|(_, record)| i64::from(record.key))
             .chain(active)
             .collect::<Vec<_>>();
         tracks.sort_unstable_by(|left, right| right.cmp(left));

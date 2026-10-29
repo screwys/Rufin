@@ -744,9 +744,10 @@ fn write_images(
 }
 
 impl Catalog {
-    /// Writes the image of the current Catalog. The writer is held while it is stamped and
-    /// encoded, so the stamp is the Store's, and the next commit raises the counter. A Catalog
-    /// with many removed slots is loaded again first, so the image holds none of them.
+    /// Writes the image of the current Catalog. The writer is held while it is stamped and the
+    /// Catalog is taken for reading, so the stamp is the Catalog's, and the next commit raises
+    /// the counter; the encode runs once the writer is released. A Catalog with many removed
+    /// slots or replaced strings is loaded again first, so the image holds none of them.
     fn write_image(&self) {
         let writer = futures_executor::block_on(self.inner.store.writer.lock());
         // A Write whose apply failed left memory behind the Store.
@@ -754,22 +755,24 @@ impl Catalog {
             return;
         }
         let mut writer = WriterGuard(writer);
-        let encoded = futures_executor::block_on(async {
+        let sealed = futures_executor::block_on(async {
             let compact = {
                 let snapshot = self.snapshot();
                 snapshot.removed_slots() * REMOVED_SLOTS > snapshot.record_slots()
+                    || snapshot.strings.wasteful()
             };
             if compact {
                 self.reload_under(&mut writer).await?;
             }
-            let stamp = image::seal(&mut writer).await?;
-            let snapshot = self.snapshot();
-            LibraryResult::Ok(image::encode(&snapshot, &stamp))
+            image::seal(&mut writer).await
         });
-        if encoded.is_ok() {
+        if sealed.is_ok() {
             self.inner.image_current.store(true, Ordering::Release);
         }
+        let snapshot = self.snapshot();
         drop(writer);
+        let encoded = sealed.map(|stamp| image::encode(&snapshot, &stamp));
+        drop(snapshot);
         match encoded {
             Ok(bytes) => {
                 if let Err(error) = image::write(&self.inner.store.path, &bytes) {

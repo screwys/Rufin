@@ -2,21 +2,33 @@
 //! of the load. It carries the Store's identity and commit counter; an image whose stamp differs
 //! from the Store's is not read. The first Write after an image is written raises the counter.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::Write as _;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
+use bytemuck::Pod;
 use sqlx::SqliteConnection;
 
 use super::records::Source;
 use super::snapshot::*;
 use super::strings::{StrId, Strings};
-use crate::tags::TagKind;
 use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
-/// Raised whenever the layout or the flags of a record change.
-const FORMAT: u32 = 3;
+/// Raised when the meaning of a record's fields or flags changes, or its fields are reordered.
+const REVISION: u8 = 4;
+/// Records are written as they are in memory, so their sizes are part of the format.
+const FORMAT: [u8; 8] = [
+    REVISION,
+    size_of::<TrackRec>() as u8,
+    size_of::<AlbumRec>() as u8,
+    size_of::<ArtistRec>() as u8,
+    size_of::<TagRec>() as u8,
+    size_of::<FolderRec>() as u8,
+    size_of::<Stats>() as u8,
+    0,
+];
 
 /// The Store's identity and commit counter.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,33 +93,39 @@ impl Out {
         self.0.extend_from_slice(&value.to_le_bytes());
     }
 
-    fn u64(&mut self, value: u64) {
-        self.0.extend_from_slice(&value.to_le_bytes());
-    }
-
     fn len(&mut self, len: usize) {
-        self.u64(len as u64);
+        self.i64(len as i64);
     }
 
-    fn bytes(&mut self, bytes: &[u8]) {
-        self.len(bytes.len());
-        self.0.extend_from_slice(bytes);
+    /// Plain records as they are in memory. Every target Rufin runs on is little-endian.
+    fn slice<T: Pod>(&mut self, items: &[T]) {
+        self.len(items.len());
+        self.0.extend_from_slice(bytemuck::cast_slice(items));
     }
 
     fn text(&mut self, text: &str) {
-        self.bytes(text.as_bytes());
+        self.slice(text.as_bytes());
     }
 
-    fn optional_bytes(&mut self, bytes: Option<&[u8]>) {
-        self.u8(u8::from(bytes.is_some()));
-        if let Some(bytes) = bytes {
-            self.bytes(bytes);
-        }
+    fn optional_text(&mut self, text: Option<&[u8]>) {
+        self.u8(u8::from(text.is_some()));
+        self.slice(text.unwrap_or_default());
     }
 
     fn optional_i64(&mut self, value: Option<i64>) {
         self.u8(u8::from(value.is_some()));
         self.i64(value.unwrap_or_default());
+    }
+
+    fn family<R: Pod>(&mut self, family: &Family<R>) {
+        self.slice(&family.records);
+        self.keys(family);
+    }
+
+    fn keys<R>(&mut self, family: &Family<R>) {
+        self.slice(&family.keys);
+        self.i64(family.base);
+        self.len(family.live);
     }
 }
 
@@ -141,28 +159,23 @@ impl In<'_> {
         Some(i64::from_le_bytes(self.array()?))
     }
 
-    fn u64(&mut self) -> Option<u64> {
-        Some(u64::from_le_bytes(self.array()?))
-    }
-
     fn len(&mut self) -> Option<usize> {
-        usize::try_from(self.u64()?).ok()
+        usize::try_from(self.i64()?).ok()
     }
 
-    fn bytes(&mut self) -> Option<Vec<u8>> {
-        let len = self.len()?;
-        Some(self.take(len)?.to_vec())
+    fn slice<T: Pod>(&mut self) -> Option<Vec<T>> {
+        let len = self.len()?.checked_mul(size_of::<T>())?;
+        Some(bytemuck::pod_collect_to_vec(self.take(len)?))
     }
 
     fn text(&mut self) -> Option<String> {
-        String::from_utf8(self.bytes()?).ok()
+        String::from_utf8(self.slice()?).ok()
     }
 
-    fn optional_bytes(&mut self) -> Option<Option<Vec<u8>>> {
-        Some(match self.u8()? {
-            0 => None,
-            _ => Some(self.bytes()?),
-        })
+    fn optional_text(&mut self) -> Option<Option<Vec<u8>>> {
+        let known = self.u8()? != 0;
+        let bytes = self.slice()?;
+        Some(known.then_some(bytes))
     }
 
     fn optional_i64(&mut self) -> Option<Option<i64>> {
@@ -170,278 +183,85 @@ impl In<'_> {
         let value = self.i64()?;
         Some(known.then_some(value))
     }
-}
 
-/// A packed record's fields, written and read in declaration order.
-trait Fields: Sized {
-    fn put(&self, out: &mut Out);
-    fn take(input: &mut In<'_>) -> Option<Self>;
-}
-
-macro_rules! fields {
-    ($record:ident { $($field:ident: $kind:ident),* $(,)? }) => {
-        impl Fields for $record {
-            fn put(&self, out: &mut Out) {
-                $(field::$kind::put(&self.$field, out);)*
-            }
-
-            fn take(input: &mut In<'_>) -> Option<Self> {
-                Some(Self { $($field: field::$kind::take(input)?,)* })
-            }
-        }
-    };
-}
-
-/// Writers and readers of one field type each.
-mod field {
-    use super::*;
-
-    macro_rules! scalar {
-        ($name:ident, $type:ty, $put:ident, $take:ident, $from:expr, $to:expr) => {
-            pub(super) mod $name {
-                use super::*;
-
-                pub(crate) fn put(value: &$type, out: &mut Out) {
-                    out.$put($from(*value));
-                }
-
-                pub(crate) fn take(input: &mut In<'_>) -> Option<$type> {
-                    Some($to(input.$take()?))
-                }
-            }
-        };
+    fn family<R: Pod>(&mut self) -> Option<Family<R>> {
+        let records = self.slice()?;
+        self.keys(records)
     }
 
-    scalar!(byte, u8, u8, u8, |value| value, |value| value);
-    scalar!(short, u16, u16, u16, |value| value, |value| value);
-    scalar!(word, u32, u32, u32, |value| value, |value| value);
-    scalar!(long, i64, i64, i64, |value| value, |value| value);
-    scalar!(
-        signed,
-        i16,
-        u16,
-        u16,
-        |value: i16| value as u16,
-        |value: u16| value as i16
-    );
-    scalar!(text, StrId, u32, u32, StrId::raw, StrId::from_raw);
-    scalar!(
-        kind,
-        TagKind,
-        u8,
-        u8,
-        |value: TagKind| value as u8,
-        |value| if value == 1 {
-            TagKind::Mood
-        } else {
-            TagKind::Genre
+    fn keys<R>(&mut self, records: Vec<R>) -> Option<Family<R>> {
+        let keys: Vec<u32> = self.slice()?;
+        if keys
+            .iter()
+            .any(|slot| *slot != NONE && *slot as usize >= records.len())
+        {
+            return None;
         }
-    );
-
-    pub(super) mod lens4 {
-        use super::*;
-
-        pub(crate) fn put(value: &[u16; 4], out: &mut Out) {
-            value.iter().for_each(|len| out.u16(*len));
-        }
-
-        pub(crate) fn take(input: &mut In<'_>) -> Option<[u16; 4]> {
-            Some([input.u16()?, input.u16()?, input.u16()?, input.u16()?])
-        }
+        Some(Family {
+            records,
+            keys,
+            base: self.i64()?,
+            live: self.len()?,
+        })
     }
-
-    pub(super) mod lens2 {
-        use super::*;
-
-        pub(crate) fn put(value: &[u16; 2], out: &mut Out) {
-            value.iter().for_each(|len| out.u16(*len));
-        }
-
-        pub(crate) fn take(input: &mut In<'_>) -> Option<[u16; 2]> {
-            Some([input.u16()?, input.u16()?])
-        }
-    }
-
-    pub(super) mod entries {
-        use super::*;
-        use crate::catalog::snapshot::Entry;
-
-        pub(crate) fn put(value: &[Entry<u32>], out: &mut Out) {
-            out.len(value.len());
-            for entry in value {
-                out.i64(entry.key);
-                out.bytes(&entry.rank);
-                out.u32(entry.track);
-            }
-        }
-
-        pub(crate) fn take(input: &mut In<'_>) -> Option<Vec<Entry<u32>>> {
-            let len = input.len()?;
-            let mut entries = Vec::with_capacity(len.min(1 << 20));
-            for _ in 0..len {
-                entries.push(Entry {
-                    key: input.i64()?,
-                    rank: input.bytes()?.into(),
-                    track: input.u32()?,
-                });
-            }
-            Some(entries)
-        }
-    }
-}
-
-fields!(TrackRec {
-    key: long,
-    title: text,
-    artist: text,
-    album_title: text,
-    sort: text,
-    comment: text,
-    format: text,
-    album: word,
-    duration_ms: word,
-    added: word,
-    release: word,
-    edges: word,
-    lens: lens4,
-    year: signed,
-    disc: short,
-    number: short,
-    bpm: short,
-    source: short,
-    flags: short,
-    native_rating: byte,
-    rating: byte,
-});
-
-fields!(AlbumRec {
-    key: long,
-    title: text,
-    artist: text,
-    sort: text,
-    added: word,
-    release: word,
-    edges: word,
-    lens: lens2,
-    year: signed,
-    source: short,
-    flags: short,
-    native_rating: byte,
-    rating: byte,
-});
-
-fields!(ArtistRec {
-    key: long,
-    name: text,
-    sort: text,
-    source: short,
-    flags: short,
-    native_rating: byte,
-    rating: byte,
-});
-
-fields!(TagRec {
-    key: long,
-    name: text,
-    sort: text,
-    source: short,
-    flags: short,
-    kind: kind,
-});
-
-fields!(FolderRec {
-    key: long,
-    name: text,
-    sort: text,
-    source: short,
-    flags: short,
-});
-
-fields!(PlaylistRec {
-    key: long,
-    name: text,
-    folder: long,
-    created: word,
-    source: short,
-    flags: short,
-    entries: entries,
-});
-
-fn put_family<R: Fields>(out: &mut Out, family: &Family<R>) {
-    out.len(family.records.len());
-    for record in &family.records {
-        record.put(out);
-    }
-}
-
-fn take_family<R: Fields + Packed>(input: &mut In<'_>) -> Option<Family<R>> {
-    let len = input.len()?;
-    let mut family = Family {
-        records: Vec::with_capacity(len.min(1 << 24)),
-        keys: HashMap::with_capacity(len.min(1 << 24)),
-    };
-    for slot in 0..len {
-        let record = R::take(input)?;
-        if !record.deleted() {
-            family.keys.insert(record.key(), slot as u32);
-        }
-        family.records.push(record);
-    }
-    Some(family)
 }
 
 pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
     let mut out = Out(Vec::with_capacity(snapshot.bytes() + 4_096));
     out.0.extend_from_slice(MAGIC);
-    out.u32(FORMAT);
-    out.bytes(&stamp.store);
+    out.0.extend_from_slice(&FORMAT);
+    out.slice(&stamp.store);
     out.i64(stamp.commits);
-    out.u64(snapshot.revision);
+    out.i64(snapshot.revision as i64);
     let strings = &snapshot.strings;
     out.len(strings.chunks.len());
     for chunk in &strings.chunks {
-        out.bytes(chunk);
+        out.slice(chunk);
     }
-    out.len(strings.entries.len());
-    for entry in &strings.entries {
-        out.u64(*entry);
-    }
-    out.len(strings.interned.len());
-    for id in strings.interned.values() {
-        out.u32(id.raw());
-    }
-    out.len(snapshot.edges.len());
-    for edge in &snapshot.edges {
-        out.u32(*edge);
-    }
+    out.slice(&strings.entries);
+    out.slice(&strings.interned.values().copied().collect::<Vec<StrId>>());
+    out.len(strings.garbage);
+    out.slice(&snapshot.edges);
     out.len(snapshot.sources.len());
     for source in snapshot.sources.values() {
         out.i64(source.key.raw());
         out.text(&source.object);
-        out.optional_bytes(source.kind.as_deref().map(str::as_bytes));
+        out.optional_text(source.kind.as_deref().map(str::as_bytes));
         out.text(&source.name);
         out.u8(u8::from(source.complete));
-        out.optional_bytes(source.freshness.as_deref());
+        out.optional_text(source.freshness.as_deref());
     }
-    out.len(snapshot.source_slots.len());
-    for key in &snapshot.source_slots {
-        out.i64(key.raw());
+    out.slice(
+        &snapshot
+            .source_slots
+            .iter()
+            .map(|key| key.raw())
+            .collect::<Vec<_>>(),
+    );
+    out.family(&snapshot.tracks);
+    out.family(&snapshot.albums);
+    out.family(&snapshot.artists);
+    out.family(&snapshot.tags);
+    out.family(&snapshot.folders);
+    out.slice(&snapshot.stats.keys().copied().collect::<Vec<_>>());
+    out.slice(&snapshot.stats.values().copied().collect::<Vec<_>>());
+    let playlists = &snapshot.playlists;
+    out.len(playlists.records.len());
+    for playlist in &playlists.records {
+        out.i64(playlist.key);
+        out.u32(playlist.name.raw());
+        out.i64(playlist.folder);
+        out.u32(playlist.created);
+        out.u16(playlist.source);
+        out.u16(playlist.flags);
+        out.len(playlist.entries.len());
+        for entry in &playlist.entries {
+            out.i64(entry.key);
+            out.slice(&entry.rank);
+            out.u32(entry.track);
+        }
     }
-    put_family(&mut out, &snapshot.tracks);
-    put_family(&mut out, &snapshot.albums);
-    put_family(&mut out, &snapshot.artists);
-    put_family(&mut out, &snapshot.tags);
-    put_family(&mut out, &snapshot.folders);
-    out.len(snapshot.stats.len());
-    for (slot, stats) in &snapshot.stats {
-        out.u32(*slot);
-        out.u32(stats.plays);
-        out.u32(stats.skips);
-        out.u32(stats.last_played);
-        out.u32(stats.native_plays);
-        out.u32(stats.native_last_played);
-    }
-    put_family(&mut out, &snapshot.playlists);
+    out.keys(playlists);
     out.len(snapshot.smart_playlists.len());
     for smart in snapshot.smart_playlists.values() {
         out.i64(smart.key);
@@ -462,14 +282,14 @@ pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
 
 fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
     let mut input = In(bytes);
-    if input.take(MAGIC.len())? != MAGIC || input.u32()? != FORMAT {
+    if input.take(MAGIC.len())? != MAGIC || input.take(FORMAT.len())? != FORMAT {
         return None;
     }
-    if input.bytes()? != stamp.store || input.i64()? != stamp.commits {
+    if input.slice::<u8>()? != stamp.store || input.i64()? != stamp.commits {
         return None;
     }
     let mut snapshot = Snapshot {
-        revision: input.u64()?,
+        revision: input.i64()? as u64,
         ..Snapshot::default()
     };
     let chunks = input.len()?;
@@ -477,31 +297,24 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
         chunks: Vec::with_capacity(chunks.min(1 << 16)),
         entries: Vec::new(),
         interned: HashMap::new(),
+        garbage: 0,
     };
     for _ in 0..chunks {
-        strings.chunks.push(input.bytes()?);
+        strings.chunks.push(input.slice()?);
     }
-    let entries = input.len()?;
-    strings.entries.reserve_exact(entries.min(1 << 26));
-    for _ in 0..entries {
-        strings.entries.push(input.u64()?);
-    }
-    let interned = input.len()?;
-    strings.interned.reserve(interned.min(1 << 24));
-    for _ in 0..interned {
-        let id = StrId::from_raw(input.u32()?);
+    strings.entries = input.slice()?;
+    let interned: Vec<StrId> = input.slice()?;
+    strings.interned.reserve(interned.len());
+    for id in interned {
         if id.raw() as usize >= strings.entries.len() {
             return None;
         }
         let hash = super::strings::hash(strings.get(id).as_bytes());
         strings.interned.insert(hash, id);
     }
+    strings.garbage = input.len()?;
     snapshot.strings = strings;
-    let edges = input.len()?;
-    snapshot.edges.reserve_exact(edges.min(1 << 26));
-    for _ in 0..edges {
-        snapshot.edges.push(input.u32()?);
-    }
+    snapshot.edges = input.slice()?;
     let sources = input.len()?;
     for _ in 0..sources {
         let key = SourceKey::from_raw(input.i64()?);
@@ -511,48 +324,60 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
                 key,
                 object: input.text()?,
                 kind: input
-                    .optional_bytes()?
+                    .optional_text()?
                     .map(String::from_utf8)
                     .transpose()
                     .ok()?,
                 name: input.text()?,
                 complete: input.u8()? != 0,
-                freshness: input.optional_bytes()?,
+                freshness: input.optional_text()?,
             },
         );
     }
-    let slots = input.len()?;
-    for _ in 0..slots {
-        snapshot
-            .source_slots
-            .push(SourceKey::from_raw(input.i64()?));
+    snapshot.source_slots = input
+        .slice::<i64>()?
+        .into_iter()
+        .map(SourceKey::from_raw)
+        .collect();
+    snapshot.tracks = input.family()?;
+    snapshot.albums = input.family()?;
+    snapshot.artists = input.family()?;
+    snapshot.tags = input.family()?;
+    snapshot.folders = input.family()?;
+    let slots: Vec<u32> = input.slice()?;
+    let stats: Vec<Stats> = input.slice()?;
+    if slots.len() != stats.len() {
+        return None;
     }
-    snapshot.tracks = take_family(&mut input)?;
-    snapshot.albums = take_family(&mut input)?;
-    snapshot.artists = take_family(&mut input)?;
-    snapshot.tags = take_family(&mut input)?;
-    snapshot.folders = take_family(&mut input)?;
-    let stats = input.len()?;
-    snapshot.stats.reserve(stats.min(1 << 24));
-    for _ in 0..stats {
-        let slot = input.u32()?;
-        snapshot.stats.insert(
-            slot,
-            Stats {
-                plays: input.u32()?,
-                skips: input.u32()?,
-                last_played: input.u32()?,
-                native_plays: input.u32()?,
-                native_last_played: input.u32()?,
-            },
-        );
+    snapshot.stats = slots.into_iter().zip(stats).collect();
+    let playlists = input.len()?;
+    let mut records = Vec::with_capacity(playlists.min(1 << 20));
+    for _ in 0..playlists {
+        let mut playlist = PlaylistRec {
+            key: input.i64()?,
+            name: StrId::from_raw(input.u32()?),
+            folder: input.i64()?,
+            created: input.u32()?,
+            source: input.u16()?,
+            flags: input.u16()?,
+            entries: Vec::new(),
+        };
+        let entries = input.len()?;
+        playlist.entries.reserve(entries.min(1 << 20));
+        for _ in 0..entries {
+            playlist.entries.push(Entry {
+                key: input.i64()?,
+                rank: input.slice()?.into(),
+                track: input.u32()?,
+            });
+        }
+        records.push(playlist);
     }
-    snapshot.playlists = take_family(&mut input)?;
+    snapshot.playlists = input.keys(records)?;
     let smart = input.len()?;
-    let mut smart_playlists = BTreeMap::new();
     for _ in 0..smart {
         let key = input.i64()?;
-        smart_playlists.insert(
+        snapshot.smart_playlists.insert(
             key,
             SmartPlaylist {
                 key,
@@ -563,7 +388,6 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
             },
         );
     }
-    snapshot.smart_playlists = smart_playlists;
     let folders = input.len()?;
     for _ in 0..folders {
         let key = input.i64()?;

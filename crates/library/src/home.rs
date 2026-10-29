@@ -228,7 +228,7 @@ impl Catalog {
                 let album = ordered[showcase_variation.rem_euclid(ordered.len() as i64) as usize];
                 chosen
                     .showcase
-                    .push((AlbumKey::from_raw(album.key), title(album)));
+                    .push((AlbumKey::from_raw(i64::from(album.key)), title(album)));
             }
             if blocks.contains(&HomeBlockKind::Explore) {
                 // A fixed shuffle of album keys, entered at a point the variation picks.
@@ -237,7 +237,7 @@ impl Catalog {
                     .iter()
                     .map(|(_, album)| {
                         (
-                            (album.key.wrapping_mul(1_103_515_245)) % 2_147_483_647,
+                            (i64::from(album.key).wrapping_mul(1_103_515_245)) % 2_147_483_647,
                             *album,
                         )
                     })
@@ -248,7 +248,7 @@ impl Catalog {
                 chosen.explore = ordered
                     .into_iter()
                     .take(HOME_LIMIT as usize)
-                    .map(|(_, album)| (AlbumKey::from_raw(album.key), title(album)))
+                    .map(|(_, album)| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
             let tracks = || {
@@ -278,7 +278,7 @@ impl Catalog {
                     .take(HOME_LIMIT as usize)
                     .map(|(.., track)| {
                         (
-                            TrackKey::from_raw(track.key),
+                            TrackKey::from_raw(i64::from(track.key)),
                             snapshot.text(track.title).to_owned(),
                         )
                     })
@@ -300,7 +300,7 @@ impl Catalog {
                     .take(HOME_LIMIT as usize)
                     .map(|(.., track)| {
                         (
-                            TrackKey::from_raw(track.key),
+                            TrackKey::from_raw(i64::from(track.key)),
                             snapshot.text(track.title).to_owned(),
                         )
                     })
@@ -318,7 +318,7 @@ impl Catalog {
                 chosen.newly_added = added
                     .into_iter()
                     .take(HOME_LIMIT as usize)
-                    .map(|album| (AlbumKey::from_raw(album.key), title(album)))
+                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::RecentlyReleased) {
@@ -344,7 +344,7 @@ impl Catalog {
                 chosen.recently_released = released
                     .into_iter()
                     .take(HOME_LIMIT as usize)
-                    .map(|album| (AlbumKey::from_raw(album.key), title(album)))
+                    .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
             (chosen, sections, blocks.contains(&HomeBlockKind::Genres))

@@ -617,7 +617,7 @@ impl Catalog {
                 .tags
                 .iter()
                 .filter(|(slot, tag)| {
-                    tag.kind == kind
+                    tag.kind() == kind
                         && tag.source == owner
                         && scoped.as_ref().is_none_or(|scoped| scoped.contains(slot))
                 })
