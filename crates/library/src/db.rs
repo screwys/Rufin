@@ -20,7 +20,6 @@ use crate::{LibraryError, LibraryResult, SourceKey, schema};
 const PAGE_SIZE_BYTES: u32 = 4 * 1024;
 const WRITER_STATEMENTS: usize = 128;
 const READER_STATEMENTS: usize = 32;
-const COMMAND_BUFFER: usize = 1;
 const ROW_BUFFER: usize = 32;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -843,7 +842,6 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .filename(path)
         .shared_cache(false)
         .busy_timeout(BUSY_TIMEOUT)
-        .command_buffer_size(COMMAND_BUFFER)
         .row_buffer_size(ROW_BUFFER)
 }
 
