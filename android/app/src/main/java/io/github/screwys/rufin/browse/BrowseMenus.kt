@@ -106,7 +106,7 @@ internal val AndroidBrowseRow.downloadItem: DownloadItem?
 internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, page: BrowsePage? = browse.visiblePage) {
     val options = page?.options
     val selected = options?.sort ?: page?.sortSelection?.sortKey
-    val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options?.descending ?: false
+    val descending = if (options?.sort == null) page?.sortSelection?.descending ?: false else options.descending
     val tabs = if (page?.supportsFavoriteFilter == true || page?.supportsDownloadedFilter == true)
         listOf("Filter", "Sort", "Display") else listOf("Sort", "Display")
     val pager = rememberPagerState { tabs.size }
