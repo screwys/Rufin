@@ -1067,7 +1067,7 @@ impl Player {
         let mut forgotten = false;
         for scope in changes.iter().flat_map(|change| &change.scopes) {
             match scope {
-                library::Scope::Reload => refresh = true,
+                library::Scope::Reload | library::Scope::Display => refresh = true,
                 library::Scope::Rekey { old, new } => rekeys.push((*old, *new)),
                 library::Scope::Tracks { keys, .. } => refresh |= self.sequence.shows_any(keys),
                 library::Scope::State { items } => {

@@ -254,7 +254,7 @@ pub(crate) async fn load_folder_rows(
         }
         catalog.loaded().await;
         let snapshot = catalog.snapshot();
-        crate::catalog::views::Context::new(&snapshot, false).playlist_folder_totals(&children)
+        crate::catalog::views::Context::new(&snapshot).playlist_folder_totals(&children)
     };
     let mut rows = load_folder_headers(connection, folders).await?;
     for folder in &mut rows {

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use localization::{msgid, tr};
+use localization::tr;
 
 use crate::controls::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
 use rufin_core::settings::context_menu::{ContextMenuItem, ContextMenuSettings};
@@ -506,13 +506,7 @@ fn resolve_context_menu_entries<T>(
 
 #[cfg(test)]
 mod context_menu_tests {
-    use super::{
-        ContextMenuEntry, context_menu_has_submenu_side, go_to_context_submenu,
-        resolve_context_menu_entries,
-    };
-    use gio::prelude::MenuModelExt;
-    use glib::prelude::IsA;
-    use gtk::{gio, glib};
+    use super::{ContextMenuEntry, context_menu_has_submenu_side, resolve_context_menu_entries};
     use rufin_core::settings::context_menu::{
         ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings,
     };
@@ -591,33 +585,6 @@ mod context_menu_tests {
         assert!(context_menu_has_submenu_side(600, 590.0, 276, 301));
         assert!(!context_menu_has_submenu_side(490, 245.0, 276, 230));
     }
-
-    #[test]
-    fn go_to_submenu_flattens_named_artists_and_keeps_album_destination() {
-        let menu = go_to_context_submenu(
-            "track",
-            &["First Artist".to_string(), "Second Artist".to_string()],
-            true,
-        );
-        assert_eq!(menu.n_items(), 3);
-        assert_eq!(menu_label(&menu, 0).as_deref(), Some("Go to First Artist"));
-        assert_eq!(menu_action(&menu, 0).as_deref(), Some("track.go-artist-0"));
-        assert_eq!(menu_label(&menu, 1).as_deref(), Some("Go to Second Artist"));
-        assert_eq!(menu_action(&menu, 1).as_deref(), Some("track.go-artist-1"));
-        assert_eq!(menu_action(&menu, 2).as_deref(), Some("track.go-album"));
-    }
-
-    fn menu_label(model: &impl IsA<gio::MenuModel>, index: i32) -> Option<String> {
-        model
-            .item_attribute_value(index, "label", Some(glib::VariantTy::STRING))
-            .and_then(|value| value.str().map(str::to_string))
-    }
-
-    fn menu_action(model: &impl IsA<gio::MenuModel>, index: i32) -> Option<String> {
-        model
-            .item_attribute_value(index, "action", Some(glib::VariantTy::STRING))
-            .and_then(|value| value.str().map(str::to_string))
-    }
 }
 
 fn menu_action_item(label: &str, action: &str, icon_name: &str) -> gio::MenuItem {
@@ -645,31 +612,6 @@ pub fn radio_context_submenu(group: &str) -> gio::Menu {
         &format!("{group}.play-radio-last"),
         PLAY_LATER_ICON,
     );
-    menu
-}
-
-pub fn go_to_context_submenu(group: &str, artist_names: &[String], has_album: bool) -> gio::Menu {
-    let menu = gio::Menu::new();
-    for (index, artist_name) in artist_names.iter().enumerate() {
-        append_menu_action(
-            &menu,
-            &localization::tr_with("Go to {artist}", &[("artist", artist_name)]),
-            &if artist_names.len() == 1 {
-                format!("{group}.go-artist")
-            } else {
-                format!("{group}.go-artist-{index}")
-            },
-            ARTIST_ICON,
-        );
-    }
-    if has_album {
-        append_menu_action(
-            &menu,
-            msgid("Go to Album"),
-            &format!("{group}.go-album"),
-            ALBUM_ICON,
-        );
-    }
     menu
 }
 

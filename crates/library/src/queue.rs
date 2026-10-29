@@ -293,7 +293,7 @@ impl Catalog {
         let filter = filter.trim().to_lowercase();
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         let mut positions = Vec::new();
         let mut total = 0;
         for (position, index) in queue.order.iter().enumerate() {

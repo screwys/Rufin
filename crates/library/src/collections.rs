@@ -209,7 +209,7 @@ enum Kind {
 impl Catalog {
     fn resident_collections(&self, kind: Kind, keys: &[i64]) -> Vec<Option<Resident>> {
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, self.distinct_track_covers());
+        let context = Context::new(&snapshot);
         let derived = self.derived(&context, None);
         keys.iter()
             .map(|key| {
@@ -586,7 +586,7 @@ impl Catalog {
     ) -> Vec<(i64, String)> {
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, false);
+        let context = Context::new(&snapshot);
         let parent = match parent {
             Some(parent) => match snapshot.folders.slot(parent.raw()) {
                 Some(slot) => Some(slot),
@@ -647,7 +647,7 @@ impl Catalog {
         let order = self.list_order(&mut connection, &read).await?;
         let tracks = {
             let snapshot = self.snapshot();
-            let context = Context::new(&snapshot, false);
+            let context = Context::new(&snapshot);
             let folder = folder.and_then(|folder| snapshot.folders.slot(folder.raw()));
             let mut albums = order
                 .iter()
@@ -696,7 +696,7 @@ impl Catalog {
             let Some(last) = page.last() else { break };
             after = last.album_key.raw();
             let snapshot = self.snapshot();
-            let context = Context::new(&snapshot, false);
+            let context = Context::new(&snapshot);
             let derived = self.covers(&context);
             candidates.extend(
                 page.into_iter()
@@ -854,7 +854,7 @@ impl crate::ListRead {
             catalog.list_order(&mut connection, self).await?
         };
         let snapshot = catalog.snapshot();
-        let context = Context::new(&snapshot, false);
+        let context = Context::new(&snapshot);
         let folder = self
             .folder
             .and_then(|folder| snapshot.folders.slot(folder.raw()));

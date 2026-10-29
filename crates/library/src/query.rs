@@ -309,7 +309,7 @@ impl MemberRead {
             catalog.member_order(&mut connection, self).await?
         };
         let snapshot = catalog.snapshot();
-        Ok(crate::catalog::views::Context::new(&snapshot, false).member_sections(self, &order))
+        Ok(crate::catalog::views::Context::new(&snapshot).member_sections(self, &order))
     }
     pub async fn disc_sections(
         &self,
@@ -324,7 +324,7 @@ impl MemberRead {
             catalog.member_order(&mut connection, self).await?
         };
         let snapshot = catalog.snapshot();
-        Ok(crate::catalog::views::Context::new(&snapshot, false).disc_sections(self, &order))
+        Ok(crate::catalog::views::Context::new(&snapshot).disc_sections(self, &order))
     }
 }
 
@@ -447,7 +447,7 @@ impl ListRead {
             catalog.list_order(&mut connection, self).await?
         };
         let snapshot = catalog.snapshot();
-        Ok(crate::catalog::views::Context::new(&snapshot, false).list_sections(self, &order))
+        Ok(crate::catalog::views::Context::new(&snapshot).list_sections(self, &order))
     }
 
     /// The keys of a window of this list, from the cached order.

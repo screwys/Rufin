@@ -771,7 +771,7 @@ pub(crate) async fn overlay_history(
 fn show_listen(catalog: &Catalog, song: &mut crate::TrackView, listen: &ListenWrite) {
     let listened = {
         let snapshot = catalog.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         snapshot
             .tracks
             .slot(song.track_key.raw())

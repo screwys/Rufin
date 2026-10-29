@@ -242,15 +242,9 @@ where
         settings.clone(),
         Arc::clone(&secrets),
         move |previous, current, credentials_changed| {
-            if previous.ui.application.prefer_distinct_track_covers
-                != current.ui.application.prefer_distinct_track_covers
-            {
-                settings_library
-                    .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
-            }
-            if previous.ui.application.use_sort_tags != current.ui.application.use_sort_tags {
-                settings_library.set_use_sort_tags(current.ui.application.use_sort_tags);
-            }
+            settings_library
+                .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
+            settings_library.set_use_sort_tags(current.ui.application.use_sort_tags);
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.ui.lastfm_api_key != current.ui.lastfm_api_key

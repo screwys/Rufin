@@ -201,7 +201,7 @@ impl Catalog {
         let artists = self.list_order(&mut connection, &artists).await?;
         let keys = {
             let snapshot = self.snapshot();
-            let context = Context::new(&snapshot, false);
+            let context = Context::new(&snapshot);
             let name = |id| snapshot.text(id).to_lowercase();
             vec![
                 tracks

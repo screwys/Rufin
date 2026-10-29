@@ -122,9 +122,6 @@ struct CatalogInner {
     image_current: AtomicBool,
     /// Shared with the image thread, which holds no strong handle while it waits.
     image: Arc<(std::sync::Mutex<ImageState>, Condvar)>,
-    distinct_track_covers: AtomicBool,
-    /// Read into every Snapshot under its lock, so a load never installs a stale value.
-    sort_tags: AtomicBool,
     views: std::sync::Mutex<crate::catalog::views::Views>,
     /// Held while totals are built, so readers that need the same ones wait for one build.
     deriving: std::sync::Mutex<()>,
@@ -376,7 +373,8 @@ impl Catalog {
         let mut state = self.snapshot_mut();
         snapshot.revision = state.revision + 1;
         snapshot.facts = snapshot.revision;
-        snapshot.sort_tags = self.inner.sort_tags.load(Ordering::Acquire);
+        snapshot.sort_tags = state.sort_tags;
+        snapshot.distinct_track_covers = state.distinct_track_covers;
         let previous = std::mem::replace(&mut *state, snapshot);
         let revision = state.revision;
         drop(state);
@@ -391,38 +389,32 @@ impl Catalog {
     /// Read when artwork falls back to a track picture; nothing stored depends on it. Clients
     /// redraw every cover when it changes.
     pub fn set_distinct_track_covers(&self, enabled: bool) {
-        let previous = self
-            .inner
-            .distinct_track_covers
-            .swap(enabled, Ordering::AcqRel);
-        if previous != enabled && *self.inner.loaded.borrow() {
-            let revision = self.next_revision();
-            self.publish(Arc::new(Change {
-                revision,
-                scopes: vec![crate::Scope::Reload],
-            }));
-        }
+        self.set_display(|snapshot| &mut snapshot.distinct_track_covers, enabled);
     }
 
     pub fn distinct_track_covers(&self) -> bool {
-        self.inner.distinct_track_covers.load(Ordering::Acquire)
+        self.snapshot().distinct_track_covers
     }
 
     /// Whether artists and albums sort by their sort tags. Nothing stored depends on it; the
     /// orders built since the last change are dropped and clients reopen their pages.
     pub fn set_use_sort_tags(&self, enabled: bool) {
+        self.set_display(|snapshot| &mut snapshot.sort_tags, enabled);
+    }
+
+    /// Sets a flag the Snapshot shows rows by. A load copies it from the Snapshot it replaces.
+    fn set_display(&self, flag: fn(&mut Snapshot) -> &mut bool, enabled: bool) {
         let mut snapshot = self.snapshot_mut();
-        if self.inner.sort_tags.swap(enabled, Ordering::AcqRel) == enabled {
+        if std::mem::replace(flag(&mut snapshot), enabled) == enabled {
             return;
         }
-        snapshot.sort_tags = enabled;
         snapshot.revision += 1;
         let revision = snapshot.revision;
         drop(snapshot);
         if *self.inner.loaded.borrow() {
             self.publish(Arc::new(Change {
                 revision,
-                scopes: vec![crate::Scope::Reload],
+                scopes: vec![crate::Scope::Display],
             }));
         }
     }
@@ -504,8 +496,6 @@ impl Catalog {
             // An image written by an earlier run may match the counter.
             image_current: AtomicBool::new(true),
             image: Arc::new((std::sync::Mutex::new(ImageState::default()), Condvar::new())),
-            distinct_track_covers: AtomicBool::new(false),
-            sort_tags: AtomicBool::new(false),
             views: Default::default(),
             deriving: std::sync::Mutex::new(()),
         });
@@ -626,7 +616,8 @@ impl CatalogInner {
                     .snapshot
                     .write()
                     .unwrap_or_else(PoisonError::into_inner);
-                snapshot.sort_tags = self.sort_tags.load(Ordering::Acquire);
+                snapshot.sort_tags = state.sort_tags;
+                snapshot.distinct_track_covers = state.distinct_track_covers;
                 let previous = std::mem::replace(&mut *state, snapshot);
                 drop(state);
                 drop(previous);

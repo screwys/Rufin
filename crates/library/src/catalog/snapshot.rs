@@ -423,6 +423,8 @@ pub(crate) struct Snapshot {
     pub(crate) playlist_folders: BTreeMap<i64, PlaylistFolder>,
     /// Artists and albums sort by their sort tags; otherwise by name past a leading article.
     pub(crate) sort_tags: bool,
+    /// Tracks with their own picture show it, not their album's.
+    pub(crate) distinct_track_covers: bool,
 }
 
 /// Leading articles a name sorts past without sort tags, Navidrome's default list.
@@ -469,6 +471,7 @@ impl Default for Snapshot {
             smart_playlists: BTreeMap::new(),
             playlist_folders: BTreeMap::new(),
             sort_tags: false,
+            distinct_track_covers: false,
         }
     }
 }

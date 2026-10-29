@@ -1697,13 +1697,6 @@ fn album_track_field_widths(
 
 fn album_track_column_width(field: LibraryField) -> i32 {
     match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels
-        | LibraryField::Format
-        | LibraryField::FilePath
-        | LibraryField::Source => gtk_widgets::library_fields::column_width(field),
         LibraryField::RowIndex => 40,
         LibraryField::TrackNumber => 52,
         LibraryField::DiscNumber => 44,
@@ -1711,16 +1704,13 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Year | LibraryField::Bpm => 52,
         LibraryField::PlayCount => 56,
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 64,
-        LibraryField::Favorite => gtk_widgets::favorites::FAVORITE_COLUMN_WIDTH,
-        LibraryField::Tools => gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
-        LibraryField::Image => 56,
         LibraryField::Title | LibraryField::TitleMerged => 320,
         LibraryField::Album
         | LibraryField::Artist
         | LibraryField::AlbumArtist
         | LibraryField::Genre => 160,
         LibraryField::ReleaseDate | LibraryField::DateAdded => 96,
-        LibraryField::LastPlayed => 148,
+        _ => gtk_widgets::library_fields::column_width(field),
     }
 }
 
