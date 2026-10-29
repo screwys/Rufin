@@ -4,6 +4,7 @@
 use crate::{AlbumMetadata, TagReference, TrackMetadata};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum TagKind {
     Genre,
     Mood,

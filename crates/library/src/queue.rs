@@ -415,14 +415,14 @@ impl Catalog {
                     provenance: row.provenance.clone(),
                 });
                 if row.position == current {
-                    let song = crate::tracks::load_track_rows(
-                        self,
-                        write.connection().await?,
-                        &[slot.as_ref().unwrap().track_key],
-                    )
-                    .await?
-                    .pop()
-                    .expect("requested canonical queue song");
+                    let song = self
+                        .track_views_on(
+                            write.connection().await?,
+                            &[slot.as_ref().unwrap().track_key],
+                        )
+                        .await?
+                        .pop()
+                        .expect("requested canonical queue song");
                     rows.push(Arc::new(QueueRow {
                         position: row.position,
                         track: song,
@@ -613,18 +613,23 @@ impl Catalog {
             .iter()
             .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
-        let songs = crate::tracks::load_track_rows(self, &mut connection, &keys).await?;
+        let songs = self
+            .track_views_on(&mut connection, &keys)
+            .await?
+            .into_iter()
+            .map(|song| (song.track_key, song))
+            .collect::<HashMap<_, _>>();
+        // An entry whose track the Store no longer holds has no row; the others keep their own.
         Ok(entries
             .iter()
-            .zip(songs)
-            .map(|((position, entry), song)| {
-                Arc::new(QueueRow {
+            .filter_map(|(position, entry)| {
+                Some(Arc::new(QueueRow {
                     occurrence_id: None,
                     position: *position,
-                    track: song,
+                    track: songs.get(&entry.track_key)?.clone(),
                     provenance: entry.provenance.clone(),
                     received_from_connect: entry.received_from_connect,
-                })
+                }))
             })
             .collect())
     }
@@ -1123,7 +1128,7 @@ async fn track_references_for_uris_on(
 ) -> LibraryResult<Vec<TrackReference>> {
     let keys = sqlx::query_scalar::<_, crate::TrackKey>("SELECT track_key FROM json_each(?1) requested JOIN tracks ON media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
         .bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?;
-    let songs = crate::tracks::load_track_rows(catalog, connection, &keys).await?;
+    let songs = catalog.track_views_on(connection, &keys).await?;
     let songs = songs
         .into_iter()
         .map(|song| (song.media_uri.clone(), TrackReference::from(song)))

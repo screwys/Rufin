@@ -1,0 +1,580 @@
+//! The one keyed statement of a read: the Store columns of the rows a window shows, their
+//! pictures and blur-hash previews, and the full reads of detail headers. Each kind of row is a
+//! tagged part of one UNION ALL, present only when it has keys, and the statement steps on the
+//! connection's raw handle.
+
+use std::collections::{BTreeSet, HashMap};
+
+use super::rows::{Handle, Rows};
+use super::views::{Art, Picture};
+use crate::artwork::{ArtworkCandidate, ArtworkImage};
+use crate::{LibraryResult, TrackArtistLink, TrackGenreLink};
+
+/// Columns after the part and the key; a part with fewer pads with NULL.
+const COLUMNS: usize = 15;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Part {
+    Track,
+    View,
+    AlbumText,
+    AlbumView,
+    ArtistView,
+    TrackArt,
+    AlbumArt,
+    ArtistArt,
+    TagArt,
+    TagMosaic,
+    FolderArt,
+    PlaylistArt,
+    SmartArt,
+}
+
+const PARTS: [Part; 13] = [
+    Part::Track,
+    Part::View,
+    Part::AlbumText,
+    Part::AlbumView,
+    Part::ArtistView,
+    Part::TrackArt,
+    Part::AlbumArt,
+    Part::ArtistArt,
+    Part::TagArt,
+    Part::TagMosaic,
+    Part::FolderArt,
+    Part::PlaylistArt,
+    Part::SmartArt,
+];
+
+/// The JSON object of preview hashes by family of the candidates in a binding.
+fn previews(binding: &str, wanted: bool) -> String {
+    if !wanted {
+        return "NULL".into();
+    }
+    format!(
+        "(SELECT json_group_object(preview.family,preview.hash) FROM json_each({binding}) candidate JOIN artwork_previews preview ON preview.family=json_extract(candidate.value,'$.key'))"
+    )
+}
+
+impl Part {
+    /// The part's columns and what it reads them from; `requested` is the key list.
+    fn sql(self, previews_wanted: bool) -> (Vec<String>, String) {
+        use crate::schema::{LINK_ARTIST, LINK_GENRE};
+        let art = |table: &str, key: &str, column: &str| {
+            (
+                vec![
+                    format!("item.{column}"),
+                    previews(&format!("item.{column}"), previews_wanted),
+                ],
+                format!(
+                    "JOIN {table} item ON item.{key}=requested.value WHERE item.{column} IS NOT NULL"
+                ),
+            )
+        };
+        let source_path = "CASE WHEN source.kind='local' THEN (SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END";
+        let track_from = "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN sources source ON source.source_key=track.source_key";
+        match self {
+            Self::Track => (
+                vec![
+                    "track.media_uri".into(),
+                    "track.object_id".into(),
+                    "track.release_date".into(),
+                    source_path.into(),
+                    "json_extract(details.metadata,'$.audio_properties')".into(),
+                ],
+                track_from.into(),
+            ),
+            Self::View => {
+                let metadata = crate::metadata::track_metadata_sql("track", "details");
+                (
+                    vec![
+                        "track.source_key".into(),
+                        "source.object_id".into(),
+                        "track.object_id".into(),
+                        "track.media_uri".into(),
+                        format!("json_patch({metadata},json_object('title',coalesce(nullif(track.title,''),track.media_uri),
+                        'date_added',date(coalesce(unixepoch(track.date_added),track.first_seen_at),'unixepoch'),
+                        'album_display_artist',coalesce(nullif(album.display_artist,''),json_extract(details.metadata,'$.album_display_artist')),
+                        'musicbrainz_album_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_id'),json_extract(details.metadata,'$.musicbrainz_album_id')),
+                        'musicbrainz_release_group_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_group_id'),json_extract(details.metadata,'$.musicbrainz_release_group_id')),
+                        'primary_artist_musicbrainz_id',coalesce((SELECT artist.musicbrainz_artist_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST} ORDER BY credit.position LIMIT 1),json_extract(details.metadata,'$.primary_artist_musicbrainz_id'))))"),
+                        source_path.into(),
+                        "coalesce(source.display_name,'')".into(),
+                        "coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path)".into(),
+                        "details.cue_start_millis".into(),
+                        "details.cue_end_millis".into(),
+                        "track.album_key".into(),
+                        "album.media_uri".into(),
+                        format!("(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST})"),
+                        format!("(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM album_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.album_key=track.album_key AND credit.role={LINK_ARTIST})"),
+                        format!("(SELECT json_group_array(json_object('genre_key',tag.tag_key,'name',tag.name) ORDER BY credit.position) FROM track_links credit JOIN tags tag ON tag.tag_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_GENRE})"),
+                    ],
+                    format!("{track_from} LEFT JOIN albums album ON album.album_key=track.album_key"),
+                )
+            }
+            Self::AlbumText => (
+                vec![
+                    "album.release_date".into(),
+                    "coalesce(date(album.date_added),album.date_added,date(album.first_seen_at,'unixepoch'))".into(),
+                ],
+                "JOIN albums album ON album.album_key=requested.value".into(),
+            ),
+            Self::AlbumView => (
+                vec![
+                    "album.object_id".into(),
+                    "album.media_uri".into(),
+                    "json_patch(json(album.metadata),json_object('title',album.title,'artist',album.display_artist,'sort_text',album.sort_text,'year',album.year,'release_date',album.release_date,'date_added',coalesce(date(album.date_added),album.date_added,date(album.first_seen_at,'unixepoch')),'is_compilation',json(CASE album.is_compilation WHEN 1 THEN 'true' WHEN 0 THEN 'false' END)))".into(),
+                ],
+                "JOIN albums album ON album.album_key=requested.value".into(),
+            ),
+            Self::ArtistView => (
+                vec![
+                    "artist.object_id".into(),
+                    "artist.media_uri".into(),
+                    "artist.musicbrainz_artist_id".into(),
+                ],
+                "JOIN artists artist ON artist.artist_key=requested.value".into(),
+            ),
+            Self::TrackArt => art("track_details", "track_key", "native_artwork"),
+            Self::AlbumArt => art("albums", "album_key", "native_artwork"),
+            Self::ArtistArt => art("artists", "artist_key", "native_artwork"),
+            Self::TagArt => art("tags", "tag_key", "native_artwork"),
+            Self::FolderArt => art("folders", "folder_key", "native_artwork"),
+            Self::TagMosaic => (
+                vec!["(SELECT json_group_array(track.track_key ORDER BY pick.key) FROM json_each(item.mosaic) pick LEFT JOIN tracks track ON track.media_uri=pick.value)".into()],
+                "JOIN tags item ON item.tag_key=requested.value WHERE item.mosaic IS NOT NULL".into(),
+            ),
+            Self::PlaylistArt | Self::SmartArt => {
+                let (table, key) = if self == Self::PlaylistArt {
+                    ("playlists", "playlist_key")
+                } else {
+                    ("smart_playlists", "smart_playlist_key")
+                };
+                (
+                    vec![
+                        "item.artwork_binding".into(),
+                        previews("item.artwork_binding", previews_wanted),
+                        "item.mosaic".into(),
+                    ],
+                    format!("JOIN {table} item ON item.{key}=requested.value"),
+                )
+            }
+        }
+    }
+}
+
+/// The keys of each part one statement reads.
+#[derive(Default)]
+pub(crate) struct Want {
+    pub(crate) tracks: BTreeSet<i64>,
+    pub(crate) views: BTreeSet<i64>,
+    pub(crate) album_texts: BTreeSet<i64>,
+    pub(crate) album_views: BTreeSet<i64>,
+    pub(crate) artist_views: BTreeSet<i64>,
+    pub(crate) track_art: BTreeSet<i64>,
+    pub(crate) album_art: BTreeSet<i64>,
+    pub(crate) artist_art: BTreeSet<i64>,
+    pub(crate) tag_art: BTreeSet<i64>,
+    pub(crate) tag_mosaics: BTreeSet<i64>,
+    pub(crate) folder_art: BTreeSet<i64>,
+    pub(crate) playlist_art: BTreeSet<i64>,
+    pub(crate) smart_art: BTreeSet<i64>,
+    /// Bindings carry the blur-hash previews known for their candidates. Mosaic recipes are the
+    /// candidates as stored.
+    pub(crate) previews: bool,
+}
+
+impl Want {
+    pub(crate) fn new(previews: bool) -> Self {
+        Self {
+            previews,
+            ..Self::default()
+        }
+    }
+
+    fn keys(&self, part: Part) -> &BTreeSet<i64> {
+        match part {
+            Part::Track => &self.tracks,
+            Part::View => &self.views,
+            Part::AlbumText => &self.album_texts,
+            Part::AlbumView => &self.album_views,
+            Part::ArtistView => &self.artist_views,
+            Part::TrackArt => &self.track_art,
+            Part::AlbumArt => &self.album_art,
+            Part::ArtistArt => &self.artist_art,
+            Part::TagArt => &self.tag_art,
+            Part::TagMosaic => &self.tag_mosaics,
+            Part::FolderArt => &self.folder_art,
+            Part::PlaylistArt => &self.playlist_art,
+            Part::SmartArt => &self.smart_art,
+        }
+    }
+
+    /// The rows a picture is composed from.
+    pub(crate) fn art(&mut self, art: Art) {
+        match art {
+            Art::None => {}
+            Art::Track(key) => {
+                self.track_art.insert(key);
+            }
+            Art::Album(key) => {
+                self.album_art.insert(key);
+            }
+            Art::Artist(key, borrowed) => {
+                self.artist_art.insert(key);
+                match borrowed {
+                    Some(Picture::Track(key)) => self.track_art.insert(key),
+                    Some(Picture::Album(key)) => self.album_art.insert(key),
+                    None => false,
+                };
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        PARTS.iter().all(|part| self.keys(*part).is_empty())
+    }
+}
+
+/// Text columns of a track row that the Catalog does not hold.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TrackText {
+    pub(crate) media_uri: String,
+    pub(crate) object_id: Option<String>,
+    pub(crate) release_date: Option<String>,
+    pub(crate) source_path: Option<String>,
+    pub(crate) audio: crate::AudioProperties,
+}
+
+/// A playlist's or smart playlist's own binding and mosaic picks.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PlaylistArt {
+    pub(crate) candidates: Option<Vec<ArtworkCandidate>>,
+    pub(crate) mosaic: Option<String>,
+}
+
+/// What one statement read, by part and key.
+#[derive(Default)]
+pub(crate) struct Got {
+    pub(crate) tracks: HashMap<i64, TrackText>,
+    pub(crate) views: HashMap<i64, crate::TrackView>,
+    pub(crate) album_texts: HashMap<i64, (Option<String>, Option<String>)>,
+    /// Object id, URI and the whole metadata JSON.
+    pub(crate) album_views: HashMap<i64, (String, String, String)>,
+    pub(crate) artist_views: HashMap<i64, (String, String, Option<String>)>,
+    track_art: HashMap<i64, Vec<ArtworkCandidate>>,
+    album_art: HashMap<i64, Vec<ArtworkCandidate>>,
+    artist_art: HashMap<i64, Vec<ArtworkCandidate>>,
+    pub(crate) tag_art: HashMap<i64, Vec<ArtworkCandidate>>,
+    pub(crate) folder_art: HashMap<i64, Vec<ArtworkCandidate>>,
+    pub(crate) playlist_art: HashMap<i64, PlaylistArt>,
+    pub(crate) smart_art: HashMap<i64, PlaylistArt>,
+    /// The track keys of each tag's mosaic picks; a pick the Store lacks has none.
+    pub(crate) mosaics: HashMap<i64, Vec<Option<i64>>>,
+    previews: HashMap<String, String>,
+}
+
+impl Got {
+    /// A row's picture as the Catalog chose it. An artist lists its own pictures, then the one
+    /// it borrows, then its name lookups.
+    pub(crate) fn candidates(&self, art: Art) -> Option<Vec<ArtworkCandidate>> {
+        let picture = |picture: Picture| match picture {
+            Picture::Track(key) => self.track_art.get(&key),
+            Picture::Album(key) => self.album_art.get(&key),
+        };
+        let mut candidates = match art {
+            Art::None => return None,
+            Art::Track(key) => self.track_art.get(&key)?.clone(),
+            Art::Album(key) => self.album_art.get(&key)?.clone(),
+            Art::Artist(key, borrowed) => {
+                let own = self
+                    .artist_art
+                    .get(&key)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                let lookup = |candidate: &&ArtworkCandidate| {
+                    matches!(
+                        candidate.image,
+                        ArtworkImage::Artist { .. } | ArtworkImage::Album(_)
+                    )
+                };
+                let candidates = own
+                    .iter()
+                    .filter(|candidate| !lookup(candidate))
+                    .chain(borrowed.and_then(picture).into_iter().flatten())
+                    .chain(own.iter().filter(lookup))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    return None;
+                }
+                candidates
+            }
+        };
+        self.fill(&mut candidates);
+        Some(candidates)
+    }
+
+    /// Fills the preview hashes the Store knows for candidates without one.
+    pub(crate) fn fill(&self, candidates: &mut [ArtworkCandidate]) {
+        for candidate in candidates {
+            if candidate.blur_hash.is_none() {
+                candidate.blur_hash = self.previews.get(&candidate.key).cloned();
+            }
+        }
+    }
+
+    /// The binding a row shows.
+    pub(crate) fn binding(&self, art: Art) -> LibraryResult<Option<Vec<u8>>> {
+        self.candidates(art)
+            .map(|candidates| encode(&candidates))
+            .transpose()
+    }
+
+    /// A tag's or folder's own binding with previews.
+    pub(crate) fn own(
+        &self,
+        stored: &HashMap<i64, Vec<ArtworkCandidate>>,
+        key: i64,
+    ) -> LibraryResult<Option<Vec<u8>>> {
+        stored
+            .get(&key)
+            .map(|candidates| {
+                let mut candidates = candidates.clone();
+                self.fill(&mut candidates);
+                encode(&candidates)
+            })
+            .transpose()
+    }
+
+    /// A playlist's own binding with previews, without its mosaic.
+    pub(crate) fn playlist_binding(&self, key: i64) -> LibraryResult<Option<Vec<u8>>> {
+        self.playlist_art
+            .get(&key)
+            .and_then(|art| art.candidates.clone())
+            .map(|mut candidates| {
+                self.fill(&mut candidates);
+                encode(&candidates)
+            })
+            .transpose()
+    }
+
+    /// A playlist row's binding: its own picture, then its mosaic. None when it has neither.
+    pub(crate) fn playlist(
+        &self,
+        smart: bool,
+        key: i64,
+        owner: (Option<String>, String),
+    ) -> LibraryResult<Option<Vec<u8>>> {
+        let stored = if smart {
+            &self.smart_art
+        } else {
+            &self.playlist_art
+        };
+        let Some(art) = stored.get(&key) else {
+            return Ok(None);
+        };
+        let mut candidates = art.candidates.clone().unwrap_or_default();
+        self.fill(&mut candidates);
+        crate::artwork::playlist_artwork(
+            candidates,
+            (smart, owner.0, owner.1),
+            art.mosaic.as_deref(),
+        )
+    }
+}
+
+pub(crate) fn encode(candidates: &[ArtworkCandidate]) -> LibraryResult<Vec<u8>> {
+    Ok(serde_json::to_vec(candidates)?)
+}
+
+fn candidates(rows: &Rows<'_>, column: i32) -> LibraryResult<Option<Vec<ArtworkCandidate>>> {
+    rows.blob(column)
+        .map(|binding| serde_json::from_slice(&binding))
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// Reads every part of a statement on the connection's raw handle.
+pub(crate) async fn run(
+    connection: &mut sqlx::SqliteConnection,
+    want: &Want,
+) -> LibraryResult<Got> {
+    let mut got = Got::default();
+    if want.is_empty() {
+        return Ok(got);
+    }
+    let mut parts = Vec::new();
+    let mut binds = Vec::new();
+    for part in PARTS {
+        let keys = want.keys(part);
+        if keys.is_empty() {
+            continue;
+        }
+        let (mut columns, from) = part.sql(want.previews);
+        columns.resize(COLUMNS, "NULL".into());
+        binds.push(serde_json::to_string(keys)?);
+        parts.push(format!(
+            "SELECT {},requested.value,{} FROM json_each(?{}) requested {from}",
+            part as i64,
+            columns.join(","),
+            binds.len()
+        ));
+    }
+    let sql = parts.join(" UNION ALL ");
+    let handle = Handle::lock(connection).await?;
+    let mut rows = handle.prepare(&sql)?;
+    for (index, keys) in binds.iter().enumerate() {
+        rows.bind_text(index as i32 + 1, keys)?;
+    }
+    fn text(rows: &Rows<'_>, column: i32) -> Option<String> {
+        rows.optional_text(column).map(str::to_owned)
+    }
+    fn json<T: serde::de::DeserializeOwned + Default>(
+        rows: &Rows<'_>,
+        column: i32,
+    ) -> LibraryResult<T> {
+        Ok(match rows.optional_text(column) {
+            Some(text) => serde_json::from_str(text)?,
+            None => T::default(),
+        })
+    }
+    while rows.step()? {
+        let part = PARTS[rows.int(0) as usize];
+        let key = rows.int(1);
+        let previews = |rows: &Rows<'_>, got: &mut Got, column| -> LibraryResult<()> {
+            if let Some(text) = rows.optional_text(column) {
+                got.previews
+                    .extend(serde_json::from_str::<HashMap<String, String>>(text)?);
+            }
+            Ok(())
+        };
+        match part {
+            Part::Track => {
+                got.tracks.insert(
+                    key,
+                    TrackText {
+                        media_uri: rows.text(2).to_owned(),
+                        object_id: text(&rows, 3),
+                        release_date: text(&rows, 4),
+                        source_path: text(&rows, 5),
+                        audio: json(&rows, 6)?,
+                    },
+                );
+            }
+            Part::View => {
+                let artists: Vec<TrackArtistLink> = json(&rows, 14)?;
+                let album_artists: Vec<TrackArtistLink> = json(&rows, 15)?;
+                let genres: Vec<TrackGenreLink> = json(&rows, 16)?;
+                got.views.insert(
+                    key,
+                    crate::TrackView {
+                        track_key: crate::TrackKey::from_raw(key),
+                        source_key: rows.optional_int(2).map(crate::SourceKey::from_raw),
+                        source_id: text(&rows, 3),
+                        object_id: text(&rows, 4),
+                        media_uri: rows.text(5).to_owned(),
+                        metadata: json(&rows, 6)?,
+                        state: Default::default(),
+                        access: crate::TrackAccess {
+                            source_path: text(&rows, 7),
+                            source_name: rows.text(8).to_owned(),
+                            cue_path: text(&rows, 9),
+                            cue_start_millis: rows.optional_int(10),
+                            cue_end_millis: rows.optional_int(11),
+                            is_downloaded: false,
+                        },
+                        links: crate::TrackLinks {
+                            album_key: rows.optional_int(12).map(crate::AlbumKey::from_raw),
+                            album_media_uri: text(&rows, 13),
+                            artists,
+                            album_artists,
+                            genres,
+                        },
+                        artwork_binding: None,
+                    },
+                );
+            }
+            Part::AlbumText => {
+                got.album_texts
+                    .insert(key, (text(&rows, 2), text(&rows, 3)));
+            }
+            Part::AlbumView => {
+                got.album_views.insert(
+                    key,
+                    (
+                        rows.text(2).to_owned(),
+                        rows.text(3).to_owned(),
+                        rows.text(4).to_owned(),
+                    ),
+                );
+            }
+            Part::ArtistView => {
+                got.artist_views.insert(
+                    key,
+                    (
+                        rows.text(2).to_owned(),
+                        rows.text(3).to_owned(),
+                        text(&rows, 4),
+                    ),
+                );
+            }
+            Part::TrackArt | Part::AlbumArt | Part::ArtistArt | Part::TagArt | Part::FolderArt => {
+                previews(&rows, &mut got, 3)?;
+                let Some(stored) = candidates(&rows, 2)? else {
+                    continue;
+                };
+                match part {
+                    Part::TrackArt => got.track_art.insert(key, stored),
+                    Part::AlbumArt => got.album_art.insert(key, stored),
+                    Part::ArtistArt => got.artist_art.insert(key, stored),
+                    Part::TagArt => got.tag_art.insert(key, stored),
+                    _ => got.folder_art.insert(key, stored),
+                };
+            }
+            Part::TagMosaic => {
+                got.mosaics.insert(key, json(&rows, 2)?);
+            }
+            Part::PlaylistArt | Part::SmartArt => {
+                previews(&rows, &mut got, 3)?;
+                let art = PlaylistArt {
+                    candidates: candidates(&rows, 2)?,
+                    mosaic: text(&rows, 4),
+                };
+                if part == Part::PlaylistArt {
+                    got.playlist_art.insert(key, art);
+                } else {
+                    got.smart_art.insert(key, art);
+                }
+            }
+        }
+    }
+    Ok(got)
+}
+
+/// The bindings rows show for these pictures: composed candidates with their previews.
+pub(crate) async fn bindings(
+    connection: &mut sqlx::SqliteConnection,
+    arts: &[Art],
+) -> LibraryResult<Vec<Option<Vec<u8>>>> {
+    let mut want = Want::new(true);
+    for art in arts {
+        want.art(*art);
+    }
+    let got = run(connection, &want).await?;
+    arts.iter().map(|art| got.binding(*art)).collect()
+}
+
+/// The candidates of these pictures as stored, without previews, so showing a cover never
+/// changes a mosaic recipe.
+pub(crate) async fn recipes(
+    connection: &mut sqlx::SqliteConnection,
+    arts: &[Art],
+) -> LibraryResult<Vec<Option<Vec<ArtworkCandidate>>>> {
+    let mut want = Want::new(false);
+    for art in arts {
+        want.art(*art);
+    }
+    let got = run(connection, &want).await?;
+    Ok(arts.iter().map(|art| got.candidates(*art)).collect())
+}

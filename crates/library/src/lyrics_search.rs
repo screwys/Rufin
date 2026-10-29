@@ -121,8 +121,10 @@ impl Catalog {
                 break;
             }
         }
-        let keys = keys.into_iter().map(TrackKey::from_raw).collect::<Vec<_>>();
-        let tracks = crate::tracks::load_track_rows(self, &mut transaction, &keys).await?;
+        let tracks = self
+            .search_rows(&mut transaction, &[keys, Vec::new(), Vec::new()], false)
+            .await?
+            .tracks;
         transaction.commit().await?;
         Ok(SearchResults {
             tracks,

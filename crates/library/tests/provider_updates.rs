@@ -52,10 +52,11 @@ async fn fixture() -> (tempfile::TempDir, Catalog) {
         .unwrap();
 
     let mut scan_observation = async {
-        if (&catalog)
-            .source_identity_key(&library::SourceId::new("source"))
-            .await?
-            .is_none()
+        if {
+            (&catalog).loaded().await;
+            (&catalog).source_key(&library::SourceId::new("source"))
+        }
+        .is_none()
         {
             (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
@@ -439,10 +440,11 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
         .unwrap();
 
     let mut scan_observation = async {
-        if (&catalog)
-            .source_identity_key(&library::SourceId::new("source"))
-            .await?
-            .is_none()
+        if {
+            (&catalog).loaded().await;
+            (&catalog).source_key(&library::SourceId::new("source"))
+        }
+        .is_none()
         {
             (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")

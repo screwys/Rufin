@@ -836,7 +836,8 @@ impl Row for Album {
         cells.extend(state_cells(&self.state));
         cells.extend([
             blob(self.binding.as_deref()),
-            num(picture_flag(self.binding.as_deref())),
+            num(picture_flag(self.binding.as_deref())
+                | i64::from(self.class.code()) << crate::schema::ALBUM_RELEASE_SHIFT),
             json_cell(self.writes.header.as_ref().map(Option::as_ref)),
             json_cell(self.writes.metadata.as_ref().map(Some)),
             self.writes.clear_accepted_audio.then_some(Cell::Null),
@@ -885,6 +886,7 @@ impl Row for Album {
             state: native_state(row)?,
             binding: row.try_get("native_artwork")?,
             input: record.flags & INPUT != 0,
+            class: crate::AlbumReleaseClass::of(record.flags),
             artists,
             genres,
             writes: AlbumWrites::default(),

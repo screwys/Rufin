@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::catalog::views::Context;
 use crate::{
-    AlbumKey, AlbumView, ArtistKey, ArtistView, Catalog, CatalogSort, Collection, FolderKey,
-    LibraryResult, ListKind, ListRead, MemberRead, ReadCancellation, SourceKey, TrackKey,
-    TrackView,
+    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Catalog, Collection, FolderKey, Item, LibraryField,
+    LibraryResult, ListKind, ListRead, MemberRead, Read, ReadCancellation, Row, SourceKey,
+    TrackKey, TrackRow,
 };
 
 const SEARCH_LIMIT: usize = 100;
@@ -71,9 +71,9 @@ impl SearchRequest {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchResults {
-    pub tracks: Vec<TrackView>,
-    pub albums: Vec<AlbumView>,
-    pub artists: Vec<ArtistView>,
+    pub tracks: Vec<TrackRow>,
+    pub albums: Vec<AlbumRow>,
+    pub artists: Vec<ArtistRow>,
     pub lyrics: BTreeMap<crate::TrackKey, LyricsSnippet>,
 }
 
@@ -101,66 +101,85 @@ impl Catalog {
             ));
         }
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let mut keys = Vec::new();
-        for (table, key, objects) in [
-            ("tracks", "track_key", track_objects),
-            ("albums", "album_key", album_objects),
-            ("artists", "artist_key", artist_objects),
-        ] {
-            keys.push(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT entity.{key} FROM json_each(?1) requested JOIN {table} entity ON entity.source_key=?2 AND entity.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)"
-            )))
-            .bind(serde_json::to_string(objects)?)
-            .bind(source)
-            .fetch_all(&mut *connection)
-            .await?);
-        }
+        let tracks = self
+            .track_keys_by_objects(&mut connection, source, track_objects)
+            .await?;
+        let keys = {
+            let snapshot = self.snapshot();
+            let owner = snapshot.source_slot(source);
+            let albums = album_objects
+                .iter()
+                .filter_map(|object| {
+                    snapshot
+                        .albums
+                        .iter()
+                        .find(|(_, album)| {
+                            Some(album.source) == owner && snapshot.text(album.object) == object
+                        })
+                        .map(|(_, album)| i64::from(album.key))
+                })
+                .collect();
+            let artists = artist_objects
+                .iter()
+                .filter_map(|object| {
+                    snapshot
+                        .artists
+                        .iter()
+                        .find(|(_, artist)| {
+                            Some(artist.source) == owner && snapshot.text(artist.object) == object
+                        })
+                        .map(|(_, artist)| i64::from(artist.key))
+                })
+                .collect();
+            [tracks, albums, artists]
+        };
         self.search_rows(&mut connection, &keys, album_artists)
             .await
     }
 
-    async fn search_rows(
+    /// The rows of search results, in one statement.
+    pub(crate) async fn search_rows(
         &self,
         connection: &mut sqlx::SqliteConnection,
-        keys: &[Vec<i64>],
+        keys: &[Vec<i64>; 3],
         album_artists: bool,
     ) -> LibraryResult<SearchResults> {
-        Ok(SearchResults {
-            lyrics: BTreeMap::new(),
-            tracks: crate::tracks::load_track_rows(
-                self,
-                connection,
-                &keys[0]
+        let items = keys[0]
+            .iter()
+            .map(|key| Item::Track {
+                key: TrackKey::from_raw(*key),
+                entry: None,
+            })
+            .chain(
+                keys[1]
                     .iter()
-                    .copied()
-                    .map(TrackKey::from_raw)
-                    .collect::<Vec<_>>(),
+                    .map(|key| Item::Album(AlbumKey::from_raw(*key))),
             )
-            .await?,
-            albums: crate::collections::load_album_rows(
-                self,
+            .chain(keys[2].iter().map(|key| Item::Artist {
+                key: ArtistKey::from_raw(*key),
+                album_artist: album_artists,
+            }))
+            .collect::<Vec<_>>();
+        let rows = self
+            .fetch_on(
                 connection,
-                &keys[1]
-                    .iter()
-                    .copied()
-                    .map(AlbumKey::from_raw)
-                    .collect::<Vec<_>>(),
-                false,
+                [(&items, &[]), (&[], &[])],
+                None,
+                &crate::read::Shape::of(None),
+                true,
             )
-            .await?,
-            artists: crate::collections::load_artist_rows(
-                self,
-                connection,
-                &keys[2]
-                    .iter()
-                    .copied()
-                    .map(ArtistKey::from_raw)
-                    .collect::<Vec<_>>(),
-                album_artists,
-                false,
-            )
-            .await?,
-        })
+            .await?
+            .rows;
+        let mut results = SearchResults::default();
+        for row in rows {
+            match row {
+                Row::Track(row) => results.tracks.push(row),
+                Row::Album(row) => results.albums.push(row),
+                Row::Artist(row) => results.artists.push(row),
+                _ => {}
+            }
+        }
+        Ok(results)
     }
 
     /// Tracks, albums and artists of a source whose texts hold every search term.
@@ -177,17 +196,16 @@ impl Catalog {
         }
         let terms = request.query.split_whitespace().collect::<Vec<_>>();
         let matches = |text: &str| terms.iter().all(|term| term_match(text, term));
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let tracks = MemberRead {
             folder,
             ..MemberRead::new(Collection::Source(source))
         };
-        let tracks = self.member_order(&mut connection, &tracks).await?;
+        let tracks = self.order(&Read::Members(tracks), cancellation).await?;
         let albums = ListRead {
             folder,
-            ..ListRead::new(ListKind::Albums, Some(source), CatalogSort::Title)
+            ..ListRead::new(ListKind::Albums, Some(source), LibraryField::Title)
         };
-        let albums = self.list_order(&mut connection, &albums).await?;
+        let albums = self.order(&Read::List(albums), cancellation).await?;
         let artists = ListRead {
             folder,
             ..ListRead::new(
@@ -195,18 +213,31 @@ impl Catalog {
                     album_artist: album_artists,
                 },
                 Some(source),
-                CatalogSort::Title,
+                LibraryField::Title,
             )
         };
-        let artists = self.list_order(&mut connection, &artists).await?;
+        let artists = self.order(&Read::List(artists), cancellation).await?;
+        let keys = |order: &crate::Order| {
+            order
+                .items(0..order.len())
+                .into_iter()
+                .filter_map(|item| match item {
+                    Item::Track { key, .. } => Some(key.raw()),
+                    Item::Album(key) => Some(key.raw()),
+                    Item::Artist { key, .. } => Some(key.raw()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let (tracks, albums, artists) = (keys(&tracks), keys(&albums), keys(&artists));
         let keys = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
             let name = |id| snapshot.text(id).to_lowercase();
-            vec![
+            [
                 tracks
                     .iter()
-                    .map(|member| &snapshot.tracks.records[member.track as usize])
+                    .filter_map(|key| snapshot.tracks.get(*key))
                     .filter(|record| matches(&context.track_search(record)))
                     .map(|record| i64::from(record.key))
                     .take(request.limit)
@@ -252,6 +283,7 @@ impl Catalog {
                     .collect(),
             ]
         };
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         self.search_rows(&mut connection, &keys, album_artists)
             .await
     }

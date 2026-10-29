@@ -226,12 +226,12 @@ async fn dav_refresh_reads_collections_whose_hrefs_escape_names_differently() {
         .acquire_catalog(&catalog, &|_| {}, Arc::new(false.into()), true)
         .await
         .unwrap();
-    let publication = catalog
-        .cached_source(source.source_id().as_str(), &ReadCancellation::new())
-        .await
-        .unwrap()
-        .unwrap()
-        .source;
+    let publication = {
+        catalog.loaded().await;
+        catalog.cached_source(source.source_id().as_str())
+    }
+    .unwrap()
+    .source;
     let tracks = catalog
         .mapping_track_page(publication, None, None, 10, &ReadCancellation::new())
         .await
@@ -326,12 +326,12 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
             .unwrap();
         let publication = if round == 1 {
             assert!(crate::published(&mut emit).is_none());
-            catalog
-                .cached_source(source.source_id().as_str(), &ReadCancellation::new())
-                .await
-                .unwrap()
-                .unwrap()
-                .source
+            {
+                catalog.loaded().await;
+                catalog.cached_source(source.source_id().as_str())
+            }
+            .unwrap()
+            .source
         } else {
             let (catalog_source, update) = crate::published(&mut emit).expect("catalog update");
             assert!(update.intersects(sources::Shown::CATALOG));

@@ -1,12 +1,9 @@
-//! Sidebar pins: rows read by key, totals from the resident Catalog; smart totals are evaluated
-//! separately from row loading.
+//! Sidebar pins: keys and totals from the resident Catalog, pictures from one statement.
 use crate::{
-    AlbumView, ArtistView, Catalog, GenreView, LibraryResult, PlaylistFolderRow, PlaylistRow,
-    ReadCancellation, SmartPlaylistRow, SourceId,
+    AlbumRow, ArtistRow, Catalog, Item, LibraryResult, PlaylistFolderRow, PlaylistListRow,
+    PlaylistRow, ReadCancellation, Row, SmartPlaylistRow, SourceId, TagRow,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::AssertSqlSafe;
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
@@ -46,9 +43,9 @@ fn is_false(value: &bool) -> bool {
 /// A pinned row the Store still holds.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PinRow {
-    Album(Box<AlbumView>),
-    Artist(ArtistView),
-    Genre(GenreView),
+    Album(Box<AlbumRow>),
+    Artist(ArtistRow),
+    Genre(TagRow),
     Playlist(PlaylistRow),
     SmartPlaylist(SmartPlaylistRow),
     PlaylistFolder(PlaylistFolderRow),
@@ -64,25 +61,25 @@ pub struct SidebarPinRow {
 }
 
 impl From<(SidebarPin, PinRow)> for SidebarPinRow {
-    /// The sidebar's reduced row. Smart playlists and folders wait for `sidebar_pin_totals`.
+    /// The sidebar's reduced row.
     fn from((pin, row): (SidebarPin, PinRow)) -> Self {
         let (key, name, totals, artwork) = match row {
             PinRow::Album(album) => (
                 album.album_key.raw(),
-                album.metadata.title,
-                Some((album.summary.track_count, album.summary.duration_millis)),
+                album.title,
+                (album.summary.track_count, album.summary.duration_millis),
                 album.artwork_binding.into_iter().collect(),
             ),
             PinRow::Artist(artist) => (
                 artist.artist_key.raw(),
-                artist.metadata.name,
-                Some((artist.summary.track_count, artist.summary.duration_millis)),
+                artist.name,
+                (artist.summary.track_count, artist.summary.duration_millis),
                 artist.artwork_binding.into_iter().collect(),
             ),
             PinRow::Genre(genre) => (
-                genre.genre_key.raw(),
-                genre.metadata.name,
-                Some((genre.summary.track_count, genre.summary.duration_millis)),
+                genre.key,
+                genre.name,
+                (genre.summary.track_count, genre.summary.duration_millis),
                 match genre.artwork_binding {
                     Some(binding) => vec![binding],
                     None => genre.representative_artwork,
@@ -91,19 +88,19 @@ impl From<(SidebarPin, PinRow)> for SidebarPinRow {
             PinRow::Playlist(playlist) => (
                 playlist.playlist_key.raw(),
                 playlist.name,
-                Some((playlist.track_count, playlist.duration_millis)),
+                (playlist.track_count, playlist.duration_millis),
                 playlist.artwork_binding.into_iter().collect(),
             ),
             PinRow::SmartPlaylist(smart) => (
                 smart.smart_playlist_key.raw(),
                 smart.name,
-                None,
+                (smart.track_count, smart.duration_millis),
                 smart.artwork_binding.into_iter().collect(),
             ),
             PinRow::PlaylistFolder(folder) => (
                 folder.folder_key.raw(),
                 folder.name,
-                None,
+                (folder.track_count, folder.duration_millis),
                 folder.artwork_binding.into_iter().collect(),
             ),
         };
@@ -111,297 +108,162 @@ impl From<(SidebarPin, PinRow)> for SidebarPinRow {
             pin,
             key,
             name,
-            totals,
+            totals: Some(totals),
             artwork,
         }
     }
 }
 
 impl Catalog {
-    /// The key of a pinned row, when the Store still holds it.
-    async fn pin_key(
-        connection: &mut sqlx::SqliteConnection,
-        pin: &SidebarPin,
-    ) -> LibraryResult<Option<i64>> {
-        let (sql, source, object) = match pin {
+    /// The item of a pinned row, when the Catalog still holds it.
+    fn pin_item(&self, pin: &SidebarPin) -> Option<Item> {
+        let snapshot = self.snapshot();
+        let source = |id: &SourceId| {
+            let key = snapshot
+                .sources
+                .values()
+                .find(|source| source.object == id.as_str())?
+                .key;
+            snapshot.source_slot(key)
+        };
+        match pin {
             SidebarPin::Album {
                 source_id,
                 album_id,
-            } => (
-                "SELECT item.album_key FROM albums item JOIN sources source USING(source_key) WHERE source.object_id=?1 AND item.object_id=?2",
-                Some(source_id.as_str()),
-                album_id,
-            ),
+            } => {
+                let source = source(source_id)?;
+                snapshot
+                    .albums
+                    .iter()
+                    .find(|(_, album)| {
+                        album.source == source && snapshot.text(album.object) == album_id
+                    })
+                    .map(|(_, album)| Item::Album(crate::AlbumKey::from_raw(i64::from(album.key))))
+            }
             SidebarPin::Artist {
                 source_id,
                 artist_id,
-                ..
-            } => (
-                "SELECT item.artist_key FROM artists item JOIN sources source USING(source_key) WHERE source.object_id=?1 AND item.object_id=?2",
-                Some(source_id.as_str()),
-                artist_id,
-            ),
+                album_artist,
+            } => {
+                let source = source(source_id)?;
+                snapshot
+                    .artists
+                    .iter()
+                    .find(|(_, artist)| {
+                        artist.source == source && snapshot.text(artist.object) == artist_id
+                    })
+                    .map(|(_, artist)| Item::Artist {
+                        key: crate::ArtistKey::from_raw(i64::from(artist.key)),
+                        album_artist: *album_artist,
+                    })
+            }
             SidebarPin::Genre {
                 source_id,
                 genre_id,
-            } => (
-                "SELECT item.tag_key FROM tags item JOIN sources source USING(source_key) WHERE item.kind=0 AND source.object_id=?1 AND item.object_id=?2",
-                Some(source_id.as_str()),
-                genre_id,
-            ),
+            } => {
+                let source = source(source_id)?;
+                snapshot
+                    .tags
+                    .iter()
+                    .find(|(_, tag)| {
+                        tag.kind() == crate::TagKind::Genre
+                            && tag.source == source
+                            && snapshot.text(tag.object) == genre_id
+                    })
+                    .map(|(_, tag)| Item::Genre(crate::GenreKey::from_raw(i64::from(tag.key))))
+            }
             SidebarPin::Playlist {
                 source_id,
                 playlist_id,
-            } => (
-                "SELECT item.playlist_key FROM playlists item LEFT JOIN sources source USING(source_key) WHERE source.object_id IS ?1 AND (?1 IS NULL OR item.source_key IS NOT NULL) AND item.object_id=?2 AND item.name IS NOT NULL",
-                source_id.as_ref().map(SourceId::as_str),
-                playlist_id,
-            ),
-            SidebarPin::SmartPlaylist { playlist_id } => (
-                "SELECT smart_playlist_key FROM smart_playlists WHERE ?1 IS NULL AND object_id=?2",
-                None,
-                playlist_id,
-            ),
-            SidebarPin::PlaylistFolder { folder_id, .. } => (
-                "SELECT folder_key FROM playlist_folders WHERE ?1 IS NULL AND object_id=?2",
-                None,
-                folder_id,
-            ),
-        };
-        Ok(sqlx::query_scalar(AssertSqlSafe(sql))
-            .bind(source)
-            .bind(object)
-            .fetch_optional(connection)
-            .await?)
+            } => {
+                let source = match source_id {
+                    Some(id) => source(id)?,
+                    None => crate::catalog::snapshot::NO_SOURCE,
+                };
+                snapshot
+                    .playlists
+                    .iter()
+                    .find(|(_, playlist)| {
+                        playlist.source == source
+                            && !snapshot.text(playlist.name).is_empty()
+                            && snapshot.text(playlist.object) == playlist_id
+                    })
+                    .map(|(_, playlist)| Item::Playlist(crate::PlaylistKey::from_raw(playlist.key)))
+            }
+            SidebarPin::SmartPlaylist { playlist_id } => snapshot
+                .smart_playlists
+                .values()
+                .find(|smart| smart.object == *playlist_id)
+                .map(|smart| Item::Smart(crate::SmartPlaylistKey::from_raw(smart.key))),
+            SidebarPin::PlaylistFolder { folder_id, .. } => snapshot
+                .playlist_folders
+                .values()
+                .find(|folder| folder.object == *folder_id)
+                .map(|folder| Item::PlaylistFolder(crate::PlaylistFolderKey::from_raw(folder.key))),
+        }
     }
 
-    /// Rows of the pins the Store still holds, in pin order. Smart playlists and playlist folders
-    /// come without totals, which take an evaluation, and smart playlists without their
-    /// definitions; `complete_pin_rows` reads both.
+    /// Rows of the pins the Catalog still holds, in pin order, with their totals: smart
+    /// playlists and their folders evaluated at `now`, playlist folders over every source.
     pub async fn pin_rows(
         &self,
         pins: &[SidebarPin],
+        now: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(SidebarPin, PinRow)>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let mut rows = Vec::with_capacity(pins.len());
-        for pin in pins {
-            let Some(key) = Self::pin_key(&mut connection, pin).await? else {
-                continue;
-            };
-            let row = match pin {
-                SidebarPin::Album { .. } => crate::collections::load_album_rows(
-                    self,
-                    &mut connection,
-                    &[crate::AlbumKey::from_raw(key)],
-                    false,
-                )
-                .await?
-                .pop()
-                .map(|album| PinRow::Album(Box::new(album))),
-                SidebarPin::Artist { album_artist, .. } => crate::collections::load_artist_rows(
-                    self,
-                    &mut connection,
-                    &[crate::ArtistKey::from_raw(key)],
-                    *album_artist,
-                    false,
-                )
-                .await?
-                .pop()
-                .map(PinRow::Artist),
-                SidebarPin::Genre { .. } => crate::collections::load_genre_rows(
-                    self,
-                    &mut connection,
-                    &[crate::GenreKey::from_raw(key)],
-                )
-                .await?
-                .pop()
-                .map(PinRow::Genre),
-                SidebarPin::Playlist { .. } => crate::playlists::load_playlist_rows(
-                    self,
-                    &mut connection,
-                    &[crate::PlaylistKey::from_raw(key)],
-                )
-                .await?
-                .pop()
-                .map(PinRow::Playlist),
-                SidebarPin::SmartPlaylist { playlist_id } => {
-                    // The definition is left unread, so a playlist this build cannot read
-                    // still lists.
-                    let (name, position, binding, mosaic): (
-                        String,
-                        i64,
-                        Option<Vec<u8>>,
-                        Option<String>,
-                    ) = sqlx::query_as(AssertSqlSafe(format!(
-                        "SELECT name,position,{},mosaic FROM smart_playlists WHERE smart_playlist_key=?1",
-                        crate::artwork::preview_sql("artwork_binding")
-                    )))
-                    .bind(key)
-                    .fetch_one(&mut *connection)
-                    .await?;
-                    Some(PinRow::SmartPlaylist(SmartPlaylistRow {
-                        smart_playlist_key: crate::SmartPlaylistKey::from_raw(key),
-                        object_id: playlist_id.clone(),
-                        name,
-                        definition: Default::default(),
-                        position,
-                        track_count: 0,
-                        duration_millis: 0,
-                        downloaded_count: 0,
-                        artwork_binding: crate::artwork::playlist_artwork(
-                            binding,
-                            (true, None, playlist_id.clone()),
-                            mosaic.as_deref(),
-                        )?,
-                    }))
-                }
-                SidebarPin::PlaylistFolder { smart: true, .. } => {
-                    crate::smart_playlists::load_smart_folder_headers(&mut connection, &[key])
-                        .await?
-                        .pop()
-                        .map(PinRow::PlaylistFolder)
-                }
-                SidebarPin::PlaylistFolder { smart: false, .. } => {
-                    crate::playlist_folders::load_folder_headers(&mut connection, &[key])
-                        .await?
-                        .pop()
-                        .map(PinRow::PlaylistFolder)
-                }
-            };
-            if let Some(row) = row {
-                rows.push((pin.clone(), row));
-            }
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(crate::LibraryError::ReadCancelled),
         }
-        Ok(rows)
-    }
-
-    /// Reads pinned smart playlists and playlist folders again as the playlist lists show them:
-    /// with their definitions and totals, evaluated now.
-    pub async fn complete_pin_rows(
-        &self,
-        rows: &mut [(SidebarPin, PinRow)],
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<()> {
-        let mut smart = Vec::new();
-        let mut smart_folders = Vec::new();
-        let mut folders = Vec::new();
-        for (_, row) in rows.iter() {
-            match row {
-                PinRow::SmartPlaylist(row) => smart.push(row.smart_playlist_key),
-                PinRow::PlaylistFolder(row) if row.smart => {
-                    smart_folders.push(row.folder_key.raw())
-                }
-                PinRow::PlaylistFolder(row) => folders.push(row.folder_key.raw()),
-                _ => {}
-            }
-        }
-        if smart.is_empty() && smart_folders.is_empty() && folders.is_empty() {
-            return Ok(());
-        }
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let mut smart =
-            crate::smart_playlists::load_smart_playlist_rows(self, &mut connection, &smart, now)
-                .await?
-                .into_iter()
-                .map(|row| (row.smart_playlist_key, row))
-                .collect::<HashMap<_, _>>();
-        let mut full_folders = HashMap::new();
-        if !smart_folders.is_empty() {
-            full_folders.extend(
-                crate::smart_playlists::load_smart_folder_rows(
-                    self,
-                    &mut connection,
-                    &smart_folders,
-                    now,
-                )
-                .await?
-                .into_iter()
-                .map(|row| (row.folder_key, row)),
-            );
-        }
-        if !folders.is_empty() {
-            let read =
-                crate::ListRead::new(crate::ListKind::Playlists, None, crate::CatalogSort::Title);
-            full_folders.extend(
-                crate::playlist_folders::load_folder_rows(self, &mut connection, &read, &folders)
-                    .await?
-                    .into_iter()
-                    .map(|row| (row.folder_key, row)),
-            );
-        }
-        for (_, row) in rows {
-            match row {
-                PinRow::SmartPlaylist(row) => {
-                    if let Some(full) = smart.remove(&row.smart_playlist_key) {
-                        *row = full;
-                    }
-                }
-                PinRow::PlaylistFolder(row) => {
-                    if let Some(full) = full_folders.remove(&row.folder_key) {
-                        *row = full;
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    /// Totals of pinned smart playlists and playlist folders, which take an evaluation. Folders
-    /// count the listed playlists of every source.
-    pub async fn sidebar_pin_totals(
-        &self,
-        mut rows: Vec<SidebarPinRow>,
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SidebarPinRow>> {
-        let keys = |pinned: fn(&SidebarPin) -> bool| {
-            rows.iter()
-                .filter(|row| pinned(&row.pin))
-                .map(|row| row.key)
-                .collect::<Vec<_>>()
-        };
-        let smart = keys(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }));
-        let pinned_folders = keys(|pin| matches!(pin, SidebarPin::PlaylistFolder { .. }));
-        if smart.is_empty() && pinned_folders.is_empty() {
-            return Ok(rows);
-        }
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let totals =
-            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now).await?;
-        let mut folders = crate::smart_playlists::smart_folder_totals(
-            self,
-            &mut connection,
-            &pinned_folders,
+        let pinned = pins
+            .iter()
+            .filter_map(|pin| Some((pin, self.pin_item(pin)?)))
+            .collect::<Vec<_>>();
+        let items = pinned.iter().map(|(_, item)| *item).collect::<Vec<_>>();
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let shape = crate::read::Shape {
             now,
-        )
-        .await?;
-        let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot);
-        for (_, playlist) in snapshot.playlists.iter() {
-            if pinned_folders.contains(&playlist.folder) && context.listed_playlist(playlist) {
-                let total = context.playlist_totals(playlist, None);
-                let folder = folders.entry(playlist.folder).or_default();
-                folder.0 += i64::from(total.tracks);
-                folder.1 += total.duration as i64;
+            ..crate::read::Shape::of(None)
+        };
+        let mut built = std::collections::HashMap::new();
+        for items in items.chunks(256) {
+            for row in self
+                .rows_of_on(&mut connection, items, &shape, true)
+                .await?
+            {
+                let (item, row) = match row {
+                    Row::Album(row) => (Item::Album(row.album_key), PinRow::Album(Box::new(row))),
+                    Row::Artist(row) => (
+                        Item::Artist {
+                            key: row.artist_key,
+                            album_artist: row.album_artist,
+                        },
+                        PinRow::Artist(row),
+                    ),
+                    Row::Tag(row) => (
+                        Item::Genre(crate::GenreKey::from_raw(row.key)),
+                        PinRow::Genre(row),
+                    ),
+                    Row::Playlist(PlaylistListRow::Playlist(row)) => {
+                        (Item::Playlist(row.playlist_key), PinRow::Playlist(row))
+                    }
+                    Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => (
+                        Item::Smart(row.smart_playlist_key),
+                        PinRow::SmartPlaylist(row),
+                    ),
+                    Row::Playlist(PlaylistListRow::Folder(row)) => (
+                        Item::PlaylistFolder(row.folder_key),
+                        PinRow::PlaylistFolder(row),
+                    ),
+                    _ => continue,
+                };
+                built.insert(item, row);
             }
         }
-        for row in &mut rows {
-            row.totals = match row.pin {
-                SidebarPin::SmartPlaylist { .. } => Some(
-                    totals
-                        .get(&row.key)
-                        .map(|total| (i64::from(total.tracks), total.duration as i64))
-                        .unwrap_or_default(),
-                ),
-                SidebarPin::PlaylistFolder { .. } => {
-                    Some(folders.get(&row.key).copied().unwrap_or_default())
-                }
-                _ => row.totals,
-            };
-        }
+        let rows = pinned
+            .into_iter()
+            .filter_map(|(pin, item)| Some((pin.clone(), built.get(&item)?.clone())))
+            .collect();
         Ok(rows)
     }
 }

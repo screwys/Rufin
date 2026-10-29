@@ -1568,9 +1568,9 @@ impl Source {
                     .await
             }
             Implementation::Local(_) | Implementation::Files(_) => {
+                catalog.loaded().await;
                 let source = catalog
-                    .source_identity_key(&self.source_id)
-                    .await?
+                    .source_key(&self.source_id)
                     .ok_or(SourceError::NotFound)?;
                 let roots = match &self.implementation {
                     Implementation::Local(local) => local.configured_file_roots()?,
@@ -3020,14 +3020,11 @@ mod refresh_laws {
                 .await
                 .expect("freshness check");
             assert!(
-                catalog
-                    .cached_source(
-                        source.source_id().as_str(),
-                        &library::ReadCancellation::new()
-                    )
-                    .await
-                    .expect("cached source")
-                    .is_none()
+                {
+                    catalog.loaded().await;
+                    catalog.cached_source(source.source_id().as_str())
+                }
+                .is_none()
             );
         }
     }

@@ -355,13 +355,12 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
     ]
 }
 
-#[derive(Clone, Debug, PartialEq, FromRow)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SmartPlaylistRow {
     pub smart_playlist_key: SmartPlaylistKey,
     pub object_id: String,
     pub name: String,
-    #[sqlx(rename = "definition_json", json)]
     pub definition: SmartPlaylistDefinition,
     pub position: i64,
     pub track_count: i64,
@@ -415,152 +414,6 @@ pub(crate) async fn smart_totals(
             )
         })
         .collect())
-}
-
-/// Smart playlist rows by key, in the order asked.
-pub(crate) async fn load_smart_playlist_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    keys: &[SmartPlaylistKey],
-    now: i64,
-) -> LibraryResult<Vec<SmartPlaylistRow>> {
-    let raw = keys.iter().map(|key| key.raw()).collect::<Vec<_>>();
-    let totals = smart_totals(catalog, connection, &raw, now).await?;
-    #[derive(FromRow)]
-    struct Row {
-        mosaic: Option<String>,
-        #[sqlx(flatten)]
-        playlist: SmartPlaylistRow,
-    }
-    let rows = sqlx::query_as::<_, Row>(AssertSqlSafe(format!(
-        "SELECT playlist.mosaic,playlist.smart_playlist_key,playlist.object_id,playlist.name,playlist.definition_json,playlist.position,
-            0 track_count,0 duration_millis,0 downloaded_count,{} artwork_binding
-         FROM json_each(?1) requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value
-         ORDER BY CAST(requested.key AS INTEGER)",
-        crate::artwork::preview_sql("playlist.artwork_binding")
-    )))
-    .bind(serde_json::to_string(&raw)?)
-    .fetch_all(&mut *connection)
-    .await?;
-    rows.into_iter()
-        .map(
-            |Row {
-                 mosaic,
-                 mut playlist,
-             }| {
-                normalize_definition(&mut playlist.definition)?;
-                let summary = totals
-                    .get(&playlist.smart_playlist_key.raw())
-                    .map(crate::catalog::views::Totals::summary)
-                    .unwrap_or_default();
-                playlist.track_count = summary.track_count;
-                playlist.duration_millis = summary.duration_millis;
-                playlist.downloaded_count = summary.downloaded_count;
-                playlist.artwork_binding = crate::artwork::playlist_artwork(
-                    playlist.artwork_binding.take(),
-                    (true, None, playlist.object_id.clone()),
-                    mosaic.as_deref(),
-                )?;
-                Ok(playlist)
-            },
-        )
-        .collect()
-}
-
-/// Totals of smart playlist folders by key: of the smart playlists each holds.
-pub(crate) async fn smart_folder_totals(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    folders: &[i64],
-    now: i64,
-) -> LibraryResult<std::collections::HashMap<i64, (i64, i64)>> {
-    let members = {
-        let snapshot = catalog.snapshot();
-        snapshot
-            .smart_playlists
-            .values()
-            .filter(|smart| smart.folder.is_some_and(|folder| folders.contains(&folder)))
-            .map(|smart| (smart.folder.unwrap_or_default(), smart.key))
-            .collect::<Vec<_>>()
-    };
-    let totals = smart_totals(
-        catalog,
-        connection,
-        &members.iter().map(|(_, key)| *key).collect::<Vec<_>>(),
-        now,
-    )
-    .await?;
-    let mut folders = std::collections::HashMap::<i64, (i64, i64)>::new();
-    for (folder, key) in members {
-        if let Some(totals) = totals.get(&key) {
-            let folder = folders.entry(folder).or_default();
-            folder.0 += i64::from(totals.tracks);
-            folder.1 += totals.duration as i64;
-        }
-    }
-    Ok(folders)
-}
-
-/// Smart playlist folder rows by key without their totals: the first smart playlist's artwork.
-pub(crate) async fn load_smart_folder_headers(
-    connection: &mut SqliteConnection,
-    folders: &[i64],
-) -> LibraryResult<Vec<crate::PlaylistFolderRow>> {
-    #[derive(FromRow)]
-    struct Row {
-        #[sqlx(flatten)]
-        folder: crate::PlaylistFolderRow,
-        cover: Option<String>,
-        mosaic: Option<String>,
-    }
-    let rows: Vec<Row> = sqlx::query_as(AssertSqlSafe(format!(
-        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,cover.object_id cover,cover.mosaic
-         FROM json_each(?1) requested JOIN playlist_folders folder ON folder.folder_key=requested.value AND folder.smart
-         LEFT JOIN smart_playlists cover ON cover.smart_playlist_key=(SELECT min(child.smart_playlist_key) FROM smart_playlists child WHERE child.playlist_folder_key=folder.folder_key)
-         ORDER BY CAST(requested.key AS INTEGER)",
-        crate::artwork::preview_sql("cover.artwork_binding")
-    )))
-    .bind(serde_json::to_string(folders)?)
-    .fetch_all(&mut *connection)
-    .await?;
-    rows.into_iter()
-        .map(
-            |Row {
-                 mut folder,
-                 cover,
-                 mosaic,
-             }| {
-                folder.artwork_binding = match cover {
-                    Some(id) => crate::artwork::playlist_artwork(
-                        folder.artwork_binding.take(),
-                        (true, None, id),
-                        mosaic.as_deref(),
-                    )?,
-                    None => None,
-                };
-                Ok(folder)
-            },
-        )
-        .collect()
-}
-
-/// Smart playlist folder rows by key: totals of their smart playlists and the first one's
-/// artwork.
-pub(crate) async fn load_smart_folder_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    folders: &[i64],
-    now: i64,
-) -> LibraryResult<Vec<crate::PlaylistFolderRow>> {
-    let totals = smart_folder_totals(catalog, connection, folders, now).await?;
-    let mut rows = load_smart_folder_headers(connection, folders).await?;
-    for folder in &mut rows {
-        if let Some((tracks, duration)) = totals.get(&folder.folder_key.raw()) {
-            folder.track_count = *tracks;
-            folder.duration_millis = *duration;
-        }
-    }
-    Ok(rows)
 }
 
 pub(crate) async fn create_default_smart_playlists(
@@ -639,16 +492,6 @@ impl Catalog {
             genres: names(crate::TagKind::Genre),
             moods: names(crate::TagKind::Mood),
         })
-    }
-
-    pub async fn smart_playlist_rows(
-        &self,
-        keys: &[SmartPlaylistKey],
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SmartPlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        load_smart_playlist_rows(self, &mut connection, keys, now).await
     }
 
     pub async fn random_smart_playlist_artwork(
@@ -804,7 +647,7 @@ fn encode_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<Stri
     Ok(json)
 }
 
-fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResult<()> {
+pub(crate) fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResult<()> {
     validate_definition(definition)?;
     for rule in definition
         .match_all

@@ -12,10 +12,11 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
     let catalog = Catalog::open(&path).await.unwrap();
 
     let mut scan_observation = async {
-        if (&catalog)
-            .source_identity_key(&library::SourceId::new("source"))
-            .await?
-            .is_none()
+        if {
+            (&catalog).loaded().await;
+            (&catalog).source_key(&library::SourceId::new("source"))
+        }
+        .is_none()
         {
             (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
@@ -161,10 +162,11 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
     };
     for renamed in [false, true] {
         let mut scan_observation = async {
-            if (&catalog)
-                .source_identity_key(&library::SourceId::new(source_id.as_str()))
-                .await?
-                .is_none()
+            if {
+                (&catalog).loaded().await;
+                (&catalog).source_key(&library::SourceId::new(source_id.as_str()))
+            }
+            .is_none()
             {
                 (&catalog)
                     .reconcile_source(&library::SourceId::new(source_id.as_str()), "webdav", "DAV")
@@ -656,10 +658,11 @@ async fn write_small_catalog(
 ) -> (library::SourceKey, super::support::Shown) {
     changes.facts();
     let mut scan_observation = async {
-        if (catalog)
-            .source_identity_key(&library::SourceId::new("source-one"))
-            .await?
-            .is_none()
+        if {
+            (catalog).loaded().await;
+            (catalog).source_key(&library::SourceId::new("source-one"))
+        }
+        .is_none()
         {
             (catalog)
                 .reconcile_source(
@@ -884,11 +887,11 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     let first = write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
     assert!(first.1.intersects(super::support::Shown::CATALOG));
     assert_eq!(
-        catalog
-            .cached_source("source-one", &ReadCancellation::new())
-            .await
-            .expect("read saved source without provider contact")
-            .map(|source| source.source),
+        {
+            catalog.loaded().await;
+            catalog.cached_source("source-one")
+        }
+        .map(|source| source.source),
         Some(first.0)
     );
     let mut outside = connection(&path).await;
@@ -1367,10 +1370,11 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
     ] {
         changes.facts();
         let mut scan_observation = async {
-            if (&catalog)
-                .source_identity_key(&library::SourceId::new("source"))
-                .await?
-                .is_none()
+            if {
+                (&catalog).loaded().await;
+                (&catalog).source_key(&library::SourceId::new("source"))
+            }
+            .is_none()
             {
                 (&catalog)
                     .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
@@ -1453,10 +1457,11 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
 
     changes.facts();
     let mut complete_observation = async {
-        if (&catalog)
-            .source_identity_key(&library::SourceId::new("source"))
-            .await?
-            .is_none()
+        if {
+            (&catalog).loaded().await;
+            (&catalog).source_key(&library::SourceId::new("source"))
+        }
+        .is_none()
         {
             (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
@@ -1549,10 +1554,11 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
     .enumerate()
     {
         let mut scan_observation = async {
-            if (&catalog)
-                .source_identity_key(&library::SourceId::new("local"))
-                .await?
-                .is_none()
+            if {
+                (&catalog).loaded().await;
+                (&catalog).source_key(&library::SourceId::new("local"))
+            }
+            .is_none()
             {
                 (&catalog)
                     .reconcile_source(&library::SourceId::new("local"), "local", "Local")
@@ -1641,11 +1647,11 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
     drop(catalog);
 
     let reopened = Catalog::open(&path).await.expect("reopen cached Store");
-    let cached = reopened
-        .cached_source("source-one", &ReadCancellation::new())
-        .await
-        .expect("resolve configured source from SQLite")
-        .expect("cached source");
+    let cached = {
+        reopened.loaded().await;
+        reopened.cached_source("source-one")
+    }
+    .expect("cached source");
 
     assert_eq!(cached.source, publication.0);
     assert!(cached.catalog_complete);
@@ -1782,12 +1788,12 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     drop(failed_observation);
     assert!(catalog.favorite(&favorite).await.unwrap());
     assert!(
-        !catalog
-            .cached_source("source-two", &ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap()
-            .catalog_complete
+        !{
+            catalog.loaded().await;
+            catalog.cached_source("source-two")
+        }
+        .unwrap()
+        .catalog_complete
     );
     assert_eq!(
         sqlx::query_as::<_, (bool, i64)>(
@@ -2013,12 +2019,12 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         (1, 1)
     );
     assert!(
-        !reopened
-            .cached_source("file-restart", &ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap()
-            .catalog_complete
+        !{
+            reopened.loaded().await;
+            reopened.cached_source("file-restart")
+        }
+        .unwrap()
+        .catalog_complete
     );
 }
 

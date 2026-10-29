@@ -223,11 +223,11 @@ mod tests {
             }
             let home = catalog
                 .home_page(
-                    catalog
-                        .source_identity_key(&crate::SourceId::new("source"))
-                        .await
-                        .unwrap()
-                        .unwrap(),
+                    {
+                        catalog.loaded().await;
+                        catalog.source_key(&crate::SourceId::new("source"))
+                    }
+                    .unwrap(),
                     None,
                     0,
                     0,

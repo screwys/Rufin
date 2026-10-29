@@ -3,11 +3,11 @@
 
 use sqlx::{Connection, FromRow, SqliteConnection};
 
-use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, Packed, SOURCE_OWNED, WRITABLE};
+use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, SOURCE_OWNED, WRITABLE};
 use crate::catalog::write::{Scope, Write};
 use crate::{
-    Catalog, CatalogSort, FolderKey, LibraryError, LibraryResult, MemberSelection,
-    PlaylistEntryKey, PlaylistKey, ReadCancellation, SourceKey, TrackKey,
+    Catalog, FolderKey, LibraryError, LibraryResult, MemberSelection, PlaylistEntryKey,
+    PlaylistKey, ReadCancellation, SourceKey, TrackKey,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,10 +21,9 @@ pub struct PlaylistAccess {
     pub metadata_writable: bool,
 }
 
-pub(crate) const PLAYLIST_ROW_LIMIT: usize = 128;
 const PLAYLIST_DELETE_BATCH: usize = 400;
 
-#[derive(Clone, Debug, PartialEq, FromRow)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
@@ -39,10 +38,7 @@ pub struct PlaylistRow {
     pub track_count: i64,
     pub duration_millis: i64,
     pub downloaded_count: i64,
-    #[sqlx(json)]
     pub genres: Vec<PlaylistGenreLink>,
-    /// An entry's track is hidden: its file or server item is gone.
-    pub holds_hidden: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
@@ -61,59 +57,30 @@ pub struct PlaylistEditEntry {
     pub position: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, FromRow)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct PlaylistEntryView {
-    pub playlist_entry_key: PlaylistEntryKey,
-    pub position: i64,
-    pub source_entry_id: Option<String>,
-    #[sqlx(flatten)]
-    pub track: crate::TrackView,
-}
-
-impl From<PlaylistEntryView> for crate::TrackReference {
-    fn from(entry: PlaylistEntryView) -> Self {
-        entry.track.into()
-    }
-}
-
 impl Catalog {
     /// Who owns a playlist and what may change, from its resident record. Only a playlist its
     /// source owns reads its server id.
     pub async fn playlist_access(
         &self,
         playlist: PlaylistKey,
-        cancellation: &ReadCancellation,
+        _cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistAccess>> {
         self.loaded().await;
-        let Some((source_key, flags)) = ({
-            let snapshot = self.snapshot();
-            snapshot
-                .playlists
-                .get(playlist.raw())
-                .map(|record| (snapshot.source_key(record.source), record.flags))
-        }) else {
+        let snapshot = self.snapshot();
+        let Some(record) = snapshot.playlists.get(playlist.raw()) else {
             return Ok(None);
         };
-        let source_owned = flags & SOURCE_OWNED != 0;
-        let object_id = if source_owned {
-            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-            sqlx::query_scalar("SELECT object_id FROM playlists WHERE playlist_key=?1")
-                .bind(playlist)
-                .fetch_optional(&mut *connection)
-                .await?
-        } else {
-            None
-        };
+        let source_key = snapshot.source_key(record.source);
+        let source_owned = record.flags & SOURCE_OWNED != 0;
         Ok(Some(PlaylistAccess {
             source_key,
             source_id: source_key
-                .and_then(|key| self.source_id(key))
-                .map(|id| id.as_str().to_owned()),
-            object_id,
+                .and_then(|key| snapshot.source(key))
+                .map(|source| source.object.clone()),
+            object_id: source_owned.then(|| snapshot.text(record.object).to_owned()),
             source_owned,
-            writable: flags & WRITABLE != 0,
-            metadata_writable: flags & METADATA_WRITABLE != 0,
+            writable: record.flags & WRITABLE != 0,
+            metadata_writable: record.flags & METADATA_WRITABLE != 0,
         }))
     }
 
@@ -202,23 +169,43 @@ impl Catalog {
         source: Option<SourceKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistRow>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let order = self
-            .list_order(
-                &mut connection,
-                &crate::ListRead::new(crate::ListKind::Playlists, source, CatalogSort::Position),
+            .order(
+                &crate::Read::List(crate::ListRead::new(
+                    crate::ListKind::Playlists,
+                    source,
+                    crate::LibraryField::RowIndex,
+                )),
+                cancellation,
             )
             .await?;
-        let keys = order
-            .iter()
-            .copied()
-            .map(PlaylistKey::from_raw)
-            .collect::<Vec<_>>();
-        let mut rows = Vec::with_capacity(keys.len());
-        for keys in keys.chunks(PLAYLIST_ROW_LIMIT) {
-            rows.extend(load_playlist_rows(self, &mut connection, keys).await?);
+        let writable = {
+            let snapshot = self.snapshot();
+            order
+                .items(0..order.len())
+                .into_iter()
+                .filter(|item| match item {
+                    crate::Item::Playlist(key) => snapshot
+                        .playlists
+                        .get(key.raw())
+                        .is_some_and(|playlist| playlist.flags & WRITABLE != 0),
+                    _ => false,
+                })
+                .collect::<Vec<_>>()
+        };
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut rows = Vec::with_capacity(writable.len());
+        for items in writable.chunks(256) {
+            rows.extend(
+                self.rows_of_on(&mut connection, items, &crate::read::Shape::of(None), true)
+                    .await?
+                    .into_iter()
+                    .filter_map(|row| match row {
+                        crate::Row::Playlist(crate::PlaylistListRow::Playlist(row)) => Some(row),
+                        _ => None,
+                    }),
+            );
         }
-        rows.retain(|row| row.writable);
         Ok(rows)
     }
 
@@ -621,181 +608,6 @@ async fn playlist_tracks_on(
     Ok(Some(tracks))
 }
 
-/// The resident part of a playlist row: totals of its entries and its two main genres.
-struct Resident {
-    totals: crate::catalog::views::Totals,
-    genres: Vec<i64>,
-    holds_hidden: bool,
-}
-
-impl Catalog {
-    fn resident_playlists(&self, keys: &[PlaylistKey]) -> Vec<Option<Resident>> {
-        let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot);
-        keys.iter()
-            .map(|key| {
-                let record = snapshot.playlists.get(key.raw())?;
-                let mut genres = std::collections::HashMap::<u32, u32>::new();
-                let mut holds_hidden = false;
-                for entry in &record.entries {
-                    let Some(track) = snapshot.tracks.live(entry.track) else {
-                        continue;
-                    };
-                    holds_hidden |= !track.indexed();
-                    for tag in snapshot.track_runs(track)[2] {
-                        if snapshot
-                            .tags
-                            .live(*tag)
-                            .is_some_and(|tag| tag.kind() == crate::TagKind::Genre)
-                        {
-                            *genres.entry(*tag).or_default() += 1;
-                        }
-                    }
-                }
-                let mut genres = genres
-                    .into_iter()
-                    .map(|(slot, count)| {
-                        let tag = &snapshot.tags.records[slot as usize];
-                        (
-                            std::cmp::Reverse(count),
-                            snapshot.name_sort(tag.name, tag.sort),
-                            i64::from(tag.key),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                genres.sort();
-                Some(Resident {
-                    totals: context.playlist_totals(record, None),
-                    genres: genres.into_iter().take(2).map(|(.., key)| key).collect(),
-                    holds_hidden,
-                })
-            })
-            .collect()
-    }
-}
-
-/// Playlist rows by key, in the order asked. Unnamed playlists are skipped.
-pub(crate) async fn load_playlist_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    keys: &[PlaylistKey],
-) -> LibraryResult<Vec<PlaylistRow>> {
-    // Playlist rows show totals, which wait for the Catalog.
-    catalog.loaded().await;
-    if keys.is_empty() {
-        return Ok(Vec::new());
-    }
-    let resident = catalog.resident_playlists(keys);
-    #[derive(FromRow)]
-    struct Row {
-        ordinal: i64,
-        mosaic: Option<String>,
-        #[sqlx(flatten)]
-        playlist: PlaylistRow,
-    }
-    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT CAST(requested.key AS INTEGER) ordinal,playlist.mosaic,playlist.playlist_key,playlist.source_key,source.object_id source_id,
-            playlist.owner='source' source_owned,playlist.object_id,playlist.name,playlist.writable,playlist.metadata_writable,
-            {} artwork_binding,0 track_count,0 duration_millis,0 downloaded_count,'[]' genres,0 holds_hidden
-         FROM json_each(?1) requested JOIN playlists playlist ON playlist.playlist_key=requested.value
-         LEFT JOIN sources source ON source.source_key=playlist.source_key
-         WHERE playlist.name IS NOT NULL ORDER BY CAST(requested.key AS INTEGER)",
-        crate::artwork::preview_sql("playlist.artwork_binding")
-    )))
-    .bind(serde_json::to_string(keys)?)
-    .fetch_all(&mut *connection)
-    .await?;
-    let genres = resident
-        .iter()
-        .flatten()
-        .flat_map(|resident| resident.genres.iter().copied())
-        .collect::<Vec<_>>();
-    let names: std::collections::HashMap<i64, String> = if genres.is_empty() {
-        Default::default()
-    } else {
-        sqlx::query_as(
-            "SELECT tag_key,name FROM tags WHERE tag_key IN (SELECT value FROM json_each(?1))",
-        )
-        .bind(serde_json::to_string(&genres)?)
-        .fetch_all(&mut *connection)
-        .await?
-        .into_iter()
-        .collect()
-    };
-    rows.into_iter()
-        .map(
-            |Row {
-                 ordinal,
-                 mosaic,
-                 mut playlist,
-             }| {
-                if let Some(resident) = resident.get(ordinal as usize).and_then(Option::as_ref) {
-                    let summary = resident.totals.summary();
-                    playlist.track_count = summary.track_count;
-                    playlist.duration_millis = summary.duration_millis;
-                    playlist.downloaded_count = summary.downloaded_count;
-                    playlist.holds_hidden = resident.holds_hidden;
-                    playlist.genres = resident
-                        .genres
-                        .iter()
-                        .filter_map(|key| {
-                            Some(PlaylistGenreLink {
-                                genre_key: crate::GenreKey::from_raw(*key),
-                                name: names.get(key)?.clone(),
-                            })
-                        })
-                        .collect();
-                }
-                playlist.artwork_binding = crate::artwork::playlist_artwork(
-                    playlist.artwork_binding.take(),
-                    (
-                        false,
-                        playlist.source_id.clone(),
-                        playlist.object_id.clone(),
-                    ),
-                    mosaic.as_deref(),
-                )?;
-                Ok(playlist)
-            },
-        )
-        .collect()
-}
-
-/// Playlist entry rows by entry key, in the order asked.
-pub(crate) async fn load_playlist_entry_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    entries: &[PlaylistEntryKey],
-) -> LibraryResult<Vec<PlaylistEntryView>> {
-    let found: Vec<(PlaylistEntryKey, PlaylistKey, String, TrackKey)> = sqlx::query_as("SELECT entry.playlist_entry_key,entry.playlist_key,entry.object_id,entry.track_key FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-        .bind(serde_json::to_string(entries)?)
-        .fetch_all(&mut *connection)
-        .await?;
-    let mut positions = std::collections::HashMap::new();
-    for (_, playlist, ..) in &found {
-        positions
-            .entry(*playlist)
-            .or_insert_with(|| catalog.entry_positions(*playlist));
-    }
-    let keys = found.iter().map(|(.., track)| *track).collect::<Vec<_>>();
-    let tracks = crate::tracks::load_track_rows(catalog, connection, &keys)
-        .await?
-        .into_iter()
-        .map(|track| (track.track_key, track))
-        .collect::<std::collections::HashMap<_, _>>();
-    Ok(found
-        .into_iter()
-        .filter_map(|(playlist_entry_key, playlist, source_entry_id, track)| {
-            Some(PlaylistEntryView {
-                playlist_entry_key,
-                position: *positions[&playlist].get(&playlist_entry_key.raw())? as i64,
-                source_entry_id: Some(source_entry_id),
-                track: tracks.get(&track)?.clone(),
-            })
-        })
-        .collect())
-}
-
 pub(crate) async fn create_playlist_identity(
     write: &mut Write<'_>,
     name: &str,
@@ -809,14 +621,14 @@ pub(crate) async fn create_playlist_identity(
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO main.playlists(object_id,name)
          VALUES('rufin:playlist:'||lower(hex(randomblob(16))),?1)
-         RETURNING {},object_id",
+         RETURNING {}",
         crate::catalog::write::PLAYLIST_COLUMNS
     )))
     .bind(name)
     .fetch_one(write.connection().await?)
     .await?;
-    let object_id = sqlx::Row::try_get(&row, 10)?;
     let header = crate::catalog::write::PlaylistRow::from_row(&row)?;
+    let object_id = header.10.clone();
     let key = PlaylistKey::from_raw(header.0);
     write.put_playlist(header);
     Ok((key, object_id))

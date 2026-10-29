@@ -6,7 +6,7 @@ use crate::catalog::write::{
 use crate::*;
 use sqlx::{FromRow, SqliteConnection};
 
-#[derive(Clone, Debug, PartialEq, FromRow)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistFolderRow {
     pub folder_key: PlaylistFolderKey,
@@ -19,6 +19,7 @@ pub struct PlaylistFolderRow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum PlaylistListRow {
     Playlist(PlaylistRow),
     SmartPlaylist(SmartPlaylistRow),
@@ -168,22 +169,24 @@ impl Catalog {
         write.commit().await?;
         Ok(deleted)
     }
-    pub async fn playlist_member_folder(
+    /// The folder a playlist or smart playlist is in.
+    pub fn playlist_member_folder(
         &self,
         member: &PlaylistFolderMember,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistFolderKey>> {
-        let (table, column, key) = member_relation(member);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(
-            sqlx::query_scalar::<_, Option<PlaylistFolderKey>>(sqlx::AssertSqlSafe(format!(
-                "SELECT playlist_folder_key FROM {table} WHERE {column}=?1"
-            )))
-            .bind(key)
-            .fetch_optional(&mut *connection)
-            .await?
-            .flatten(),
-        )
+    ) -> Option<PlaylistFolderKey> {
+        let snapshot = self.snapshot();
+        match member {
+            PlaylistFolderMember::Playlist { key } => snapshot
+                .playlists
+                .get(key.raw())
+                .filter(|playlist| playlist.folder != 0)
+                .map(|playlist| PlaylistFolderKey::from_raw(playlist.folder)),
+            PlaylistFolderMember::SmartPlaylist { key } => snapshot
+                .smart_playlists
+                .get(&key.raw())
+                .and_then(|smart| smart.folder)
+                .map(PlaylistFolderKey::from_raw),
+        }
     }
     pub async fn move_playlist_to_folder(
         &self,
@@ -195,170 +198,46 @@ impl Catalog {
         write.commit().await?;
         Ok(())
     }
-    pub async fn playlist_folder_choices(
-        &self,
-        smart: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(PlaylistFolderKey, String)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_as("SELECT folder_key,name FROM playlist_folders WHERE smart=?1 ORDER BY lower(name),folder_key")
-            .bind(smart).fetch_all(&mut *connection).await?)
+    /// Playlist folders of one kind by name.
+    pub fn playlist_folder_choices(&self, smart: bool) -> Vec<(PlaylistFolderKey, String)> {
+        let snapshot = self.snapshot();
+        let mut folders = snapshot
+            .playlist_folders
+            .values()
+            .filter(|folder| folder.smart == smart)
+            .map(|folder| (folder.name.to_lowercase(), folder.key, folder.name.clone()))
+            .collect::<Vec<_>>();
+        folders.sort();
+        folders
+            .into_iter()
+            .map(|(_, key, name)| (PlaylistFolderKey::from_raw(key), name))
+            .collect()
     }
+
     pub async fn playlist_folder_by_id(
         &self,
         id: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<PlaylistFolderRow>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let folder: Option<(i64, bool)> =
-            sqlx::query_as("SELECT folder_key,smart FROM playlist_folders WHERE object_id=?1")
-                .bind(id)
-                .fetch_optional(&mut *connection)
-                .await?;
-        let Some((key, smart)) = folder else {
+        self.loaded().await;
+        let key = self
+            .snapshot()
+            .playlist_folders
+            .values()
+            .find(|folder| folder.object == id)
+            .map(|folder| PlaylistFolderKey::from_raw(folder.key));
+        let Some(key) = key else {
             return Ok(None);
         };
-        let read = ListRead::new(
-            if smart {
-                ListKind::SmartPlaylists {
-                    now: chrono::Utc::now().timestamp(),
-                }
-            } else {
-                ListKind::Playlists
-            },
-            None,
-            CatalogSort::Title,
-        );
-        Ok(load_items(self, &mut connection, &read, &[-key])
+        Ok(self
+            .rows_of(&[Item::PlaylistFolder(key)], true, cancellation)
             .await?
             .into_iter()
             .find_map(|row| match row {
-                PlaylistListRow::Folder(row) => Some(row),
+                Row::Playlist(PlaylistListRow::Folder(row)) => Some(row),
                 _ => None,
             }))
     }
-}
-
-/// Playlist folder rows: totals of the playlists each holds and its first playlist's artwork.
-pub(crate) async fn load_folder_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    read: &ListRead,
-    folders: &[i64],
-) -> LibraryResult<Vec<PlaylistFolderRow>> {
-    let totals = {
-        let mut children = read.clone();
-        children.filter.clear();
-        if read.playlist_scope == PlaylistScope::All {
-            children.source = None;
-        }
-        catalog.loaded().await;
-        let snapshot = catalog.snapshot();
-        crate::catalog::views::Context::new(&snapshot).playlist_folder_totals(&children)
-    };
-    let mut rows = load_folder_headers(connection, folders).await?;
-    for folder in &mut rows {
-        if let Some(totals) = totals.get(&folder.folder_key.raw()) {
-            folder.track_count = i64::from(totals.tracks);
-            folder.duration_millis = totals.duration as i64;
-        }
-    }
-    Ok(rows)
-}
-
-/// Playlist folder rows by key without their totals: the first playlist's artwork.
-pub(crate) async fn load_folder_headers(
-    connection: &mut SqliteConnection,
-    folders: &[i64],
-) -> LibraryResult<Vec<PlaylistFolderRow>> {
-    #[derive(FromRow)]
-    struct Row {
-        #[sqlx(flatten)]
-        folder: PlaylistFolderRow,
-        source_id: Option<String>,
-        cover_object_id: Option<String>,
-        mosaic: Option<String>,
-    }
-    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT folder.folder_key,folder.object_id,folder.name,folder.smart,{} artwork_binding,0 track_count,0 duration_millis,source.object_id source_id,cover.object_id cover_object_id,cover.mosaic
-         FROM json_each(?1) requested JOIN playlist_folders folder ON folder.folder_key=requested.value AND NOT folder.smart
-         LEFT JOIN playlists cover ON cover.playlist_key=(SELECT min(child.playlist_key) FROM playlists child WHERE child.playlist_folder_key=folder.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed))
-         LEFT JOIN sources source ON source.source_key=cover.source_key
-         ORDER BY CAST(requested.key AS INTEGER)",
-        crate::artwork::preview_sql("cover.artwork_binding")
-    )))
-    .bind(serde_json::to_string(folders)?)
-    .fetch_all(&mut *connection)
-    .await?;
-    rows.into_iter()
-        .map(|mut row| {
-            row.folder.artwork_binding = match row.cover_object_id {
-                Some(id) => crate::artwork::playlist_artwork(
-                    row.folder.artwork_binding.take(),
-                    (false, row.source_id, id),
-                    row.mosaic.as_deref(),
-                )?,
-                None => None,
-            };
-            Ok(row.folder)
-        })
-        .collect()
-}
-
-/// Rows of a playlist list in one key space: playlists by key, folders by negative key.
-pub(crate) async fn load_items(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    read: &ListRead,
-    keys: &[i64],
-) -> LibraryResult<Vec<PlaylistListRow>> {
-    let folders = keys
-        .iter()
-        .filter(|key| **key < 0)
-        .map(|key| -key)
-        .collect::<Vec<_>>();
-    let playlists = keys
-        .iter()
-        .copied()
-        .filter(|key| *key >= 0)
-        .collect::<Vec<_>>();
-    let mut loaded = std::collections::HashMap::new();
-    if let ListKind::SmartPlaylists { now } = read.kind {
-        for row in
-            crate::smart_playlists::load_smart_folder_rows(catalog, connection, &folders, now)
-                .await?
-        {
-            loaded.insert(-row.folder_key.raw(), PlaylistListRow::Folder(row));
-        }
-        let keys = playlists
-            .iter()
-            .copied()
-            .map(SmartPlaylistKey::from_raw)
-            .collect::<Vec<_>>();
-        for row in crate::smart_playlists::load_smart_playlist_rows(catalog, connection, &keys, now)
-            .await?
-        {
-            loaded.insert(
-                row.smart_playlist_key.raw(),
-                PlaylistListRow::SmartPlaylist(row),
-            );
-        }
-    } else {
-        if !folders.is_empty() {
-            for row in load_folder_rows(catalog, connection, read, &folders).await? {
-                loaded.insert(-row.folder_key.raw(), PlaylistListRow::Folder(row));
-            }
-        }
-        let keys = playlists
-            .iter()
-            .copied()
-            .map(PlaylistKey::from_raw)
-            .collect::<Vec<_>>();
-        for row in crate::playlists::load_playlist_rows(catalog, connection, &keys).await? {
-            loaded.insert(row.playlist_key.raw(), PlaylistListRow::Playlist(row));
-        }
-    }
-    Ok(keys.iter().filter_map(|key| loaded.remove(key)).collect())
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

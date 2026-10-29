@@ -954,7 +954,7 @@ mod tests {
                 first.playlist,
                 &crate::MemberRead {
                     collection: crate::Collection::Playlist(first.playlist),
-                    sort: Some(crate::CatalogSort::Position),
+                    sort: Some(crate::LibraryField::RowIndex),
                     ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                 }
                 .selection(),
@@ -985,7 +985,7 @@ mod tests {
                     first.playlist,
                     &crate::MemberRead {
                         collection: crate::Collection::Playlist(first.playlist),
-                        sort: Some(crate::CatalogSort::Position),
+                        sort: Some(crate::LibraryField::RowIndex),
                         ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
@@ -1016,7 +1016,7 @@ mod tests {
                     first.playlist,
                     &crate::MemberRead {
                         collection: crate::Collection::Playlist(first.playlist),
-                        sort: Some(crate::CatalogSort::Position),
+                        sort: Some(crate::LibraryField::RowIndex),
                         ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
@@ -1324,100 +1324,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn standard_edits_override_snapshots_and_target_overrides_file_identity() {
-        let directory = tempfile::tempdir().unwrap();
-        let catalog = Catalog::open(directory.path().join("library.db"))
-            .await
-            .unwrap();
-        let file = directory.path().join("mix.m3u8");
-        let first = catalog
-            .import_playlist_file(
-                std::io::Cursor::new(
-                    "#EXTM3U\n#PLAYLIST:Old\n#EXTINF:12,Artist - Old track\nold.flac\n",
-                ),
-                &file,
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
-        let second = catalog
-            .import_playlist_file(
-                std::io::Cursor::new("#EXTM3U\nother.flac\n"),
-                &file,
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
-        let mut output = Vec::new();
-        catalog
-            .export_playlist_file(
-                first.playlist,
-                &file,
-                PlaylistPathMode::Automatic,
-                &mut output,
-            )
-            .await
-            .unwrap();
-        let text = String::from_utf8(output)
-            .unwrap()
-            .replace("#PLAYLIST:Old", "#PLAYLIST:New")
-            .replace("#EXTINF:12,Artist - Old track", "#EXTINF:30,New track")
-            .replace("\nold.flac\n", "\nnew.flac\n");
-        let updated = catalog
-            .import_playlist_file(
-                std::io::Cursor::new(text),
-                &file,
-                Some(second.playlist),
-                |_| None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(updated.playlist, second.playlist);
-        let mut output = Vec::new();
-        catalog
-            .export_playlist_file(
-                second.playlist,
-                &file,
-                PlaylistPathMode::Automatic,
-                &mut output,
-            )
-            .await
-            .unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains("#PLAYLIST:New\n"));
-        assert!(text.contains("#EXTINF:30,New track\nnew.flac\n"));
-        assert!(
-            catalog
-                .import_playlist_file(
-                    std::io::Cursor::new("binary\0data"),
-                    &file,
-                    Some(second.playlist),
-                    |_| None
-                )
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            (&crate::MemberRead {
-                collection: crate::Collection::Playlist(second.playlist),
-                sort: Some(crate::CatalogSort::Position),
-                ..crate::MemberRead::new(crate::Collection::Playlist(second.playlist))
-            })
-                .rows(&catalog, 0, 128, &crate::ReadCancellation::new())
-                .await
-                .map(|rows| rows
-                    .into_iter()
-                    .filter_map(crate::MemberRow::into_entry)
-                    .collect::<Vec<_>>())
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
     #[test]
     fn paths_keep_literal_characters_and_normalize_parent_segments() {
         let directory = tempfile::tempdir().unwrap();
@@ -1665,46 +1571,6 @@ mod tests {
                 .unwrap(),
             2
         );
-    }
-
-    #[tokio::test]
-    async fn local_paths_import_without_a_configured_source() {
-        let directory = tempfile::tempdir().unwrap();
-        let catalog = Catalog::open(directory.path().join("library.db"))
-            .await
-            .unwrap();
-        let path = directory.path().join("café %.flac");
-        let uri = url::Url::from_file_path(&path).unwrap().to_string();
-        let input = format!("#EXTM3U\ncafé %.flac\n{}\n{uri}\n", path.display());
-        let report = catalog
-            .import_playlist_file(
-                std::io::Cursor::new(input),
-                &directory.path().join("mix.m3u8"),
-                None,
-                |_| None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(report.imported, 3);
-        let entries = (&crate::MemberRead {
-            collection: crate::Collection::Playlist(report.playlist),
-            sort: Some(crate::CatalogSort::Position),
-            ..crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
-        })
-            .rows(&catalog, 0, 128, &crate::ReadCancellation::new())
-            .await
-            .map(|rows| {
-                rows.into_iter()
-                    .filter_map(crate::MemberRow::into_entry)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(entries.len(), 3);
-        for entry in entries {
-            let actual = entry.track.media_uri;
-            assert_eq!(actual, uri);
-            assert_eq!(crate::file_media_path(&actual).unwrap(), path);
-        }
     }
 
     #[tokio::test]

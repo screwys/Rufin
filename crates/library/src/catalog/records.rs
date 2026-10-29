@@ -292,6 +292,8 @@ pub(crate) struct Album {
     pub(crate) binding: Option<Vec<u8>>,
     /// Whether a source observed a header; the header itself is read by key.
     pub(crate) input: bool,
+    /// Resolved from its compilation flag and release types, and kept in `flags`.
+    pub(crate) class: crate::AlbumReleaseClass,
     pub(crate) artists: Vec<ArtistKey>,
     pub(crate) genres: Vec<i64>,
     pub(crate) writes: AlbumWrites,
@@ -314,6 +316,7 @@ impl Album {
             state: NativeState::default(),
             binding: None,
             input: false,
+            class: crate::AlbumReleaseClass::Album,
             artists: Vec::new(),
             genres: Vec::new(),
             writes: AlbumWrites::default(),

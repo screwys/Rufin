@@ -1,7 +1,8 @@
 //! The resident Catalog: packed records in slots, one string arena and one edge arena. Slots stay
 //! stable while the process runs; a removed record becomes a tombstone, and a reference to a
-//! tombstone reads as none. URIs, object ids, paths, details and artwork bindings are not
-//! resident; a Write reads them by key.
+//! tombstone reads as none. Collection object ids are resident, and their URIs are built from
+//! them. Track URIs and object ids, paths, details and artwork bindings are not resident; a
+//! Write or a window's statement reads them by key.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -39,6 +40,9 @@ pub(crate) const CACHED_LOCAL: u16 = 1 << 8;
 pub(crate) const INPUT: u16 = 1 << 9;
 pub(crate) const COMPILATION_KNOWN: u16 = 1 << 10;
 pub(crate) const COMPILATION: u16 = 1 << 11;
+/// Albums: the release class code, bits 12-14.
+pub(crate) const RELEASE_SHIFT: u16 = 12;
+pub(crate) const RELEASE_MASK: u16 = 0b111 << RELEASE_SHIFT;
 /// Playlists: a source owns the playlist.
 pub(crate) const SOURCE_OWNED: u16 = 1 << 8;
 pub(crate) const WRITABLE: u16 = 1 << 9;
@@ -68,6 +72,14 @@ fn year(value: Option<i64>) -> i16 {
 
 fn rating(value: Option<i64>) -> u8 {
     value.map_or(UNRATED, |rating| rating.clamp(0, 100) as u8)
+}
+
+/// The plays and last play a source reports for an album or artist.
+fn native_plays(state: &NativeState) -> [u32; 2] {
+    [
+        optional_u32(state.play_count),
+        optional_u32(state.last_played),
+    ]
 }
 
 fn native_flags(indexed: bool, native: bool, picture: bool, state: &NativeState) -> u16 {
@@ -186,10 +198,13 @@ pub(crate) struct AlbumRec {
     pub(crate) title: StrId,
     pub(crate) artist: StrId,
     pub(crate) sort: StrId,
+    pub(crate) object: StrId,
     pub(crate) added: u32,
     pub(crate) release: u32,
     /// The start of the run of artists and genres.
     pub(crate) edges: u32,
+    /// The plays and last play its source reports; NONE when it reports none.
+    pub(crate) native: [u32; 2],
     pub(crate) lens: [u16; 2],
     pub(crate) year: i16,
     pub(crate) source: u16,
@@ -204,6 +219,9 @@ pub(crate) struct ArtistRec {
     pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
+    pub(crate) object: StrId,
+    /// The plays and last play its source reports; NONE when it reports none.
+    pub(crate) native: [u32; 2],
     pub(crate) source: u16,
     pub(crate) flags: u16,
     pub(crate) native_rating: u8,
@@ -217,6 +235,7 @@ pub(crate) struct TagRec {
     pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
+    pub(crate) object: StrId,
     pub(crate) source: u16,
     pub(crate) flags: u16,
     /// A `TagKind`, as `tags.kind` stores it.
@@ -236,6 +255,7 @@ pub(crate) struct FolderRec {
     pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
+    pub(crate) object: StrId,
     pub(crate) source: u16,
     pub(crate) flags: u16,
 }
@@ -244,6 +264,7 @@ pub(crate) struct FolderRec {
 pub(crate) struct PlaylistRec {
     pub(crate) key: i64,
     pub(crate) name: StrId,
+    pub(crate) object: StrId,
     /// Zero when the playlist is in no folder.
     pub(crate) folder: i64,
     pub(crate) created: u32,
@@ -268,6 +289,7 @@ pub(crate) struct Playlist {
     pub(crate) source: Option<SourceKey>,
     pub(crate) owned_by_source: bool,
     pub(crate) indexed: bool,
+    pub(crate) object: String,
     pub(crate) name: String,
     pub(crate) folder: Option<i64>,
     pub(crate) created: i64,
@@ -280,6 +302,7 @@ pub(crate) struct Playlist {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SmartPlaylist {
     pub(crate) key: i64,
+    pub(crate) object: String,
     pub(crate) name: String,
     pub(crate) folder: Option<i64>,
     pub(crate) position: i64,
@@ -445,6 +468,12 @@ pub(crate) struct Snapshot {
     /// The revision that last changed catalog records. Pictures and album visibility read on
     /// a row depend only on them, not on favorites, listens or playlists.
     pub(crate) facts: u64,
+    /// The revisions that last changed favorites and ratings, listens, downloads, and
+    /// playlists with their entries and folders. Orders keep the stamps they depend on.
+    pub(crate) states: u64,
+    pub(crate) plays: u64,
+    pub(crate) downloads: u64,
+    pub(crate) playlist_stamp: u64,
     pub(crate) strings: Strings,
     pub(crate) edges: Vec<u32>,
     pub(crate) sources: BTreeMap<SourceKey, Source>,
@@ -495,6 +524,10 @@ impl Default for Snapshot {
         Self {
             revision: 0,
             facts: 0,
+            states: 0,
+            plays: 0,
+            downloads: 0,
+            playlist_stamp: 0,
             strings: Strings::default(),
             edges: Vec::new(),
             sources: BTreeMap::new(),
@@ -515,6 +548,27 @@ impl Default for Snapshot {
 }
 
 impl Snapshot {
+    /// The stamps of facts, states, plays, downloads and playlists.
+    pub(crate) fn stamps(&self) -> [u64; 5] {
+        [
+            self.facts,
+            self.states,
+            self.plays,
+            self.downloads,
+            self.playlist_stamp,
+        ]
+    }
+
+    /// Marks everything changed at the current revision, as a load or a display flag does.
+    pub(crate) fn stamp_all(&mut self) {
+        let revision = self.revision;
+        self.facts = revision;
+        self.states = revision;
+        self.plays = revision;
+        self.downloads = revision;
+        self.playlist_stamp = revision;
+    }
+
     pub(crate) fn source(&self, key: SourceKey) -> Option<&Source> {
         self.sources.get(&key)
     }
@@ -830,6 +884,7 @@ impl Snapshot {
         if let Some(compilation) = facts.compilation {
             flags |= COMPILATION_KNOWN | u16::from(compilation) * COMPILATION;
         }
+        flags |= album.class.code() << RELEASE_SHIFT;
         let old = |field: fn(&AlbumRec) -> StrId| previous.as_ref().map_or(StrId::NONE, field);
         let strings = &mut self.strings;
         let record = AlbumRec {
@@ -837,9 +892,11 @@ impl Snapshot {
             title: strings.text(old(|record| record.title), &facts.title, true),
             artist: strings.text(old(|record| record.artist), &facts.artist, true),
             sort: strings.text(old(|record| record.sort), &facts.sort, true),
+            object: strings.text(old(|record| record.object), &album.object, false),
             added: optional_u32(added),
             release,
             edges,
+            native: native_plays(&album.state),
             lens: [artists as u16, genres.len() as u16],
             year: year(facts.year),
             source,
@@ -872,6 +929,8 @@ impl Snapshot {
                 artist.metadata.sort_text.as_deref(),
                 true,
             ),
+            object: strings.text(old(|record| record.object), &artist.object, false),
+            native: native_plays(&artist.state),
             source,
             flags: native_flags(artist.indexed, artist.native, picture, &artist.state)
                 | previous.map_or(0, |record| record.flags & (FAVORITE_KNOWN | FAVORITE)),
@@ -904,6 +963,7 @@ impl Snapshot {
                 tag.metadata.sort_text.as_deref(),
                 true,
             ),
+            object: strings.text(old(|record| record.object), &tag.object, false),
             source,
             flags: native_flags(tag.indexed, tag.native, picture, &NativeState::default()),
             kind: tag.kind as u8,
@@ -938,6 +998,7 @@ impl Snapshot {
                 folder.metadata.sort_text.as_deref(),
                 true,
             ),
+            object: strings.text(old(|record| record.object), &folder.object, false),
             source,
             flags: native_flags(
                 folder.indexed,
@@ -1038,6 +1099,7 @@ impl Snapshot {
             source: self.source_key(record.source),
             owned_by_source: record.flags & SOURCE_OWNED != 0,
             indexed: record.flags & INDEXED != 0,
+            object: self.text(record.object).to_owned(),
             name: self.text(record.name).to_owned(),
             folder: (record.folder != 0).then_some(record.folder),
             created: i64::from(record.created),
@@ -1059,11 +1121,21 @@ impl Snapshot {
     }
 
     pub(crate) fn put_playlist(&mut self, playlist: &Playlist) {
-        let previous = self.playlists.get(playlist.key).map(|record| record.name);
+        let previous = self
+            .playlists
+            .get(playlist.key)
+            .map(|record| (record.name, record.object));
         let source = self.slot_for_source(playlist.source);
-        let name = self
-            .strings
-            .text(previous.unwrap_or(StrId::NONE), &playlist.name, false);
+        let name = self.strings.text(
+            previous.map_or(StrId::NONE, |(name, _)| name),
+            &playlist.name,
+            false,
+        );
+        let object = self.strings.text(
+            previous.map_or(StrId::NONE, |(_, object)| object),
+            &playlist.object,
+            false,
+        );
         let entries = playlist
             .entries
             .iter()
@@ -1076,6 +1148,7 @@ impl Snapshot {
         self.playlists.place(PlaylistRec {
             key: playlist.key,
             name,
+            object,
             folder: playlist.folder.unwrap_or(0),
             created: clamp_u32(playlist.created),
             source,

@@ -372,7 +372,7 @@ impl Catalog {
         let mut snapshot = load(&self.inner.store.path).await?;
         let mut state = self.snapshot_mut();
         snapshot.revision = state.revision + 1;
-        snapshot.facts = snapshot.revision;
+        snapshot.stamp_all();
         snapshot.sort_tags = state.sort_tags;
         snapshot.distinct_track_covers = state.distinct_track_covers;
         let previous = std::mem::replace(&mut *state, snapshot);
@@ -409,6 +409,7 @@ impl Catalog {
             return;
         }
         snapshot.revision += 1;
+        snapshot.stamp_all();
         let revision = snapshot.revision;
         drop(snapshot);
         if *self.inner.loaded.borrow() {
@@ -520,19 +521,6 @@ impl Catalog {
         Ok(Self { inner })
     }
 
-    pub async fn source_identity_key(
-        &self,
-        source_id: &crate::SourceId,
-    ) -> LibraryResult<Option<SourceKey>> {
-        let mut connection = self.acquire_reader().await?;
-        Ok(
-            sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
-                .bind(source_id.as_str())
-                .fetch_optional(&mut *connection)
-                .await?,
-        )
-    }
-
     pub(crate) async fn writer(&self) -> LibraryResult<WriterGuard<'_>> {
         let writer = self.inner.store.writer.lock().await;
         if writer.is_none() {
@@ -604,7 +592,7 @@ impl CatalogInner {
             Ok((mut snapshot, from_image)) => {
                 // Above the empty Snapshot's revision, so nothing built from that one is reused.
                 snapshot.revision = 1;
-                snapshot.facts = 1;
+                snapshot.stamp_all();
                 tracing::debug!(
                     tracks = snapshot.track_count(),
                     bytes = snapshot.bytes(),

@@ -11,7 +11,9 @@ use super::records::*;
 use super::write::Write;
 use crate::metadata::album_details_value;
 use crate::tags::TagKind;
-use crate::{AlbumMetadata, AlbumTags, ArtistCredit, LibraryResult, TagReference};
+use crate::{
+    AlbumMetadata, AlbumReleaseClass, AlbumTags, ArtistCredit, LibraryResult, TagReference,
+};
 
 const PAGE: usize = 128;
 
@@ -421,10 +423,45 @@ async fn resolve_album(
     );
     let metadata = parsed::<AlbumMetadata>(&resolved);
     album.facts = AlbumFacts::of(&metadata);
+    album.class = release_class(
+        album.facts.compilation == Some(true),
+        &metadata.release_types,
+    );
     let details = album_details_value(resolved);
     if stored.metadata.as_ref() != Some(&details) {
         album.writes.metadata = Some(details);
     }
     write.put(album);
     Ok(())
+}
+
+/// Classifies an album by its compilation flag and release types.
+pub(crate) fn release_class(compilation: bool, types: &[String]) -> AlbumReleaseClass {
+    let tokens = types
+        .iter()
+        .flat_map(|types| types.split('|'))
+        .map(|token| token.trim().to_lowercase())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if compilation {
+        AlbumReleaseClass::Collection
+    } else if tokens.is_empty() || tokens.iter().any(|token| token == "album") {
+        AlbumReleaseClass::Album
+    } else if tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "compilation" | "compilations" | "collection" | "collections"
+        )
+    }) {
+        AlbumReleaseClass::Collection
+    } else if tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "ep" | "e.p."))
+    {
+        AlbumReleaseClass::Ep
+    } else if tokens.iter().any(|token| token == "single") {
+        AlbumReleaseClass::Single
+    } else {
+        AlbumReleaseClass::Other
+    }
 }

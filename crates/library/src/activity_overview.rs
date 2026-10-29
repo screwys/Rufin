@@ -1,8 +1,7 @@
 //! Calendar reports over the existing accepted-listen history.
 
 use crate::{
-    AlbumView, ArtistView, CalendarActivityPeriod, Catalog, LibraryResult, ReadCancellation,
-    TrackView,
+    AlbumRow, ArtistRow, CalendarActivityPeriod, Catalog, LibraryResult, ReadCancellation, TrackRow,
 };
 
 // Released versions also stored monthly counts. Keep those in the same report;
@@ -33,9 +32,9 @@ pub struct ActivityTotals {
 pub struct ActivityOverview {
     pub totals: ActivityTotals,
     pub previous: ActivityTotals,
-    pub tracks: Vec<TrackView>,
-    pub albums: Vec<AlbumView>,
-    pub artists: Vec<ArtistView>,
+    pub tracks: Vec<TrackRow>,
+    pub albums: Vec<AlbumRow>,
+    pub artists: Vec<ArtistRow>,
     pub genres: Vec<GenreActivity>,
 }
 
@@ -145,24 +144,79 @@ impl Catalog {
             .bind(limit as i64)
             .fetch_all(&mut *connection)
             .await?;
-        let keys = tracks.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut track_rows = crate::tracks::load_track_rows(self, &mut connection, &keys).await?;
+        let items = tracks
+            .iter()
+            .map(|(key, _)| crate::Item::Track {
+                key: *key,
+                entry: None,
+            })
+            .chain(albums.iter().map(|(key, _)| crate::Item::Album(*key)))
+            .chain(artists.iter().map(|(key, _)| crate::Item::Artist {
+                key: *key,
+                album_artist: false,
+            }))
+            .collect::<Vec<_>>();
+        let plays = tracks
+            .iter()
+            .map(|(key, plays)| {
+                (
+                    crate::Item::Track {
+                        key: *key,
+                        entry: None,
+                    },
+                    *plays,
+                )
+            })
+            .chain(
+                albums
+                    .iter()
+                    .map(|(key, plays)| (crate::Item::Album(*key), *plays)),
+            )
+            .chain(artists.iter().map(|(key, plays)| {
+                (
+                    crate::Item::Artist {
+                        key: *key,
+                        album_artist: false,
+                    },
+                    *plays,
+                )
+            }))
+            .collect::<std::collections::HashMap<_, _>>();
+        let rows = self
+            .fetch_on(
+                &mut connection,
+                [(&items, &[]), (&[], &[])],
+                None,
+                &crate::read::Shape::of(None),
+                true,
+            )
+            .await?
+            .rows;
+        let (mut track_rows, mut album_rows, mut artist_rows) =
+            (Vec::new(), Vec::new(), Vec::new());
+        for row in rows {
+            match row {
+                crate::Row::Track(row) => track_rows.push(row),
+                crate::Row::Album(mut row) => {
+                    row.state.play_count = plays[&crate::Item::Album(row.album_key)];
+                    album_rows.push(row);
+                }
+                crate::Row::Artist(mut row) => {
+                    row.state.play_count = plays[&crate::Item::Artist {
+                        key: row.artist_key,
+                        album_artist: false,
+                    }];
+                    artist_rows.push(row);
+                }
+                _ => {}
+            }
+        }
         crate::activity::overlay_history(self, &mut connection, &mut track_rows).await?;
-        for (row, (_, count)) in track_rows.iter_mut().zip(tracks) {
-            row.state.play_count = count;
-        }
-        let keys = albums.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut album_rows =
-            crate::collections::load_album_rows(self, &mut connection, &keys, false).await?;
-        for (row, (_, count)) in album_rows.iter_mut().zip(albums) {
-            row.state.play_count = count;
-        }
-        let keys = artists.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut artist_rows =
-            crate::collections::load_artist_rows(self, &mut connection, &keys, false, false)
-                .await?;
-        for (row, (_, count)) in artist_rows.iter_mut().zip(artists) {
-            row.state.play_count = count;
+        for row in &mut track_rows {
+            row.state.play_count = plays[&crate::Item::Track {
+                key: row.track_key,
+                entry: None,
+            }];
         }
         Ok(ActivityOverview {
             totals,

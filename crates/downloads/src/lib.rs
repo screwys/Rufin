@@ -389,10 +389,9 @@ async fn load_direct_queue(
     let direct = grouped.remove(&None).unwrap_or_default();
     for (source, jobs) in grouped {
         let source = source.unwrap();
+        catalog.loaded().await;
         let key = catalog
-            .source_identity_key(&source)
-            .await
-            .map_err(|error| error.to_string())?
+            .source_key(&source)
             .ok_or("The download source is unavailable")?;
         let directory = settings
             .get(&source)

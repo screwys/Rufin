@@ -190,10 +190,14 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
         });
     }
     let mut rows = handle.prepare(
-        "SELECT folder_key,source_key,indexed,native_metadata,name,sort_text,flags FROM folders ORDER BY folder_key",
+        "SELECT folder_key,source_key,indexed,native_metadata,name,sort_text,flags,object_id FROM folders ORDER BY folder_key",
     )?;
     while rows.step()? {
-        let mut folder = Folder::new(SourceKey::from_raw(rows.int(1)), "", String::new());
+        let mut folder = Folder::new(
+            SourceKey::from_raw(rows.int(1)),
+            rows.text(7),
+            String::new(),
+        );
         folder.key = FolderKey::from_raw(rows.int(0));
         folder.indexed = rows.flag(2);
         folder.native = rows.flag(3);
@@ -204,10 +208,14 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
         snapshot.pack_folder(&folder, rows.int(6) & HAS_PICTURE != 0);
     }
     let mut rows = handle.prepare(
-        "SELECT artist_key,source_key,indexed,native_metadata,name,sort_text,native_favorite,native_rating,native_play_count,native_last_played,flags FROM artists ORDER BY artist_key",
+        "SELECT artist_key,source_key,indexed,native_metadata,name,sort_text,native_favorite,native_rating,native_play_count,native_last_played,flags,object_id FROM artists ORDER BY artist_key",
     )?;
     while rows.step()? {
-        let mut artist = Artist::new(SourceKey::from_raw(rows.int(1)), "", String::new());
+        let mut artist = Artist::new(
+            SourceKey::from_raw(rows.int(1)),
+            rows.text(11),
+            String::new(),
+        );
         artist.key = ArtistKey::from_raw(rows.int(0));
         artist.indexed = rows.flag(2);
         artist.native = rows.flag(3);
@@ -220,13 +228,13 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
         snapshot.pack_artist(&artist, rows.int(10) & HAS_PICTURE != 0);
     }
     let mut rows = handle.prepare(
-        "SELECT tag_key,source_key,kind,indexed,native_metadata,name,sort_text,flags FROM tags ORDER BY tag_key",
+        "SELECT tag_key,source_key,kind,indexed,native_metadata,name,sort_text,flags,object_id FROM tags ORDER BY tag_key",
     )?;
     while rows.step()? {
         let mut tag = Tag::new(
             super::families::tag_kind(rows.int(2)),
             SourceKey::from_raw(rows.int(1)),
-            "",
+            rows.text(8),
             String::new(),
         );
         tag.key = rows.int(0);
@@ -240,11 +248,15 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
     }
     let mut album_links = links(handle, "album_links", "album_key")?;
     let mut rows = handle.prepare(
-        "SELECT album_key,source_key,indexed,native_metadata,cached_local,title,display_artist,sort_text,year,released,added_at,is_compilation,native_favorite,native_rating,native_play_count,native_last_played,input_metadata IS NOT NULL,flags FROM albums ORDER BY album_key",
+        "SELECT album_key,source_key,indexed,native_metadata,cached_local,title,display_artist,sort_text,year,released,added_at,is_compilation,native_favorite,native_rating,native_play_count,native_last_played,input_metadata IS NOT NULL,flags,object_id FROM albums ORDER BY album_key",
     )?;
     while rows.step()? {
         let key = rows.int(0);
-        let mut album = Album::new(SourceKey::from_raw(rows.int(1)), "", String::new());
+        let mut album = Album::new(
+            SourceKey::from_raw(rows.int(1)),
+            rows.text(18),
+            String::new(),
+        );
         album.key = AlbumKey::from_raw(key);
         album.indexed = rows.flag(2);
         album.native = rows.flag(3);
@@ -259,6 +271,7 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
         };
         album.state = native_state(&rows, 12);
         album.input = rows.flag(16);
+        album.class = crate::AlbumReleaseClass::stored(rows.int(17));
         for (role, target) in album_links.remove(&key).unwrap_or_default() {
             match role {
                 LINK_ARTIST => album.artists.push(ArtistKey::from_raw(target)),
@@ -349,6 +362,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
             rows.flag(7),
             rows.flag(8),
             rows.flag(9),
+            rows.text(10).to_owned(),
         );
         snapshot.put_playlist(&write::playlist(
             row,
@@ -366,6 +380,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
             rows.optional_int(2),
             rows.int(3),
             rows.text(4).to_owned(),
+            rows.text(5).to_owned(),
         ));
         snapshot.smart_playlists.insert(smart.key, smart);
     }

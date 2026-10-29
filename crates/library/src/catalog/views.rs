@@ -1,8 +1,7 @@
 //! Reads served from the resident Catalog: orders, filters, letter sections, collection totals
-//! and the values computed on read. Opening a page orders slots in memory; only the rows a
+//! and the values computed on read. Opening a page orders keys in memory; only the rows a
 //! client shows are read from the Store, by key.
 
-use std::any::Any;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -12,10 +11,11 @@ use sqlx::SqliteConnection;
 
 use super::snapshot::*;
 use super::strings::StrId;
+use crate::read::{AlbumSpan, Listen, Members, Order, OrderInner};
 use crate::tags::TagKind;
 use crate::{
-    AlbumReleaseClass, Catalog, CatalogSort, Collection, LibraryResult, ListKind, ListRead,
-    MemberRead, PlaylistScope, SmartPlaylistDefinition, SourceKey,
+    AlbumReleaseClass, Catalog, Collection, LibraryField, LibraryResult, ListKind, ListRead,
+    MemberRead, PlaylistScope, Read, ReadCancellation, SmartPlaylistDefinition, SourceKey,
 };
 
 /// Bytes of cached orders, read by the order cache's eviction.
@@ -471,12 +471,9 @@ impl Context<'_> {
     }
 }
 
-/// One row of a member order: a track slot and, in a playlist, the entry that holds it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Member {
-    pub(crate) track: u32,
-    pub(crate) entry: i64,
-}
+/// A row of a member order while it is built: a track slot and, in a playlist, the key of the
+/// entry that holds it, else zero.
+type Member = (u32, u32);
 
 /// Facts a reader needs from the Store before it orders: they are not resident.
 #[derive(Default)]
@@ -485,10 +482,10 @@ pub(crate) struct Inputs {
     pub(crate) objects: Vec<i64>,
     /// Listens of each smart playlist window by track key: plays, skips and last play.
     pub(crate) periods: HashMap<Option<i64>, HashMap<i64, Played>>,
-    /// Release classes of albums by key.
-    pub(crate) classes: HashMap<i64, AlbumReleaseClass>,
     /// A smart playlist's members as of the time its page opened, by track key.
     pub(crate) smart: Option<Arc<Vec<i64>>>,
+    /// The listens a History order shows.
+    pub(crate) history: Vec<Listen>,
 }
 
 /// A lowercase haystack matcher for list filters.
@@ -558,100 +555,119 @@ fn directed(order: Ordering, descending: bool) -> Ordering {
     if descending { order.reverse() } else { order }
 }
 
-/// A track with the sort facts that need work to read.
-struct TrackRow<'a> {
+/// An album's sort facts, read only for sorts that look at the album.
+struct AlbumSort<'a> {
+    sort: Cow<'a, str>,
+    year: Option<i16>,
+    key: i64,
+}
+
+/// A track with the sort facts its sort needs.
+struct Sorted<'a> {
     member: Member,
     position: usize,
     record: &'a TrackRec,
     artist: &'a str,
     sort: Cow<'a, str>,
     played: Played,
-    album_sort: Option<Cow<'a, str>>,
-    album_year: Option<i16>,
-    album_key: Option<i64>,
-    album_artist: Option<Cow<'a, str>>,
-    genre: Option<Cow<'a, str>>,
+    album: Option<AlbumSort<'a>>,
+    /// The album artist's or the genre's sort text, for those sorts.
+    text: Option<Cow<'a, str>>,
 }
 
 impl Context<'_> {
-    fn track_row(&self, sort: CatalogSort, position: usize, member: Member) -> TrackRow<'_> {
+    fn sorted(&self, sort: LibraryField, position: usize, member: Member) -> Sorted<'_> {
+        use LibraryField as S;
         let snapshot = self.snapshot;
-        let record = &snapshot.tracks.records[member.track as usize];
-        let album = snapshot.albums.live(record.album);
-        TrackRow {
+        let record = &snapshot.tracks.records[member.0 as usize];
+        let album = matches!(sort, S::Artist | S::AlbumArtist | S::Album)
+            .then(|| snapshot.albums.live(record.album))
+            .flatten();
+        Sorted {
             member,
             position,
             record,
             artist: snapshot.text(record.artist),
             sort: snapshot.track_sort(record),
-            played: if matches!(sort, CatalogSort::PlayCount | CatalogSort::LastPlayed) {
-                self.played(member.track, record)
+            played: if sort.activity_sensitive() {
+                self.played(member.0, record)
             } else {
                 Played::default()
             },
-            album_sort: album.map(|album| snapshot.album_sort(album)),
-            album_year: album.and_then(|album| year_of(album.year)),
-            album_key: album.map(|album| i64::from(album.key)),
-            album_artist: if sort == CatalogSort::AlbumArtist {
-                album.and_then(|_| self.album_artist_sort(record.album))
-            } else {
-                None
-            },
-            genre: if sort == CatalogSort::Genre {
-                self.genre_sort(record)
-            } else {
-                None
+            album: album.map(|album| AlbumSort {
+                sort: snapshot.album_sort(album),
+                year: year_of(album.year),
+                key: i64::from(album.key),
+            }),
+            text: match sort {
+                S::AlbumArtist => snapshot
+                    .albums
+                    .live(record.album)
+                    .and_then(|_| self.album_artist_sort(record.album)),
+                S::Genre => self.genre_sort(record),
+                _ => None,
             },
         }
     }
 
     /// Text of the letter index of a track order.
-    fn track_section(&self, sort: CatalogSort, row: &TrackRow<'_>) -> Option<String> {
+    fn track_section(&self, sort: LibraryField, row: &Sorted<'_>) -> Option<String> {
+        use LibraryField as S;
         let snapshot = self.snapshot;
         Some(match sort {
-            CatalogSort::Title => snapshot.text(row.record.title).to_owned(),
-            CatalogSort::Artist => snapshot.text(row.record.artist).to_owned(),
-            CatalogSort::AlbumArtist => row.album_artist.as_deref().unwrap_or_default().to_owned(),
-            CatalogSort::Album => row.album_sort.as_deref().unwrap_or_default().to_owned(),
-            CatalogSort::Genre => row.genre.as_deref().unwrap_or_default().to_owned(),
+            S::Title => snapshot.text(row.record.title).to_owned(),
+            S::Artist => snapshot.text(row.record.artist).to_owned(),
+            S::AlbumArtist | S::Genre => row.text.as_deref().unwrap_or_default().to_owned(),
+            S::Album => row
+                .album
+                .as_ref()
+                .map(|album| album.sort.as_ref())
+                .unwrap_or_default()
+                .to_owned(),
             _ => return None,
         })
     }
 }
 
 fn compare_tracks(
-    sort: CatalogSort,
+    sort: LibraryField,
     descending: bool,
-    a: &TrackRow<'_>,
-    b: &TrackRow<'_>,
+    a: &Sorted<'_>,
+    b: &Sorted<'_>,
 ) -> Ordering {
-    use CatalogSort as S;
+    use LibraryField as S;
     let (left, right) = (a.record, b.record);
     let key = left.key.cmp(&right.key);
     let text = a.sort.cmp(&b.sort);
     let first = |order: Ordering| directed(order, descending);
     let disc = left.disc.cmp(&right.disc);
     let number = left.number.cmp(&right.number);
+    fn album_sort<'a>(row: &'a Sorted<'_>) -> Option<&'a str> {
+        row.album.as_ref().map(|album| album.sort.as_ref())
+    }
+    fn album_key(row: &Sorted<'_>) -> Option<i64> {
+        row.album.as_ref().map(|album| album.key)
+    }
     let album_tail = || {
-        nulls_last(a.album_year, b.album_year, false)
-            .then_with(|| a.album_sort.cmp(&b.album_sort))
-            .then_with(|| nulls_last(a.album_key, b.album_key, false))
-            .then(disc)
-            .then(number)
+        nulls_last(
+            a.album.as_ref().and_then(|album| album.year),
+            b.album.as_ref().and_then(|album| album.year),
+            false,
+        )
+        .then_with(|| album_sort(a).cmp(&album_sort(b)))
+        .then_with(|| nulls_last(album_key(a), album_key(b), false))
+        .then(disc)
+        .then(number)
     };
     let order = match sort {
-        S::Position => return first(a.position.cmp(&b.position)),
-        S::Title => return first(text).then(key),
+        S::RowIndex => return first(a.position.cmp(&b.position)),
         S::TrackNumber => first(disc).then(first(number)),
         S::Artist => first(a.artist.cmp(b.artist)).then_with(album_tail),
-        S::AlbumArtist => nulls_last(
-            a.album_artist.as_deref(),
-            b.album_artist.as_deref(),
-            descending,
-        )
-        .then_with(album_tail),
-        S::Album => first(a.album_sort.cmp(&b.album_sort))
-            .then_with(|| nulls_last(a.album_key, b.album_key, false))
+        S::AlbumArtist => {
+            nulls_last(a.text.as_deref(), b.text.as_deref(), descending).then_with(album_tail)
+        }
+        S::Album => first(album_sort(a).cmp(&album_sort(b)))
+            .then_with(|| nulls_last(album_key(a), album_key(b), false))
             .then(disc)
             .then(number),
         S::Year => nulls_last(year_of(left.year), year_of(right.year), descending),
@@ -668,7 +684,7 @@ fn compare_tracks(
             rating(right.rating, right.native_rating),
             descending,
         ),
-        S::Genre => nulls_last(a.genre.as_deref(), b.genre.as_deref(), descending),
+        S::Genre => nulls_last(a.text.as_deref(), b.text.as_deref(), descending),
         S::Bpm => nulls_last(
             (left.bpm != u16::MAX).then_some(left.bpm),
             (right.bpm != u16::MAX).then_some(right.bpm),
@@ -680,7 +696,8 @@ fn compare_tracks(
                 .unwrap_or(false)
                 .cmp(&favorite(right.flags).unwrap_or(false)),
         ),
-        S::AlbumCount | S::TrackCount => Ordering::Equal,
+        S::AlbumCount | S::SongCount => Ordering::Equal,
+        _ => return first(text).then(key),
     };
     order.then(text).then(key)
 }
@@ -720,7 +737,7 @@ impl Context<'_> {
         inputs: &Inputs,
     ) -> Vec<Member> {
         let snapshot = self.snapshot;
-        let member = |track| Member { track, entry: 0 };
+        let member = |track| (track, 0);
         let tracks = |keep: &dyn Fn(&TrackRec) -> bool| {
             snapshot
                 .tracks
@@ -784,10 +801,7 @@ impl Context<'_> {
                             .live(entry.track)
                             .is_some_and(|record| !scoped || self.in_folder(record, folder))
                     })
-                    .map(|entry| Member {
-                        track: entry.track,
-                        entry: entry.key,
-                    })
+                    .map(|entry| (entry.track, entry.key as u32))
                     .collect()
             }
             Collection::Smart { .. } => inputs
@@ -801,20 +815,12 @@ impl Context<'_> {
         }
     }
 
-    /// A member read's rows in order.
-    pub(crate) fn member_order(&self, read: &MemberRead, inputs: &Inputs) -> Vec<Member> {
+    /// A member read's rows in order, before its filters.
+    fn member_base(&self, read: &MemberRead, inputs: &Inputs) -> Vec<Member> {
         let Some(folder) = self.folder_slot(read.folder) else {
             return Vec::new();
         };
-        let mut members = self.collection_members(&read.collection, folder, inputs);
-        let filter = filter_text(&read.filter);
-        let records = &self.snapshot.tracks.records;
-        members.retain(|member| {
-            let record = &records[member.track as usize];
-            (filter.is_empty() || self.track_search(record).contains(&filter))
-                && (!read.favorites_only || favorite(record.flags) == Some(true))
-                && (!read.downloaded_only || record.flags & DOWNLOADED != 0)
-        });
+        let members = self.collection_members(&read.collection, folder, inputs);
         if matches!(read.collection, Collection::Smart { .. }) && read.sort.is_none() {
             return members;
         }
@@ -822,7 +828,7 @@ impl Context<'_> {
         let mut rows = members
             .into_iter()
             .enumerate()
-            .map(|(position, member)| self.track_row(sort, position, member))
+            .map(|(position, member)| self.sorted(sort, position, member))
             .collect::<Vec<_>>();
         rows.sort_by(|a, b| {
             compare_tracks(sort, read.descending, a, b).then(a.position.cmp(&b.position))
@@ -830,30 +836,39 @@ impl Context<'_> {
         rows.into_iter().map(|row| row.member).collect()
     }
 
+    /// Whether a track passes a member read's filters.
+    fn member_keep(&self, read: &MemberRead, filter: &str, record: &TrackRec) -> bool {
+        (filter.is_empty() || self.track_search(record).contains(filter))
+            && (!read.favorites_only || favorite(record.flags) == Some(true))
+            && (!read.downloaded_only || record.flags & DOWNLOADED != 0)
+    }
+
     /// Letter sections of a member order.
-    pub(crate) fn member_sections(
-        &self,
-        read: &MemberRead,
-        order: &[Member],
-    ) -> Vec<crate::ScrollSection> {
+    fn member_sections(&self, read: &MemberRead, keys: &[u32]) -> Vec<crate::ScrollSection> {
         let sort = read.effective_sort();
         if matches!(read.collection, Collection::Smart { .. }) && read.sort.is_none() {
             return Vec::new();
         }
-        sections(order.iter().enumerate().map(|(position, member)| {
-            self.track_section(sort, &self.track_row(sort, position, *member))
-        }))
+        let tracks = &self.snapshot.tracks;
+        sections(keys.iter().enumerate().map(
+            |(position, key)| match tracks.slot(i64::from(*key)) {
+                Some(slot) => self.track_section(sort, &self.sorted(sort, position, (slot, 0))),
+                None => Some(String::new()),
+            },
+        ))
     }
 
     /// Disc sections of an album order: where each disc starts, when there are several.
-    pub(crate) fn disc_sections(&self, read: &MemberRead, order: &[Member]) -> Vec<(u32, i64)> {
-        if read.effective_sort() != CatalogSort::TrackNumber {
+    fn disc_sections(&self, read: &MemberRead, keys: &[u32]) -> Vec<(u32, i64)> {
+        if read.effective_sort() != LibraryField::TrackNumber {
             return Vec::new();
         }
-        let records = &self.snapshot.tracks.records;
+        let tracks = &self.snapshot.tracks;
         let mut sections = Vec::<(u32, i64)>::new();
-        for (position, member) in order.iter().enumerate() {
-            let disc = i64::from(records[member.track as usize].disc);
+        for (position, key) in keys.iter().enumerate() {
+            let disc = tracks
+                .get(i64::from(*key))
+                .map_or(0, |record| i64::from(record.disc));
             if sections.last().is_none_or(|(_, last)| *last != disc) {
                 sections.push((position as u32, disc));
             }
@@ -937,48 +952,6 @@ pub(crate) fn sections(texts: impl Iterator<Item = Option<String>>) -> Vec<crate
     sections
 }
 
-/// A release class's place in an artist's releases.
-pub(crate) fn release_code(class: AlbumReleaseClass) -> usize {
-    match class {
-        AlbumReleaseClass::Album => 0,
-        AlbumReleaseClass::Ep => 1,
-        AlbumReleaseClass::Single => 2,
-        AlbumReleaseClass::Collection => 3,
-        AlbumReleaseClass::Other => 4,
-    }
-}
-
-/// Classifies an album by its compilation flag and release types.
-pub(crate) fn release_class(compilation: bool, types: &[String]) -> AlbumReleaseClass {
-    let tokens = types
-        .iter()
-        .flat_map(|types| types.split('|'))
-        .map(|token| token.trim().to_lowercase())
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    if compilation {
-        AlbumReleaseClass::Collection
-    } else if tokens.is_empty() || tokens.iter().any(|token| token == "album") {
-        AlbumReleaseClass::Album
-    } else if tokens.iter().any(|token| {
-        matches!(
-            token.as_str(),
-            "compilation" | "compilations" | "collection" | "collections"
-        )
-    }) {
-        AlbumReleaseClass::Collection
-    } else if tokens
-        .iter()
-        .any(|token| matches!(token.as_str(), "ep" | "e.p."))
-    {
-        AlbumReleaseClass::Ep
-    } else if tokens.iter().any(|token| token == "single") {
-        AlbumReleaseClass::Single
-    } else {
-        AlbumReleaseClass::Other
-    }
-}
-
 /// One row of a named list with the facts its sorts read.
 struct ListRow<'a> {
     key: i64,
@@ -1012,12 +985,13 @@ impl ListRow<'_> {
 }
 
 fn compare_albums(
-    sort: CatalogSort,
+    sort: LibraryField,
     descending: bool,
     a: &ListRow<'_>,
     b: &ListRow<'_>,
 ) -> Ordering {
-    use CatalogSort as S;
+    use LibraryField as S;
+    let sort = sort.sort();
     let text = a.sort.cmp(&b.sort);
     let key = a.key.cmp(&b.key);
     let order = match sort {
@@ -1035,7 +1009,7 @@ fn compare_albums(
         S::PlayCount => directed(a.totals.plays.cmp(&b.totals.plays), descending),
         S::UserRating => nulls_last(a.rating, b.rating, descending),
         S::Favorite => directed(a.favorite.cmp(&b.favorite), descending),
-        S::TrackCount => directed(a.totals.tracks.cmp(&b.totals.tracks), descending),
+        S::SongCount => directed(a.totals.tracks.cmp(&b.totals.tracks), descending),
         S::Duration => directed(a.totals.duration.cmp(&b.totals.duration), descending),
         _ => Ordering::Equal,
     };
@@ -1043,18 +1017,19 @@ fn compare_albums(
 }
 
 fn compare_named(
-    sort: CatalogSort,
+    sort: LibraryField,
     descending: bool,
     a: &ListRow<'_>,
     b: &ListRow<'_>,
 ) -> Ordering {
-    use CatalogSort as S;
+    use LibraryField as S;
+    let sort = sort.sort();
     let text = a.sort.cmp(&b.sort);
     let key = a.key.cmp(&b.key);
     let order = match sort {
         S::Title | S::Artist => return directed(text, descending).then(key),
         S::AlbumCount => directed(a.totals.albums.cmp(&b.totals.albums), descending),
-        S::TrackCount => directed(a.totals.tracks.cmp(&b.totals.tracks), descending),
+        S::SongCount => directed(a.totals.tracks.cmp(&b.totals.tracks), descending),
         S::Duration => directed(a.totals.duration.cmp(&b.totals.duration), descending),
         S::PlayCount => directed(a.totals.plays.cmp(&b.totals.plays), descending),
         S::LastPlayed => nulls_last(a.totals.last_played, b.totals.last_played, descending),
@@ -1076,15 +1051,15 @@ struct PlaylistItem<'a> {
 }
 
 fn compare_items(
-    sort: CatalogSort,
+    sort: LibraryField,
     descending: bool,
     a: &PlaylistItem<'_>,
     b: &PlaylistItem<'_>,
 ) -> Ordering {
     let order = match sort {
-        CatalogSort::Position => a.position.cmp(&b.position),
-        CatalogSort::TrackCount => a.totals.tracks.cmp(&b.totals.tracks),
-        CatalogSort::Duration => a.totals.duration.cmp(&b.totals.duration),
+        LibraryField::RowIndex => a.position.cmp(&b.position),
+        LibraryField::SongCount => a.totals.tracks.cmp(&b.totals.tracks),
+        LibraryField::Duration => a.totals.duration.cmp(&b.totals.duration),
         _ => a.sort.cmp(&b.sort),
     };
     directed(order, descending)
@@ -1153,7 +1128,7 @@ impl Context<'_> {
     ) -> Vec<PlaylistItem<'_>> {
         let snapshot = self.snapshot;
         let smart = matches!(read.kind, ListKind::SmartPlaylists { .. });
-        let totals = matches!(read.sort, CatalogSort::TrackCount | CatalogSort::Duration)
+        let totals = matches!(read.sort, LibraryField::SongCount | LibraryField::Duration)
             || !matches!(read.playlist_scope, PlaylistScope::All);
         if smart {
             return snapshot
@@ -1278,9 +1253,9 @@ impl Context<'_> {
             // Smart playlists keep their own order between equal values.
             items.sort_by(|a, b| {
                 let order = match read.sort {
-                    CatalogSort::Position => a.position.cmp(&b.position),
-                    CatalogSort::TrackCount => a.totals.tracks.cmp(&b.totals.tracks),
-                    CatalogSort::Duration => a.totals.duration.cmp(&b.totals.duration),
+                    LibraryField::RowIndex => a.position.cmp(&b.position),
+                    LibraryField::SongCount => a.totals.tracks.cmp(&b.totals.tracks),
+                    LibraryField::Duration => a.totals.duration.cmp(&b.totals.duration),
                     _ => a.sort.cmp(&b.sort),
                 };
                 directed(order, read.descending)
@@ -1327,6 +1302,58 @@ impl Context<'_> {
         row
     }
 
+    /// Whether a listed row passes a list read's filters. `filter` is as `filter_text` gives it.
+    fn list_keep(&self, read: &ListRead, derived: &Derived, filter: &str, key: i64) -> bool {
+        let snapshot = self.snapshot;
+        match &read.kind {
+            ListKind::Albums => snapshot.albums.slot(key).is_some_and(|slot| {
+                let record = &snapshot.albums.records[slot as usize];
+                self.album_matches(record, filter)
+                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.downloaded_only || derived.albums[slot as usize].downloaded > 0)
+            }),
+            ListKind::ArtistAlbums {
+                release_class,
+                filters,
+                ..
+            } => snapshot.albums.slot(key).is_some_and(|slot| {
+                let record = &snapshot.albums.records[slot as usize];
+                let class = AlbumReleaseClass::of(record.flags);
+                let text = filters.as_ref().map_or(filter.to_owned(), |filters| {
+                    filter_text(&filters[usize::from(class.code())])
+                });
+                let matched = text.is_empty()
+                    || format!(
+                        "{} {}",
+                        snapshot.text(record.title),
+                        snapshot.text(record.artist)
+                    )
+                    .to_lowercase()
+                    .contains(&text)
+                    || year_of(record.year).is_some_and(|year| year.to_string() == text);
+                matched
+                    && release_class.is_none_or(|wanted| wanted == class)
+                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.downloaded_only || derived.albums[slot as usize].downloaded > 0)
+            }),
+            ListKind::Artists { album_artist } => snapshot.artists.slot(key).is_some_and(|slot| {
+                let record = &snapshot.artists.records[slot as usize];
+                contains(snapshot.text(record.name), filter)
+                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.downloaded_only
+                        || derived.artists[usize::from(*album_artist)][slot as usize].downloaded
+                            > 0)
+            }),
+            ListKind::Genres | ListKind::Moods => snapshot.tags.slot(key).is_some_and(|slot| {
+                contains(
+                    snapshot.text(snapshot.tags.records[slot as usize].name),
+                    filter,
+                ) && (!read.downloaded_only || derived.tags[slot as usize].downloaded > 0)
+            }),
+            ListKind::Playlists | ListKind::SmartPlaylists { .. } => true,
+        }
+    }
+
     /// The keys a list read shows, in order. Playlist folders have negative keys.
     pub(crate) fn list_order(
         &self,
@@ -1348,16 +1375,14 @@ impl Context<'_> {
             return Vec::new();
         };
         let filter = filter_text(&read.filter);
+        let keep = |key: u32| self.list_keep(read, derived, &filter, i64::from(key));
         let mut rows = Vec::new();
         match &read.kind {
             ListKind::Albums => {
                 for (slot, record) in snapshot.albums.iter() {
-                    let totals = derived.albums[slot as usize];
                     if record.source == source
-                        && totals.tracks > 0
-                        && self.album_matches(record, &filter)
-                        && (!read.favorites_only || favorite(record.flags) == Some(true))
-                        && (!read.downloaded_only || totals.downloaded > 0)
+                        && derived.albums[slot as usize].tracks > 0
+                        && keep(record.key)
                     {
                         rows.push(self.album_row(derived, slot, record));
                     }
@@ -1367,40 +1392,16 @@ impl Context<'_> {
             ListKind::ArtistAlbums {
                 artist,
                 album_artist,
-                release_class,
-                filters,
+                ..
             } => {
                 let Some(artist) = snapshot.artists.slot(artist.raw()) else {
                     return Vec::new();
                 };
                 for slot in self.artist_albums(artist, *album_artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
-                    let class = inputs
-                        .classes
-                        .get(&i64::from(record.key))
-                        .copied()
-                        .unwrap_or(AlbumReleaseClass::Album);
-                    let text = filters.as_ref().map_or(filter.clone(), |filters| {
-                        filter_text(&filters[release_code(class)])
-                    });
-                    let totals = derived.albums[slot as usize];
-                    let matched = text.is_empty()
-                        || format!(
-                            "{} {}",
-                            snapshot.text(record.title),
-                            snapshot.text(record.artist)
-                        )
-                        .to_lowercase()
-                        .contains(&text)
-                        || year_of(record.year).is_some_and(|year| year.to_string() == text);
-                    if record.source == source
-                        && matched
-                        && release_class.is_none_or(|wanted| wanted == class)
-                        && (!read.favorites_only || favorite(record.flags) == Some(true))
-                        && (!read.downloaded_only || totals.downloaded > 0)
-                    {
+                    if record.source == source && keep(record.key) {
                         let mut row = self.album_row(derived, slot, record);
-                        row.class = release_code(class);
+                        row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
                         rows.push(row);
                     }
                 }
@@ -1414,12 +1415,7 @@ impl Context<'_> {
                 let role = usize::from(*album_artist);
                 for (slot, record) in snapshot.artists.iter() {
                     let totals = derived.artists[role][slot as usize];
-                    if record.source == source
-                        && totals.tracks > 0
-                        && contains(snapshot.text(record.name), &filter)
-                        && (!read.favorites_only || favorite(record.flags) == Some(true))
-                        && (!read.downloaded_only || totals.downloaded > 0)
-                    {
+                    if record.source == source && totals.tracks > 0 && keep(record.key) {
                         let mut row =
                             ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
                         row.totals = totals;
@@ -1442,8 +1438,7 @@ impl Context<'_> {
                     if record.source == source
                         && record.kind() == kind
                         && listed
-                        && contains(snapshot.text(record.name), &filter)
-                        && (!read.downloaded_only || totals.downloaded > 0)
+                        && keep(record.key)
                     {
                         let mut row = ListRow::new(
                             i64::from(record.key),
@@ -1461,21 +1456,23 @@ impl Context<'_> {
     }
 
     /// Letter sections of a list order.
-    pub(crate) fn list_sections(
+    fn list_sections(
         &self,
         read: &ListRead,
-        order: &[i64],
+        order: impl Iterator<Item = i64>,
     ) -> Vec<crate::ScrollSection> {
         let snapshot = self.snapshot;
-        let texts = order.iter().map(|key| -> Option<String> {
+        let sort = read.sort.sort();
+        let texts = order.map(|key| -> Option<String> {
+            let key = &key;
             Some(match &read.kind {
                 ListKind::Albums | ListKind::ArtistAlbums { .. } => {
                     let slot = snapshot.albums.slot(*key)?;
-                    match read.sort {
-                        CatalogSort::Title => snapshot
+                    match sort {
+                        LibraryField::Title => snapshot
                             .album_sort(&snapshot.albums.records[slot as usize])
                             .into_owned(),
-                        CatalogSort::Artist | CatalogSort::AlbumArtist => self
+                        LibraryField::Artist | LibraryField::AlbumArtist => self
                             .album_artist_sort(slot)
                             .map(Cow::into_owned)
                             .unwrap_or_default(),
@@ -1483,14 +1480,14 @@ impl Context<'_> {
                     }
                 }
                 ListKind::Artists { .. } => {
-                    if !matches!(read.sort, CatalogSort::Title | CatalogSort::Artist) {
+                    if !matches!(sort, LibraryField::Title | LibraryField::Artist) {
                         return None;
                     }
                     let artist = snapshot.artists.get(*key)?;
                     snapshot.artist_sort(artist).into_owned()
                 }
                 ListKind::Genres | ListKind::Moods => {
-                    if !matches!(read.sort, CatalogSort::Title | CatalogSort::Artist) {
+                    if !matches!(sort, LibraryField::Title | LibraryField::Artist) {
                         return None;
                     }
                     let tag = snapshot.tags.get(*key)?;
@@ -1498,7 +1495,7 @@ impl Context<'_> {
                 }
                 ListKind::Playlists | ListKind::SmartPlaylists { .. } => {
                     let grouped = !matches!(read.playlist_scope, PlaylistScope::All);
-                    if !grouped && read.sort != CatalogSort::Title {
+                    if !grouped && sort != LibraryField::Title {
                         return None;
                     }
                     if *key < 0 {
@@ -1816,13 +1813,13 @@ pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> 
     (sorted || ruled).then_some(seconds)
 }
 
-/// Orders, totals and other values built from one revision of the Catalog, kept while that
-/// revision lasts and the order budget allows.
+/// Orders, totals and other values built from the Catalog, kept while the stamps they depend on
+/// hold and the order budget allows.
 #[derive(Default)]
 pub(crate) struct Views {
     derived: Vec<BuiltDerived>,
     /// Most recently used last.
-    orders: Vec<CachedOrder>,
+    orders: Vec<Order>,
     /// Members of the smart playlists pages opened most recently, oldest first.
     opened: Vec<OpenedSmart>,
 }
@@ -1839,17 +1836,123 @@ struct OpenedSmart {
 const OPENED_SMART: usize = 8;
 
 struct BuiltDerived {
-    revision: u64,
-    facts: u64,
+    /// The facts, plays and downloads it counts.
+    stamp: [u64; 3],
     folder: Option<u32>,
     derived: Arc<Derived>,
 }
 
-struct CachedOrder {
-    key: String,
-    revision: u64,
-    bytes: usize,
-    value: Arc<dyn Any + Send + Sync>,
+/// What an order depends on besides catalog records: favorites and ratings, plays, downloads,
+/// and playlists.
+pub(crate) type Depends = [bool; 4];
+
+impl MemberRead {
+    pub(crate) fn depends(&self) -> Depends {
+        let sort = self.effective_sort();
+        match self.collection {
+            Collection::Smart { .. } => [true; 4],
+            _ => [
+                self.favorites_only
+                    || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
+                self.activity
+                    || sort.activity_sensitive()
+                    || matches!(self.collection, Collection::History { .. }),
+                self.downloaded_only,
+                matches!(self.collection, Collection::Playlist(_)),
+            ],
+        }
+    }
+
+    /// The read without its filters, whose order a filtered one is taken from.
+    fn unfiltered(&self) -> Option<Self> {
+        let filtered =
+            !filter_text(&self.filter).is_empty() || self.favorites_only || self.downloaded_only;
+        (filtered && !matches!(self.collection, Collection::History { .. })).then(|| Self {
+            filter: String::new(),
+            favorites_only: false,
+            downloaded_only: false,
+            ..self.clone()
+        })
+    }
+}
+
+impl ListRead {
+    pub(crate) fn depends(&self) -> Depends {
+        let sort = self.sort.sort();
+        match self.kind {
+            ListKind::SmartPlaylists { .. } => [true; 4],
+            _ => [
+                self.favorites_only
+                    || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
+                self.activity || sort.activity_sensitive(),
+                self.downloaded_only,
+                self.kind == ListKind::Playlists,
+            ],
+        }
+    }
+
+    /// The read without its filters, whose order a filtered one is taken from. Playlist lists
+    /// are small and group by folder, so they are built whole.
+    fn unfiltered(&self) -> Option<Self> {
+        if matches!(
+            self.kind,
+            ListKind::Playlists | ListKind::SmartPlaylists { .. }
+        ) {
+            return None;
+        }
+        let mut base = Self {
+            filter: String::new(),
+            favorites_only: false,
+            downloaded_only: false,
+            ..self.clone()
+        };
+        if let ListKind::ArtistAlbums {
+            release_class,
+            filters,
+            ..
+        } = &mut base.kind
+        {
+            *release_class = None;
+            *filters = None;
+        }
+        (base != *self).then_some(base)
+    }
+}
+
+impl Read {
+    fn depends(&self) -> Depends {
+        match self {
+            Self::Members(read) => read.depends(),
+            Self::List(read) | Self::AlbumTracks(read) => read.depends(),
+            Self::Folders(_) => [false; 4],
+        }
+    }
+
+    /// Whether building it reads the Store: listens, live folder object ids or smart playlist
+    /// windows.
+    fn reads_store(&self) -> bool {
+        match self {
+            Self::Members(read) => matches!(
+                read.collection,
+                Collection::Objects { .. } | Collection::Smart { .. } | Collection::History { .. }
+            ),
+            Self::List(read) | Self::AlbumTracks(read) => {
+                matches!(read.kind, ListKind::SmartPlaylists { .. })
+            }
+            Self::Folders(_) => false,
+        }
+    }
+}
+
+/// The stamps an order keeps: facts always, the others when it depends on them.
+fn masked(stamps: [u64; 5], depends: Depends) -> [u64; 5] {
+    let mut masked = [stamps[0], 0, 0, 0, 0];
+    for (index, depends) in depends.into_iter().enumerate() {
+        if depends {
+            masked[index + 1] = stamps[index + 1];
+        }
+    }
+    masked
 }
 
 impl Catalog {
@@ -1859,20 +1962,22 @@ impl Catalog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Totals and borrowed pictures of the current revision, scoped to a music folder.
+    /// Totals and borrowed pictures of the current facts, plays and downloads, scoped to a
+    /// music folder.
     pub(crate) fn derived(&self, context: &Context<'_>, folder: Option<u32>) -> Arc<Derived> {
-        let revision = context.snapshot.revision;
+        let snapshot = context.snapshot;
+        let stamp = [snapshot.facts, snapshot.plays, snapshot.downloads];
         self.derive(context, folder, |built| {
-            built.revision == revision && built.folder == folder
+            built.stamp == stamp && built.folder == folder
         })
     }
 
     /// Borrowed pictures and whether an album lists a track. They change only with catalog
-    /// records, so a row read after a favorite or a listen reuses an older revision's build.
+    /// records, so a row read after a favorite or a listen reuses an older build.
     pub(crate) fn covers(&self, context: &Context<'_>) -> Arc<Derived> {
         let facts = context.snapshot.facts;
         self.derive(context, None, |built| {
-            built.facts == facts && built.folder.is_none()
+            built.stamp[0] == facts && built.folder.is_none()
         })
     }
 
@@ -1897,159 +2002,341 @@ impl Catalog {
             return derived;
         }
         let derived = Arc::new(Derived::build(context, folder));
-        let (revision, facts) = (context.snapshot.revision, context.snapshot.facts);
+        let snapshot = context.snapshot;
+        let stamp = [snapshot.facts, snapshot.plays, snapshot.downloads];
         let mut views = self.views();
         views.derived.retain(|built| {
-            built.facts == facts && (built.revision == revision || built.folder.is_none())
+            built.stamp[0] == stamp[0] && (built.stamp == stamp || built.folder.is_none())
         });
         if views.derived.len() >= 4 {
             views.derived.remove(0);
         }
         views.derived.push(BuiltDerived {
-            revision,
-            facts,
+            stamp,
             folder,
             derived: derived.clone(),
         });
         derived
     }
 
-    fn cached<T: Send + Sync + 'static>(&self, key: &str, revision: u64) -> Option<Arc<T>> {
+    /// The cached order of a read while what it depends on is unchanged.
+    fn cached(&self, read: &Read, stamps: [u64; 5]) -> Option<Order> {
+        let stamp = masked(stamps, read.depends());
         let mut views = self.views();
         let index = views
             .orders
             .iter()
-            .position(|order| order.key == key && order.revision == revision)?;
+            .position(|order| order.0.stamp == stamp && order.0.read == *read)?;
         let order = views.orders.remove(index);
-        let value = order.value.clone().downcast::<T>().ok();
-        views.orders.push(order);
-        value
+        views.orders.push(order.clone());
+        Some(order)
     }
 
-    fn cache<T: Send + Sync + 'static>(
-        &self,
-        key: String,
-        revision: u64,
-        bytes: usize,
-        value: Arc<T>,
-    ) {
+    /// Keeps an order; drops those whose stamps moved on, then the oldest past the budget.
+    fn cache(&self, order: &Order, stamps: [u64; 5]) {
         let mut views = self.views();
-        views
-            .orders
-            .retain(|order| order.revision == revision && order.key != key);
-        views.orders.push(CachedOrder {
-            key,
-            revision,
-            bytes,
-            value,
+        views.orders.retain(|cached| {
+            cached.0.read != order.0.read
+                && cached.0.stamp == masked(stamps, cached.0.read.depends())
         });
-        let mut total = views.orders.iter().map(|order| order.bytes).sum::<usize>();
+        views.orders.push(order.clone());
+        let mut total = views
+            .orders
+            .iter()
+            .map(|order| order.0.members.bytes())
+            .sum::<usize>();
         while total > ORDER_BUDGET && views.orders.len() > 1 {
-            total -= views.orders.remove(0).bytes;
+            total -= views.orders.remove(0).0.members.bytes();
         }
     }
 
-    /// Facts a member read needs from the Store before it can order.
-    async fn member_inputs(
+    /// The cached order while what it depends on is unchanged, else built. A connection is
+    /// taken only for inputs the Store alone holds: History listens, periodic smart rules and
+    /// live folder object ids.
+    pub async fn order(
+        &self,
+        read: &Read,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Order> {
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(crate::LibraryError::ReadCancelled),
+        }
+        let stamps = self.snapshot().stamps();
+        if let Some(order) = self.cached(read, stamps) {
+            return Ok(order);
+        }
+        if read.reads_store() {
+            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            return self.order_on(&mut connection, read).await;
+        }
+        Ok(self.build(read, &Inputs::default()))
+    }
+
+    /// An order read on a caller's connection, so a Write's selection sees the rows it staged.
+    pub(crate) async fn order_on(
         &self,
         connection: &mut SqliteConnection,
-        read: &MemberRead,
-    ) -> LibraryResult<Inputs> {
-        let mut inputs = Inputs::default();
-        match &read.collection {
-            Collection::Objects { source, ids } => {
-                inputs.objects = self.track_keys_by_objects(connection, *source, ids).await?;
-            }
-            Collection::Smart { key, now } => {
-                let definition = self
-                    .snapshot()
-                    .smart_playlists
-                    .get(&key.raw())
-                    .map(|smart| smart.definition.clone());
-                if let Some(definition) = definition {
-                    self.read_periods(
-                        connection,
-                        &mut inputs,
-                        smart_period(&definition).into_iter().collect(),
-                        *now,
-                    )
-                    .await?;
-                    let tracks = match self.opened_smart(key.raw(), *now, &definition) {
-                        Some(tracks) => tracks,
-                        None => {
-                            let snapshot = self.snapshot();
-                            let tracks = Arc::new(
-                                Context::new(&snapshot)
-                                    .evaluate(&definition, &inputs)
-                                    .into_iter()
-                                    .filter_map(|slot| snapshot.tracks.key_of(slot))
-                                    .collect::<Vec<_>>(),
-                            );
-                            let mut views = self.views();
-                            views
-                                .opened
-                                .retain(|opened| opened.key != key.raw() || opened.now != *now);
-                            views.opened.push(OpenedSmart {
-                                key: key.raw(),
-                                now: *now,
-                                definition,
-                                tracks: tracks.clone(),
-                            });
-                            if views.opened.len() > OPENED_SMART {
-                                views.opened.remove(0);
-                            }
-                            tracks
-                        }
+        read: &Read,
+    ) -> LibraryResult<Order> {
+        self.loaded().await;
+        let stamps = self.snapshot().stamps();
+        if let Some(order) = self.cached(read, stamps) {
+            return Ok(order);
+        }
+        let inputs = self.inputs(connection, read).await?;
+        Ok(self.build(read, &inputs))
+    }
+
+    fn build(&self, read: &Read, inputs: &Inputs) -> Order {
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot);
+        self.build_in(&context, read, inputs)
+    }
+
+    /// Builds an order under one hold of the Catalog. A filtered order is the cached
+    /// unfiltered one less the rows its filters drop.
+    fn build_in(&self, context: &Context<'_>, read: &Read, inputs: &Inputs) -> Order {
+        let snapshot = context.snapshot;
+        let stamps = snapshot.stamps();
+        if let Some(order) = self.cached(read, stamps) {
+            return order;
+        }
+        let mut counts = None;
+        let members = match read {
+            Read::Members(member) => {
+                if let Collection::History { .. } = member.collection {
+                    Members::History(inputs.history.clone().into())
+                } else if let Some(base) = member.unfiltered() {
+                    let base = self.build_in(context, &Read::Members(base), inputs);
+                    let filter = filter_text(&member.filter);
+                    let keep = |track: &u32| {
+                        snapshot
+                            .tracks
+                            .get(i64::from(*track))
+                            .is_some_and(|record| context.member_keep(member, &filter, record))
                     };
-                    inputs.smart = Some(tracks);
+                    match &base.0.members {
+                        Members::Entries(entries) => Members::Entries(
+                            entries
+                                .iter()
+                                .filter(|(track, _)| keep(track))
+                                .copied()
+                                .collect(),
+                        ),
+                        Members::Tracks(tracks) => Members::Tracks(
+                            tracks.iter().filter(|track| keep(track)).copied().collect(),
+                        ),
+                        _ => unreachable!("member orders hold tracks"),
+                    }
+                } else {
+                    let rows = context.member_base(member, inputs);
+                    let records = &snapshot.tracks.records;
+                    if matches!(member.collection, Collection::Playlist(_)) {
+                        Members::Entries(
+                            rows.into_iter()
+                                .map(|(slot, entry)| (records[slot as usize].key, entry))
+                                .collect(),
+                        )
+                    } else {
+                        Members::Tracks(
+                            rows.into_iter()
+                                .map(|(slot, _)| records[slot as usize].key)
+                                .collect(),
+                        )
+                    }
                 }
             }
-            _ => {}
-        }
-        Ok(inputs)
+            Read::List(list) => {
+                let keys = self.list_keys(context, list, inputs);
+                if let ListKind::ArtistAlbums { .. } = list.kind {
+                    let mut classes = [0; 6];
+                    for key in &keys {
+                        if let Some(album) = snapshot.albums.get(*key) {
+                            classes[usize::from(AlbumReleaseClass::of(album.flags).code())] += 1;
+                        }
+                    }
+                    counts = Some(classes);
+                }
+                if matches!(
+                    list.kind,
+                    ListKind::Playlists | ListKind::SmartPlaylists { .. }
+                ) {
+                    Members::Playlists(keys.into())
+                } else {
+                    Members::Keys(keys.into_iter().map(|key| key as u32).collect())
+                }
+            }
+            Read::AlbumTracks(list) => {
+                let albums = self.build_in(context, &Read::List(list.clone()), inputs);
+                let keys = match &albums.0.members {
+                    Members::Keys(keys) => keys.clone(),
+                    _ => Box::default(),
+                };
+                let folder = context.folder_slot(list.folder).flatten();
+                let slots = keys
+                    .iter()
+                    .filter_map(|key| Some((*key, snapshot.albums.slot(i64::from(*key))?)))
+                    .collect::<Vec<_>>();
+                let mut members = context.album_tracks(
+                    &slots.iter().map(|(_, slot)| *slot).collect::<Vec<_>>(),
+                    folder,
+                );
+                let mut spans = Vec::with_capacity(slots.len());
+                let mut tracks = Vec::new();
+                let mut first = 0;
+                for (key, slot) in slots {
+                    let album = members.remove(&slot).unwrap_or_default();
+                    let count = album.len();
+                    tracks.extend(
+                        album
+                            .into_iter()
+                            .map(|slot| snapshot.tracks.records[slot as usize].key),
+                    );
+                    spans.push(AlbumSpan {
+                        album: crate::AlbumKey::from_raw(i64::from(key)),
+                        first,
+                        count,
+                        genres: !snapshot.album_runs(&snapshot.albums.records[slot as usize])[1]
+                            .is_empty(),
+                    });
+                    first += 1 + count;
+                }
+                Members::AlbumTracks {
+                    spans: spans.into(),
+                    tracks: tracks.into(),
+                }
+            }
+            Read::Folders(folders) => {
+                let parent = match folders.parent {
+                    Some(parent) => snapshot.folders.slot(parent.raw()),
+                    None => None,
+                };
+                Members::Keys(
+                    if folders.parent.is_some() && parent.is_none() {
+                        Vec::new()
+                    } else {
+                        context
+                            .folder_order(
+                                folders.source,
+                                parent,
+                                &folders.filter,
+                                folders.descending,
+                            )
+                            .into_iter()
+                            .map(|(key, _)| key as u32)
+                            .collect()
+                    }
+                    .into(),
+                )
+            }
+        };
+        let order = Order(Arc::new(OrderInner {
+            read: read.clone(),
+            stamp: masked(stamps, read.depends()),
+            members,
+            counts,
+        }));
+        self.cache(&order, stamps);
+        order
     }
 
-    /// Facts a list read needs from the Store before it can order.
-    async fn list_inputs(
+    /// The keys of a list read in order, a filtered one taken from its unfiltered order.
+    fn list_keys(&self, context: &Context<'_>, list: &ListRead, inputs: &Inputs) -> Vec<i64> {
+        let folder = context.folder_slot(list.folder).flatten();
+        let derived = self.derived(context, folder);
+        let Some(base) = list.unfiltered() else {
+            return context.list_order(list, &derived, inputs);
+        };
+        let base = self.build_in(context, &Read::List(base), inputs);
+        let filter = filter_text(&list.filter);
+        match &base.0.members {
+            Members::Keys(keys) => keys
+                .iter()
+                .map(|key| i64::from(*key))
+                .filter(|key| context.list_keep(list, &derived, &filter, *key))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Facts a read needs from the Store before it can order.
+    async fn inputs(
         &self,
         connection: &mut SqliteConnection,
-        read: &ListRead,
+        read: &Read,
     ) -> LibraryResult<Inputs> {
         let mut inputs = Inputs::default();
-        match &read.kind {
-            ListKind::ArtistAlbums {
-                artist,
-                album_artist,
-                ..
-            } => {
-                let albums = {
-                    let snapshot = self.snapshot();
-                    let context = Context::new(&snapshot);
-                    let folder = context.folder_slot(read.folder).flatten();
-                    match snapshot.artists.slot(artist.raw()) {
-                        Some(artist) => context
-                            .artist_albums(artist, *album_artist, folder)
-                            .into_iter()
-                            .map(|slot| &snapshot.albums.records[slot as usize])
-                            .map(|album| (i64::from(album.key), album.flags & COMPILATION != 0))
-                            .collect::<Vec<_>>(),
-                        None => Vec::new(),
+        match read {
+            Read::Members(read) => match &read.collection {
+                Collection::Objects { source, ids } => {
+                    inputs.objects = self.track_keys_by_objects(connection, *source, ids).await?;
+                }
+                Collection::History { source } => {
+                    inputs.history =
+                        Self::history(connection, source.as_ref(), &read.filter, read.descending)
+                            .await?;
+                }
+                Collection::Smart { key, now } => {
+                    let definition = self
+                        .snapshot()
+                        .smart_playlists
+                        .get(&key.raw())
+                        .map(|smart| smart.definition.clone());
+                    if let Some(definition) = definition {
+                        self.read_periods(
+                            connection,
+                            &mut inputs,
+                            smart_period(&definition).into_iter().collect(),
+                            *now,
+                        )
+                        .await?;
+                        let tracks = match self.opened_smart(key.raw(), *now, &definition) {
+                            Some(tracks) => tracks,
+                            None => {
+                                let snapshot = self.snapshot();
+                                let tracks = Arc::new(
+                                    Context::new(&snapshot)
+                                        .evaluate(&definition, &inputs)
+                                        .into_iter()
+                                        .filter_map(|slot| snapshot.tracks.key_of(slot))
+                                        .collect::<Vec<_>>(),
+                                );
+                                let mut views = self.views();
+                                views
+                                    .opened
+                                    .retain(|opened| opened.key != key.raw() || opened.now != *now);
+                                views.opened.push(OpenedSmart {
+                                    key: key.raw(),
+                                    now: *now,
+                                    definition,
+                                    tracks: tracks.clone(),
+                                });
+                                if views.opened.len() > OPENED_SMART {
+                                    views.opened.remove(0);
+                                }
+                                tracks
+                            }
+                        };
+                        inputs.smart = Some(tracks);
                     }
-                };
-                inputs.classes = self.release_classes(connection, &albums).await?;
+                }
+                _ => {}
+            },
+            Read::List(read) | Read::AlbumTracks(read) => {
+                if let ListKind::SmartPlaylists { now } = read.kind {
+                    let definitions = self
+                        .snapshot()
+                        .smart_playlists
+                        .values()
+                        .map(|smart| smart.definition.clone())
+                        .collect::<Vec<_>>();
+                    let periods = definitions.iter().filter_map(smart_period).collect();
+                    self.read_periods(connection, &mut inputs, periods, now)
+                        .await?;
+                }
             }
-            ListKind::SmartPlaylists { now } => {
-                let definitions = self
-                    .snapshot()
-                    .smart_playlists
-                    .values()
-                    .map(|smart| smart.definition.clone())
-                    .collect::<Vec<_>>();
-                let periods = definitions.iter().filter_map(smart_period).collect();
-                self.read_periods(connection, &mut inputs, periods, *now)
-                    .await?;
-            }
-            _ => {}
+            Read::Folders(_) => {}
         }
         Ok(inputs)
     }
@@ -2079,63 +2366,33 @@ impl Catalog {
         periods: Vec<i64>,
         now: i64,
     ) -> LibraryResult<()> {
+        let periods = periods
+            .into_iter()
+            .filter(|seconds| !inputs.periods.contains_key(&Some(*seconds)))
+            .collect::<Vec<_>>();
+        if periods.is_empty() {
+            return Ok(());
+        }
+        let handle = super::rows::Handle::lock(connection).await?;
         for seconds in periods {
-            if inputs.periods.contains_key(&Some(seconds)) {
-                continue;
-            }
-            let rows = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+            let mut rows = handle.prepare(
                 "SELECT track.track_key,sum(listen.skipped=0),sum(listen.skipped),max(listen.started_at) FROM listens listen JOIN tracks track USING(media_uri) WHERE listen.started_at<=?1 AND listen.started_at>=?2 GROUP BY track.track_key",
-            )
-            .bind(now)
-            .bind(now - seconds)
-            .fetch_all(&mut *connection)
-            .await?;
-            inputs.periods.insert(
-                Some(seconds),
-                rows.into_iter()
-                    .map(|(key, plays, skips, last)| {
-                        (
-                            key,
-                            Played {
-                                plays: plays.clamp(0, i64::from(u32::MAX)) as u32,
-                                skips: skips.clamp(0, i64::from(u32::MAX)) as u32,
-                                last: u32::try_from(last).ok(),
-                            },
-                        )
-                    })
-                    .collect(),
-            );
+            )?;
+            rows.bind(1, now)?.bind(2, now - seconds)?;
+            let mut listened = HashMap::new();
+            while rows.step()? {
+                listened.insert(
+                    rows.int(0),
+                    Played {
+                        plays: rows.int(1).clamp(0, i64::from(u32::MAX)) as u32,
+                        skips: rows.int(2).clamp(0, i64::from(u32::MAX)) as u32,
+                        last: u32::try_from(rows.int(3)).ok(),
+                    },
+                );
+            }
+            inputs.periods.insert(Some(seconds), listened);
         }
         Ok(())
-    }
-
-    /// Release classes of albums from the release types their metadata or a lookup holds.
-    pub(crate) async fn release_classes(
-        &self,
-        connection: &mut SqliteConnection,
-        albums: &[(i64, bool)],
-    ) -> LibraryResult<HashMap<i64, AlbumReleaseClass>> {
-        let mut classes = HashMap::new();
-        for chunk in albums.chunks(512) {
-            let keys = chunk.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-            let rows = sqlx::query_as::<_, (i64, Option<String>)>(
-                "SELECT album.album_key,coalesce((SELECT json(accepted.release_types) FROM album_release_observations accepted WHERE accepted.album_key=album.album_key AND accepted.lookup_identity=album.release_lookup_identity),json_extract(album.metadata,'$.release_types')) FROM json_each(?1) requested JOIN albums album ON album.album_key=requested.value",
-            )
-            .bind(serde_json::to_string(&keys)?)
-            .fetch_all(&mut *connection)
-            .await?;
-            let types = rows.into_iter().collect::<HashMap<_, _>>();
-            for (key, compilation) in chunk {
-                let release_types = types
-                    .get(key)
-                    .and_then(Option::as_deref)
-                    .map(serde_json::from_str::<Vec<String>>)
-                    .transpose()?
-                    .unwrap_or_default();
-                classes.insert(*key, release_class(*compilation, &release_types));
-            }
-        }
-        Ok(classes)
     }
 
     /// Track keys of a source's object ids, in request order.
@@ -2145,51 +2402,55 @@ impl Catalog {
         source: SourceKey,
         ids: &[String],
     ) -> LibraryResult<Vec<i64>> {
-        Ok(sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.source_key=?2 AND track.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-            .bind(serde_json::to_string(ids)?)
-            .bind(source)
-            .fetch_all(&mut *connection)
-            .await?)
+        let ids = serde_json::to_string(ids)?;
+        let handle = super::rows::Handle::lock(connection).await?;
+        let mut rows = handle.prepare("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.source_key=?2 AND track.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)")?;
+        rows.bind_text(1, &ids)?.bind(2, source.raw())?;
+        let mut keys = Vec::new();
+        while rows.step()? {
+            keys.push(rows.int(0));
+        }
+        Ok(keys)
     }
 
-    /// A member read's rows in order, from the cache while the Catalog is unchanged.
-    pub(crate) async fn member_order(
-        &self,
-        connection: &mut SqliteConnection,
-        read: &MemberRead,
-    ) -> LibraryResult<Arc<Vec<Member>>> {
-        self.loaded().await;
-        let key = format!("{read:?}");
-        if let Some(order) = self.cached::<Vec<Member>>(&key, self.snapshot().revision) {
-            return Ok(order);
-        }
-        let inputs = self.member_inputs(connection, read).await?;
+    /// Letter sections of an order, for lists by name.
+    pub fn sections(&self, order: &Order) -> Vec<crate::ScrollSection> {
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
-        let order = Arc::new(context.member_order(read, &inputs));
-        self.cache(key, snapshot.revision, order.len() * 16, order.clone());
-        Ok(order)
+        match (&order.0.read, &order.0.members) {
+            (Read::Members(read), Members::Tracks(keys)) => context.member_sections(read, keys),
+            (Read::Members(read), Members::Entries(entries)) => context.member_sections(
+                read,
+                &entries.iter().map(|(track, _)| *track).collect::<Vec<_>>(),
+            ),
+            (Read::List(read), Members::Keys(keys)) => {
+                context.list_sections(read, keys.iter().map(|key| i64::from(*key)))
+            }
+            (Read::List(read), Members::Playlists(keys)) => {
+                context.list_sections(read, keys.iter().copied())
+            }
+            (Read::Folders(_), Members::Keys(keys)) => sections(keys.iter().map(|key| {
+                Some(
+                    snapshot
+                        .folders
+                        .get(i64::from(*key))
+                        .map(|folder| snapshot.name_sort(folder.name, folder.sort).into_owned())
+                        .unwrap_or_default(),
+                )
+            })),
+            _ => Vec::new(),
+        }
     }
 
-    /// A list read's keys in order, from the cache while the Catalog is unchanged.
-    pub(crate) async fn list_order(
-        &self,
-        connection: &mut SqliteConnection,
-        read: &ListRead,
-    ) -> LibraryResult<Arc<Vec<i64>>> {
-        self.loaded().await;
-        let key = format!("{read:?}");
-        if let Some(order) = self.cached::<Vec<i64>>(&key, self.snapshot().revision) {
-            return Ok(order);
-        }
-        let inputs = self.list_inputs(connection, read).await?;
+    /// Where each disc of an album order starts, when it has several.
+    pub fn disc_sections(&self, order: &Order) -> Vec<(u32, i64)> {
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot);
-        let folder = context.folder_slot(read.folder).flatten();
-        let derived = self.derived(&context, folder);
-        let order = Arc::new(context.list_order(read, &derived, &inputs));
-        self.cache(key, snapshot.revision, order.len() * 8, order.clone());
-        Ok(order)
+        match (&order.0.read, &order.0.members) {
+            (Read::Members(read), Members::Tracks(keys)) => {
+                Context::new(&snapshot).disc_sections(read, keys)
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -2227,24 +2488,6 @@ impl Catalog {
             .collect()
     }
 
-    /// Track and entry keys of an order's rows. A row removed since the order was built is
-    /// skipped.
-    pub(crate) fn member_keys(
-        &self,
-        order: &[Member],
-    ) -> Vec<(crate::TrackKey, Option<crate::PlaylistEntryKey>)> {
-        let snapshot = self.snapshot();
-        order
-            .iter()
-            .filter_map(|member| {
-                Some((
-                    crate::TrackKey::from_raw(snapshot.tracks.key_of(member.track)?),
-                    (member.entry != 0).then(|| crate::PlaylistEntryKey::from_raw(member.entry)),
-                ))
-            })
-            .collect()
-    }
-
     /// A collection's members in its own order.
     pub(crate) async fn members(
         &self,
@@ -2252,12 +2495,15 @@ impl Catalog {
         collection: Collection,
     ) -> LibraryResult<Vec<crate::TrackKey>> {
         let order = self
-            .member_order(connection, &MemberRead::new(collection))
+            .order_on(connection, &Read::Members(MemberRead::new(collection)))
             .await?;
-        Ok(self
-            .member_keys(&order)
+        Ok(order
+            .items(0..order.len())
             .into_iter()
-            .map(|(key, _)| key)
+            .filter_map(|item| match item {
+                crate::Item::Track { key, .. } => Some(key),
+                _ => None,
+            })
             .collect())
     }
 }
@@ -2366,7 +2612,7 @@ impl Context<'_> {
         inputs: &Inputs,
     ) -> Vec<Member> {
         let snapshot = self.snapshot;
-        let member = |track| Member { track, entry: 0 };
+        let member = |track| (track, 0);
         match kind {
             ListKind::Playlists => {
                 return parents
@@ -2377,10 +2623,7 @@ impl Context<'_> {
                             .entries
                             .iter()
                             .filter(|entry| snapshot.tracks.live(entry.track).is_some())
-                            .map(|entry| Member {
-                                track: entry.track,
-                                entry: entry.key,
-                            })
+                            .map(|entry| (entry.track, entry.key as u32))
                     })
                     .collect();
             }
@@ -2400,18 +2643,18 @@ impl Context<'_> {
                     .iter()
                     .map(|key| snapshot.albums.slot(*key))
                     .collect::<Vec<_>>(),
-                CatalogSort::TrackNumber,
+                LibraryField::TrackNumber,
             ),
             ListKind::Artists { .. } => (
                 parents
                     .iter()
                     .map(|key| snapshot.artists.slot(*key))
                     .collect(),
-                CatalogSort::Title,
+                LibraryField::Title,
             ),
             _ => (
                 parents.iter().map(|key| snapshot.tags.slot(*key)).collect(),
-                CatalogSort::Title,
+                LibraryField::Title,
             ),
         };
         let mut index = HashMap::<u32, Vec<usize>>::new();
@@ -2452,7 +2695,7 @@ impl Context<'_> {
                 let mut rows = bucket
                     .into_iter()
                     .enumerate()
-                    .map(|(position, member)| self.track_row(sort, position, member))
+                    .map(|(position, member)| self.sorted(sort, position, member))
                     .collect::<Vec<_>>();
                 rows.sort_by(|a, b| compare_tracks(sort, false, a, b));
                 rows.into_iter().map(|row| row.member).collect::<Vec<_>>()
@@ -2468,7 +2711,7 @@ impl Catalog {
         connection: &mut SqliteConnection,
         read: &ListRead,
         parents: &[i64],
-    ) -> LibraryResult<Vec<Member>> {
+    ) -> LibraryResult<Vec<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>> {
         let mut inputs = Inputs::default();
         if let ListKind::SmartPlaylists { now } = read.kind {
             let definitions = {
@@ -2484,6 +2727,17 @@ impl Catalog {
                 .await?;
         }
         let snapshot = self.snapshot();
-        Ok(Context::new(&snapshot).parent_members(&read.kind, parents, &inputs))
+        Ok(Context::new(&snapshot)
+            .parent_members(&read.kind, parents, &inputs)
+            .into_iter()
+            .map(|(slot, entry)| {
+                (
+                    crate::TrackKey::from_raw(i64::from(
+                        snapshot.tracks.records[slot as usize].key,
+                    )),
+                    (entry != 0).then(|| crate::PlaylistEntryKey::from_raw(i64::from(entry))),
+                )
+            })
+            .collect())
     }
 }

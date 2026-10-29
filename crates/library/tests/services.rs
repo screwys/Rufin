@@ -515,10 +515,11 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
 
     let mut scan_observation = async {
-        if (&fixture.catalog)
-            .source_identity_key(&library::SourceId::new("source"))
-            .await?
-            .is_none()
+        if {
+            (&fixture.catalog).loaded().await;
+            (&fixture.catalog).source_key(&library::SourceId::new("source"))
+        }
+        .is_none()
         {
             (&fixture.catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")

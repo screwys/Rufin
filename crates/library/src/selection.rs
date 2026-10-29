@@ -38,11 +38,29 @@ impl MemberSelection {
 }
 
 /// The items of selected ranges of an order.
-fn in_ranges<T: Copy>(order: &[T], ranges: Option<&[Range<usize>]>) -> Vec<T> {
+fn in_ranges(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<Item> {
     crate::query::selection_ranges(ranges)
         .into_iter()
-        .flat_map(|range| &order[range.start.min(order.len())..range.end.min(order.len())])
-        .copied()
+        .flat_map(|range| order.items(range))
+        .collect()
+}
+
+/// The keys of a list order's selected rows; playlist folders are negative.
+fn parents(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<i64> {
+    in_ranges(order, ranges)
+        .into_iter()
+        .filter_map(|item| {
+            Some(match item {
+                Item::Album(key) | Item::AlbumHeading(key) => key.raw(),
+                Item::Artist { key, .. } => key.raw(),
+                Item::Genre(key) => key.raw(),
+                Item::Mood(key) => key.raw(),
+                Item::Playlist(key) => key.raw(),
+                Item::Smart(key) => key.raw(),
+                Item::PlaylistFolder(key) => -key.raw(),
+                _ => return None,
+            })
+        })
         .collect()
 }
 
@@ -58,29 +76,25 @@ pub(crate) async fn selected_tracks_on(
         match next {
             MemberSelection::Concat(selections) => pending.extend(selections.iter().rev()),
             MemberSelection::Members { read, ranges } => {
-                if let Collection::History { source } = &read.collection {
-                    let order = Catalog::history(
-                        connection,
-                        source.as_ref(),
-                        &read.filter,
-                        read.descending,
-                    )
+                let order = catalog
+                    .order_on(connection, &Read::Members(read.clone()))
                     .await?;
-                    rows.extend(
-                        in_ranges(&order, ranges.as_deref())
-                            .into_iter()
-                            .filter_map(|(key, _)| Some((key?, None))),
-                    );
-                } else {
-                    let order = catalog.member_order(connection, read).await?;
-                    rows.extend(catalog.member_keys(&in_ranges(&order, ranges.as_deref())));
-                }
+                rows.extend(
+                    in_ranges(&order, ranges.as_deref()).into_iter().filter_map(
+                        |item| match item {
+                            Item::Track { key, entry } => Some((key, entry)),
+                            Item::Listen(index) => Some((order.listen_track(index)?, None)),
+                            _ => None,
+                        },
+                    ),
+                );
             }
             MemberSelection::Parents { read, ranges } => {
-                let order = catalog.list_order(connection, read).await?;
-                let parents = in_ranges(&order, ranges.as_deref());
-                let members = catalog.parent_order(connection, read, &parents).await?;
-                rows.extend(catalog.member_keys(&members));
+                let order = catalog
+                    .order_on(connection, &Read::List(read.clone()))
+                    .await?;
+                let parents = parents(&order, ranges.as_deref());
+                rows.extend(catalog.parent_order(connection, read, &parents).await?);
             }
             MemberSelection::Collections(collections) => {
                 if collections
@@ -94,25 +108,32 @@ pub(crate) async fn selected_tracks_on(
                             _ => unreachable!(),
                         })
                         .collect::<Vec<_>>();
-                    let read = ListRead::new(ListKind::Albums, None, CatalogSort::TrackNumber);
-                    let members = catalog.parent_order(connection, &read, &albums).await?;
-                    rows.extend(catalog.member_keys(&members));
+                    let read = ListRead::new(ListKind::Albums, None, LibraryField::TrackNumber);
+                    rows.extend(catalog.parent_order(connection, &read, &albums).await?);
                     continue;
                 }
                 for collection in collections {
-                    let order = catalog
-                        .member_order(connection, &MemberRead::new(collection.clone()))
-                        .await?;
-                    rows.extend(catalog.member_keys(&order));
+                    rows.extend(
+                        catalog
+                            .members(connection, collection.clone())
+                            .await?
+                            .into_iter()
+                            .map(|key| (key, None)),
+                    );
                 }
             }
             MemberSelection::Keys { source, keys } => {
-                let found: Vec<TrackKey> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value WHERE ?2 IS NULL OR track.source_key=?2 ORDER BY CAST(requested.key AS INTEGER)")
-                    .bind(serde_json::to_string(keys.as_ref())?)
-                    .bind(source)
-                    .fetch_all(&mut *connection)
-                    .await?;
-                rows.extend(found.into_iter().map(|key| (key, None)));
+                let snapshot = catalog.snapshot();
+                let slot = source.map(|source| snapshot.source_slot(source));
+                rows.extend(
+                    keys.iter()
+                        .filter(|key| {
+                            snapshot.tracks.get(key.raw()).is_some_and(|record| {
+                                slot.is_none_or(|slot| slot == Some(record.source))
+                            })
+                        })
+                        .map(|key| (*key, None)),
+                );
             }
             MemberSelection::Uris(uris) => {
                 let found: Vec<TrackKey> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
@@ -167,9 +188,8 @@ impl Catalog {
         ranges: &[Range<usize>],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Collection>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        let order = self.list_order(&mut connection, read).await?;
-        Ok(in_ranges(&order, Some(ranges))
+        let order = self.order(&Read::List(read.clone()), cancellation).await?;
+        Ok(parents(&order, Some(ranges))
             .into_iter()
             .filter(|key| read.playlist_scope == PlaylistScope::All || *key >= 0)
             .map(|key| parent_collection(read, key))

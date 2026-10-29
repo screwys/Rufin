@@ -76,6 +76,10 @@ pub enum Scope {
         key: PlaylistKey,
         entries: bool,
     },
+    /// A playlist was linked to a playlist file or unlinked, and nothing it shows changed.
+    PlaylistLink {
+        key: PlaylistKey,
+    },
     /// Playlists were added, removed or moved. A rename is a `Playlist` scope.
     Playlists,
     Smart {
@@ -1388,6 +1392,9 @@ impl<'a> Write<'a> {
         for (key, playlist, shown, entries) in &user.playlists {
             // The link is read by the playlist file feature, not shown.
             if !shown {
+                scopes.push(Scope::PlaylistLink {
+                    key: PlaylistKey::from_raw(*key),
+                });
                 continue;
             }
             let resident = snapshot.playlist(*key);
@@ -1431,6 +1438,13 @@ impl<'a> Write<'a> {
 
     /// Applies the staged rows under the Catalog lock, at most APPLY_RECORDS per hold.
     fn apply(&mut self, user: UserChanges) -> u64 {
+        let states = !user.states.is_empty();
+        let plays = !user.listened.is_empty();
+        let downloads = !user.downloads.is_empty();
+        let playlists = !user.playlists.is_empty()
+            || !user.smart.is_empty()
+            || user.folders.is_some()
+            || !self.forgotten.is_empty();
         let mut applier = Applier {
             catalog: self.catalog,
             guard: None,
@@ -1472,10 +1486,19 @@ impl<'a> Write<'a> {
         let facts = self.changed_rows() || !self.forgotten.is_empty();
         let snapshot = applier.snapshot();
         snapshot.revision += 1;
-        if facts {
-            snapshot.facts = snapshot.revision;
+        let revision = snapshot.revision;
+        for (changed, stamp) in [
+            (facts, &mut snapshot.facts),
+            (states, &mut snapshot.states),
+            (plays, &mut snapshot.plays),
+            (downloads, &mut snapshot.downloads),
+            (playlists, &mut snapshot.playlist_stamp),
+        ] {
+            if changed {
+                *stamp = revision;
+            }
         }
-        snapshot.revision
+        revision
     }
 }
 
@@ -1735,7 +1758,7 @@ pub(crate) fn listened_sql(condition: &str) -> String {
 
 /// The playlist header columns the Catalog holds, in load order. Statements that write a
 /// header return them.
-pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),playlist_folder_key,created_at,writable,metadata_writable,EXISTS(SELECT 1 FROM playlist_file_links link WHERE link.playlist_key=playlists.playlist_key)";
+pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),playlist_folder_key,created_at,writable,metadata_writable,EXISTS(SELECT 1 FROM playlist_file_links link WHERE link.playlist_key=playlists.playlist_key),object_id";
 
 pub(crate) type PlaylistRow = (
     i64,
@@ -1748,6 +1771,7 @@ pub(crate) type PlaylistRow = (
     bool,
     bool,
     bool,
+    String,
 );
 
 pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playlist {
@@ -1762,12 +1786,14 @@ pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playl
         writable,
         metadata_writable,
         linked,
+        object,
     ) = row;
     Playlist {
         key,
         source: source.map(SourceKey::from_raw),
         owned_by_source,
         indexed,
+        object,
         name,
         folder,
         created,
@@ -1795,13 +1821,16 @@ fn edit_entries(entries: &mut Vec<Entry<TrackKey>>, removed: &[i64], put: Vec<En
 
 /// The smart playlist columns the Catalog holds. Statements that write one return them.
 pub(crate) const SMART_COLUMNS: &str =
-    "smart_playlist_key,name,playlist_folder_key,position,definition_json";
+    "smart_playlist_key,name,playlist_folder_key,position,definition_json,object_id";
 
-pub(crate) type SmartRow = (i64, String, Option<i64>, i64, String);
+pub(crate) type SmartRow = (i64, String, Option<i64>, i64, String, String);
 
-pub(crate) fn smart_playlist((key, name, folder, position, definition): SmartRow) -> SmartPlaylist {
+pub(crate) fn smart_playlist(
+    (key, name, folder, position, definition, object): SmartRow,
+) -> SmartPlaylist {
     SmartPlaylist {
         key,
+        object,
         name,
         folder,
         position,

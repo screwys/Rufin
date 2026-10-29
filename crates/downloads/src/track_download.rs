@@ -844,10 +844,8 @@ async fn import_download_record(
         None
     };
     let inferred_key = if let Some(id) = &inferred {
-        catalog
-            .source_identity_key(id)
-            .await
-            .map_err(|error| error.to_string())?
+        catalog.loaded().await;
+        catalog.source_key(id)
     } else {
         None
     };

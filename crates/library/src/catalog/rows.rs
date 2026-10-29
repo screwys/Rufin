@@ -1,5 +1,5 @@
-//! Steps one statement on a connection's raw SQLite handle. The load reads every thin row of
-//! the Store, and handing each row from sqlx's connection worker to the caller costs far more
+//! Steps one statement on a connection's raw SQLite handle. The load and every keyed read step
+//! rows here, since handing each row from sqlx's connection worker to the caller costs far more
 //! than reading it.
 #![allow(unsafe_code)]
 
@@ -46,17 +46,21 @@ impl<'a> Handle<'a> {
                 handle: self,
                 statement,
             })
-            .ok_or_else(|| LibraryError::InvalidStore("an empty load statement".into()))
+            .ok_or_else(|| LibraryError::InvalidStore("an empty statement".into()))
     }
 
     fn check(&self, code: c_int) -> LibraryResult<()> {
         if code == ffi::SQLITE_OK {
             return Ok(());
         }
+        // A read's progress handler stopped it.
+        if code == ffi::SQLITE_INTERRUPT {
+            return Err(LibraryError::ReadCancelled);
+        }
         // SAFETY: the handle is open, and SQLite returns a static or connection-owned string.
         let message = unsafe { CStr::from_ptr(ffi::sqlite3_errmsg(self.raw.as_ptr())) };
         Err(LibraryError::InvalidStore(format!(
-            "the Catalog load failed: {}",
+            "a Catalog read failed: {}",
             message.to_string_lossy()
         )))
     }
@@ -72,6 +76,22 @@ impl Rows<'_> {
     pub(super) fn bind(&mut self, index: c_int, value: i64) -> LibraryResult<&mut Self> {
         // SAFETY: the statement is live and SQLite checks the index.
         let code = unsafe { ffi::sqlite3_bind_int64(self.statement.as_ptr(), index, value) };
+        self.handle.check(code)?;
+        Ok(self)
+    }
+
+    /// Binds text, such as a JSON list of keys. SQLite copies it.
+    pub(super) fn bind_text(&mut self, index: c_int, value: &str) -> LibraryResult<&mut Self> {
+        // SAFETY: the statement is live, SQLite checks the index and copies the bytes.
+        let code = unsafe {
+            ffi::sqlite3_bind_text(
+                self.statement.as_ptr(),
+                index,
+                value.as_ptr().cast(),
+                c_int::try_from(value.len()).unwrap_or(c_int::MAX),
+                ffi::SQLITE_TRANSIENT(),
+            )
+        };
         self.handle.check(code)?;
         Ok(self)
     }

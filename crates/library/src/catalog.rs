@@ -6,6 +6,7 @@ pub(crate) mod albums;
 pub(crate) mod artwork;
 pub(crate) mod collections;
 pub(crate) mod families;
+pub(crate) mod fetch;
 pub(crate) mod file_reads;
 pub(crate) mod files;
 pub(crate) mod image;
@@ -91,7 +92,7 @@ impl Drop for Observation<'_> {
     }
 }
 
-#[derive(Clone, Debug, FromRow, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachedSource {
     pub source: SourceKey,
     pub object_id: String,
@@ -119,9 +120,9 @@ impl Catalog {
         source_id: &'a str,
         observed: Option<i64>,
     ) -> LibraryResult<Observation<'a>> {
+        self.loaded().await;
         let source = self
-            .source_identity_key(&SourceId::new(source_id))
-            .await?
+            .source_key(&SourceId::new(source_id))
             .ok_or_else(|| LibraryError::InvalidRequest("source is no longer configured".into()))?;
         Ok(Observation {
             catalog: self,
@@ -135,18 +136,19 @@ impl Catalog {
         })
     }
 
-    pub async fn cached_source(
-        &self,
-        source_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<CachedSource>> {
-        let mut connection = tokio::select! {
-            biased;
-            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
-            connection = self.acquire_reader() => connection?,
-        };
-        Ok(sqlx::query_as("SELECT source_key source,object_id,display_name,catalog_complete FROM sources WHERE object_id=?1")
-            .bind(source_id).fetch_optional(&mut *connection).await?)
+    /// A source the Catalog holds. Callers that can run before the first load await
+    /// `loaded` first.
+    pub fn cached_source(&self, source_id: &str) -> Option<CachedSource> {
+        self.snapshot()
+            .sources
+            .values()
+            .find(|source| source.object == source_id)
+            .map(|source| CachedSource {
+                source: source.key,
+                object_id: source.object.clone(),
+                display_name: source.name.clone(),
+                catalog_complete: source.complete,
+            })
     }
 
     pub async fn accept_freshness(

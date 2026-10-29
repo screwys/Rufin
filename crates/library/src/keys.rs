@@ -59,7 +59,7 @@ pub(crate) fn source_entity_prefix(source: &SourceId, entity_kind: &str) -> Stri
 pub fn source_entity_parts(uri: &str) -> Option<(SourceId, String, String)> {
     let mut parts = uri.strip_prefix("rufin:source/")?.split('/');
     let kind = parts.next()?;
-    if !matches!(kind, "track" | "album" | "artist") {
+    if !source_entity_kinds().any(|known| known == kind) {
         return None;
     }
     let source = decode(parts.next()?)?;

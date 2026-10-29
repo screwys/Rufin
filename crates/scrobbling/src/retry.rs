@@ -891,7 +891,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{Catalog, CatalogSort, ReadCancellation, SourceId};
+    use library::{Catalog, LibraryField, ReadCancellation, SourceId};
 
     use super::*;
 
@@ -989,17 +989,17 @@ mod tests {
             )
             .await
             .unwrap();
-        let source = catalog
-            .source_identity_key(&library::SourceId::new("source"))
-            .await
-            .unwrap()
-            .unwrap();
+        let source = {
+            catalog.loaded().await;
+            catalog.source_key(&library::SourceId::new("source"))
+        }
+        .unwrap();
         let cancellation = ReadCancellation::new();
         let track_uri = catalog
             .selected_track_uris(
                 &library::MemberRead {
                     collection: library::Collection::Source(source),
-                    sort: Some(CatalogSort::Title),
+                    sort: Some(LibraryField::Title),
                     ..library::MemberRead::new(library::Collection::Source(source))
                 }
                 .selection(),
@@ -1078,15 +1078,19 @@ mod tests {
             .expect("record Activity idempotently");
 
         assert_eq!(
-            library::MemberRead {
-                descending: true,
-                ..library::MemberRead::new(library::Collection::History {
-                    source: Some(SourceId::new("source"))
-                })
-            }
-            .count(&catalog, &cancellation)
-            .await
-            .expect("Activity"),
+            catalog
+                .order(
+                    &library::Read::Members(library::MemberRead {
+                        descending: true,
+                        ..library::MemberRead::new(library::Collection::History {
+                            source: Some(SourceId::new("source"))
+                        })
+                    }),
+                    &cancellation
+                )
+                .await
+                .expect("Activity")
+                .len(),
             1
         );
         let due = catalog
@@ -1128,15 +1132,19 @@ mod tests {
             1
         );
         assert_eq!(
-            library::MemberRead {
-                descending: true,
-                ..library::MemberRead::new(library::Collection::History {
-                    source: Some(SourceId::new("source"))
-                })
-            }
-            .count(&catalog, &cancellation)
-            .await
-            .expect("Activity after account removal"),
+            catalog
+                .order(
+                    &library::Read::Members(library::MemberRead {
+                        descending: true,
+                        ..library::MemberRead::new(library::Collection::History {
+                            source: Some(SourceId::new("source"))
+                        })
+                    }),
+                    &cancellation
+                )
+                .await
+                .expect("Activity after account removal")
+                .len(),
             1
         );
     }

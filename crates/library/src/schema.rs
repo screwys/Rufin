@@ -20,6 +20,9 @@ pub(crate) const STORE_VERSION: i64 = 60;
 pub(crate) const HAS_PICTURE: i64 = 1;
 /// Tracks only.
 pub(crate) const TRACK_CUE: i64 = 2;
+/// Albums only: the release class code, from its compilation flag and release types, in
+/// three bits from here.
+pub(crate) const ALBUM_RELEASE_SHIFT: i64 = 2;
 
 /// Roles of `track_links` and `album_links`. Albums use the artist and genre roles.
 pub(crate) const LINK_ARTIST: i64 = 0;

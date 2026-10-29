@@ -2,14 +2,14 @@
 //! resident Catalog.
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, SqliteConnection};
+use sqlx::Connection;
 
 use crate::catalog::snapshot::AlbumRec;
 use crate::catalog::snapshot::Packed;
 use crate::catalog::views::Context;
 use crate::{
-    AlbumKey, AlbumView, Catalog, FolderKey, LibraryResult, ReadCancellation, SourceKey, TrackKey,
-    TrackView,
+    AlbumKey, AlbumRow, Catalog, FolderKey, Item, LibraryResult, ReadCancellation, Row, SourceKey,
+    TagRow, TrackKey, TrackRow,
 };
 
 const HOME_LIMIT: i64 = 24;
@@ -90,13 +90,13 @@ pub struct HomeEntryInput {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeTrackRow {
-    pub track: TrackView,
+    pub track: TrackRow,
     pub title: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeAlbumRow {
-    pub album: AlbumView,
+    pub album: AlbumRow,
     pub title: String,
 }
 
@@ -121,7 +121,7 @@ pub struct HomePage {
     pub newly_added: HomeSectionRows,
     pub recently_played: HomeSectionRows,
     pub recently_released: HomeSectionRows,
-    pub genres: Vec<crate::GenreView>,
+    pub genres: Vec<TagRow>,
     pub provider_sections: Vec<HomeProviderSection>,
 }
 
@@ -367,51 +367,151 @@ impl Catalog {
             .unwrap_or((chosen.recently_played, Vec::new()));
         let recently_released = provided(HomeBlockKind::RecentlyReleased, "recently-released")
             .unwrap_or((Vec::new(), chosen.recently_released));
-        let mut page = HomePage {
-            showcase: home_albums(self, &mut transaction, chosen.showcase)
+        let genres = if genres {
+            let read = crate::ListRead {
+                folder,
+                descending: true,
+                ..crate::ListRead::new(
+                    crate::ListKind::Genres,
+                    Some(source),
+                    crate::LibraryField::SongCount,
+                )
+            };
+            self.order_on(&mut transaction, &crate::Read::List(read))
                 .await?
-                .pop(),
-            explore: home_albums(self, &mut transaction, chosen.explore).await?,
-            most_played: section_rows(self, &mut transaction, most_played).await?,
-            newly_added: section_rows(self, &mut transaction, newly_added).await?,
-            recently_played: section_rows(self, &mut transaction, recently_played).await?,
-            recently_released: section_rows(self, &mut transaction, recently_released).await?,
-            genres: if genres {
-                let read = crate::ListRead {
-                    folder,
-                    descending: true,
-                    ..crate::ListRead::new(
-                        crate::ListKind::Genres,
-                        Some(source),
-                        crate::CatalogSort::TrackCount,
-                    )
-                };
-                let order = self.list_order(&mut transaction, &read).await?;
-                let keys = order
-                    .iter()
-                    .take(12)
-                    .copied()
-                    .map(crate::GenreKey::from_raw)
-                    .collect::<Vec<_>>();
-                crate::collections::load_genre_rows(self, &mut transaction, &keys).await?
-            } else {
-                Vec::new()
-            },
-            provider_sections: Vec::new(),
+                .items(0..12)
+        } else {
+            Vec::new()
         };
-        let others = sections.into_iter().filter(|(section, _)| {
-            !matches!(
-                section.as_str(),
-                "most-played" | "newly-added" | "recently-played" | "recently-released"
-            )
-        });
-        for (section_id, (title, tracks, albums)) in others.take(12) {
-            page.provider_sections.push(HomeProviderSection {
-                section_id,
-                title,
-                rows: section_rows(self, &mut transaction, (tracks, albums)).await?,
-            });
+        let others = sections
+            .into_iter()
+            .filter(|(section, _)| {
+                !matches!(
+                    section.as_str(),
+                    "most-played" | "newly-added" | "recently-played" | "recently-released"
+                )
+            })
+            .take(12)
+            .collect::<Vec<_>>();
+        // Every block's rows in one statement.
+        let tracks = |members: &[(TrackKey, String)]| {
+            members
+                .iter()
+                .map(|(key, _)| Item::Track {
+                    key: *key,
+                    entry: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let albums = |members: &[(AlbumKey, String)]| {
+            members
+                .iter()
+                .map(|(key, _)| Item::Album(*key))
+                .collect::<Vec<_>>()
+        };
+        let mut items = albums(&chosen.showcase);
+        items.extend(albums(&chosen.explore));
+        for (tracked, albumed) in [
+            &most_played,
+            &newly_added,
+            &recently_played,
+            &recently_released,
+        ] {
+            items.extend(tracks(tracked));
+            items.extend(albums(albumed));
         }
+        for (_, (_, tracked, albumed)) in &others {
+            items.extend(tracks(tracked));
+            items.extend(albums(albumed));
+        }
+        items.extend(genres.iter().copied());
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert(*item));
+        let shape = crate::read::Shape::of(None);
+        let rows = self
+            .fetch_on(
+                &mut transaction,
+                [(&items, &[]), (&[], &[])],
+                None,
+                &shape,
+                true,
+            )
+            .await?
+            .rows;
+        let mut track_rows = std::collections::HashMap::new();
+        let mut album_rows = std::collections::HashMap::new();
+        let mut tag_rows = std::collections::HashMap::new();
+        for row in rows {
+            match row {
+                Row::Track(row) => {
+                    track_rows.insert(row.track_key, row);
+                }
+                Row::Album(row) => {
+                    album_rows.insert(row.album_key, row);
+                }
+                Row::Tag(row) => {
+                    tag_rows.insert(row.key, row);
+                }
+                _ => {}
+            }
+        }
+        let home_tracks = |members: Vec<(TrackKey, String)>| {
+            members
+                .into_iter()
+                .filter_map(|(key, title)| {
+                    Some(HomeTrackRow {
+                        track: track_rows.get(&key)?.clone(),
+                        title,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let home_albums = |members: Vec<(AlbumKey, String)>| {
+            members
+                .into_iter()
+                .filter_map(|(key, title)| {
+                    let album = album_rows.get(&key)?.clone();
+                    let title = if title.is_empty() {
+                        album.title.clone()
+                    } else {
+                        title
+                    };
+                    Some(HomeAlbumRow { album, title })
+                })
+                .collect::<Vec<_>>()
+        };
+        let section_rows =
+            |(tracks, albums): (Vec<(TrackKey, String)>, Vec<(AlbumKey, String)>)| {
+                HomeSectionRows {
+                    tracks: home_tracks(tracks),
+                    albums: home_albums(albums),
+                }
+            };
+        let page = HomePage {
+            showcase: home_albums(chosen.showcase).pop(),
+            explore: home_albums(chosen.explore),
+            most_played: section_rows(most_played),
+            newly_added: section_rows(newly_added),
+            recently_played: section_rows(recently_played),
+            recently_released: section_rows(recently_released),
+            genres: genres
+                .into_iter()
+                .filter_map(|item| match item {
+                    Item::Genre(key) => tag_rows.get(&key.raw()).cloned(),
+                    _ => None,
+                })
+                .collect(),
+            provider_sections: others
+                .into_iter()
+                .map(
+                    |(section_id, (title, tracks, albums))| HomeProviderSection {
+                        section_id,
+                        title,
+                        rows: section_rows((tracks, albums)),
+                    },
+                )
+                .collect(),
+        };
         transaction.commit().await?;
         Ok(page)
     }
@@ -424,62 +524,4 @@ fn explore_album_pivot(source: SourceKey, variation: i64) -> i64 {
     mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     mixed ^= mixed >> 31;
     (mixed % 2_147_483_647) as i64
-}
-
-async fn section_rows(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    (tracks, albums): (Vec<(TrackKey, String)>, Vec<(AlbumKey, String)>),
-) -> LibraryResult<HomeSectionRows> {
-    Ok(HomeSectionRows {
-        tracks: home_tracks(catalog, connection, tracks).await?,
-        albums: home_albums(catalog, connection, albums).await?,
-    })
-}
-
-async fn home_tracks(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    members: Vec<(TrackKey, String)>,
-) -> LibraryResult<Vec<HomeTrackRow>> {
-    let keys = members.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-    let mut tracks = crate::tracks::load_track_rows(catalog, connection, &keys)
-        .await?
-        .into_iter()
-        .map(|track| (track.track_key, track))
-        .collect::<std::collections::HashMap<_, _>>();
-    Ok(members
-        .into_iter()
-        .filter_map(|(key, title)| {
-            Some(HomeTrackRow {
-                track: tracks.remove(&key)?,
-                title,
-            })
-        })
-        .collect())
-}
-
-async fn home_albums(
-    catalog: &Catalog,
-    connection: &mut SqliteConnection,
-    members: Vec<(AlbumKey, String)>,
-) -> LibraryResult<Vec<HomeAlbumRow>> {
-    let keys = members.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-    let mut albums = crate::collections::load_album_rows(catalog, connection, &keys, false)
-        .await?
-        .into_iter()
-        .map(|album| (album.album_key, album))
-        .collect::<std::collections::HashMap<_, _>>();
-    Ok(members
-        .into_iter()
-        .filter_map(|(key, title)| {
-            let album = albums.remove(&key)?;
-            let title = if title.is_empty() {
-                album.metadata.title.clone()
-            } else {
-                title
-            };
-            Some(HomeAlbumRow { album, title })
-        })
-        .collect())
 }

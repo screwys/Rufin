@@ -17,7 +17,7 @@ use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
 /// Raised when the meaning of a record's fields or flags changes, or its fields are reordered.
-const REVISION: u8 = 4;
+const REVISION: u8 = 5;
 /// Records are written as they are in memory, so their sizes are part of the format.
 const FORMAT: [u8; 8] = [
     REVISION,
@@ -250,6 +250,7 @@ pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
     for playlist in &playlists.records {
         out.i64(playlist.key);
         out.u32(playlist.name.raw());
+        out.u32(playlist.object.raw());
         out.i64(playlist.folder);
         out.u32(playlist.created);
         out.u16(playlist.source);
@@ -265,6 +266,7 @@ pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
     out.len(snapshot.smart_playlists.len());
     for smart in snapshot.smart_playlists.values() {
         out.i64(smart.key);
+        out.text(&smart.object);
         out.text(&smart.name);
         out.optional_i64(smart.folder);
         out.i64(smart.position);
@@ -356,6 +358,7 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
         let mut playlist = PlaylistRec {
             key: input.i64()?,
             name: StrId::from_raw(input.u32()?),
+            object: StrId::from_raw(input.u32()?),
             folder: input.i64()?,
             created: input.u32()?,
             source: input.u16()?,
@@ -381,6 +384,7 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
             key,
             SmartPlaylist {
                 key,
+                object: input.text()?,
                 name: input.text()?,
                 folder: input.optional_i64()?,
                 position: input.i64()?,

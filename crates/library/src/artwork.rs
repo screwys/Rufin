@@ -5,7 +5,7 @@ use md5_digest::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Sqlite};
 
-use crate::catalog::views::{Art, Context, Owner, Picture};
+use crate::catalog::views::{Art, Context, Owner};
 use crate::{Catalog, FolderKey, LibraryError, LibraryResult, ReadCancellation, SourceKey};
 
 const ARTWORK_PAGE_LIMIT: usize = 128;
@@ -250,126 +250,6 @@ impl ArtworkCandidate {
     }
 }
 
-/// Picture bindings of rows, read by key and composed as the Catalog chose them. An artist
-/// lists its own pictures, then the one it borrows, then its name lookups. Mosaic recipes are
-/// these candidates as stored, without preview hashes, so showing a cover never changes them.
-async fn composed_art(
-    connection: &mut sqlx::SqliteConnection,
-    arts: &[Art],
-) -> LibraryResult<Vec<Option<Vec<ArtworkCandidate>>>> {
-    let mut keys: [Vec<i64>; 3] = Default::default();
-    for art in arts {
-        match *art {
-            Art::None => {}
-            Art::Track(key) => keys[0].push(key),
-            Art::Album(key) => keys[1].push(key),
-            Art::Artist(key, borrowed) => {
-                keys[2].push(key);
-                match borrowed {
-                    Some(Picture::Track(key)) => keys[0].push(key),
-                    Some(Picture::Album(key)) => keys[1].push(key),
-                    None => {}
-                }
-            }
-        }
-    }
-    let mut stored: [std::collections::HashMap<i64, Vec<ArtworkCandidate>>; 3] = Default::default();
-    for ((table, column), (keys, stored)) in [
-        ("track_details", "track_key"),
-        ("albums", "album_key"),
-        ("artists", "artist_key"),
-    ]
-    .into_iter()
-    .zip(keys.iter().zip(&mut stored))
-    {
-        if keys.is_empty() {
-            continue;
-        }
-        let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {column},native_artwork FROM {table} WHERE {column} IN (SELECT value FROM json_each(?1)) AND native_artwork IS NOT NULL"
-        )))
-        .bind(serde_json::to_string(keys)?)
-        .fetch_all(&mut *connection)
-        .await?;
-        for (key, binding) in rows {
-            stored.insert(key, serde_json::from_slice(&binding)?);
-        }
-    }
-    let picture = |picture: Picture| match picture {
-        Picture::Track(key) => stored[0].get(&key),
-        Picture::Album(key) => stored[1].get(&key),
-    };
-    let composed = arts
-        .iter()
-        .map(|art| match *art {
-            Art::None => None,
-            Art::Track(key) => stored[0].get(&key).cloned(),
-            Art::Album(key) => stored[1].get(&key).cloned(),
-            Art::Artist(key, borrowed) => {
-                let own = stored[2].get(&key).map(Vec::as_slice).unwrap_or_default();
-                let lookup = |candidate: &&ArtworkCandidate| {
-                    matches!(
-                        candidate.image,
-                        ArtworkImage::Artist { .. } | ArtworkImage::Album(_)
-                    )
-                };
-                let candidates = own
-                    .iter()
-                    .filter(|candidate| !lookup(candidate))
-                    .chain(borrowed.and_then(picture).into_iter().flatten())
-                    .chain(own.iter().filter(lookup))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                (!candidates.is_empty()).then_some(candidates)
-            }
-        })
-        .collect::<Vec<_>>();
-    Ok(composed)
-}
-
-/// The bindings rows show: the composed candidates with the preview hashes known for them.
-pub(crate) async fn art_bindings(
-    connection: &mut sqlx::SqliteConnection,
-    arts: &[Art],
-) -> LibraryResult<Vec<Option<Vec<u8>>>> {
-    let mut composed = composed_art(connection, arts).await?;
-    let families = composed
-        .iter()
-        .flatten()
-        .flatten()
-        .filter(|candidate| candidate.blur_hash.is_none())
-        .map(|candidate| candidate.key.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    if !families.is_empty() {
-        let previews: std::collections::HashMap<String, String> =
-            sqlx::query_as("SELECT family,hash FROM artwork_previews WHERE family IN (SELECT value FROM json_each(?1))")
-                .bind(serde_json::to_string(&families)?)
-                .fetch_all(&mut *connection)
-                .await?
-                .into_iter()
-                .collect();
-        for candidate in composed.iter_mut().flatten().flatten() {
-            if candidate.blur_hash.is_none() {
-                candidate.blur_hash = previews.get(&candidate.key).cloned();
-            }
-        }
-    }
-    composed
-        .into_iter()
-        .map(|candidates| {
-            candidates
-                .map(|candidates| serde_json::to_vec(&candidates).map_err(Into::into))
-                .transpose()
-        })
-        .collect()
-}
-
-pub(crate) fn preview_sql(binding: &str) -> String {
-    format!(
-        "CASE WHEN {binding} IS NOT NULL THEN CAST((SELECT json_group_array(json_object('key',json_extract(candidate.value,'$.key'),'image',json(json_extract(candidate.value,'$.image')),'blur_hash',COALESCE(json_extract(candidate.value,'$.blur_hash'),preview.hash)) ORDER BY candidate.key) FROM json_each({binding}) candidate LEFT JOIN artwork_previews preview ON preview.family=json_extract(candidate.value,'$.key')) AS BLOB) END"
-    )
-}
-
 pub(crate) fn playlist_binding(
     smart: bool,
     source_id: Option<String>,
@@ -500,24 +380,19 @@ pub(crate) async fn raw_playlist_artwork_on(
         .fetch_all(&mut *connection)
         .await?;
     let arts = catalog.arts(keys.into_iter().map(|key| key.map(Owner::Track)));
-    Ok(composed_art(connection, &arts)
+    Ok(crate::catalog::fetch::recipes(connection, &arts)
         .await?
         .into_iter()
         .map(Option::unwrap_or_default)
         .collect())
 }
 
-/// A playlist row's binding: its own picture, then its mosaic. None when it has neither.
+/// A playlist row's binding: its own candidates, then its mosaic. None when it has neither.
 pub(crate) fn playlist_artwork(
-    binding: Option<Vec<u8>>,
+    mut candidates: Vec<ArtworkCandidate>,
     owner: (bool, Option<String>, String),
     mosaic: Option<&str>,
 ) -> LibraryResult<Option<Vec<u8>>> {
-    let mut candidates: Vec<ArtworkCandidate> = binding
-        .as_deref()
-        .map(serde_json::from_slice)
-        .transpose()?
-        .unwrap_or_default();
     let picks = mosaic
         .map(serde_json::from_str::<Vec<String>>)
         .transpose()?
@@ -606,7 +481,10 @@ pub(crate) async fn playlist_artwork_choices_on(
             break;
         }
         let arts = catalog.arts(batch.iter().map(|(key, _)| Some(Owner::Track(*key))));
-        for ((_, uri), recipe) in batch.iter().zip(composed_art(connection, &arts).await?) {
+        for ((_, uri), recipe) in batch
+            .iter()
+            .zip(crate::catalog::fetch::recipes(connection, &arts).await?)
+        {
             let Some(recipe) = recipe else { continue };
             if result.len() < 4
                 && let Some(asset) = recipe.first().map(ArtworkCandidate::asset_identity)
@@ -644,7 +522,7 @@ impl ArtworkCacheRetention<'_> {
         let arts = self
             .catalog
             .arts(page.into_iter().rev().map(|key| Some(Owner::Track(key))));
-        Ok(art_bindings(&mut self.connection, &arts)
+        Ok(crate::catalog::fetch::bindings(&mut self.connection, &arts)
             .await?
             .into_iter()
             .flatten()
@@ -765,7 +643,7 @@ impl Catalog {
                 .or(album.map(Owner::Album))
                 .or(artist.map(Owner::Artist))
         }));
-        art_bindings(&mut connection, &arts).await
+        crate::catalog::fetch::bindings(&mut connection, &arts).await
     }
 
     pub async fn playlist_artwork_binding(
@@ -773,14 +651,11 @@ impl Catalog {
         playlist: crate::PlaylistKey,
     ) -> LibraryResult<Option<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT {} FROM playlists WHERE playlist_key=?1",
-            preview_sql("artwork_binding")
-        )))
-        .bind(playlist)
-        .fetch_optional(&mut *connection)
-        .await?
-        .flatten())
+        let mut want = crate::catalog::fetch::Want::new(true);
+        want.playlist_art.insert(playlist.raw());
+        crate::catalog::fetch::run(&mut connection, &want)
+            .await?
+            .playlist_binding(playlist.raw())
     }
     pub async fn playlist_image(&self, image: &ArtworkImage) -> LibraryResult<Option<Vec<u8>>> {
         let ArtworkImage::Playlist {
@@ -835,7 +710,7 @@ impl Catalog {
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let arts = self.arts(keys.iter().map(|key| Some(Owner::Track(key.raw()))));
         let mut connection = self.acquire_reader().await?;
-        Ok(art_bindings(&mut connection, &arts)
+        Ok(crate::catalog::fetch::bindings(&mut connection, &arts)
             .await?
             .into_iter()
             .flatten()
@@ -862,7 +737,7 @@ impl Catalog {
             .fetch_all(&mut *connection)
             .await?;
         let arts = self.arts(keys.into_iter().map(|key| Some(Owner::Track(key))));
-        Ok(art_bindings(&mut connection, &arts)
+        Ok(crate::catalog::fetch::bindings(&mut connection, &arts)
             .await?
             .into_iter()
             .flatten()
@@ -965,7 +840,7 @@ impl Catalog {
         };
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut seen = std::collections::HashSet::new();
-        Ok(art_bindings(&mut connection, &arts)
+        Ok(crate::catalog::fetch::bindings(&mut connection, &arts)
             .await?
             .into_iter()
             .flatten()

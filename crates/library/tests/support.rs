@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use library::{
-    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind,
     QueueRepeatMode, QueueTransferRow, SourceKey, TrackKey,
 };
 use sqlx::Connection;
@@ -19,7 +19,6 @@ pub struct Fixture {
     pub artists: Vec<ArtistKey>,
     pub artist_uris: Vec<String>,
     pub genre: GenreKey,
-    pub mood: MoodKey,
     pub folder: FolderKey,
 }
 
@@ -292,10 +291,6 @@ pub async fn fixture() -> Fixture {
         .fetch_one(&mut connection)
         .await
         .unwrap();
-    let mood = sqlx::query_scalar("SELECT tag_key FROM tags WHERE kind=1")
-        .fetch_one(&mut connection)
-        .await
-        .unwrap();
     let folder = sqlx::query_scalar("SELECT folder_key FROM folders")
         .fetch_one(&mut connection)
         .await
@@ -312,7 +307,6 @@ pub async fn fixture() -> Fixture {
         artists,
         artist_uris,
         genre,
-        mood,
         folder,
     }
 }

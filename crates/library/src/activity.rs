@@ -656,14 +656,14 @@ pub(crate) async fn write_legacy_activity(
 
 impl Catalog {
     /// The latest 100 listens, newest first, each with its track when one is left: filtered by
-    /// the listen's own copy and scoped to a source. Listens are not resident; this reads them
-    /// from the Store.
+    /// the listen's own copy and scoped to a source. Listens are not resident; a History order
+    /// reads them once, when it is built.
     pub(crate) async fn history(
         connection: &mut SqliteConnection,
         current: Option<&SourceId>,
         filter: &str,
         descending: bool,
-    ) -> LibraryResult<Vec<(Option<TrackKey>, ListenKey)>> {
+    ) -> LibraryResult<Vec<crate::read::Listen>> {
         let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
         let sources = if current.is_some() {
             vec![
@@ -686,59 +686,26 @@ impl Catalog {
             .collect::<Vec<_>>()
             .join(" UNION ALL ");
         let direction = if descending { "DESC" } else { "ASC" };
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT track.track_key,listen.listen_key FROM (SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT {HISTORY_LIMIT}) listen
-            LEFT JOIN tracks track USING(media_uri) ORDER BY listen.started_at {direction},listen.listen_key {direction}"
+        #[derive(FromRow)]
+        struct Row {
+            track_key: Option<TrackKey>,
+            #[sqlx(flatten)]
+            listen: ListenWrite,
+        }
+        let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT track.track_key,heard.*,heard.track_title title,heard.artist_name artist,heard.album_title album FROM (SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT {HISTORY_LIMIT}) listen
+            JOIN listens heard ON heard.listen_key=listen.listen_key
+            LEFT JOIN tracks track ON track.media_uri=listen.media_uri ORDER BY listen.started_at {direction},listen.listen_key {direction}"
         )))
         .bind(current.map(SourceId::as_str))
         .bind(filter)
         .fetch_all(connection)
-        .await?)
-    }
-
-    /// History rows: one per listen, as the listen recorded its track. A listen whose track is
-    /// gone shows from its own copy.
-    pub(crate) async fn history_rows(
-        &self,
-        connection: &mut SqliteConnection,
-        order: &[(Option<TrackKey>, ListenKey)],
-        range: std::ops::Range<usize>,
-    ) -> LibraryResult<Vec<crate::MemberRow>> {
-        let window = &order[range.start.min(order.len())..range.end.min(order.len())];
-        let keys = window
-            .iter()
-            .filter_map(|(key, _)| *key)
-            .collect::<Vec<_>>();
-        let listens = window.iter().map(|(_, key)| *key).collect::<Vec<_>>();
-        let listens: Vec<ListenWrite> = sqlx::query_as("SELECT listen.*,listen.track_title title,listen.artist_name artist,listen.album_title album FROM json_each(?1) requested JOIN listens listen ON listen.listen_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-            .bind(serde_json::to_string(&listens)?)
-            .fetch_all(&mut *connection)
-            .await?;
-        let tracks = crate::tracks::load_track_rows(self, connection, &keys)
-            .await?
+        .await?;
+        Ok(rows
             .into_iter()
-            .map(|track| (track.track_key, track))
-            .collect::<std::collections::HashMap<_, _>>();
-        Ok(window
-            .iter()
-            .zip(listens)
-            .map(|((key, _), listen)| {
-                let mut song = key
-                    .and_then(|key| tracks.get(&key).cloned())
-                    .unwrap_or_else(|| crate::TrackView {
-                        track_key: TrackKey::from_raw(0),
-                        source_key: None,
-                        source_id: None,
-                        object_id: None,
-                        media_uri: listen.media_uri.clone(),
-                        metadata: crate::TrackMetadata::default(),
-                        state: Default::default(),
-                        access: Default::default(),
-                        links: Default::default(),
-                        artwork_binding: None,
-                    });
-                show_listen(self, &mut song, &listen);
-                crate::MemberRow::Track(song)
+            .map(|row| crate::read::Listen {
+                track: row.track_key,
+                copy: row.listen,
             })
             .collect())
     }
@@ -748,53 +715,28 @@ impl Catalog {
 pub(crate) async fn overlay_history(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
-    songs: &mut [crate::TrackView],
+    rows: &mut [crate::TrackRow],
 ) -> LibraryResult<()> {
-    let uris = songs.iter().map(|song| &song.media_uri).collect::<Vec<_>>();
-    let rows: Vec<ListenWrite> = sqlx::query_as("SELECT listen.*,listen.track_title title,listen.artist_name artist,listen.album_title album FROM json_each(?1) requested JOIN listens listen ON listen.listen_key=(SELECT listen_key FROM listens WHERE media_uri=requested.value ORDER BY started_at DESC,listen_key DESC LIMIT 1)")
+    let uris = rows.iter().map(|row| &row.media_uri).collect::<Vec<_>>();
+    let listens: Vec<ListenWrite> = sqlx::query_as("SELECT listen.*,listen.track_title title,listen.artist_name artist,listen.album_title album FROM json_each(?1) requested JOIN listens listen ON listen.listen_key=(SELECT listen_key FROM listens WHERE media_uri=requested.value ORDER BY started_at DESC,listen_key DESC LIMIT 1)")
         .bind(serde_json::to_string(&uris)?)
         .fetch_all(connection)
         .await?;
-    let facts = rows
+    let facts = listens
         .into_iter()
         .map(|listen| (listen.media_uri.clone(), listen))
         .collect::<std::collections::HashMap<_, _>>();
-    for song in songs {
-        if let Some(listen) = facts.get(&song.media_uri) {
-            show_listen(catalog, song, listen);
+    let snapshot = catalog.snapshot();
+    let context = crate::catalog::views::Context::new(&snapshot);
+    for row in rows {
+        if let Some(listen) = facts.get(&row.media_uri) {
+            let listened = snapshot
+                .tracks
+                .slot(row.track_key.raw())
+                .map(|slot| context.listened(slot))
+                .unwrap_or_default();
+            crate::read::show_listen(row, listen, listened);
         }
     }
     Ok(())
-}
-
-/// A track as a listen recorded it, with Rufin's own counts of its listens.
-fn show_listen(catalog: &Catalog, song: &mut crate::TrackView, listen: &ListenWrite) {
-    let listened = {
-        let snapshot = catalog.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot);
-        snapshot
-            .tracks
-            .slot(song.track_key.raw())
-            .map(|slot| context.listened(slot))
-            .unwrap_or_default()
-    };
-    let metadata = &mut song.metadata;
-    metadata.title.clone_from(&listen.title);
-    metadata.artist.clone_from(&listen.artist);
-    metadata.album.clone_from(&listen.album);
-    metadata.duration_millis = listen.duration_millis;
-    metadata.disc_number = listen.disc_number.unwrap_or_default();
-    metadata.track_number = listen.track_number.unwrap_or_default();
-    metadata.year = listen.year;
-    metadata.release_date.clone_from(&listen.release_date);
-    metadata.source_format.clone_from(&listen.source_format);
-    metadata
-        .musicbrainz_recording_id
-        .clone_from(&listen.musicbrainz_recording_id);
-    metadata
-        .musicbrainz_release_track_id
-        .clone_from(&listen.musicbrainz_release_track_id);
-    song.state.last_played = Some(listen.started_at);
-    song.state.play_count = i64::from(listened.plays);
-    song.state.skip_count = i64::from(listened.skips);
 }
