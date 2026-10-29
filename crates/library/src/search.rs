@@ -100,7 +100,7 @@ impl Catalog {
                 "Search identity page exceeds 100 rows".into(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let tracks = self
             .track_keys_by_objects(&mut connection, Some(source), track_objects)
             .await?;
@@ -272,7 +272,7 @@ impl Catalog {
                     .collect(),
             ]
         };
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         self.search_rows(&mut connection, &keys, album_artists)
             .await
     }

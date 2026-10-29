@@ -255,8 +255,8 @@ mod tests {
     async fn export_runs_alongside_browsing_and_playback_and_releases_its_reader() {
         let directory = tempfile::tempdir().unwrap();
         let catalog = catalog(directory.path(), "export").await;
-        let (_permit, _foreground) = catalog
-            .acquire_general(&crate::ReadCancellation::new())
+        let _foreground = catalog
+            .acquire_cancellable(&crate::ReadCancellation::new())
             .await
             .unwrap();
         let mut playback = catalog.acquire_reader().await.unwrap();

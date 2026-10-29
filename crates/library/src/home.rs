@@ -146,7 +146,7 @@ impl Catalog {
         blocks: &[HomeBlockKind],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<HomePage> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let mut transaction = connection.begin().await?;
         // Provider sections by id: title, then track and album entries in position order.
         let mut provider = std::collections::BTreeMap::<

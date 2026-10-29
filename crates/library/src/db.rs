@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use sqlx::{Connection, Sqlite};
-use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore, broadcast, watch};
+use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 use crate::catalog::image;
 use crate::catalog::snapshot::Snapshot;
@@ -37,7 +37,7 @@ const IMAGE_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// written, so neither memory nor the image keeps them.
 const REMOVED_SLOTS: usize = 16;
 
-/// Request-local cooperative cancellation for one non-Playback read.
+/// Request-local cooperative cancellation for one read.
 #[derive(Debug, Default)]
 struct CancellationInner {
     cancelled: AtomicBool,
@@ -79,7 +79,6 @@ struct Store {
     readers: SqlitePool,
     export_readers: SqlitePool,
     export_read: tokio::sync::Mutex<()>,
-    general_read: Arc<Semaphore>,
 }
 
 /// What a row is to an open walk: the walk listed it, or a write outside the walk changed it
@@ -130,6 +129,33 @@ struct CatalogInner {
 #[derive(Clone)]
 pub struct Catalog {
     inner: Arc<CatalogInner>,
+}
+
+/// A pooled reader with its read's progress handler. The handler stays on the connection after
+/// release and turns inert when this drops, before the connection goes back to the pool.
+pub(crate) struct Reader {
+    live: Arc<AtomicBool>,
+    connection: PoolConnection<Sqlite>,
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::Release);
+    }
+}
+
+impl std::ops::Deref for Reader {
+    type Target = SqliteConnection;
+
+    fn deref(&self) -> &SqliteConnection {
+        &self.connection
+    }
+}
+
+impl std::ops::DerefMut for Reader {
+    fn deref_mut(&mut self) -> &mut SqliteConnection {
+        &mut self.connection
+    }
 }
 
 /// Holds the writer lock. `Catalog::writer` creates it only while the writer is open.
@@ -523,45 +549,40 @@ impl Catalog {
         Ok(WriterGuard(writer))
     }
 
-    pub(crate) async fn acquire_general(
+    /// A pooled reader whose statements stop once `cancellation` fires.
+    pub(crate) async fn acquire_cancellable(
         &self,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(OwnedSemaphorePermit, PoolConnection<Sqlite>)> {
-        let permit = tokio::select! {
-            permit = Arc::clone(&self.inner.store.general_read).acquire_owned() => {
-                permit.expect("Catalog retains the general-read semaphore")
-            }
-            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
-        };
-        if cancellation.is_cancelled() {
-            return Err(LibraryError::ReadCancelled);
-        }
+    ) -> LibraryResult<Reader> {
         let mut connection = tokio::select! {
             connection = self.inner.store.readers.acquire() => connection?,
             () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
         };
-        let cancellation = cancellation.clone();
+        let live = Arc::new(AtomicBool::new(true));
+        let (read, cancellation) = (Arc::clone(&live), cancellation.clone());
         connection
             .lock_handle()
             .await?
-            .set_progress_handler(PROGRESS_INTERVAL, move || !cancellation.is_cancelled());
-        Ok((permit, connection))
+            .set_progress_handler(PROGRESS_INTERVAL, move || {
+                !(read.load(Ordering::Acquire) && cancellation.is_cancelled())
+            });
+        Ok(Reader { live, connection })
     }
 
-    /// The general read of a page. It waits for the first load before it takes the permit, so
-    /// reads by key never queue behind the load.
+    /// `acquire_cancellable` once the first load finished, for reads that need the Catalog.
     pub(crate) async fn acquire_loaded(
         &self,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(OwnedSemaphorePermit, PoolConnection<Sqlite>)> {
+    ) -> LibraryResult<Reader> {
         tokio::select! {
             () = self.loaded() => {}
             () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
         }
-        self.acquire_general(cancellation).await
+        self.acquire_cancellable(cancellation).await
     }
 
-    // Point reads bypass the route-read permit.
+    /// A pooled reader for a read nothing cancels. A handler a cancellable read left on the
+    /// connection is inert, so this takes no handle lock.
     pub(crate) async fn acquire_reader(&self) -> LibraryResult<PoolConnection<Sqlite>> {
         Ok(self.inner.store.readers.acquire().await?)
     }
@@ -651,7 +672,6 @@ impl Store {
             readers,
             export_readers,
             export_read: tokio::sync::Mutex::new(()),
-            general_read: Arc::new(Semaphore::new(1)),
         })
     }
 }
@@ -868,12 +888,6 @@ async fn open_readers(
                     .await?;
                 Ok(())
             })
-        })
-        .after_release(|connection, _| {
-            Box::pin(async move {
-                connection.lock_handle().await?.remove_progress_handler();
-                Ok(true)
-            })
         });
     if minimum == 0 {
         Ok(options.connect_lazy_with(reader_options(path).row_buffer_size(row_buffer)))
@@ -993,10 +1007,10 @@ mod tests {
         );
 
         let cancellation = ReadCancellation::new();
-        let (_permit, mut reader) = catalog
-            .acquire_general(&cancellation)
+        let mut reader = catalog
+            .acquire_cancellable(&cancellation)
             .await
-            .expect("acquire general reader");
+            .expect("acquire a reader");
         let row = sqlx::query(
             "SELECT
                  (SELECT journal_mode FROM pragma_journal_mode),
@@ -1051,92 +1065,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn playback_bypass_uses_second_slot_but_third_general_read_waits_fairly() {
-        let (_directory, catalog) = catalog().await;
-        let mut writer = catalog.writer().await.unwrap();
-        sqlx::raw_sql("INSERT INTO sources(object_id,kind) VALUES ('source','local'); INSERT INTO tracks(source_key,object_id,media_uri) SELECT source_key,'track','file:///point.flac' FROM sources WHERE object_id='source'")
-            .execute(&mut *writer).await.unwrap();
-        // The rows were written behind the Catalog, so it loads them before the timed reads.
-        catalog.reload_under(&mut writer).await.unwrap();
-        drop(writer);
-        let cancellation = ReadCancellation::new();
-        let (permit, general) = catalog
-            .acquire_general(&cancellation)
-            .await
-            .expect("acquire suspended general read");
-
-        let mut playback = catalog
-            .acquire_reader()
-            .await
-            .expect("acquire Playback bypass");
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(&mut *playback)
-                .await
-                .expect("run Playback point read"),
-            1
-        );
-        assert_eq!(catalog.reader_pool().size(), MAX_READERS);
-
-        let waiting_catalog = catalog.clone();
-        let waiting = tokio::spawn(async move {
-            waiting_catalog
-                .acquire_general(&ReadCancellation::new())
-                .await
-        });
-        sleep(Duration::from_millis(50)).await;
-        assert!(
-            !waiting.is_finished(),
-            "a third general read bypassed the permit"
-        );
-        drop(playback);
-        assert_eq!(
-            timeout(
-                Duration::from_secs(1),
-                catalog.playback_loudness("file:///not-present", &cancellation)
-            )
-            .await
-            .expect("cached gain bypasses the browsing permit")
-            .expect("cached gain read"),
-            (None, None)
-        );
-        sleep(Duration::from_millis(50)).await;
-        assert!(
-            !waiting.is_finished(),
-            "a free pool slot bypassed the permit"
-        );
-
-        let listen: crate::ListenWrite = serde_json::from_value(serde_json::json!({
-            "external_id":"direct", "media_uri":"file:///point.flac",
-            "title":"Direct", "artist":"", "album":"", "duration_millis":1000,
-            "started_at":1_700_000_000,"local_period":"2023-11","listened_millis":1000,"skipped":false
-        })).unwrap();
-        timeout(
-            Duration::from_secs(1),
-            catalog.record_listen(&listen, Some(crate::TrackKey::from_raw(1)), &[]),
-        )
-        .await
-        .expect("accepted listen does not wait on the browsing permit")
-        .unwrap();
-
-        drop(general);
-        drop(permit);
-        let (_permit, _admitted) = timeout(Duration::from_secs(1), waiting)
-            .await
-            .expect("third general read admitted after permit release")
-            .expect("general read task joined")
-            .expect("general read acquired");
-    }
-
-    #[tokio::test]
-    async fn cancelled_general_read_returns_a_clean_usable_connection() {
+    async fn cancelled_read_returns_a_usable_connection() {
         let (_directory, catalog) = catalog().await;
         let cancellation = ReadCancellation::new();
         let task_catalog = catalog.clone();
         let task_cancellation = cancellation.clone();
         let read = tokio::spawn(async move {
-            let (_permit, mut connection) =
-                task_catalog.acquire_general(&task_cancellation).await?;
+            let mut connection = task_catalog.acquire_cancellable(&task_cancellation).await?;
             sqlx::query_scalar::<_, i64>(
                 "WITH RECURSIVE count(value) AS (
                      VALUES(0) UNION ALL SELECT value + 1 FROM count
@@ -1155,16 +1090,22 @@ mod tests {
             .expect_err("progress handler interrupted the read");
         assert!(error.to_string().contains("interrupted"), "{error}");
 
-        let (_permit, mut connection) = catalog
-            .acquire_general(&ReadCancellation::new())
+        // The cancelled read's handler is still on the connection, inert, so a read long enough
+        // to reach it runs to the end.
+        let mut connection = catalog
+            .acquire_reader()
             .await
-            .expect("reacquire cleaned reader");
+            .expect("reacquire the reader");
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT 7")
-                .fetch_one(&mut *connection)
-                .await
-                .expect("reader remains usable"),
-            7
+            sqlx::query_scalar::<_, i64>(
+                "WITH RECURSIVE count(value) AS (
+                     VALUES(0) UNION ALL SELECT value + 1 FROM count WHERE value < 99999
+                 ) SELECT count(*) FROM count",
+            )
+            .fetch_one(&mut *connection)
+            .await
+            .expect("reader remains usable"),
+            100_000
         );
     }
 
@@ -1172,8 +1113,8 @@ mod tests {
     async fn dynamic_reader_skips_journal_mode_and_is_idle_reapable() {
         let (directory, catalog) = catalog().await;
         let cancellation = ReadCancellation::new();
-        let (_permit, general) = catalog
-            .acquire_general(&cancellation)
+        let general = catalog
+            .acquire_cancellable(&cancellation)
             .await
             .expect("hold steady reader");
         let mut writer = catalog.writer().await.expect("acquire writer");

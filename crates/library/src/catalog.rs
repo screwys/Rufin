@@ -157,7 +157,7 @@ impl Catalog {
         freshness: &Freshness,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<bool> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sources WHERE object_id=?1 AND catalog_complete AND freshness=?2)")
             .bind(source_id).bind(freshness.as_bytes()).fetch_one(&mut *connection).await?)
     }

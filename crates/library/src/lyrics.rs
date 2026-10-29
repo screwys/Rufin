@@ -60,7 +60,7 @@ impl Catalog {
         only: Option<&[crate::TrackKey]>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_as("SELECT track_key,media_uri FROM tracks track
             WHERE source_key=?1 AND indexed=1 AND track_key>?2
               AND (?4 IS NULL OR track_key IN (SELECT value FROM json_each(?4)))
@@ -121,7 +121,7 @@ impl Catalog {
         authority: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<LyricsCacheRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let result = sqlx::query_as::<_, LyricsScalar>(
             "SELECT media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at
              FROM lyrics_cache WHERE media_uri=?1

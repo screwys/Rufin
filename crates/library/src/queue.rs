@@ -429,9 +429,8 @@ impl Catalog {
         // The staged tracks are resident once the transfer commits.
         let mut rows = Vec::new();
         if let Some((key, provenance)) = playing {
-            let mut connection = self.acquire_reader().await?;
             let song = self
-                .track_views_on(&mut connection, &[key])
+                .tracks(&[key], &ReadCancellation::new())
                 .await?
                 .pop()
                 .expect("requested canonical queue song");
@@ -611,13 +610,12 @@ impl Catalog {
                 "Queue window exceeds its context".into(),
             ));
         }
-        let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
         let keys = entries
             .iter()
             .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
         let songs = self
-            .track_views_on(&mut connection, &keys)
+            .tracks(&keys, cancellation)
             .await?
             .into_iter()
             .map(|song| (song.track_key, song))

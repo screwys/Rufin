@@ -82,7 +82,7 @@ impl Catalog {
     ) -> LibraryResult<ActivityOverview> {
         let (from, until) = period.range();
         let (previous_from, previous_until) = period.previous().range();
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let totals_sql = format!("{PERIOD_ACTIVITY} SELECT COALESCE(sum(plays),0) plays,COALESCE(sum(duration_millis),0) duration_millis,
             count(DISTINCT media_uri) tracks,count(DISTINCT NULLIF(artist_name,'')) artists
             FROM period_activity");

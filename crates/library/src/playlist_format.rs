@@ -1173,8 +1173,8 @@ mod tests {
                 .unwrap();
             assert_eq!(imported.playlist, original.playlist);
             assert_eq!(imported.imported, 5);
-            let (_permit, mut connection) = catalog
-                .acquire_general(&crate::ReadCancellation::new())
+            let mut connection = catalog
+                .acquire_cancellable(&crate::ReadCancellation::new())
                 .await
                 .unwrap();
             let actual: Vec<String> = sqlx::query_scalar(

@@ -130,7 +130,7 @@ impl Catalog {
                 "R128 tag write page limit must be between 1 and 128".to_string(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let native = native_album_sql("owner");
         let result = sqlx::query_as::<_, R128TagWrite>(sqlx::AssertSqlSafe(format!(
             "SELECT track.track_key,track_loudness.integrated_lufs track_lufs,
@@ -162,7 +162,7 @@ impl Catalog {
         after: Option<TrackKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<TrackLoudnessWork>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,details.loudness_analysis_key expected_analysis_key,COALESCE((SELECT download.path FROM downloads download WHERE download.media_uri=track.media_uri LIMIT 1),(SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track JOIN track_details details USING(track_key) WHERE track.source_key=?1 AND track.indexed=1 AND track.track_key>?2 AND NOT(details.source_loudness_analysis_key=details.loudness_analysis_key AND json_extract(details.metadata,'$.source_loudness.integrated_lufs') IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.analysis_key=details.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
             .bind(source).bind(after.map_or(0, TrackKey::raw)).fetch_optional(&mut *connection).await;
         result?.map(TryInto::try_into).transpose()
@@ -174,7 +174,7 @@ impl Catalog {
         after: Option<AlbumKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<AlbumLoudnessWork>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let native = native_album_sql("album");
         let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>(sqlx::AssertSqlSafe(format!("WITH album AS(SELECT albums.*,source_loudness_analysis_key album_source_token,loudness_analysis_key album_token FROM albums) SELECT album.album_key,album.loudness_analysis_key FROM album WHERE album.source_key=?1 AND album.album_key>?2 AND json_extract({native},'$.integrated_lufs') IS NULL AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key AND measurement.analysis_key=album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track WHERE track.source_key=album.source_key AND track.album_key=album.album_key AND track.indexed=1) ORDER BY album.album_key LIMIT 1")))

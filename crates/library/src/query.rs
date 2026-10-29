@@ -108,7 +108,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<i64>> {
         if kind == CatalogKind::Track {
-            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let mut connection = self.acquire_cancellable(cancellation).await?;
             return self
                 .track_keys_by_objects(&mut connection, source, objects)
                 .await;

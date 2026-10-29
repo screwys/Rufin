@@ -1396,7 +1396,7 @@ impl Catalog {
         let (rows, listens) = window(fetch.rows.as_ref());
         let (favorites, favorite_listens) = window(fetch.favorites.as_ref());
         let shape = Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()));
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let (headers, [rows, favorites]) = self
             .fetch_on(
                 &mut connection,
@@ -1442,7 +1442,7 @@ impl Catalog {
         art: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Row>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         self.rows_of_on(&mut connection, items, &Shape::of(None), art)
             .await
     }
@@ -1547,7 +1547,7 @@ impl Catalog {
         keys: &[TrackKey],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackView>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         self.track_views_on(&mut connection, &keys[..keys.len().min(WINDOW)])
             .await
     }
@@ -1569,7 +1569,7 @@ impl Catalog {
         uris: &[String],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackView>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let keys = track_keys_on(&mut connection, &uris[..uris.len().min(WINDOW)]).await?;
         self.track_views_on(&mut connection, &keys).await
     }
@@ -1580,7 +1580,7 @@ impl Catalog {
         uris: &[String],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         track_keys_on(&mut connection, uris).await
     }
 
@@ -1590,7 +1590,7 @@ impl Catalog {
         headers: &[HeaderKey],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Header>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let headers = &headers[..headers.len().min(WINDOW)];
         Ok(self
             .fetch_on(
@@ -1712,7 +1712,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<SmartPlaylistRow>> {
         let items = keys.iter().map(|key| Item::Smart(*key)).collect::<Vec<_>>();
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let shape = Shape {
             now,
             ..Shape::of(None)

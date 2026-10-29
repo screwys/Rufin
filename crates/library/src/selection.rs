@@ -201,7 +201,7 @@ impl Catalog {
         selection: &MemberSelection,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         Ok(selected_tracks_on(self, &mut connection, selection)
             .await?
             .into_iter()
@@ -218,7 +218,7 @@ impl Catalog {
         if limit == Some(0) {
             return Ok(Vec::new());
         }
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let mut keys = selected_tracks_on(self, &mut connection, selection)
             .await?
             .into_iter()

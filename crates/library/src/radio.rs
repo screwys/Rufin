@@ -52,7 +52,7 @@ impl Catalog {
         seed: &RadioSeed,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<(SourceKey, crate::SourceId, Option<String>)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT sources.source_key,sources.object_id,seed.object_id FROM (",
         );
@@ -102,7 +102,7 @@ impl Catalog {
             return Ok(Vec::new());
         }
         require_radio_bounds(0, object_ids.len())?;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut query = QueryBuilder::<Sqlite>::new("WITH requested(object_id,position) AS (");
         query.push_values(object_ids.iter().enumerate(), |mut row, (position, id)| {
             row.push_bind(id).push_bind(position as i64);
@@ -147,7 +147,7 @@ impl Catalog {
     ) -> LibraryResult<Vec<TrackKey>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let (seed_track, queued) = {
-            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let mut connection = self.acquire_cancellable(cancellation).await?;
             let track = match &seed {
                 RadioSeed::Track(uri) => {
                     sqlx::query_scalar::<_, i64>(
@@ -285,7 +285,7 @@ impl Catalog {
     ) -> LibraryResult<Vec<TrackKey>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let queued = {
-            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let mut connection = self.acquire_cancellable(cancellation).await?;
             queued_tracks(&mut connection).await?
         };
         self.loaded().await;

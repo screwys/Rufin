@@ -108,7 +108,7 @@ impl Catalog {
         media_uri: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<(Option<bool>, Option<u8>)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let result = sqlx::query_as::<_, (Option<bool>, Option<i64>)>(
             "SELECT favorite,rating/10 FROM user_state WHERE media_uri=?1",
         )

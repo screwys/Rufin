@@ -219,7 +219,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PendingListenDelivery>> {
         let limit = limit.clamp(1, DELIVERY_LIMIT) as i64;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_as::<_, PendingListenDelivery>(
             "SELECT outbox.outbox_key,outbox.listen_key,outbox.service,outbox.account_id,
                     outbox.attempts,outbox.next_attempt_at,outbox.last_error,

@@ -627,7 +627,7 @@ impl Catalog {
                 "artwork URI window exceeds 128".into(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         // Album and artist URIs resolve resident; the rest are track URIs.
         let tracks: Vec<Option<i64>> = sqlx::query_scalar(
             "SELECT track.track_key FROM json_each(?1) requested
@@ -843,7 +843,7 @@ impl Catalog {
                 .take(limit)
                 .collect::<Vec<_>>()
         };
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut seen = std::collections::HashSet::new();
         Ok(crate::catalog::fetch::bindings(&mut connection, &arts)
             .await?
@@ -861,7 +861,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let limit = limit.clamp(1, ARTWORK_PAGE_LIMIT) as i64;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let mut query = QueryBuilder::<Sqlite>::new("");
         for (index, table) in [

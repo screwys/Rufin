@@ -89,7 +89,7 @@ impl Catalog {
         if expressions.is_empty() {
             return Ok(SearchResults::default());
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let mut keys = Vec::new();
         let mut lyrics = BTreeMap::new();

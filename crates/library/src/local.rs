@@ -234,7 +234,7 @@ impl Catalog {
         parent: Option<&str>,
         configured_roots: &[String],
     ) -> LibraryResult<(Vec<(String, String)>, Vec<String>)> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         let mut transaction = connection.begin().await?;
         let roots_json = serde_json::to_string(configured_roots)?;
         let mut parent = parent.map(str::to_owned);
@@ -314,7 +314,7 @@ impl Catalog {
         album_artist: bool,
         folder: Option<crate::FolderKey>,
     ) -> LibraryResult<Option<(String, String)>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         let members = self
             .collection_members(&mut connection, media_uri, Some(album_artist), folder)
             .await?;
@@ -392,7 +392,7 @@ impl Catalog {
         after: Option<crate::TrackKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<FileEditRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut members = self
             .collection_members(&mut connection, collection_uri, None, None)
             .await?;
@@ -460,7 +460,7 @@ impl Catalog {
         item: &DownloadItem,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<DownloadStatus> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let owner: Option<i64> = match item {
             DownloadItem::Track { media_uri } => {
                 let (total, downloaded): (i64, i64) =
@@ -536,7 +536,7 @@ impl Catalog {
     }
 
     pub async fn downloaded_count(&self, source_id: Option<&str>) -> LibraryResult<usize> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         let count = if let Some(source_id) = source_id {
             sqlx::query_scalar::<_, i64>(
                 "SELECT count(DISTINCT media_uri) FROM main.downloads WHERE source_id=?1",
@@ -808,7 +808,7 @@ impl Catalog {
         server_prefix: Option<&str>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let count = sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM tracks JOIN track_details USING(track_key)
              WHERE source_key=?1 AND indexed=1 AND source_path IS NOT NULL AND (
@@ -861,7 +861,7 @@ impl Catalog {
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<MappingTrackRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_as::<_, MappingTrackRow>(
             "SELECT track_key,media_uri,source_path
              FROM tracks JOIN track_details USING(track_key) WHERE source_key=?1 AND indexed=1 AND source_path IS NOT NULL
@@ -877,7 +877,7 @@ impl Catalog {
     }
 
     pub async fn local_file_roots(&self, source: SourceKey) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_scalar(
             "SELECT DISTINCT root FROM local_file_access_roots WHERE source_key=?1",
         )
@@ -894,7 +894,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<LocalFileRow>> {
         let limit = limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM observed_local_files WHERE source_key=?1 AND EXISTS(SELECT 1 FROM local_file_access_roots access WHERE access.source_key=observed_local_files.source_key AND access.root=observed_local_files.root) AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
             .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
@@ -919,13 +919,13 @@ impl Catalog {
     }
 
     pub async fn original_file(&self, media_uri: &str) -> LibraryResult<Option<LocalLocatorWrite>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1")
             .bind(media_uri).fetch_optional(&mut *connection).await?)
     }
 
     pub async fn media_file_size(&self, media_uri: &str) -> LibraryResult<Option<i64>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_scalar("SELECT size_bytes FROM (
             SELECT observed.size_bytes FROM tracks track JOIN track_details details USING(track_key)
             JOIN local_files file ON file.source_key=track.source_key AND file.path=details.source_path
@@ -1206,7 +1206,7 @@ impl Catalog {
         playlist: Option<crate::PlaylistKey>,
         after: &str,
     ) -> LibraryResult<Vec<(String, Option<String>)>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_as(
             "SELECT imported.media_uri,(SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key AND access.local_file_key IS NOT NULL) FROM (SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key)
             WHERE (?1 IS NULL OR entry.playlist_key=?1) AND track.media_uri>?2

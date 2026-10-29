@@ -122,7 +122,7 @@ impl Catalog {
             tracks.sort();
             tracks.into_iter().map(|(_, key)| key).collect::<Vec<_>>()
         };
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_scalar("SELECT track.media_uri FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
             .bind(serde_json::to_string(&keys)?)
             .fetch_all(&mut *connection)
@@ -159,7 +159,7 @@ impl Catalog {
                 })
                 .collect::<Vec<_>>()
         };
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let mut rows = Vec::with_capacity(writable.len());
         for items in writable.chunks(256) {
             rows.extend(
@@ -181,7 +181,7 @@ impl Catalog {
         selection: &MemberSelection,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<PlaylistEditEntry>> {
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         let selected =
             crate::selection::selected_tracks_on(self, &mut connection, selection).await?;
         let keys = selected

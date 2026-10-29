@@ -2067,7 +2067,7 @@ impl Catalog {
             return Ok(order);
         }
         if read.reads_store() {
-            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let mut connection = self.acquire_cancellable(cancellation).await?;
             return self.order_on(&mut connection, read).await;
         }
         Ok(self.build(read, &Inputs::default()))

@@ -191,7 +191,7 @@ impl Catalog {
             .filter_map(|pin| Some((pin, self.pin_item(pin)?)))
             .collect::<Vec<_>>();
         let items = pinned.iter().map(|(_, item)| *item).collect::<Vec<_>>();
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut connection = self.acquire_cancellable(cancellation).await?;
         let shape = crate::read::Shape {
             now,
             ..crate::read::Shape::of(None)

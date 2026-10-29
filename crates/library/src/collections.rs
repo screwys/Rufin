@@ -212,7 +212,7 @@ impl Catalog {
                 .filter_map(|slot| snapshot.tracks.key_of(slot))
                 .collect::<Vec<_>>()
         };
-        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let mut connection = self.acquire_loaded(cancellation).await?;
         Ok(sqlx::query_scalar("SELECT track.media_uri FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
             .bind(serde_json::to_string(&tracks)?)
             .fetch_all(&mut *connection)
@@ -234,7 +234,7 @@ impl Catalog {
         let mut after = 0;
         while candidates.len() < limit {
             let page: Vec<AlbumReleaseCandidate> = {
-                let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+                let mut connection = self.acquire_cancellable(cancellation).await?;
                 sqlx::query_as("SELECT album_key,media_uri,release_identity lookup_identity FROM albums WHERE source_key=?1 AND album_key>?2 AND release_identity IS NOT NULL AND release_lookup_identity IS NOT release_identity ORDER BY album_key LIMIT 256")
                     .bind(source)
                     .bind(after)
