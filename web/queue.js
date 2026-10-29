@@ -183,7 +183,7 @@ async function showQueueMenu(row, anchor, event) {
     `/media?${new URLSearchParams({ uri: row.track.uri })}`,
   );
   const track = { ...row.track, favorite: metadata.favorite };
-  const destination = await goToMenu(track, "track", metadata);
+  const destination = await goToMenu(track);
   showMenu(
     [
       [tr("Play"), () => api("/queue/activate", "POST", { position: row.position })],
