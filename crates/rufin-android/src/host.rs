@@ -107,13 +107,6 @@ fn android_paths(files_dir: String, cache_dir: String) -> Paths {
     }
 }
 
-#[uniffi::export]
-pub fn reset_database(files_dir: String, cache_dir: String) -> Result<(), AndroidError> {
-    rufin_core::settings::StorageResetRequest::Database
-        .apply(&android_paths(files_dir, cache_dir))
-        .map_err(error)
-}
-
 /// The Android service retains this object independently of screen navigation.
 #[derive(uniffi::Object)]
 pub struct AndroidRuntime {

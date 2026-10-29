@@ -14,14 +14,11 @@ pub enum StorageReset {
     AllData,
 }
 
-pub enum StorageResetRequest {
-    Database,
-    Storage {
-        reset: StorageReset,
-        stored: Box<StoredSettings>,
-        connect: Box<crate::connect::ConnectSettings>,
-        secrets: Arc<dyn secrets::SecretStore>,
-    },
+pub struct StorageResetRequest {
+    reset: StorageReset,
+    stored: Box<StoredSettings>,
+    connect: Box<crate::connect::ConnectSettings>,
+    secrets: Arc<dyn secrets::SecretStore>,
 }
 
 impl SettingsOwner {
@@ -40,7 +37,7 @@ impl SettingsOwner {
         } else {
             self.secrets.current().map_err(error)?
         };
-        Ok(StorageResetRequest::Storage {
+        Ok(StorageResetRequest {
             reset,
             stored: Box::new(stored),
             connect: Box::new(connect),
@@ -69,28 +66,12 @@ impl SettingsOwner {
 impl StorageResetRequest {
     /// The host must stop playback, close the Store and stop its worker runtime first.
     pub fn apply(self, paths: &Paths) -> Result<(), String> {
-        let Self::Storage {
+        let Self {
             reset,
             stored,
             mut connect,
             secrets,
-        } = self
-        else {
-            validate_root(&paths.data_dir())?;
-            validate_root(&paths.cache_dir())?;
-            for path in [paths.store_file(), paths.catalog_file()] {
-                for suffix in ["", "-wal", "-shm"] {
-                    let mut file = path.as_os_str().to_os_string();
-                    file.push(suffix);
-                    match fs::remove_file(file) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(cause) => return Err(error(cause)),
-                    }
-                }
-            }
-            return Ok(());
-        };
+        } = self;
         let roots = [
             paths.cache_dir(),
             paths.data_dir(),

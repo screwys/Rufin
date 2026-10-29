@@ -41,7 +41,6 @@ import io.github.screwys.rufin.platform.AndroidDocuments
 import io.github.screwys.rufin.core.AndroidRuntime
 import io.github.screwys.rufin.core.installCatalogs
 import io.github.screwys.rufin.core.installTranslations
-import io.github.screwys.rufin.core.resetDatabase as resetDatabaseFiles
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -271,11 +270,6 @@ class RufinService : MediaSessionService() {
         if (wakeLock.isHeld) wakeLock.release()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
-    }
-
-    internal suspend fun resetDatabase() {
-        stopRuntimeForReset()
-        withContext(Dispatchers.IO) { resetDatabaseFiles(filesDir.absolutePath, cacheDir.absolutePath) }
     }
 
     internal suspend fun resetStorage(storage: AndroidStorage, kind: StorageReset) {

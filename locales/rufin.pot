@@ -3240,9 +3240,6 @@ msgstr ""
 msgid "Remove search"
 msgstr ""
 
-msgid "Remove the library database? Settings and saved logins will be kept."
-msgstr ""
-
 msgid "Remove unavailable tracks"
 msgstr ""
 
@@ -3299,12 +3296,6 @@ msgid "Require SMB encryption"
 msgstr ""
 
 msgid "Reset appearance"
-msgstr ""
-
-msgid "Reset database"
-msgstr ""
-
-msgid "Reset database?"
 msgstr ""
 
 msgid "Reset to defaults"

@@ -407,7 +407,12 @@ impl Catalog {
         let (opened, imported) = match opened {
             Err(error) if path.exists() && !error.is_store_unavailable() => {
                 tracing::warn!(%error, "could not open the Store; trying compatible columns");
-                crate::migration::current::recover_columns(path).await?;
+                image::remove(path);
+                if let Err(error) = crate::migration::current::recover_columns(path).await {
+                    // Nothing could be copied: start with a new Store and keep the old file beside it.
+                    tracing::warn!(%error, "could not recover the Store; starting a new one");
+                    preserve_store(path)?;
+                }
                 (Self::open(path).await?, true)
             }
             opened => opened?,

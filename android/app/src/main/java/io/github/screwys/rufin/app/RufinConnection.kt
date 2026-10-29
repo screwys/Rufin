@@ -227,11 +227,6 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    internal suspend fun resetDatabase() {
-        val connected = snapshotFlow { service }.filterNotNull().first()
-        restartAfterStorageReset { connected.resetDatabase() }
-    }
-
     private suspend fun restartAfterStorageReset(reset: suspend () -> Unit) {
         // A confirmed reset must finish even when dropping the runtime unmounts this screen.
         withContext(NonCancellable) {

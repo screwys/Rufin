@@ -28,38 +28,6 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
     let (diagnostics, _stderr) = Diagnostics::install(paths.state_dir());
     std::fs::create_dir_all(paths.store_file().parent().unwrap()).unwrap();
     std::fs::write(paths.store_file(), b"unreadable database").unwrap();
-    app::with_runtime(|runtime| {
-        let opened = runtime.block_on(app::runtime_inputs(
-            diagnostics.clone(),
-            false,
-            app::startup_settings(&paths),
-            paths.clone(),
-            |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
-            Vec::new,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
-        ));
-        assert!(opened.is_err());
-        assert_eq!(
-            std::fs::read(paths.store_file()).unwrap(),
-            b"unreadable database"
-        );
-    })
-    .unwrap();
-    let settings = std::fs::read(paths.settings_file()).unwrap();
-    let artwork = paths.artwork_dir().join("keep.img");
-    std::fs::create_dir_all(artwork.parent().unwrap()).unwrap();
-    std::fs::write(&artwork, b"cached artwork").unwrap();
-    let catalog = paths.catalog_file();
-    std::fs::create_dir_all(catalog.parent().unwrap()).unwrap();
-    std::fs::write(&catalog, b"old database").unwrap();
-    rufin_core::settings::StorageResetRequest::Database
-        .apply(&paths)
-        .unwrap();
-    assert!(!paths.store_file().exists());
-    assert!(!paths.catalog_file().exists());
-    assert_eq!(std::fs::read(paths.settings_file()).unwrap(), settings);
-    assert_eq!(std::fs::read(&artwork).unwrap(), b"cached artwork");
     for reopening in [false, true] {
         app::with_runtime(|runtime| {
             let inputs = runtime
@@ -106,4 +74,11 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
         })
         .unwrap();
     }
+    // The unreadable Store did not stop startup; it waits beside the new one.
+    let kept = std::fs::read_dir(paths.store_file().parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().contains("before-migration"))
+        .expect("the unreadable Store is kept");
+    assert_eq!(std::fs::read(kept).unwrap(), b"unreadable database");
 }

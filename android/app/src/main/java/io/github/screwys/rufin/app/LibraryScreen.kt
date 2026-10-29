@@ -153,9 +153,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val translation = LocalTranslationRevision.current
     val reduceMotion = LocalReduceMotion.current
     val label: (String) -> String = ::translate
-    val resetScope = rememberCoroutineScope()
-    var confirmDatabaseReset by remember { mutableStateOf(false) }
-    var resettingDatabase by remember { mutableStateOf(false) }
     val browse = model.browse
     SideEffect {
         browse.homeBlocksFingerprint = preferences.applicationSettings?.homeBlocks?.toString()
@@ -417,8 +414,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                         ErrorNotice(failure)
                         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(model::retryStartup, enabled = !resettingDatabase) { Text(label("Retry")) }
-                            TextButton({ confirmDatabaseReset = true }, enabled = !resettingDatabase) { Text(label("Reset database")) }
+                            TextButton(model::retryStartup) { Text(label("Retry")) }
                         }
                     }
                 }
@@ -519,22 +515,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         }, onMore = {
             player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
         }) { fullPlayer = false }
-    }
-    if (confirmDatabaseReset) AlertDialog(onDismissRequest = { confirmDatabaseReset = false },
-        title = { Text(label("Reset database?")) },
-        text = { Text(label("Remove the library database? Settings and saved logins will be kept.")) },
-        confirmButton = { TextButton({
-            confirmDatabaseReset = false
-            resettingDatabase = true
-            resetScope.launch {
-                try { model.resetDatabase() }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { model.showFeedback(failure); resettingDatabase = false }
-            }
-        }) { Text(label("Reset database")) } },
-        dismissButton = { TextButton({ confirmDatabaseReset = false }) { Text(label("Cancel")) } })
-    if (resettingDatabase) Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
-        Surface(shape = MaterialTheme.shapes.large) { CircularProgressIndicator(Modifier.padding(32.dp)) }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
