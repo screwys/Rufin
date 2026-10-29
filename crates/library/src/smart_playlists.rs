@@ -150,23 +150,16 @@ impl SmartPlaylistRuleField {
         ) {
             return Some(SmartPlaylistRuleValueKind::None);
         }
+        let between = operator == SmartPlaylistRuleOperator::Between;
         Some(match self {
+            Self::Title | Self::Artist | Self::Album | Self::Comment | Self::Genre | Self::Mood => {
+                SmartPlaylistRuleValueKind::Text
+            }
             Self::Favorite | Self::Played => SmartPlaylistRuleValueKind::Bool,
-            Self::LastPlayed | Self::DateAdded
-                if operator == SmartPlaylistRuleOperator::Between =>
-            {
-                SmartPlaylistRuleValueKind::DateRange
-            }
+            Self::LastPlayed | Self::DateAdded if between => SmartPlaylistRuleValueKind::DateRange,
             Self::LastPlayed | Self::DateAdded => SmartPlaylistRuleValueKind::Date,
-            Self::Bpm | Self::Rating | Self::Year | Self::PlayCount | Self::SkipCount
-                if operator == SmartPlaylistRuleOperator::Between =>
-            {
-                SmartPlaylistRuleValueKind::NumberRange
-            }
-            Self::Bpm | Self::Rating | Self::Year | Self::PlayCount | Self::SkipCount => {
-                SmartPlaylistRuleValueKind::Number
-            }
-            _ => SmartPlaylistRuleValueKind::Text,
+            _ if between => SmartPlaylistRuleValueKind::NumberRange,
+            _ => SmartPlaylistRuleValueKind::Number,
         })
     }
 
@@ -411,7 +404,7 @@ pub(crate) async fn smart_totals(
         )
         .await?;
     let snapshot = catalog.snapshot();
-    let context = crate::catalog::views::Context::new(&snapshot, false);
+    let context = crate::catalog::views::Context::new(&snapshot);
     Ok(definitions
         .iter()
         .map(|(key, definition)| {
@@ -818,34 +811,14 @@ fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResu
         .iter_mut()
         .chain(&mut definition.match_any)
     {
-        let valid = matches!(
-            (rule.field.value_kind(rule.operator), &rule.value),
-            (Some(SmartPlaylistRuleValueKind::None), None)
-                | (
-                    Some(SmartPlaylistRuleValueKind::Text),
-                    Some(SmartPlaylistRuleValue::Text(_))
-                )
-                | (
-                    Some(SmartPlaylistRuleValueKind::Number),
-                    Some(SmartPlaylistRuleValue::Number(_))
-                )
-                | (
-                    Some(SmartPlaylistRuleValueKind::NumberRange),
-                    Some(SmartPlaylistRuleValue::NumberRange { .. })
-                )
-                | (
-                    Some(SmartPlaylistRuleValueKind::Date),
-                    Some(SmartPlaylistRuleValue::Date(_))
-                )
-                | (
-                    Some(SmartPlaylistRuleValueKind::DateRange),
-                    Some(SmartPlaylistRuleValue::DateRange { .. })
-                )
-                | (
-                    Some(SmartPlaylistRuleValueKind::Bool),
-                    Some(SmartPlaylistRuleValue::Bool(_))
-                )
-        );
+        // A value of the kind the field's default for this operator has.
+        let valid = rule.field.value_kind(rule.operator).is_some()
+            && rule.value.as_ref().map(std::mem::discriminant)
+                == rule
+                    .field
+                    .default_value(rule.operator)
+                    .as_ref()
+                    .map(std::mem::discriminant);
         if !valid {
             return Err(LibraryError::InvalidRequest(
                 "Smart Playlist rule operator and value do not match the field".to_string(),

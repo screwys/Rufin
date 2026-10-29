@@ -164,7 +164,7 @@ impl Catalog {
         };
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, false);
+        let context = Context::new(&snapshot);
         let Some(owner) = snapshot.source_slot(source) else {
             return Ok(Vec::new());
         };
@@ -290,7 +290,7 @@ impl Catalog {
         };
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, false);
+        let context = Context::new(&snapshot);
         let Some(owner) = snapshot.source_slot(source) else {
             return Ok(Vec::new());
         };

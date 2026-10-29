@@ -49,6 +49,8 @@ pub enum SourcePhase {
 pub enum Scope {
     /// The Catalog was loaded again; everything may have changed.
     Reload,
+    /// Sort text or the track cover choice changed, nothing stored did; rows read again show it.
+    Display,
     Tracks {
         source: Option<SourceKey>,
         keys: Vec<TrackKey>,

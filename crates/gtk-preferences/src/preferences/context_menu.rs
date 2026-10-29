@@ -50,19 +50,10 @@ pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) 
 
     let rating: adw::SwitchRow =
         gtk_widgets::ui_resource::object(builder, resource, "context_menu_rating_row");
-    rating.set_active(
-        shell
-            .settings
-            .current
-            .borrow()
-            .application
-            .context_menu
-            .rating_visible,
+    shell.settings.bind_switch(
+        &rating,
+        "context menu rating setting",
+        |settings| &mut settings.application.context_menu.rating_visible,
+        |_| {},
     );
-    let settings = Rc::clone(&shell.settings);
-    rating.connect_active_notify(move |row| {
-        settings.set_app_setting("context menu rating setting", row.is_active(), |settings| {
-            &mut settings.application.context_menu.rating_visible
-        });
-    });
 }

@@ -109,15 +109,12 @@ pub(super) fn page(
             },
         );
     });
-    cast_proxy_row.set_active(settings.application.cast_proxy_enabled);
-    let cast_proxy_shell = Rc::clone(shell);
-    cast_proxy_row.connect_active_notify(move |row| {
-        cast_proxy_shell.settings.set_app_setting(
-            "cast proxy setting",
-            row.is_active(),
-            |settings| &mut settings.application.cast_proxy_enabled,
-        );
-    });
+    shell.settings.bind_switch(
+        &cast_proxy_row,
+        "cast proxy setting",
+        |settings| &mut settings.application.cast_proxy_enabled,
+        |_| {},
+    );
     let cast_network_dropdown = casting_network_dropdown(&shell.player_ui, 220);
     cast_network_row.add_suffix(&cast_network_dropdown);
     cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));

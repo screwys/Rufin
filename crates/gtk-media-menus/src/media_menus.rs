@@ -11,7 +11,7 @@ use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 use gtk_widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
 use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use gtk_widgets::interactions::{
-    ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON, go_to_context_submenu,
+    ALBUM_ICON, ARTIST_ICON, ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON,
     radio_context_submenu,
 };
 use gtk_widgets::ratings::context_rating_row;
@@ -282,12 +282,22 @@ fn install_track_navigation(
     } else {
         track_artists
     };
-    let artist_names = artists
-        .iter()
-        .map(|artist| artist.name.clone())
-        .collect::<Vec<_>>();
-
-    let submenu = go_to_context_submenu(action_group, &artist_names, album_media_uri.is_some());
+    let album_artist = track_artists.is_empty();
+    let submenu = go_to_submenu(
+        surface,
+        menus,
+        action_group,
+        artists.iter().map(|artist| {
+            let key = artist.media_uri.clone();
+            let route = if album_artist {
+                Route::AlbumArtistDetail(key)
+            } else {
+                Route::ArtistDetail(key)
+            };
+            (artist.name.as_str(), route)
+        }),
+        album_media_uri.map(|album| Route::AlbumDetail(album.to_owned())),
+    );
     install_source_navigation(
         surface,
         menus,
@@ -306,29 +316,40 @@ fn install_track_navigation(
             GO_TO_ICON,
         );
     }
-    let album_artist = track_artists.is_empty();
-    for (index, artist) in artists.iter().enumerate() {
-        let action = if artists.len() == 1 {
-            "go-artist".to_string()
-        } else {
-            format!("go-artist-{index}")
-        };
-        let menus = Rc::clone(menus);
-        let key = artist.media_uri.clone();
-        surface.add_action(&action, move || {
-            (menus.navigate)(if album_artist {
-                Route::AlbumArtistDetail(key.clone())
-            } else {
-                Route::ArtistDetail(key.clone())
-            })
+}
+
+/// The Go to submenu of artists and an album, with the actions that open them.
+fn go_to_submenu<'a>(
+    surface: &ContextMenuSurface,
+    menus: &Rc<MediaMenus>,
+    group: &str,
+    artists: impl IntoIterator<Item = (&'a str, Route)>,
+    album: Option<Route>,
+) -> gtk::gio::Menu {
+    let submenu = gtk::gio::Menu::new();
+    let artists = artists
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, route))| {
+            (
+                format!("go-artist-{index}"),
+                localization::tr_with("Go to {artist}", &[("artist", name)]),
+                ARTIST_ICON,
+                route,
+            )
         });
-    }
-    if let Some(album) = album_media_uri.map(str::to_owned) {
+    let album = album.map(|route| {
+        let label = localization::tr(msgid("Go to Album"));
+        ("go-album".to_string(), label, ALBUM_ICON, route)
+    });
+    for (action, label, icon, route) in artists.chain(album) {
+        let item = gtk::gio::MenuItem::new(Some(&label), Some(&format!("{group}.{action}")));
+        item.set_icon(&gtk::gio::ThemedIcon::new(icon));
+        submenu.append_item(&item);
         let menus = Rc::clone(menus);
-        surface.add_action("go-album", move || {
-            (menus.navigate)(Route::AlbumDetail(album.clone()))
-        });
+        surface.add_action(&action, move || (menus.navigate)(route.clone()));
     }
+    submenu
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -945,13 +966,16 @@ pub fn present_album_context_menu(
             album_id: album.object_id.clone(),
         }),
     );
-    let artist_names = album
-        .links
-        .album_artists
-        .iter()
-        .map(|artist| artist.name.clone())
-        .collect::<Vec<_>>();
-    let submenu = go_to_context_submenu("album", &artist_names, true);
+    let submenu = go_to_submenu(
+        &surface,
+        menus,
+        "album",
+        album.links.album_artists.iter().map(|artist| {
+            let route = Route::AlbumArtistDetail(artist.media_uri.clone());
+            (artist.name.as_str(), route)
+        }),
+        Some(Route::AlbumDetail(album.media_uri.clone())),
+    );
     install_source_navigation(
         &surface,
         menus,
@@ -996,23 +1020,6 @@ pub fn present_album_context_menu(
             (metadata_menus.edit_metadata)(MetadataItemId::Album(media_uri.clone()));
         });
     }
-    for (index, artist) in album.links.album_artists.iter().enumerate() {
-        let action = if album.links.album_artists.len() == 1 {
-            "go-artist".to_string()
-        } else {
-            format!("go-artist-{index}")
-        };
-        let menus = Rc::clone(menus);
-        let key = artist.media_uri.clone();
-        surface.add_action(&action, move || {
-            (menus.navigate)(Route::AlbumArtistDetail(key.clone()))
-        });
-    }
-    let menus_album = Rc::clone(menus);
-    let album_uri = album.media_uri.clone();
-    surface.add_action("go-album", move || {
-        (menus_album.navigate)(Route::AlbumDetail(album_uri.clone()));
-    });
     if context_menu_rating_visible(menus) {
         let menus = Rc::clone(menus);
         let media_uri = album.media_uri.clone();
@@ -1103,8 +1110,18 @@ pub fn present_artist_context_menu(
             }
         }),
     );
-    let submenu =
-        go_to_context_submenu("artist", std::slice::from_ref(&artist.metadata.name), false);
+    let route = if album_artist {
+        Route::AlbumArtistDetail(artist.media_uri.clone())
+    } else {
+        Route::ArtistDetail(artist.media_uri.clone())
+    };
+    let submenu = go_to_submenu(
+        &surface,
+        menus,
+        "artist",
+        [(artist.metadata.name.as_str(), route)],
+        None,
+    );
     install_source_navigation(
         &surface,
         menus,
@@ -1158,15 +1175,6 @@ pub fn present_artist_context_menu(
             (metadata_menus.edit_metadata)(MetadataItemId::Artist(media_uri.clone()));
         });
     }
-    let menus_artist = Rc::clone(menus);
-    let artist_uri = artist.media_uri.clone();
-    surface.add_action("go-artist", move || {
-        (menus_artist.navigate)(if album_artist {
-            Route::AlbumArtistDetail(artist_uri.clone())
-        } else {
-            Route::ArtistDetail(artist_uri.clone())
-        });
-    });
     if context_menu_rating_visible(menus) {
         let menus = Rc::clone(menus);
         let media_uri = artist.media_uri.clone();

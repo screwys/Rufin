@@ -356,7 +356,7 @@ impl Catalog {
         };
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         let folder = folder.and_then(|folder| snapshot.folders.slot(folder.raw()));
         let album = snapshot.albums.slot(owner);
         let artist = snapshot.artists.slot(owner);
@@ -507,7 +507,7 @@ impl Catalog {
         drop(connection);
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         let derived = self.derived(&context, None);
         let totals = match item {
             DownloadItem::Album { .. } => snapshot
@@ -791,7 +791,7 @@ impl Catalog {
     ) -> LibraryResult<std::collections::HashMap<crate::SourceId, (usize, usize)>> {
         self.loaded().await;
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         let derived = self.covers(&context);
         let mut counts = vec![(0usize, 0usize); snapshot.source_slots.len()];
         for (slot, album) in snapshot.albums.iter() {

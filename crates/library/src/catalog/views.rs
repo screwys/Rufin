@@ -27,12 +27,10 @@ const ORDER_BUDGET: usize = 32 << 20;
 /// Kinds whose play counts come from Rufin's listens; servers report their own.
 const LISTENED_KINDS: [&str; 5] = ["local", "files", "webdav", "smb", "documents"];
 
-/// What a reader needs besides the Snapshot: which sources count Rufin's listens and the
-/// distinct-covers setting.
+/// What a reader needs besides the Snapshot: which sources count Rufin's listens.
 pub(crate) struct Context<'a> {
     pub(crate) snapshot: &'a Snapshot,
     listened: Vec<bool>,
-    pub(crate) distinct: bool,
 }
 
 /// A track's displayed plays: the server's counts on server sources, Rufin's listens elsewhere.
@@ -72,7 +70,7 @@ fn release_of(release: u32) -> Option<u32> {
 }
 
 impl<'a> Context<'a> {
-    pub(crate) fn new(snapshot: &'a Snapshot, distinct: bool) -> Self {
+    pub(crate) fn new(snapshot: &'a Snapshot) -> Self {
         let listened = snapshot
             .source_slots
             .iter()
@@ -85,11 +83,7 @@ impl<'a> Context<'a> {
                 })
             })
             .collect();
-        Self {
-            snapshot,
-            listened,
-            distinct,
-        }
+        Self { snapshot, listened }
     }
 
     pub(crate) fn played(&self, slot: u32, record: &TrackRec) -> Played {
@@ -415,7 +409,9 @@ impl Context<'_> {
         let album = self
             .album_of(record)
             .map_or(Art::None, |album| self.album_art(derived, album));
-        if record.flags & PICTURE != 0 && (self.distinct || album == Art::None) {
+        if record.flags & PICTURE != 0
+            && (self.snapshot.distinct_track_covers || album == Art::None)
+        {
             return Art::Track(record.key);
         }
         if album != Art::None {
@@ -1976,7 +1972,7 @@ impl Catalog {
                         None => {
                             let snapshot = self.snapshot();
                             let tracks = Arc::new(
-                                Context::new(&snapshot, false)
+                                Context::new(&snapshot)
                                     .evaluate(&definition, &inputs)
                                     .into_iter()
                                     .filter_map(|slot| snapshot.tracks.key_of(slot))
@@ -2021,7 +2017,7 @@ impl Catalog {
             } => {
                 let albums = {
                     let snapshot = self.snapshot();
-                    let context = Context::new(&snapshot, false);
+                    let context = Context::new(&snapshot);
                     let folder = context.folder_slot(read.folder).flatten();
                     match snapshot.artists.slot(artist.raw()) {
                         Some(artist) => context
@@ -2162,7 +2158,7 @@ impl Catalog {
         }
         let inputs = self.member_inputs(connection, read).await?;
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, self.distinct_track_covers());
+        let context = Context::new(&snapshot);
         let order = Arc::new(context.member_order(read, &inputs));
         self.cache(key, snapshot.revision, order.len() * 16, order.clone());
         Ok(order)
@@ -2181,7 +2177,7 @@ impl Catalog {
         }
         let inputs = self.list_inputs(connection, read).await?;
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, self.distinct_track_covers());
+        let context = Context::new(&snapshot);
         let folder = context.folder_slot(read.folder).flatten();
         let derived = self.derived(&context, folder);
         let order = Arc::new(context.list_order(read, &derived, &inputs));
@@ -2202,7 +2198,7 @@ impl Catalog {
     /// Where the pictures of these rows come from. A row the Catalog does not hold has none.
     pub(crate) fn arts(&self, owners: impl IntoIterator<Item = Option<Owner>>) -> Vec<Art> {
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, self.distinct_track_covers());
+        let context = Context::new(&snapshot);
         let derived = self.covers(&context);
         owners
             .into_iter()
@@ -2481,6 +2477,6 @@ impl Catalog {
                 .await?;
         }
         let snapshot = self.snapshot();
-        Ok(Context::new(&snapshot, false).parent_members(&read.kind, parents, &inputs))
+        Ok(Context::new(&snapshot).parent_members(&read.kind, parents, &inputs))
     }
 }

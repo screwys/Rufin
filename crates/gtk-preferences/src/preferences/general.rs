@@ -79,11 +79,8 @@ pub fn scrobbling_page(
         let settings = shell.settings.current.borrow().clone();
         let external_links = settings.application.external_site_links.clone();
         external_links_row.set_active(external_links.enabled);
-        lastfm_links_row.set_active(external_links.lastfm);
         lastfm_links_row.set_sensitive(external_links.enabled);
-        musicbrainz_links_row.set_active(external_links.musicbrainz);
         musicbrainz_links_row.set_sensitive(external_links.enabled);
-        server_links_row.set_active(external_links.server);
         server_links_row.set_sensitive(external_links.enabled);
         let external_links_shell = Rc::clone(shell);
         let lastfm_links_for_master = lastfm_links_row.clone();
@@ -105,43 +102,26 @@ pub fn scrobbling_page(
             }
         });
         let lastfm_links_shell = Rc::clone(shell);
-        lastfm_links_row.connect_active_notify(move |row| {
-            if lastfm_links_shell
-                .settings
-                .set_app_setting("Last.fm site links setting", row.is_active(), |settings| {
-                    &mut settings.application.external_site_links.lastfm
-                })
-                .is_some()
-            {
-                (lastfm_links_shell.effects)(crate::Effect::CatalogChanged);
-            }
-        });
+        shell.settings.bind_switch(
+            &lastfm_links_row,
+            "Last.fm site links setting",
+            |settings| &mut settings.application.external_site_links.lastfm,
+            move |_| (lastfm_links_shell.effects)(crate::Effect::CatalogChanged),
+        );
         let musicbrainz_links_shell = Rc::clone(shell);
-        musicbrainz_links_row.connect_active_notify(move |row| {
-            if musicbrainz_links_shell
-                .settings
-                .set_app_setting(
-                    "MusicBrainz site links setting",
-                    row.is_active(),
-                    |settings| &mut settings.application.external_site_links.musicbrainz,
-                )
-                .is_some()
-            {
-                (musicbrainz_links_shell.effects)(crate::Effect::CatalogChanged);
-            }
-        });
+        shell.settings.bind_switch(
+            &musicbrainz_links_row,
+            "MusicBrainz site links setting",
+            |settings| &mut settings.application.external_site_links.musicbrainz,
+            move |_| (musicbrainz_links_shell.effects)(crate::Effect::CatalogChanged),
+        );
         let server_links_shell = Rc::clone(shell);
-        server_links_row.connect_active_notify(move |row| {
-            if server_links_shell
-                .settings
-                .set_app_setting("server site links setting", row.is_active(), |settings| {
-                    &mut settings.application.external_site_links.server
-                })
-                .is_some()
-            {
-                (server_links_shell.effects)(crate::Effect::CatalogChanged);
-            }
-        });
+        shell.settings.bind_switch(
+            &server_links_row,
+            "server site links setting",
+            |settings| &mut settings.application.external_site_links.server,
+            move |_| (server_links_shell.effects)(crate::Effect::CatalogChanged),
+        );
         presence_row.set_active(settings.rich_presence.enabled);
         let presence_shell = Rc::clone(shell);
         presence_row.connect_active_notify(move |row| {
@@ -186,24 +166,18 @@ pub fn scrobbling_page(
                 |settings| &mut settings.rich_presence.link_type,
             );
         });
-        paused_row.set_active(settings.rich_presence.show_paused);
-        let paused_shell = Rc::clone(shell);
-        paused_row.connect_active_notify(move |row| {
-            paused_shell.settings.set_app_setting(
-                "Discord paused setting",
-                row.is_active(),
-                |settings| &mut settings.rich_presence.show_paused,
-            );
-        });
-        listening_row.set_active(settings.rich_presence.show_as_listening);
-        let listening_shell = Rc::clone(shell);
-        listening_row.connect_active_notify(move |row| {
-            listening_shell.settings.set_app_setting(
-                "Discord activity type setting",
-                row.is_active(),
-                |settings| &mut settings.rich_presence.show_as_listening,
-            );
-        });
+        shell.settings.bind_switch(
+            &paused_row,
+            "Discord paused setting",
+            |settings| &mut settings.rich_presence.show_paused,
+            |_| {},
+        );
+        shell.settings.bind_switch(
+            &listening_row,
+            "Discord activity type setting",
+            |settings| &mut settings.rich_presence.show_as_listening,
+            |_| {},
+        );
     }
 
     lastfm_enabled.set_active(settings.lastfm.enabled);
@@ -628,15 +602,12 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     refill_row.set_activatable_widget(Some(&refill));
     transition_group.add(&refill_row);
 
-    clear_queue_row.set_active(app_settings.player_display.clear_queue_includes_current);
-    let clear_queue_shell = Rc::clone(shell);
-    clear_queue_row.connect_active_notify(move |row| {
-        clear_queue_shell.settings.set_app_setting(
-            "clear queue setting",
-            row.is_active(),
-            |settings| &mut settings.player_display.clear_queue_includes_current,
-        );
-    });
+    shell.settings.bind_switch(
+        &clear_queue_row,
+        "clear queue setting",
+        |settings| &mut settings.player_display.clear_queue_includes_current,
+        |_| {},
+    );
     transition_group.add(&clear_queue_row);
 
     let loudness_scope_shell = Rc::clone(shell);
@@ -855,19 +826,13 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         home_blocks: adw::ExpanderRow,
     });
 
-    reduce_motion.set_active(shell.settings.current.borrow().application.reduce_motion);
     let motion_shell = Rc::clone(shell);
-    reduce_motion.connect_active_notify(move |row| {
-        if let Some(settings) =
-            motion_shell
-                .settings
-                .set_app_setting("reduced motion", row.is_active(), |settings| {
-                    &mut settings.application.reduce_motion
-                })
-        {
-            motion_shell.appearance.apply(&settings);
-        }
-    });
+    shell.settings.bind_switch(
+        &reduce_motion,
+        "reduced motion",
+        |settings| &mut settings.application.reduce_motion,
+        move |settings| motion_shell.appearance.apply(settings),
+    );
     populate_layout_group(shell, &builder);
 
     configure_sidebar_items_expander(shell, &sidebar_items, &sidebar_pins_row);

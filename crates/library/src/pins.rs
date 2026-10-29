@@ -379,7 +379,7 @@ impl Catalog {
         )
         .await?;
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         for (_, playlist) in snapshot.playlists.iter() {
             if pinned_folders.contains(&playlist.folder) && context.listed_playlist(playlist) {
                 let total = context.playlist_totals(playlist, None);

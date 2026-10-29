@@ -74,6 +74,23 @@ impl SettingsState {
         })
     }
 
+    /// Shows a saved switch on `row` and saves each toggle; `saved` runs when a toggle changed it.
+    pub fn bind_switch(
+        self: &Rc<Self>,
+        row: &adw::SwitchRow,
+        warning_action: &'static str,
+        field: impl Fn(&mut Settings) -> &mut bool + 'static,
+        saved: impl Fn(&Settings) + 'static,
+    ) {
+        row.set_active(*field(&mut self.current.borrow_mut()));
+        let state = Rc::clone(self);
+        row.connect_active_notify(move |row| {
+            if let Some(settings) = state.set_app_setting(warning_action, row.is_active(), &field) {
+                saved(&settings);
+            }
+        });
+    }
+
     pub fn update_app_settings(
         &self,
         warning_action: &'static str,

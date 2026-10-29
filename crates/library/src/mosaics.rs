@@ -56,7 +56,7 @@ impl Catalog {
     /// The genres and moods of these tracks.
     pub fn track_tags(&self, tracks: &[TrackKey]) -> Vec<i64> {
         let snapshot = self.snapshot();
-        let context = Context::new(&snapshot, false);
+        let context = Context::new(&snapshot);
         let mut owned = Vec::new();
         let mut tags = std::collections::BTreeSet::new();
         for track in tracks {

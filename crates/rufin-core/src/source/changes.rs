@@ -43,7 +43,7 @@ impl Pending {
     fn add(&mut self, change: &Change) {
         for scope in &change.scopes {
             match scope {
-                Scope::Reload => self.reloaded = true,
+                Scope::Reload | Scope::Display => self.reloaded = true,
                 Scope::Tracks {
                     source: Some(source),
                     ..

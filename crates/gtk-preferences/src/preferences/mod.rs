@@ -864,38 +864,26 @@ fn general_page(
         release_notifications_row: adw::SwitchRow,
     });
     let settings = shell.settings.current.borrow().clone();
-    prefer_distinct_track_covers_row.set_active(settings.application.prefer_distinct_track_covers);
-    let distinct_track_covers_shell = Rc::clone(shell);
-    prefer_distinct_track_covers_row.connect_active_notify(move |row| {
-        if distinct_track_covers_shell
-            .settings
-            .set_app_setting("track cover setting", row.is_active(), |settings| {
-                &mut settings.application.prefer_distinct_track_covers
-            })
-            .is_some()
-        {
-            if let Some(selected) = distinct_track_covers_shell
-                .products
-                .source
-                .selected_library()
-            {
-                let source = distinct_track_covers_shell.products.source.clone();
+    let source = shell.products.source.clone();
+    shell.settings.bind_switch(
+        &prefer_distinct_track_covers_row,
+        "track cover setting",
+        |settings| &mut settings.application.prefer_distinct_track_covers,
+        move |_| {
+            if let Some(selected) = source.selected_library() {
+                let source = source.clone();
                 gtk::glib::spawn_future_local(async move {
                     let _ = source.refresh_source(selected.source_id, false).await;
                 });
             }
-        }
-    });
-
-    use_sort_tags_row.set_active(settings.application.use_sort_tags);
-    let sort_tags_shell = Rc::clone(shell);
-    use_sort_tags_row.connect_active_notify(move |row| {
-        sort_tags_shell
-            .settings
-            .set_app_setting("sort tag setting", row.is_active(), |settings| {
-                &mut settings.application.use_sort_tags
-            });
-    });
+        },
+    );
+    shell.settings.bind_switch(
+        &use_sort_tags_row,
+        "sort tag setting",
+        |settings| &mut settings.application.use_sort_tags,
+        |_| {},
+    );
 
     external_metadata_row.set_active(settings.application.external_metadata_enabled);
     let metadata_shell = Rc::clone(shell);
@@ -974,7 +962,6 @@ fn general_page(
         keep_running_row.set_active(settings.keep_running_after_close);
         #[cfg(not(target_os = "macos"))]
         start_minimized_row.set_active(settings.tray_enabled && settings.start_minimized);
-        type_to_search_row.set_active(settings.type_to_search_enabled);
         #[cfg(target_os = "macos")]
         for row in [&tray_row, &keep_running_row, &start_minimized_row] {
             window_group.remove(row);
@@ -1013,14 +1000,12 @@ fn general_page(
         start_minimized_row.connect_active_notify(move |row| {
             (start_minimized_shell.effects)(crate::Effect::StartMinimized(row.is_active()));
         });
-        let type_to_search_shell = Rc::clone(shell);
-        type_to_search_row.connect_active_notify(move |row| {
-            type_to_search_shell.settings.set_app_setting(
-                "type to search setting",
-                row.is_active(),
-                |settings| &mut settings.type_to_search_enabled,
-            );
-        });
+        shell.settings.bind_switch(
+            &type_to_search_row,
+            "type to search setting",
+            |settings| &mut settings.type_to_search_enabled,
+            |_| {},
+        );
         if shell
             .state
             .release_history
@@ -1028,15 +1013,12 @@ fn general_page(
             .automatic_updates_supported
             || shell.state.preview_windows_updates
         {
-            automatic_updates_row.set_active(settings.automatic_updates_enabled);
-            let automatic_updates_shell = Rc::clone(shell);
-            automatic_updates_row.connect_active_notify(move |row| {
-                automatic_updates_shell.settings.set_app_setting(
-                    "automatic update setting",
-                    row.is_active(),
-                    |settings| &mut settings.automatic_updates_enabled,
-                );
-            });
+            shell.settings.bind_switch(
+                &automatic_updates_row,
+                "automatic update setting",
+                |settings| &mut settings.automatic_updates_enabled,
+                |_| {},
+            );
         } else {
             window_group.remove(&automatic_updates_row);
         }
@@ -1064,39 +1046,29 @@ fn general_page(
             });
     });
 
-    control_notifications_row.set_active(settings.application.control_notifications_enabled);
-    let control_notifications_shell = Rc::clone(shell);
-    control_notifications_row.connect_active_notify(move |row| {
-        control_notifications_shell.settings.set_app_setting(
-            "control notification setting",
-            row.is_active(),
-            |settings| &mut settings.application.control_notifications_enabled,
-        );
-    });
-    notifications_row.set_active(settings.application.notifications_enabled);
+    shell.settings.bind_switch(
+        &control_notifications_row,
+        "control notification setting",
+        |settings| &mut settings.application.control_notifications_enabled,
+        |_| {},
+    );
     let notifications_shell = Rc::clone(shell);
-    notifications_row.connect_active_notify(move |row| {
-        let enabled = row.is_active();
-        if notifications_shell
-            .settings
-            .set_app_setting("notification setting", enabled, |settings| {
-                &mut settings.application.notifications_enabled
-            })
-            .is_some()
-            && !enabled
-        {
-            (notifications_shell.effects)(crate::Effect::WithdrawNotification);
-        }
-    });
-    release_notifications_row.set_active(settings.application.release_notifications_enabled);
-    let release_notifications_shell = Rc::clone(shell);
-    release_notifications_row.connect_active_notify(move |row| {
-        release_notifications_shell.settings.set_app_setting(
-            "release notification setting",
-            row.is_active(),
-            |settings| &mut settings.application.release_notifications_enabled,
-        );
-    });
+    shell.settings.bind_switch(
+        &notifications_row,
+        "notification setting",
+        |settings| &mut settings.application.notifications_enabled,
+        move |settings| {
+            if !settings.application.notifications_enabled {
+                (notifications_shell.effects)(crate::Effect::WithdrawNotification);
+            }
+        },
+    );
+    shell.settings.bind_switch(
+        &release_notifications_row,
+        "release notification setting",
+        |settings| &mut settings.application.release_notifications_enabled,
+        |_| {},
+    );
     activity::wrap_general(shell, &page, &activity_overview_row, navigation_controls)
 }
 fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
@@ -1177,19 +1149,13 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
     });
     group.add(&combine_panels_row);
 
-    bottom_bar_rating_row.set_active(settings.show_bottom_bar_rating);
     let bottom_bar_rating_shell = Rc::clone(shell);
-    bottom_bar_rating_row.connect_active_notify(move |row| {
-        if bottom_bar_rating_shell
-            .settings
-            .set_app_setting("bottom bar rating setting", row.is_active(), |settings| {
-                &mut settings.show_bottom_bar_rating
-            })
-            .is_some()
-        {
-            bottom_bar_rating_shell.player_ui.update_bottom_player();
-        }
-    });
+    shell.settings.bind_switch(
+        &bottom_bar_rating_row,
+        "bottom bar rating setting",
+        |settings| &mut settings.show_bottom_bar_rating,
+        move |_| bottom_bar_rating_shell.player_ui.update_bottom_player(),
+    );
     group.add(&bottom_bar_rating_row);
 
     narrow_row.set_active(settings.layout.narrow_enabled);

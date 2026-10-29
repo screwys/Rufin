@@ -631,7 +631,7 @@ struct Resident {
 impl Catalog {
     fn resident_playlists(&self, keys: &[PlaylistKey]) -> Vec<Option<Resident>> {
         let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot, false);
+        let context = crate::catalog::views::Context::new(&snapshot);
         keys.iter()
             .map(|key| {
                 let record = snapshot.playlists.get(key.raw())?;
