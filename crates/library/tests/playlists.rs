@@ -1,6 +1,6 @@
-use library::{Delivery, DeliveryKind, FavoriteTarget, ReadCancellation};
+use library::{Delivery, DeliveryKind, FavoriteTarget, LibraryField, ReadCancellation};
 
-use super::support::{connection, fixture};
+use super::support::{connection, fixture, items, tracks};
 
 #[tokio::test]
 async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
@@ -462,4 +462,389 @@ async fn deliveries_wait_until_accepted_and_then_drop_rufins_copy() {
         Some((None, Some(8)))
     );
     assert_eq!(fixture.catalog.next_delivery_at().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn playlist_order_is_title_ordered_and_folder_scoped() {
+    let mut fixture = fixture().await;
+    let zulu = fixture
+        .catalog
+        .create_playlist(
+            "Zulu",
+            &library::MemberSelection::Uris(vec![fixture.track_uris[0].clone()].into()),
+        )
+        .await
+        .expect("create Zulu Playlist")
+        .expect("Track exists")
+        .0;
+    let alpha = fixture
+        .catalog
+        .create_playlist(
+            "Alpha",
+            &library::MemberSelection::Uris(vec![fixture.track_uris[1].clone()].into()),
+        )
+        .await
+        .expect("create Alpha Playlist")
+        .expect("Track exists")
+        .0;
+    let mut raw = connection(&fixture.path).await;
+    let folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,sort_text,media_uri) VALUES (?1,'destination-folder','Destination Folder','destination folder','folder:'||COALESCE(?1,0)||':'||'destination-folder') RETURNING folder_key")
+        .bind(fixture.source)
+        .fetch_one(&mut raw)
+        .await
+        .expect("insert destination folder");
+    sqlx::query("INSERT INTO track_links(track_key,role,position,target) VALUES (?1,4,1,?2)")
+        .bind(fixture.tracks[0])
+        .bind(folder)
+        .execute(&mut raw)
+        .await
+        .expect("scope Zulu Playlist Track");
+    drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+
+    let cancellation = ReadCancellation::new();
+    let playlists = |folder| library::ListRead {
+        folder,
+        activity: true,
+        ..library::ListRead::new(
+            library::ListKind::Playlists,
+            Some(fixture.source),
+            LibraryField::Title,
+        )
+    };
+    let expected = [
+        library::Item::Playlist(alpha),
+        library::Item::Playlist(zulu),
+    ];
+    assert_eq!(items(&fixture.catalog, playlists(None)).await, expected);
+    // A music folder scopes source playlists; Rufin playlists hold tracks of every source.
+    assert_eq!(
+        items(&fixture.catalog, playlists(Some(folder))).await,
+        expected
+    );
+    let destinations = fixture
+        .catalog
+        .playlist_destinations(Some(fixture.source), &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        destinations
+            .iter()
+            .find(|row| row.playlist_key == zulu)
+            .unwrap()
+            .genres[0]
+            .name,
+        "Rock"
+    );
+    assert_eq!(
+        fixture
+            .catalog
+            .playlists(&[zulu], &cancellation)
+            .await
+            .unwrap()[0]
+            .genres[0]
+            .name,
+        "Rock"
+    );
+}
+
+#[tokio::test]
+async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
+    let fixture = fixture().await;
+    let playlist = fixture
+        .catalog
+        .create_playlist(
+            "Duplicates",
+            &library::MemberSelection::Uris(
+                vec![
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[0].clone(),
+                    fixture.track_uris[1].clone(),
+                ]
+                .into(),
+            ),
+        )
+        .await
+        .expect("create Playlist")
+        .expect("all Tracks exist")
+        .0;
+    let cancel = ReadCancellation::new();
+    let by_position = library::MemberRead {
+        sort: Some(LibraryField::RowIndex),
+        ..library::MemberRead::new(library::Collection::Playlist(playlist))
+    };
+    let entry_keys = |read: library::MemberRead| {
+        let catalog = &fixture.catalog;
+        let cancel = &cancel;
+        async move {
+            catalog
+                .playlist_edit_entries(playlist, &read.selection(), cancel)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.playlist_entry_key)
+                .collect::<Vec<_>>()
+        }
+    };
+    let initial = entry_keys(by_position.clone()).await;
+    let rows = tracks(&fixture.catalog, by_position.clone()).await;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.entry.as_ref().unwrap().key)
+            .collect::<Vec<_>>(),
+        initial
+    );
+    assert_eq!(rows[0].media_uri, rows[1].media_uri);
+    assert_ne!(
+        rows[0].entry.as_ref().unwrap().key,
+        rows[1].entry.as_ref().unwrap().key
+    );
+    let edit_entries = fixture
+        .catalog
+        .playlist_edit_entries(
+            playlist,
+            &library::MemberSelection::Entries(
+                initial.iter().rev().copied().collect::<Vec<_>>().into(),
+            ),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        edit_entries
+            .iter()
+            .map(|entry| entry.playlist_entry_key)
+            .collect::<Vec<_>>(),
+        initial
+    );
+    assert_eq!(
+        edit_entries
+            .iter()
+            .map(|entry| entry.position)
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert_eq!(edit_entries[0].track_key, edit_entries[1].track_key);
+    let selected = fixture
+        .catalog
+        .playlist_edit_entries(
+            playlist,
+            &library::MemberSelection::Members {
+                read: library::MemberRead {
+                    descending: true,
+                    ..library::MemberRead::new(library::Collection::Playlist(playlist))
+                },
+                ranges: Some(vec![0..1, 2..3]),
+            },
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|entry| entry.playlist_entry_key)
+            .collect::<Vec<_>>(),
+        [initial[0], initial[2]]
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.media_uri.as_str())
+            .collect::<Vec<_>>(),
+        [
+            fixture.track_uris[0].as_str(),
+            fixture.track_uris[0].as_str(),
+            fixture.track_uris[1].as_str(),
+        ]
+    );
+
+    assert_eq!(
+        fixture
+            .catalog
+            .add_playlist_tracks(
+                playlist,
+                &library::MemberSelection::Uris(
+                    vec![
+                        fixture.track_uris[0].clone(),
+                        fixture.track_uris[2].clone(),
+                        fixture.track_uris[2].clone(),
+                    ]
+                    .into()
+                ),
+                true
+            )
+            .await
+            .expect("add with duplicate policy"),
+        2
+    );
+    let added = entry_keys(by_position.clone()).await;
+    assert!(
+        fixture
+            .catalog
+            .move_playlist_entry(playlist, added[4], 0)
+            .await
+            .expect("move entry")
+    );
+    let moved = entry_keys(by_position.clone()).await;
+    assert_eq!(moved[0], added[4]);
+    assert_eq!(
+        fixture
+            .catalog
+            .remove_playlist_entries(playlist, &moved[1..3])
+            .await
+            .expect("remove entries"),
+        2
+    );
+
+    let selection = vec![fixture.track_uris[3].clone(); 520];
+    assert_eq!(
+        fixture
+            .catalog
+            .add_playlist_tracks(
+                playlist,
+                &library::MemberSelection::Uris(selection.into()),
+                false
+            )
+            .await
+            .expect("add selected media"),
+        520
+    );
+    let entries = entry_keys(by_position).await;
+    assert_eq!(entries.len(), 523);
+    let state = super::support::resolve_queue(
+        &fixture.catalog,
+        library::QueueLoad::Tracks(vec![(
+            library::MemberSelection::Entries(entries.into()),
+            library::QueueProvenance::Context {
+                context_id: "playlist".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )]),
+        Default::default(),
+    )
+    .await;
+    assert_eq!(state.entries.len(), 523);
+    assert_eq!(state.rows[3].track.media_uri, fixture.track_uris[3]);
+    assert_eq!(state.rows[95].track.media_uri, fixture.track_uris[3]);
+    assert_ne!(state.rows[3].position, state.rows[95].position);
+}
+
+#[tokio::test]
+async fn global_playlist_adds_rufin_media_without_provider_admission() {
+    let fixture = fixture().await;
+    let (playlist, _) = fixture
+        .catalog
+        .create_playlist(
+            "Global",
+            &library::MemberSelection::Uris(vec![fixture.track_uris[0].clone()].into()),
+        )
+        .await
+        .expect("create global Playlist")
+        .expect("Playlist key");
+    assert_eq!(
+        fixture
+            .catalog
+            .add_playlist_tracks(
+                playlist,
+                &library::MemberSelection::Uris(
+                    vec![
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[1].clone(),
+                        fixture.track_uris[2].clone(),
+                    ]
+                    .into()
+                ),
+                false
+            )
+            .await
+            .expect("add global Playlist media"),
+        3
+    );
+    let order = fixture
+        .catalog
+        .selected_track_uris(
+            &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
+            None,
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("global Playlist order");
+    assert_eq!(
+        order,
+        [
+            fixture.track_uris[0].clone(),
+            fixture.track_uris[1].clone(),
+            fixture.track_uris[1].clone(),
+            fixture.track_uris[2].clone(),
+        ]
+    );
+
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET indexed=0 WHERE media_uri=?1")
+        .bind(&fixture.track_uris[1])
+        .execute(&mut raw)
+        .await
+        .expect("remove source membership");
+    drop(raw);
+    let read = library::MemberRead {
+        sort: Some(LibraryField::RowIndex),
+        ..library::MemberRead::new(library::Collection::Playlist(playlist))
+    };
+    let rows = tracks(&fixture.catalog, read).await;
+    assert_eq!(rows[1].title, "Beta");
+    assert_eq!(rows[1].media_uri, fixture.track_uris[1]);
+    let playback = super::support::resolve_queue(
+        &fixture.catalog,
+        library::QueueLoad::Tracks(vec![(
+            library::MemberSelection::Entries(
+                rows.iter()
+                    .map(|row| row.entry.as_ref().unwrap().key)
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            library::QueueProvenance::Context {
+                context_id: "unavailable".into(),
+                context_title: None,
+                source_rank: 0,
+            },
+        )]),
+        Default::default(),
+    )
+    .await;
+    assert_eq!(playback.rows[1].track.metadata.title, "Beta");
+    assert_eq!(playback.rows[1].track.media_uri, fixture.track_uris[1]);
+
+    assert_eq!(
+        fixture
+            .catalog
+            .playlist_access(playlist, &ReadCancellation::new())
+            .await
+            .expect("read global Playlist owner")
+            .map(|access| (access.source_key, access.source_id, access.source_owned)),
+        Some((None, None, false))
+    );
+    assert!(
+        fixture
+            .catalog
+            .update_playlist(playlist, Some("Renamed global"), None)
+            .await
+            .expect("rename global Playlist")
+    );
+    assert!(
+        fixture
+            .catalog
+            .delete_playlist(playlist)
+            .await
+            .expect("delete global Playlist")
+    );
+    assert_eq!(
+        fixture
+            .catalog
+            .playlist_access(playlist, &ReadCancellation::new())
+            .await
+            .expect("deleted Playlist owner"),
+        None
+    );
 }

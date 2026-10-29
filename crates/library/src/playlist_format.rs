@@ -1474,6 +1474,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standard_edits_override_snapshots_and_target_overrides_file_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let file = directory.path().join("mix.m3u8");
+        let first = catalog
+            .import_playlist_file(
+                std::io::Cursor::new(
+                    "#EXTM3U\n#PLAYLIST:Old\n#EXTINF:12,Artist - Old track\nold.flac\n",
+                ),
+                &file,
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        let second = catalog
+            .import_playlist_file(
+                std::io::Cursor::new("#EXTM3U\nother.flac\n"),
+                &file,
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        let mut output = Vec::new();
+        catalog
+            .export_playlist_file(
+                first.playlist,
+                &file,
+                PlaylistPathMode::Automatic,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        let text = String::from_utf8(output)
+            .unwrap()
+            .replace("#PLAYLIST:Old", "#PLAYLIST:New")
+            .replace("#EXTINF:12,Artist - Old track", "#EXTINF:30,New track")
+            .replace("\nold.flac\n", "\nnew.flac\n");
+        let updated = catalog
+            .import_playlist_file(
+                std::io::Cursor::new(text),
+                &file,
+                Some(second.playlist),
+                |_| None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.playlist, second.playlist);
+        let mut output = Vec::new();
+        catalog
+            .export_playlist_file(
+                second.playlist,
+                &file,
+                PlaylistPathMode::Automatic,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("#PLAYLIST:New\n"));
+        assert!(text.contains("#EXTINF:30,New track\nnew.flac\n"));
+        assert!(
+            catalog
+                .import_playlist_file(
+                    std::io::Cursor::new("binary\0data"),
+                    &file,
+                    Some(second.playlist),
+                    |_| None
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(playlist_rows(&catalog, second.playlist).await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn smart_export_streams_large_direct_http_results_without_current() {
         let directory = tempfile::tempdir().unwrap();
         let catalog = Catalog::open(directory.path().join("library.db"))
@@ -1574,6 +1653,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_paths_import_without_a_configured_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let path = directory.path().join("café %.flac");
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let input = format!("#EXTM3U\ncafé %.flac\n{}\n{uri}\n", path.display());
+        let report = catalog
+            .import_playlist_file(
+                std::io::Cursor::new(input),
+                &directory.path().join("mix.m3u8"),
+                None,
+                |_| None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(report.imported, 3);
+        let entries = playlist_rows(&catalog, report.playlist).await;
+        assert_eq!(entries.len(), 3);
+        for entry in entries {
+            let actual = entry.media_uri;
+            assert_eq!(actual, uri);
+            assert_eq!(crate::file_media_path(&actual).unwrap(), path);
+        }
+    }
+
+    #[tokio::test]
     async fn ordinary_m3u_preserves_unicode_duplicates_missing_paths_and_exact_reimport() {
         let directory = tempfile::tempdir().unwrap();
         let catalog = Catalog::open(directory.path().join("library.db"))
@@ -1637,5 +1744,33 @@ mod tests {
             "https://example.test/song?token=secret&signature=abc%2Bdef&token=other"
         );
         assert_eq!(rows[4].track.media_uri, rows[5].track.media_uri);
+    }
+
+    /// A playlist's entry rows in playlist order.
+    async fn playlist_rows(
+        catalog: &Catalog,
+        playlist: crate::PlaylistKey,
+    ) -> Vec<crate::TrackRow> {
+        let cancel = crate::ReadCancellation::new();
+        let order = catalog
+            .order(
+                &crate::Read::Members(crate::MemberRead {
+                    sort: Some(crate::LibraryField::RowIndex),
+                    ..crate::MemberRead::new(crate::Collection::Playlist(playlist))
+                }),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        catalog
+            .rows(&order, 0..order.len(), false, &cancel)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::Row::Track(track) if track.entry.is_some() => Some(track),
+                _ => None,
+            })
+            .collect()
     }
 }

@@ -642,6 +642,368 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn playlist_expiry_controls_reuse_without_hiding_header_changes_or_removals() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let server = MockServer::start().await;
+        let state = Arc::new(AtomicUsize::new(0));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let response_state = state.clone();
+        Mock::given(method("GET")).and(path("/rest/getPlaylists.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                let state = response_state.load(Ordering::Relaxed);
+                let mut playlist = serde_json::json!({"id":"playlist","name":if state==1 {"Renamed"} else {"Playlist"},
+                    "changed":if state==4 {"revision-2"} else {"revision-1"},"validUntil":"2099-01-01T00:00:00Z"});
+                if state==2 { playlist["validUntil"] = "2000-01-01T00:00:00Z".into(); }
+                if state==0 { playlist["coverArt"] = "cover".into(); }
+                if state==3 || state==6 { playlist.as_object_mut().unwrap().remove("validUntil"); }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","playlists":{
+                    "playlist":if state==5 {vec![]} else {vec![playlist]}
+                }}}))
+            }).mount(&server).await;
+        let response_state = state.clone();
+        let response_reads = reads.clone();
+        Mock::given(method("GET")).and(path("/rest/getPlaylist.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                response_reads.fetch_add(1,Ordering::Relaxed);
+                let state=response_state.load(Ordering::Relaxed);
+                if state==6 { return ResponseTemplate::new(500); }
+                let mut playlist=serde_json::json!({"id":"playlist","name":"Playlist","changed":if state==4 {"revision-2"} else {"revision-1"},
+                    "validUntil":"2099-01-01T00:00:00Z","entry":if state==4 {vec![]} else {vec![serde_json::json!({"id":"track"})]}});
+                if state==2 { playlist["validUntil"]="2000-01-01T00:00:00Z".into(); }
+                if state==0 { playlist["coverArt"] = "cover".into(); }
+                if state==3 { playlist.as_object_mut().unwrap().remove("validUntil"); }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","playlist":playlist}}))
+            }).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::LegacyPassword,
+            },
+            super::SubsonicCredential::LegacyPassword("password".into()).serialize(),
+        )
+        .unwrap();
+        let source_owner = crate::Source::new(
+            library::SourceId::new("source"),
+            crate::Implementation::OpenSubsonic(source),
+        );
+        let crate::Implementation::OpenSubsonic(source) = &source_owner.implementation else {
+            unreachable!()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
+            .await
+            .unwrap();
+
+        let cancellation = library::ReadCancellation::new();
+        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 3), (6, 4), (4, 5), (5, 5)] {
+            state.store(next, Ordering::Relaxed);
+            let catalog_source_id = ("source").to_string();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let result = {
+                let result = source
+                    .acquire_user_collections(&mut observation, &|_| {}, &|| false)
+                    .await;
+                result
+            };
+            result.unwrap();
+            assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
+            let rows = crate::listed_playlists(
+                &catalog,
+                library::ListRead {
+                    playlist_scope: Default::default(),
+                    kind: library::ListKind::Playlists,
+                    source: (Some(
+                        {
+                            catalog.loaded().await;
+                            catalog.source_key(&crate::SourceId::new("source"))
+                        }
+                        .unwrap(),
+                    ))
+                    .into(),
+                    sort: library::LibraryField::RowIndex,
+                    folder: None,
+                    filter: ("").to_string(),
+                    descending: false,
+                    favorites_only: false,
+                    downloaded_only: false,
+                    activity: false,
+                },
+            )
+            .await;
+            if next == 5 {
+                assert!(rows.is_empty());
+                continue;
+            }
+            assert_eq!(rows.len(), 1);
+            let playlist = rows[0].playlist_key;
+            assert_eq!(rows[0].name, if next == 1 { "Renamed" } else { "Playlist" });
+            assert_eq!(
+                rows[0]
+                    .artwork_binding
+                    .as_deref()
+                    .map(library::authored_playlist_artwork)
+                    .transpose()
+                    .unwrap()
+                    .flatten()
+                    .is_some(),
+                next <= 1
+            );
+            assert_eq!(
+                catalog
+                    .selected_track_uris(
+                        &library::MemberRead::new(library::Collection::Playlist(playlist))
+                            .selection(),
+                        None,
+                        &cancellation
+                    )
+                    .await
+                    .unwrap()
+                    .len(),
+                if next == 4 { 0 } else { 1 }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn favorites_and_playlists_refresh_without_replacing_catalog_metadata() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let server = MockServer::start().await;
+        let state = Arc::new(AtomicUsize::new(0));
+        let response_state = state.clone();
+        Mock::given(method("GET")).and(path("/rest/getStarred2.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                match response_state.load(Ordering::Relaxed) {
+                    2 => ResponseTemplate::new(500),
+                    1 => ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subsonic-response":{"status":"ok","starred2":{}}
+                    })),
+                    _ => ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subsonic-response":{"status":"ok","starred2":{
+                            "song":[{"id":"track"}],"album":[{"id":"album"}],"artist":[{"id":"artist"}]
+                        }}
+                    })),
+                }
+            }).mount(&server).await;
+        let response_state = state.clone();
+        Mock::given(method("GET"))
+            .and(path("/rest/getPlaylists.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response":{"status":"ok","playlists":{"playlist":
+                        if response_state.load(Ordering::Relaxed) == 1 { serde_json::json!([]) }
+                        else { serde_json::json!([{"id":"playlist","name":"Playlist"}]) }
+                    }}
+                }))
+            })
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/rest/getPlaylist.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","playlist":{"id":"playlist","name":"Playlist","entry":[{"id":"track"}]}}
+            }))).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::LegacyPassword,
+            },
+            super::SubsonicCredential::LegacyPassword("password".into()).serialize(),
+        )
+        .unwrap();
+        let source_owner = crate::Source::new(
+            library::SourceId::new("source"),
+            crate::Implementation::OpenSubsonic(source),
+        );
+        let crate::Implementation::OpenSubsonic(source) = &source_owner.implementation else {
+            unreachable!()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut updates = catalog.changes();
+        let marker = library::Freshness::new(b"unchanged catalog".to_vec()).unwrap();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
+            .await
+            .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let stamp = Some(observation.start_observation().await.unwrap());
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.albums.extend_from_slice(&[(super::album_from_json(
+                &source,
+                "source",
+                &serde_json::json!({"id":"album","name":"Album","userRating":4}),
+            )
+            .unwrap()
+            .unwrap())
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .unwrap();
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.artists.extend_from_slice(&[(super::artist_from_json(
+                &source,
+                "source",
+                &serde_json::json!({"id":"artist","name":"Artist"}),
+            )
+            .unwrap()
+            .unwrap())
+            .clone()]);
+            observation.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .unwrap();
+        (async { let mut batch = library::CatalogBatch::default(); let result = batch.tracks.extend_from_slice(&[(super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
+        {
+            let result = source.acquire_favorites(&mut observation, &|| false).await;
+            result
+        }
+        .unwrap();
+        {
+            let result = source
+                .acquire_playlist_snapshot(&mut observation, "subsonic:playlist:playlist", &|| {
+                    false
+                })
+                .await;
+            result
+        }
+        .unwrap();
+        (async {
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(
+                        &[
+                            "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                        ],
+                        (Some(marker.clone())).as_ref(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            if stamp.is_some() {
+                observation
+                    .complete_source_observation(&[], Some(&marker))
+                    .await
+                    .unwrap();
+            }
+            Ok::<_, library::LibraryError>(())
+        })
+        .await
+        .unwrap();
+        let publication = crate::published(&mut updates).expect("catalog update").1;
+        assert!(publication.intersects(sources::Shown::CATALOG));
+        for (next, expected) in [(2, true), (1, false), (0, true)] {
+            state.store(next, Ordering::Relaxed);
+            let catalog_source_id = ("source").to_string();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let result = {
+                let result = source
+                    .acquire_user_collections(&mut observation, &|_| {}, &|| false)
+                    .await;
+                result
+            };
+            result.unwrap();
+            for (kind, id) in [("track", "track"), ("album", "album"), ("artist", "artist")] {
+                let uri = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    kind,
+                    &format!("subsonic:{kind}:{id}"),
+                );
+                let target = match kind {
+                    "track" => library::FavoriteTarget::Track(uri),
+                    "album" => library::FavoriteTarget::Album(uri),
+                    _ => library::FavoriteTarget::Artist(uri),
+                };
+                assert_eq!(catalog.favorite(&target).await.unwrap(), expected);
+            }
+            let cancellation = library::ReadCancellation::new();
+            let uri = library::source_entity_uri(
+                &crate::SourceId::new("source"),
+                "track",
+                "subsonic:track:track",
+            );
+            let row = catalog
+                .track(&(&uri), &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.metadata.comment.as_deref(), Some("Keep"));
+            assert!(
+                catalog
+                    .accept_freshness("source", &marker, &cancellation)
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                crate::listed_playlists(
+                    &catalog,
+                    library::ListRead {
+                        playlist_scope: Default::default(),
+                        kind: library::ListKind::Playlists,
+                        source: (Some(
+                            {
+                                catalog.loaded().await;
+                                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                            }
+                            .unwrap()
+                        ))
+                        .into(),
+                        sort: library::LibraryField::Title,
+                        folder: None,
+                        filter: ("").to_string(),
+                        descending: false,
+                        favorites_only: false,
+                        downloaded_only: false,
+                        activity: false
+                    }
+                )
+                .await
+                .len() as i64,
+                i64::from(next != 1)
+            );
+        }
+        crate::published(&mut updates);
+        let catalog_source_id = ("source").to_string();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let result = {
+            let result = source
+                .acquire_user_collections(&mut observation, &|_| {}, &|| false)
+                .await;
+            result
+        };
+        result.unwrap();
+        assert!(!observation.changed());
+        assert!(
+            crate::published(&mut updates).is_none(),
+            "unchanged native data stays quiet"
+        );
+    }
+
+    #[tokio::test]
     async fn catalog_and_home_publish_when_optional_collections_are_unavailable() {
         for folders_available in [false, true] {
             let server = MockServer::start().await;

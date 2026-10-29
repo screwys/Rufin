@@ -1,9 +1,9 @@
 use library::{
     LibraryField, QueueProvenance, QueueRepeatMode, QueueTransferRow, ReadCancellation,
-    TrackReference,
+    SmartPlaylistDefinition, TrackReference,
 };
 
-use super::support::{connection, fixture, persist_queue};
+use super::support::{connection, fixture, persist_queue, uris};
 
 fn queue_row(item: TrackReference, position: usize) -> QueueTransferRow {
     QueueTransferRow {
@@ -1091,5 +1091,120 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
                 .unwrap(),
             20000
         );
+    }
+}
+
+#[tokio::test]
+async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let album = uris(
+        &fixture.catalog,
+        library::MemberRead {
+            sort: Some(LibraryField::TrackNumber),
+            ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
+        },
+    )
+    .await;
+    let playlist_key = fixture
+        .catalog
+        .create_playlist(
+            "Collection",
+            &library::MemberSelection::Uris(fixture.track_uris[..3].to_vec().into()),
+        )
+        .await
+        .expect("create Playlist")
+        .expect("Playlist key")
+        .0;
+    let playlist = fixture
+        .catalog
+        .selected_track_uris(
+            &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
+            None,
+            &cancel,
+        )
+        .await
+        .expect("Playlist URI order");
+    let smart_key = fixture
+        .catalog
+        .create_smart_playlist("Everything", &SmartPlaylistDefinition::default(), None)
+        .await
+        .expect("create Smart Playlist");
+    let smart = fixture
+        .catalog
+        .selected_track_uris(
+            &library::MemberRead::new(library::Collection::Smart {
+                key: smart_key,
+                now: 0,
+            })
+            .selection(),
+            None,
+            &cancel,
+        )
+        .await
+        .expect("Smart Playlist URI order");
+
+    for (name, order) in [("album", album), ("playlist", playlist), ("smart", smart)] {
+        assert!(!order.is_empty(), "{name} order");
+        let media = fixture
+            .catalog
+            .track_references_for_uris(&order, &cancel)
+            .await
+            .expect("materialize URI order");
+        assert_eq!(
+            media
+                .iter()
+                .map(|item| item.media_uri.as_str())
+                .collect::<Vec<_>>(),
+            order.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn source_membership_matches_track_view_sort_filter_and_null_order() {
+    let fixture = fixture().await;
+    for sort in [
+        LibraryField::Title,
+        LibraryField::TrackNumber,
+        LibraryField::Artist,
+        LibraryField::AlbumArtist,
+        LibraryField::Album,
+        LibraryField::Year,
+        LibraryField::ReleaseDate,
+        LibraryField::DateAdded,
+        LibraryField::LastPlayed,
+        LibraryField::PlayCount,
+        LibraryField::UserRating,
+        LibraryField::Genre,
+        LibraryField::Bpm,
+        LibraryField::Duration,
+        LibraryField::Favorite,
+    ] {
+        for descending in [false, true] {
+            for filter in ["", "a"] {
+                let read = library::MemberRead {
+                    sort: Some(sort),
+                    filter: filter.into(),
+                    descending,
+                    ..library::MemberRead::new(library::Collection::Source(fixture.source))
+                };
+                let view = uris(&fixture.catalog, read.clone()).await;
+                let input = library::QueueLoad::Tracks(vec![(
+                    read.selection(),
+                    library::QueueProvenance::Context {
+                        context_id: "tracks".into(),
+                        context_title: None,
+                        source_rank: 0,
+                    },
+                )]);
+                let items = source_items(&fixture.catalog, input, None).await;
+                assert_eq!(
+                    items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
+                    view.iter().collect::<Vec<_>>(),
+                    "{sort:?}, descending={descending}, filter={filter}"
+                );
+            }
+        }
     }
 }
