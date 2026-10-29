@@ -506,8 +506,6 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
     }
 }
 
-type PinMenu = Box<dyn FnOnce(&gtk::Widget, &Rc<Shell>) + Send>;
-
 #[derive(Clone, PartialEq)]
 struct SidebarPinItem(library::SidebarPinRow);
 
@@ -606,140 +604,51 @@ impl SidebarPinItem {
     ) {
         let catalog = shell.products.library.clone();
         let pin = self.0.pin.clone();
-        let key = self.0.key;
         let task = shell.products.runtime.spawn(async move {
-            let cancel = library::ReadCancellation::new();
-            Ok::<_, library::LibraryError>(match pin {
-                SidebarPin::Album {
-                    source_id,
-                    album_id,
-                } => catalog
-                    .album(
-                        &library::source_entity_uri(&source_id, "album", &album_id),
-                        false,
-                        &cancel,
-                    )
-                    .await?
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            present_album_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                None,
-                                None,
-                                position,
-                            )
-                        }) as PinMenu
-                    }),
-                SidebarPin::Artist {
-                    source_id,
-                    artist_id,
-                    album_artist,
-                } => catalog
-                    .artist(
-                        &library::source_entity_uri(&source_id, "artist", &artist_id),
-                        album_artist,
-                        false,
-                        &cancel,
-                    )
-                    .await?
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            present_artist_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                album_artist,
-                                None,
-                                position,
-                            )
-                        }) as PinMenu
-                    }),
-                SidebarPin::Genre {
-                    source_id,
-                    genre_id,
-                } => catalog
-                    .genre(
-                        &library::source_entity_uri(&source_id, "genre", &genre_id),
-                        &cancel,
-                    )
-                    .await?
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            present_genre_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                None,
-                                position,
-                            )
-                        }) as PinMenu
-                    }),
-                SidebarPin::Playlist { .. } => catalog
-                    .playlists(&[library::PlaylistKey::from_raw(key)], &cancel)
-                    .await?
-                    .pop()
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            present_playlist_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                None,
-                                position,
-                                gtk_player::state::current_playback_track(
-                                    shell.player_ui.selected_playback().as_deref(),
-                                )
-                                .map(|track| track.media_uri),
-                            )
-                        }) as PinMenu
-                    }),
-                SidebarPin::SmartPlaylist { .. } => catalog
-                    .smart_playlist_rows(
-                        &[library::SmartPlaylistKey::from_raw(key)],
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as i64,
-                        &cancel,
-                    )
-                    .await?
-                    .pop()
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            present_smart_playlist_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                None,
-                                position,
-                            )
-                        }) as PinMenu
-                    }),
-                SidebarPin::PlaylistFolder { folder_id, .. } => catalog
-                    .playlist_folder_by_id(&folder_id, &cancel)
-                    .await?
-                    .map(|row| {
-                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
-                            gtk_media_menus::playlist_folders::present_folder_context_menu(
-                                target,
-                                &shell.media_menus,
-                                row,
-                                position,
-                            )
-                        }) as PinMenu
-                    }),
-            })
+            catalog
+                .pin_rows(&[pin], unix_now(), &library::ReadCancellation::new())
+                .await
+                .map(|mut rows| rows.pop().map(|(_, row)| row))
         });
         let target = target.downgrade();
         let shell = Rc::downgrade(shell);
         glib::spawn_future_local(async move {
-            let result = task.await.ok().and_then(Result::ok).flatten();
-            if let (Some(context), Some(target), Some(shell)) =
-                (result, target.upgrade(), shell.upgrade())
-            {
-                context(&target, &shell);
+            let (Ok(Ok(Some(row))), Some(target), Some(shell)) =
+                (task.await, target.upgrade(), shell.upgrade())
+            else {
+                return;
+            };
+            let menus = &shell.media_menus;
+            match row {
+                library::PinRow::Album(row) => {
+                    present_album_context_menu(&target, menus, *row, None, None, position)
+                }
+                library::PinRow::Artist(row) => {
+                    let album_artist = row.album_artist;
+                    present_artist_context_menu(&target, menus, row, album_artist, None, position)
+                }
+                library::PinRow::Genre(row) => {
+                    present_genre_context_menu(&target, menus, row, None, position)
+                }
+                library::PinRow::Playlist(row) => present_playlist_context_menu(
+                    &target,
+                    menus,
+                    row,
+                    None,
+                    position,
+                    gtk_player::state::current_playback_track(
+                        shell.player_ui.selected_playback().as_deref(),
+                    )
+                    .map(|track| track.media_uri),
+                ),
+                library::PinRow::SmartPlaylist(row) => {
+                    present_smart_playlist_context_menu(&target, menus, row, None, position)
+                }
+                library::PinRow::PlaylistFolder(row) => {
+                    gtk_media_menus::playlist_folders::present_folder_context_menu(
+                        &target, menus, row, position,
+                    )
+                }
             }
         });
     }
@@ -817,13 +726,9 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         .pin_cancellation
         .replace(Some(cancellation.clone()));
     let catalog = Arc::clone(&shell.products.library);
-    let runtime = shell.products.runtime.clone();
-    let read_pins = pins;
-    let read_database = catalog.clone();
-    let read_cancel = cancellation.clone();
-    let task = runtime.spawn(async move {
-        read_database
-            .pin_rows(&read_pins, &read_cancel)
+    let task = shell.products.runtime.spawn(async move {
+        catalog
+            .pin_rows(&pins, unix_now(), &cancellation)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -841,28 +746,16 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         {
             return;
         }
+        current.navigation.pin_cancellation.borrow_mut().take();
         let Some(rows) = result else {
             current.navigation.pin_identity.borrow_mut().take();
-            current.navigation.pin_cancellation.borrow_mut().take();
             warn!("failed to load sidebar Pins");
             return;
         };
-        let mut pending = Vec::new();
-        let mut indexed = HashMap::new();
-        {
-            let current_items = current.navigation.pin_items.borrow();
-            let known = current_items
-                .iter()
-                .map(|item| (&item.0.pin, item.0.totals))
-                .collect::<HashMap<_, _>>();
-            for mut row in rows {
-                if row.totals.is_none() {
-                    pending.push(row.clone());
-                    row.totals = known.get(&row.pin).copied().flatten();
-                }
-                indexed.insert(row.pin.clone(), SidebarPinItem(row));
-            }
-        }
+        let mut indexed = rows
+            .into_iter()
+            .map(|row| (row.pin.clone(), SidebarPinItem(row)))
+            .collect::<HashMap<_, _>>();
         let items = current
             .settings
             .current
@@ -876,65 +769,14 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             reconcile_sidebar_pin_widgets(&current, &items);
             current.navigation.pin_items.replace(items);
         }
-
-        if pending.is_empty() {
-            current.navigation.pin_cancellation.borrow_mut().take();
-            return;
-        }
-        let task = runtime.spawn(async move {
-            catalog
-                .sidebar_pin_totals(
-                    pending,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs() as i64,
-                    &cancellation,
-                )
-                .await
-        });
-        drop(current);
-        let result = task.await.ok().and_then(Result::ok);
-        let Some(current) = shell.upgrade() else {
-            return;
-        };
-        if !sidebar_pin_publication_is_current(generation, current.navigation.pin_generation.get())
-        {
-            return;
-        }
-        if let Some(rows) = result {
-            let totals = rows
-                .into_iter()
-                .map(|row| (row.pin, row.totals))
-                .collect::<HashMap<_, _>>();
-            let items = {
-                let mut items = current.navigation.pin_items.borrow_mut();
-                let mut changed = Vec::new();
-                for item in &mut *items {
-                    if let Some(total) = totals.get(&item.0.pin)
-                        && item.0.totals != *total
-                    {
-                        item.0.totals = *total;
-                        changed.push(item.clone());
-                    }
-                }
-                changed
-            };
-            if !items.is_empty() {
-                let widgets = keyed_sidebar_pin_widgets(&current.navigation_view.normal_nav_pins);
-                for item in &items {
-                    if let Some(key) = sidebar_pin_route_key(&item.route())
-                        && let Some(widget) = widgets.get(&key)
-                    {
-                        update_sidebar_pin_widget_metadata(widget, item);
-                    }
-                }
-            }
-        } else {
-            warn!("failed to load sidebar Pin totals");
-        }
-        current.navigation.pin_cancellation.borrow_mut().take();
     });
+}
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn sidebar_pin_publication_is_current(expected_generation: u64, current_generation: u64) -> bool {

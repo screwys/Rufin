@@ -1,6 +1,8 @@
+use crate::sparse_model::SparseLoad;
 use adw::prelude::*;
 use gtk::glib;
 use playback::TransportStatus;
+use rufin_core::view::{OpenOptions, Opened, Reread, View};
 use std::{
     cell::{Cell, RefCell},
     future::Future,
@@ -54,7 +56,7 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedDownloadChange = Rc<dyn Fn(&downloads::DownloadEvent)>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
-pub type MountedFavoriteState = Rc<dyn Fn(rufin_core::runtime::FavoriteState)>;
+pub type MountedFavoriteState = Rc<dyn Fn(&library::StateChange)>;
 pub type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
@@ -190,19 +192,75 @@ impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R>
     }
 }
 
-/// A mounted route's open page and the reads that replace it; the latest request wins. The route
-/// says what it wants read and how a new page applies; a page the route rejects is not kept.
+/// The view a mounted route reads; its models read their windows from the view it holds now.
+pub type RouteView = Rc<RefCell<Arc<View>>>;
+
+/// A read of a route: its view and what came with it, the header, the seed window starting at
+/// `first`, an artist's favorite tracks, an album's disc sections and the Albums list's spans in
+/// Detail layout.
+pub struct RouteRead {
+    pub view: Arc<View>,
+    pub header: Option<library::Header>,
+    pub first: usize,
+    pub rows: Vec<library::Row>,
+    pub favorites: Option<Vec<library::Row>>,
+    pub discs: Vec<(u32, i64)>,
+    pub spans: Option<Vec<library::AlbumSpan>>,
+}
+
+impl RouteRead {
+    pub async fn of(
+        opened: Opened,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Self> {
+        let discs = opened.view.disc_sections(cancel).await?;
+        let spans = opened.view.album_spans(cancel).await?;
+        Ok(Self {
+            view: Arc::new(opened.view),
+            header: opened.header,
+            first: opened.first,
+            rows: opened.rows,
+            favorites: opened.favorites,
+            discs,
+            spans,
+        })
+    }
+
+    pub fn route_view(&self) -> RouteView {
+        Rc::new(RefCell::new(Arc::clone(&self.view)))
+    }
+}
+
+/// A sparse loader that reads windows of the view `view` holds and keeps the rows `map` takes.
+pub fn view_rows<K, R: Send + 'static>(
+    view: &RouteView,
+    map: fn(library::Row) -> Option<R>,
+) -> SparseLoad<K, R> {
+    let view = Rc::clone(view);
+    Rc::new(move |_, range, cancel| {
+        let view = Arc::clone(&view.borrow());
+        Box::pin(async move {
+            view.rows(range, &cancel)
+                .await
+                .map(|rows| rows.into_iter().filter_map(map).collect())
+                .map_err(|error| error.to_string())
+        })
+    })
+}
+
+/// A mounted route's view and the reads that replace it; the latest request wins. The route
+/// says what it wants read and how a new read applies; a read the route rejects is not kept.
 pub struct PageReread {
-    page: RefCell<Arc<rufin_core::page::Page>>,
-    inputs: Box<dyn Fn(&rufin_core::browse::OpenOptions) -> rufin_core::browse::OpenOptions>,
-    read: Rc<LatestMountedRouteRead<Result<rufin_core::page::Page, String>, PageRequest>>,
+    view: RouteView,
+    inputs: Box<dyn Fn(&OpenOptions) -> OpenOptions>,
+    read: Rc<LatestMountedRouteRead<Result<RouteRead, String>, PageRequest>>,
 }
 
 #[derive(Clone)]
 struct PageRequest {
-    page: Arc<rufin_core::page::Page>,
-    read: rufin_core::page::Reread,
-    options: rufin_core::browse::OpenOptions,
+    view: Arc<View>,
+    read: Reread,
+    options: OpenOptions,
     window: library::RouteSeedWindow,
 }
 
@@ -210,78 +268,91 @@ impl PageReread {
     pub fn new(
         runtime: tokio::runtime::Handle,
         context: &'static str,
-        page: rufin_core::page::Page,
-        inputs: impl Fn(&rufin_core::browse::OpenOptions) -> rufin_core::browse::OpenOptions + 'static,
-        apply: impl Fn(&rufin_core::page::Page) -> bool + 'static,
+        view: &RouteView,
+        inputs: impl Fn(&OpenOptions) -> OpenOptions + 'static,
+        apply: impl Fn(RouteRead) -> bool + 'static,
     ) -> Rc<Self> {
-        Rc::new_cyclic(|reread: &std::rc::Weak<Self>| {
-            let reread = reread.clone();
-            let apply = Rc::new(move |_, result: Result<rufin_core::page::Page, String>| {
-                let page = match result {
-                    Ok(page) => page,
-                    Err(error) => {
-                        warn!(%error, context, "failed to read page again");
-                        return;
+        let current = Rc::downgrade(view);
+        let apply = Rc::new(move |_, result: Result<RouteRead, String>| {
+            let read = match result {
+                Ok(read) => read,
+                Err(error) => {
+                    warn!(%error, context, "failed to read page again");
+                    return;
+                }
+            };
+            let Some(current) = current.upgrade() else {
+                return;
+            };
+            // Models read windows of the new view as soon as they take its rows.
+            let previous = current.replace(Arc::clone(&read.view));
+            if !apply(read) {
+                current.replace(previous);
+            }
+        });
+        let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
+            Box::pin(async move {
+                let view = &request.view;
+                let opened = match request.read {
+                    Reread::Page => view.reread(request.options, request.window, &cancel).await,
+                    Reread::Releases => {
+                        view.reread_releases(request.options, request.window, &cancel)
+                            .await
                     }
                 };
-                if let Some(reread) = reread.upgrade()
-                    && apply(&page)
-                {
-                    reread.page.replace(Arc::new(page));
+                match opened {
+                    Ok(opened) => RouteRead::of(opened, &cancel).await,
+                    Err(error) => Err(error),
                 }
-            });
-            let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
-                Box::pin(async move {
-                    let page = &request.page;
-                    match request.read {
-                        rufin_core::page::Reread::Page => {
-                            page.reread(request.options, request.window, &cancel).await
-                        }
-                        rufin_core::page::Reread::Releases => {
-                            page.reread_releases(request.options, request.window, &cancel)
-                                .await
-                        }
-                    }
-                    .map_err(|error| error.to_string())
-                }) as Pin<Box<dyn Future<Output = _> + Send>>
-            });
-            Self {
-                page: RefCell::new(Arc::new(page)),
-                inputs: Box::new(inputs),
-                read: LatestMountedRouteRead::new_with_request(runtime, apply, load, context),
-            }
+                .map_err(|error| error.to_string())
+            }) as Pin<Box<dyn Future<Output = _> + Send>>
+        });
+        Rc::new(Self {
+            view: Rc::clone(view),
+            inputs: Box::new(inputs),
+            read: LatestMountedRouteRead::new_with_request(runtime, apply, load, context),
         })
     }
 
-    /// The page last applied.
-    pub fn page(&self) -> Arc<rufin_core::page::Page> {
-        Arc::clone(&self.page.borrow())
+    /// The view last applied.
+    pub fn view(&self) -> Arc<View> {
+        Arc::clone(&self.view.borrow())
     }
 
     /// The options the route wants read now.
-    pub fn wanted(&self) -> rufin_core::browse::OpenOptions {
-        (self.inputs)(self.page.borrow().options())
+    pub fn wanted(&self) -> OpenOptions {
+        (self.inputs)(self.view.borrow().options())
     }
 
+    /// Reads from the top, for a new search or filter.
     pub fn reread(&self) {
         self.reread_at(library::RouteSeedWindow::top());
     }
 
+    /// Reads where the list is, for a change to what it shows.
     pub fn reread_at(&self, window: library::RouteSeedWindow) {
-        self.request(rufin_core::page::Reread::Page, window);
+        self.request(Reread::Page, window);
+    }
+
+    /// Reads again for a committed change: from `live`, where the list is, unless its search
+    /// moved since the read it shows.
+    pub fn refresh(&self, live: library::RouteSeedWindow) {
+        let window = if self.wanted().filter == self.view.borrow().options().filter {
+            live
+        } else {
+            library::RouteSeedWindow::top()
+        };
+        self.reread_at(window);
     }
 
     /// Reads an artist page's releases again.
     pub fn reread_releases(&self) {
-        self.request(
-            rufin_core::page::Reread::Releases,
-            library::RouteSeedWindow::top(),
-        );
+        self.request(Reread::Releases, library::RouteSeedWindow::top());
     }
 
-    fn request(&self, read: rufin_core::page::Reread, window: library::RouteSeedWindow) {
+    fn request(&self, read: Reread, window: library::RouteSeedWindow) {
         self.read.request_with(PageRequest {
-            page: self.page(),
+            view: self.view(),
             read,
             options: self.wanted(),
             window,
@@ -290,16 +361,16 @@ impl PageReread {
 
     /// Reads again what `settings` change.
     pub fn resume(&self, settings: &rufin_core::settings::app::Settings) {
-        let read = self.page.borrow().settings_reread(settings);
+        let read = self.view.borrow().settings_reread(settings);
         if let Some(read) = read {
             self.request(read, library::RouteSeedWindow::top());
         }
     }
 
-    /// Reads again when a favorite change can move or drop the page's rows.
-    pub fn favorite_changed(&self) {
-        if self.page.borrow().favorites_reorder() {
-            self.reread();
+    /// Reads again where the list is when a favorite change can move or drop its rows.
+    pub fn favorite_changed(&self, live: library::RouteSeedWindow) {
+        if self.view.borrow().favorites_reorder() {
+            self.refresh(live);
         }
     }
 }
@@ -594,7 +665,7 @@ impl MountedRoute {
         self
     }
 
-    pub fn apply_favorite_state(&self, state: rufin_core::runtime::FavoriteState) {
+    pub fn apply_favorite_state(&self, state: &library::StateChange) {
         if let Some(apply) = &self.favorite_state {
             apply(state);
         }

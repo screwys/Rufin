@@ -115,6 +115,12 @@ impl PlaylistEntrySelection {
         (positions.size() > 0).then(|| self.snapshot(&positions))
     }
 
+    /// Where a shown entry stands in its playlist.
+    pub fn entry_position(&self, entry: PlaylistEntryKey) -> Option<u32> {
+        let row = self.model.ready(self.model.ready_position(entry)?)?;
+        row.entry.as_ref().map(|entry| entry.position)
+    }
+
     pub fn single_entry(&self, entry: PlaylistEntryKey) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             writable: self.writable,

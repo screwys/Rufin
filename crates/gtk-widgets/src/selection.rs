@@ -393,7 +393,7 @@ pub fn smart_play_request(key: library::SmartPlaylistKey) -> rufin_core::playbac
         .with_context(CollectionTarget::SmartPlaylist(key).context_id().into())
 }
 
-pub fn album_play_request(row: &library::AlbumView) -> rufin_core::playback::PlayRequest {
+pub fn album_play_request(row: &library::AlbumRow) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(
         library::MemberRead::new(library::Collection::Album(row.album_key)).selection(),
         0,
@@ -408,7 +408,7 @@ pub fn album_play_request(row: &library::AlbumView) -> rufin_core::playback::Pla
 }
 
 pub fn artist_play_request(
-    row: &library::ArtistView,
+    row: &library::ArtistRow,
     album_artist: bool,
 ) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(

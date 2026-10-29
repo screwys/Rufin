@@ -33,7 +33,7 @@ pub fn present_playlist_entry_context_menu(
     shell: &Rc<CatalogUi>,
     playlist: library::PlaylistKey,
     entry: library::PlaylistEntryKey,
-    entry_row: library::PlaylistEntryView,
+    entry_row: library::TrackRow,
     position: Option<(f64, f64)>,
 ) {
     if let Some(selection) = shell.current_playlist_entry_selection(entry) {

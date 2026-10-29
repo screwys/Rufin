@@ -665,10 +665,22 @@ impl crate::PlayerUi {
         let catalog = self.catalog.clone();
         let read_cancellation = cancellation.clone();
         let task = self.runtime.spawn(async move {
-            let keys = candidates.await?;
+            let items = candidates
+                .await?
+                .into_iter()
+                .map(|key| library::Item::Track { key, entry: None })
+                .collect::<Vec<_>>();
             catalog
-                .tracks(&keys, &read_cancellation)
+                .rows_of(&items, true, &read_cancellation)
                 .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .filter_map(|row| match row {
+                            library::Row::Track(track) => Some(track),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                })
                 .map_err(|error| error.to_string())
         });
         *parts.related_task.borrow_mut() = Some((cancellation, task.abort_handle()));

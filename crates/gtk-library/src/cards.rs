@@ -23,12 +23,12 @@ pub struct AlbumCover {
     button: gtk::Button,
     tile: ArtworkTile,
     favorite: gtk::Button,
-    current: Rc<std::cell::RefCell<Option<library::AlbumView>>>,
+    current: Rc<std::cell::RefCell<Option<library::AlbumRow>>>,
 }
 
 impl AlbumCover {
     pub fn new(shell: &Rc<CatalogUi>) -> Self {
-        let current = Rc::new(std::cell::RefCell::new(None::<library::AlbumView>));
+        let current = Rc::new(std::cell::RefCell::new(None::<library::AlbumRow>));
         let button = gtk::Button::new();
         button.add_css_class("album-cover-button");
         button.add_css_class("flat");
@@ -111,7 +111,7 @@ impl AlbumCover {
         }
     }
 
-    pub fn bind(&self, shell: &CatalogUi, album: Option<&library::AlbumView>) {
+    pub fn bind(&self, shell: &CatalogUi, album: Option<&library::AlbumRow>) {
         self.current.replace(album.cloned());
         if let Some(album) = album {
             shell.artwork.bind_artwork_tile(

@@ -2,7 +2,7 @@ use gtk_widgets::media_drag::{MediaDragSource, install_media_drag_source};
 use gtk_widgets::sparse_model::{item_at_from_item, object_item};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use ::library::{AlbumView, ArtistView};
+use ::library::{AlbumRow, ArtistRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
@@ -22,7 +22,7 @@ use gtk_widgets::localization::localized_column;
 use rufin_core::playback::PlayRequest;
 
 use super::table_links::mapped_track_link_column;
-use gtk_widgets::detail_links::{DetailLinks, album_artist_links};
+use gtk_widgets::detail_links::{DetailLinks, album_row_artist_links};
 use gtk_widgets::library_fields::{
     add_field_skeleton_class, album_field, artist_field, column_fit_width, column_width,
     opaque_artwork,
@@ -205,7 +205,7 @@ pub fn album_column(
             let row = item
                 .item()
                 .and_downcast::<gtk_widgets::sparse_model::SparseObjectItem>()
-                .and_then(|item| item.value::<std::sync::Arc<AlbumView>>());
+                .and_then(|item| item.value::<std::sync::Arc<AlbumRow>>());
             cell.bind(item.position(), row);
         }
     });
@@ -257,7 +257,7 @@ mod album_table_cell_imp {
     #[derive(Default)]
     pub struct AlbumTableCell {
         pub(super) view: RefCell<Option<AlbumCellView>>,
-        pub(super) row: RefCell<Option<std::sync::Arc<AlbumView>>>,
+        pub(super) row: RefCell<Option<std::sync::Arc<AlbumRow>>>,
         pub(super) field: std::cell::Cell<Option<LibraryField>>,
         pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
         pub(super) playback_context: RefCell<Option<String>>,
@@ -361,10 +361,7 @@ impl AlbumTableCell {
                 let target = context.as_ref().map_or(target.clone(), |context| {
                     target.with_context(context.as_str().into())
                 });
-                Some((
-                    MediaDragSource::capture_target(target),
-                    row.metadata.title.clone(),
-                ))
+                Some((MediaDragSource::capture_target(target), row.title.clone()))
             });
             let weak = cell.downgrade();
             install_context_menu_openers(
@@ -405,7 +402,7 @@ impl AlbumTableCell {
         cell
     }
 
-    pub fn bind(&self, position: u32, row: Option<std::sync::Arc<AlbumView>>) {
+    pub fn bind(&self, position: u32, row: Option<std::sync::Arc<AlbumRow>>) {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
         let imp = self.imp();
         imp.row.replace(row.clone());
@@ -463,10 +460,9 @@ impl AlbumTableCell {
                         opaque_artwork(row.artwork_binding.as_deref()),
                         48,
                     );
-                    cell.title().set_text(&row.metadata.title);
-                    cell.bind_subtitle(album_artist_links(&row));
-                    cell.subtitle()
-                        .set_visible(!row.metadata.artist.trim().is_empty());
+                    cell.title().set_text(&row.title);
+                    cell.bind_subtitle(album_row_artist_links(&row));
+                    cell.subtitle().set_visible(!row.artist.trim().is_empty());
                     shell.bind_download_badge(
                         &cell.downloaded().unwrap(),
                         collection_is_downloaded(
@@ -496,7 +492,7 @@ pub fn artist_column(
 ) -> gtk::ColumnViewColumn {
     match field {
         LibraryField::RowIndex => {
-            mapped_row_index_column::<ArtistView>(shell, column_width(field), move |row| {
+            mapped_row_index_column::<ArtistRow>(shell, column_width(field), move |row| {
                 Some(gtk_widgets::selection::artist_play_request(
                     row,
                     album_artist,
@@ -506,7 +502,7 @@ pub fn artist_column(
         LibraryField::Image => artist_image_column(shell, album_artist),
         LibraryField::TitleMerged | LibraryField::Title => {
             artist_text_column(shell, field, "Title", 220, album_artist, |artist| {
-                artist.metadata.name.clone()
+                artist.name.clone()
             })
         }
         LibraryField::Favorite | LibraryField::Tools => {
@@ -922,13 +918,13 @@ fn install_artist_list_item_context_menu(
         target,
         shell,
         item,
-        Rc::new(move |artist: ArtistView| {
+        Rc::new(move |artist: ArtistRow| {
             let target = if album_artist {
                 gtk_widgets::selection::artist_play_request(&artist, true)
             } else {
                 gtk_widgets::selection::artist_play_request(&artist, false)
             };
-            Some((target, artist.metadata.name))
+            Some((target, artist.name))
         }),
     );
     let item = item.downgrade();
@@ -1050,7 +1046,7 @@ pub fn artist_image_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk::Co
         };
         let cover = cell.artwork();
         let Some(artwork) = item.item().and_then(|object| {
-            object_item::<ArtistView, _>(object, |row| {
+            object_item::<ArtistRow, _>(object, |row| {
                 opaque_artwork(row.artwork_binding.as_deref())
             })
         }) else {
@@ -1081,11 +1077,11 @@ pub fn artist_text_column<F>(
     value: F,
 ) -> gtk::ColumnViewColumn
 where
-    F: Fn(&ArtistView) -> String + 'static,
+    F: Fn(&ArtistRow) -> String + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
-        bind_collection_title::<ArtistView>(&factory, shell, move |row| {
+        bind_collection_title::<ArtistRow>(&factory, shell, move |row| {
             Some(gtk_widgets::selection::artist_play_request(
                 row,
                 album_artist,
@@ -1115,7 +1111,7 @@ where
             return;
         };
         let Some((text, downloaded)) = item.item().and_then(|object| {
-            object_item::<ArtistView, _>(object, |row| {
+            object_item::<ArtistRow, _>(object, |row| {
                 (
                     value(row),
                     collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
@@ -1519,10 +1515,11 @@ pub fn artist_actions_column(
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
             Rc::new(move || {
-                favorite_item
-                    .upgrade()
-                    .and_then(|item| item_at_from_item::<ArtistView>(&item))
-                    .map(|artist| artist_favorite_key(&artist.media_uri))
+                favorite_item.upgrade()?.item().and_then(|object| {
+                    object_item::<ArtistRow, _>(object, |artist| {
+                        artist_favorite_key(&artist.media_uri)
+                    })
+                })
             }),
             &button,
         );
@@ -1531,7 +1528,7 @@ pub fn artist_actions_column(
         button.connect_clicked(move |button| {
             let Some(artist) = click_item
                 .upgrade()
-                .and_then(|item| item_at_from_item::<ArtistView>(&item))
+                .and_then(|item| item_at_from_item::<ArtistRow>(&item))
             else {
                 return;
             };
@@ -1550,7 +1547,7 @@ pub fn artist_actions_column(
         };
         let favorite = item
             .item()
-            .and_then(|object| object_item::<ArtistView, _>(object, |row| row.state.favorite));
+            .and_then(|object| object_item::<ArtistRow, _>(object, |row| row.state.favorite));
         set_placeholder_favorite(&button, favorite);
     });
 
@@ -1604,9 +1601,12 @@ where
         setup_shell.register_dynamic_favorite_button(
             Rc::new(move || {
                 favorite_item
-                    .upgrade()
-                    .and_then(|item| item_at_from_item::<T>(&item))
-                    .and_then(|value| favorite_key_value(&value))
+                    .upgrade()?
+                    .item()
+                    .and_then(|object| {
+                        object_item::<T, _>(object, |value| favorite_key_value(value))
+                    })
+                    .flatten()
                     .map(|(track, _)| track_favorite_key(&track))
             }),
             &button,

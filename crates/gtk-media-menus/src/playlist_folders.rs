@@ -188,22 +188,7 @@ fn populate_folder_picker(
             );
         }),
     );
-    let catalog = menus.library.clone();
-    let task = menus.runtime.spawn(async move {
-        catalog
-            .playlist_folder_choices(smart, &library::ReadCancellation::new())
-            .await
-    });
-    let menus = Rc::downgrade(menus);
-    gtk::glib::spawn_future_local(async move {
-        let result = task.await;
-        let Some(menus) = menus.upgrade() else { return };
-        match result {
-            Ok(Ok(rows)) => update(rows),
-            Ok(Err(error)) => (menus.show_error)(error.to_string()),
-            Err(error) => (menus.show_error)(error.to_string()),
-        }
-    });
+    update(menus.library.playlist_folder_choices(smart));
 }
 
 pub fn present_folder_context_menu(

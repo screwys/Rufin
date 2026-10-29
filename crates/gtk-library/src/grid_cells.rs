@@ -1,6 +1,6 @@
 use crate::CatalogUi;
 use crate::LibraryField;
-use ::library::{AlbumView, ArtistView, FavoriteTarget};
+use ::library::{AlbumRow, ArtistRow, FavoriteTarget};
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
@@ -25,7 +25,7 @@ use gtk_widgets::selection::track_play_request;
 use rufin_core::playback::PlayRequest;
 
 use crate::track_selection::TrackSelection;
-use gtk_widgets::detail_links::{DetailLinkBinding, DetailLinks, album_artist_links};
+use gtk_widgets::detail_links::{DetailLinkBinding, DetailLinks, album_row_artist_links};
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MAX_CARD_WIDTH, COLLECTION_GRID_MIN_CARD_WIDTH,
     album_field, artist_field, opaque_artwork,
@@ -642,14 +642,14 @@ fn selected_position(selection: &gtk::SelectionModel) -> u32 {
     }
 }
 
-fn album_playback_target(album: &library::AlbumView, context: Option<&str>) -> PlayRequest {
+fn album_playback_target(album: &library::AlbumRow, context: Option<&str>) -> PlayRequest {
     let target = gtk_widgets::selection::album_play_request(album);
     context
         .map(|context| target.clone().with_context(context.into()))
         .unwrap_or(target)
 }
 
-pub struct TrackGridCell<T: gtk_widgets::library_fields::TrackPresentation = library::TrackView> {
+pub struct TrackGridCell<T: gtk_widgets::library_fields::TrackPresentation = library::TrackRow> {
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
@@ -805,7 +805,7 @@ pub struct AlbumGridCell {
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
     favorite: gtk::Button,
-    current: Rc<RefCell<Option<AlbumView>>>,
+    current: Rc<RefCell<Option<AlbumRow>>>,
     context: Option<String>,
 }
 
@@ -836,7 +836,7 @@ impl AlbumGridCell {
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], context: Option<String>) -> Self {
-        let current = Rc::new(RefCell::new(None::<AlbumView>));
+        let current = Rc::new(RefCell::new(None::<AlbumRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play album"));
         let cover_host = controls.imp().cover_host.get();
         let menu = controls.imp().menu.get();
@@ -857,7 +857,7 @@ impl AlbumGridCell {
             let row = row.as_ref()?;
             let target = album_playback_target(&row, drag_context.as_deref());
             let source = MediaDragSource::capture_target(target);
-            Some((source, row.metadata.title.clone()))
+            Some((source, row.title.clone()))
         });
         let menu_context = context.clone();
         install_grid_context(
@@ -914,7 +914,7 @@ pub struct ArtistGridCell {
     shell: std::rc::Weak<CatalogUi>,
     cover: ArtworkTile,
     favorite: gtk::Button,
-    current: Rc<RefCell<Option<ArtistView>>>,
+    current: Rc<RefCell<Option<ArtistRow>>>,
     album_artist: bool,
 }
 
@@ -924,7 +924,7 @@ impl ArtistGridCell {
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], album_artist: bool) -> Self {
-        let current = Rc::new(RefCell::new(None::<ArtistView>));
+        let current = Rc::new(RefCell::new(None::<ArtistRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play artist"));
         let cover_host = controls.imp().cover_host.get();
         let menu = controls.imp().menu.get();
@@ -948,7 +948,7 @@ impl ArtistGridCell {
                 gtk_widgets::selection::artist_play_request(&row, false)
             };
             let source = MediaDragSource::capture_target(target);
-            Some((source, row.metadata.name.clone()))
+            Some((source, row.name.clone()))
         });
         install_grid_context(
             shell,
@@ -999,11 +999,11 @@ impl ArtistGridCell {
     }
 }
 
-impl ReusableCollectionGridCell<ArtistView> for ArtistGridCell {
+impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
     fn widget(&self) -> gtk::Widget {
         self.body.widget()
     }
-    fn bind(&self, _: u32, row: ArtistView) {
+    fn bind(&self, _: u32, row: ArtistRow) {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
@@ -1020,7 +1020,7 @@ impl ReusableCollectionGridCell<ArtistView> for ArtistGridCell {
             opaque_artwork(row.artwork_binding.as_deref()),
             COLLECTION_GRID_MAX_CARD_WIDTH,
         );
-        self.body.bind(&row.metadata.name, |field| {
+        self.body.bind(&row.name, |field| {
             DetailLinks::text(&artist_field(&row, field))
         });
         self.body.set_download_target(
@@ -1048,18 +1048,18 @@ impl ReusableCollectionGridCell<ArtistView> for ArtistGridCell {
         };
         self.body.replace_fields(&shell, fields);
         if let Some(row) = self.current.borrow().as_ref() {
-            self.body.bind(&row.metadata.name, |field| {
+            self.body.bind(&row.name, |field| {
                 DetailLinks::text(&artist_field(row, field))
             });
         }
     }
 }
 
-impl ReusableCollectionGridCell<AlbumView> for AlbumGridCell {
+impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
     fn widget(&self) -> gtk::Widget {
         self.body.widget()
     }
-    fn bind(&self, _: u32, row: AlbumView) {
+    fn bind(&self, _: u32, row: AlbumRow) {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
@@ -1070,14 +1070,14 @@ impl ReusableCollectionGridCell<AlbumView> for AlbumGridCell {
             opaque_artwork(row.artwork_binding.as_deref()),
             COLLECTION_GRID_MAX_CARD_WIDTH,
         );
-        self.body.bind(&row.metadata.title, |field| {
+        self.body.bind(&row.title, |field| {
             let value = album_field(&row, field);
             if value.is_empty()
                 || !matches!(field, LibraryField::Artist | LibraryField::AlbumArtist)
             {
                 DetailLinks::text(&value)
             } else {
-                album_artist_links(&row)
+                album_row_artist_links(&row)
             }
         });
         self.body.set_download_target(
@@ -1105,7 +1105,7 @@ impl ReusableCollectionGridCell<AlbumView> for AlbumGridCell {
         };
         self.body.replace_fields(&shell, fields);
         if let Some(row) = self.current.borrow().as_ref() {
-            self.body.bind(&row.metadata.title, |field| {
+            self.body.bind(&row.title, |field| {
                 DetailLinks::text(&album_field(row, field))
             });
         }

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use library::{GenreView, HomeAlbumRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed};
+use library::{HomeAlbumRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow};
 use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -35,11 +35,8 @@ use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::selection::track_play_request;
 
 use crate::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
-use gtk_widgets::detail_links::{
-    DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
-    track_artist_links,
-};
-use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, track_field};
+use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
+use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, TrackPresentation};
 use gtk_widgets::route::Route;
 
 const HOME_ALBUM_GRID_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
@@ -454,11 +451,7 @@ fn clamped_page_start(start: usize, page_size: usize, count: usize) -> usize {
 }
 
 impl CatalogUi {
-    pub fn home_route(
-        self: &Rc<Self>,
-        _selected: rufin_core::runtime::SelectedLibrary,
-        home: HomePage,
-    ) -> MountedRoute {
+    pub fn home_route(self: &Rc<Self>, home: HomePage) -> MountedRoute {
         let scroller = gtk::ScrolledWindow::new();
         configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
         scroller.set_vexpand(true);
@@ -565,9 +558,9 @@ impl CatalogUi {
                     view.mounted.update(|item| {
                         if let HomeItem::Track(item) = item
                             && item.track.media_uri == uri
-                            && item.track.access.is_downloaded != downloaded
+                            && item.track.is_downloaded != downloaded
                         {
-                            item.track.access.is_downloaded = downloaded;
+                            item.track.is_downloaded = downloaded;
                             true
                         } else {
                             false
@@ -652,14 +645,14 @@ impl CatalogUi {
     ) -> gtk::Widget {
         let width = crate::route_layout::home_album_content_width_for((self.route_width)());
         let mut album = item.album.clone();
-        album.metadata.title.clone_from(&item.title);
+        album.title.clone_from(&item.title);
         let seed = stable_seed(&album.object_id);
         let cover = home_album_cover_projection(
             self,
             &album,
             crate::route_layout::detail_showcase_cover_size(width),
         );
-        let title_text = album.metadata.title.clone();
+        let title_text = album.title.clone();
         let showcase_view =
             DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
         let radio = detail_radio_button();
@@ -742,22 +735,19 @@ impl CatalogUi {
         });
 
         let (artist_scroll, artist) = gtk_widgets::text_slide::new_label();
-        artist.set_text(&album.metadata.artist);
+        artist.set_text(&album.artist);
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
         artist.set_width_request(1);
         artist.set_width_chars(1);
-        DetailLinkBinding::new(&artist, self.route_navigation()).bind(album_artist_links(&album));
+        DetailLinkBinding::new(&artist, self.route_navigation())
+            .bind(album_row_artist_links(&album));
         showcase_view.append_detail(&artist_scroll);
         showcase_view.replace_summary(&[
             (
                 "rufin-x-office-calendar-symbolic",
-                album
-                    .metadata
-                    .year
-                    .map(|year| year.to_string())
-                    .unwrap_or_default(),
+                album.year.map(|year| year.to_string()).unwrap_or_default(),
             ),
             (
                 "rufin-tracks-symbolic",
@@ -782,7 +772,7 @@ impl CatalogUi {
         showcase.upcast()
     }
 
-    fn home_genres(self: &Rc<Self>, genres: &[GenreView]) -> Option<gtk::Widget> {
+    fn home_genres(self: &Rc<Self>, genres: &[TagRow]) -> Option<gtk::Widget> {
         if genres.is_empty() {
             return None;
         }
@@ -810,7 +800,7 @@ impl CatalogUi {
         Some(section.upcast())
     }
 
-    fn home_genre_chip(self: &Rc<Self>, genre: &GenreView) -> gtk::Widget {
+    fn home_genre_chip(self: &Rc<Self>, genre: &TagRow) -> gtk::Widget {
         let button = gtk::Button::new();
         button.add_css_class("flat");
         button.add_css_class("home-genre-chip");
@@ -821,7 +811,7 @@ impl CatalogUi {
         labels.set_margin_bottom(8);
         labels.set_margin_start(10);
         labels.set_margin_end(10);
-        let name = gtk::Label::new(Some(&genre.metadata.name));
+        let name = gtk::Label::new(Some(&genre.name));
         name.add_css_class("album-title");
         name.set_xalign(0.0);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -842,7 +832,7 @@ impl CatalogUi {
         labels.append(&counts);
         button.set_child(Some(&labels));
         let shell = Rc::clone(self);
-        let key = genre.genre_key;
+        let key = library::GenreKey::from_raw(genre.key);
         button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(key)));
         button.upcast()
     }
@@ -852,7 +842,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
     match item {
         HomeItem::Track(item) => {
             let mut track = item.track;
-            track.metadata.title = item.title;
+            track.title = item.title;
             let play_shell = Rc::clone(shell);
             let play_key = track.track_key;
             let play = Rc::new(move |_| {
@@ -862,14 +852,8 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                     false,
                 );
             });
-            let field = Rc::new(move |_, track: &library::TrackView, field| match field {
-                LibraryField::Artist => track_artist_links(track),
-                LibraryField::AlbumArtist => track_album_artist_links(track),
-                LibraryField::Album => DetailLinks::route(
-                    &track.metadata.album,
-                    track.links.album_media_uri.clone().map(Route::AlbumDetail),
-                ),
-                _ => DetailLinks::text(&track_field(track, field)),
+            let field = Rc::new(move |_, track: &library::TrackRow, field| {
+                TrackPresentation::links(track, field)
             });
             let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
             cell.bind(0, track);
@@ -878,7 +862,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 Rc::new(move |item| {
                     if let HomeItem::Track(item) = item {
                         let mut track = item.track;
-                        track.metadata.title = item.title;
+                        track.title = item.title;
                         cell.bind(0, track);
                     }
                 }),
@@ -886,7 +870,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
         }
         HomeItem::Album(item) => {
             let mut album = item.album;
-            album.metadata.title = item.title;
+            album.title = item.title;
             let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
             cell.bind(0, album);
             (
@@ -894,7 +878,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 Rc::new(move |item| {
                     if let HomeItem::Album(item) = item {
                         let mut album = item.album;
-                        album.metadata.title = item.title;
+                        album.title = item.title;
                         cell.bind(0, album);
                     }
                 }),

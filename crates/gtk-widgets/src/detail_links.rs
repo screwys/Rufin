@@ -8,6 +8,28 @@ pub use rufin_core::route::detail_links::{
     DetailLinks, album_artist_links, joined_credits, metadata_links, track_album_artist_links,
     track_artist_album_links, track_artist_links,
 };
+use rufin_core::settings::LibraryField;
+
+/// An album row's album artist links, as `album_artist_links` gives them for a full album.
+pub fn album_row_artist_links(album: &library::AlbumRow) -> DetailLinks {
+    let credits = album
+        .links
+        .album_artists
+        .iter()
+        .map(|credit| library::TrackArtistLink {
+            artist_key: credit.artist_key,
+            media_uri: credit.media_uri.clone(),
+            name: credit.name.clone(),
+        })
+        .collect::<Vec<_>>();
+    metadata_links(
+        LibraryField::AlbumArtist,
+        &album.artist,
+        None,
+        &[],
+        &credits,
+    )
+}
 
 fn markup(links: &DetailLinks) -> String {
     let mut markup = String::new();
@@ -105,7 +127,7 @@ mod tests {
     use super::*;
 
     use library::{
-        AlbumArtistLink, AlbumKey, AlbumView, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
+        AlbumArtistLink, AlbumKey, AlbumRow, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
         TrackView,
     };
 
@@ -171,7 +193,7 @@ mod tests {
         let credits = vec![credit(5, "First"), credit(6, "Second")];
         let mut album = album();
         album.links.album_artists = vec![album_credit(5, "First"), album_credit(6, "Second")];
-        let links = album_artist_links(&album);
+        let links = album_row_artist_links(&album);
         assert_eq!(
             links.route_for_link("0"),
             Some(Route::AlbumArtistDetail(uri("artist", 5)))
@@ -266,7 +288,6 @@ mod tests {
                 cue_path: None,
                 cue_start_millis: None,
                 cue_end_millis: None,
-                loudness_analysis_key: [0; 32],
                 is_downloaded: false,
                 ..Default::default()
             },
@@ -289,8 +310,8 @@ mod tests {
         }
     }
 
-    fn album() -> AlbumView {
-        AlbumView {
+    fn album() -> AlbumRow {
+        AlbumRow {
             album_key: AlbumKey::from_raw(1),
             source_key: SourceKey::from_raw(1),
             object_id: "album".to_string(),
@@ -299,38 +320,18 @@ mod tests {
                 "album",
                 "album",
             ),
-            release_lookup_identity: None,
+            title: "Album".to_string(),
+            artist: "First, Second".to_string(),
+            sort_text: "album".to_string(),
+            year: None,
+            release_date: None,
+            date_added: None,
+            is_compilation: false,
+            release_class: library::AlbumReleaseClass::Album,
+            state: Default::default(),
+            summary: Default::default(),
+            links: Default::default(),
             artwork_binding: None,
-            metadata: library::AlbumMetadata {
-                title: "Album".to_string(),
-                artist: "First, Second".to_string(),
-                year: None,
-                release_date: None,
-                date_added: None,
-                musicbrainz_release_id: None,
-                musicbrainz_release_group_id: None,
-                is_compilation: None,
-                release_types: Vec::new(),
-                ..Default::default()
-            },
-            state: library::TrackState {
-                favorite: false,
-                rating: None,
-                play_count: 0,
-                last_played: None,
-                ..Default::default()
-            },
-            summary: library::CollectionSummary {
-                track_count: 0,
-                duration_millis: 0,
-                downloaded_count: 0,
-                ..Default::default()
-            },
-            links: library::AlbumLinks {
-                album_artists: Vec::new(),
-                genres: Vec::new(),
-                ..Default::default()
-            },
         }
     }
 }

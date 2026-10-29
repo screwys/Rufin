@@ -1,6 +1,5 @@
-use rufin_core::browse::{OpenOptions, OpenedCollection};
-use rufin_core::page::Page;
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
+use rufin_core::view::OpenOptions;
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use adw::prelude::*;
 use gtk::glib;
@@ -8,7 +7,7 @@ use gtk::glib;
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey, LibraryListSettings};
 use gtk_widgets::localization::bind_search_placeholder;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead, RouteView};
 use localization::msgid;
 use rufin_core::collection_context::CollectionTarget;
 
@@ -93,8 +92,18 @@ impl TrackListProjection {
             .play_source(queue, placement, context_id, shuffled);
     }
 
-    pub fn replace_page(&self, prepared: rufin_core::browse::MemberPage) -> bool {
-        self.model.replace_page(prepared)
+    /// Where a reread starts so the rows on screen stay.
+    pub fn live_window(&self) -> library::RouteSeedWindow {
+        self.model.live_window()
+    }
+
+    pub fn replace_favorites(
+        &self,
+        members: library::MemberRead,
+        count: usize,
+        rows: Vec<library::Row>,
+    ) {
+        self.model.replace_favorites(members, count, rows);
     }
 
     pub fn resume_initial_demand(&self) {
@@ -125,9 +134,9 @@ impl TrackListProjection {
         &self,
         shell: &Rc<CatalogUi>,
         context: &'static str,
-        page: Page,
+        view: &RouteView,
         scope: impl Fn(&mut OpenOptions) + 'static,
-        changed: impl Fn(&Page) + 'static,
+        changed: impl Fn(Option<library::Header>) + 'static,
     ) -> Rc<PageReread> {
         let inputs = list_inputs(&self.search);
         let model = self.model.clone();
@@ -135,19 +144,18 @@ impl TrackListProjection {
         let reread = PageReread::new(
             shell.runtime.clone(),
             context,
-            page,
+            view,
             move |options| {
                 let mut options = inputs(options);
                 scope(&mut options);
                 options
             },
-            move |page| {
+            move |mut read| {
+                let header = read.header.take();
                 let replaced = current.upgrade().is_some_and(|shell| (shell.is_current)())
-                    && page
-                        .tracks()
-                        .is_some_and(|tracks| model.replace_page(tracks.clone()));
+                    && model.replace_page(read);
                 if replaced {
-                    changed(page);
+                    changed(header);
                 }
                 replaced
             },
@@ -202,92 +210,56 @@ pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reread: &Rc<PageRer
 }
 
 impl CatalogUi {
-    pub fn opened_collection_view(self: &Rc<Self>, page: Page) -> MountedRoute {
-        let route = page.route().clone();
-        let selected = page.selected().cloned();
-        match page.opened() {
-            OpenedCollection::Tracks(tracks) => {
-                let tracks = tracks.clone();
-                match route {
-                    Route::History => self.history_route(page, tracks),
-                    Route::Favorites => {
-                        self.favorites_route(page, tracks, selected.expect("source collection"))
-                    }
-                    _ => self.library_tracks_route(
-                        page,
-                        tracks,
-                        selected.expect("source collection"),
-                    ),
-                }
+    pub fn opened_collection_view(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
+        let route = read.view.route().clone();
+        let selected = read.view.selected().cloned();
+        let category = read.view.options().category;
+        match route {
+            Route::History => self.history_route(read),
+            Route::Favorites if category == CollectionCategory::Tracks => {
+                self.favorites_route(read, selected.expect("source collection"))
             }
-            OpenedCollection::Detail(detail) => {
-                let detail = detail.clone();
-                match route {
-                    Route::AlbumDetail(_) => self.album_detail_view(page, detail),
-                    Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => self
-                        .artist_detail_view(
-                            matches!(route, Route::AlbumArtistDetail(_)),
-                            page,
-                            detail,
-                        ),
-                    Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
-                        self.artist_discography_view(page, detail)
-                    }
-                    Route::ArtistTracks(_) | Route::AlbumArtistTracks(_) => self
-                        .artist_tracks_view(
-                            matches!(route, Route::AlbumArtistTracks(_)),
-                            page,
-                            detail,
-                        ),
-                    Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_) => self
-                        .artist_favorite_tracks_view(
-                            matches!(route, Route::AlbumArtistFavoriteTracks(_)),
-                            page,
-                            detail,
-                        ),
-                    Route::PlaylistDetail(key) => self.playlist_detail_route(key, page, detail),
-                    Route::SmartPlaylistDetail(key) => {
-                        self.smart_playlist_detail_route(key, page, detail)
-                    }
-                    Route::GenreDetail(key) => self.named_detail_view(
-                        super::named_detail::NamedDetailId::Genre(key),
-                        page,
-                        detail,
-                    ),
-                    Route::MoodDetail(key) => self.named_detail_view(
-                        super::named_detail::NamedDetailId::Mood(key),
-                        page,
-                        detail,
-                    ),
-                    _ => unreachable!("detail renderer"),
-                }
+            Route::Tracks => self.library_tracks_route(read, selected.expect("source collection")),
+            Route::Albums => self.library_albums_route(read, false),
+            Route::Favorites if category == CollectionCategory::Albums => {
+                self.library_albums_route(read, true)
             }
-            OpenedCollection::Albums(albums) => {
-                let albums = albums.clone();
-                self.library_albums_route(page, albums)
+            Route::Artists | Route::AlbumArtists | Route::Favorites => {
+                self.library_artist_list_route(read, route)
             }
-            OpenedCollection::Artists { .. } => self.library_artist_list_route(page),
-            OpenedCollection::Genres { .. } => self.library_genres_route(page),
-            OpenedCollection::Moods { .. } => self.library_moods_route(page),
-            OpenedCollection::Playlists { .. } => self.library_playlists_route(page),
-            OpenedCollection::SmartPlaylists { .. } => self.library_smart_playlists_route(page),
-            OpenedCollection::Folders(folders) => {
-                let folders = folders.clone();
-                let Route::Folders { path } = route else {
-                    unreachable!("folder renderer")
-                };
-                self.folders_route(
-                    path,
-                    selected.as_ref().expect("folder source"),
-                    page,
-                    Ok(folders),
-                )
+            Route::AlbumDetail(_) => self.album_detail_view(read),
+            Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
+                self.artist_detail_view(matches!(route, Route::AlbumArtistDetail(_)), read)
             }
-            OpenedCollection::Home(home) => {
-                let home = home.as_ref().clone();
-                self.home_route(selected.expect("home source"), home)
+            Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
+                self.artist_discography_view(read)
             }
-            OpenedCollection::Search(_) => self.search_route(),
+            Route::ArtistTracks(_) | Route::AlbumArtistTracks(_) => {
+                self.artist_tracks_view(matches!(route, Route::AlbumArtistTracks(_)), read)
+            }
+            Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_) => self
+                .artist_favorite_tracks_view(
+                    matches!(route, Route::AlbumArtistFavoriteTracks(_)),
+                    read,
+                ),
+            Route::PlaylistDetail(key) => self.playlist_detail_route(key, read),
+            Route::SmartPlaylistDetail(key) => self.smart_playlist_detail_route(key, read),
+            Route::GenreDetail(key) => {
+                self.named_detail_view(super::named_detail::NamedDetailId::Genre(key), read)
+            }
+            Route::MoodDetail(key) => {
+                self.named_detail_view(super::named_detail::NamedDetailId::Mood(key), read)
+            }
+            Route::Genres | Route::Moods => self.library_tags_route(read, route == Route::Genres),
+            Route::Playlists | Route::PlaylistFolder { smart: false, .. } => {
+                self.library_playlists_route(read)
+            }
+            Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
+                self.library_smart_playlists_route(read)
+            }
+            Route::Folders { path } => self.folders_route(path, read),
+            Route::Home => self.home_route(read.view.home().cloned().unwrap_or_default()),
+            Route::Search => self.search_route(),
         }
     }
 
@@ -322,18 +294,12 @@ impl CatalogUi {
 
     pub fn library_albums_route(
         self: &Rc<Self>,
-        opened_page: Page,
-        opened: rufin_core::browse::AlbumListPage,
+        read: RouteRead,
+        favorites_only: bool,
     ) -> MountedRoute {
-        let favorites_only = opened.read.favorites_only;
         let key = LibraryListKey::Albums;
-        let applied_query = Rc::new(RefCell::new(opened.read));
-        let models = AlbumCollectionModels::new(
-            &self.library,
-            &self.runtime,
-            opened.content,
-            Rc::clone(&applied_query),
-        );
+        let view = read.route_view();
+        let models = AlbumCollectionModels::new(&self.runtime, &view, read);
         let models = Rc::new(RefCell::new(models));
 
         let search = gtk::SearchEntry::new();
@@ -360,31 +326,20 @@ impl CatalogUi {
             let models = models.clone();
             let content = content.clone();
             let page = page.clone();
-            move |opened: &Page| {
-                let (Some(shell), OpenedCollection::Albums(albums)) =
-                    (shell.upgrade(), opened.opened())
-                else {
+            let view = Rc::clone(&view);
+            move |read: RouteRead| {
+                let Some(shell) = shell.upgrade() else {
                     return false;
                 };
                 if !(shell.is_current)() {
                     return false;
                 }
-                applied_query.replace(albums.read.clone());
                 let settings = shell.settings.current.borrow().library_list(key);
                 let current_models = models.borrow().clone();
-                let replace_model = current_models.is_detail()
-                    != matches!(
-                        &albums.content,
-                        rufin_core::browse::AlbumListContent::Detail { .. }
-                    );
+                let replace_model = current_models.is_detail() != read.spans.is_some();
                 if replace_model {
-                    models.replace(AlbumCollectionModels::new(
-                        &shell.library,
-                        &shell.runtime,
-                        albums.content.clone(),
-                        Rc::clone(&applied_query),
-                    ));
-                } else if !current_models.replace_prepared(albums.content.clone()) {
+                    models.replace(AlbumCollectionModels::new(&shell.runtime, &view, read));
+                } else if !current_models.replace_prepared(read) {
                     tracing::warn!("rejected a mismatched prepared Albums page");
                     return false;
                 }
@@ -401,7 +356,7 @@ impl CatalogUi {
         let reread = PageReread::new(
             self.runtime.clone(),
             "mounted Albums route",
-            opened_page,
+            &view,
             list_inputs(&search),
             apply,
         );
@@ -451,8 +406,12 @@ impl CatalogUi {
             self.install_favorite_category_tabs(CollectionCategory::Albums, &mut page);
         }
         let refresh = Rc::clone(&reread);
+        let refresh_models = models.clone();
+        let favorite_window = models.clone();
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || refresh.reread()))
+            .with_catalog_refresh(Rc::new(move || {
+                refresh.refresh(refresh_models.borrow().live_window())
+            }))
             .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
             .with_item_scroll(content.item_scroll())
@@ -464,19 +423,18 @@ impl CatalogUi {
                 })
             })
             .with_favorite_state(Rc::new(move |state| {
-                let library::FavoriteTarget::Album(album) = state.target else {
+                let library::FavoriteTarget::Album(album) = &state.target else {
                     return;
                 };
                 let models = favorite_models.borrow().clone();
-                models.update_favorite(&album, state.favorite);
-                reread.favorite_changed();
+                models.update_favorite(album, state.favorite);
+                reread.favorite_changed(favorite_window.borrow().live_window());
             }))
     }
 
     pub fn library_tracks_route(
         self: &Rc<Self>,
-        opened: Page,
-        page: rufin_core::browse::MemberPage,
+        read: RouteRead,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         self.root_track_route(
@@ -485,8 +443,7 @@ impl CatalogUi {
                 context: "tracks",
                 empty_body: msgid("Nothing here yet"),
             },
-            opened,
-            page,
+            read,
             selected,
             false,
         )
@@ -494,8 +451,7 @@ impl CatalogUi {
 
     pub fn favorites_route(
         self: &Rc<Self>,
-        opened: Page,
-        page: rufin_core::browse::MemberPage,
+        read: RouteRead,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::FavoriteTracks;
@@ -505,8 +461,7 @@ impl CatalogUi {
                 context: "favorite-tracks",
                 empty_body: msgid("No favorites yet"),
             },
-            opened,
-            page,
+            read,
             selected,
             true,
         )
@@ -515,8 +470,7 @@ impl CatalogUi {
     fn root_track_route(
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
-        opened: Page,
-        page: rufin_core::browse::MemberPage,
+        read: RouteRead,
         selected: rufin_core::runtime::SelectedLibrary,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -524,8 +478,10 @@ impl CatalogUi {
             || format!("{}:all", options.context),
             |folder_key| format!("{}:{folder_key}", options.context),
         );
+        let view = read.route_view();
         let projection = self.searchable_track_collection(
-            page,
+            &view,
+            read,
             options.key,
             SearchableTrackOptions {
                 context_id,
@@ -541,7 +497,7 @@ impl CatalogUi {
         let reread = projection.page_reread(
             self,
             "mounted Track route",
-            opened,
+            &view,
             |_| {},
             move |_| apply_page.set_empty(apply_projection.source_is_empty()),
         );
@@ -551,14 +507,12 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, reread)
     }
 
-    pub fn history_route(
-        self: &Rc<Self>,
-        opened: Page,
-        initial: rufin_core::browse::MemberPage,
-    ) -> MountedRoute {
+    pub fn history_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
         let key = LibraryListKey::History;
+        let view = read.route_view();
         let projection = self.searchable_track_collection(
-            initial,
+            &view,
+            read,
             key,
             SearchableTrackOptions {
                 context_id: "history:all".to_string(),
@@ -576,7 +530,7 @@ impl CatalogUi {
         let reread = projection.page_reread(
             self,
             "History filter",
-            opened,
+            &view,
             move |options| options.history_source.clone_from(&scope.borrow()),
             move |_| apply_page.set_empty(apply_projection.source_is_empty()),
         );
@@ -599,49 +553,59 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, reread)
     }
 
-    pub fn library_artist_list_route(self: &Rc<Self>, page: Page) -> MountedRoute {
-        let OpenedCollection::Artists { read, .. } = page.opened() else {
-            unreachable!("artist list renderer")
+    pub fn library_artist_list_route(
+        self: &Rc<Self>,
+        read: RouteRead,
+        route: Route,
+    ) -> MountedRoute {
+        let (key, empty_body) = match route {
+            Route::Favorites => (LibraryListKey::Artists, msgid("No favorite artists yet")),
+            Route::AlbumArtists => (LibraryListKey::AlbumArtists, msgid("Nothing here yet")),
+            _ => (LibraryListKey::Artists, msgid("Nothing here yet")),
         };
-        let key = if matches!(read.kind, library::ListKind::Artists { album_artist: true }) {
-            LibraryListKey::AlbumArtists
-        } else {
-            LibraryListKey::Artists
-        };
-        let favorites_only = read.favorites_only;
         self.collection_list_route(
             key,
-            if favorites_only {
-                msgid("No favorite artists yet")
-            } else {
-                msgid("Nothing here yet")
-            },
-            page,
-            |row: &library::ArtistView| row.artist_key,
+            empty_body,
+            route == Route::Favorites,
+            read,
+            |row: &library::ArtistRow| row.artist_key,
         )
     }
 
-    pub fn library_playlists_route(self: &Rc<Self>, page: Page) -> MountedRoute {
+    pub fn library_playlists_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::Playlists,
             msgid("No playlists yet"),
-            page,
+            false,
+            read,
             |row: &library::PlaylistListRow| row.key(),
         )
     }
 
-    pub fn library_smart_playlists_route(self: &Rc<Self>, page: Page) -> MountedRoute {
+    pub fn library_smart_playlists_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::SmartPlaylists,
             msgid("No smart playlists yet"),
-            page,
+            false,
+            read,
             |row: &library::PlaylistListRow| row.key(),
         )
     }
 
     pub fn searchable_track_collection(
         self: &Rc<Self>,
-        page: rufin_core::browse::MemberPage,
+        view: &RouteView,
+        read: RouteRead,
+        key: LibraryListKey,
+        options: SearchableTrackOptions,
+    ) -> TrackListProjection {
+        let model = TrackCollectionModel::new(self.runtime.clone(), view, read);
+        self.track_projection(model, key, options)
+    }
+
+    pub fn track_projection(
+        self: &Rc<Self>,
+        model: TrackCollectionModel,
         key: LibraryListKey,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {
@@ -649,8 +613,6 @@ impl CatalogUi {
         if let Some(layout) = options.fixed_layout {
             settings.layout = layout;
         }
-        let model =
-            TrackCollectionModel::new(Arc::clone(&self.library), self.runtime.clone(), page);
         self.build_track_collection(model, key, settings, options)
     }
 
@@ -732,9 +694,12 @@ impl CatalogUi {
             })
         };
         let refresh = Rc::clone(&reread);
+        let refresh_projection = projection.clone();
         let favorite_projection = projection.clone();
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || refresh.reread()))
+            .with_catalog_refresh(Rc::new(move || {
+                refresh.refresh(refresh_projection.live_window())
+            }))
             .with_download_change(projection.download_change())
             .with_item_navigation(projection.item_navigation())
             .with_initial_demand({
@@ -742,13 +707,13 @@ impl CatalogUi {
                 Rc::new(move || projection.resume_initial_demand())
             })
             .with_favorite_state(Rc::new(move |state| {
-                let library::FavoriteTarget::Track(track) = state.target else {
+                let library::FavoriteTarget::Track(track) = &state.target else {
                     return;
                 };
                 favorite_projection
                     .model
-                    .update_favorite(&track, state.favorite);
-                reread.favorite_changed();
+                    .update_favorite(track, state.favorite);
+                reread.favorite_changed(favorite_projection.live_window());
             }))
     }
 }

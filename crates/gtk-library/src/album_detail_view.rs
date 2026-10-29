@@ -1,9 +1,7 @@
-use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use rufin_core::collection_context::CollectionTarget;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::Arc,
 };
 
 use ::library::{AlbumView, FavoriteTarget};
@@ -17,7 +15,7 @@ use gtk_widgets::favorites::{
     album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use gtk_widgets::format_duration_units;
-use gtk_widgets::mounted_route::MountedRoute;
+use gtk_widgets::mounted_route::{MountedRoute, RouteRead};
 use localization::{msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -35,15 +33,9 @@ use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
 
 impl CatalogUi {
-    pub fn album_detail_view(
-        self: &Rc<Self>,
-        opened: rufin_core::page::Page,
-        detail: Option<DetailPage>,
-    ) -> MountedRoute {
-        let Some(DetailPage {
-            summary: DetailSummary::Album(album),
-            content: DetailContent::Tracks(page),
-        }) = detail
+    pub fn album_detail_view(self: &Rc<Self>, mut read: RouteRead) -> MountedRoute {
+        let (false, Some(::library::Header::Album(album))) =
+            (read.view.is_missing(), read.header.take())
         else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Album",
@@ -51,7 +43,8 @@ impl CatalogUi {
             ));
         };
         let album = *album;
-        let album_id = album.album_key;
+        let album_id = album.row.album_key;
+        let view = read.route_view();
         let current_album = Rc::new(RefCell::new(album.clone()));
         let context_id = CollectionTarget::Album(album_id.to_string()).context_id();
         let applied_external_link_settings = Rc::new(RefCell::new(
@@ -70,8 +63,7 @@ impl CatalogUi {
             (self.route_width)(),
             PRIMARY_ROUTE_MARGIN_START,
         );
-        let model =
-            TrackCollectionModel::new(Arc::clone(&self.library), self.runtime.clone(), page);
+        let model = TrackCollectionModel::new(self.runtime.clone(), &view, read);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,
@@ -82,20 +74,20 @@ impl CatalogUi {
         let cover_size = detail_showcase_cover_size(inner_content_width);
         let cover = media_cover_projection(
             self,
-            gtk_widgets::library_fields::opaque_artwork(album.artwork_binding.as_deref()),
+            gtk_widgets::library_fields::opaque_artwork(album.row.artwork_binding.as_deref()),
             cover_size,
             "album-detail-cover",
         );
         let showcase_view = DetailShowcaseView::new(
             "album-detail-showcase",
-            gtk_widgets::artwork::presentation::stable_seed(&album.object_id),
+            gtk_widgets::artwork::presentation::stable_seed(&album.row.object_id),
             album_release_kind_label(&album),
             true,
             &album.metadata.title,
         );
         showcase_view.add_external_links_class("album-detail-link-stack");
         showcase_view.replace_summary(&album_summary_items(&album));
-        let track_count = Rc::new(Cell::new(album.summary.track_count.max(0) as u32));
+        let track_count = Rc::new(Cell::new(album.row.summary.track_count.max(0) as u32));
         let localized_track_count = Rc::clone(&track_count);
         showcase_view.bind_summary_text_with(1, move || {
             track_count_text(u64::from(localized_track_count.get()))
@@ -106,13 +98,14 @@ impl CatalogUi {
         let radio_album = Rc::clone(&current_album);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(RadioSeed::Album(
-                radio_album.borrow().album_key,
+                radio_album.borrow().row.album_key,
             )));
         });
         showcase_view.append_kind_control(&radio);
         showcase_view.set_genres(
             self,
             album
+                .row
                 .links
                 .genres
                 .iter()
@@ -147,20 +140,20 @@ impl CatalogUi {
         let cover_controls = detail_playback_controls(
             &actions,
             msgid("Play album"),
-            Some(album.state.favorite),
+            Some(album.row.state.favorite),
             Rc::clone(&play),
         );
 
         let favorite = favorite_icon_button("Favorite");
         configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-        set_favorite_button_active(&favorite, album.state.favorite);
+        set_favorite_button_active(&favorite, album.row.state.favorite);
         actions.append(&favorite);
         let hover_favorite = cover_controls
             .favorite
             .as_ref()
             .expect("album detail has a Favorite cover control")
             .clone();
-        let favorite_media_uri = album.media_uri.clone();
+        let favorite_media_uri = album.row.media_uri.clone();
         for button in [favorite, hover_favorite] {
             self.register_favorite_button(album_favorite_key(&favorite_media_uri), &button);
             let shell = Rc::clone(self);
@@ -178,7 +171,7 @@ impl CatalogUi {
         let menu_play = Rc::clone(&play);
         let context_menu: gtk_widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
-                let album = menu_album.borrow().clone();
+                let album = menu_album.borrow().row.clone();
                 present_album_context_menu(
                     target,
                     &menu_shell.media_menus,
@@ -212,7 +205,7 @@ impl CatalogUi {
         route_stack.set_visible_child_name("content");
 
         let reread =
-            track_projection.page_reread(self, "mounted Album route", opened, |_| {}, |_| {});
+            track_projection.page_reread(self, "mounted Album route", &view, |_| {}, |_| {});
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -247,11 +240,12 @@ impl CatalogUi {
                 reread.resume(&shell.settings.current.borrow());
             })
         };
-        let download_target = current_album.borrow().media_uri.clone();
+        let download_target = current_album.borrow().row.media_uri.clone();
         let download_album = Rc::clone(&current_album);
         let downloads = crate::collection_download_change(move |target, downloaded| {
             if matches!(target, CollectionTarget::Album(uri) if *uri == download_target) {
-                let mut row = download_album.borrow_mut();
+                let mut album = download_album.borrow_mut();
+                let row = &mut album.row;
                 row.summary.downloaded_count = if downloaded {
                     row.summary.track_count
                 } else {
@@ -259,8 +253,11 @@ impl CatalogUi {
                 };
             }
         });
+        let refresh_projection = track_projection.clone();
         MountedRoute::new(route_stack.upcast(), resume)
-            .with_catalog_refresh(Rc::new(move || reread.reread()))
+            .with_catalog_refresh(Rc::new(move || {
+                reread.refresh(refresh_projection.live_window())
+            }))
             .with_download_change(downloads)
             .with_download_change(track_projection.download_change())
             .with_search(track_projection.search())
@@ -285,11 +282,11 @@ fn album_summary_items(summary: &AlbumView) -> Vec<(&'static str, String)> {
         ),
         (
             "rufin-tracks-symbolic",
-            track_count_text(summary.summary.track_count.max(0) as u64),
+            track_count_text(summary.row.summary.track_count.max(0) as u64),
         ),
         (
             "rufin-preferences-system-time-symbolic",
-            format_duration_units((summary.summary.duration_millis.max(0) / 1_000) as u32),
+            format_duration_units((summary.row.summary.duration_millis.max(0) / 1_000) as u32),
         ),
     ]
 }

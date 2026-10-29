@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use ::library::{AlbumView, ArtistView};
+use ::library::{AlbumRow, AlbumView, ArtistView};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -616,7 +616,7 @@ pub fn media_cover_projection(
 
 pub fn home_album_cover_projection(
     shell: &Rc<CatalogUi>,
-    album: &AlbumView,
+    album: &AlbumRow,
     size: i32,
 ) -> MediaCoverProjection {
     let album_uri = album.media_uri.clone();
@@ -709,7 +709,7 @@ pub fn fit_detail_text(label: &gtk::Label, text: &str) {
 
 pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumView) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
-    let source = library::source_entity_parts(&album.media_uri)
+    let source = library::source_entity_parts(&album.row.media_uri)
         .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
     detail_external_links(
         shell,
@@ -718,7 +718,7 @@ pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumView) -> Option<
             source.as_ref(),
             album,
         ),
-        &album.media_uri,
+        &album.row.media_uri,
         false,
     )
 }
@@ -729,7 +729,7 @@ pub fn artist_external_links(
     album_artist: bool,
 ) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
-    let source = library::source_entity_parts(&artist.media_uri)
+    let source = library::source_entity_parts(&artist.row.media_uri)
         .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
     detail_external_links(
         shell,
@@ -738,7 +738,7 @@ pub fn artist_external_links(
             source.as_ref(),
             artist,
         ),
-        &artist.media_uri,
+        &artist.row.media_uri,
         album_artist,
     )
 }

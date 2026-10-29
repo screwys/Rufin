@@ -17,9 +17,9 @@ use rufin_core::runtime::source::{
     DiscoveryStatus, DiscoveryUpdate, SourceOperation, SourceProgress,
 };
 use rufin_core::runtime::{
-    CatalogChange, CatalogPublication, ProductReceivers, SourceEvent, SourceNotice,
-    SourceNoticeKind, WaveformProjection,
+    ProductReceivers, SourceEvent, SourceNotice, SourceNoticeKind, WaveformProjection,
 };
+use rufin_core::source::feed::Changed;
 
 use super::Shell;
 use super::navigation::update_sidebar_pin_playback;
@@ -44,11 +44,10 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 
     let event_shell = Rc::clone(shell);
-    let mut publications = shell.products.source.catalog_publications();
+    let changes = shell.products.source.changes();
     glib::spawn_future_local(async move {
-        while let Some(publication) = rufin_core::source::next_publication(&mut publications).await
-        {
-            apply_catalog_publication(&event_shell, publication);
+        while let Some(changed) = changes.next().await {
+            apply_changed(&event_shell, &changed);
         }
     });
 
@@ -211,12 +210,12 @@ fn apply_selected_source(
     }
 }
 
-fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication) {
-    if matches!(
-        publication.change,
-        CatalogChange::Broad | CatalogChange::Scope
-    ) && let Some(selected) = shell.products.source.selected_library()
-        && publication.source_key == Some(selected.source_key)
+fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
+    let rating = changed.items.iter().any(|item| item.rating);
+    if let Some(selected) = shell.products.source.selected_library()
+        && (changed.sources.contains(&selected.source_key)
+            || changed.scope == Some(selected.source_key)
+            || rating)
         && shell
             .selected_library()
             .is_some_and(|current| current.source_key == selected.source_key)
@@ -229,20 +228,22 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         }
         shell.search_session.set_selected(Some(selected));
     }
-    for state in &publication.favorites {
+    for state in &changed.items {
         shell.apply_favorite_state(&state.target, state.favorite);
-        shell.apply_favorite_state_to_mounted_route(state.clone());
+        shell.apply_favorite_state_to_mounted_route(state);
     }
-    if matches!(
-        publication.change,
-        CatalogChange::Broad | CatalogChange::Scope | CatalogChange::Playlists(_)
-    ) {
+    if changed.all
+        || !changed.sources.is_empty()
+        || changed.scope.is_some()
+        || !changed.playlists.is_empty()
+        || changed.playlist_lists
+    {
         refresh_context_playlist_picker(shell);
     }
-    if rufin_core::page::pins_refresh(&shell.products.source, &publication) {
+    if rufin_core::view::pins_refresh(&shell.products.source, changed) {
         super::navigation::refresh_sidebar_pins(shell);
     }
-    shell.refresh_mounted_route(&publication);
+    shell.refresh_mounted_route(changed);
 }
 
 fn apply_source_notice(shell: &Rc<Shell>, notice: SourceNotice) {

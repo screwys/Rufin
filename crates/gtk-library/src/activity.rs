@@ -8,7 +8,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use gtk_widgets::selection::track_play_request;
 use gtk_widgets::{mounted_route::RouteCurrentTrack, route::Route};
-use library::{ActivityOverview, TrackView};
+use library::{ActivityOverview, TrackRow};
 use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{cell::RefCell, rc::Rc};
 
@@ -38,7 +38,7 @@ impl ActivityCollections {
             LibraryField::TitleMerged,
             LibraryField::PlayCount,
         ] {
-            let column = track_column_for_key::<TrackView>(
+            let column = track_column_for_key::<TrackRow>(
                 &catalog,
                 LibraryListKey::History,
                 field,
@@ -57,7 +57,7 @@ impl ActivityCollections {
                 return;
             };
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
-                let row = item.borrow::<TrackView>();
+                let row = item.borrow::<TrackRow>();
                 (shell.media_menus.play_target)(
                     &track_play_request(row.track_key),
                     rufin_core::playback::QueuePlacement::Now,

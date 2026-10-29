@@ -200,10 +200,8 @@ pub fn download_rule_artwork(
     let catalog = Arc::clone(catalog);
     let task = runtime.spawn(async move {
         let cancellation = library::ReadCancellation::new();
-        let Some(source) = catalog
-            .cached_source(source_id.as_str(), &cancellation)
-            .await?
-        else {
+        catalog.loaded().await;
+        let Some(source) = catalog.cached_source(source_id.as_str()) else {
             return Ok::<_, library::LibraryError>(Vec::new());
         };
         let scope = match rule {

@@ -1,9 +1,6 @@
-use rufin_core::browse::{DetailContent, DetailPage, DetailSummary, OpenedCollection};
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::page::Page;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -15,7 +12,7 @@ use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::format_duration_units;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead};
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -125,20 +122,17 @@ impl PlaylistDetailOwner {
         }
     }
 
-    /// The playlist as a page read again shows it; `None` when the page lacks it.
-    fn read_from(&self, page: &Page) -> Option<Self> {
-        let OpenedCollection::Detail(Some(detail)) = page.opened() else {
-            return None;
-        };
-        Some(match (self, &detail.summary) {
-            (Self::Saved { key, .. }, DetailSummary::Playlist(summary)) => Self::Saved {
+    /// The playlist as a page read again shows it; `None` when the read lacks it.
+    fn read_from(&self, header: library::Header) -> Option<Self> {
+        Some(match (self, header) {
+            (Self::Saved { key, .. }, library::Header::Playlist(summary)) => Self::Saved {
                 key: *key,
-                summary: summary.as_ref().clone(),
+                summary: *summary,
             },
-            (Self::Smart { key, now, .. }, DetailSummary::SmartPlaylist(summary)) => Self::Smart {
+            (Self::Smart { key, now, .. }, library::Header::Smart(summary)) => Self::Smart {
                 key: *key,
                 now: *now,
-                summary: summary.as_ref().clone(),
+                summary: *summary,
             },
             _ => return None,
         })
@@ -170,13 +164,10 @@ impl CatalogUi {
     pub fn smart_playlist_detail_route(
         self: &Rc<Self>,
         key: SmartPlaylistKey,
-        opened: Page,
-        detail: Option<DetailPage>,
+        mut read: RouteRead,
     ) -> MountedRoute {
-        let Some(DetailPage {
-            summary: DetailSummary::SmartPlaylist(summary),
-            content: DetailContent::Tracks(projection),
-        }) = detail
+        let (false, Some(library::Header::Smart(summary))) =
+            (read.view.is_missing(), read.header.take())
         else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Smart Playlist"),
@@ -184,20 +175,22 @@ impl CatalogUi {
             ));
         };
         (self.update_smart_playlist_pin)(&summary);
-        let library::Collection::Smart { now, .. } = projection.read.collection else {
+        let Some(library::Collection::Smart { now, .. }) = read
+            .view
+            .members()
+            .map(|members| members.collection.clone())
+        else {
             unreachable!("Smart Playlist pages read their playlist")
         };
+        let view = read.route_view();
         let owner = PlaylistDetailOwner::Smart {
             key,
             now,
             summary: *summary,
         };
         let list_key = owner.key();
-        let model = crate::track_model::TrackCollectionModel::new(
-            Arc::clone(&self.library),
-            self.runtime.clone(),
-            projection,
-        );
+        let model =
+            crate::track_model::TrackCollectionModel::new(self.runtime.clone(), &view, read);
         let play_model = model.clone();
         let play_queue = self.playback.clone();
         let play_context = owner.target().context_id();
@@ -239,12 +232,15 @@ impl CatalogUi {
                 let reread = reread_tracks.page_reread(
                     &shell,
                     "mounted Smart Playlist route",
-                    opened,
+                    &view,
                     |_| {},
-                    move |page| apply_owner(page),
+                    move |header| apply_owner(header),
                 );
                 let refresh = Rc::clone(&reread);
-                (reread, Rc::new(move || refresh.reread()))
+                (
+                    reread,
+                    Rc::new(move || refresh.refresh(reread_tracks.live_window())),
+                )
             },
             search,
             layout_cycle,
@@ -257,25 +253,17 @@ impl CatalogUi {
     pub fn playlist_detail_route(
         self: &Rc<Self>,
         key: PlaylistKey,
-        opened: Page,
-        detail: Option<DetailPage>,
+        mut read: RouteRead,
     ) -> MountedRoute {
-        let Some(DetailPage {
-            summary: DetailSummary::Playlist(summary),
-            content: DetailContent::Tracks(page),
-        }) = detail
+        let (false, Some(library::Header::Playlist(summary))) =
+            (read.view.is_missing(), read.header.take())
         else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Playlist"),
                 msgid("This isn't available"),
             ));
         };
-        let first_rows = page
-            .page
-            .rows
-            .into_iter()
-            .filter_map(library::MemberRow::into_entry)
-            .collect();
+        let view = read.route_view();
         let owner = PlaylistDetailOwner::Saved {
             key,
             summary: *summary,
@@ -284,10 +272,8 @@ impl CatalogUi {
             key,
             owner.name().to_string(),
             matches!(&owner, PlaylistDetailOwner::Saved { summary, .. } if summary.writable),
-            page.page.count,
-            page.page.first_row_position,
-            first_rows,
-            page.read,
+            &view,
+            read,
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
@@ -319,18 +305,16 @@ impl CatalogUi {
                 let reread = PageReread::new(
                     shell.runtime.clone(),
                     "mounted Playlist route",
-                    opened,
+                    &view,
                     crate::routes::list_inputs(&reread_search),
-                    move |page| {
-                        let Some(tracks) = page.tracks() else {
-                            return false;
-                        };
-                        apply_entries.replace_prepared(tracks, page.list_settings());
-                        apply_owner(page);
+                    move |mut read| {
+                        let header = read.header.take();
+                        apply_entries.replace_prepared(read);
+                        apply_owner(header);
                         true
                     },
                 );
-                let requested = RefCell::new(reread.page().options().filter.clone());
+                let requested = RefCell::new(reread.view().options().filter.clone());
                 let search_reread = Rc::downgrade(&reread);
                 reread_search.connect_search_changed(move |search| {
                     let filter = search.text().trim().to_string();
@@ -342,26 +326,11 @@ impl CatalogUi {
                         reread.reread();
                     }
                 });
-                let refresh_shell = Rc::downgrade(&shell);
                 let refresh_reread = Rc::downgrade(&reread);
                 let refresh = Rc::new(move || {
-                    let (Some(shell), Some(reread)) =
-                        (refresh_shell.upgrade(), refresh_reread.upgrade())
-                    else {
-                        return;
-                    };
-                    let page = reread.page();
-                    // Read the shown entries again in place unless the search or order moved.
-                    let window = if reread.wanted() == *page.options()
-                        && page
-                            .settings_reread(&shell.settings.current.borrow())
-                            .is_none()
-                    {
-                        library::RouteSeedWindow::position(reread_entries.first_live_position())
-                    } else {
-                        library::RouteSeedWindow::top()
-                    };
-                    reread.reread_at(window);
+                    if let Some(reread) = refresh_reread.upgrade() {
+                        reread.refresh(reread_entries.live_window());
+                    }
                 }) as Rc<dyn Fn()>;
                 (reread, refresh)
             },
@@ -389,7 +358,7 @@ impl CatalogUi {
         tracks_widget: gtk::Widget,
         item_navigation: gtk_widgets::mounted_route::MountedRouteItemNavigation,
         apply_list_settings: Rc<dyn Fn(&LibraryListSettings)>,
-        reread: impl FnOnce(Rc<dyn Fn(&Page)>) -> (Rc<PageReread>, Rc<dyn Fn()>),
+        reread: impl FnOnce(Rc<dyn Fn(Option<library::Header>)>) -> (Rc<PageReread>, Rc<dyn Fn()>),
         search: gtk::SearchEntry,
         layout_cycle: gtk_widgets::mounted_route::MountedRouteCommand,
         initial_demand: Rc<dyn Fn()>,
@@ -521,9 +490,9 @@ impl CatalogUi {
             let owner = Rc::clone(&owner_state);
             let showcase = showcase_view.clone();
             let cover = cover.clone();
-            Rc::new(move |page: &Page| {
+            Rc::new(move |header: Option<library::Header>| {
                 let Some(shell) = shell.upgrade() else { return };
-                let Some(next) = owner.borrow().read_from(page) else {
+                let Some(next) = header.and_then(|header| owner.borrow().read_from(header)) else {
                     return;
                 };
                 if *owner.borrow() == next {
@@ -549,7 +518,7 @@ impl CatalogUi {
                 cover.replace(&shell.artwork, &next.artwork());
                 shell.append_playlist_detail_kind_controls(&showcase, &next);
                 owner.replace(next);
-            }) as Rc<dyn Fn(&Page)>
+            }) as Rc<dyn Fn(Option<library::Header>)>
         };
         let (reread, refresh) = reread(apply_owner);
         let resume = {
@@ -683,7 +652,6 @@ mod tests {
                 duration_millis: 1,
                 downloaded_count: 0,
                 genres: Vec::new(),
-                holds_hidden: false,
             },
         };
 

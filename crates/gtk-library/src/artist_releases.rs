@@ -21,12 +21,27 @@ use crate::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
 use gtk_widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
+use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
-use rufin_core::browse::ArtistReleasePage;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
+
+fn release_row(row: library::Row) -> Option<library::AlbumRow> {
+    match row {
+        library::Row::Album(album) => Some(album),
+        _ => None,
+    }
+}
+
+/// The read of an artist page's releases, for its selections.
+fn release_read(view: &rufin_core::view::View) -> library::ListRead {
+    match view.selection() {
+        Some(library::MemberSelection::Parents { read, .. }) => read,
+        _ => unreachable!("an artist page reads its releases"),
+    }
+}
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
 
 pub struct ArtistReleaseRoutePreamble {
@@ -41,7 +56,7 @@ pub struct ArtistReleaseProjections {
     query: Rc<RefCell<library::ListRead>>,
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
-    pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
+    pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
     surface: gtk::Widget,
     scroll: gtk_widgets::mounted_route::NativeListScroll,
     layout: Rc<Cell<LibraryLayout>>,
@@ -54,7 +69,7 @@ pub struct ArtistReleaseProjections {
 }
 
 struct ArtistAlbumProjection {
-    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
+    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
     start: Cell<usize>,
     count: Cell<usize>,
     source_present: Cell<bool>,
@@ -440,7 +455,7 @@ impl ArtistAlbumProjection {
     fn new(
         shell: &Rc<CatalogUi>,
         title: &'static str,
-        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
+        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
         start: usize,
         count: usize,
         layout: Rc<Cell<LibraryLayout>>,
@@ -592,7 +607,8 @@ impl ArtistReleaseProjections {
         shell: &Rc<CatalogUi>,
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
-        page: ArtistReleasePage,
+        view: &RouteView,
+        read: RouteRead,
     ) -> Self {
         let settings = shell
             .settings
@@ -601,44 +617,22 @@ impl ArtistReleaseProjections {
             .library_list(LibraryListKey::ArtistAlbums);
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
-        let ArtistReleasePage {
-            query,
-            counts,
-            source_counts,
-            page:
-                library::Page {
-                    first_row_position,
-                    rows: first_rows,
-                    ..
-                },
-        } = page;
-        let query = Rc::new(RefCell::new(query));
+        let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
+        let query = Rc::new(RefCell::new(release_read(&read.view)));
         let counts = Rc::new(Cell::new(counts));
-        let catalog = Arc::clone(&shell.library);
-        let load_query = Rc::clone(&query);
-        let load = Rc::new(
-            move |_: Vec<library::AlbumKey>,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let catalog = Arc::clone(&catalog);
-                let query = load_query.borrow().clone();
-                Box::pin(async move {
-                    query
-                        .albums(&catalog, range.start, range.len(), &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
         let sparse = SparseRouteModel::new(
             SparseSource::Query {
                 count: counts.get().iter().sum(),
             },
             32,
             shell.runtime.clone(),
-            load,
+            view_rows(view, release_row),
         );
-        sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
+        sparse.seed_matching_at(
+            read.first,
+            read.rows.into_iter().filter_map(release_row).collect(),
+            |row| row.album_key,
+        );
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
@@ -787,22 +781,21 @@ impl ArtistReleaseProjections {
         self.sparse.resume_initial_demand();
     }
 
+    /// Where a reread starts so the releases on screen stay.
+    pub fn live_window(&self) -> library::RouteSeedWindow {
+        self.sparse.first_live_position().map_or_else(
+            library::RouteSeedWindow::top,
+            library::RouteSeedWindow::position,
+        )
+    }
+
     pub fn filters(&self) -> [String; 6] {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
     }
 
-    pub fn replace_page(&self, page: ArtistReleasePage) {
-        let ArtistReleasePage {
-            query,
-            counts,
-            source_counts,
-            page:
-                library::Page {
-                    first_row_position,
-                    rows: first_rows,
-                    ..
-                },
-        } = page;
+    pub fn replace_page(&self, read: RouteRead) {
+        let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
+        let query = release_read(&read.view);
         if *self.query.borrow() != query || self.counts.get() != counts {
             self.selection.unselect_all();
         }
@@ -812,8 +805,8 @@ impl ArtistReleaseProjections {
             SparseSource::Query {
                 count: counts.iter().sum(),
             },
-            first_row_position,
-            first_rows,
+            read.first,
+            read.rows.into_iter().filter_map(release_row).collect(),
             Vec::new(),
             |row| row.album_key,
         );
@@ -1039,7 +1032,7 @@ fn artist_route_list(
                     .and_downcast::<SparseObjectItem>();
                 let row = value
                     .as_ref()
-                    .and_then(|item| item.value::<Arc<library::AlbumView>>());
+                    .and_then(|item| item.value::<Arc<library::AlbumRow>>());
                 for cell in state.imp().table_cells.borrow().iter() {
                     cell.downcast_ref::<AlbumTableCell>()
                         .unwrap()
@@ -1121,7 +1114,7 @@ fn artist_route_list(
                         .and_downcast::<SparseObjectItem>();
                     if let Some(album) = value
                         .as_ref()
-                        .and_then(|item| item.value::<Arc<library::AlbumView>>())
+                        .and_then(|item| item.value::<Arc<library::AlbumRow>>())
                     {
                         slot.cell.bind(position as u32, (*album).clone());
                         slot.widget.remove_css_class("row-pending");

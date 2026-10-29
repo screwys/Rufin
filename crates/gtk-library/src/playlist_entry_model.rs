@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use library::{PlaylistEntryKey, PlaylistEntryView, PlaylistKey};
+use library::{PlaylistEntryKey, PlaylistKey, Row, TrackRow};
 
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::settings::LibraryListSettings;
 
+use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
@@ -17,6 +18,31 @@ struct AppliedEntries {
     settings: LibraryListSettings,
 }
 
+impl AppliedEntries {
+    fn of(read: &RouteRead) -> Self {
+        Self {
+            query: read
+                .view
+                .members()
+                .cloned()
+                .expect("a playlist page reads its entries"),
+            settings: read.view.list_settings(),
+        }
+    }
+}
+
+/// A playlist row: a track with its entry.
+fn entry_row(row: Row) -> Option<TrackRow> {
+    match row {
+        Row::Track(track) if track.entry.is_some() => Some(track),
+        _ => None,
+    }
+}
+
+pub(crate) fn entry_key(row: &TrackRow) -> Option<PlaylistEntryKey> {
+    row.entry.as_ref().map(|entry| entry.key)
+}
+
 #[derive(Clone)]
 pub struct PlaylistEntryModel {
     inner: Rc<PlaylistEntryModelState>,
@@ -24,53 +50,31 @@ pub struct PlaylistEntryModel {
 
 struct PlaylistEntryModelState {
     playlist_key: PlaylistKey,
-    sparse: Rc<SparseRouteModel<PlaylistEntryKey, PlaylistEntryView>>,
-    applied: Rc<RefCell<AppliedEntries>>,
+    sparse: Rc<SparseRouteModel<(), TrackRow>>,
+    applied: RefCell<AppliedEntries>,
 }
 
 impl PlaylistEntryModel {
     pub fn new(
-        catalog: Arc<library::Catalog>,
         runtime: tokio::runtime::Handle,
         playlist_key: PlaylistKey,
-        count: usize,
-        first_row_position: usize,
-        first_rows: Vec<PlaylistEntryView>,
-        settings: LibraryListSettings,
-        read: library::MemberRead,
+        view: &RouteView,
+        read: RouteRead,
     ) -> Self {
-        let applied = Rc::new(RefCell::new(AppliedEntries {
-            query: read,
-            settings,
-        }));
-        let load_request = Rc::clone(&applied);
-        let loader_catalog = Arc::clone(&catalog);
-        let load = Rc::new(
-            move |_: Vec<PlaylistEntryKey>,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let catalog = Arc::clone(&loader_catalog);
-                let query = load_request.borrow().query.clone();
-                Box::pin(async move {
-                    query
-                        .rows(&catalog, range.start, range.len(), &cancellation)
-                        .await
-                        .map(|rows| {
-                            rows.into_iter()
-                                .filter_map(library::MemberRow::into_entry)
-                                .collect()
-                        })
-                        .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
+        let applied = RefCell::new(AppliedEntries::of(&read));
         let sparse = SparseRouteModel::new(
-            SparseSource::Query { count },
+            SparseSource::Query {
+                count: read.view.len(),
+            },
             PLAYLIST_ENTRY_OVERSCAN,
-            runtime.clone(),
-            load,
+            runtime,
+            view_rows(view, entry_row),
         );
-        sparse.seed_matching_at(first_row_position, first_rows, |row| row.playlist_entry_key);
+        sparse.seed_matching_at(
+            read.first,
+            read.rows.into_iter().filter_map(entry_row).collect(),
+            |_| (),
+        );
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 playlist_key,
@@ -91,7 +95,7 @@ impl PlaylistEntryModel {
     pub fn ready_position(&self, entry: PlaylistEntryKey) -> Option<u32> {
         self.inner
             .sparse
-            .ready_position(|row| row.playlist_entry_key == entry)
+            .ready_position(|row| entry_key(row) == Some(entry))
     }
 
     pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
@@ -114,39 +118,26 @@ impl PlaylistEntryModel {
         self.inner.sparse.first_live_position().unwrap_or(0)
     }
 
-    pub fn replace_prepared(
-        &self,
-        page: &rufin_core::browse::MemberPage,
-        settings: LibraryListSettings,
-    ) {
-        let count = page.page.count;
-        let first = page.page.first_row_position.min(count);
-        self.inner.applied.replace(AppliedEntries {
-            query: page.read.clone(),
-            settings,
-        });
+    pub fn replace_prepared(&self, read: RouteRead) {
+        let count = read.view.len();
+        self.inner.applied.replace(AppliedEntries::of(&read));
         self.inner.sparse.replace_prepared_at(
             SparseSource::Query { count },
-            first,
-            page.page
-                .rows
-                .iter()
-                .cloned()
-                .filter_map(library::MemberRow::into_entry)
-                .collect(),
+            read.first.min(count),
+            read.rows.into_iter().filter_map(entry_row).collect(),
             Vec::new(),
-            |row| row.playlist_entry_key,
+            |_| (),
         );
     }
 
-    pub fn ready(&self, position: u32) -> Option<Arc<PlaylistEntryView>> {
+    pub fn ready(&self, position: u32) -> Option<Arc<TrackRow>> {
         self.inner.sparse.ready(position)
     }
 
     pub fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
         self.inner.sparse.update_matching(
-            |row| row.track.media_uri == media_uri && row.track.access.is_downloaded != downloaded,
-            |row| row.track.access.is_downloaded = downloaded,
+            |row| row.media_uri == media_uri && row.is_downloaded != downloaded,
+            |row| row.is_downloaded = downloaded,
         );
     }
 
@@ -172,14 +163,18 @@ impl PlaylistEntryModel {
             let position = u32::try_from(source_rank).ok()?;
             return self
                 .ready(position)
-                .filter(|row| row.track.media_uri == media_uri)
+                .filter(|row| row.media_uri == media_uri)
                 .map(|_| position);
         }
         if context_id != CollectionTarget::Playlist(self.inner.playlist_key).context_id() {
             return None;
         }
         self.inner.sparse.ready_position(|row| {
-            row.track.media_uri == media_uri && row.position.max(0) as usize == source_rank
+            row.media_uri == media_uri
+                && row
+                    .entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.position as usize == source_rank)
         })
     }
 
@@ -225,7 +220,7 @@ impl PlaylistEntryModel {
         .with_context(self.visible_context_id().into())
         .shuffled(shuffled);
         if !collection_start && let Some(row) = self.ready(position as u32) {
-            request = request.with_anchor(row.track.track_key, Some(row.playlist_entry_key));
+            request = request.with_anchor(row.track_key, entry_key(&row));
         }
         queue.play_selection(request);
     }

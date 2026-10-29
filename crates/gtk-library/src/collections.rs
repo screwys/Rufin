@@ -6,7 +6,7 @@ use std::{
     rc::Rc,
 };
 
-use ::library::{AlbumView, ArtistKey, ArtistView, TrackView};
+use ::library::{AlbumRow, ArtistKey, ArtistRow, TrackRow};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
@@ -577,7 +577,7 @@ pub fn album_collection_projection(
 
 pub fn artist_collection_projection(
     shell: &Rc<CatalogUi>,
-    sparse: Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistView>>,
+    sparse: Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
     key: LibraryListKey,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(key);
@@ -670,7 +670,7 @@ pub fn album_grid(
         sparse.list_model(),
         &fields,
         move |fields| AlbumGridCell::new(&cell_shell, fields, None),
-        move |_, album: AlbumView| {
+        move |_, album: AlbumRow| {
             activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()))
         },
         move |position| demand.demand_positions([position as usize]),
@@ -679,7 +679,7 @@ pub fn album_grid(
 
 pub fn artist_grid(
     shell: &Rc<CatalogUi>,
-    sparse: &Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistView>>,
+    sparse: &Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
     key: LibraryListKey,
 ) -> CollectionGridProjection {
     let fields = shell
@@ -696,7 +696,7 @@ pub fn artist_grid(
         sparse.list_model(),
         &fields,
         move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
-        move |_, artist: ArtistView| {
+        move |_, artist: ArtistRow| {
             activate_shell.navigate(super::artist::artist_detail_route(
                 artist.media_uri.clone(),
                 album_artist,
@@ -723,7 +723,7 @@ pub fn track_grid(
         .borrow()
         .library_list(key)
         .grid_fields;
-    let field = Rc::new(move |_: u32, item: &TrackView, field| item.links(field));
+    let field = Rc::new(move |_: u32, item: &TrackRow, field| item.links(field));
     let cell_shell = Rc::clone(shell);
     let cell_play = Rc::clone(&play_from_collection);
     let activate = Rc::clone(&play_from_collection);
@@ -741,7 +741,7 @@ pub fn track_grid(
                 Some(selection.clone()),
             )
         },
-        move |position, _: TrackView| activate(position),
+        move |position, _: TrackRow| activate(position),
         move |position| bind_demand(position),
     )
 }
@@ -767,7 +767,7 @@ where
         move |field| album_column(&column_shell, field, column_playback_context.clone()),
         |field| column_fit_width(field, column_width(field)),
         true,
-        Some(Box::new(move |_, album: AlbumView| {
+        Some(Box::new(move |_, album: AlbumRow| {
             activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
         })),
         None,
@@ -796,7 +796,7 @@ where
         move |field| artist_column(&column_shell, field, album_artist),
         |field| column_fit_width(field, column_width(field)),
         true,
-        Some(Box::new(move |_, artist: ArtistView| {
+        Some(Box::new(move |_, artist: ArtistRow| {
             activate_shell.navigate(super::artist::artist_detail_route(
                 artist.media_uri.clone(),
                 album_artist,
@@ -954,7 +954,7 @@ where
 impl CatalogUi {
     pub fn related_tracks_view(
         self: &Rc<Self>,
-        rows: Vec<TrackView>,
+        rows: Vec<TrackRow>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
         let model = TrackCollectionModel::related(self.library.clone(), self.runtime.clone(), rows);
@@ -1047,7 +1047,7 @@ pub fn track_table(
     let queue = shell.playback.clone();
     let play_model = model.clone();
     let context_id = options.context_id;
-    let activate = Box::new(move |position, _: TrackView| {
+    let activate = Box::new(move |position, _: TrackRow| {
         play_model.play(
             queue.clone(),
             position as usize,
@@ -1068,14 +1068,14 @@ pub fn track_table(
         &fields,
         Vec::new(),
         move |field| {
-            let column = track_column_for_key::<TrackView>(
+            let column = track_column_for_key::<TrackRow>(
                 &column_shell,
                 key,
                 field,
                 &column_playing_indicator,
             );
             if field != LibraryField::Favorite {
-                install_track_column_drag_source::<TrackView>(
+                install_track_column_drag_source::<TrackRow>(
                     &column,
                     &column_shell,
                     column_selection.clone(),

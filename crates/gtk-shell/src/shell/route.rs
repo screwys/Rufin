@@ -4,9 +4,8 @@
 //! away from GTK, then builds and mounts its GTK model. Home and playlist
 //! detail have narrow point-update hooks because those operations are
 //! intentionally visible without remounting the whole page.
-use rufin_core::browse::{OpenOptions, OpenedCollection};
-use rufin_core::page::Refresh;
-use rufin_core::runtime::CatalogPublication;
+use rufin_core::source::feed::Changed;
+use rufin_core::view::{OpenOptions, Refresh};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -213,9 +212,17 @@ impl Shell {
         let load_route = route.clone();
         let load_selected = selected.clone();
         let task = self.products.runtime.spawn(async move {
-            source
-                .open_page(load_route, load_selected, options, window, &cancellation)
-                .await
+            let opened = source
+                .open(
+                    load_route,
+                    load_selected,
+                    options,
+                    window,
+                    true,
+                    &cancellation,
+                )
+                .await?;
+            RouteRead::of(opened, &cancellation).await
         });
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -233,8 +240,8 @@ impl Shell {
             let source_id = source_scoped
                 .then(|| selected.as_ref().map(|selected| selected.source_id.clone()))
                 .flatten();
-            let page = match result {
-                Ok(Ok(page)) => page,
+            let read = match result {
+                Ok(Ok(read)) => read,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, "failed to open collection");
                     shell.show_route_load_error(route, source_id, render_started);
@@ -257,11 +264,11 @@ impl Shell {
             } else {
                 None
             };
-            match (page.opened(), apply_home) {
-                (OpenedCollection::Home(home), Some(apply)) => apply(home.as_ref().clone()),
+            match (read.view.home(), apply_home) {
+                (Some(home), Some(apply)) => apply(home.clone()),
                 _ => {
                     shell.replace_mounted_route(route, source_id, render_started, move |catalog| {
-                        catalog.opened_collection_view(page)
+                        catalog.opened_collection_view(read)
                     })
                 }
             }
@@ -474,7 +481,7 @@ impl Shell {
     }
 
     /// Rereads or reopens the mounted route when a committed change touches it.
-    pub(crate) fn refresh_mounted_route(self: &Rc<Self>, publication: &CatalogPublication) {
+    pub(crate) fn refresh_mounted_route(self: &Rc<Self>, changed: &Changed) {
         let route = self.navigation.routes.borrow().current().clone();
         let selected = self
             .route_viewport
@@ -482,12 +489,12 @@ impl Shell {
             .borrow()
             .as_ref()
             .and_then(|catalog| catalog.selected.clone());
-        match rufin_core::page::refresh(
+        match rufin_core::view::refresh(
             &self.products.source,
             &route,
             selected.as_ref(),
             &self.route_options(&route),
-            publication,
+            changed,
         ) {
             Refresh::Nothing => {}
             Refresh::Reread if route == Route::Home => self.refresh_mounted_home(),
@@ -676,10 +683,7 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(false);
     }
 
-    pub(crate) fn apply_favorite_state_to_mounted_route(
-        &self,
-        state: rufin_core::runtime::FavoriteState,
-    ) {
+    pub(crate) fn apply_favorite_state_to_mounted_route(&self, state: &library::StateChange) {
         if let Some(view) = self
             .route_viewport
             .mounted_route

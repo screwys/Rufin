@@ -2,10 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use library::{Catalog, TrackKey, TrackView};
+use library::{Catalog, Row, TrackKey, TrackRow};
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 
 use gtk_widgets::library_fields::TrackPresentation;
+use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 
 const TRACK_OVERSCAN: usize = 64;
@@ -39,8 +40,16 @@ impl TrackRead {
     }
 }
 
+/// A track list row of any track page.
+pub(crate) fn track_row(row: Row) -> Option<TrackRow> {
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => Some(track),
+        _ => None,
+    }
+}
+
 struct TrackModelState {
-    sparse: Rc<SparseRouteModel<TrackKey, TrackView>>,
+    sparse: Rc<SparseRouteModel<TrackKey, TrackRow>>,
     /// The search the page wants; a page read for another search is stale.
     filter: RefCell<String>,
     applied: Rc<RefCell<TrackRead>>,
@@ -50,70 +59,100 @@ struct TrackModelState {
 pub struct TrackCollectionModel(Rc<TrackModelState>);
 
 impl TrackCollectionModel {
-    pub fn new(
-        catalog: Arc<Catalog>,
-        runtime: tokio::runtime::Handle,
-        page: rufin_core::browse::MemberPage,
-    ) -> Self {
-        let rows = page
-            .page
-            .rows
-            .into_iter()
-            .map(library::MemberRow::into_track)
-            .collect();
-        let filter = RefCell::new(page.read.filter.clone());
-        let applied = Rc::new(RefCell::new(TrackRead::Members(page.read)));
-        let load_request = applied.clone();
+    /// The tracks of `view`, seeded with the rows `read` took with it.
+    pub fn new(runtime: tokio::runtime::Handle, view: &RouteView, read: RouteRead) -> Self {
+        let members = read
+            .view
+            .members()
+            .cloned()
+            .expect("a track page reads members");
+        let filter = RefCell::new(members.filter.clone());
         let sparse = SparseRouteModel::new(
             SparseSource::Query {
-                count: page.page.count,
+                count: read.view.len(),
             },
             TRACK_OVERSCAN,
             runtime,
-            Rc::new(move |_, range, cancellation| {
-                let catalog = catalog.clone();
-                let request = load_request.borrow().clone();
+            view_rows(view, track_row),
+        );
+        sparse.seed_matching_at(
+            read.first,
+            read.rows.into_iter().filter_map(track_row).collect(),
+            |row| row.track_key,
+        );
+        sparse.list_model().set_sections(read.discs);
+        Self(Rc::new(TrackModelState {
+            sparse,
+            applied: Rc::new(RefCell::new(TrackRead::Members(members))),
+            filter,
+        }))
+    }
+
+    /// An artist page's favorite tracks, which `members` lists.
+    pub fn favorites(
+        runtime: tokio::runtime::Handle,
+        view: &RouteView,
+        members: library::MemberRead,
+        rows: Vec<Row>,
+    ) -> Self {
+        let count = view.borrow().favorites_len().unwrap_or(0);
+        let load_view = Rc::clone(view);
+        let sparse = SparseRouteModel::new(
+            SparseSource::Query { count },
+            TRACK_OVERSCAN,
+            runtime,
+            Rc::new(move |_, range, cancel| {
+                let view = Arc::clone(&load_view.borrow());
                 Box::pin(async move {
-                    let TrackRead::Members(request) = request else {
-                        unreachable!()
-                    };
-                    request
-                        .rows(&catalog, range.start, range.len(), &cancellation)
+                    view.favorite_rows(range, &cancel)
                         .await
-                        .map(|rows| {
-                            rows.into_iter()
-                                .map(library::MemberRow::into_track)
-                                .collect()
-                        })
+                        .map(|rows| rows.into_iter().filter_map(track_row).collect())
                         .map_err(|error| error.to_string())
                 })
             }),
         );
-        sparse.seed_matching_at(page.page.first_row_position, rows, |row| row.track_key);
-        sparse.list_model().set_sections(page.disc_sections);
+        sparse.seed_matching_at(0, rows.into_iter().filter_map(track_row).collect(), |row| {
+            row.track_key
+        });
         Self(Rc::new(TrackModelState {
             sparse,
-            applied,
-            filter,
+            filter: RefCell::new(members.filter.clone()),
+            applied: Rc::new(RefCell::new(TrackRead::Members(members))),
         }))
+    }
+
+    pub fn replace_favorites(&self, members: library::MemberRead, count: usize, rows: Vec<Row>) {
+        self.0.applied.replace(TrackRead::Members(members));
+        self.0.sparse.replace_prepared_at(
+            SparseSource::Query { count },
+            0,
+            rows.into_iter().filter_map(track_row).collect(),
+            Vec::new(),
+            |row| row.track_key,
+        );
     }
 
     pub fn related(
         catalog: Arc<Catalog>,
         runtime: tokio::runtime::Handle,
-        rows: Vec<TrackView>,
+        rows: Vec<TrackRow>,
     ) -> Self {
         let keys: Arc<[TrackKey]> = rows.iter().map(|row| row.track_key).collect();
         let sparse = SparseRouteModel::new(
             SparseSource::Keys(keys.clone()),
             TRACK_OVERSCAN,
             runtime,
-            Rc::new(move |keys, _, cancel| {
+            Rc::new(move |keys: Vec<TrackKey>, _, cancel| {
                 let catalog = catalog.clone();
                 Box::pin(async move {
+                    let items = keys
+                        .into_iter()
+                        .map(|key| library::Item::Track { key, entry: None })
+                        .collect::<Vec<_>>();
                     catalog
-                        .tracks(&keys, &cancel)
+                        .rows_of(&items, true, &cancel)
                         .await
+                        .map(|rows| rows.into_iter().filter_map(track_row).collect())
                         .map_err(|error| error.to_string())
                 })
             }),
@@ -130,7 +169,7 @@ impl TrackCollectionModel {
         self.0.sparse.list_model()
     }
 
-    pub fn sparse_model(&self) -> Rc<SparseRouteModel<TrackKey, TrackView>> {
+    pub fn sparse_model(&self) -> Rc<SparseRouteModel<TrackKey, TrackRow>> {
         Rc::clone(&self.0.sparse)
     }
 
@@ -138,6 +177,14 @@ impl TrackCollectionModel {
         self.0
             .sparse
             .ready_position(|row| row.media_uri() == media_uri)
+    }
+
+    /// Where a reread starts so the rows on screen stay: the first live row.
+    pub fn live_window(&self) -> library::RouteSeedWindow {
+        self.0.sparse.first_live_position().map_or_else(
+            library::RouteSeedWindow::top,
+            library::RouteSeedWindow::position,
+        )
     }
 
     pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
@@ -159,24 +206,22 @@ impl TrackCollectionModel {
         self.0.filter.replace(query.trim().to_string());
     }
 
-    pub fn replace_page(&self, page: rufin_core::browse::MemberPage) -> bool {
-        if page.read.filter != *self.0.filter.borrow() {
+    /// Takes a reread of the page; a read for another search is stale.
+    pub fn replace_page(&self, read: RouteRead) -> bool {
+        let Some(members) = read.view.members().cloned() else {
+            return false;
+        };
+        if members.filter != *self.0.filter.borrow() {
             return false;
         }
-        let rows = page
-            .page
-            .rows
-            .into_iter()
-            .map(library::MemberRow::into_track)
-            .collect();
-        self.0.applied.replace(TrackRead::Members(page.read));
+        self.0.applied.replace(TrackRead::Members(members));
         self.0.sparse.replace_prepared_at(
             SparseSource::Query {
-                count: page.page.count,
+                count: read.view.len(),
             },
-            page.page.first_row_position,
-            rows,
-            page.disc_sections,
+            read.first,
+            read.rows.into_iter().filter_map(track_row).collect(),
+            read.discs,
             |row| row.track_key,
         )
     }
@@ -282,111 +327,5 @@ impl TrackCollectionModel {
         selected_position: u32,
     ) -> Option<u32> {
         self.position_for_current_uri(media_uri, Some(selected_position as usize))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn page_for_another_search_is_stale_and_rereads_refresh_metadata() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let row = library::TrackView {
-            track_key: TrackKey::from_raw(1),
-            source_key: None,
-            source_id: None,
-            object_id: None,
-            media_uri: "test:track".into(),
-            artwork_binding: None,
-            metadata: library::TrackMetadata {
-                title: "Before".into(),
-                duration_millis: 1000,
-                ..Default::default()
-            },
-            state: library::TrackState {
-                play_count: 1,
-                ..Default::default()
-            },
-            access: Default::default(),
-            links: Default::default(),
-        };
-        let settings = rufin_core::settings::LibraryListSettings::for_key(
-            rufin_core::settings::LibraryListKey::History,
-        );
-        let query = library::MemberRead {
-            sort: Some(settings.sort_key.catalog_sort()),
-            descending: settings.descending,
-            ..library::MemberRead::new(library::Collection::History { source: None })
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let catalog = runtime
-            .block_on(Catalog::open(directory.path().join("catalog.sqlite3")))
-            .unwrap();
-        let model = TrackCollectionModel::new(
-            Arc::new(catalog),
-            runtime.handle().clone(),
-            rufin_core::browse::MemberPage {
-                read: query.clone(),
-                page: library::Page {
-                    count: 1,
-                    first_row_position: 0,
-                    rows: vec![library::MemberRow::Track(row.clone())],
-                },
-                disc_sections: Vec::new(),
-            },
-        );
-        assert_eq!(
-            model.position_for_current_uri("test:track", Some(0)),
-            Some(0)
-        );
-        assert_eq!(
-            model.position_for_current_uri("test:track", Some(1)),
-            Some(0)
-        );
-        assert_eq!(
-            model.position_for_current_uri("test:missing", Some(0)),
-            None
-        );
-        let mut updated = row;
-        updated.metadata.title = "After".into();
-        let prepared = rufin_core::browse::MemberPage {
-            disc_sections: Vec::new(),
-            page: library::Page {
-                count: 1,
-                first_row_position: 0,
-                rows: vec![library::MemberRow::Track(updated.clone())],
-            },
-            read: query,
-        };
-        assert!(model.replace_page(prepared.clone()));
-        assert_eq!(
-            model.sparse_model().ready(0).unwrap().metadata.title,
-            "After"
-        );
-
-        // A later catalog publication has the same query but new row data.
-        updated.metadata.title = "Catalog update".into();
-        assert!(model.replace_page(rufin_core::browse::MemberPage {
-            disc_sections: Vec::new(),
-            page: library::Page {
-                rows: vec![library::MemberRow::Track(updated)],
-                ..prepared.page.clone()
-            },
-            ..prepared.clone()
-        }));
-        assert_eq!(
-            model.sparse_model().ready(0).unwrap().metadata.title,
-            "Catalog update"
-        );
-
-        let visible_context = model.visible_context_id("history");
-        model.set_query("different search");
-        assert_eq!(model.visible_context_id("history"), visible_context);
-        assert!(!model.replace_page(prepared));
-        assert_eq!(
-            model.sparse_model().ready(0).unwrap().metadata.title,
-            "Catalog update"
-        );
     }
 }

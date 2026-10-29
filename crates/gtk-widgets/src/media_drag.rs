@@ -98,17 +98,23 @@ async fn selected_parent_collections(
 
 pub fn install_parent_selection<K, R>(
     sparse: &Rc<crate::sparse_model::SparseRouteModel<K, R>>,
-    read: Rc<RefCell<library::ListRead>>,
+    view: &crate::mounted_route::RouteView,
     target: impl Fn(&R) -> Option<PlayRequest> + Send + Sync + 'static,
 ) where
     K: Clone + Eq + Send + Sync + 'static,
     R: Clone + Send + Sync + 'static,
 {
     let weak = Rc::downgrade(sparse);
+    let view = Rc::downgrade(view);
     sparse
         .list_model()
         .set_collection_selection(Box::new(move |dragged, positions| {
             let sparse = weak.upgrade()?;
+            let Some(library::MemberSelection::Parents { read, .. }) =
+                view.upgrade()?.borrow().selection()
+            else {
+                return None;
+            };
             let position = sparse.ready_position(|row| {
                 match (
                     target(row).and_then(|target| target.selection()),
@@ -129,7 +135,7 @@ pub fn install_parent_selection<K, R>(
             })?;
             positions.contains(position).then(|| {
                 CollectionTargets::Parents(vec![(
-                    read.borrow().clone(),
+                    read,
                     crate::selection::selected_ranges(positions),
                 )])
             })
@@ -679,24 +685,12 @@ async fn prepare_live_collection(
         .recv()
         .await
         .map_err(|error| error.to_string())??;
-    let cancellation = library::ReadCancellation::new();
-    let scope = match library::source_entity_parts(media_uri)
-        .map(|(_, kind, _)| kind)
-        .as_deref()
-    {
-        Some("album") => catalog
-            .album(media_uri, false, &cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(|row| library::Collection::Album(row.album_key)),
-        Some("artist") => catalog
-            .catalog_identity(library::CatalogKind::Artist, media_uri, &cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(|identity| library::Collection::Artist {
-                key: library::ArtistKey::from_raw(identity.key),
-                album_artist: false,
-            }),
+    let scope = match catalog.item(media_uri) {
+        Some(library::Item::Album(key)) => Some(library::Collection::Album(key)),
+        Some(library::Item::Artist { key, .. }) => Some(library::Collection::Artist {
+            key,
+            album_artist: false,
+        }),
         _ => None,
     }
     .ok_or_else(|| "Collection is no longer available".to_string())?;

@@ -1,10 +1,9 @@
-use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use rufin_core::collection_context::CollectionTarget;
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use library::{GenreKey, GenreView, MoodKey, MoodView, RadioSeed};
+use library::{GenreKey, MoodKey, RadioSeed, TagRow};
 use localization::{msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -12,7 +11,7 @@ use crate::CatalogUi;
 use crate::LibraryListKey;
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::format_duration_units;
-use gtk_widgets::mounted_route::MountedRoute;
+use gtk_widgets::mounted_route::{MountedRoute, RouteRead};
 
 use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
@@ -23,12 +22,6 @@ use gtk_media_menus::media_menus::{present_genre_context_menu, present_mood_cont
 pub enum NamedDetailId {
     Genre(GenreKey),
     Mood(MoodKey),
-}
-
-#[derive(Clone)]
-pub enum NamedDetailSummary {
-    Genre(GenreView),
-    Mood(MoodView),
 }
 
 impl NamedDetailId {
@@ -75,51 +68,21 @@ impl NamedDetailId {
     }
 }
 
-impl NamedDetailSummary {
-    fn name(&self) -> &str {
-        match self {
-            Self::Genre(row) => &row.metadata.name,
-            Self::Mood(row) => &row.metadata.name,
-        }
-    }
+fn named_artwork(row: &TagRow) -> Vec<ArtworkBinding> {
+    row.artwork_binding
+        .as_ref()
+        .filter(|_| row.kind == library::TagKind::Genre)
+        .map(std::slice::from_ref)
+        .unwrap_or(&row.representative_artwork)
+        .iter()
+        .map(|binding| ArtworkBinding::opaque(binding))
+        .collect()
+}
 
-    fn track_count(&self) -> i64 {
-        match self {
-            Self::Genre(row) => row.summary.track_count,
-            Self::Mood(row) => row.summary.track_count,
-        }
-    }
-
-    fn duration_millis(&self) -> i64 {
-        match self {
-            Self::Genre(row) => row.summary.duration_millis,
-            Self::Mood(row) => row.summary.duration_millis,
-        }
-    }
-
-    fn artwork(&self) -> Vec<ArtworkBinding> {
-        match self {
-            Self::Genre(row) => row
-                .artwork_binding
-                .as_ref()
-                .map(std::slice::from_ref)
-                .unwrap_or(&row.representative_artwork)
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-            Self::Mood(row) => row
-                .representative_artwork
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-        }
-    }
-
-    fn seed(&self) -> u32 {
-        match self {
-            Self::Genre(row) => stable_seed(&row.object_id),
-            Self::Mood(row) => stable_seed(&row.mood_key.to_string()),
-        }
+fn named_seed(row: &TagRow) -> u32 {
+    match row.kind {
+        library::TagKind::Genre => stable_seed(&row.object_id),
+        library::TagKind::Mood => stable_seed(&MoodKey::from_raw(row.key).to_string()),
     }
 }
 
@@ -127,31 +90,22 @@ impl CatalogUi {
     pub fn named_detail_view(
         self: &Rc<Self>,
         id: NamedDetailId,
-        opened: rufin_core::page::Page,
-        detail: Option<DetailPage>,
+        mut read: RouteRead,
     ) -> MountedRoute {
-        let Some(DetailPage {
-            summary,
-            content: DetailContent::Tracks(page),
-        }) = detail
+        let (false, Some(library::Header::Tag(summary))) =
+            (read.view.is_missing(), read.header.take())
         else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 id.kind(),
                 id.missing_body(),
             ));
         };
-        let summary = match summary {
-            DetailSummary::Genre(row) => NamedDetailSummary::Genre(*row),
-            DetailSummary::Mood(row) => NamedDetailSummary::Mood(*row),
-            _ => unreachable!("named detail"),
-        };
+        let view = read.route_view();
+        let title = summary.name.clone();
+        let artwork = named_artwork(&summary);
+        let seed = named_seed(&summary);
+        let summary_items = named_summary_items(&summary);
         let current = Rc::new(RefCell::new(summary));
-        let borrowed = current.borrow();
-        let title = borrowed.name().to_string();
-        let artwork = borrowed.artwork();
-        let seed = borrowed.seed();
-        let summary_items = named_summary_items(&borrowed);
-        drop(borrowed);
         let context_menu = named_context_menu(self, Rc::clone(&current));
         let grouped = self.grouped_detail_view(GroupedDetailData {
             key: id.key(),
@@ -167,13 +121,14 @@ impl CatalogUi {
             seed,
             summary_items,
             context_menu,
-            tracks: page,
+            view: Rc::clone(&view),
+            tracks: read,
             table_context: id.table_context(),
             playback_context: id.target().context_id(),
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
-        let reread = tracks.page_reread(self, "mounted named detail", opened, |_| {}, |_| {});
+        let reread = tracks.page_reread(self, "mounted named detail", &view, |_| {}, |_| {});
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
@@ -190,25 +145,18 @@ impl CatalogUi {
             if *target != id.target() {
                 return;
             }
-            match &mut *download_summary.borrow_mut() {
-                NamedDetailSummary::Genre(row) => {
-                    row.summary.downloaded_count = if downloaded {
-                        row.summary.track_count
-                    } else {
-                        0
-                    };
-                }
-                NamedDetailSummary::Mood(row) => {
-                    row.summary.downloaded_count = if downloaded {
-                        row.summary.track_count
-                    } else {
-                        0
-                    };
-                }
-            }
+            let row = &mut *download_summary.borrow_mut();
+            row.summary.downloaded_count = if downloaded {
+                row.summary.track_count
+            } else {
+                0
+            };
         });
+        let refresh_tracks = Rc::clone(&tracks);
         MountedRoute::new(grouped.widget(), resume)
-            .with_catalog_refresh(Rc::new(move || reread.reread()))
+            .with_catalog_refresh(Rc::new(move || {
+                reread.refresh(refresh_tracks.live_window())
+            }))
             .with_download_change(downloads)
             .with_download_change(tracks.download_change())
             .with_search(grouped.search())
@@ -223,22 +171,22 @@ impl CatalogUi {
 
 fn named_context_menu(
     shell: &Rc<CatalogUi>,
-    current: Rc<RefCell<NamedDetailSummary>>,
+    current: Rc<RefCell<TagRow>>,
 ) -> Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>> {
     let shell = Rc::clone(shell);
     Some(Rc::new(
-        move |target: &gtk::Widget, position, play| match &*current.borrow() {
-            NamedDetailSummary::Genre(summary) => present_genre_context_menu(
+        move |target: &gtk::Widget, position, play| match current.borrow().kind {
+            library::TagKind::Genre => present_genre_context_menu(
                 target,
                 &shell.media_menus,
-                summary.clone(),
+                current.borrow().clone(),
                 Some(play),
                 position,
             ),
-            NamedDetailSummary::Mood(summary) => present_mood_context_menu(
+            library::TagKind::Mood => present_mood_context_menu(
                 target,
                 &shell.media_menus,
-                summary.clone(),
+                current.borrow().clone(),
                 Some(play),
                 position,
             ),
@@ -262,16 +210,16 @@ fn named_kind_controls(shell: &Rc<CatalogUi>, id: NamedDetailId) -> Vec<gtk::Wid
     controls
 }
 
-fn named_summary_items(summary: &NamedDetailSummary) -> Vec<(&'static str, String)> {
+fn named_summary_items(summary: &TagRow) -> Vec<(&'static str, String)> {
     let mut items = vec![(
         "rufin-tracks-symbolic",
-        track_count_text(summary.track_count().max(0) as u64),
+        track_count_text(summary.summary.track_count.max(0) as u64),
     )];
-    if summary.duration_millis() > 0 {
+    if summary.summary.duration_millis > 0 {
         items.push((
             "rufin-preferences-system-time-symbolic",
             format_duration_units(
-                (summary.duration_millis() / 1_000)
+                (summary.summary.duration_millis / 1_000)
                     .try_into()
                     .unwrap_or(u32::MAX),
             ),

@@ -3,8 +3,8 @@ use std::{rc::Rc, sync::Arc};
 use adw::prelude::*;
 use gtk::glib;
 use library::{
-    AlbumView, ArtistView, FavoriteTarget, GenreView, MoodView, PlaylistRow, RadioSeed,
-    SmartPlaylistRow, TrackView,
+    AlbumRow, ArtistRow, FavoriteTarget, PlaylistRow, RadioSeed, SmartPlaylistRow, TagRow,
+    TrackLinks, TrackRow, TrackView,
 };
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
@@ -108,15 +108,12 @@ pub struct MediaMenus {
     pub download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
     pub remove_download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
 }
-fn track_menu_subtitle(track: &TrackView) -> String {
-    [
-        track.metadata.artist.as_str(),
-        track.metadata.album.as_str(),
-    ]
-    .into_iter()
-    .filter(|value| !value.is_empty())
-    .collect::<Vec<_>>()
-    .join(" · ")
+fn track_menu_subtitle(artist: &str, album: &str) -> String {
+    [artist, album]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 pub fn present_track_menu(
@@ -152,7 +149,7 @@ pub fn present_track_menu(
         crate::media_details::MenuHeader {
             item: MediaDetailsItem::Track(track.media_uri.clone()),
             title: &track.metadata.title,
-            subtitle: &track_menu_subtitle(&track),
+            subtitle: &track_menu_subtitle(&track.metadata.artist, &track.metadata.album),
             artwork: track.artwork_binding.as_deref(),
             favorite,
         },
@@ -178,7 +175,14 @@ pub fn present_track_menu(
             EDIT_ICON,
         );
     }
-    install_track_navigation(&surface, menus, action_group, &track);
+    install_track_navigation(
+        &surface,
+        menus,
+        action_group,
+        &track.links,
+        &track.media_uri,
+        track.source_id.as_deref(),
+    );
     let playback = track_play_request(track.track_key);
     install_download_actions(
         &surface,
@@ -272,11 +276,13 @@ fn install_track_navigation(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
     action_group: &str,
-    track: &TrackView,
+    links: &TrackLinks,
+    media_uri: &str,
+    source_id: Option<&str>,
 ) {
-    let track_artists = &track.links.artists;
-    let album_artists = &track.links.album_artists;
-    let album_media_uri = track.links.album_media_uri.as_deref();
+    let track_artists = &links.artists;
+    let album_artists = &links.album_artists;
+    let album_media_uri = links.album_media_uri.as_deref();
     let artists = if track_artists.is_empty() {
         album_artists
     } else {
@@ -303,8 +309,8 @@ fn install_track_navigation(
         menus,
         &submenu,
         action_group,
-        &track.media_uri,
-        track.source_id.as_deref(),
+        media_uri,
+        source_id,
         album_media_uri,
         false,
     );
@@ -428,12 +434,12 @@ fn install_source_navigation(
 pub fn present_playlist_entry_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    row: library::PlaylistEntryView,
+    row: TrackRow,
     position: Option<(f64, f64)>,
     _playlist: library::PlaylistKey,
     removal: Option<PlaylistEntrySelectionSnapshot>,
 ) {
-    let favorite = row.track.state.favorite;
+    let favorite = row.state.favorite;
     let surface = ContextMenuSurface::new(target, "playlist-entry", position);
     crate::media_details::append_header(
         &surface,
@@ -441,10 +447,10 @@ pub fn present_playlist_entry_menu(
         menus,
         "playlist-entry",
         crate::media_details::MenuHeader {
-            item: MediaDetailsItem::Track(row.track.media_uri.clone()),
-            title: &row.track.metadata.title,
-            subtitle: &track_menu_subtitle(&row.track),
-            artwork: row.track.artwork_binding.as_deref(),
+            item: MediaDetailsItem::Track(row.media_uri.clone()),
+            title: &row.title,
+            subtitle: &track_menu_subtitle(&row.artist, &row.album),
+            artwork: row.artwork_binding.as_deref(),
             favorite,
         },
     );
@@ -456,19 +462,25 @@ pub fn present_playlist_entry_menu(
             REMOVE_ICON,
         );
     }
-    install_track_navigation(&surface, menus, "playlist-entry", &row.track);
+    install_track_navigation(
+        &surface,
+        menus,
+        "playlist-entry",
+        &row.links,
+        &row.media_uri,
+        row.source_id.as_deref(),
+    );
     install_download_actions(
         &surface,
         menus,
         &gtk_widgets::media_drag::MediaDragSource::capture_target(track_play_request(
-            row.track.track_key,
+            row.track_key,
         )),
-        Some(&row.track.media_uri),
+        Some(&row.media_uri),
         true,
-        row.track.access.is_downloaded,
+        row.is_downloaded,
     );
-    if row.track.media_uri.starts_with("file:")
-        || library::source_entity_parts(&row.track.media_uri).is_some()
+    if row.media_uri.starts_with("file:") || library::source_entity_parts(&row.media_uri).is_some()
     {
         surface.append_configurable_action(
             ContextMenuItem::EditMetadata,
@@ -477,32 +489,26 @@ pub fn present_playlist_entry_menu(
             EDIT_ICON,
         );
         let metadata_menus = Rc::clone(menus);
-        let media_uri = row.track.media_uri.clone();
+        let media_uri = row.media_uri.clone();
         surface.add_action("edit-metadata", move || {
             (metadata_menus.edit_metadata)(MetadataItemId::Track(media_uri.clone()))
         });
     }
-    append_context_menu_picker_media(&surface, menus, row.track.media_uri.clone());
+    append_context_menu_picker_media(&surface, menus, row.media_uri.clone());
     add_favorite_action(
         &surface,
         menus,
-        FavoriteTarget::Track(row.track.media_uri.clone()),
+        FavoriteTarget::Track(row.media_uri.clone()),
         favorite,
     );
     if context_menu_rating_visible(menus) {
         let rating_menus = Rc::clone(menus);
-        let media_uri = row.track.media_uri.clone();
+        let media_uri = row.media_uri.clone();
         surface.append_fixed_widget(
             "rating",
             &context_rating_row(
-                row.track
-                    .state
-                    .rating
-                    .and_then(|value| u8::try_from(value).ok()),
-                (rating_menus.half_stars_enabled)(
-                    &row.track.media_uri,
-                    row.track.source_id.as_deref(),
-                ),
+                row.state.rating.and_then(|value| u8::try_from(value).ok()),
+                (rating_menus.half_stars_enabled)(&row.media_uri, row.source_id.as_deref()),
                 surface.popover(),
                 move |rating| {
                     rating_menus
@@ -512,7 +518,7 @@ pub fn present_playlist_entry_menu(
             ),
         );
     }
-    install_media_uri_playback_actions(&surface, menus, row.track.media_uri.clone());
+    install_media_uri_playback_actions(&surface, menus, row.media_uri.clone());
     let remove_menus = Rc::downgrade(menus);
     surface.add_action("remove-from-playlist", move || {
         if let (Some(menus), Some(removal)) = (remove_menus.upgrade(), removal.as_ref()) {
@@ -913,7 +919,7 @@ fn install_selection_download_actions(
 pub fn present_album_context_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    album: AlbumView,
+    album: AlbumRow,
     playback_context: Option<String>,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
@@ -934,8 +940,8 @@ pub fn present_album_context_menu(
         "album",
         crate::media_details::MenuHeader {
             item: MediaDetailsItem::Album(album.media_uri.clone()),
-            title: &album.metadata.title,
-            subtitle: &album.metadata.artist,
+            title: &album.title,
+            subtitle: &album.artist,
             artwork: album.artwork_binding.as_deref(),
             favorite,
         },
@@ -1046,7 +1052,7 @@ pub fn present_album_context_menu(
 pub fn present_artist_context_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    artist: ArtistView,
+    artist: ArtistRow,
     album_artist: bool,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
@@ -1071,7 +1077,7 @@ pub fn present_artist_context_menu(
                 media_uri: artist.media_uri.clone(),
                 album_artist,
             },
-            title: &artist.metadata.name,
+            title: &artist.name,
             subtitle: "",
             artwork: artist.artwork_binding.as_deref(),
             favorite,
@@ -1119,7 +1125,7 @@ pub fn present_artist_context_menu(
         &surface,
         menus,
         "artist",
-        [(artist.metadata.name.as_str(), route)],
+        [(artist.name.as_str(), route)],
         None,
     );
     install_source_navigation(
@@ -1201,14 +1207,16 @@ pub fn present_artist_context_menu(
 pub fn present_genre_context_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    genre: GenreView,
+    genre: TagRow,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
     if present_collection_selection_menu(
         target,
         menus,
-        collection_play_request(library::Collection::Genre(genre.genre_key)),
+        collection_play_request(library::Collection::Genre(library::GenreKey::from_raw(
+            genre.key,
+        ))),
         position,
     ) {
         return;
@@ -1229,7 +1237,9 @@ pub fn present_genre_context_menu(
             genre_id: genre.object_id.clone(),
         }),
     );
-    let playback = collection_play_request(library::Collection::Genre(genre.genre_key));
+    let playback = collection_play_request(library::Collection::Genre(
+        library::GenreKey::from_raw(genre.key),
+    ));
     install_download_actions(
         &surface,
         menus,
@@ -1240,28 +1250,36 @@ pub fn present_genre_context_menu(
             && genre.summary.downloaded_count == genre.summary.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
-    install_radio_actions(&surface, menus, RadioSeed::Genre(genre.genre_key));
+    install_radio_actions(
+        &surface,
+        menus,
+        RadioSeed::Genre(library::GenreKey::from_raw(genre.key)),
+    );
     surface.popup(&menus.settings.current.borrow().application.context_menu);
 }
 
 pub fn present_mood_context_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    mood: MoodView,
+    mood: TagRow,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
     if present_collection_selection_menu(
         target,
         menus,
-        collection_play_request(library::Collection::Mood(mood.mood_key)),
+        collection_play_request(library::Collection::Mood(library::MoodKey::from_raw(
+            mood.key,
+        ))),
         position,
     ) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "mood", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
-    let playback = collection_play_request(library::Collection::Mood(mood.mood_key));
+    let playback = collection_play_request(library::Collection::Mood(library::MoodKey::from_raw(
+        mood.key,
+    )));
     install_download_actions(
         &surface,
         menus,
@@ -1283,46 +1301,12 @@ pub fn present_playlist_context_menu(
     position: Option<(f64, f64)>,
     current: Option<String>,
 ) {
-    let catalog = menus.library.clone();
-    let member = library::PlaylistFolderMember::Playlist {
-        key: playlist.playlist_key,
-    };
-    let task = menus.runtime.spawn(async move {
-        catalog
-            .playlist_member_folder(&member, &library::ReadCancellation::new())
-            .await
-    });
-    let target = target.downgrade();
-    let menus = Rc::downgrade(menus);
-    gtk::glib::spawn_future_local(async move {
-        let (Some(target), Some(menus)) = (target.upgrade(), menus.upgrade()) else {
-            return;
-        };
-        match task.await {
-            Ok(Ok(folder)) => present_playlist_context_menu_ready(
-                &target,
-                &menus,
-                playlist,
-                play,
-                position,
-                current,
-                folder.is_some(),
-            ),
-            Ok(Err(error)) => (menus.show_error)(error.to_string()),
-            Err(error) => (menus.show_error)(error.to_string()),
-        }
-    });
-}
-
-fn present_playlist_context_menu_ready(
-    target: &gtk::Widget,
-    menus: &Rc<MediaMenus>,
-    playlist: PlaylistRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-    current: Option<String>,
-    in_folder: bool,
-) {
+    let in_folder = menus
+        .library
+        .playlist_member_folder(&library::PlaylistFolderMember::Playlist {
+            key: playlist.playlist_key,
+        })
+        .is_some();
     if present_playlist_selection_menu(
         target,
         menus,
@@ -1478,44 +1462,12 @@ pub fn present_smart_playlist_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    let catalog = menus.library.clone();
-    let member = library::PlaylistFolderMember::SmartPlaylist {
-        key: playlist.smart_playlist_key,
-    };
-    let task = menus.runtime.spawn(async move {
-        catalog
-            .playlist_member_folder(&member, &library::ReadCancellation::new())
-            .await
-    });
-    let target = target.downgrade();
-    let menus = Rc::downgrade(menus);
-    gtk::glib::spawn_future_local(async move {
-        let (Some(target), Some(menus)) = (target.upgrade(), menus.upgrade()) else {
-            return;
-        };
-        match task.await {
-            Ok(Ok(folder)) => present_smart_playlist_context_menu_ready(
-                &target,
-                &menus,
-                playlist,
-                play,
-                position,
-                folder.is_some(),
-            ),
-            Ok(Err(error)) => (menus.show_error)(error.to_string()),
-            Err(error) => (menus.show_error)(error.to_string()),
-        }
-    });
-}
-
-fn present_smart_playlist_context_menu_ready(
-    target: &gtk::Widget,
-    menus: &Rc<MediaMenus>,
-    playlist: SmartPlaylistRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-    in_folder: bool,
-) {
+    let in_folder = menus
+        .library
+        .playlist_member_folder(&library::PlaylistFolderMember::SmartPlaylist {
+            key: playlist.smart_playlist_key,
+        })
+        .is_some();
     if present_playlist_selection_menu(
         target,
         menus,

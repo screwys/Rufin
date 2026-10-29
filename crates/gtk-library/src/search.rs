@@ -41,12 +41,10 @@ use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
 use super::table_sizing::route_column_view_initial_width;
-use gtk_widgets::detail_links::{
-    DetailLinks, album_artist_links, track_album_artist_links, track_artist_links,
-};
+use gtk_widgets::detail_links::{DetailLinks, album_row_artist_links};
 use gtk_widgets::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, album_field, artist_field,
-    column_width, track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, TrackPresentation, add_field_skeleton_class, album_field,
+    artist_field, column_width, track_row_field,
 };
 use gtk_widgets::recycled_cells::{RecycledMergedCell, RecycledTextCell, list_cell};
 use gtk_widgets::route::CollectionCategory;
@@ -60,9 +58,9 @@ use gtk_widgets::lyrics_snippet::LyricsSnippetView;
 #[derive(Clone)]
 #[expect(clippy::large_enum_variant, reason = "bounded prepared Search rows")]
 enum SearchItem {
-    Track(library::TrackView, Option<library::LyricsSnippet>),
-    Album(library::AlbumView),
-    Artist(library::ArtistView),
+    Track(library::TrackRow, Option<library::LyricsSnippet>),
+    Album(library::AlbumRow),
+    Artist(library::ArtistRow),
 }
 
 impl SearchItem {
@@ -118,9 +116,9 @@ impl SearchItem {
     }
     fn title(&self) -> &str {
         match self {
-            Self::Track(row, _) => &row.metadata.title,
-            Self::Album(row) => &row.metadata.title,
-            Self::Artist(row) => &row.metadata.name,
+            Self::Track(row, _) => &row.title,
+            Self::Album(row) => &row.title,
+            Self::Artist(row) => &row.name,
         }
     }
     fn artwork(&self) -> ArtworkBinding {
@@ -136,7 +134,7 @@ impl SearchItem {
     }
     fn field(&self, field: LibraryField) -> String {
         match self {
-            Self::Track(row, _) => track_field(row, field),
+            Self::Track(row, _) => track_row_field(row, field),
             Self::Album(row) => album_field(row, field),
             Self::Artist(row) => artist_field(row, field),
         }
@@ -144,17 +142,9 @@ impl SearchItem {
     fn field_links(&self, field: LibraryField) -> DetailLinks {
         let text = self.field(field);
         match self {
-            Self::Track(row, _) => match field {
-                LibraryField::Artist => track_artist_links(row),
-                LibraryField::AlbumArtist => track_album_artist_links(row),
-                LibraryField::Album => DetailLinks::route(
-                    &text,
-                    row.links.album_media_uri.clone().map(Route::AlbumDetail),
-                ),
-                _ => DetailLinks::text(&text),
-            },
+            Self::Track(row, _) => TrackPresentation::links(row, field),
             Self::Album(row) => match field {
-                LibraryField::Artist | LibraryField::AlbumArtist => album_artist_links(row),
+                LibraryField::Artist | LibraryField::AlbumArtist => album_row_artist_links(row),
                 LibraryField::Title => {
                     DetailLinks::route(&text, Some(Route::AlbumDetail(row.media_uri.clone())))
                 }
@@ -168,15 +158,15 @@ impl SearchItem {
     }
     fn subtitle_links(&self) -> DetailLinks {
         match self {
-            Self::Track(row, _) => track_artist_links(row),
-            Self::Album(row) => album_artist_links(row),
+            Self::Track(row, _) => TrackPresentation::links(row, LibraryField::Artist),
+            Self::Album(row) => album_row_artist_links(row),
             _ => DetailLinks::text(self.subtitle()),
         }
     }
     fn subtitle(&self) -> &str {
         match self {
-            Self::Track(row, _) => &row.metadata.artist,
-            Self::Album(row) => &row.metadata.artist,
+            Self::Track(row, _) => &row.artist,
+            Self::Album(row) => &row.artist,
             Self::Artist(_) => "",
         }
     }
@@ -186,15 +176,16 @@ impl SearchItem {
     fn numeric_field(&self, field: LibraryField) -> Option<i64> {
         match self {
             Self::Track(row, _) => match field {
-                LibraryField::Year => row.metadata.year,
-                LibraryField::Duration => Some(row.metadata.duration_millis),
+                LibraryField::Year => row.year,
+                LibraryField::Duration => Some(row.duration_millis),
+                LibraryField::DateAdded => row.date_added,
                 LibraryField::PlayCount => Some(row.state.play_count),
                 LibraryField::UserRating => row.state.rating,
                 LibraryField::Favorite => Some(i64::from(row.state.favorite)),
                 _ => None,
             },
             Self::Album(row) => match field {
-                LibraryField::Year => row.metadata.year,
+                LibraryField::Year => row.year,
                 LibraryField::Duration => Some(row.summary.duration_millis),
                 LibraryField::PlayCount => Some(row.state.play_count),
                 LibraryField::UserRating => row.state.rating,
@@ -215,13 +206,12 @@ impl SearchItem {
     fn date_field(&self, field: LibraryField) -> Option<&str> {
         match self {
             Self::Track(row, _) => match field {
-                LibraryField::ReleaseDate => row.metadata.release_date.as_deref(),
-                LibraryField::DateAdded => row.metadata.date_added.as_deref(),
+                LibraryField::ReleaseDate => row.release_date.as_deref(),
                 _ => None,
             },
             Self::Album(row) => match field {
-                LibraryField::ReleaseDate => row.metadata.release_date.as_deref(),
-                LibraryField::DateAdded => row.metadata.date_added.as_deref(),
+                LibraryField::ReleaseDate => row.release_date.as_deref(),
+                LibraryField::DateAdded => row.date_added.as_deref(),
                 _ => None,
             },
             Self::Artist(_) => None,
@@ -925,10 +915,10 @@ impl CatalogUi {
             let (uri, downloaded) = (uri.as_str(), *downloaded);
             if let Some(projection) = download_tracks.upgrade() {
                 projection.update_matching(
-                    |row| matches!(row, SearchItem::Track(row, _) if row.media_uri == uri && row.access.is_downloaded != downloaded),
+                    |row| matches!(row, SearchItem::Track(row, _) if row.media_uri == uri && row.is_downloaded != downloaded),
                     |row| {
                         if let SearchItem::Track(row, _) = row {
-                            row.access.is_downloaded = downloaded;
+                            row.is_downloaded = downloaded;
                         }
                     },
                 );
@@ -1394,7 +1384,7 @@ mod tests {
     #[test]
     fn accepted_search_metadata_keeps_its_exact_route_link() {
         let artist_key = library::ArtistKey::from_raw(7);
-        let item = SearchItem::Artist(library::ArtistView {
+        let item = SearchItem::Artist(library::ArtistRow {
             artist_key,
             source_key: library::SourceKey::from_raw(3),
             object_id: "artist-object".to_string(),
@@ -1404,11 +1394,9 @@ mod tests {
                 "artist-object",
             ),
             artwork_binding: None,
-            metadata: library::ArtistMetadata {
-                name: "Performer".to_string(),
-                musicbrainz_artist_id: None,
-                ..Default::default()
-            },
+            album_artist: false,
+            name: "Performer".to_string(),
+            sort_text: "performer".to_string(),
             state: library::TrackState {
                 favorite: false,
                 rating: None,

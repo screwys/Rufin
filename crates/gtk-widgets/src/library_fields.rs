@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use ::library::{AlbumView, ArtistView, PlaylistRow, QueueRow, SmartPlaylistRow, TrackView};
+use ::library::{AlbumRow, ArtistRow, PlaylistRow, QueueRow, SmartPlaylistRow, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 #[cfg(test)]
@@ -33,33 +33,95 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     }
 }
 
-macro_rules! song_presentation {
-    ($ty:ty, $this:ident, $song:expr, $song_mut:expr) => {
-        impl TrackPresentation for $ty {
-            fn track_key(&$this) -> Option<library::TrackKey> { Some($song.track_key) }
-            fn media_uri(&$this) -> &str { &$song.media_uri }
-            fn title(&$this) -> &str { &$song.metadata.title }
-            fn artist(&$this) -> &str { &$song.metadata.artist }
-            fn artwork(&$this) -> Option<&[u8]> { $song.artwork_binding.as_deref() }
-            fn favorite(&$this) -> bool { $song.state.favorite }
-            fn set_favorite(&mut $this, value: bool) { $song_mut.state.favorite = value; }
-            fn downloaded(&$this) -> bool { $song.access.is_downloaded }
-            fn set_downloaded(&mut $this, value: bool) { $song_mut.access.is_downloaded = value; }
-            fn track_number(&$this) -> Option<i64> { Some($song.metadata.track_number) }
-            fn field(&$this, field: LibraryField) -> String { track_field(&$song, field) }
-            fn links(&$this, field: LibraryField) -> crate::detail_links::DetailLinks {
-                crate::detail_links::metadata_links(field, &$this.field(field), $song.links.album_media_uri.as_deref(), &$song.links.artists, &$song.links.album_artists)
-            }
-        }
-    };
+impl TrackPresentation for TrackRow {
+    fn track_key(&self) -> Option<library::TrackKey> {
+        Some(self.track_key)
+    }
+    fn media_uri(&self) -> &str {
+        &self.media_uri
+    }
+    fn title(&self) -> &str {
+        &self.title
+    }
+    fn artist(&self) -> &str {
+        &self.artist
+    }
+    fn artwork(&self) -> Option<&[u8]> {
+        self.artwork_binding.as_deref()
+    }
+    fn favorite(&self) -> bool {
+        self.state.favorite
+    }
+    fn set_favorite(&mut self, value: bool) {
+        self.state.favorite = value;
+    }
+    fn downloaded(&self) -> bool {
+        self.is_downloaded
+    }
+    fn set_downloaded(&mut self, value: bool) {
+        self.is_downloaded = value;
+    }
+    fn track_number(&self) -> Option<i64> {
+        Some(self.track_number)
+    }
+    fn field(&self, field: LibraryField) -> String {
+        track_row_field(self, field)
+    }
+    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
+        crate::detail_links::metadata_links(
+            field,
+            &self.field(field),
+            self.links.album_media_uri.as_deref(),
+            &self.links.artists,
+            &self.links.album_artists,
+        )
+    }
 }
-song_presentation!(TrackView, self, self, self);
-song_presentation!(
-    std::sync::Arc<QueueRow>,
-    self,
-    self.track,
-    std::sync::Arc::make_mut(self).track
-);
+
+impl TrackPresentation for std::sync::Arc<QueueRow> {
+    fn track_key(&self) -> Option<library::TrackKey> {
+        Some(self.track.track_key)
+    }
+    fn media_uri(&self) -> &str {
+        &self.track.media_uri
+    }
+    fn title(&self) -> &str {
+        &self.track.metadata.title
+    }
+    fn artist(&self) -> &str {
+        &self.track.metadata.artist
+    }
+    fn artwork(&self) -> Option<&[u8]> {
+        self.track.artwork_binding.as_deref()
+    }
+    fn favorite(&self) -> bool {
+        self.track.state.favorite
+    }
+    fn set_favorite(&mut self, value: bool) {
+        std::sync::Arc::make_mut(self).track.state.favorite = value;
+    }
+    fn downloaded(&self) -> bool {
+        self.track.access.is_downloaded
+    }
+    fn set_downloaded(&mut self, value: bool) {
+        std::sync::Arc::make_mut(self).track.access.is_downloaded = value;
+    }
+    fn track_number(&self) -> Option<i64> {
+        Some(self.track.metadata.track_number)
+    }
+    fn field(&self, field: LibraryField) -> String {
+        track_field(&self.track, field)
+    }
+    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
+        crate::detail_links::metadata_links(
+            field,
+            &self.field(field),
+            self.track.links.album_media_uri.as_deref(),
+            &self.track.links.artists,
+            &self.track.links.album_artists,
+        )
+    }
+}
 
 pub fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryField) {
     if field == LibraryField::Duration {
@@ -82,13 +144,13 @@ pub fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryFi
 
 pub use rufin_core::playlists::smart_playlist_display_name;
 
-pub fn album_item_field(album: &AlbumView, field: LibraryField) -> String {
+pub fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => album.metadata.title.clone(),
-        LibraryField::AlbumArtist | LibraryField::Artist => album.metadata.artist.clone(),
-        LibraryField::Year => optional_year(album.metadata.year),
-        LibraryField::ReleaseDate => album.metadata.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => album.metadata.date_added.clone().unwrap_or_default(),
+        LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
+        LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
+        LibraryField::Year => optional_year(album.year),
+        LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
         LibraryField::LastPlayed => display_unix_date(album.state.last_played),
         LibraryField::PlayCount => count(album.state.play_count),
         LibraryField::UserRating => stored_rating(album.state.rating),
@@ -103,7 +165,7 @@ pub fn album_item_field(album: &AlbumView, field: LibraryField) -> String {
         _ => String::new(),
     }
 }
-pub fn album_field(album: &AlbumView, field: LibraryField) -> String {
+pub fn album_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
         LibraryField::SongCount => track_count_text(album.summary.track_count.max(0) as u64),
         LibraryField::Duration => {
@@ -112,9 +174,9 @@ pub fn album_field(album: &AlbumView, field: LibraryField) -> String {
         _ => album_item_field(album, field),
     }
 }
-pub fn artist_item_field(artist: &ArtistView, field: LibraryField) -> String {
+pub fn artist_item_field(artist: &ArtistRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => artist.metadata.name.clone(),
+        LibraryField::Title | LibraryField::TitleMerged => artist.name.clone(),
         LibraryField::LastPlayed => display_unix_date(artist.state.last_played),
         LibraryField::PlayCount => count(artist.state.play_count),
         LibraryField::UserRating => stored_rating(artist.state.rating),
@@ -122,7 +184,7 @@ pub fn artist_item_field(artist: &ArtistView, field: LibraryField) -> String {
         _ => String::new(),
     }
 }
-pub fn artist_field(artist: &ArtistView, field: LibraryField) -> String {
+pub fn artist_field(artist: &ArtistRow, field: LibraryField) -> String {
     match field {
         LibraryField::AlbumCount => album_count_text(artist.summary.album_count.max(0) as u64),
         LibraryField::SongCount => track_count_text(artist.summary.track_count.max(0) as u64),
@@ -162,7 +224,7 @@ pub fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) ->
     }
 }
 pub use rufin_core::settings::presentation::{
-    audio_property_field, optional_track_number, track_field,
+    audio_property_field, optional_track_number, track_field, track_row_field,
 };
 pub fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
@@ -390,11 +452,6 @@ pub fn column_fit_width(field: LibraryField, width: i32) -> i32 {
 }
 pub fn column_width(field: LibraryField) -> i32 {
     match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels
-        | LibraryField::Format => 100,
         LibraryField::FilePath => 320,
         LibraryField::Source => 160,
         LibraryField::RowIndex => 48,
@@ -415,6 +472,7 @@ pub fn column_width(field: LibraryField) -> i32 {
         | LibraryField::TrackNumber
         | LibraryField::Bpm => 68,
         LibraryField::Duration => 76,
+        _ => 100,
     }
 }
 pub fn play_count_column_width() -> i32 {

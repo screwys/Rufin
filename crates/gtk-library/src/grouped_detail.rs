@@ -30,7 +30,8 @@ pub struct GroupedDetailData {
     pub seed: u32,
     pub summary_items: Vec<(&'static str, String)>,
     pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub tracks: rufin_core::browse::MemberPage,
+    pub view: gtk_widgets::mounted_route::RouteView,
+    pub tracks: gtk_widgets::mounted_route::RouteRead,
     pub table_context: &'static str,
     pub playback_context: String,
     pub play_label: &'static str,
@@ -77,6 +78,7 @@ impl CatalogUi {
             seed,
             summary_items,
             context_menu,
+            view,
             tracks,
             table_context,
             playback_context,
@@ -108,6 +110,7 @@ impl CatalogUi {
         }
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.searchable_track_collection(
+            &view,
             tracks,
             key,
             SearchableTrackOptions {
