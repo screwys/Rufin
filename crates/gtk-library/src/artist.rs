@@ -71,42 +71,17 @@ fn artist_header(read: &mut RouteRead) -> Option<ArtistView> {
     }
 }
 
-/// What an artist page's favorite tracks list: the artist's favorites in the Artist tracks
-/// order, as the page reads them.
-fn favorite_tracks_read(
-    view: &rufin_core::view::View,
-    artist: ArtistKey,
-    album_artist: bool,
-    settings: &crate::LibraryListSettings,
-) -> library::MemberRead {
-    let mut read = library::MemberRead::new(library::Collection::Artist {
-        key: artist,
-        album_artist,
-    });
-    read.sort = Some(settings.sort_key);
-    read.descending = settings.descending;
-    read.folder = view
-        .selected()
-        .and_then(|selected| selected.music_folder_key);
-    read.filter.clone_from(&view.options().filter);
-    read.favorites_only = true;
-    read.activity = settings.sort_key.activity_sensitive()
-        || settings
-            .row_fields
-            .iter()
-            .any(|field| field.activity_sensitive());
-    read
-}
-
 impl CatalogUi {
     pub fn artist_detail_view(
         self: &Rc<Self>,
         album_artist: bool,
         mut read: RouteRead,
     ) -> MountedRoute {
-        let (Some(summary), Some(favorite_rows)) =
-            (artist_header(&mut read), read.favorites.take())
-        else {
+        let (Some(summary), Some(favorite_rows), Some(favorite_read)) = (
+            artist_header(&mut read),
+            read.favorites.take(),
+            read.view.favorites().cloned(),
+        ) else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Artist",
                 msgid("No music from this artist yet"),
@@ -115,16 +90,11 @@ impl CatalogUi {
         let view = read.route_view();
         let artist = summary.row.artist_key;
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
-        let track_settings = self
-            .settings
-            .current
-            .borrow()
-            .library_list(LibraryListKey::ArtistTracks);
         let favorite_count = read.view.favorites_len().unwrap_or(0);
         let favorite_model = crate::track_model::TrackCollectionModel::favorites(
             self.runtime.clone(),
             &view,
-            favorite_tracks_read(&read.view, artist, album_artist, &track_settings),
+            favorite_read,
             favorite_rows,
         );
         let favorite = self.track_projection(
@@ -198,16 +168,13 @@ impl CatalogUi {
                     shell.reapply_current_track();
                     return true;
                 };
-                let Some(summary) = artist_header(&mut read) else {
+                let (Some(summary), Some(favorite_read)) =
+                    (artist_header(&mut read), read.view.favorites().cloned())
+                else {
                     return false;
                 };
-                let track_settings = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(LibraryListKey::ArtistTracks);
                 favorite.replace_favorites(
-                    favorite_tracks_read(&read.view, artist, album_artist, &track_settings),
+                    favorite_read,
                     read.view.favorites_len().unwrap_or(0),
                     favorite_rows,
                 );

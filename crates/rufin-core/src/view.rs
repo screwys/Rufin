@@ -728,6 +728,17 @@ impl View {
         catalog.rows(&order, range, self.art, cancel).await
     }
 
+    /// The member read behind an artist page's favorite tracks, for selections and plays.
+    pub fn favorites(&self) -> Option<&MemberRead> {
+        match &self.body {
+            Body::Releases {
+                favorites: Some((read, _)),
+                ..
+            } => Some(read),
+            _ => None,
+        }
+    }
+
     /// How many favorite tracks an artist page lists.
     pub fn favorites_len(&self) -> Option<usize> {
         match &self.body {
