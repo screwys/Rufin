@@ -917,7 +917,7 @@ pub(super) mod tests {
         let moods = crate::listed(
             &catalog,
             library::Read::List(library::ListRead {
-                folder: Some(folders[0].folder_key),
+                folder: folders[0].folder_key,
                 ..library::ListRead::new(
                     library::ListKind::Moods,
                     Some(source_key),
