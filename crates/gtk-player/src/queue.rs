@@ -1206,19 +1206,25 @@ impl crate::PlayerUi {
         })
     }
 
-    fn reveal_queue_current(self: &Rc<Self>, scroller: &gtk::ScrolledWindow, fullscreen: bool) {
+    /// Scrolls a pending current row into view, or to the top when `top`; true once it did.
+    fn reveal_queue_current(
+        self: &Rc<Self>,
+        scroller: &gtk::ScrolledWindow,
+        fullscreen: bool,
+        top: bool,
+    ) -> bool {
         let Some(queue) = self.selected_queue() else {
-            return;
+            return false;
         };
         let pending = &queue.reveal_current[usize::from(fullscreen)];
         let loading = self.queue_loading_icon(fullscreen).is_visible();
         if !pending.get() {
-            return;
+            return false;
         }
         let Some(position) = *queue.current.borrow() else {
             pending.set(false);
             self.set_queue_loading(fullscreen, false);
-            return;
+            return false;
         };
         let Some(position) = queue
             .rows
@@ -1228,12 +1234,14 @@ impl crate::PlayerUi {
         else {
             pending.set(false);
             self.set_queue_loading(fullscreen, loading);
-            return;
+            return false;
         };
-        if reveal_queue_current_row(scroller, position) {
-            pending.set(false);
-            self.set_queue_loading(fullscreen, loading);
+        if !reveal_queue_current_row(scroller, position, top) {
+            return false;
         }
+        pending.set(false);
+        self.set_queue_loading(fullscreen, loading);
+        true
     }
 }
 
@@ -1296,6 +1304,9 @@ fn render_panel(
         });
         let weak = scroller.downgrade();
         let weak_shell = Rc::downgrade(shell);
+        // The table's first reveal shows the playing row at the top, whether the queue
+        // rows arrive before or after the panel's layout settles; later reveals keep it in view.
+        let opening = Cell::new(true);
         owner.set_after_allocate_callback(move || {
             let Some(scroller) = weak.upgrade() else {
                 return;
@@ -1307,8 +1318,10 @@ fn render_panel(
                 let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
                 adjustment.set_value(value.clamp(adjustment.lower(), maximum));
             }
-            if let Some(shell) = weak_shell.upgrade() {
-                shell.reveal_queue_current(&scroller, fullscreen);
+            if let Some(shell) = weak_shell.upgrade()
+                && shell.reveal_queue_current(&scroller, fullscreen, opening.get())
+            {
+                opening.set(false);
             }
         });
         panel.append(&owner);
@@ -1378,12 +1391,17 @@ fn queue_scroller_in(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
     None
 }
 
-fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, position: usize) -> bool {
+fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, position: usize, top: bool) -> bool {
     let Some(table) = scroller.child().and_downcast::<gtk::ColumnView>() else {
         return false;
     };
-    if table.width() <= 1 && table.height() <= 1 {
+    let adjustment = scroller.vadjustment();
+    if adjustment.page_size() <= 0.0 {
         return false;
+    }
+    if top {
+        // Scrolled into view from below, a row lines its top up with the viewport's.
+        adjustment.set_value(adjustment.upper());
     }
     table.scroll_to(position as u32, None, gtk::ListScrollFlags::NONE, None);
     true
