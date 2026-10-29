@@ -1,4 +1,8 @@
 //! Library-owned groups for regular and smart playlists.
+use crate::catalog::write::{
+    FOLDER_COLUMNS, FolderRow, PLAYLIST_COLUMNS, PlaylistRow as PlaylistHeader, SMART_COLUMNS,
+    SmartRow, Write,
+};
 use crate::*;
 use sqlx::{FromRow, SqliteConnection};
 
@@ -47,12 +51,13 @@ fn member_relation(member: &PlaylistFolderMember) -> (&'static str, &'static str
 }
 
 pub(crate) async fn move_to_folder_on(
-    connection: &mut SqliteConnection,
+    write: &mut Write<'_>,
     member: PlaylistFolderMember,
     folder: Option<PlaylistFolderKey>,
 ) -> LibraryResult<()> {
     let smart = matches!(member, PlaylistFolderMember::SmartPlaylist { .. });
     let (table, column, key) = member_relation(&member);
+    let connection = write.connection().await?;
     if let Some(folder) = folder {
         let namespace: Option<bool> =
             sqlx::query_scalar("SELECT smart FROM playlist_folders WHERE folder_key=?1")
@@ -65,10 +70,22 @@ pub(crate) async fn move_to_folder_on(
             ));
         }
     }
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "UPDATE {table} SET playlist_folder_key=?2 WHERE {column}=?1 AND playlist_folder_key IS NOT ?2"
+    let returning = if smart {
+        SMART_COLUMNS
+    } else {
+        PLAYLIST_COLUMNS
+    };
+    let moved = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {table} SET playlist_folder_key=?2 WHERE {column}=?1 AND playlist_folder_key IS NOT ?2 RETURNING {returning}"
     )))
-    .bind(key).bind(folder).execute(connection).await?;
+    .bind(key).bind(folder).fetch_optional(connection).await?;
+    if let Some(row) = moved {
+        if smart {
+            write.put_smart(SmartRow::from_row(&row)?);
+        } else {
+            write.put_playlist(PlaylistHeader::from_row(&row)?);
+        }
+    }
     Ok(())
 }
 
@@ -89,8 +106,9 @@ impl Catalog {
     ) -> LibraryResult<PlaylistFolderKey> {
         let name = folder_name(name)?;
         let mut write = self.write().await?;
-        let key = sqlx::query_scalar("INSERT INTO playlist_folders(object_id,name,smart) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1,?2) RETURNING folder_key").bind(name).bind(smart).fetch_one(write.connection().await?).await?;
-        write.touch_playlist_folders();
+        let row: FolderRow = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_folders(object_id,name,smart) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1,?2) RETURNING {FOLDER_COLUMNS}"))).bind(name).bind(smart).fetch_one(write.connection().await?).await?;
+        let key = PlaylistFolderKey::from_raw(row.0);
+        write.put_folder(row);
         write.commit().await?;
         Ok(key)
     }
@@ -101,12 +119,16 @@ impl Catalog {
     ) -> LibraryResult<()> {
         let name = folder_name(name)?;
         let mut write = self.write().await?;
-        sqlx::query("UPDATE playlist_folders SET name=?2 WHERE folder_key=?1")
-            .bind(key)
-            .bind(name)
-            .execute(write.connection().await?)
-            .await?;
-        write.touch_playlist_folders();
+        let row: Option<FolderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE playlist_folders SET name=?2 WHERE folder_key=?1 AND name IS NOT ?2 RETURNING {FOLDER_COLUMNS}"
+        )))
+        .bind(key)
+        .bind(name)
+        .fetch_optional(write.connection().await?)
+        .await?;
+        if let Some(row) = row {
+            write.put_folder(row);
+        }
         write.commit().await?;
         Ok(())
     }
@@ -115,15 +137,16 @@ impl Catalog {
         key: PlaylistFolderKey,
     ) -> LibraryResult<Option<(String, bool)>> {
         let mut write = self.write().await?;
-        // Members leave the folder as the Store's foreign keys clear it.
-        let playlists: Vec<i64> =
-            sqlx::query_scalar("SELECT playlist_key FROM playlists WHERE playlist_folder_key=?1")
-                .bind(key)
-                .fetch_all(write.connection().await?)
-                .await?;
-        let smart: Vec<i64> = sqlx::query_scalar(
-            "SELECT smart_playlist_key FROM smart_playlists WHERE playlist_folder_key=?1",
-        )
+        // Members leave the folder first, so their rows say so.
+        let playlists: Vec<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key=?1 RETURNING {PLAYLIST_COLUMNS}"
+        )))
+        .bind(key)
+        .fetch_all(write.connection().await?)
+        .await?;
+        let smart: Vec<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key=?1 RETURNING {SMART_COLUMNS}"
+        )))
         .bind(key)
         .fetch_all(write.connection().await?)
         .await?;
@@ -134,12 +157,14 @@ impl Catalog {
         .fetch_optional(write.connection().await?)
         .await?;
         for playlist in playlists {
-            write.touch_playlist(playlist);
+            write.put_playlist(playlist);
         }
         for smart in smart {
-            write.touch_smart_playlist(smart);
+            write.put_smart(smart);
         }
-        write.touch_playlist_folders();
+        if deleted.is_some() {
+            write.remove_folder(key.raw());
+        }
         write.commit().await?;
         Ok(deleted)
     }
@@ -166,11 +191,7 @@ impl Catalog {
         folder: Option<PlaylistFolderKey>,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        move_to_folder_on(write.connection().await?, member.clone(), folder).await?;
-        match member {
-            PlaylistFolderMember::Playlist { key } => write.touch_playlist(key.raw()),
-            PlaylistFolderMember::SmartPlaylist { key } => write.touch_smart_playlist(key.raw()),
-        }
+        move_to_folder_on(&mut write, member, folder).await?;
         write.commit().await?;
         Ok(())
     }

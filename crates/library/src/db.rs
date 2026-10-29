@@ -261,6 +261,13 @@ impl Catalog {
         let _ = self.inner.changes.send(change);
     }
 
+    /// The revision of a Change that leaves the Catalog's records as they are.
+    pub(crate) fn next_revision(&self) -> u64 {
+        let mut snapshot = self.snapshot_mut();
+        snapshot.revision += 1;
+        snapshot.revision
+    }
+
     /// A Write committed, so the image is written again once the Catalog is quiet.
     pub(crate) fn committed(&self) {
         let (state, wake) = &*self.inner.image;
@@ -365,7 +372,7 @@ impl Catalog {
             .distinct_track_covers
             .swap(enabled, Ordering::AcqRel);
         if previous != enabled && *self.inner.loaded.borrow() {
-            let revision = self.snapshot().revision;
+            let revision = self.next_revision();
             self.publish(Arc::new(Change {
                 revision,
                 scopes: vec![crate::Scope::Reload],
@@ -614,12 +621,13 @@ impl CatalogInner {
                 self.reload.store(true, Ordering::Release);
             }
         }
-        self.loaded.send_replace(true);
         // Rows read by key before the load, such as now playing, showed no state or covers.
+        // The Reload goes out first, so a Write that waited for the load publishes after it.
         let _ = self.changes.send(Arc::new(Change {
             revision: 1,
             scopes: vec![crate::Scope::Reload],
         }));
+        self.loaded.send_replace(true);
     }
 }
 

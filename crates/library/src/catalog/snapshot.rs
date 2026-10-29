@@ -41,6 +41,8 @@ pub(crate) const COMPILATION: u16 = 1 << 11;
 pub(crate) const SOURCE_OWNED: u16 = 1 << 8;
 pub(crate) const WRITABLE: u16 = 1 << 9;
 pub(crate) const METADATA_WRITABLE: u16 = 1 << 10;
+/// Playlists: linked to a playlist file, so an edit marks the link dirty.
+pub(crate) const LINKED: u16 = 1 << 11;
 
 fn clamp_u32(value: i64) -> u32 {
     value.clamp(0, i64::from(NONE - 1)) as u32
@@ -121,6 +123,16 @@ impl Default for Stats {
 }
 
 impl Stats {
+    /// The plays, skips and last play after one more listen.
+    pub(crate) fn heard(self, skipped: bool, started_at: i64) -> Self {
+        let last = (self.last_played != NONE).then_some(i64::from(self.last_played));
+        Self::listened(
+            i64::from(self.plays) + i64::from(!skipped),
+            i64::from(self.skips) + i64::from(skipped),
+            last.max(Some(started_at)),
+        )
+    }
+
     /// Plays, skips and last play counted from listens and carried-over counts.
     pub(crate) fn listened(plays: i64, skips: i64, last_played: Option<i64>) -> Self {
         Self {
@@ -241,6 +253,7 @@ pub(crate) struct Playlist {
     pub(crate) created: i64,
     pub(crate) writable: bool,
     pub(crate) metadata_writable: bool,
+    pub(crate) linked: bool,
     pub(crate) entries: Vec<Entry<TrackKey>>,
 }
 
@@ -974,6 +987,7 @@ impl Snapshot {
             created: i64::from(record.created),
             writable: record.flags & WRITABLE != 0,
             metadata_writable: record.flags & METADATA_WRITABLE != 0,
+            linked: record.flags & LINKED != 0,
             entries: record
                 .entries
                 .iter()
@@ -1012,7 +1026,8 @@ impl Snapshot {
             flags: u16::from(playlist.indexed) * INDEXED
                 | u16::from(playlist.owned_by_source) * SOURCE_OWNED
                 | u16::from(playlist.writable) * WRITABLE
-                | u16::from(playlist.metadata_writable) * METADATA_WRITABLE,
+                | u16::from(playlist.metadata_writable) * METADATA_WRITABLE
+                | u16::from(playlist.linked) * LINKED,
             entries,
         });
     }

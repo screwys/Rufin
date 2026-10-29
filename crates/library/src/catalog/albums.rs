@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::merge::{dedupe, merge_patch, parsed};
 use super::records::*;
@@ -212,20 +212,19 @@ async fn resolve_album(
         .filter(|member| member.track.indexed)
         .collect::<Vec<_>>();
     let tagged = |member: &&Member| member.album_tags.is_some();
-    let mut extra = Map::new();
     // A cached local header lasts while an indexed member has no album tags of its own.
     if album.cached_local && indexed.iter().all(tagged) {
-        album.input = false;
         album.indexed = false;
         album.cached_local = false;
-        extra.insert("input_metadata".into(), Value::Null);
-        extra.insert("accepted_audio".into(), Value::Null);
+        album.input = false;
+        album.writes.header = Some(None);
+        album.writes.clear_accepted_audio = true;
     }
     // Observed file tags own the album even when its header is derived.
     if !album.native && !album.cached_local && indexed.iter().any(tagged) {
         album.native = true;
         album.input = false;
-        extra.insert("input_metadata".into(), Value::Null);
+        album.writes.header = Some(None);
     }
     // A file source lists an album only through its indexed members, whatever header an
     // imported Store gave it.
@@ -424,8 +423,8 @@ async fn resolve_album(
     album.facts = AlbumFacts::of(&metadata);
     let details = album_details_value(resolved);
     if stored.metadata.as_ref() != Some(&details) {
-        extra.insert("metadata".into(), details);
+        album.writes.metadata = Some(details);
     }
-    write.put(album, extra);
+    write.put(album);
     Ok(())
 }

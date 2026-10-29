@@ -9,16 +9,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use super::families::hex;
+use super::families::Owned;
 use super::records::*;
-use super::write::{Family, Resident, Scope, SourcePhase, Write};
+use super::write::{Family, Scope, SourcePhase, Write};
 use super::*;
 use crate::metadata::{track_details_value, track_metadata_sql};
 use crate::tags::{TAG_TABLES, TagKind};
 use crate::{
-    AlbumKey, AlbumMetadata, ArtistCredit, ArtistKey, ArtistMetadata, FolderMetadata,
-    HomeEntryInput, LocalFileKey, NativeUserState, TagMetadata, TagReference, TrackKey,
-    TrackMetadata, TrackObservation, TrackReference,
+    AlbumKey, ArtistCredit, ArtistKey, ArtistMetadata, HomeEntryInput, LocalFileKey,
+    NativeUserState, TagMetadata, TagReference, TrackKey, TrackMetadata, TrackObservation,
+    TrackReference,
 };
 
 const PAGE: usize = 128;
@@ -150,13 +150,6 @@ pub(super) fn dedupe<T: Eq + std::hash::Hash + Copy>(items: impl IntoIterator<It
         .collect()
 }
 
-pub(super) fn extras(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String, Value> {
-    pairs
-        .into_iter()
-        .map(|(name, value)| (name.to_owned(), value))
-        .collect()
-}
-
 /// What a batch staged, for album resolution and loudness.
 #[derive(Default)]
 pub(crate) struct Touched {
@@ -167,47 +160,6 @@ pub(crate) struct Touched {
     /// Albums whose member audio changed, so their loudness is analysed again.
     pub(crate) audio: BTreeSet<i64>,
 }
-
-/// The fields completion and removal read and change on every source-owned record.
-pub(crate) trait Owned: Resident {
-    fn indexed(&self) -> bool;
-    fn set_indexed(&mut self, indexed: bool);
-    fn native(&self) -> bool;
-    fn set_native(&mut self, native: bool);
-    fn binding(&self) -> Option<&[u8]>;
-    fn set_binding(&mut self, binding: Option<Vec<u8>>);
-}
-
-macro_rules! owned {
-    ($($record:ty),*) => {$(
-        impl Owned for $record {
-            fn indexed(&self) -> bool {
-                self.indexed
-            }
-
-            fn set_indexed(&mut self, indexed: bool) {
-                self.indexed = indexed;
-            }
-
-            fn native(&self) -> bool {
-                self.native
-            }
-
-            fn set_native(&mut self, native: bool) {
-                self.native = native;
-            }
-
-            fn binding(&self) -> Option<&[u8]> {
-                self.binding.as_deref()
-            }
-
-            fn set_binding(&mut self, binding: Option<Vec<u8>>) {
-                self.binding = binding;
-            }
-        }
-    )*};
-}
-owned!(Track, Album, Artist, Tag, Folder);
 
 /// The kinds providers name in completion and removal.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -332,7 +284,7 @@ pub(crate) async fn index_credits(
                     artist.metadata.musicbrainz_artist_id.as_deref(),
                     artist.binding.as_deref(),
                 )?);
-                write.put(artist, Map::new());
+                write.put(artist);
             }
             None => {
                 let mut artist =
@@ -343,7 +295,7 @@ pub(crate) async fn index_credits(
                     None,
                 )?);
                 artist.metadata = credit;
-                inserted.push((artist, Map::new()));
+                inserted.push(artist);
             }
         }
     }
@@ -384,7 +336,7 @@ pub(crate) async fn index_tags(
             Some(known) if known.native || known.metadata == metadata => {}
             Some(mut known) => {
                 known.metadata = metadata;
-                write.put(known, Map::new());
+                write.put(known);
             }
             None => {
                 let mut tag = Tag::new(
@@ -398,9 +350,7 @@ pub(crate) async fn index_tags(
             }
         }
     }
-    write
-        .insert(inserted.into_iter().map(|tag| (tag, Map::new())).collect())
-        .await?;
+    write.insert(inserted).await?;
     Ok(())
 }
 
@@ -569,7 +519,7 @@ async fn track_page(
     for object in albums {
         if named.insert(object) && find::<Album>(write, source, None, object).await?.is_none() {
             let uri = entity_uri(source_id, "album", object);
-            stubs.push((Album::new(source, object, uri), Map::new()));
+            stubs.push(Album::new(source, object, uri));
         }
     }
     write.insert(stubs).await?;
@@ -595,7 +545,7 @@ async fn track_page(
             known.object = None;
             known.indexed = false;
             touched.tracks.insert(known.key.raw());
-            write.put(known, Map::new());
+            write.put(known);
             moved = true;
         }
     }
@@ -764,17 +714,10 @@ async fn track_page(
         .collect::<Vec<_>>();
     index_track_credits(write, source, source_id, &mut credited).await?;
     let mut inserted = Vec::new();
-    for (candidate, (track, _)) in accepted.into_iter().zip(credited) {
-        let mut extra = extras([
-            (
-                "source_loudness_analysis_key",
-                hex(&candidate.row.loudness_analysis_key),
-            ),
-            ("loudness_analysis_key", hex(&candidate.loudness)),
-        ]);
-        if let Some(details) = candidate.details {
-            extra.insert("metadata".into(), details);
-        }
+    for (candidate, (mut track, _)) in accepted.into_iter().zip(credited) {
+        track.writes.source_loudness = Some(candidate.row.loudness_analysis_key.to_vec());
+        track.writes.loudness = Some(candidate.loudness);
+        track.writes.metadata = candidate.details;
         for album in candidate
             .before
             .as_ref()
@@ -788,14 +731,14 @@ async fn track_page(
             Some(_) => {
                 touched.tracks.insert(track.key.raw());
                 write.see(&track);
-                write.put(track, extra);
+                write.put(track);
             }
-            None => inserted.push((track, extra)),
+            None => inserted.push(track),
         }
     }
     for candidate in artwork_only {
         write.see(&candidate.track);
-        write.put(candidate.track, Map::new());
+        write.put(candidate.track);
     }
     for track in write.insert(inserted).await? {
         touched.tracks.insert(track.key.raw());
@@ -836,7 +779,7 @@ async fn track_page(
         }
         track.state.merge(&row.user_data);
         write.see(&track);
-        write.put(track, Map::new());
+        write.put(track);
     }
     let audio = touched
         .audio
@@ -897,7 +840,7 @@ async fn native_states(
                 continue;
             }
             state(&mut record).merge(incoming);
-            write.put(record, Map::new());
+            write.put(record);
         }
         Ok(())
     }
@@ -916,125 +859,10 @@ pub(crate) struct Header<'r, M> {
     pub(crate) artwork: Option<&'r [u8]>,
 }
 
-/// What the header merge needs from albums, artists, tags and folders.
-trait Entity: Owned {
-    type Metadata: serde::Serialize + serde::de::DeserializeOwned + Default + Clone + PartialEq;
-    /// Whether the stored picture is rebuilt from the header, as artist pictures are.
-    const BUILT_PICTURE: bool = false;
-    fn create(source: SourceKey, tag: Option<TagKind>, object: &str, uri: String) -> Self;
-    /// The stored header, when the row holds it; album headers are read by key.
-    fn header(&self) -> Option<Value>;
-    /// Sets the header and returns the extras that store it.
-    fn set_header(&mut self, metadata: &Self::Metadata, json: Value) -> Map<String, Value>;
-    /// Folder observations without a name keep the stored header.
-    fn keeps_header(_metadata: &Self::Metadata) -> bool {
-        false
-    }
-    /// The picture to store from an observed one. Artist pictures carry the artist itself.
-    fn picture(&self, observed: Option<&[u8]>, _native: bool) -> LibraryResult<Option<Vec<u8>>> {
-        Ok(observed.map(<[u8]>::to_vec))
-    }
-    /// Notes a staged change for album resolution.
-    fn touch(&self, _touched: &mut Touched) {}
-}
-
-impl Entity for Album {
-    type Metadata = AlbumMetadata;
-
-    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
-        Album::new(source, object, uri)
-    }
-
-    fn header(&self) -> Option<Value> {
-        None
-    }
-
-    fn set_header(&mut self, _metadata: &AlbumMetadata, json: Value) -> Map<String, Value> {
-        extras([("input_metadata", json)])
-    }
-
-    fn touch(&self, touched: &mut Touched) {
-        touched.albums.insert(self.key.raw());
-    }
-}
-
-impl Entity for Artist {
-    type Metadata = ArtistMetadata;
-    const BUILT_PICTURE: bool = true;
-
-    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
-        Artist::new(source, object, uri)
-    }
-
-    fn header(&self) -> Option<Value> {
-        serde_json::to_value(&self.metadata).ok()
-    }
-
-    fn set_header(&mut self, metadata: &ArtistMetadata, _json: Value) -> Map<String, Value> {
-        self.metadata = metadata.clone();
-        Map::new()
-    }
-
-    fn picture(&self, observed: Option<&[u8]>, native: bool) -> LibraryResult<Option<Vec<u8>>> {
-        let pictures = if native {
-            observed
-        } else {
-            self.binding.as_deref().or(observed)
-        };
-        Ok(Some(super::artwork::artist_binding(
-            &self.metadata.name,
-            self.metadata.musicbrainz_artist_id.as_deref(),
-            pictures,
-        )?))
-    }
-
-    fn touch(&self, touched: &mut Touched) {
-        touched.artists.insert(self.key.raw());
-    }
-}
-
-impl Entity for Tag {
-    type Metadata = TagMetadata;
-
-    fn create(source: SourceKey, tag: Option<TagKind>, object: &str, uri: String) -> Self {
-        Tag::new(tag.unwrap_or(TagKind::Genre), source, object, uri)
-    }
-
-    fn header(&self) -> Option<Value> {
-        serde_json::to_value(&self.metadata).ok()
-    }
-
-    fn set_header(&mut self, metadata: &TagMetadata, _json: Value) -> Map<String, Value> {
-        self.metadata = metadata.clone();
-        Map::new()
-    }
-}
-
-impl Entity for Folder {
-    type Metadata = FolderMetadata;
-
-    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
-        Folder::new(source, object, uri)
-    }
-
-    fn header(&self) -> Option<Value> {
-        serde_json::to_value(&self.metadata).ok()
-    }
-
-    fn set_header(&mut self, metadata: &FolderMetadata, _json: Value) -> Map<String, Value> {
-        self.metadata = metadata.clone();
-        Map::new()
-    }
-
-    fn keeps_header(metadata: &FolderMetadata) -> bool {
-        metadata.name.is_none()
-    }
-}
-
 /// Merges observed headers of one family and their pictures. A native header replaces the
 /// stored one; a reference header patches records no source observed natively.
 #[allow(clippy::too_many_arguments)]
-async fn headers<R: Entity>(
+async fn headers<R: Owned>(
     write: &mut Write<'_>,
     source: SourceKey,
     source_id: &str,
@@ -1128,10 +956,9 @@ async fn headers<R: Entity>(
                     (record, header, changed)
                 }
             };
-            let mut extra = match header {
-                Some(json) => record.set_header(&parsed(&json), json),
-                None => Map::new(),
-            };
+            if let Some(json) = header {
+                record.set_header(&parsed(&json), json);
+            }
             let picture = record.picture(row.artwork, native)?;
             let next = if native || R::BUILT_PICTURE {
                 picture
@@ -1147,11 +974,11 @@ async fn headers<R: Entity>(
                 continue;
             }
             if record.key() == 0 {
-                inserted.push((record, extra));
+                inserted.push(record);
             } else {
                 record.touch(touched);
                 write.see(&record);
-                write.put(record, std::mem::take(&mut extra));
+                write.put(record);
             }
         }
         for record in write.insert(inserted).await? {
@@ -1184,7 +1011,7 @@ async fn memberships(
             listed.push((record.key.raw(), track.key.raw()));
             if !track.folders.contains(&record.key) {
                 track.folders.push(record.key);
-                write.put(track, Map::new());
+                write.put(track);
             }
         }
     }
@@ -1356,6 +1183,8 @@ async fn withdraw<R: Owned>(
     tag: Option<TagKind>,
     ids: &[String],
 ) -> LibraryResult<Vec<R>> {
+    let objects = ids.iter().map(String::as_str).collect::<Vec<_>>();
+    write.read_objects::<R>(source, tag, &objects).await?;
     let mut withdrawn = Vec::new();
     for id in ids {
         let Some(mut record) = find::<R>(write, source, tag, id).await? else {
@@ -1368,7 +1197,7 @@ async fn withdraw<R: Owned>(
         if record.indexed() {
             record.set_indexed(false);
             withdrawn.push(record.clone());
-            write.put(record, Map::new());
+            write.put(record);
         }
     }
     Ok(withdrawn)
@@ -1421,12 +1250,12 @@ pub(crate) async fn remove_items(
     Ok(())
 }
 
-/// Hides provider playlists; their rows are plain SQL read back by key.
+/// Hides provider playlists.
 async fn withdraw_playlists(write: &mut Write<'_>, keys: &[i64]) -> LibraryResult<()> {
-    sqlx::query("UPDATE playlists SET indexed=0 WHERE indexed=1 AND playlist_key IN(SELECT value FROM json_each(?1))")
-        .bind(serde_json::to_string(keys)?).execute(write.connection().await?).await?;
-    for key in keys {
-        write.touch_playlist(*key);
+    let rows: Vec<super::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE playlists SET indexed=0 WHERE indexed=1 AND playlist_key IN(SELECT value FROM json_each(?1)) RETURNING {}", super::write::PLAYLIST_COLUMNS)))
+        .bind(serde_json::to_string(keys)?).fetch_all(write.connection().await?).await?;
+    for row in rows {
+        write.put_playlist(row);
     }
     Ok(())
 }
@@ -1472,7 +1301,7 @@ async fn complete_kind(
             if let Some(mut record) = write.get::<R>(*key).await?.filter(Owned::indexed) {
                 record.set_indexed(false);
                 withdrawn.push(record.clone());
-                write.put(record, Map::new());
+                write.put(record);
             }
         }
         Ok(withdrawn)
@@ -1668,13 +1497,12 @@ impl Catalog {
         let mut track = existing
             .clone()
             .unwrap_or_else(|| Track::new(None, None, uri.to_owned()));
-        track.facts = TrackFacts::of(metadata);
+        track.set_header(metadata, details);
         track.native = true;
-        let extra = extras([("metadata", details)]);
         if existing.is_some() {
-            write.put(track, extra);
+            write.put(track);
         } else {
-            write.insert(vec![(track, extra)]).await?;
+            write.insert(vec![track]).await?;
         }
         write.commit().await?;
         Ok(true)
@@ -1715,7 +1543,7 @@ impl Catalog {
         };
         if reconciled != source {
             source = reconciled;
-            write.put(source.clone(), Map::new());
+            write.put(source.clone());
         }
         write.commit().await?;
         Ok(CachedSource {
@@ -1727,31 +1555,38 @@ impl Catalog {
     }
 
     /// Forgets a source in one Write: its catalog, favorites, ratings, lyrics, download records,
-    /// Home rows and playlists go. A track a Rufin playlist or the queue still holds stays as a hidden row
-    /// without a source. Listens stay, since they carry their own copy.
+    /// queue entries, Home rows and playlists go. A track a Rufin playlist still holds stays as
+    /// a hidden row without a source. Listens stay, since they carry their own copy.
     pub async fn remove_source(&self, source_id: &SourceId) -> LibraryResult<bool> {
         let mut write = self.write().await?;
         let key = write
             .source_by_object(source_id.as_str())
             .await?
             .map(|source| source.key);
-        for kind in crate::keys::source_entity_kinds() {
-            let prefix = crate::keys::source_entity_prefix(source_id, kind);
-            let uris: Vec<String> = sqlx::query_scalar("DELETE FROM user_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN(SELECT media_uri FROM tracks WHERE source_key=?2) RETURNING media_uri")
-                .bind(&prefix).bind(key).fetch_all(write.connection().await?).await?;
-            for uri in &uris {
-                write.touch_state(uri);
-            }
-            for query in [
-                "DELETE FROM lyrics_cache WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
-                "DELETE FROM outbox WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
-            ] {
-                sqlx::query(query)
-                    .bind(&prefix)
-                    .bind(key)
-                    .execute(write.connection().await?)
-                    .await?;
-            }
+        let prefixes = serde_json::to_string(
+            &crate::keys::source_entity_kinds()
+                .map(|kind| crate::keys::source_entity_prefix(source_id, kind))
+                .collect::<Vec<_>>(),
+        )?;
+        // URIs under the source's entity prefixes, or of its tracks.
+        let owned = "(EXISTS(SELECT 1 FROM json_each(?1) prefix WHERE substr(media_uri,1,length(prefix.value))=prefix.value) OR media_uri IN(SELECT media_uri FROM tracks WHERE source_key=?2))";
+        let states: Vec<super::write::StateRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM user_state WHERE {owned}{}",
+            super::write::STATE_DELETED
+        )))
+        .bind(&prefixes)
+        .bind(key)
+        .fetch_all(write.connection().await?)
+        .await?;
+        write.set_states(states);
+        for table in ["lyrics_cache", "outbox"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE {owned}"
+            )))
+            .bind(&prefixes)
+            .bind(key)
+            .execute(write.connection().await?)
+            .await?;
         }
         sqlx::query("DELETE FROM local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN sources identity USING(source_key) WHERE identity.object_id=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.source_key IS NOT ?2)").bind(source_id.as_str()).bind(key).execute(write.connection().await?).await?;
         sqlx::query("DELETE FROM downloads WHERE source_id=?1")
@@ -1765,13 +1600,39 @@ impl Catalog {
         };
         self.close_walks(source);
         let connection = write.connection().await?;
+        // The queue loses the source's tracks; the saved position follows the entry it named.
+        let queued = "track_key IN(SELECT track_key FROM tracks WHERE source_key=?1)";
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "WITH play AS(SELECT row_number() OVER(ORDER BY CASE WHEN (SELECT shuffled FROM queue_state WHERE singleton=1) THEN coalesce(shuffle_rank,rank) ELSE rank END,entry_id)-1 position,{queued} gone FROM queue_entries)
+            UPDATE queue_state SET
+                current_index=(SELECT CASE WHEN count(*) FILTER(WHERE NOT gone AND position<queue_state.current_index)<count(*) FILTER(WHERE NOT gone) THEN count(*) FILTER(WHERE NOT gone AND position<queue_state.current_index) END FROM play),
+                progress_millis=CASE WHEN EXISTS(SELECT 1 FROM play WHERE gone AND position=queue_state.current_index) THEN 0 ELSE progress_millis END
+            WHERE singleton=1 AND current_index IS NOT NULL AND EXISTS(SELECT 1 FROM play WHERE gone)"
+        )))
+        .bind(source)
+        .execute(&mut *connection)
+        .await?;
+        let contexts: Vec<Option<i64>> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM queue_entries WHERE {queued} RETURNING context_key"
+        )))
+        .bind(source)
+        .fetch_all(&mut *connection)
+        .await?;
+        if !contexts.is_empty() {
+            sqlx::query("DELETE FROM queue_contexts WHERE context_key IN(SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM queue_entries WHERE context_key=queue_contexts.context_key)")
+                .bind(serde_json::to_string(&contexts)?)
+                .execute(&mut *connection)
+                .await?;
+            write.changed(Scope::Queue);
+        }
+        let connection = write.connection().await?;
         // Provider playlists go first, so their entries hold none of the source's tracks.
         sqlx::query("DELETE FROM playlists WHERE source_key=?1")
             .bind(source)
             .execute(&mut *connection)
             .await?;
         let kept: Vec<(i64, String)> = sqlx::query_as("UPDATE tracks SET source_key=NULL,object_id=NULL,album_key=NULL,local_file_key=NULL,indexed=0,hidden_since=CASE WHEN indexed THEN unixepoch() ELSE hidden_since END
-            WHERE source_key=?1 AND(EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=tracks.track_key) OR EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=tracks.track_key))
+            WHERE source_key=?1 AND EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=tracks.track_key)
             RETURNING track_key,media_uri")
             .bind(source)
             .fetch_all(&mut *connection)
@@ -1798,15 +1659,14 @@ impl Catalog {
             .bind(source)
             .execute(&mut *connection)
             .await?;
-        for (_, uri) in &kept {
-            write.touch_state(uri);
-            write.touch_listened(uri);
-            write.touch_download(uri);
-        }
+        // Kept tracks lose their carried-over counts and their downloads.
+        let uris = kept.iter().map(|(_, uri)| uri.as_str()).collect::<Vec<_>>();
+        write.recount(&uris).await?;
+        write.read_downloads(&uris).await?;
         write.forget_source(
             source,
-            kept.into_iter()
-                .map(|(key, _)| TrackKey::from_raw(key))
+            kept.iter()
+                .map(|(key, _)| TrackKey::from_raw(*key))
                 .collect(),
         );
         write.commit().await?;
@@ -1821,7 +1681,7 @@ impl Catalog {
             self.close_walks(source.key);
             if source.freshness.is_some() {
                 source.freshness = None;
-                write.put(source, Map::new());
+                write.put(source);
             }
         }
         write.commit().await?;
@@ -1920,9 +1780,8 @@ impl Write<'_> {
         let metadata = parsed::<TrackMetadata>(&json);
         track.facts = TrackFacts::of(&metadata);
         let details = track_details_value(json);
-        let mut extra = Map::new();
         if stored.as_ref() != Some(&details) {
-            extra.insert("metadata".into(), details);
+            track.writes.metadata = Some(details);
         }
         if let (Some(source), Some(_)) = (track.source, track.object.as_deref()) {
             let source_id = self
@@ -1935,10 +1794,10 @@ impl Write<'_> {
             track = credited.remove(0).0;
         }
         Ok(if track.key.raw() == 0 {
-            self.insert(vec![(track, extra)]).await?.remove(0).key
+            self.insert(vec![track]).await?.remove(0).key
         } else {
             let key = track.key;
-            self.put(track, extra);
+            self.put(track);
             key
         })
     }
@@ -2038,7 +1897,7 @@ impl Observation<'_> {
             if let Some(mut source) = write.get::<Source>(self.source.raw()).await? {
                 source.complete = true;
                 source.freshness = freshness.map(|marker| marker.as_bytes().to_vec());
-                write.put(source, Map::new());
+                write.put(source);
             }
             // Clients hear of a completion only when the walk changed something.
             if self.changed {
@@ -2123,7 +1982,7 @@ impl Observation<'_> {
                 touched.tracks.insert(key);
                 track.album = None;
                 write.see(&track);
-                write.put(track, Map::new());
+                write.put(track);
             }
             touched.albums.insert(album.key.raw());
             crate::loudness::invalidate_album_audio(write.connection().await?, &[album.key], true)
@@ -2158,7 +2017,7 @@ impl Observation<'_> {
         for key in members {
             if let Some(mut track) = write.get::<Track>(key).await? {
                 track.folders.retain(|member| *member != folder.key);
-                write.put(track, Map::new());
+                write.put(track);
             }
         }
         self.commit(write).await?;
@@ -2331,7 +2190,7 @@ pub(crate) async fn pictures(
     kind: &str,
     rows: &[(String, Option<Vec<u8>>)],
 ) -> LibraryResult<()> {
-    async fn entity<R: Entity>(
+    async fn entity<R: Owned>(
         write: &mut Write<'_>,
         source: SourceKey,
         tag: Option<TagKind>,
@@ -2350,7 +2209,7 @@ pub(crate) async fn pictures(
             }
             record.set_binding(picture);
             write.see(&record);
-            write.put(record, Map::new());
+            write.put(record);
         }
         Ok(())
     }
@@ -2379,7 +2238,7 @@ pub(crate) async fn pictures(
                 }
                 track.binding.clone_from(artwork);
                 write.see(&track);
-                write.put(track, Map::new());
+                write.put(track);
             }
             Ok(())
         }
@@ -2394,7 +2253,7 @@ pub(crate) async fn pictures(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArtistCredit, HomeEntryKind};
+    use crate::{AlbumMetadata, ArtistCredit, FolderMetadata, HomeEntryKind};
 
     /// Memory must equal a fresh load.
     async fn assert_reloads(catalog: &Catalog) {

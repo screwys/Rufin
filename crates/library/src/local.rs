@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 
-use crate::catalog::families::hex;
 use crate::catalog::records::{Source, Track};
 use crate::catalog::snapshot::Packed;
 use crate::catalog::write::Write;
@@ -997,7 +996,7 @@ impl Catalog {
             == 1;
         if let Some(media_uri) = removed_access.as_deref() {
             write.keep();
-            write.touch_download(media_uri);
+            write.read_downloads(&[media_uri]).await?;
             refresh_uri_audio(&mut write, &[media_uri]).await?;
         }
         write.commit().await?;
@@ -1019,14 +1018,12 @@ async fn refresh_access_audio(
             .read_keys::<Track>(&changed.iter().map(|row| row.0).collect::<Vec<_>>())
             .await?;
         for (key, chosen, _, _, _) in changed {
-            let Some(track) = write.get::<Track>(key).await? else {
+            let Some(mut track) = write.get::<Track>(key).await? else {
                 continue;
             };
             albums.extend(track.album);
-            write.put(
-                track,
-                std::iter::once(("loudness_analysis_key".to_owned(), hex(&chosen))).collect(),
-            );
+            track.writes.loudness = Some(chosen);
+            write.put(track);
         }
     }
     albums.sort_unstable();
@@ -1217,7 +1214,7 @@ pub(crate) async fn write_local_locator(
     let key = sqlx::query_scalar("INSERT INTO main.local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(media_uri,origin) DO UPDATE SET source_key=excluded.source_key,path=excluded.path,root=excluded.root,relative_path=excluded.relative_path,access_uri=excluded.access_uri RETURNING local_access_file_key")
         .bind(source).bind(&locator.media_uri).bind(&locator.origin).bind(&locator.path).bind(&locator.root).bind(&locator.relative_path).bind(&locator.access_uri).fetch_one(write.connection().await?).await?;
     write.keep();
-    write.touch_download(&locator.media_uri);
+    write.read_downloads(&[&locator.media_uri]).await?;
     Ok(key)
 }
 

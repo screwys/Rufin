@@ -1,10 +1,10 @@
 //! The user's favorites and ratings, and the outbox that delivers them to servers. Source
 //! clients send the deliveries and decide when to retry.
 
-use serde_json::Map;
 use sqlx::sqlite::SqliteConnection;
 
 use crate::catalog::records::{Album, Artist, NativeState, Track};
+use crate::catalog::write::{STATE_DELETED, STATE_RETURNING, StateRow, Write};
 
 use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
 
@@ -173,16 +173,15 @@ impl Catalog {
         let column = kind.as_str();
         let mut write = self.write().await?;
         let connection = write.connection().await?;
-        let changed = sqlx::query(sqlx::AssertSqlSafe(format!(
+        let changed: Vec<StateRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO user_state(media_uri,{column},changed_at) VALUES(?1,?2,unixepoch())
              ON CONFLICT(media_uri) DO UPDATE SET {column}=excluded.{column},changed_at=excluded.changed_at
-             WHERE {column} IS NOT excluded.{column}"
+             WHERE {column} IS NOT excluded.{column}{STATE_RETURNING}"
         )))
         .bind(uri)
         .bind(value)
-        .execute(&mut *connection)
-        .await?
-        .rows_affected();
+        .fetch_all(&mut *connection)
+        .await?;
         if deliver {
             sqlx::query(
                 "INSERT INTO outbox(media_uri,kind,value,next_attempt_at) VALUES(?1,?2,?3,unixepoch())
@@ -195,10 +194,10 @@ impl Catalog {
             .await?;
         }
         // A URI the Catalog holds no track for stages nothing resident, so keep its row.
-        if deliver || changed != 0 {
+        if deliver || !changed.is_empty() {
             write.keep();
         }
-        write.touch_state(uri);
+        write.set_states(changed);
         write.commit().await?;
         Ok(())
     }
@@ -262,18 +261,29 @@ impl Catalog {
                 DeliveryKind::Favorite => state.favorite = delivery.value.map(|value| value != 0),
                 DeliveryKind::Rating => state.rating = delivery.value,
             };
-            if let Some(mut row) = write.by_natural::<Track>(uri).await? {
-                apply(&mut row.state);
-                write.put(row, Map::new());
-            } else if let Some(mut row) = write.by_natural::<Album>(uri).await? {
-                apply(&mut row.state);
-                write.put(row, Map::new());
-            } else if let Some(mut row) = write.by_natural::<Artist>(uri).await? {
-                apply(&mut row.state);
-                write.put(row, Map::new());
+            // Deliveries go to servers, whose URIs name the kind of their row.
+            let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
+            match kind.as_deref() {
+                Some("album") => {
+                    if let Some(mut row) = write.by_natural::<Album>(uri).await? {
+                        apply(&mut row.state);
+                        write.put(row);
+                    }
+                }
+                Some("artist") => {
+                    if let Some(mut row) = write.by_natural::<Artist>(uri).await? {
+                        apply(&mut row.state);
+                        write.put(row);
+                    }
+                }
+                _ => {
+                    if let Some(mut row) = write.by_natural::<Track>(uri).await? {
+                        apply(&mut row.state);
+                        write.put(row);
+                    }
+                }
             }
-            drop_copy(write.connection().await?, uri, delivery.kind).await?;
-            write.touch_state(uri);
+            drop_copy(&mut write, uri, delivery.kind).await?;
         }
         write.commit().await?;
         Ok(true)
@@ -317,13 +327,7 @@ impl Catalog {
             write.keep();
         }
         if removed && !keep_copy {
-            drop_copy(
-                write.connection().await?,
-                &delivery.media_uri,
-                delivery.kind,
-            )
-            .await?;
-            write.touch_state(&delivery.media_uri);
+            drop_copy(&mut write, &delivery.media_uri, delivery.kind).await?;
         }
         write.commit().await?;
         Ok(removed)
@@ -332,7 +336,7 @@ impl Catalog {
 
 /// Drops Rufin's copy of one value: the whole row when it holds no other value.
 async fn drop_copy(
-    connection: &mut SqliteConnection,
+    write: &mut Write<'_>,
     media_uri: &str,
     kind: DeliveryKind,
 ) -> LibraryResult<()> {
@@ -340,21 +344,22 @@ async fn drop_copy(
         DeliveryKind::Favorite => ("favorite", "rating"),
         DeliveryKind::Rating => ("rating", "favorite"),
     };
-    let removed = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "DELETE FROM user_state WHERE media_uri=?1 AND {other} IS NULL"
+    let connection = write.connection().await?;
+    let mut states: Vec<StateRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM user_state WHERE media_uri=?1 AND {other} IS NULL{STATE_DELETED}"
     )))
     .bind(media_uri)
-    .execute(&mut *connection)
-    .await?
-    .rows_affected();
-    if removed == 0 {
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE user_state SET {column}=NULL,changed_at=unixepoch() WHERE media_uri=?1 AND {column} IS NOT NULL"
+    .fetch_all(&mut *connection)
+    .await?;
+    if states.is_empty() {
+        states = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE user_state SET {column}=NULL,changed_at=unixepoch() WHERE media_uri=?1 AND {column} IS NOT NULL{STATE_RETURNING}"
         )))
         .bind(media_uri)
-        .execute(&mut *connection)
+        .fetch_all(&mut *connection)
         .await?;
     }
+    write.set_states(states);
     Ok(())
 }
 
@@ -411,15 +416,14 @@ pub(crate) async fn import_user_media_state_jsonl_on(
     let mut count = 0;
     for line in lines {
         let state: UserMediaStateWrite = serde_json::from_str(&line?)?;
-        write_user_media_state(write.connection().await?, &state).await?;
-        write.touch_state(&state.media_uri);
+        write_user_media_state(write, &state).await?;
         count += 1;
     }
     Ok(count)
 }
 
 pub(crate) async fn write_user_media_state(
-    connection: &mut SqliteConnection,
+    write: &mut Write<'_>,
     state: &UserMediaStateWrite,
 ) -> LibraryResult<()> {
     if state.media_uri.is_empty()
@@ -431,22 +435,26 @@ pub(crate) async fn write_user_media_state(
             "invalid user media state".into(),
         ));
     }
-    if state.favorite.is_none() && state.rating.is_none() {
-        sqlx::query("DELETE FROM user_state WHERE media_uri=?1")
-            .bind(&state.media_uri)
-            .execute(&mut *connection)
-            .await?;
-        return Ok(());
-    }
-    sqlx::query(
-        "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,?2,?3,unixepoch())
-        ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating,changed_at=excluded.changed_at
-        WHERE (favorite,rating) IS NOT (excluded.favorite,excluded.rating)",
-    )
-    .bind(&state.media_uri)
-    .bind(state.favorite)
-    .bind(state.rating)
-    .execute(&mut *connection)
-    .await?;
+    let connection = write.connection().await?;
+    let states: Vec<StateRow> = if state.favorite.is_none() && state.rating.is_none() {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM user_state WHERE media_uri=?1{STATE_DELETED}"
+        )))
+        .bind(&state.media_uri)
+        .fetch_all(&mut *connection)
+        .await?
+    } else {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,?2,?3,unixepoch())
+            ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating,changed_at=excluded.changed_at
+            WHERE (favorite,rating) IS NOT (excluded.favorite,excluded.rating){STATE_RETURNING}"
+        )))
+        .bind(&state.media_uri)
+        .bind(state.favorite)
+        .bind(state.rating)
+        .fetch_all(&mut *connection)
+        .await?
+    };
+    write.set_states(states);
     Ok(())
 }

@@ -648,6 +648,7 @@ impl Catalog {
     pub async fn save_playlist_file_link(&self, link: &PlaylistFileLink) -> LibraryResult<bool> {
         let mut write = self.write().await?;
         let saved = save_link_on(write.connection().await?, link).await?;
+        write.link_playlist(link.playlist.raw(), true);
         write.keep();
         write.commit().await?;
         Ok(saved)
@@ -660,6 +661,9 @@ impl Catalog {
             .execute(write.connection().await?)
             .await?
             .rows_affected();
+        if removed != 0 {
+            write.link_playlist(playlist.raw(), false);
+        }
         write.keep();
         write.commit().await?;
         Ok(removed != 0)
@@ -765,14 +769,23 @@ impl Catalog {
     }
 }
 
-/// An edit made the playlist differ from its linked file.
+/// An edit made the playlist differ from its linked file. An unlinked playlist has nothing to
+/// mark.
 pub(crate) async fn mark_dirty_on(
+    catalog: &Catalog,
     connection: &mut SqliteConnection,
     playlist: PlaylistKey,
 ) -> LibraryResult<()> {
-    sqlx::query("UPDATE playlist_file_links SET dirty=1 WHERE playlist_key=?1 AND dirty=0")
-        .bind(playlist)
-        .execute(connection)
-        .await?;
+    let linked = catalog
+        .snapshot()
+        .playlists
+        .get(playlist.raw())
+        .is_some_and(|record| record.flags & crate::catalog::snapshot::LINKED != 0);
+    if linked {
+        sqlx::query("UPDATE playlist_file_links SET dirty=1 WHERE playlist_key=?1 AND dirty=0")
+            .bind(playlist)
+            .execute(connection)
+            .await?;
+    }
     Ok(())
 }

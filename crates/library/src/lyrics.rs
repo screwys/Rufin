@@ -162,7 +162,7 @@ impl Catalog {
             ));
         }
         let mut write = self.write().await?;
-        if sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at WHERE (lyrics_cache.cache_input_digest,lyrics_cache.lyrics,lyrics_cache.updated_at) IS NOT (excluded.cache_input_digest,excluded.lyrics,excluded.updated_at)")
+        if sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at WHERE (lyrics_cache.cache_input_digest,lyrics_cache.lyrics) IS NOT (excluded.cache_input_digest,excluded.lyrics)")
             .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
             .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(write.connection().await?).await?.rows_affected() != 0
         {

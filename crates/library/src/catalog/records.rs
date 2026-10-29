@@ -157,8 +157,16 @@ impl TrackFacts {
     }
 }
 
-/// A `tracks` row with its links and the `track_details` columns the merge compares. The
-/// details JSON and loudness keys are written as extras and read by key.
+/// Track columns a Write stores and never reads back: a set one is written.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct TrackWrites {
+    /// The details JSON.
+    pub(crate) metadata: Option<serde_json::Value>,
+    pub(crate) source_loudness: Option<Vec<u8>>,
+    pub(crate) loudness: Option<Vec<u8>>,
+}
+
+/// A `tracks` row with its links and the `track_details` columns the merge compares.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Track {
     pub(crate) key: TrackKey,
@@ -183,6 +191,7 @@ pub(crate) struct Track {
     pub(crate) album_artists: Vec<ArtistKey>,
     pub(crate) tags: Vec<(TagKind, i64)>,
     pub(crate) folders: Vec<FolderKey>,
+    pub(crate) writes: TrackWrites,
 }
 
 impl Track {
@@ -209,6 +218,7 @@ impl Track {
             album_artists: Vec::new(),
             tags: Vec::new(),
             folders: Vec::new(),
+            writes: TrackWrites::default(),
         }
     }
 
@@ -250,6 +260,16 @@ impl AlbumFacts {
     }
 }
 
+/// Album columns a Write stores and never reads back: a set one is written.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct AlbumWrites {
+    /// The header a source observed; None clears it.
+    pub(crate) header: Option<Option<serde_json::Value>>,
+    /// The rest of the resolved metadata.
+    pub(crate) metadata: Option<serde_json::Value>,
+    pub(crate) clear_accepted_audio: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Album {
     pub(crate) key: AlbumKey,
@@ -269,6 +289,7 @@ pub(crate) struct Album {
     pub(crate) input: bool,
     pub(crate) artists: Vec<ArtistKey>,
     pub(crate) genres: Vec<i64>,
+    pub(crate) writes: AlbumWrites,
 }
 
 impl Album {
@@ -290,6 +311,7 @@ impl Album {
             input: false,
             artists: Vec::new(),
             genres: Vec::new(),
+            writes: AlbumWrites::default(),
         }
     }
 }

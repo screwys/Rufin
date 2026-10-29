@@ -76,26 +76,14 @@ impl Catalog {
             track.cue_path = reference["cue_path"].as_str().map(str::to_owned);
             track.cue_start = reference["cue_start_millis"].as_i64();
             track.cue_end = reference["cue_end_millis"].as_i64();
-            let extras = [
-                (
-                    "metadata",
-                    crate::metadata::track_details_value(reference["metadata"].clone()),
-                ),
-                (
-                    "source_loudness_analysis_key",
-                    reference["source_loudness"].clone(),
-                ),
-                ("loudness_analysis_key", reference["loudness"].clone()),
-            ];
-            write.put(
-                track,
-                extras
-                    .into_iter()
-                    .map(|(name, value)| (name.to_owned(), value))
-                    .collect(),
-            );
+            track.writes.metadata = Some(crate::metadata::track_details_value(
+                reference["metadata"].clone(),
+            ));
+            track.writes.source_loudness = hex_bytes(&reference["source_loudness"]);
+            track.writes.loudness = hex_bytes(&reference["loudness"]);
+            write.put(track);
             write.keep();
-            write.touch_download(uri);
+            write.read_downloads(&[uri]).await?;
             let connection = write.connection().await?;
             sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT (SELECT source_key FROM sources WHERE object_id=locator.value->>'$.source_id'),?1,locator.value->>'$.origin',locator.value->>'$.path',locator.value->>'$.root',locator.value->>'$.relative_path',locator.value->>'$.access_uri' FROM json_each(?2) locator")
                 .bind(uri).bind(reference["locators"].to_string()).execute(&mut *connection).await?;

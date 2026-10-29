@@ -445,6 +445,7 @@ fn user_data(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult<()> 
             rows.int(6),
             rows.flag(7),
             rows.flag(8),
+            rows.flag(9),
         );
         snapshot.put_playlist(&write::playlist(
             row,

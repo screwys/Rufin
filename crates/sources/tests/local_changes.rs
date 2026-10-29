@@ -826,6 +826,14 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .execute(&mut stored)
         .await
         .unwrap();
+    // Rows written straight to the Store reach the Catalog when it opens again.
+    sqlx::query("UPDATE store_commits SET commits=commits+1")
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    catalog.close().await.expect("close Catalog");
+    let catalog = Catalog::open(&database_path).await.expect("reopen Catalog");
+    let mut updates = catalog.changes();
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     source
         .catch_up_local(

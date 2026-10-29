@@ -686,30 +686,30 @@ impl Catalog {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
         let mut write = self.write().await?;
-        let transaction = write.connection().await?;
-        let result = sqlx::query(
+        let row: crate::catalog::write::SmartRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO smart_playlists(
                  object_id, name, normalized_name,definition_json, position
              ) VALUES (
                  'rufin:smart:' || lower(hex(randomblob(16))),
                  ?1, lower(?1), ?2,
                  (SELECT COALESCE(max(position) + 1, 0) FROM smart_playlists)
-             )",
-        )
+             ) RETURNING {}",
+            crate::catalog::write::SMART_COLUMNS
+        )))
         .bind(name)
         .bind(definition)
-        .execute(&mut *transaction)
+        .fetch_one(write.connection().await?)
         .await?;
-        let key = SmartPlaylistKey::from_raw(result.last_insert_rowid());
+        let key = SmartPlaylistKey::from_raw(row.0);
+        write.put_smart(row);
         if let Some(folder) = folder {
             crate::playlist_folders::move_to_folder_on(
-                transaction,
+                &mut write,
                 crate::PlaylistFolderMember::SmartPlaylist { key },
                 Some(folder),
             )
             .await?;
         }
-        write.touch_smart_playlist(key.raw());
         write.commit().await?;
         Ok(key)
     }
@@ -745,25 +745,25 @@ impl Catalog {
             }
             None => None,
         };
-        let changed = sqlx::query(
+        let row: Option<crate::catalog::write::SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE smart_playlists
              SET name=?2, normalized_name=lower(?2), definition_json=?3,
                  artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
                  artwork_revision=CASE WHEN ?4 THEN ?6 ELSE artwork_revision END, artwork_binding=CASE WHEN ?4 THEN ?7 ELSE artwork_binding END
-             WHERE smart_playlist_key=?1",
-        )
+             WHERE smart_playlist_key=?1 RETURNING {}",
+            crate::catalog::write::SMART_COLUMNS
+        )))
         .bind(key)
         .bind(name)
         .bind(definition)
         .bind(artwork.is_some())
         .bind(artwork.flatten())
         .bind(revision).bind(binding)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        if changed {
-            write.touch_smart_playlist(key.raw());
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let changed = row.is_some();
+        if let Some(row) = row {
+            write.put_smart(row);
             // The image itself is read by key.
             if artwork.is_some() {
                 write.changed(crate::catalog::write::Scope::Smart { key });
@@ -781,7 +781,9 @@ impl Catalog {
             .await?
             .rows_affected()
             > 0;
-        write.touch_smart_playlist(key.raw());
+        if deleted {
+            write.remove_smart(key.raw());
+        }
         write.commit().await?;
         Ok(deleted)
     }

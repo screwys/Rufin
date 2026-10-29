@@ -1,84 +1,57 @@
-//! Each resident table is declared once. A Write reads rows by key, URI or object id with the
-//! SELECT generated here, decodes them in column order, and persists only the columns a staged
-//! row changed with the statements generated from the same declaration.
+//! Each resident table is declared once: its columns, which of them a read takes from the
+//! Catalog, and the bound statements a Write reads and persists rows with. A Write reads by key
+//! only the columns the Catalog does not hold, compares typed cells, and writes the cells a
+//! staged row changed, one statement per table, page and set of changed columns.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 use sqlx::Row as _;
-use sqlx::sqlite::SqliteRow;
+use sqlx::sqlite::{SqliteArguments, SqliteRow};
 
+use super::merge::Touched;
 use super::records::*;
+use super::snapshot::{
+    CACHED_LOCAL, INDEXED, INPUT, NATIVE, Packed, SORT_LOWER, SORT_TITLE, Snapshot, UserItem,
+};
+use super::strings::StrId;
+use super::write::{Family, Overlay, Write};
 use crate::schema::{LINK_ALBUM_ARTIST, LINK_ARTIST, LINK_FOLDER, LINK_GENRE, LINK_MOOD};
 use crate::tags::TagKind;
 use crate::{
-    AlbumKey, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, LibraryResult, LocalFileKey,
-    SourceKey, TagMetadata, TrackKey,
+    AlbumKey, AlbumMetadata, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, LibraryError,
+    LibraryResult, LocalFileKey, SourceKey, TagMetadata, TrackKey, TrackMetadata,
 };
 
+/// One column value, bound to a statement.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Cell {
+    Null,
+    Int(i64),
+    Text(String),
+    Blob(Vec<u8>),
+}
+
 #[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Conv {
-    Value,
-    /// Hex text in the staged row.
-    Blob,
-    /// JSON in the staged row, stored as JSONB.
-    Jsonb,
+pub(crate) enum Kind {
+    /// The record has it without the SELECT: from the Catalog, or derived from other columns.
+    Held,
+    /// Read by key with the row.
+    Read,
+    /// Written when a row sets it, never read back.
+    Written,
+    /// Written as JSON text and stored as JSONB.
+    Json,
 }
 
 pub(crate) struct Column {
     pub(crate) name: &'static str,
-    pub(crate) conv: Conv,
-    /// The value of a new row when the staged row leaves the column out.
-    pub(crate) default: &'static str,
+    pub(crate) kind: Kind,
 }
 
-const fn value(name: &'static str) -> Column {
-    Column {
-        name,
-        conv: Conv::Value,
-        default: "NULL",
-    }
-}
-
-const fn text(name: &'static str, default: &'static str) -> Column {
-    Column {
-        name,
-        conv: Conv::Value,
-        default,
-    }
-}
-
-const fn blob(name: &'static str, default: &'static str) -> Column {
-    Column {
-        name,
-        conv: Conv::Blob,
-        default,
-    }
-}
-
-const fn jsonb(name: &'static str, default: &'static str) -> Column {
-    Column {
-        name,
-        conv: Conv::Jsonb,
-        default,
-    }
-}
-
-pub(crate) struct Table {
-    pub(crate) name: &'static str,
-    pub(crate) key: &'static str,
-    /// The column a new row's RETURNING maps back to its staged row.
-    pub(crate) natural: &'static str,
-    /// The columns a read decodes, in order after the key. They are the row's own fields.
-    pub(crate) read: usize,
-    /// Every column a staged row may write: the read ones first, then extras that are read by
-    /// key only.
-    pub(crate) columns: &'static [Column],
-    /// The table a read joins and the row's details are written to.
-    pub(crate) details: Option<&'static Table>,
-    /// The condition that finds a row by source and object id.
-    pub(crate) object: &'static str,
+/// Columns by kind and name, as `Held source_key, Read object_id`.
+macro_rules! columns {
+    ($($kind:ident $name:ident),* $(,)?) => {
+        &[$(Column { name: stringify!($name), kind: Kind::$kind }),*]
+    };
 }
 
 /// An ordered list of link targets of one role, replaced as a whole when it changes.
@@ -88,220 +61,133 @@ pub(crate) struct Run {
     pub(crate) role: i64,
 }
 
+const fn run(table: &'static str, owner: &'static str, role: i64) -> Run {
+    Run { table, owner, role }
+}
+
+pub(crate) struct Table {
+    pub(crate) name: &'static str,
+    pub(crate) key: &'static str,
+    /// The column a new row's RETURNING maps back to its staged row.
+    pub(crate) natural: &'static str,
+    /// Every column a row has, in cell order.
+    pub(crate) columns: &'static [Column],
+    /// The table a read joins; its columns follow the row's own in cell order.
+    pub(crate) details: Option<&'static Table>,
+    /// Whether an object id is unique only within a kind.
+    pub(crate) tagged: bool,
+    pub(crate) runs: &'static [Run],
+}
+
 pub(crate) static SOURCES: Table = Table {
     name: "sources",
     key: "source_key",
     natural: "object_id",
-    read: 5,
-    columns: &[
-        value("object_id"),
-        value("kind"),
-        text("display_name", "''"),
-        text("catalog_complete", "0"),
-        blob("freshness", "NULL"),
+    columns: columns![
+        Held object_id, Held kind, Held display_name, Held catalog_complete, Held freshness,
     ],
     details: None,
-    object: "false",
+    tagged: false,
+    runs: &[],
 };
 
 pub(crate) static TRACK_DETAILS: Table = Table {
     name: "track_details",
     key: "track_key",
     natural: "track_key",
-    read: 5,
-    columns: &[
-        blob("native_artwork", "NULL"),
-        value("source_path"),
-        value("cue_path"),
-        value("cue_start_millis"),
-        value("cue_end_millis"),
-        jsonb("metadata", "jsonb('{}')"),
-        blob("source_loudness_analysis_key", "zeroblob(32)"),
-        blob("loudness_analysis_key", "zeroblob(32)"),
+    columns: columns![
+        Read native_artwork, Read source_path, Read cue_path, Read cue_start_millis,
+        Read cue_end_millis, Json metadata, Written source_loudness_analysis_key,
+        Written loudness_analysis_key,
     ],
     details: None,
-    object: "false",
+    tagged: false,
+    runs: &[],
 };
 
 pub(crate) static TRACKS: Table = Table {
     name: "tracks",
     key: "track_key",
     natural: "media_uri",
-    read: 27,
-    columns: &[
-        value("source_key"),
-        value("object_id"),
-        value("media_uri"),
-        value("album_key"),
-        value("local_file_key"),
-        text("indexed", "0"),
-        value("hidden_since"),
-        text("native_metadata", "0"),
-        text("title", "''"),
-        text("display_artist", "''"),
-        text("display_album", "''"),
-        text("sort_text", "''"),
-        text("duration_millis", "0"),
-        text("disc_number", "0"),
-        text("track_number", "0"),
-        value("year"),
-        value("release_date"),
-        value("date_added"),
-        value("first_seen_at"),
-        value("bpm"),
-        value("comment"),
-        value("source_format"),
-        text("flags", "0"),
-        value("native_favorite"),
-        value("native_rating"),
-        value("native_play_count"),
-        value("native_last_played"),
+    columns: columns![
+        Held source_key, Read object_id, Read media_uri, Held album_key, Read local_file_key,
+        Held indexed, Read hidden_since, Held native_metadata, Held title, Held display_artist,
+        Held display_album, Held sort_text, Read duration_millis, Read disc_number,
+        Read track_number, Read year, Read release_date, Read date_added, Read first_seen_at,
+        Read bpm, Held comment, Held source_format, Held flags, Read native_favorite,
+        Read native_rating, Read native_play_count, Read native_last_played,
     ],
     details: Some(&TRACK_DETAILS),
-    object: "source_key=?1 AND object_id=?2",
+    tagged: false,
+    runs: &[
+        run("track_links", "track_key", LINK_ARTIST),
+        run("track_links", "track_key", LINK_ALBUM_ARTIST),
+        run("track_links", "track_key", LINK_GENRE),
+        run("track_links", "track_key", LINK_MOOD),
+        run("track_links", "track_key", LINK_FOLDER),
+    ],
 };
 
 pub(crate) static ALBUMS: Table = Table {
     name: "albums",
     key: "album_key",
     natural: "media_uri",
-    read: 22,
-    columns: &[
-        value("source_key"),
-        value("object_id"),
-        value("media_uri"),
-        text("indexed", "0"),
-        text("native_metadata", "0"),
-        text("cached_local", "0"),
-        text("title", "''"),
-        text("display_artist", "''"),
-        text("sort_text", "''"),
-        value("year"),
-        value("release_date"),
-        value("date_added"),
-        value("is_compilation"),
-        value("first_seen_at"),
-        value("release_identity"),
-        value("release_lookup_identity"),
-        value("native_favorite"),
-        value("native_rating"),
-        value("native_play_count"),
-        value("native_last_played"),
-        blob("native_artwork", "NULL"),
-        // Read as whether a header exists; written as the header itself.
-        jsonb("input_metadata", "NULL"),
-        jsonb("metadata", "jsonb('{}')"),
-        blob("source_loudness_analysis_key", "zeroblob(32)"),
-        blob("loudness_analysis_key", "zeroblob(32)"),
-        blob("accepted_audio", "NULL"),
+    columns: columns![
+        Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
+        Held cached_local, Held title, Held display_artist, Held sort_text, Read year,
+        Read release_date, Read date_added, Read is_compilation, Read first_seen_at,
+        Read release_identity, Read release_lookup_identity, Read native_favorite,
+        Read native_rating, Read native_play_count, Read native_last_played,
+        Read native_artwork, Json input_metadata, Json metadata, Written accepted_audio,
     ],
     details: None,
-    object: "source_key=?1 AND object_id=?2",
+    tagged: false,
+    runs: &[
+        run("album_links", "album_key", LINK_ARTIST),
+        run("album_links", "album_key", LINK_GENRE),
+    ],
 };
 
 pub(crate) static ARTISTS: Table = Table {
     name: "artists",
     key: "artist_key",
     natural: "media_uri",
-    read: 13,
-    columns: &[
-        value("source_key"),
-        value("object_id"),
-        value("media_uri"),
-        text("indexed", "0"),
-        text("native_metadata", "0"),
-        text("name", "''"),
-        value("sort_text"),
-        value("musicbrainz_artist_id"),
-        value("native_favorite"),
-        value("native_rating"),
-        value("native_play_count"),
-        value("native_last_played"),
-        blob("native_artwork", "NULL"),
+    columns: columns![
+        Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
+        Held name, Held sort_text, Read musicbrainz_artist_id, Read native_favorite,
+        Read native_rating, Read native_play_count, Read native_last_played,
+        Read native_artwork,
     ],
     details: None,
-    object: "source_key=?1 AND object_id=?2",
+    tagged: false,
+    runs: &[],
 };
 
 pub(crate) static TAGS: Table = Table {
     name: "tags",
     key: "tag_key",
     natural: "media_uri",
-    read: 9,
-    columns: &[
-        value("source_key"),
-        value("kind"),
-        value("object_id"),
-        value("media_uri"),
-        text("indexed", "0"),
-        text("native_metadata", "0"),
-        text("name", "''"),
-        value("sort_text"),
-        blob("native_artwork", "NULL"),
+    columns: columns![
+        Held source_key, Held kind, Read object_id, Read media_uri, Held indexed,
+        Held native_metadata, Held name, Held sort_text, Read native_artwork,
     ],
     details: None,
-    object: "source_key=?1 AND object_id=?2 AND kind=?3",
+    tagged: true,
+    runs: &[],
 };
 
 pub(crate) static FOLDERS: Table = Table {
     name: "folders",
     key: "folder_key",
     natural: "media_uri",
-    read: 8,
-    columns: &[
-        value("source_key"),
-        value("object_id"),
-        value("media_uri"),
-        text("indexed", "0"),
-        text("native_metadata", "0"),
-        value("name"),
-        value("sort_text"),
-        blob("native_artwork", "NULL"),
+    columns: columns![
+        Held source_key, Read object_id, Read media_uri, Held indexed, Held native_metadata,
+        Held name, Held sort_text, Read native_artwork,
     ],
     details: None,
-    object: "source_key=?1 AND object_id=?2",
+    tagged: false,
+    runs: &[],
 };
-
-pub(crate) static TRACK_RUNS: [Run; 5] = [
-    Run {
-        table: "track_links",
-        owner: "track_key",
-        role: LINK_ARTIST,
-    },
-    Run {
-        table: "track_links",
-        owner: "track_key",
-        role: LINK_ALBUM_ARTIST,
-    },
-    Run {
-        table: "track_links",
-        owner: "track_key",
-        role: LINK_GENRE,
-    },
-    Run {
-        table: "track_links",
-        owner: "track_key",
-        role: LINK_MOOD,
-    },
-    Run {
-        table: "track_links",
-        owner: "track_key",
-        role: LINK_FOLDER,
-    },
-];
-
-pub(crate) static ALBUM_RUNS: [Run; 2] = [
-    Run {
-        table: "album_links",
-        owner: "album_key",
-        role: LINK_ARTIST,
-    },
-    Run {
-        table: "album_links",
-        owner: "album_key",
-        role: LINK_GENRE,
-    },
-];
 
 pub(crate) fn tag_kind(kind: i64) -> TagKind {
     if kind == 1 {
@@ -311,24 +197,43 @@ pub(crate) fn tag_kind(kind: i64) -> TagKind {
     }
 }
 
+/// Numbered placeholders from `first`, as `?2,?3`.
+pub(crate) fn placeholders(first: usize, count: usize) -> String {
+    (first..first + count)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// `rows` rows of VALUES: a leading key when `key` is set, then the columns.
+fn values(rows: usize, key: bool, columns: &[&Column]) -> String {
+    let row = key
+        .then_some("?")
+        .into_iter()
+        .chain(columns.iter().map(|column| match column.kind {
+            Kind::Json => "jsonb(?)",
+            _ => "?",
+        }))
+        .collect::<Vec<_>>()
+        .join(",");
+    vec![format!("({row})"); rows].join(",")
+}
+
 impl Table {
-    /// Reads rows by a condition over the table's own columns.
+    /// Reads the key and the Read columns, joined with the details' Read columns.
     pub(crate) fn select(&self, condition: &str) -> String {
         let mut columns = vec![format!("{}.{}", self.name, self.key)];
-        columns.extend(self.columns[..self.read].iter().map(|column| {
-            if column.name == "input_metadata" {
-                "input_metadata IS NOT NULL".to_owned()
-            } else {
-                format!("{}.{}", self.name, column.name)
-            }
-        }));
         let mut from = self.name.to_owned();
-        if let Some(details) = self.details {
+        for table in std::iter::once(self).chain(self.details) {
             columns.extend(
-                details.columns[..details.read]
+                table
+                    .columns
                     .iter()
-                    .map(|column| format!("{}.{}", details.name, column.name)),
+                    .filter(|column| column.kind == Kind::Read)
+                    .map(|column| format!("{}.{}", table.name, column.name)),
             );
+        }
+        if let Some(details) = self.details {
             from = format!(
                 "{} LEFT JOIN {} USING({})",
                 self.name, details.name, self.key
@@ -336,184 +241,325 @@ impl Table {
         }
         format!("SELECT {} FROM {from} WHERE {condition}", columns.join(","))
     }
+
+    /// The condition that finds rows of a source by object id, with `count` ids from ?2.
+    pub(crate) fn objects(&self, count: usize) -> String {
+        let kind = if self.tagged {
+            format!(" AND {}.kind=?{}", self.name, count + 2)
+        } else {
+            String::new()
+        };
+        format!(
+            "{0}.source_key=?1 AND {0}.object_id IN({1}){kind}",
+            self.name,
+            placeholders(2, count)
+        )
+    }
+
+    /// New rows with these columns; RETURNING maps each to its key.
+    pub(crate) fn insert(&self, columns: &[&Column], rows: usize) -> String {
+        format!(
+            "INSERT INTO {}({}) VALUES {} RETURNING {},{}",
+            self.name,
+            names(columns),
+            values(rows, false, columns),
+            self.key,
+            self.natural
+        )
+    }
+
+    /// Sets these columns of rows by key. SQLite rewrites the index entries of every column the
+    /// SET list names, even when the value is unchanged, so the list names no other column.
+    pub(crate) fn update(&self, columns: &[&Column], rows: usize) -> String {
+        format!(
+            "UPDATE {0} SET {1} FROM (VALUES {2}) staged WHERE {0}.{3}=staged.column1",
+            self.name,
+            columns
+                .iter()
+                .enumerate()
+                .map(|(index, column)| format!("{}=staged.column{}", column.name, index + 2))
+                .collect::<Vec<_>>()
+                .join(","),
+            values(rows, true, columns),
+            self.key
+        )
+    }
+
+    /// Details rows take their owner's key; a missing one is created with the defaults.
+    pub(crate) fn upsert(&self, columns: &[&Column], rows: usize) -> String {
+        format!(
+            "INSERT INTO {0}({1},{2}) VALUES {3} ON CONFLICT({1}) DO UPDATE SET {4}",
+            self.name,
+            self.key,
+            names(columns),
+            values(rows, true, columns),
+            columns
+                .iter()
+                .map(|column| format!("{0}=excluded.{0}", column.name))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+
+    pub(crate) fn delete(&self, rows: usize) -> String {
+        format!(
+            "DELETE FROM {} WHERE {} IN({})",
+            self.name,
+            self.key,
+            placeholders(1, rows)
+        )
+    }
 }
 
-fn staged(column: &Column, fallback: &str) -> String {
-    let name = column.name;
-    let set = match column.conv {
-        Conv::Value => format!("j.value->>'$.{name}'"),
-        Conv::Blob => format!("unhex(j.value->>'$.{name}')"),
-        Conv::Jsonb => format!(
-            "CASE json_type(j.value,'$.{name}') WHEN 'null' THEN NULL ELSE jsonb(j.value->'$.{name}') END"
-        ),
-    };
-    format!("CASE WHEN json_type(j.value,'$.{name}') IS NULL THEN {fallback} ELSE {set} END")
-}
-
-/// The statements for one table, generated once.
-pub(crate) struct TableStatements {
-    pub(crate) insert: String,
-    pub(crate) delete: String,
-}
-
-/// An UPDATE of the columns any staged row holds; a row without one keeps its value. SQLite
-/// rewrites the index entries of every column the SET list names, even when the value is
-/// unchanged, so the list names no other column.
-pub(crate) fn update(table: &Table, columns: &[&Column]) -> String {
-    format!(
-        "UPDATE {} SET {} FROM json_each(?1) j WHERE {}.{}=j.value->>'$.{}'",
-        table.name,
-        columns
-            .iter()
-            .map(|column| format!(
-                "{}={}",
-                column.name,
-                staged(column, &format!("{}.{}", table.name, column.name))
-            ))
-            .collect::<Vec<_>>()
-            .join(","),
-        table.name,
-        table.key,
-        table.key
-    )
-}
-
-fn build_table_statements(table: &Table) -> TableStatements {
-    let columns = table.columns.iter().map(|column| column.name);
-    let values = table
-        .columns
+fn names(columns: &[&Column]) -> String {
+    columns
         .iter()
-        .map(|column| staged(column, column.default));
-    let insert = if table.details.is_some() || table.natural != table.key {
-        format!(
-            "INSERT INTO {}({}) SELECT {} FROM json_each(?1) j RETURNING {},{}",
-            table.name,
-            columns.collect::<Vec<_>>().join(","),
-            values.collect::<Vec<_>>().join(","),
-            table.key,
-            table.natural
-        )
-    } else {
-        // Details rows take their owner's key; an existing row keeps its columns until the
-        // update that follows.
-        format!(
-            "INSERT OR IGNORE INTO {}({}) SELECT j.value->>'$.{}' FROM json_each(?1) j",
-            table.name, table.key, table.key
-        )
-    };
-    let delete = format!(
-        "DELETE FROM {} WHERE {} IN (SELECT value FROM json_each(?1))",
-        table.name, table.key
-    );
-    TableStatements { insert, delete }
+        .map(|column| column.name)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
-static TABLE_STATEMENTS: LazyLock<HashMap<&'static str, TableStatements>> = LazyLock::new(|| {
+impl Run {
+    /// Deletes the runs of `rows` (owner, role) pairs.
+    pub(crate) fn delete(&self, rows: usize) -> String {
+        format!(
+            "DELETE FROM {} WHERE ({},role) IN(VALUES {})",
+            self.table,
+            self.owner,
+            vec!["(?,?)"; rows].join(",")
+        )
+    }
+
+    /// Inserts `rows` (owner, role, position, target) rows.
+    pub(crate) fn insert(&self, rows: usize) -> String {
+        format!(
+            "INSERT INTO {}({},role,position,target) VALUES {}",
+            self.table,
+            self.owner,
+            vec!["(?,?,?,?)"; rows].join(",")
+        )
+    }
+}
+
+pub(crate) type Query<'q> = sqlx::query::Query<'q, sqlx::Sqlite, SqliteArguments>;
+
+pub(crate) fn bind<'q>(
+    mut query: Query<'q>,
+    cells: impl IntoIterator<Item = &'q Cell>,
+) -> Query<'q> {
+    for cell in cells {
+        query = match cell {
+            Cell::Null => query.bind(None::<i64>),
+            Cell::Int(value) => query.bind(*value),
+            Cell::Text(value) => query.bind(value.as_str()),
+            Cell::Blob(value) => query.bind(value.as_slice()),
+        };
+    }
+    query
+}
+
+fn int(value: Option<i64>) -> Option<Cell> {
+    Some(value.map_or(Cell::Null, Cell::Int))
+}
+
+fn num(value: i64) -> Option<Cell> {
+    Some(Cell::Int(value))
+}
+
+fn flag(value: bool) -> Option<Cell> {
+    num(i64::from(value))
+}
+
+fn text(value: Option<&str>) -> Option<Cell> {
+    Some(value.map_or(Cell::Null, |value| Cell::Text(value.to_owned())))
+}
+
+fn string(value: &str) -> Option<Cell> {
+    Some(Cell::Text(value.to_owned()))
+}
+
+fn blob(value: Option<&[u8]>) -> Option<Cell> {
+    Some(value.map_or(Cell::Null, |value| Cell::Blob(value.to_vec())))
+}
+
+/// A JSON cell a row writes when it sets one.
+fn json_cell(value: Option<Option<&Value>>) -> Option<Cell> {
+    value.map(|value| value.map_or(Cell::Null, |value| Cell::Text(value.to_string())))
+}
+
+fn state_cells(state: &NativeState) -> [Option<Cell>; 4] {
     [
-        &SOURCES,
-        &TRACKS,
-        &TRACK_DETAILS,
-        &ALBUMS,
-        &ARTISTS,
-        &TAGS,
-        &FOLDERS,
+        int(state.favorite.map(i64::from)),
+        int(state.rating),
+        int(state.play_count),
+        int(state.last_played),
     ]
-    .into_iter()
-    .map(|table| (table.name, build_table_statements(table)))
-    .collect()
-});
-
-pub(crate) fn statements(table: &Table) -> &'static TableStatements {
-    &TABLE_STATEMENTS[table.name]
 }
 
-/// Deletes the runs of (owner, role) pairs, then inserts (owner, role, position, target) rows.
-pub(crate) fn run_delete(table: &str, owner: &str) -> String {
-    format!(
-        "DELETE FROM {table} WHERE ({owner},role) IN (SELECT j.value->>0,j.value->>1 FROM json_each(?1) j)"
-    )
+fn native_state(row: &SqliteRow) -> LibraryResult<NativeState> {
+    Ok(NativeState {
+        favorite: row
+            .try_get::<Option<i64>, _>("native_favorite")?
+            .map(|value| value != 0),
+        rating: row.try_get("native_rating")?,
+        play_count: row.try_get("native_play_count")?,
+        last_played: row.try_get("native_last_played")?,
+    })
 }
 
-pub(crate) fn run_insert(table: &str, owner: &str) -> String {
-    format!(
-        "INSERT INTO {table}({owner},role,position,target) SELECT j.value->>0,j.value->>1,j.value->>2,j.value->>3 FROM json_each(?1) j"
-    )
+fn missing(table: &str, key: i64) -> LibraryError {
+    LibraryError::InvalidStore(format!("{table} row {key} is not in the Catalog"))
 }
 
-pub(crate) fn hex(bytes: &[u8]) -> Value {
-    Value::String(bytes.iter().map(|byte| format!("{byte:02X}")).collect())
+impl Snapshot {
+    fn held_text(&self, id: StrId) -> String {
+        self.text(id).to_owned()
+    }
+
+    fn held_optional(&self, id: StrId) -> Option<String> {
+        (id != StrId::NONE).then(|| self.held_text(id))
+    }
 }
 
-pub(crate) fn hex_or_null(bytes: Option<&[u8]>) -> Value {
-    bytes.map_or(Value::Null, hex)
-}
-
-/// A staged row: its table, key, identity, columns and link runs.
+/// A resident family a Write reads, stages and persists.
 pub(crate) trait Row: Clone + PartialEq + Sized {
     const TABLE: &'static Table;
+    const FAMILY: Family;
     fn key(&self) -> i64;
     fn set_key(&mut self, key: i64);
     fn natural(&self) -> &str;
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)>;
     fn source(&self) -> Option<SourceKey>;
-    fn columns(&self) -> Map<String, Value>;
-    /// The columns of the details row, for rows that have one.
-    fn details(&self) -> Option<Map<String, Value>> {
-        None
-    }
-    fn runs(&self) -> Vec<(&'static Run, Vec<i64>)> {
+    /// The cells of the row's columns, then its details columns. A Written column the row does
+    /// not set is None.
+    fn cells(&self) -> Vec<Option<Cell>>;
+    /// The link targets of each of the table's runs.
+    fn runs(&self) -> Vec<Vec<i64>> {
         Vec::new()
     }
-    /// Decodes the key, then the table's read columns, then the details columns.
-    fn read(row: &SqliteRow) -> LibraryResult<Self>;
-}
-
-fn object(value: Value) -> Map<String, Value> {
-    match value {
-        Value::Object(columns) => columns,
-        _ => unreachable!("rows are JSON objects"),
+    /// Decodes a row the table's SELECT read; the Held columns and the links come from the
+    /// resident record.
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self>;
+    fn overlay<'b>(write: &'b Write<'_>) -> &'b Overlay<Self>;
+    fn overlay_mut<'b>(write: &'b mut Write<'_>) -> &'b mut Overlay<Self>;
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>);
+    /// The source of a resident record, for a removal of a row the Write never read.
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey>;
+    /// Columns the Write keeps consistent: when a track stops being listed, and whether an
+    /// album has a header.
+    fn normalize(&mut self, _before: Option<&Self>) {}
+    /// The favorite, rating and plays the row's source reports, for rows that carry them.
+    fn state(&mut self) -> Option<&mut NativeState> {
+        None
+    }
+    /// The row as the user favorites and rates it, with its URI.
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        None
     }
 }
 
-fn flag(row: &SqliteRow, index: usize) -> LibraryResult<bool> {
-    Ok(row.try_get::<i64, _>(index)? != 0)
+/// The source-owned families: what completion, removal and the header merge read and change.
+pub(crate) trait Owned: Row {
+    type Metadata: serde::Serialize + serde::de::DeserializeOwned + Default + Clone + PartialEq;
+    /// Whether the stored picture is rebuilt from the header, as artist pictures are.
+    const BUILT_PICTURE: bool = false;
+    fn indexed(&self) -> bool;
+    fn set_indexed(&mut self, indexed: bool);
+    fn native(&self) -> bool;
+    fn set_native(&mut self, native: bool);
+    fn binding(&self) -> Option<&[u8]>;
+    fn set_binding(&mut self, binding: Option<Vec<u8>>);
+    fn create(source: SourceKey, tag: Option<TagKind>, object: &str, uri: String) -> Self;
+    /// The stored header, when the row holds it; album headers are read by key.
+    fn header(&self) -> Option<Value>;
+    fn set_header(&mut self, metadata: &Self::Metadata, json: Value);
+    /// Folder observations without a name keep the stored header.
+    fn keeps_header(_metadata: &Self::Metadata) -> bool {
+        false
+    }
+    /// The picture to store from an observed one. Artist pictures carry the artist itself.
+    fn picture(&self, observed: Option<&[u8]>, _native: bool) -> LibraryResult<Option<Vec<u8>>> {
+        Ok(observed.map(<[u8]>::to_vec))
+    }
+    /// Notes a staged change for album resolution.
+    fn touch(&self, _touched: &mut Touched) {}
 }
 
-fn native_state(row: &SqliteRow, start: usize) -> LibraryResult<NativeState> {
-    Ok(NativeState {
-        favorite: row
-            .try_get::<Option<i64>, _>(start)?
-            .map(|value| value != 0),
-        rating: row.try_get(start + 1)?,
-        play_count: row.try_get(start + 2)?,
-        last_played: row.try_get(start + 3)?,
-    })
+/// What every family declares alike: its table, its overlay in a Write, its key and natural key.
+macro_rules! family {
+    ($table:ident, $family:ident, $overlay:ident, $natural:ident, $raw:expr, $from:expr) => {
+        const TABLE: &'static Table = &$table;
+        const FAMILY: Family = Family::$family;
+
+        fn overlay<'b>(write: &'b Write<'_>) -> &'b Overlay<Self> {
+            &write.$overlay
+        }
+
+        fn overlay_mut<'b>(write: &'b mut Write<'_>) -> &'b mut Overlay<Self> {
+            &mut write.$overlay
+        }
+
+        fn key(&self) -> i64 {
+            $raw(self.key)
+        }
+
+        fn set_key(&mut self, key: i64) {
+            self.key = $from(key);
+        }
+
+        fn natural(&self) -> &str {
+            &self.$natural
+        }
+    };
 }
 
-fn state_columns(columns: &mut Map<String, Value>, state: &NativeState) {
-    columns.insert(
-        "native_favorite".into(),
-        state.favorite.map(i64::from).into(),
-    );
-    columns.insert("native_rating".into(), state.rating.into());
-    columns.insert("native_play_count".into(), state.play_count.into());
-    columns.insert("native_last_played".into(), state.last_played.into());
+macro_rules! owned {
+    () => {
+        fn indexed(&self) -> bool {
+            self.indexed
+        }
+
+        fn set_indexed(&mut self, indexed: bool) {
+            self.indexed = indexed;
+        }
+
+        fn native(&self) -> bool {
+            self.native
+        }
+
+        fn set_native(&mut self, native: bool) {
+            self.native = native;
+        }
+
+        fn binding(&self) -> Option<&[u8]> {
+            self.binding.as_deref()
+        }
+
+        fn set_binding(&mut self, binding: Option<Vec<u8>>) {
+            self.binding = binding;
+        }
+    };
+}
+
+fn source_of<R: Packed>(
+    snapshot: &Snapshot,
+    family: &super::snapshot::Family<R>,
+    key: i64,
+) -> Option<SourceKey> {
+    family
+        .get(key)
+        .and_then(|record| snapshot.source_key(record.source()))
 }
 
 impl Row for Source {
-    const TABLE: &'static Table = &SOURCES;
-
-    fn key(&self) -> i64 {
-        self.key.raw()
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = SourceKey::from_raw(key);
-    }
-
-    fn natural(&self) -> &str {
-        &self.object
-    }
+    family!(
+        SOURCES,
+        Source,
+        sources,
+        object,
+        SourceKey::raw,
+        SourceKey::from_raw
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         None
@@ -523,42 +569,45 @@ impl Row for Source {
         Some(self.key)
     }
 
-    fn columns(&self) -> Map<String, Value> {
-        object(json!({
-            "object_id": self.object,
-            "kind": self.kind,
-            "display_name": self.name,
-            "catalog_complete": i64::from(self.complete),
-            "freshness": hex_or_null(self.freshness.as_deref()),
-        }))
+    fn cells(&self) -> Vec<Option<Cell>> {
+        vec![
+            string(&self.object),
+            text(self.kind.as_deref()),
+            string(&self.name),
+            flag(self.complete),
+            blob(self.freshness.as_deref()),
+        ]
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
-        Ok(Self {
-            key: SourceKey::from_raw(row.try_get(0)?),
-            object: row.try_get(1)?,
-            kind: row.try_get(2)?,
-            name: row.try_get(3)?,
-            complete: flag(row, 4)?,
-            freshness: row.try_get(5)?,
-        })
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key = SourceKey::from_raw(row.try_get(0)?);
+        snapshot
+            .source(key)
+            .cloned()
+            .ok_or_else(|| missing("sources", key.raw()))
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_source(record.clone()),
+            None => snapshot.remove_source(SourceKey::from_raw(key)),
+        }
+    }
+
+    fn resident_source(_snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        Some(SourceKey::from_raw(key))
     }
 }
 
 impl Row for Track {
-    const TABLE: &'static Table = &TRACKS;
-
-    fn key(&self) -> i64 {
-        self.key.raw()
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = TrackKey::from_raw(key);
-    }
-
-    fn natural(&self) -> &str {
-        &self.uri
-    }
+    family!(
+        TRACKS,
+        Track,
+        tracks,
+        uri,
+        TrackKey::raw,
+        TrackKey::from_raw
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         Some((self.source?, None, self.object.as_deref()?))
@@ -568,48 +617,54 @@ impl Row for Track {
         self.source
     }
 
-    fn columns(&self) -> Map<String, Value> {
+    fn cells(&self) -> Vec<Option<Cell>> {
         let facts = &self.facts;
-        let mut columns = object(json!({
-            "source_key": self.source,
-            "object_id": self.object,
-            "media_uri": self.uri,
-            "album_key": self.album,
-            "local_file_key": self.local_file,
-            "indexed": i64::from(self.indexed),
-            "hidden_since": self.hidden_since,
-            "native_metadata": i64::from(self.native),
-            "title": facts.title,
-            "display_artist": facts.artist,
-            "display_album": facts.album,
-            "sort_text": facts.sort,
-            "duration_millis": facts.duration_ms,
-            "disc_number": facts.disc,
-            "track_number": facts.number,
-            "year": facts.year,
-            "release_date": facts.release_date,
-            "date_added": facts.date_added,
-            "first_seen_at": self.first_seen,
-            "bpm": facts.bpm,
-            "comment": facts.comment,
-            "source_format": facts.format,
-            "flags": self.flags(),
-        }));
-        state_columns(&mut columns, &self.state);
-        columns
+        let mut cells = vec![
+            int(self.source.map(SourceKey::raw)),
+            text(self.object.as_deref()),
+            string(&self.uri),
+            int(self.album.map(AlbumKey::raw)),
+            int(self.local_file.map(LocalFileKey::raw)),
+            flag(self.indexed),
+            int(self.hidden_since),
+            flag(self.native),
+            string(&facts.title),
+            string(&facts.artist),
+            string(&facts.album),
+            string(&facts.sort),
+            num(facts.duration_ms),
+            num(facts.disc),
+            num(facts.number),
+            int(facts.year),
+            text(facts.release_date.as_deref()),
+            text(facts.date_added.as_deref()),
+            int(self.first_seen),
+            int(facts.bpm),
+            text(facts.comment.as_deref()),
+            text(facts.format.as_deref()),
+            num(self.flags()),
+        ];
+        cells.extend(state_cells(&self.state));
+        cells.extend([
+            blob(self.binding.as_deref()),
+            text(self.source_path.as_deref()),
+            text(self.cue_path.as_deref()),
+            int(self.cue_start),
+            int(self.cue_end),
+            json_cell(self.writes.metadata.as_ref().map(Some)),
+            self.writes
+                .source_loudness
+                .as_ref()
+                .map(|key| Cell::Blob(key.clone())),
+            self.writes
+                .loudness
+                .as_ref()
+                .map(|key| Cell::Blob(key.clone())),
+        ]);
+        cells
     }
 
-    fn details(&self) -> Option<Map<String, Value>> {
-        Some(object(json!({
-            "native_artwork": hex_or_null(self.binding.as_deref()),
-            "source_path": self.source_path,
-            "cue_path": self.cue_path,
-            "cue_start_millis": self.cue_start,
-            "cue_end_millis": self.cue_end,
-        })))
-    }
-
-    fn runs(&self) -> Vec<(&'static Run, Vec<i64>)> {
+    fn runs(&self) -> Vec<Vec<i64>> {
         let tags = |kind| {
             self.tags
                 .iter()
@@ -618,81 +673,133 @@ impl Row for Track {
                 .collect()
         };
         vec![
-            (
-                &TRACK_RUNS[0],
-                self.artists.iter().map(|key| key.raw()).collect(),
-            ),
-            (
-                &TRACK_RUNS[1],
-                self.album_artists.iter().map(|key| key.raw()).collect(),
-            ),
-            (&TRACK_RUNS[2], tags(TagKind::Genre)),
-            (&TRACK_RUNS[3], tags(TagKind::Mood)),
-            (
-                &TRACK_RUNS[4],
-                self.folders.iter().map(|key| key.raw()).collect(),
-            ),
+            self.artists.iter().map(|key| key.raw()).collect(),
+            self.album_artists.iter().map(|key| key.raw()).collect(),
+            tags(TagKind::Genre),
+            tags(TagKind::Mood),
+            self.folders.iter().map(|key| key.raw()).collect(),
         ]
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key: i64 = row.try_get(0)?;
+        let record = snapshot
+            .tracks
+            .get(key)
+            .ok_or_else(|| missing("tracks", key))?;
+        let title = snapshot.held_text(record.title);
+        let sort = if record.flags & SORT_TITLE != 0 {
+            title.clone()
+        } else if record.flags & SORT_LOWER != 0 {
+            title.to_lowercase()
+        } else {
+            snapshot.held_text(record.sort)
+        };
+        let links = snapshot.track_links(record);
         Ok(Self {
-            key: TrackKey::from_raw(row.try_get(0)?),
-            source: row.try_get::<Option<i64>, _>(1)?.map(SourceKey::from_raw),
-            object: row.try_get(2)?,
-            uri: row.try_get(3)?,
-            album: row.try_get::<Option<i64>, _>(4)?.map(AlbumKey::from_raw),
+            key: TrackKey::from_raw(key),
+            source: snapshot.source_key(record.source),
+            object: row.try_get("object_id")?,
+            uri: row.try_get("media_uri")?,
+            album: snapshot.albums.key_of(record.album).map(AlbumKey::from_raw),
             local_file: row
-                .try_get::<Option<i64>, _>(5)?
+                .try_get::<Option<i64>, _>("local_file_key")?
                 .map(LocalFileKey::from_raw),
-            indexed: flag(row, 6)?,
-            hidden_since: row.try_get(7)?,
-            native: flag(row, 8)?,
+            indexed: record.flags & INDEXED != 0,
+            hidden_since: row.try_get("hidden_since")?,
+            native: record.flags & NATIVE != 0,
             facts: TrackFacts {
-                title: row.try_get(9)?,
-                artist: row.try_get(10)?,
-                album: row.try_get(11)?,
-                sort: row.try_get(12)?,
-                duration_ms: row.try_get(13)?,
-                disc: row.try_get(14)?,
-                number: row.try_get(15)?,
-                year: row.try_get(16)?,
-                release_date: row.try_get(17)?,
-                date_added: row.try_get(18)?,
-                bpm: row.try_get(20)?,
-                comment: row.try_get(21)?,
-                format: row.try_get(22)?,
+                title,
+                artist: snapshot.held_text(record.artist),
+                album: snapshot.held_text(record.album_title),
+                sort,
+                duration_ms: row.try_get("duration_millis")?,
+                disc: row.try_get("disc_number")?,
+                number: row.try_get("track_number")?,
+                year: row.try_get("year")?,
+                release_date: row.try_get("release_date")?,
+                date_added: row.try_get("date_added")?,
+                bpm: row.try_get("bpm")?,
+                comment: snapshot.held_optional(record.comment),
+                format: snapshot.held_optional(record.format),
             },
-            first_seen: row.try_get(19)?,
-            // 23 is flags, derived from the details columns.
-            state: native_state(row, 24)?,
-            binding: row.try_get(28)?,
-            source_path: row.try_get(29)?,
-            cue_path: row.try_get(30)?,
-            cue_start: row.try_get(31)?,
-            cue_end: row.try_get(32)?,
-            artists: Vec::new(),
-            album_artists: Vec::new(),
-            tags: Vec::new(),
-            folders: Vec::new(),
+            first_seen: row.try_get("first_seen_at")?,
+            state: native_state(row)?,
+            binding: row.try_get("native_artwork")?,
+            source_path: row.try_get("source_path")?,
+            cue_path: row.try_get("cue_path")?,
+            cue_start: row.try_get("cue_start_millis")?,
+            cue_end: row.try_get("cue_end_millis")?,
+            artists: links.artists,
+            album_artists: links.album_artists,
+            tags: links.tags,
+            folders: links.folders,
+            writes: TrackWrites::default(),
         })
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_track(record),
+            None => snapshot.remove_track(TrackKey::from_raw(key)),
+        }
+    }
+
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        source_of(snapshot, &snapshot.tracks, key)
+    }
+
+    /// A track is hidden from when it stops being listed, or from its insertion when nothing
+    /// lists it, so the expiry can forget it.
+    fn normalize(&mut self, before: Option<&Self>) {
+        self.hidden_since = if self.indexed {
+            None
+        } else {
+            match before {
+                Some(before) if !before.indexed => before.hidden_since,
+                Some(_) => None,
+                None => self.hidden_since,
+            }
+            .or_else(|| Some(chrono::Utc::now().timestamp()))
+        };
+    }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
+    }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Track(self.key.raw()), &self.uri))
+    }
+}
+
+impl Owned for Track {
+    type Metadata = TrackMetadata;
+    owned!();
+
+    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
+        Track::new(Some(source), Some(object.to_owned()), uri)
+    }
+
+    fn header(&self) -> Option<Value> {
+        None
+    }
+
+    fn set_header(&mut self, metadata: &TrackMetadata, json: Value) {
+        self.facts = TrackFacts::of(metadata);
+        self.writes.metadata = Some(json);
     }
 }
 
 impl Row for Album {
-    const TABLE: &'static Table = &ALBUMS;
-
-    fn key(&self) -> i64 {
-        self.key.raw()
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = AlbumKey::from_raw(key);
-    }
-
-    fn natural(&self) -> &str {
-        &self.uri
-    }
+    family!(
+        ALBUMS,
+        Album,
+        albums,
+        uri,
+        AlbumKey::raw,
+        AlbumKey::from_raw
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         Some((self.source, None, &self.object))
@@ -702,85 +809,139 @@ impl Row for Album {
         Some(self.source)
     }
 
-    fn columns(&self) -> Map<String, Value> {
+    fn cells(&self) -> Vec<Option<Cell>> {
         let facts = &self.facts;
-        let mut columns = object(json!({
-            "source_key": self.source,
-            "object_id": self.object,
-            "media_uri": self.uri,
-            "indexed": i64::from(self.indexed),
-            "native_metadata": i64::from(self.native),
-            "cached_local": i64::from(self.cached_local),
-            "title": facts.title,
-            "display_artist": facts.artist,
-            "sort_text": facts.sort,
-            "year": facts.year,
-            "release_date": facts.release_date,
-            "date_added": facts.date_added,
-            "is_compilation": facts.compilation.map(i64::from),
-            "first_seen_at": self.first_seen,
-            "release_identity": self.release_identity,
-            "release_lookup_identity": self.release_lookup_identity,
-            "native_artwork": hex_or_null(self.binding.as_deref()),
-        }));
-        state_columns(&mut columns, &self.state);
-        columns
+        let mut cells = vec![
+            num(self.source.raw()),
+            string(&self.object),
+            string(&self.uri),
+            flag(self.indexed),
+            flag(self.native),
+            flag(self.cached_local),
+            string(&facts.title),
+            string(&facts.artist),
+            string(&facts.sort),
+            int(facts.year),
+            text(facts.release_date.as_deref()),
+            text(facts.date_added.as_deref()),
+            int(facts.compilation.map(i64::from)),
+            int(self.first_seen),
+            text(self.release_identity.as_deref()),
+            text(self.release_lookup_identity.as_deref()),
+        ];
+        cells.extend(state_cells(&self.state));
+        cells.extend([
+            blob(self.binding.as_deref()),
+            json_cell(self.writes.header.as_ref().map(Option::as_ref)),
+            json_cell(self.writes.metadata.as_ref().map(Some)),
+            self.writes.clear_accepted_audio.then_some(Cell::Null),
+        ]);
+        cells
     }
 
-    fn runs(&self) -> Vec<(&'static Run, Vec<i64>)> {
+    fn runs(&self) -> Vec<Vec<i64>> {
         vec![
-            (
-                &ALBUM_RUNS[0],
-                self.artists.iter().map(|key| key.raw()).collect(),
-            ),
-            (&ALBUM_RUNS[1], self.genres.clone()),
+            self.artists.iter().map(|key| key.raw()).collect(),
+            self.genres.clone(),
         ]
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key: i64 = row.try_get(0)?;
+        let record = snapshot
+            .albums
+            .get(key)
+            .ok_or_else(|| missing("albums", key))?;
+        let (artists, genres) = snapshot.album_links(record);
         Ok(Self {
-            key: AlbumKey::from_raw(row.try_get(0)?),
-            source: SourceKey::from_raw(row.try_get(1)?),
-            object: row.try_get(2)?,
-            uri: row.try_get(3)?,
-            indexed: flag(row, 4)?,
-            native: flag(row, 5)?,
-            cached_local: flag(row, 6)?,
+            key: AlbumKey::from_raw(key),
+            source: snapshot
+                .source_key(record.source)
+                .ok_or_else(|| missing("albums", key))?,
+            object: row.try_get("object_id")?,
+            uri: row.try_get("media_uri")?,
+            indexed: record.flags & INDEXED != 0,
+            native: record.flags & NATIVE != 0,
+            cached_local: record.flags & CACHED_LOCAL != 0,
             facts: AlbumFacts {
-                title: row.try_get(7)?,
-                artist: row.try_get(8)?,
-                sort: row.try_get(9)?,
-                year: row.try_get(10)?,
-                release_date: row.try_get(11)?,
-                date_added: row.try_get(12)?,
-                compilation: row.try_get::<Option<i64>, _>(13)?.map(|value| value != 0),
+                title: snapshot.held_text(record.title),
+                artist: snapshot.held_text(record.artist),
+                sort: snapshot.held_text(record.sort),
+                year: row.try_get("year")?,
+                release_date: row.try_get("release_date")?,
+                date_added: row.try_get("date_added")?,
+                compilation: row
+                    .try_get::<Option<i64>, _>("is_compilation")?
+                    .map(|value| value != 0),
             },
-            first_seen: row.try_get(14)?,
-            release_identity: row.try_get(15)?,
-            release_lookup_identity: row.try_get(16)?,
-            state: native_state(row, 17)?,
-            binding: row.try_get(21)?,
-            input: flag(row, 22)?,
-            artists: Vec::new(),
-            genres: Vec::new(),
+            first_seen: row.try_get("first_seen_at")?,
+            release_identity: row.try_get("release_identity")?,
+            release_lookup_identity: row.try_get("release_lookup_identity")?,
+            state: native_state(row)?,
+            binding: row.try_get("native_artwork")?,
+            input: record.flags & INPUT != 0,
+            artists,
+            genres,
+            writes: AlbumWrites::default(),
         })
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_album(record),
+            None => snapshot.remove_album(AlbumKey::from_raw(key)),
+        }
+    }
+
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        source_of(snapshot, &snapshot.albums, key)
+    }
+
+    fn normalize(&mut self, _before: Option<&Self>) {
+        if let Some(header) = &self.writes.header {
+            self.input = header.is_some();
+        }
+    }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
+    }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Album(self.key.raw()), &self.uri))
+    }
+}
+
+impl Owned for Album {
+    type Metadata = AlbumMetadata;
+    owned!();
+
+    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
+        Album::new(source, object, uri)
+    }
+
+    fn header(&self) -> Option<Value> {
+        None
+    }
+
+    fn set_header(&mut self, _metadata: &AlbumMetadata, json: Value) {
+        self.writes.header = Some(Some(json));
+    }
+
+    fn touch(&self, touched: &mut Touched) {
+        touched.albums.insert(self.key.raw());
     }
 }
 
 impl Row for Artist {
-    const TABLE: &'static Table = &ARTISTS;
-
-    fn key(&self) -> i64 {
-        self.key.raw()
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = ArtistKey::from_raw(key);
-    }
-
-    fn natural(&self) -> &str {
-        &self.uri
-    }
+    family!(
+        ARTISTS,
+        Artist,
+        artists,
+        uri,
+        ArtistKey::raw,
+        ArtistKey::from_raw
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         Some((self.source, None, &self.object))
@@ -790,55 +951,111 @@ impl Row for Artist {
         Some(self.source)
     }
 
-    fn columns(&self) -> Map<String, Value> {
-        let mut columns = object(json!({
-            "source_key": self.source,
-            "object_id": self.object,
-            "media_uri": self.uri,
-            "indexed": i64::from(self.indexed),
-            "native_metadata": i64::from(self.native),
-            "name": self.metadata.name,
-            "sort_text": self.metadata.sort_text,
-            "musicbrainz_artist_id": self.metadata.musicbrainz_artist_id,
-            "native_artwork": hex_or_null(self.binding.as_deref()),
-        }));
-        state_columns(&mut columns, &self.state);
-        columns
+    fn cells(&self) -> Vec<Option<Cell>> {
+        let mut cells = vec![
+            num(self.source.raw()),
+            string(&self.object),
+            string(&self.uri),
+            flag(self.indexed),
+            flag(self.native),
+            string(&self.metadata.name),
+            text(self.metadata.sort_text.as_deref()),
+            text(self.metadata.musicbrainz_artist_id.as_deref()),
+        ];
+        cells.extend(state_cells(&self.state));
+        cells.push(blob(self.binding.as_deref()));
+        cells
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key: i64 = row.try_get(0)?;
+        let record = snapshot
+            .artists
+            .get(key)
+            .ok_or_else(|| missing("artists", key))?;
         Ok(Self {
-            key: ArtistKey::from_raw(row.try_get(0)?),
-            source: SourceKey::from_raw(row.try_get(1)?),
-            object: row.try_get(2)?,
-            uri: row.try_get(3)?,
-            indexed: flag(row, 4)?,
-            native: flag(row, 5)?,
+            key: ArtistKey::from_raw(key),
+            source: snapshot
+                .source_key(record.source)
+                .ok_or_else(|| missing("artists", key))?,
+            object: row.try_get("object_id")?,
+            uri: row.try_get("media_uri")?,
+            indexed: record.flags & INDEXED != 0,
+            native: record.flags & NATIVE != 0,
             metadata: ArtistMetadata {
-                name: row.try_get(6)?,
-                sort_text: row.try_get(7)?,
-                musicbrainz_artist_id: row.try_get(8)?,
+                name: snapshot.held_text(record.name),
+                sort_text: snapshot.held_optional(record.sort),
+                musicbrainz_artist_id: row.try_get("musicbrainz_artist_id")?,
             },
-            state: native_state(row, 9)?,
-            binding: row.try_get(13)?,
+            state: native_state(row)?,
+            binding: row.try_get("native_artwork")?,
         })
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_artist(record),
+            None => snapshot.remove_artist(ArtistKey::from_raw(key)),
+        }
+    }
+
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        source_of(snapshot, &snapshot.artists, key)
+    }
+
+    fn state(&mut self) -> Option<&mut NativeState> {
+        Some(&mut self.state)
+    }
+
+    fn user_item(&self) -> Option<(UserItem, &str)> {
+        Some((UserItem::Artist(self.key.raw()), &self.uri))
+    }
+}
+
+impl Owned for Artist {
+    type Metadata = ArtistMetadata;
+    const BUILT_PICTURE: bool = true;
+    owned!();
+
+    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
+        Artist::new(source, object, uri)
+    }
+
+    fn header(&self) -> Option<Value> {
+        serde_json::to_value(&self.metadata).ok()
+    }
+
+    fn set_header(&mut self, metadata: &ArtistMetadata, _json: Value) {
+        self.metadata = metadata.clone();
+    }
+
+    fn picture(&self, observed: Option<&[u8]>, native: bool) -> LibraryResult<Option<Vec<u8>>> {
+        let pictures = if native {
+            observed
+        } else {
+            self.binding.as_deref().or(observed)
+        };
+        Ok(Some(super::artwork::artist_binding(
+            &self.metadata.name,
+            self.metadata.musicbrainz_artist_id.as_deref(),
+            pictures,
+        )?))
+    }
+
+    fn touch(&self, touched: &mut Touched) {
+        touched.artists.insert(self.key.raw());
     }
 }
 
 impl Row for Tag {
-    const TABLE: &'static Table = &TAGS;
-
-    fn key(&self) -> i64 {
-        self.key
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = key;
-    }
-
-    fn natural(&self) -> &str {
-        &self.uri
-    }
+    family!(
+        TAGS,
+        Tag,
+        tags,
+        uri,
+        std::convert::identity,
+        std::convert::identity
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         Some((self.source, Some(self.kind), &self.object))
@@ -848,52 +1065,79 @@ impl Row for Tag {
         Some(self.source)
     }
 
-    fn columns(&self) -> Map<String, Value> {
-        object(json!({
-            "source_key": self.source,
-            "kind": self.kind as i64,
-            "object_id": self.object,
-            "media_uri": self.uri,
-            "indexed": i64::from(self.indexed),
-            "native_metadata": i64::from(self.native),
-            "name": self.metadata.name,
-            "sort_text": self.metadata.sort_text,
-            "native_artwork": hex_or_null(self.binding.as_deref()),
-        }))
+    fn cells(&self) -> Vec<Option<Cell>> {
+        vec![
+            num(self.source.raw()),
+            num(self.kind as i64),
+            string(&self.object),
+            string(&self.uri),
+            flag(self.indexed),
+            flag(self.native),
+            string(&self.metadata.name),
+            text(self.metadata.sort_text.as_deref()),
+            blob(self.binding.as_deref()),
+        ]
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key: i64 = row.try_get(0)?;
+        let record = snapshot.tags.get(key).ok_or_else(|| missing("tags", key))?;
         Ok(Self {
-            key: row.try_get(0)?,
-            source: SourceKey::from_raw(row.try_get(1)?),
-            kind: tag_kind(row.try_get(2)?),
-            object: row.try_get(3)?,
-            uri: row.try_get(4)?,
-            indexed: flag(row, 5)?,
-            native: flag(row, 6)?,
+            key,
+            source: snapshot
+                .source_key(record.source)
+                .ok_or_else(|| missing("tags", key))?,
+            kind: record.kind,
+            object: row.try_get("object_id")?,
+            uri: row.try_get("media_uri")?,
+            indexed: record.flags & INDEXED != 0,
+            native: record.flags & NATIVE != 0,
             metadata: TagMetadata {
-                name: row.try_get(7)?,
-                sort_text: row.try_get(8)?,
+                name: snapshot.held_text(record.name),
+                sort_text: snapshot.held_optional(record.sort),
             },
-            binding: row.try_get(9)?,
+            binding: row.try_get("native_artwork")?,
         })
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_tag(record),
+            None => snapshot.remove_tag(key),
+        }
+    }
+
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        source_of(snapshot, &snapshot.tags, key)
+    }
+}
+
+impl Owned for Tag {
+    type Metadata = TagMetadata;
+    owned!();
+
+    fn create(source: SourceKey, tag: Option<TagKind>, object: &str, uri: String) -> Self {
+        Tag::new(tag.unwrap_or(TagKind::Genre), source, object, uri)
+    }
+
+    fn header(&self) -> Option<Value> {
+        serde_json::to_value(&self.metadata).ok()
+    }
+
+    fn set_header(&mut self, metadata: &TagMetadata, _json: Value) {
+        self.metadata = metadata.clone();
     }
 }
 
 impl Row for Folder {
-    const TABLE: &'static Table = &FOLDERS;
-
-    fn key(&self) -> i64 {
-        self.key.raw()
-    }
-
-    fn set_key(&mut self, key: i64) {
-        self.key = FolderKey::from_raw(key);
-    }
-
-    fn natural(&self) -> &str {
-        &self.uri
-    }
+    family!(
+        FOLDERS,
+        Folder,
+        folders,
+        uri,
+        FolderKey::raw,
+        FolderKey::from_raw
+    );
 
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)> {
         Some((self.source, None, &self.object))
@@ -903,32 +1147,71 @@ impl Row for Folder {
         Some(self.source)
     }
 
-    fn columns(&self) -> Map<String, Value> {
-        object(json!({
-            "source_key": self.source,
-            "object_id": self.object,
-            "media_uri": self.uri,
-            "indexed": i64::from(self.indexed),
-            "native_metadata": i64::from(self.native),
-            "name": self.metadata.name,
-            "sort_text": self.metadata.sort_text,
-            "native_artwork": hex_or_null(self.binding.as_deref()),
-        }))
+    fn cells(&self) -> Vec<Option<Cell>> {
+        vec![
+            num(self.source.raw()),
+            string(&self.object),
+            string(&self.uri),
+            flag(self.indexed),
+            flag(self.native),
+            text(self.metadata.name.as_deref()),
+            text(self.metadata.sort_text.as_deref()),
+            blob(self.binding.as_deref()),
+        ]
     }
 
-    fn read(row: &SqliteRow) -> LibraryResult<Self> {
+    fn read(row: &SqliteRow, snapshot: &Snapshot) -> LibraryResult<Self> {
+        let key: i64 = row.try_get(0)?;
+        let record = snapshot
+            .folders
+            .get(key)
+            .ok_or_else(|| missing("folders", key))?;
         Ok(Self {
-            key: FolderKey::from_raw(row.try_get(0)?),
-            source: SourceKey::from_raw(row.try_get(1)?),
-            object: row.try_get(2)?,
-            uri: row.try_get(3)?,
-            indexed: flag(row, 4)?,
-            native: flag(row, 5)?,
+            key: FolderKey::from_raw(key),
+            source: snapshot
+                .source_key(record.source)
+                .ok_or_else(|| missing("folders", key))?,
+            object: row.try_get("object_id")?,
+            uri: row.try_get("media_uri")?,
+            indexed: record.flags & INDEXED != 0,
+            native: record.flags & NATIVE != 0,
             metadata: FolderMetadata {
-                name: row.try_get(6)?,
-                sort_text: row.try_get(7)?,
+                name: snapshot.held_optional(record.name),
+                sort_text: snapshot.held_optional(record.sort),
             },
-            binding: row.try_get(8)?,
+            binding: row.try_get("native_artwork")?,
         })
+    }
+
+    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
+        match record {
+            Some(record) => snapshot.put_folder(record),
+            None => snapshot.remove_folder(FolderKey::from_raw(key)),
+        }
+    }
+
+    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
+        source_of(snapshot, &snapshot.folders, key)
+    }
+}
+
+impl Owned for Folder {
+    type Metadata = FolderMetadata;
+    owned!();
+
+    fn create(source: SourceKey, _tag: Option<TagKind>, object: &str, uri: String) -> Self {
+        Folder::new(source, object, uri)
+    }
+
+    fn header(&self) -> Option<Value> {
+        serde_json::to_value(&self.metadata).ok()
+    }
+
+    fn set_header(&mut self, metadata: &FolderMetadata, _json: Value) {
+        self.metadata = metadata.clone();
+    }
+
+    fn keeps_header(metadata: &FolderMetadata) -> bool {
+        metadata.name.is_none()
     }
 }

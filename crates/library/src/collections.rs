@@ -744,7 +744,7 @@ impl Catalog {
             sqlx::query("INSERT INTO album_release_observations(album_key,lookup_identity,release_types) VALUES(?1,?2,jsonb(?3)) ON CONFLICT(album_key) DO UPDATE SET lookup_identity=excluded.lookup_identity,release_types=excluded.release_types").bind(album).bind(lookup_identity).bind(serde_json::to_string(&release_types)?).execute(write.connection().await?).await?;
         }
         record.release_lookup_identity = Some(lookup_identity.to_owned());
-        write.put(record, serde_json::Map::new());
+        write.put(record);
         crate::catalog::albums::resolve(&mut write, &[album.raw()].into()).await?;
         write.commit().await?;
         Ok(Some(album))

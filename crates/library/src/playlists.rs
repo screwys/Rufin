@@ -352,9 +352,8 @@ impl Catalog {
         let Some(tracks) = playlist_tracks_on(self, connection, None, songs).await? else {
             return Ok(None);
         };
-        let (playlist, object_id) = create_playlist_identity(connection, name).await?;
+        let (playlist, object_id) = create_playlist_identity(&mut write, name).await?;
         insert_playlist_tracks(self, &mut write, playlist, &tracks, false).await?;
-        write.touch_playlist(playlist.raw());
         write.commit().await?;
         Ok(Some((playlist, object_id)))
     }
@@ -387,31 +386,33 @@ impl Catalog {
             }
             None => None,
         };
-        let changed = sqlx::query(
-            "UPDATE main.playlists SET name=COALESCE(?2,name),
+        let row: Option<crate::catalog::write::PlaylistRow> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "UPDATE main.playlists SET name=COALESCE(?2,name),
              artwork_bytes=CASE WHEN ?3 THEN ?4 ELSE artwork_bytes END,
              artwork_mime=CASE WHEN ?3 THEN ?5 ELSE artwork_mime END,
              artwork_revision=CASE WHEN ?3 THEN ?6 ELSE artwork_revision END,
              artwork_binding=CASE WHEN ?3 THEN ?7 ELSE artwork_binding END
              WHERE owner='rufin' AND playlist_key=?1 AND metadata_writable
-               AND ((?2 IS NOT NULL AND name IS NOT ?2) OR (?3 AND artwork_revision IS NOT ?6))",
-        )
-        .bind(playlist)
-        .bind(name)
-        .bind(artwork.is_some())
-        .bind(image.map(|(bytes, _)| bytes))
-        .bind(image.and_then(|(_, mime)| mime))
-        .bind(revision)
-        .bind(binding)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
+               AND ((?2 IS NOT NULL AND name IS NOT ?2) OR (?3 AND artwork_revision IS NOT ?6))
+             RETURNING {}",
+                crate::catalog::write::PLAYLIST_COLUMNS
+            )))
+            .bind(playlist)
+            .bind(name)
+            .bind(artwork.is_some())
+            .bind(image.map(|(bytes, _)| bytes))
+            .bind(image.and_then(|(_, mime)| mime))
+            .bind(revision)
+            .bind(binding)
+            .fetch_optional(&mut *transaction)
+            .await?;
+        let changed = row.is_some();
         if changed && name.is_some() {
-            crate::playlist_links::mark_dirty_on(transaction, playlist).await?;
+            crate::playlist_links::mark_dirty_on(self, transaction, playlist).await?;
         }
-        if changed {
-            write.touch_playlist(playlist.raw());
+        if let Some(row) = row {
+            write.put_playlist(row);
             // The image itself is read by key.
             write.changed(Scope::Playlist {
                 key: playlist,
@@ -430,7 +431,9 @@ impl Catalog {
             .await?
             .rows_affected()
             > 0;
-        write.touch_playlist(playlist.raw());
+        if deleted {
+            write.remove_playlist(playlist.raw());
+        }
         write.commit().await?;
         Ok(deleted)
     }
@@ -453,7 +456,7 @@ impl Catalog {
         let accepted =
             insert_playlist_tracks(self, &mut write, playlist, &tracks, skip_existing).await?;
         if accepted > 0 {
-            crate::playlist_links::mark_dirty_on(write.connection().await?, playlist).await?;
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         }
         write.commit().await?;
         Ok(accepted)
@@ -485,7 +488,7 @@ impl Catalog {
         }
         let count = removed.len();
         if count > 0 {
-            crate::playlist_links::mark_dirty_on(write.connection().await?, playlist).await?;
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         }
         write.remove_entries(playlist.raw(), removed);
         write.commit().await?;
@@ -530,7 +533,7 @@ impl Catalog {
             .bind(&rank)
             .execute(write.connection().await?)
             .await?;
-        crate::playlist_links::mark_dirty_on(write.connection().await?, playlist).await?;
+        crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         write.put_entries(
             playlist.raw(),
             vec![Entry {
@@ -794,7 +797,7 @@ pub(crate) async fn load_playlist_entry_rows(
 }
 
 pub(crate) async fn create_playlist_identity(
-    connection: &mut SqliteConnection,
+    write: &mut Write<'_>,
     name: &str,
 ) -> LibraryResult<(PlaylistKey, String)> {
     let name = name.trim();
@@ -803,14 +806,20 @@ pub(crate) async fn create_playlist_identity(
             "Playlist name cannot be empty".into(),
         ));
     }
-    Ok(sqlx::query_as(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO main.playlists(object_id,name)
          VALUES('rufin:playlist:'||lower(hex(randomblob(16))),?1)
-         RETURNING playlist_key,object_id",
-    )
+         RETURNING {},object_id",
+        crate::catalog::write::PLAYLIST_COLUMNS
+    )))
     .bind(name)
-    .fetch_one(&mut *connection)
-    .await?)
+    .fetch_one(write.connection().await?)
+    .await?;
+    let object_id = sqlx::Row::try_get(&row, 10)?;
+    let header = crate::catalog::write::PlaylistRow::from_row(&row)?;
+    let key = PlaylistKey::from_raw(header.0);
+    write.put_playlist(header);
+    Ok((key, object_id))
 }
 
 /// Appends tracks after the playlist's last rank, in one INSERT. With `skip_existing`, tracks the
@@ -1119,12 +1128,11 @@ pub(crate) async fn write_playlist_identity(
         Some(source_id) if source_owned => Some(write.source_identity(source_id).await?),
         _ => None,
     };
-    let connection = write.connection().await?;
     if let Some(source) = source {
-        let key = source_playlist_identity(connection, source, &identity.object_id).await?;
-        write.touch_playlist(key.raw());
-        return Ok(key);
+        return source_playlist_identity(write, source, &identity.object_id).await;
     }
+    let columns = crate::catalog::write::PLAYLIST_COLUMNS;
+    let connection = write.connection().await?;
     // Rufin playlists are global, whatever source a backup scoped them to.
     let existing = sqlx::query_scalar::<_, PlaylistKey>(
         "SELECT playlist_key FROM playlists WHERE object_id=?1 AND source_key IS NULL",
@@ -1132,32 +1140,38 @@ pub(crate) async fn write_playlist_identity(
     .bind(&identity.object_id)
     .fetch_optional(&mut *connection)
     .await?;
-    let key = match existing {
-        Some(key) => {
-            if !source_owned {
-                sqlx::query("UPDATE playlists SET name=?2 WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT ?2")
-                    .bind(key).bind(&identity.name).execute(&mut *connection).await?;
-            }
-            key
+    let (key, row) = match existing {
+        Some(key) if source_owned => (key, None),
+        Some(key) => (key, sqlx::query_as::<_, crate::catalog::write::PlaylistRow>(sqlx::AssertSqlSafe(format!("UPDATE playlists SET name=?2 WHERE playlist_key=?1 AND owner='rufin' AND name IS NOT ?2 RETURNING {columns}")))
+            .bind(key).bind(&identity.name).fetch_optional(&mut *connection).await?),
+        None => {
+            let row: crate::catalog::write::PlaylistRow = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlists(owner,object_id,name,indexed) VALUES (?1,?2,?3,?4) RETURNING {columns}")))
+                .bind(if source_owned { "source" } else { "rufin" }).bind(&identity.object_id).bind(&identity.name)
+                .bind(!source_owned)
+                .fetch_one(connection).await?;
+            (PlaylistKey::from_raw(row.0), Some(row))
         }
-        None => sqlx::query_scalar("INSERT INTO playlists(owner,object_id,name,indexed) VALUES (?1,?2,?3,?4) RETURNING playlist_key")
-            .bind(if source_owned { "source" } else { "rufin" }).bind(&identity.object_id).bind(&identity.name)
-            .bind(!source_owned)
-            .fetch_one(connection).await?,
     };
-    write.touch_playlist(key.raw());
+    if let Some(row) = row {
+        write.put_playlist(row);
+    }
     Ok(key)
 }
 /// A playlist a source owns, known by identity before the source describes it.
 async fn source_playlist_identity(
-    connection: &mut SqliteConnection,
+    write: &mut Write<'_>,
     source: SourceKey,
     object_id: &str,
 ) -> LibraryResult<PlaylistKey> {
-    let key: Option<PlaylistKey> = sqlx::query_scalar("INSERT INTO playlists(source_key,owner,object_id,indexed) VALUES (?1,'source',?2,0) ON CONFLICT(source_key,object_id) DO NOTHING RETURNING playlist_key")
+    let connection = write.connection().await?;
+    let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlists(source_key,owner,object_id,indexed) VALUES (?1,'source',?2,0) ON CONFLICT(source_key,object_id) DO NOTHING RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
         .bind(source).bind(object_id).fetch_optional(&mut *connection).await?;
-    match key {
-        Some(key) => Ok(key),
+    match row {
+        Some(row) => {
+            let key = PlaylistKey::from_raw(row.0);
+            write.put_playlist(row);
+            Ok(key)
+        }
         None => Ok(sqlx::query_scalar(
             "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
         )

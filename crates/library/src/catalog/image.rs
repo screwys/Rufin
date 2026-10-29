@@ -15,8 +15,8 @@ use crate::tags::TagKind;
 use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
-/// Raised whenever the layout of a record changes.
-const FORMAT: u32 = 2;
+/// Raised whenever the layout or the flags of a record change.
+const FORMAT: u32 = 3;
 
 /// The Store's identity and commit counter.
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -370,7 +370,7 @@ async fn write_track_membership(
             }
             touched.tracks.insert(*key);
             changed = true;
-            write.put(track, serde_json::Map::new());
+            write.put(track);
         }
     }
     albums.sort_unstable();
@@ -402,7 +402,7 @@ pub(crate) async fn delete_physical_files(
     for key in linked {
         if let Some(mut track) = write.get::<Track>(key).await? {
             track.local_file = None;
-            write.put(track, serde_json::Map::new());
+            write.put(track);
         }
     }
     let connection = write.connection().await?;
@@ -630,7 +630,7 @@ pub(crate) async fn write_file_observations_on(
                 && track.local_file != Some(file)
             {
                 track.local_file = Some(file);
-                write.put(track, serde_json::Map::new());
+                write.put(track);
             }
         }
     }
@@ -900,7 +900,7 @@ async fn merge_local_file_uris_on(
             if track.source.is_some() {
                 track.object = Some(object_id.clone());
             }
-            write.put(track, serde_json::Map::new());
+            write.put(track);
             old.key
         } else {
             write
@@ -925,40 +925,29 @@ async fn merge_local_file_uris_on(
                     LibraryError::InvalidStore(format!("track {current_key} has no row"))
                 })?;
             let same_metadata = same_details && canonical.facts == previous_track.facts;
-            write.put(
-                Track {
-                    object: None,
-                    indexed: false,
-                    local_file: None,
-                    ..previous_track.clone()
-                },
-                serde_json::Map::new(),
-            );
-            let mut extras = serde_json::Map::new();
+            write.put(Track {
+                object: None,
+                indexed: false,
+                local_file: None,
+                ..previous_track.clone()
+            });
+            // The old row gives up its identity first, so the canonical row can take it.
+            write.connection().await?;
             let copies_edges = !canonical.indexed || same_metadata;
             if !canonical.indexed {
                 canonical.facts = previous_track.facts.clone();
-                extras.insert(
-                    "metadata".into(),
-                    details.map_or(
-                        Ok(serde_json::Value::Object(serde_json::Map::new())),
-                        |json| serde_json::from_str(&json),
-                    )?,
-                );
+                canonical.writes.metadata = Some(details.map_or(
+                    Ok(serde_json::Value::Object(serde_json::Map::new())),
+                    |json| serde_json::from_str(&json),
+                )?);
                 canonical.album = canonical.album.or(previous_track.album);
                 if canonical.binding.is_none() {
                     canonical.binding.clone_from(&previous_track.binding);
                 }
             }
             if canonical.source.is_none() {
-                extras.insert(
-                    "source_loudness_analysis_key".into(),
-                    super::families::hex(&source_loudness),
-                );
-                extras.insert(
-                    "loudness_analysis_key".into(),
-                    super::families::hex(&loudness),
-                );
+                canonical.writes.source_loudness = Some(source_loudness);
+                canonical.writes.loudness = Some(loudness);
             }
             if previous_track.source.is_some() {
                 canonical.object = canonical.object.or_else(|| Some(object_id.clone()));
@@ -998,16 +987,23 @@ async fn merge_local_file_uris_on(
                     }
                 }
             }
-            write.put(canonical, extras);
-            let playlists: Vec<i64> = sqlx::query_scalar(
-                "UPDATE playlist_entries SET track_key=?2 WHERE track_key=?1 RETURNING playlist_key",
+            write.put(canonical);
+            let entries: Vec<(i64, i64, Vec<u8>)> = sqlx::query_as(
+                "UPDATE playlist_entries SET track_key=?2 WHERE track_key=?1 RETURNING playlist_key,playlist_entry_key,rank",
             )
             .bind(old_key)
             .bind(current_key)
             .fetch_all(write.connection().await?)
             .await?;
-            for playlist in playlists {
-                write.touch_playlist_entries(playlist);
+            for (playlist, key, rank) in entries {
+                write.put_entries(
+                    playlist,
+                    vec![super::snapshot::Entry {
+                        key,
+                        rank: rank.into(),
+                        track: current_key,
+                    }],
+                );
             }
             sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
                 .bind(old_key)
@@ -1025,32 +1021,35 @@ async fn merge_local_file_uris_on(
             write.rekey(old_key, current_key);
             merged = true;
         }
-        sqlx::query(
+        let mut states: Vec<super::write::StateRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO user_state(media_uri,favorite,rating,changed_at)
             SELECT ?2,favorite,rating,changed_at FROM user_state WHERE media_uri=?1
             ON CONFLICT(media_uri) DO UPDATE SET
                 favorite=COALESCE(user_state.favorite,excluded.favorite),
                 rating=COALESCE(user_state.rating,excluded.rating)
             WHERE (user_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
-               OR (user_state.rating IS NULL AND excluded.rating IS NOT NULL)",
-        )
+               OR (user_state.rating IS NULL AND excluded.rating IS NOT NULL){}",
+            super::write::STATE_RETURNING
+        )))
         .bind(previous)
         .bind(current)
-        .execute(write.connection().await?)
+        .fetch_all(write.connection().await?)
         .await?;
-        sqlx::query("DELETE FROM user_state WHERE media_uri=?1")
+        states.extend(
+            sqlx::query_as::<_, super::write::StateRow>(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM user_state WHERE media_uri=?1{}",
+                super::write::STATE_DELETED
+            )))
             .bind(previous)
-            .execute(write.connection().await?)
-            .await?;
-        write.touch_state(previous);
-        write.touch_state(current);
+            .fetch_all(write.connection().await?)
+            .await?,
+        );
+        write.set_states(states);
         sqlx::query("UPDATE listens SET media_uri=?2 WHERE media_uri=?1")
             .bind(previous)
             .bind(current)
             .execute(write.connection().await?)
             .await?;
-        write.touch_listened(previous);
-        write.touch_listened(current);
 
         if let Some((old_source, old_source_id, old_object)) = old_identity {
             let moved = match write.by_natural::<Track>(current).await? {
@@ -1073,12 +1072,15 @@ async fn merge_local_file_uris_on(
                     .bind(&old_source_id).bind(&old_object).execute(write.connection().await?).await?;
             }
         }
+        write
+            .recount(&[previous.as_str(), current.as_str()])
+            .await?;
         if crate::cue_media_parts(current).is_some() {
             sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT source_key,?2,origin,path,root,relative_path,access_uri FROM local_locators WHERE media_uri=?1 ON CONFLICT(media_uri,origin) DO NOTHING")
                 .bind(previous).bind(current).execute(write.connection().await?).await?;
             sqlx::query("INSERT INTO downloads(media_uri,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired) SELECT ?2,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired FROM downloads WHERE media_uri=?1 ON CONFLICT DO NOTHING")
                 .bind(previous).bind(current).execute(write.connection().await?).await?;
-            write.touch_download(current);
+            write.read_downloads(&[current.as_str()]).await?;
         }
         if let Some(path) = crate::file_media_path(current) {
             let path = path.to_string_lossy().into_owned();

@@ -415,11 +415,16 @@ pub(crate) async fn import_playlist_on(
         .ok_or_else(|| invalid("Playlist is not editable"))?;
         changed = Some(&name) != identity.name.as_ref();
         if changed {
-            sqlx::query("UPDATE main.playlists SET name=?2 WHERE playlist_key=?1")
+            let row: crate::catalog::write::PlaylistRow =
+                sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "UPDATE main.playlists SET name=?2 WHERE playlist_key=?1 RETURNING {}",
+                    crate::catalog::write::PLAYLIST_COLUMNS
+                )))
                 .bind(key)
                 .bind(&identity.name)
-                .execute(write.connection().await?)
+                .fetch_one(write.connection().await?)
                 .await?;
+            write.put_playlist(row);
         }
         key
     } else {
@@ -464,7 +469,6 @@ pub(crate) async fn import_playlist_on(
         .map(|(entry, track)| (entry.object_id, track))
         .collect::<Vec<_>>();
     changed |= crate::playlists::write_entries(write, key.raw(), &wanted, true).await?;
-    write.touch_playlist(key.raw());
     Ok(PlaylistImportReport {
         playlist: key,
         imported,

@@ -322,9 +322,8 @@ impl ProfileStore {
             .bind(&files).execute(&mut *connection).await?;
         sqlx::query("UPDATE connect_profile SET profile=NULL,publisher=NULL,actor='0',clock=0,enabled=0,schema_version=?1 WHERE singleton=1")
             .bind(SCHEMA_VERSION).execute(&mut *connection).await?;
-        for uri in &removed {
-            write.touch_download(uri);
-        }
+        let removed = removed.iter().map(String::as_str).collect::<Vec<_>>();
+        write.read_downloads(&removed).await?;
         write.keep();
         write.commit().await?;
         Ok(())

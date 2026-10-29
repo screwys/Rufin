@@ -2,7 +2,7 @@ use super::write::{Family, Write};
 use super::*;
 use crate::PlaylistEntryObservation;
 
-/// Provider playlist headers, written as plain SQL and read back by key.
+/// Provider playlist headers, written as plain SQL.
 pub(super) async fn playlists(
     write: &mut Write<'_>,
     source: SourceKey,
@@ -21,13 +21,15 @@ pub(super) async fn playlists(
         if known.is_some_and(|key| write.newer(Family::Playlist, key)) {
             continue;
         }
-        let key: Option<i64> = sqlx::query_scalar("WITH binding AS (
+        let row: Option<super::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH binding AS (
                 SELECT CASE WHEN ?8 AND ?4 IS NULL THEN (SELECT artwork_binding FROM playlists WHERE source_key=?1 AND object_id=?2) ELSE ?4 END bytes
             ) INSERT INTO playlists(owner,source_key,object_id,name,artwork_binding,writable,metadata_writable,indexed) VALUES ('source',?1,?2,?3,(SELECT bytes FROM binding),coalesce(?5,1),coalesce(?6,1),?7) ON CONFLICT(source_key,object_id) DO UPDATE SET name=excluded.name,artwork_binding=excluded.artwork_binding,writable=coalesce(?5,playlists.writable),metadata_writable=coalesce(?6,playlists.metadata_writable),indexed=max(playlists.indexed,excluded.indexed) WHERE(playlists.name,playlists.artwork_binding,playlists.writable,playlists.metadata_writable,playlists.indexed) IS NOT(excluded.name,excluded.artwork_binding,coalesce(?5,playlists.writable),coalesce(?6,playlists.metadata_writable),max(playlists.indexed,excluded.indexed))
-            RETURNING playlist_key")
+            RETURNING {}", super::write::PLAYLIST_COLUMNS)))
             .bind(source).bind(&input.object_id).bind(&input.name).bind(&input.artwork_binding).bind(input.writable).bind(input.metadata_writable).bind(admit).bind(reference).fetch_optional(write.connection().await?).await?;
-        if let Some(key) = key {
-            write.touch_playlist(key);
+        let key = row.as_ref().map(|row| row.0);
+        if let Some(row) = row {
+            let key = row.0;
+            write.put_playlist(row);
             // The picture is not resident; the Change names it.
             write.changed(super::write::Scope::Playlist {
                 key: crate::PlaylistKey::from_raw(key),
@@ -131,9 +133,10 @@ impl super::Observation<'_> {
                     Some(track) => {
                         keys.insert(&entry.track_id, track.key);
                     }
-                    None => stubs.push((
-                        super::records::Track::new(Some(source), Some(entry.track_id.clone()), uri),
-                        serde_json::Map::new(),
+                    None => stubs.push(super::records::Track::new(
+                        Some(source),
+                        Some(entry.track_id.clone()),
+                        uri,
                     )),
                 }
             }
@@ -166,7 +169,7 @@ impl super::Observation<'_> {
         kind: &str,
         ids: &[String],
     ) -> LibraryResult<()> {
-        async fn replace<R: super::write::Resident>(
+        async fn replace<R: super::families::Row>(
             write: &mut Write<'_>,
             source: SourceKey,
             ids: &[String],
@@ -182,7 +185,7 @@ impl super::Observation<'_> {
                         .object()
                         .is_some_and(|(_, _, object)| ids.iter().any(|id| id == object));
                     state(&mut record).favorite = Some(favorite);
-                    write.put(record, serde_json::Map::new());
+                    write.put(record);
                 }
             }
             Ok(())
@@ -233,13 +236,22 @@ impl super::Observation<'_> {
     ) -> LibraryResult<crate::PlaylistKey> {
         let mut write = self.write().await?;
         let source = self.source.raw();
-        let (key, _) =
-            crate::playlists::create_playlist_identity(write.connection().await?, name).await?;
+        let (key, _) = crate::playlists::create_playlist_identity(&mut write, name).await?;
         let rank = crate::rank::nth_sql(
             "row_number() OVER(ORDER BY coalesce(details.cue_path,details.source_path),track.disc_number,track.track_number,track.object_id)-1",
         );
-        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.track_key,{rank} FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE track.source_key=?2 AND track.local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=?2 AND observed_stamp=?3)"))).bind(key).bind(source).bind(observed).execute(write.connection().await?).await?;
-        write.touch_playlist(key.raw());
+        let entries: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.track_key,{rank} FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE track.source_key=?2 AND track.local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=?2 AND observed_stamp=?3) RETURNING playlist_entry_key,rank,track_key"))).bind(key).bind(source).bind(observed).fetch_all(write.connection().await?).await?;
+        write.put_entries(
+            key.raw(),
+            entries
+                .into_iter()
+                .map(|(key, rank, track)| super::snapshot::Entry {
+                    key,
+                    rank: rank.into(),
+                    track: crate::TrackKey::from_raw(track),
+                })
+                .collect(),
+        );
         write.commit().await?;
         Ok(key)
     }

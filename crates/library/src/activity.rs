@@ -104,26 +104,29 @@ impl Catalog {
     ) -> LibraryResult<ListenKey> {
         validate_listen(listen, deliveries)?;
         let mut write = self.write().await?;
-        let current: Option<(String, Option<crate::SourceKey>, Option<String>)> = if let Some(key) =
-            current_track
-        {
-            Some(sqlx::query_as("SELECT track.media_uri,source.source_key,source.object_id FROM tracks track LEFT JOIN sources source USING(source_key) WHERE track.track_key=?1")
-                .bind(key).fetch_one(write.connection().await?).await?)
-        } else {
-            sqlx::query_as("SELECT track.media_uri,source.source_key,source.object_id FROM tracks track LEFT JOIN sources source USING(source_key) WHERE track.media_uri=?1")
-                .bind(&listen.media_uri).fetch_optional(write.connection().await?).await?
+        // The player names its track; its source comes from memory.
+        let source_id = match source_entity_parts(&listen.media_uri) {
+            Some((source, _, _)) => Some(source.as_str().to_owned()),
+            None => match current_track {
+                Some(key) => {
+                    let snapshot = self.snapshot();
+                    snapshot
+                        .tracks
+                        .get(key.raw())
+                        .and_then(|record| snapshot.source_key(record.source))
+                        .and_then(|source| snapshot.source(source))
+                        .map(|source| source.object.clone())
+                }
+                None => sqlx::query_scalar("SELECT source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1")
+                    .bind(&listen.media_uri).fetch_optional(write.connection().await?).await?,
+            },
         };
-        let current_media_uri =
-            current_track.and_then(|_| current.as_ref().map(|(uri, _, _)| uri.as_str()));
-        let media_uri = current_media_uri.unwrap_or(&listen.media_uri);
-        let source_id = source_entity_parts(media_uri)
-            .map(|(source, _, _)| source.as_str().to_string())
-            .or_else(|| current.as_ref().and_then(|(_, _, id)| id.clone()));
         let (key, _) = write_listen(
             &mut write,
             listen,
             source_id.as_deref(),
-            current_media_uri,
+            current_track,
+            &listen.media_uri,
             None,
         )
         .await?;
@@ -365,15 +368,18 @@ fn valid_local_period(period: &str) -> bool {
         )
 }
 
+/// Writes one listen under the URI of `track` when one is named, else under `media_uri`, and
+/// counts it into that track's plays in one statement.
 pub(crate) async fn write_listen(
     write: &mut crate::catalog::write::Write<'_>,
     listen: &ListenWrite,
     source_id: Option<&str>,
-    current_media_uri: Option<&str>,
+    track: Option<TrackKey>,
+    media_uri: &str,
     imported_key: Option<i64>,
 ) -> LibraryResult<(ListenKey, bool)> {
     validate_listen(listen, &[])?;
-    let inserted = sqlx::query_scalar::<_, ListenKey>(
+    let inserted = sqlx::query_as::<_, (ListenKey, Option<TrackKey>)>(
         "INSERT INTO listens(
                  external_id,source_id,media_uri,listen_key,
                  track_title,artist_name,album_title,
@@ -381,15 +387,15 @@ pub(crate) async fn write_listen(
                  musicbrainz_recording_id,musicbrainz_release_track_id,
                  started_at,local_period,duration_millis,listened_millis,skipped
              ) VALUES (
-                 ?1,?2,?3,?19,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
-                 ?17,?18
+                 ?1,?2,coalesce((SELECT media_uri FROM tracks WHERE track_key=?20),?3),?19,
+                 ?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18
              )
              ON CONFLICT DO NOTHING
-             RETURNING listen_key",
+             RETURNING listen_key,(SELECT track_key FROM tracks WHERE tracks.media_uri=listens.media_uri)",
     )
     .bind(&listen.external_id)
     .bind(source_id)
-    .bind(current_media_uri.unwrap_or(&listen.media_uri))
+    .bind(media_uri)
     .bind(&listen.title)
     .bind(&listen.artist)
     .bind(&listen.album)
@@ -416,17 +422,33 @@ pub(crate) async fn write_listen(
     .bind(listen.listened_millis)
     .bind(listen.skipped)
     .bind(imported_key)
+    .bind(track)
     .fetch_optional(write.connection().await?)
     .await?;
-    let changed = inserted.is_some() || sqlx::query("UPDATE listens SET listened_millis=max(listened_millis,?2),skipped=min(skipped,?3) WHERE external_id=?1 AND(?2>listened_millis OR ?3<skipped)")
-        .bind(&listen.external_id).bind(listen.listened_millis).bind(listen.skipped)
-        .execute(write.connection().await?).await?.rows_affected()>0;
+    let changed = match inserted {
+        Some((_, track)) => {
+            if let Some(track) = track {
+                let stats = write.stats(track).heard(listen.skipped, listen.started_at);
+                write.listened(track, stats);
+            }
+            true
+        }
+        None => {
+            // A repeated listen that was heard longer, or no longer counts as a skip.
+            let updated: Option<String> = sqlx::query_scalar("UPDATE listens SET listened_millis=max(listened_millis,?2),skipped=min(skipped,?3) WHERE external_id=?1 AND(?2>listened_millis OR ?3<skipped) RETURNING media_uri")
+                .bind(&listen.external_id).bind(listen.listened_millis).bind(listen.skipped)
+                .fetch_optional(write.connection().await?).await?;
+            if let Some(uri) = &updated {
+                write.recount(&[uri]).await?;
+            }
+            updated.is_some()
+        }
+    };
+    // History reads listens.
     if changed {
-        // History reads listens; the track's plays follow them.
         write.keep();
-        write.touch_listened(current_media_uri.unwrap_or(&listen.media_uri));
     }
-    let key = if let Some(key) = inserted {
+    let key = if let Some((key, _)) = inserted {
         key
     } else {
         sqlx::query_scalar("SELECT listen_key FROM listens WHERE external_id=?1 OR (external_id IS NULL AND listen_key=?2)")
@@ -480,7 +502,11 @@ pub(crate) async fn import_activity_jsonl_on(
             write,
             &record.listen,
             record.source_id.as_deref(),
-            record.current_media_uri.as_deref(),
+            None,
+            record
+                .current_media_uri
+                .as_deref()
+                .unwrap_or(&record.listen.media_uri),
             Some(record.listen_key),
         )
         .await?;
@@ -623,7 +649,7 @@ pub(crate) async fn write_legacy_activity(
         .bind(&record.source_id).bind(&record.track_object_id)
         .fetch_optional(write.connection().await?).await?;
     if let Some(uri) = uri {
-        write.touch_listened(&uri);
+        write.recount(&[&uri]).await?;
     }
     Ok(())
 }

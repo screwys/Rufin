@@ -93,7 +93,7 @@ impl Catalog {
             .bind(if file.retired_documents.is_empty() { "[]" } else { &file.retired_documents })
             .execute(write.connection().await?).await?;
         write.keep();
-        write.touch_download(&file.media_uri);
+        write.read_downloads(&[&file.media_uri]).await?;
         write.commit().await?;
         Ok(())
     }
@@ -114,7 +114,7 @@ impl Catalog {
             > 0;
         if removed {
             write.keep();
-            write.touch_download(&file.media_uri);
+            write.read_downloads(&[&file.media_uri]).await?;
         }
         write.commit().await?;
         Ok(())

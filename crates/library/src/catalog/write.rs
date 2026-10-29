@@ -1,7 +1,7 @@
 //! Every change to the Store runs in one Write. A Write takes the writer and begins a
-//! transaction. Resident rows are staged and compared with the rows the Store holds; only the
-//! columns that differ are written. User data an operation writes with plain SQL is named by a
-//! touch and read back by key before the commit. When nothing differs the transaction rolls
+//! transaction. Resident rows are staged and compared with what the Catalog and the Store hold;
+//! only the cells that differ are written. User data an operation writes with plain SQL is
+//! staged with the values its statement returned. When nothing differs the transaction rolls
 //! back and nothing is published. Otherwise the Write commits, applies the same rows to the
 //! Catalog and publishes one Change before it releases the writer.
 //! The lock order is always the writer, then the Catalog.
@@ -9,12 +9,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use serde_json::{Map, Value};
+use sqlx::Row as _;
 use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteTransactionManager;
 use sqlx_core::transaction::TransactionManager;
 
-use super::families::{self, Row, Run};
+use super::families::{self, Cell, Column, Kind, Row, Run, Table};
 use super::records::*;
 use super::snapshot::{
     Entry, Playlist, PlaylistFolder, SmartPlaylist, Snapshot, Stats, UserItem, UserState,
@@ -31,6 +31,8 @@ type Shown = (Option<bool>, Option<u8>);
 const PERSIST_ROWS: usize = 256;
 const READ_KEYS: usize = 256;
 const APPLY_RECORDS: usize = 8_192;
+/// Bound parameters per statement, below SQLite's limit.
+const PARAMETERS: usize = 32_000;
 
 /// What a Source scope reports.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,19 +145,18 @@ pub(crate) enum Family {
     Playlist,
 }
 
-/// What the Store holds for a staged row.
+/// What the Store holds for a staged row: its cells, None where it was never read, and its
+/// link runs.
 #[derive(Clone)]
 struct Stored {
-    columns: Map<String, Value>,
-    details: Option<Map<String, Value>>,
-    runs: Vec<(&'static Run, Vec<i64>)>,
+    cells: Vec<Option<Cell>>,
+    runs: Vec<Vec<i64>>,
 }
 
 impl Stored {
     fn of<R: Row>(record: &R) -> Self {
         Self {
-            columns: record.columns(),
-            details: record.details(),
+            cells: record.cells(),
             runs: record.runs(),
         }
     }
@@ -165,24 +166,21 @@ struct Staged<R> {
     /// The row when this Write first staged it; None for a row this Write inserted.
     before: Option<R>,
     current: Option<R>,
-    /// What the Store holds now. None when the Write did not read the row before staging it.
+    /// What the Store holds now. None once a removal was written.
     stored: Option<Stored>,
-    extras: Map<String, Value>,
-    details: Map<String, Value>,
-    /// The row changed even when its own columns did not: a put carried extras, or the Write
-    /// removed a row it never read.
-    extra: bool,
+    /// The Write removed a row it never read.
+    unread: bool,
     /// Staged since the last flush.
     dirty: bool,
 }
 
 impl<R: PartialEq> Staged<R> {
     fn changed(&self) -> bool {
-        self.extra || self.before != self.current
+        self.unread || self.before != self.current
     }
 }
 
-impl<R: Resident> Staged<R> {
+impl<R: Row> Staged<R> {
     /// When the row changed only in the favorite, rating or plays its source reports: whether
     /// the plays changed. Clients show plays as activity and favorites and ratings as state, so
     /// such a row changes no catalog page.
@@ -196,7 +194,7 @@ impl<R: Resident> Staged<R> {
         };
         let played = (prior.play_count, prior.last_played) != (state.play_count, state.last_played);
         *state = prior.clone();
-        (!self.extra && current == before).then_some(played)
+        (current == before).then_some(played)
     }
 
     /// Whether the favorite or rating the row's source reports changed.
@@ -262,29 +260,6 @@ impl<R: Row> Overlay<R> {
     }
 }
 
-/// A resident family a Write stages.
-pub(crate) trait Resident: Row {
-    const FAMILY: Family;
-    fn overlay<'b>(write: &'b Write<'_>) -> &'b Overlay<Self>;
-    fn overlay_mut<'b>(write: &'b mut Write<'_>) -> &'b mut Overlay<Self>;
-    /// Fills the links of a row read from the Store from its resident record.
-    fn links(&mut self, _snapshot: &Snapshot) {}
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>);
-    /// The source of a resident record, for a removal of a row the Write never read.
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey>;
-    /// Columns the Write keeps consistent: when a track stops being listed, and whether an
-    /// album has a header.
-    fn normalize(&mut self, _before: Option<&Self>, _extras: &Map<String, Value>) {}
-    /// The favorite, rating and plays the row's source reports, for rows that carry them.
-    fn state(&mut self) -> Option<&mut NativeState> {
-        None
-    }
-    /// The row as the user favorites and rates it, with its URI.
-    fn user_item(&self) -> Option<(UserItem, &str)> {
-        None
-    }
-}
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Stage {
     Open,
@@ -294,29 +269,49 @@ enum Stage {
     Done,
 }
 
-/// User data operations name for read-back before the commit.
+/// RETURNING of a user_state statement: the URI, the favorite and rating it holds now, and the
+/// track, album and artist with that URI.
+pub(crate) const STATE_RETURNING: &str = " RETURNING media_uri,favorite,rating,(SELECT track_key FROM tracks WHERE tracks.media_uri=user_state.media_uri),(SELECT album_key FROM albums WHERE albums.media_uri=user_state.media_uri),(SELECT artist_key FROM artists WHERE artists.media_uri=user_state.media_uri)";
+/// The same for a DELETE: the URI holds no state any more.
+pub(crate) const STATE_DELETED: &str = " RETURNING media_uri,NULL,NULL,(SELECT track_key FROM tracks WHERE tracks.media_uri=user_state.media_uri),(SELECT album_key FROM albums WHERE albums.media_uri=user_state.media_uri),(SELECT artist_key FROM artists WHERE artists.media_uri=user_state.media_uri)";
+pub(crate) type StateRow = (
+    String,
+    Option<bool>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
+/// A playlist's header and entries as operations wrote them.
 #[derive(Default)]
-struct Touched {
-    states: BTreeSet<String>,
-    listened: BTreeSet<String>,
-    downloads: BTreeSet<String>,
-    /// Playlists whose header is read back.
-    playlists: BTreeSet<i64>,
-    /// Playlists whose entries are read back.
-    entries: BTreeSet<i64>,
-    /// Entries operations removed and put, by playlist, applied to the resident entries.
-    edits: BTreeMap<i64, (Vec<i64>, Vec<Entry<TrackKey>>)>,
-    smart: BTreeSet<i64>,
-    folders: bool,
+struct PlaylistEdit {
+    /// The header the Store holds now; None inside when it was removed.
+    header: Option<Option<Playlist>>,
+    linked: Option<bool>,
+    removed: Vec<i64>,
+    put: Vec<Entry<TrackKey>>,
 }
 
-/// The resident user data a commit applies.
+/// User data operations wrote, as the Store holds it now.
+#[derive(Default)]
+struct UserEdits {
+    states: BTreeMap<UserItem, (UserState, String)>,
+    listened: BTreeMap<TrackKey, Stats>,
+    downloads: BTreeMap<TrackKey, (bool, String)>,
+    playlists: BTreeMap<i64, PlaylistEdit>,
+    smart: BTreeMap<i64, Option<SmartPlaylist>>,
+    folders: BTreeMap<i64, Option<PlaylistFolder>>,
+}
+
+/// The resident user data a commit applies: what differs from the Catalog.
 #[derive(Default)]
 struct UserChanges {
     states: Vec<(UserItem, UserState, String)>,
     listened: Vec<(TrackKey, Stats)>,
     downloads: Vec<(TrackKey, bool, String)>,
-    playlists: Vec<(i64, Option<Playlist>, bool)>,
+    /// Playlists, and whether more than the link changed, and whether their entries did.
+    playlists: Vec<(i64, Option<Playlist>, bool, bool)>,
     smart: Vec<(i64, Option<SmartPlaylist>)>,
     folders: Option<BTreeMap<i64, PlaylistFolder>>,
 }
@@ -336,13 +331,13 @@ pub(crate) struct Write<'a> {
     catalog: &'a Catalog,
     writer: WriterGuard<'a>,
     // Boxed: the futures of syncs and scans hold a Write, and they nest deeply.
-    sources: Box<Overlay<Source>>,
-    folders: Box<Overlay<Folder>>,
-    artists: Box<Overlay<Artist>>,
-    tags: Box<Overlay<Tag>>,
-    albums: Box<Overlay<Album>>,
-    tracks: Box<Overlay<Track>>,
-    touched: Touched,
+    pub(super) sources: Box<Overlay<Source>>,
+    pub(super) folders: Box<Overlay<Folder>>,
+    pub(super) artists: Box<Overlay<Artist>>,
+    pub(super) tags: Box<Overlay<Tag>>,
+    pub(super) albums: Box<Overlay<Album>>,
+    pub(super) tracks: Box<Overlay<Track>>,
+    edits: UserEdits,
     /// The walk this Write belongs to, when an observation started one.
     pub(super) walk: Option<u64>,
     /// Rows an observation saw, by family and key, with the row's source.
@@ -383,7 +378,7 @@ impl Catalog {
             tags: Box::default(),
             albums: Box::default(),
             tracks: Box::default(),
-            touched: Touched::default(),
+            edits: UserEdits::default(),
             walk: None,
             seen: Vec::new(),
             forgotten: Vec::new(),
@@ -397,9 +392,33 @@ impl Catalog {
     }
 }
 
+/// Rows per statement for rows of `width` parameters.
+fn page_rows(width: usize) -> usize {
+    (PARAMETERS / width.max(1)).clamp(1, PERSIST_ROWS)
+}
+
+/// Runs a statement per page of rows; `sql` builds it for a page's length.
+async fn paged(
+    connection: &mut SqliteConnection,
+    rows: &[Vec<Cell>],
+    sql: impl Fn(usize) -> String,
+) -> LibraryResult<()> {
+    let width = rows.first().map_or(1, Vec::len);
+    for page in rows.chunks(page_rows(width)) {
+        let statement = sql(page.len());
+        families::bind(
+            sqlx::query(sqlx::AssertSqlSafe(statement.as_str())).persistent(false),
+            page.iter().flatten(),
+        )
+        .execute(&mut *connection)
+        .await?;
+    }
+    Ok(())
+}
+
 impl<'a> Write<'a> {
     /// A row by key: staged, read before, or read from the Store now.
-    pub(crate) async fn get<R: Resident>(&mut self, key: i64) -> LibraryResult<Option<R>> {
+    pub(crate) async fn get<R: Row>(&mut self, key: i64) -> LibraryResult<Option<R>> {
         let overlay = R::overlay(self);
         if let Some(known) = overlay.known(key) {
             return Ok(known.cloned());
@@ -407,73 +426,80 @@ impl<'a> Write<'a> {
         if overlay.missing_keys.contains(&key) {
             return Ok(None);
         }
-        let condition = format!("{}.{}=?1", R::TABLE.name, R::TABLE.key);
-        self.read::<R>(&condition, |query| query.bind(key)).await
+        self.read_keys::<R>(&[key]).await?;
+        Ok(R::overlay(self).known(key).flatten().cloned())
     }
 
-    pub(crate) async fn by_natural<R: Resident>(
-        &mut self,
-        natural: &str,
-    ) -> LibraryResult<Option<R>> {
-        let overlay = R::overlay(self);
-        if let Some(&key) = overlay.naturals.get(natural)
-            && let Some(known) = overlay.known(key)
-        {
-            if let Some(record) = known.filter(|record| record.natural() == natural) {
-                return Ok(Some(record.clone()));
-            }
+    pub(crate) async fn by_natural<R: Row>(&mut self, natural: &str) -> LibraryResult<Option<R>> {
+        if let Some(record) = self.natural_known::<R>(natural) {
+            return Ok(Some(record));
         }
-        if overlay.missing_naturals.contains(natural) {
+        if R::overlay(self).missing_naturals.contains(natural) {
             return Ok(None);
         }
-        let condition = format!("{}.{}=?1", R::TABLE.name, R::TABLE.natural);
-        let record = self
-            .read::<R>(&condition, |query| query.bind(natural))
-            .await?;
-        Ok(record.filter(|record| record.natural() == natural))
+        self.read_naturals::<R>(&[natural]).await?;
+        Ok(self.natural_known::<R>(natural))
     }
 
-    pub(crate) async fn by_object<R: Resident>(
+    fn natural_known<R: Row>(&self, natural: &str) -> Option<R> {
+        let overlay = R::overlay(self);
+        let key = overlay.naturals.get(natural)?;
+        overlay
+            .known(*key)
+            .flatten()
+            .filter(|record| record.natural() == natural)
+            .cloned()
+    }
+
+    pub(crate) async fn by_object<R: Row>(
         &mut self,
         source: SourceKey,
         tag: Option<TagKind>,
         object: &str,
     ) -> LibraryResult<Option<R>> {
-        let overlay = R::overlay(self);
-        let identity = (source, tag, object.to_owned());
-        let matches = |record: &R| record.object() == Some((source, tag, object));
-        if let Some(&key) = overlay.objects.get(&identity)
-            && let Some(Some(record)) = overlay.known(key)
-            && matches(record)
-        {
-            return Ok(Some(record.clone()));
+        if let Some(record) = self.object_known::<R>(source, tag, object) {
+            return Ok(Some(record));
         }
-        if overlay.missing_objects.contains(&identity) {
+        let identity = (source, tag, object.to_owned());
+        if R::overlay(self).missing_objects.contains(&identity) {
             return Ok(None);
         }
-        let record = self
-            .read::<R>(R::TABLE.object, |query| {
-                query
-                    .bind(source)
-                    .bind(object)
-                    .bind(tag.map(|kind| kind as i64))
-            })
-            .await?;
-        Ok(record.filter(matches))
+        self.read_objects::<R>(source, tag, &[object]).await?;
+        Ok(self.object_known::<R>(source, tag, object))
+    }
+
+    fn object_known<R: Row>(
+        &self,
+        source: SourceKey,
+        tag: Option<TagKind>,
+        object: &str,
+    ) -> Option<R> {
+        let overlay = R::overlay(self);
+        let key = overlay.objects.get(&(source, tag, object.to_owned()))?;
+        overlay
+            .known(*key)
+            .flatten()
+            .filter(|record| record.object() == Some((source, tag, object)))
+            .cloned()
     }
 
     /// Reads the rows of these keys in one statement per page, so the per-item reads that
     /// follow answer from memory, also for keys the Store holds no row for.
-    pub(crate) async fn read_keys<R: Resident>(&mut self, keys: &[i64]) -> LibraryResult<()> {
-        let condition = format!(
-            "{}.{} IN(SELECT value FROM json_each(?1))",
-            R::TABLE.name,
-            R::TABLE.key
-        );
+    pub(crate) async fn read_keys<R: Row>(&mut self, keys: &[i64]) -> LibraryResult<()> {
+        let table = R::TABLE;
         for page in keys.chunks(READ_KEYS) {
-            let found = self
-                .read_all::<R>(&condition, serde_json::to_string(page)?, None)
-                .await?;
+            let condition = format!(
+                "{}.{} IN({})",
+                table.name,
+                table.key,
+                families::placeholders(1, page.len())
+            );
+            let select = table.select(&condition);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(select.as_str()));
+            for key in page {
+                query = query.bind(*key);
+            }
+            let found = self.fetch::<R>(query).await?;
             let overlay = R::overlay_mut(self);
             for key in page {
                 if !found.contains(key) {
@@ -485,18 +511,21 @@ impl<'a> Write<'a> {
     }
 
     /// Reads the rows of these natural keys, as `read_keys` does.
-    pub(crate) async fn read_naturals<R: Resident>(
-        &mut self,
-        naturals: &[&str],
-    ) -> LibraryResult<()> {
-        let condition = format!(
-            "{}.{} IN(SELECT value FROM json_each(?1))",
-            R::TABLE.name,
-            R::TABLE.natural
-        );
+    pub(crate) async fn read_naturals<R: Row>(&mut self, naturals: &[&str]) -> LibraryResult<()> {
+        let table = R::TABLE;
         for page in naturals.chunks(READ_KEYS) {
-            self.read_all::<R>(&condition, serde_json::to_string(page)?, None)
-                .await?;
+            let condition = format!(
+                "{}.{} IN({})",
+                table.name,
+                table.natural,
+                families::placeholders(1, page.len())
+            );
+            let select = table.select(&condition);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(select.as_str()));
+            for natural in page {
+                query = query.bind(*natural);
+            }
+            self.fetch::<R>(query).await?;
             let overlay = R::overlay_mut(self);
             for natural in page {
                 if !overlay.naturals.contains_key(*natural) {
@@ -508,23 +537,23 @@ impl<'a> Write<'a> {
     }
 
     /// Reads the rows of these object ids of a source, as `read_keys` does.
-    pub(crate) async fn read_objects<R: Resident>(
+    pub(crate) async fn read_objects<R: Row>(
         &mut self,
         source: SourceKey,
         tag: Option<TagKind>,
         objects: &[&str],
     ) -> LibraryResult<()> {
-        let condition = R::TABLE.object.replace(
-            "object_id=?2",
-            "object_id IN(SELECT value FROM json_each(?2))",
-        );
+        let table = R::TABLE;
         for page in objects.chunks(READ_KEYS) {
-            self.read_all::<R>(
-                &condition,
-                serde_json::to_string(page)?,
-                Some((source, tag)),
-            )
-            .await?;
+            let select = table.select(&table.objects(page.len()));
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(select.as_str())).bind(source);
+            for object in page {
+                query = query.bind(*object);
+            }
+            if table.tagged {
+                query = query.bind(tag.map(|kind| kind as i64));
+            }
+            self.fetch::<R>(query).await?;
             let overlay = R::overlay_mut(self);
             for object in page {
                 let identity = (source, tag, (*object).to_owned());
@@ -536,160 +565,103 @@ impl<'a> Write<'a> {
         Ok(())
     }
 
-    /// Reads rows by a condition over a JSON array, remembering each. Returns their keys.
-    async fn read_all<R: Resident>(
-        &mut self,
-        condition: &str,
-        values: String,
-        object: Option<(SourceKey, Option<TagKind>)>,
-    ) -> LibraryResult<HashSet<i64>> {
-        let select = R::TABLE.select(condition);
-        let query = sqlx::query(sqlx::AssertSqlSafe(select.as_str()));
-        let query = match object {
-            Some((source, tag)) => query
-                .bind(source)
-                .bind(values)
-                .bind(tag.map(|kind| kind as i64)),
-            None => query.bind(values),
-        };
+    /// Runs a read and remembers each row it finds that this Write does not know yet. A row
+    /// this Write staged answers from its staged version, so a row that moved away from the
+    /// identity it was found by is not returned for it. Returns the keys found.
+    async fn fetch<R: Row>(&mut self, query: families::Query<'_>) -> LibraryResult<HashSet<i64>> {
         let rows = query.fetch_all(&mut *self.writer).await?;
-        let snapshot = self.catalog.snapshot();
+        let catalog = self.catalog;
+        let snapshot = catalog.snapshot();
         let mut found = HashSet::new();
         for row in rows {
-            let mut record = R::read(&row)?;
-            found.insert(record.key());
-            if R::overlay(self).known(record.key()).is_some() {
+            let key: i64 = row.try_get(0)?;
+            found.insert(key);
+            if R::overlay(self).known(key).is_some() {
                 continue;
             }
-            record.links(&snapshot);
+            let record = R::read(&row, &snapshot)?;
             let overlay = R::overlay_mut(self);
             overlay.remember(&record);
-            overlay.fetched.insert(record.key(), record);
+            overlay.fetched.insert(key, record);
         }
         Ok(found)
     }
 
-    /// Reads one row. A row this Write staged answers from its staged version, so a row that
-    /// moved away from the identity it was found by is not returned for it.
-    async fn read<R: Resident>(
-        &mut self,
-        condition: &str,
-        bind: impl FnOnce(
-            sqlx::query::Query<'_, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
-        )
-            -> sqlx::query::Query<'_, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
-    ) -> LibraryResult<Option<R>> {
-        let select = R::TABLE.select(condition);
-        let row = bind(sqlx::query(sqlx::AssertSqlSafe(select.as_str())))
-            .fetch_optional(&mut *self.writer)
-            .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let mut record = R::read(&row)?;
-        if let Some(known) = R::overlay(self).known(record.key()) {
-            return Ok(known.cloned());
-        }
-        record.links(&self.catalog.snapshot());
-        let overlay = R::overlay_mut(self);
-        overlay.remember(&record);
-        overlay.fetched.insert(record.key(), record.clone());
-        Ok(Some(record))
-    }
-
     /// Whether this Write staged a row of the family.
-    pub(crate) fn staged<R: Resident>(&self) -> bool {
+    pub(crate) fn staged<R: Row>(&self) -> bool {
         !R::overlay(self).order.is_empty()
     }
 
-    /// Inserts new rows at once, so they get SQLite's keys through RETURNING. Extras carry
-    /// columns a row does not hold; for tracks they go to the details row.
-    pub(crate) async fn insert<R: Resident>(
-        &mut self,
-        rows: Vec<(R, Map<String, Value>)>,
-    ) -> LibraryResult<Vec<R>> {
+    /// Inserts new rows at once, so they get SQLite's keys through RETURNING. Their details and
+    /// links are written with the next flush.
+    pub(crate) async fn insert<R: Row>(&mut self, mut rows: Vec<R>) -> LibraryResult<Vec<R>> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
         self.flush().await?;
         let table = R::TABLE;
-        let rows = rows
-            .into_iter()
-            .map(|(mut record, extras)| {
-                record.normalize(None, &extras);
-                (record, extras)
-            })
-            .collect::<Vec<_>>();
-        let input = rows
-            .iter()
-            .map(|(record, extras)| {
-                let mut columns = record.columns();
-                if table.details.is_none() {
-                    columns.extend(extras.clone());
-                }
-                Value::Object(columns)
-            })
-            .collect::<Vec<_>>();
+        let own = table.columns.len();
+        for record in &mut rows {
+            record.normalize(None);
+        }
+        let cells = rows.iter().map(R::cells).collect::<Vec<_>>();
+        let mut groups = Vec::<(u64, Vec<usize>)>::new();
+        for (index, row) in cells.iter().enumerate() {
+            let mask = mask(&row[..own]);
+            match groups.iter_mut().find(|(known, _)| *known == mask) {
+                Some((_, indices)) => indices.push(index),
+                None => groups.push((mask, vec![index])),
+            }
+        }
         let mut keys = HashMap::new();
-        for page in input.chunks(PERSIST_ROWS) {
-            let inserted: Vec<(i64, String)> =
-                sqlx::query_as(sqlx::AssertSqlSafe(&*families::statements(table).insert))
-                    .bind(Value::Array(page.to_vec()).to_string())
-                    .fetch_all(&mut *self.writer)
-                    .await?;
-            keys.extend(inserted.into_iter().map(|(key, natural)| (natural, key)));
+        for (mask, indices) in groups {
+            let columns = masked(table.columns, mask);
+            for page in indices.chunks(page_rows(columns.len())) {
+                let statement = table.insert(&columns, page.len());
+                let inserted = families::bind(
+                    sqlx::query(sqlx::AssertSqlSafe(statement.as_str())).persistent(false),
+                    page.iter()
+                        .flat_map(|index| cells[*index][..own].iter().flatten()),
+                )
+                .fetch_all(&mut *self.writer)
+                .await?;
+                for row in inserted {
+                    keys.insert(row.try_get::<String, _>(1)?, row.try_get::<i64, _>(0)?);
+                }
+            }
         }
         let mut records = Vec::with_capacity(rows.len());
-        let mut details = Vec::new();
-        let mut links = BTreeMap::<(&'static str, &'static str), Vec<Value>>::new();
-        for (mut record, extras) in rows {
+        for (mut record, mut cells) in rows.into_iter().zip(cells) {
             let key = *keys.get(record.natural()).ok_or_else(|| {
                 LibraryError::InvalidStore(format!("{} insert returned no key", table.name))
             })?;
             record.set_key(key);
-            if let Some(mut row) = record.details() {
-                row.retain(|_, value| !value.is_null());
-                row.extend(extras);
-                if !row.is_empty() {
-                    row.insert(table.key.into(), key.into());
-                    details.push(Value::Object(row));
+            // The details row and the links do not exist yet.
+            if let Some(details) = table.details {
+                for (cell, column) in cells[own..].iter_mut().zip(details.columns) {
+                    *cell = (column.kind == Kind::Read).then_some(Cell::Null);
                 }
             }
-            for (run, items) in record.runs() {
-                links
-                    .entry((run.table, run.owner))
-                    .or_default()
-                    .extend(link_rows(run, key, &items));
-            }
-            let stored = Stored::of(&record);
-            self.stage(record.clone(), None, Some(stored), Map::new(), Map::new());
-            R::overlay_mut(self)
-                .rows
-                .get_mut(&key)
-                .expect("the row was staged")
-                .dirty = false;
+            let stored = Stored {
+                cells,
+                runs: vec![Vec::new(); table.runs.len()],
+            };
+            self.stage(record.clone(), None, Some(stored));
             records.push(record);
-        }
-        if let Some(table) = table.details {
-            persist_details(&mut self.writer, table, details).await?;
-        }
-        for ((table, owner), rows) in links {
-            execute(&mut self.writer, &families::run_insert(table, owner), rows).await?;
         }
         Ok(records)
     }
 
-    /// Stages a changed row. Extras carry columns the row does not hold; for tracks they go to
-    /// the details row. A row equal to the known one stages nothing.
-    pub(crate) fn put<R: Resident>(&mut self, mut record: R, extras: Map<String, Value>) {
+    /// Stages a changed row. A row equal to the known one stages nothing.
+    pub(crate) fn put<R: Row>(&mut self, mut record: R) {
         let key = record.key();
         let overlay = R::overlay(self);
         let previous = match overlay.rows.get(&key) {
             Some(staged) => staged.current.clone(),
             None => overlay.fetched.get(&key).cloned(),
         };
-        record.normalize(previous.as_ref(), &extras);
-        if previous.as_ref() == Some(&record) && extras.is_empty() {
+        record.normalize(previous.as_ref());
+        if previous.as_ref() == Some(&record) {
             return;
         }
         let overlay = R::overlay_mut(self);
@@ -700,15 +672,10 @@ impl<'a> Write<'a> {
             let stored = before.as_ref().map(Stored::of);
             (before, stored)
         };
-        let (row_extras, details) = if R::TABLE.details.is_some() {
-            (Map::new(), extras)
-        } else {
-            (extras, Map::new())
-        };
-        self.stage(record, before, stored, row_extras, details);
+        self.stage(record, before, stored);
     }
 
-    pub(crate) fn remove<R: Resident>(&mut self, key: i64) {
+    pub(crate) fn remove<R: Row>(&mut self, key: i64) {
         self.dirty = true;
         let overlay = R::overlay_mut(self);
         if let Some(staged) = overlay.rows.get_mut(&key) {
@@ -723,30 +690,20 @@ impl<'a> Write<'a> {
             Staged {
                 stored: Some(before.as_ref().map_or(
                     Stored {
-                        columns: Map::new(),
-                        details: None,
+                        cells: Vec::new(),
                         runs: Vec::new(),
                     },
                     Stored::of,
                 )),
-                extra: before.is_none(),
+                unread: before.is_none(),
                 before,
                 current: None,
-                extras: Map::new(),
-                details: Map::new(),
                 dirty: true,
             },
         );
     }
 
-    fn stage<R: Resident>(
-        &mut self,
-        record: R,
-        before: Option<R>,
-        stored: Option<Stored>,
-        extras: Map<String, Value>,
-        details: Map<String, Value>,
-    ) {
+    fn stage<R: Row>(&mut self, record: R, before: Option<R>, stored: Option<Stored>) {
         self.dirty = true;
         let overlay = R::overlay_mut(self);
         let key = record.key();
@@ -754,10 +711,7 @@ impl<'a> Write<'a> {
         overlay.fetched.remove(&key);
         match overlay.rows.get_mut(&key) {
             Some(staged) => {
-                staged.extra |= !extras.is_empty() || !details.is_empty();
                 staged.current = Some(record);
-                staged.extras.extend(extras);
-                staged.details.extend(details);
                 staged.dirty = true;
             }
             None => {
@@ -768,9 +722,7 @@ impl<'a> Write<'a> {
                         before,
                         current: Some(record),
                         stored,
-                        extra: !extras.is_empty() || !details.is_empty(),
-                        extras,
-                        details,
+                        unread: false,
                         dirty: true,
                     },
                 );
@@ -780,7 +732,7 @@ impl<'a> Write<'a> {
 
     /// Records that an observation saw a row. A walk keeps it as seen; a write outside a walk
     /// keeps every open walk of the row's source from changing it.
-    pub(crate) fn see<R: Resident>(&mut self, record: &R) {
+    pub(crate) fn see<R: Row>(&mut self, record: &R) {
         if let Some(source) = record.source() {
             self.seen.push((R::FAMILY, record.key(), source));
         }
@@ -834,7 +786,7 @@ impl<'a> Write<'a> {
             complete: false,
             freshness: None,
         };
-        Ok(self.insert(vec![(source, Map::new())]).await?.remove(0).key)
+        Ok(self.insert(vec![source]).await?.remove(0).key)
     }
 
     pub(crate) fn rekey(&mut self, old: TrackKey, new: TrackKey) {
@@ -861,57 +813,149 @@ impl<'a> Write<'a> {
         self.reload = true;
     }
 
-    /// Names a media URI whose favorite or rating plain SQL may have changed.
-    pub(crate) fn touch_state(&mut self, uri: &str) {
-        self.touched.states.insert(uri.to_owned());
+    /// Stages the favorites and ratings user_state statements returned with STATE_RETURNING
+    /// or STATE_DELETED.
+    pub(crate) fn set_states(&mut self, rows: Vec<StateRow>) {
+        for (uri, favorite, rating, track, album, artist) in rows {
+            let state = user_state(favorite, rating);
+            for item in [
+                track.map(UserItem::Track),
+                album.map(UserItem::Album),
+                artist.map(UserItem::Artist),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.edits.states.insert(item, (state, uri.clone()));
+            }
+        }
     }
 
-    /// Names a media URI whose listens or carried-over counts plain SQL may have changed.
-    pub(crate) fn touch_listened(&mut self, uri: &str) {
-        self.touched.listened.insert(uri.to_owned());
+    /// The plays, skips and last play of a track, with what this Write staged.
+    pub(crate) fn stats(&self, key: TrackKey) -> Stats {
+        self.edits
+            .listened
+            .get(&key)
+            .copied()
+            .unwrap_or_else(|| self.catalog.snapshot().listened(key))
     }
 
-    /// Names a media URI whose downloaded copy plain SQL may have added or removed.
-    pub(crate) fn touch_download(&mut self, uri: &str) {
-        self.touched.downloads.insert(uri.to_owned());
+    /// Stages a track's plays, skips and last play.
+    pub(crate) fn listened(&mut self, key: TrackKey, stats: Stats) {
+        self.edits.listened.insert(key, stats);
     }
 
-    /// Names a playlist whose header plain SQL may have changed, added or removed.
-    pub(crate) fn touch_playlist(&mut self, key: i64) {
-        self.touched.playlists.insert(key);
+    /// Counts the plays of the tracks with these URIs again from their listens and carried-over
+    /// counts. Imports and identity moves change those with plain SQL.
+    pub(crate) async fn recount(&mut self, uris: &[&str]) -> LibraryResult<()> {
+        for page in uris.chunks(READ_KEYS) {
+            let sql = listened_sql(&format!(
+                "track.media_uri IN({})",
+                families::placeholders(1, page.len())
+            ));
+            let mut query = sqlx::query_as::<_, (i64, i64, i64, Option<i64>)>(sqlx::AssertSqlSafe(
+                sql.as_str(),
+            ));
+            for uri in page {
+                query = query.bind(*uri);
+            }
+            for (key, plays, skips, last) in query.fetch_all(self.connection().await?).await? {
+                self.listened(TrackKey::from_raw(key), Stats::listened(plays, skips, last));
+            }
+        }
+        Ok(())
     }
 
-    /// Names a playlist whose entries plain SQL replaced; they are read back before the commit.
-    pub(crate) fn touch_playlist_entries(&mut self, key: i64) {
-        self.touched.entries.insert(key);
+    /// Reads whether the tracks with these URIs have a downloaded copy after plain SQL changed
+    /// their download rows.
+    pub(crate) async fn read_downloads(&mut self, uris: &[&str]) -> LibraryResult<()> {
+        for page in uris.chunks(READ_KEYS) {
+            let sql = format!(
+                "SELECT track.track_key,EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=track.media_uri),track.media_uri FROM tracks track WHERE track.media_uri IN({})",
+                families::placeholders(1, page.len())
+            );
+            let mut query =
+                sqlx::query_as::<_, (i64, bool, String)>(sqlx::AssertSqlSafe(sql.as_str()));
+            for uri in page {
+                query = query.bind(*uri);
+            }
+            for (key, downloaded, uri) in query.fetch_all(self.connection().await?).await? {
+                self.edits
+                    .downloads
+                    .insert(TrackKey::from_raw(key), (downloaded, uri));
+            }
+        }
+        Ok(())
+    }
+
+    /// Stages a playlist header a statement returned with PLAYLIST_COLUMNS.
+    pub(crate) fn put_playlist(&mut self, row: PlaylistRow) {
+        let header = playlist(row, Vec::new());
+        let edit = self.edits.playlists.entry(header.key).or_default();
+        edit.linked = None;
+        edit.header = Some(Some(header));
+    }
+
+    pub(crate) fn remove_playlist(&mut self, key: i64) {
+        self.edits.playlists.entry(key).or_default().header = Some(None);
+    }
+
+    /// A playlist was linked to a file or unlinked.
+    pub(crate) fn link_playlist(&mut self, key: i64, linked: bool) {
+        self.edits.playlists.entry(key).or_default().linked = Some(linked);
     }
 
     /// Entries plain SQL inserted into a playlist or gave another rank or track.
     pub(crate) fn put_entries(&mut self, playlist: i64, entries: Vec<Entry<TrackKey>>) {
         if !entries.is_empty() {
-            let edits = self.touched.edits.entry(playlist).or_default();
-            edits.1.extend(entries);
+            let edit = self.edits.playlists.entry(playlist).or_default();
+            edit.removed
+                .retain(|key| !entries.iter().any(|entry| entry.key == *key));
+            edit.put
+                .retain(|put| !entries.iter().any(|entry| entry.key == put.key));
+            edit.put.extend(entries);
         }
     }
 
     /// Entries plain SQL removed from a playlist.
     pub(crate) fn remove_entries(&mut self, playlist: i64, keys: Vec<i64>) {
         if !keys.is_empty() {
-            let edits = self.touched.edits.entry(playlist).or_default();
-            edits.0.extend(keys);
+            let edit = self.edits.playlists.entry(playlist).or_default();
+            edit.put.retain(|entry| !keys.contains(&entry.key));
+            edit.removed.extend(keys);
         }
     }
 
-    pub(crate) fn touch_smart_playlist(&mut self, key: i64) {
-        self.touched.smart.insert(key);
+    /// Stages a smart playlist a statement returned with SMART_COLUMNS.
+    pub(crate) fn put_smart(&mut self, row: SmartRow) {
+        let smart = smart_playlist(row);
+        self.edits.smart.insert(smart.key, Some(smart));
     }
 
-    pub(crate) fn touch_playlist_folders(&mut self) {
-        self.touched.folders = true;
+    pub(crate) fn remove_smart(&mut self, key: i64) {
+        self.edits.smart.insert(key, None);
+    }
+
+    /// Stages a playlist folder a statement returned with FOLDER_COLUMNS.
+    pub(crate) fn put_folder(&mut self, (key, object, name, smart): FolderRow) {
+        self.edits.folders.insert(
+            key,
+            Some(PlaylistFolder {
+                key,
+                object,
+                name,
+                smart,
+            }),
+        );
+    }
+
+    pub(crate) fn remove_folder(&mut self, key: i64) {
+        self.edits.folders.insert(key, None);
     }
 
     /// The open transaction for plain SQL and Store reads. Staged rows are written first, so
-    /// the SQL sees them. Plain SQL never writes a resident table; it touches user data instead.
+    /// the SQL sees them. Plain SQL never writes a resident column of a resident table; it
+    /// stages what it changed of user data instead.
     pub(crate) async fn connection(&mut self) -> LibraryResult<&mut SqliteConnection> {
         self.flush().await?;
         Ok(&mut self.writer)
@@ -930,43 +974,51 @@ impl<'a> Write<'a> {
         persist(&mut self.albums, &mut writes);
         persist(&mut self.tracks, &mut writes);
         let connection = &mut *self.writer;
-        for (table, rows) in writes.updates {
-            let columns = table
-                .columns
-                .iter()
-                .filter(|column| rows.iter().any(|row| row.get(column.name).is_some()))
-                .collect::<Vec<_>>();
-            if !columns.is_empty() {
-                execute(connection, &families::update(table, &columns), rows).await?;
-            }
+        for group in &writes.updates {
+            let ((table, details), (_, mask)) = (group.statement, group.key);
+            let columns = masked(table.columns, mask);
+            let sql = |count| {
+                if details {
+                    table.upsert(&columns, count)
+                } else {
+                    table.update(&columns, count)
+                }
+            };
+            paged(connection, &group.rows, sql).await?;
         }
-        persist_details(connection, &families::TRACK_DETAILS, writes.details).await?;
-        for ((table, owner), rows) in writes.run_deletes {
-            execute(connection, &families::run_delete(table, owner), rows).await?;
+        for group in &writes.run_deletes {
+            paged(connection, &group.rows, |count| {
+                group.statement.delete(count)
+            })
+            .await?;
         }
-        for ((table, owner), rows) in writes.run_inserts {
-            execute(connection, &families::run_insert(table, owner), rows).await?;
+        for group in &writes.run_inserts {
+            paged(connection, &group.rows, |count| {
+                group.statement.insert(count)
+            })
+            .await?;
         }
-        for (table, keys) in writes.deletes.into_iter().rev() {
+        for group in writes.deletes.iter().rev() {
+            let (table, keys) = (group.statement, &group.rows);
             // Links name their targets without a foreign key, so they go with them.
-            let targets = match table.name {
+            let roles = match table.name {
                 "artists" => Some("0,1"),
                 "tags" => Some("2,3"),
                 "folders" => Some("4"),
                 _ => None,
             };
-            if let Some(roles) = targets {
-                let input = Value::Array(keys.clone()).to_string();
+            if let Some(roles) = roles {
                 for links in ["track_links", "album_links"] {
-                    sqlx::query(sqlx::AssertSqlSafe(format!(
-                        "DELETE FROM {links} WHERE role IN({roles}) AND target IN(SELECT value FROM json_each(?1))"
-                    )))
-                    .bind(&input)
-                    .execute(&mut *connection)
+                    paged(connection, keys, |count| {
+                        format!(
+                            "DELETE FROM {links} WHERE role IN({roles}) AND target IN({})",
+                            families::placeholders(1, count)
+                        )
+                    })
                     .await?;
                 }
             }
-            execute(connection, &families::statements(table).delete, keys).await?;
+            paged(connection, keys, |count| table.delete(count)).await?;
         }
         Ok(())
     }
@@ -978,7 +1030,8 @@ impl<'a> Write<'a> {
         let user = if self.reload {
             UserChanges::default()
         } else {
-            self.user_changes().await?
+            self.attached().await?;
+            self.user_changes()
         };
         let mut scopes = self.scopes(&user);
         if self.reload && !scopes.contains(&Scope::Reload) {
@@ -989,8 +1042,7 @@ impl<'a> Write<'a> {
         } else {
             self.shown_before(&user)
         };
-        // A commit of rows memory does not hold leaves the Catalog, its revision and the image
-        // as they are.
+        // A commit of rows memory does not hold leaves the Catalog and the image as they are.
         let resident =
             self.reload || self.changed_rows() || !self.forgotten.is_empty() || !user.is_empty();
         if scopes.is_empty() && !self.kept && !resident {
@@ -1008,11 +1060,11 @@ impl<'a> Write<'a> {
         self.stage = Stage::Committed;
         let revision = if self.reload {
             self.catalog.require_reload();
-            self.catalog.reload_under(&mut self.writer).await?
+            Some(self.catalog.reload_under(&mut self.writer).await?)
         } else if resident {
-            self.apply(user)
+            Some(self.apply(user))
         } else {
-            self.catalog.snapshot().revision
+            None
         };
         self.stage = Stage::Done;
         if resident {
@@ -1026,6 +1078,7 @@ impl<'a> Write<'a> {
         if scopes.is_empty() {
             return Ok(None);
         }
+        let revision = revision.unwrap_or_else(|| self.catalog.next_revision());
         let change = Arc::new(Change { revision, scopes });
         self.catalog.publish(Arc::clone(&change));
         Ok(Some(change))
@@ -1034,7 +1087,7 @@ impl<'a> Write<'a> {
     /// The tracks, albums and artists whose shown favorite or rating this Write may change,
     /// with their URIs and what they show before it applies.
     fn shown_before(&self, user: &UserChanges) -> Vec<(UserItem, String, Shown)> {
-        fn rated<R: Resident>(overlay: &Overlay<R>, items: &mut BTreeMap<UserItem, String>) {
+        fn rated<R: Row>(overlay: &Overlay<R>, items: &mut BTreeMap<UserItem, String>) {
             for key in &overlay.order {
                 let staged = &overlay.rows[key];
                 if staged.rated()
@@ -1086,10 +1139,12 @@ impl<'a> Write<'a> {
         (!items.is_empty()).then_some(Scope::State { items })
     }
 
-    /// Reads back the user data operations touched, and the user data of rows this Write
-    /// inserted or moved to another URI, and keeps what differs from the Catalog.
-    async fn user_changes(&mut self) -> LibraryResult<UserChanges> {
-        let mut touched = std::mem::take(&mut self.touched);
+    /// Rows this Write inserted or moved to another URI or identity take the user data the
+    /// Store holds for them: favorites and ratings by URI, plays by URI and identity, and
+    /// downloads by URI.
+    async fn attached(&mut self) -> LibraryResult<()> {
+        let mut states = BTreeSet::new();
+        let mut tracks = BTreeSet::new();
         for key in &self.tracks.order {
             let staged = &self.tracks.rows[key];
             if let Some(current) = &staged.current
@@ -1099,9 +1154,8 @@ impl<'a> Write<'a> {
                         || before.object != current.object
                 })
             {
-                touched.states.insert(current.uri.clone());
-                touched.listened.insert(current.uri.clone());
-                touched.downloads.insert(current.uri.clone());
+                states.insert(current.uri.clone());
+                tracks.insert(current.uri.clone());
             }
         }
         for uri in self
@@ -1116,82 +1170,98 @@ impl<'a> Write<'a> {
                     .filter_map(|key| moved(&self.artists.rows[key], |artist| &artist.uri)),
             )
         {
-            touched.states.insert(uri.clone());
+            states.insert(uri.clone());
         }
-        let connection = &mut *self.writer;
-        let catalog = self.catalog;
-        let mut changes = UserChanges::default();
-        if !touched.states.is_empty() {
-            for (item, state, uri) in read_states(connection, &touched.states).await? {
-                // A row this Write inserted holds no user state yet.
-                let resident = catalog.snapshot().user_state(item).unwrap_or_default();
-                if resident != state {
-                    changes.states.push((item, state, uri));
-                }
-            }
+        if !states.is_empty() {
+            let rows = read_states(&mut self.writer, &states).await?;
+            self.set_states(rows);
         }
-        if !touched.listened.is_empty() {
-            for (key, stats) in read_listened(connection, &touched.listened).await? {
-                if catalog.snapshot().listened(key) != stats {
-                    changes.listened.push((key, stats));
-                }
-            }
+        if !tracks.is_empty() {
+            let uris = tracks.iter().map(String::as_str).collect::<Vec<_>>();
+            self.recount(&uris).await?;
+            self.read_downloads(&uris).await?;
         }
-        if !touched.downloads.is_empty() {
-            for (key, downloaded, uri) in read_downloads(connection, &touched.downloads).await? {
-                if catalog.snapshot().downloaded(key).unwrap_or(false) != downloaded {
-                    changes.downloads.push((key, downloaded, uri));
+        Ok(())
+    }
+
+    /// What the staged user data changes of the Catalog.
+    fn user_changes(&mut self) -> UserChanges {
+        let edits = std::mem::take(&mut self.edits);
+        let snapshot = self.catalog.snapshot();
+        let mut changes = UserChanges {
+            states: edits
+                .states
+                .into_iter()
+                .filter(|(item, (state, _))| {
+                    snapshot.user_state(*item).unwrap_or_default() != *state
+                })
+                .map(|(item, (state, uri))| (item, state, uri))
+                .collect(),
+            listened: edits
+                .listened
+                .into_iter()
+                .filter(|(key, stats)| snapshot.listened(*key) != *stats)
+                .collect(),
+            downloads: edits
+                .downloads
+                .into_iter()
+                .filter(|(key, (downloaded, _))| {
+                    snapshot.downloaded(*key).unwrap_or(false) != *downloaded
+                })
+                .map(|(key, (downloaded, uri))| (key, downloaded, uri))
+                .collect(),
+            ..UserChanges::default()
+        };
+        for (key, edit) in edits.playlists {
+            let resident = snapshot.playlist(key);
+            let mut playlist = match edit.header {
+                Some(None) => None,
+                Some(Some(mut header)) => {
+                    header.entries = resident
+                        .as_ref()
+                        .map(|resident| resident.entries.clone())
+                        .unwrap_or_default();
+                    Some(header)
                 }
-            }
-        }
-        let playlists = touched
-            .playlists
-            .iter()
-            .chain(&touched.entries)
-            .chain(touched.edits.keys())
-            .copied()
-            .collect::<BTreeSet<_>>();
-        for key in &playlists {
-            let resident = catalog.snapshot().playlist(*key);
-            let mut playlist = match &resident {
-                Some(resident)
-                    if !touched.playlists.contains(key) && !touched.entries.contains(key) =>
-                {
-                    Some(resident.clone())
-                }
-                _ => read_playlist(connection, *key).await?,
+                None => resident.clone(),
             };
             if let Some(playlist) = &mut playlist {
-                // A playlist memory does not hold yet comes with its entries from the Store.
-                match &resident {
-                    Some(resident) if !touched.entries.contains(key) => {
-                        playlist.entries.clone_from(&resident.entries);
-                        if let Some((removed, put)) = touched.edits.remove(key) {
-                            edit_entries(&mut playlist.entries, &removed, put);
-                        }
-                    }
-                    _ => playlist.entries = read_entries(connection, *key).await?,
+                if let Some(linked) = edit.linked {
+                    playlist.linked = linked;
                 }
+                edit_entries(&mut playlist.entries, &edit.removed, edit.put);
             }
             if playlist != resident {
                 let entries = playlist.as_ref().map(|playlist| &playlist.entries)
                     != resident.as_ref().map(|playlist| &playlist.entries);
-                changes.playlists.push((*key, playlist, entries));
+                let shown = match (&playlist, &resident) {
+                    (Some(next), Some(before)) => {
+                        Playlist {
+                            linked: before.linked,
+                            ..next.clone()
+                        } != *before
+                    }
+                    _ => true,
+                };
+                changes.playlists.push((key, playlist, shown, entries));
             }
         }
-        for key in &touched.smart {
-            let smart = read_smart_playlist(connection, *key).await?;
-            if smart.as_ref() != catalog.snapshot().smart_playlists.get(key) {
-                changes.smart.push((*key, smart));
-            }
+        changes.smart = edits
+            .smart
+            .into_iter()
+            .filter(|(key, smart)| smart.as_ref() != snapshot.smart_playlists.get(key))
+            .collect();
+        let mut folders = snapshot.playlist_folders.clone();
+        for (key, folder) in edits.folders {
+            match folder {
+                Some(folder) => folders.insert(key, folder),
+                None => folders.remove(&key),
+            };
         }
-        if touched.folders {
-            let folders = read_playlist_folders(connection).await?;
-            if folders != catalog.snapshot().playlist_folders {
-                changes.folders = Some(folders);
-            }
+        if folders != snapshot.playlist_folders {
+            changes.folders = Some(folders);
         }
-        Ok(changes)
+        changes
     }
 
     /// Whether a staged row differs from the Store, published or not.
@@ -1313,7 +1383,11 @@ impl<'a> Write<'a> {
             });
         }
         let mut listed = false;
-        for (key, playlist, entries) in &user.playlists {
+        for (key, playlist, shown, entries) in &user.playlists {
+            // The link is read by the playlist file feature, not shown.
+            if !shown {
+                continue;
+            }
             let resident = snapshot.playlist(*key);
             listed |= playlist.is_none()
                 || resident.is_none()
@@ -1375,7 +1449,7 @@ impl<'a> Write<'a> {
         for (key, downloaded, _) in user.downloads {
             applier.snapshot().set_downloaded(key, downloaded);
         }
-        for (key, playlist, _) in user.playlists {
+        for (key, playlist, _, _) in user.playlists {
             match playlist {
                 Some(playlist) => applier.snapshot().put_playlist(&playlist),
                 None => applier.snapshot().remove_playlist(key),
@@ -1431,7 +1505,7 @@ fn moved<R: Clone>(staged: &Staged<R>, uri: impl Fn(&R) -> &String) -> Option<&S
         .then(|| uri(current))
 }
 
-fn collect_sources<R: Resident>(
+fn collect_sources<R: Row>(
     overlay: &Overlay<R>,
     snapshot: &Snapshot,
     sources: &mut BTreeSet<SourceKey>,
@@ -1454,33 +1528,56 @@ fn collect_sources<R: Resident>(
     }
 }
 
-/// The statements one flush runs, grouped so each runs once per page of rows.
-#[derive(Default)]
-struct Writes {
-    updates: Vec<(&'static families::Table, Vec<Value>)>,
-    details: Vec<Value>,
-    run_deletes: BTreeMap<(&'static str, &'static str), Vec<Value>>,
-    run_inserts: BTreeMap<(&'static str, &'static str), Vec<Value>>,
-    deletes: Vec<(&'static families::Table, Vec<Value>)>,
-}
-
-fn link_rows(run: &Run, owner: i64, items: &[i64]) -> Vec<Value> {
-    items
+/// The columns whose bits a mask sets.
+fn masked(columns: &'static [Column], mask: u64) -> Vec<&'static Column> {
+    columns
         .iter()
         .enumerate()
-        .map(|(position, target)| serde_json::json!([owner, run.role, position, target]))
+        .filter(|(index, _)| mask & (1 << index) != 0)
+        .map(|(_, column)| column)
         .collect()
 }
 
-/// The columns of `next` that differ from `stored`.
-fn differing(stored: Option<&Map<String, Value>>, next: Map<String, Value>) -> Map<String, Value> {
-    next.into_iter()
-        .filter(|(name, value)| stored.and_then(|stored| stored.get(name)) != Some(value))
-        .collect()
+/// The bits of the cells that are set.
+fn mask(cells: &[Option<Cell>]) -> u64 {
+    cells
+        .iter()
+        .enumerate()
+        .filter(|(_, cell)| cell.is_some())
+        .fold(0, |mask, (index, _)| mask | 1 << index)
 }
 
-fn persist<R: Resident>(overlay: &mut Overlay<R>, writes: &mut Writes) {
+/// The statements one flush runs, grouped so each runs once per page of rows. A row is the key
+/// cell, then the changed cells.
+#[derive(Default)]
+struct Writes {
+    /// Rows by table and the columns they change; the flag marks a details table.
+    updates: Vec<Group<(&'static str, u64), (&'static Table, bool)>>,
+    run_deletes: Vec<Group<(&'static str, &'static str), &'static Run>>,
+    run_inserts: Vec<Group<(&'static str, &'static str), &'static Run>>,
+    deletes: Vec<Group<&'static str, &'static Table>>,
+}
+
+struct Group<K, V> {
+    key: K,
+    statement: V,
+    rows: Vec<Vec<Cell>>,
+}
+
+fn group<K: PartialEq, V>(groups: &mut Vec<Group<K, V>>, key: K, statement: V, row: Vec<Cell>) {
+    match groups.iter_mut().find(|group| group.key == key) {
+        Some(group) => group.rows.push(row),
+        None => groups.push(Group {
+            key,
+            statement,
+            rows: vec![row],
+        }),
+    }
+}
+
+fn persist<R: Row>(overlay: &mut Overlay<R>, writes: &mut Writes) {
     let table = R::TABLE;
+    let own = table.columns.len();
     for key in &overlay.order {
         let staged = overlay.rows.get_mut(key).expect("staged keys have rows");
         if !std::mem::take(&mut staged.dirty) {
@@ -1488,108 +1585,83 @@ fn persist<R: Resident>(overlay: &mut Overlay<R>, writes: &mut Writes) {
         }
         let Some(record) = &staged.current else {
             if staged.stored.take().is_some() {
-                let key = Value::from(*key);
-                match writes
-                    .deletes
-                    .iter_mut()
-                    .find(|(known, _)| std::ptr::eq(*known, table))
-                {
-                    Some((_, keys)) => keys.push(key),
-                    None => writes.deletes.push((table, vec![key])),
-                }
+                group(
+                    &mut writes.deletes,
+                    table.name,
+                    table,
+                    vec![Cell::Int(*key)],
+                );
             }
             continue;
         };
         let stored = staged.stored.take();
-        let mut columns = differing(
-            stored.as_ref().map(|stored| &stored.columns),
-            record.columns(),
-        );
-        columns.extend(std::mem::take(&mut staged.extras));
-        if !columns.is_empty() {
-            columns.insert(table.key.into(), Value::from(*key));
-            match writes
-                .updates
-                .iter_mut()
-                .find(|(known, _)| std::ptr::eq(*known, table))
-            {
-                Some((_, rows)) => rows.push(Value::Object(columns)),
-                None => writes.updates.push((table, vec![Value::Object(columns)])),
+        let known = |index: usize| stored.as_ref().and_then(|stored| stored.cells.get(index));
+        let cells = record.cells();
+        for (range, details) in [(0..own, None), (own..cells.len(), table.details)] {
+            let start = range.start;
+            let changed = range
+                .filter(|index| {
+                    cells[*index].is_some()
+                        && known(*index).is_none_or(|known| *known != cells[*index])
+                })
+                .collect::<Vec<_>>();
+            if changed.is_empty() {
+                continue;
             }
-        }
-        if let Some(details) = record.details() {
-            let mut details = differing(
-                stored.as_ref().and_then(|stored| stored.details.as_ref()),
-                details,
+            let mask = changed
+                .iter()
+                .fold(0, |mask, index| mask | 1 << (index - start));
+            let mut row = vec![Cell::Int(*key)];
+            row.extend(changed.iter().filter_map(|index| cells[*index].clone()));
+            let target = details.unwrap_or(table);
+            group(
+                &mut writes.updates,
+                (target.name, mask),
+                (target, details.is_some()),
+                row,
             );
-            details.extend(std::mem::take(&mut staged.details));
-            if !details.is_empty() {
-                details.insert(table.key.into(), Value::from(*key));
-                writes.details.push(Value::Object(details));
-            }
         }
-        for (run, items) in record.runs() {
-            let known = stored.as_ref().map(|stored| {
-                stored
-                    .runs
-                    .iter()
-                    .find(|(other, _)| std::ptr::eq(*other, run))
-                    .map_or(&[][..], |(_, items)| items.as_slice())
-            });
+        let runs = record.runs();
+        for (index, (run, items)) in table.runs.iter().zip(&runs).enumerate() {
+            let known = stored
+                .as_ref()
+                .map(|stored| stored.runs.get(index).map_or(&[][..], Vec::as_slice));
             if known == Some(items.as_slice()) {
                 continue;
             }
             if known.is_none_or(|known| !known.is_empty()) {
-                writes
-                    .run_deletes
-                    .entry((run.table, run.owner))
-                    .or_default()
-                    .push(serde_json::json!([key, run.role]));
+                group(
+                    &mut writes.run_deletes,
+                    (run.table, run.owner),
+                    run,
+                    vec![Cell::Int(*key), Cell::Int(run.role)],
+                );
             }
-            writes
-                .run_inserts
-                .entry((run.table, run.owner))
-                .or_default()
-                .extend(link_rows(run, *key, &items));
+            for (position, target) in items.iter().enumerate() {
+                group(
+                    &mut writes.run_inserts,
+                    (run.table, run.owner),
+                    run,
+                    vec![
+                        Cell::Int(*key),
+                        Cell::Int(run.role),
+                        Cell::Int(position as i64),
+                        Cell::Int(*target),
+                    ],
+                );
+            }
         }
-        staged.stored = Some(Stored::of(record));
+        // A cell never read or set stays unknown, so a later stage writes it when it sets it.
+        let known = stored.map(|stored| stored.cells).unwrap_or_default();
+        staged.stored = Some(Stored {
+            cells: cells
+                .into_iter()
+                .enumerate()
+                .map(|(index, cell)| cell.or_else(|| known.get(index).cloned().flatten()))
+                .collect(),
+            runs,
+        });
     }
-}
-
-async fn persist_details(
-    connection: &mut SqliteConnection,
-    table: &'static families::Table,
-    rows: Vec<Value>,
-) -> LibraryResult<()> {
-    if rows.is_empty() {
-        return Ok(());
-    }
-    execute(
-        connection,
-        &families::statements(table).insert,
-        rows.clone(),
-    )
-    .await?;
-    let columns = table
-        .columns
-        .iter()
-        .filter(|column| rows.iter().any(|row| row.get(column.name).is_some()))
-        .collect::<Vec<_>>();
-    execute(connection, &families::update(table, &columns), rows).await
-}
-
-async fn execute(
-    connection: &mut SqliteConnection,
-    statement: &str,
-    rows: Vec<Value>,
-) -> LibraryResult<()> {
-    for page in rows.chunks(PERSIST_ROWS) {
-        sqlx::query(sqlx::AssertSqlSafe(statement.to_owned()))
-            .bind(Value::Array(page.to_vec()).to_string())
-            .execute(&mut *connection)
-            .await?;
-    }
-    Ok(())
 }
 
 struct Applier<'a> {
@@ -1609,7 +1681,7 @@ impl Applier<'_> {
             .get_or_insert_with(|| self.catalog.snapshot_mut())
     }
 
-    fn family<R: Resident>(&mut self, overlay: &Overlay<R>) {
+    fn family<R: Row>(&mut self, overlay: &Overlay<R>) {
         for key in &overlay.order {
             R::apply(self.snapshot(), *key, overlay.rows[key].current.as_ref());
         }
@@ -1620,27 +1692,18 @@ impl Applier<'_> {
 async fn read_states(
     connection: &mut SqliteConnection,
     uris: &BTreeSet<String>,
-) -> LibraryResult<Vec<(UserItem, UserState, String)>> {
+) -> LibraryResult<Vec<StateRow>> {
     let mut states = Vec::new();
     for page in uris.iter().collect::<Vec<_>>().chunks(READ_KEYS) {
-        let rows: Vec<(String, i64, String, Option<bool>, Option<i64>)> = sqlx::query_as(
-            "WITH input AS(SELECT value uri FROM json_each(?1)),
-             items AS(SELECT 'track' kind,track_key key,media_uri FROM tracks WHERE media_uri IN(SELECT uri FROM input)
-                UNION ALL SELECT 'album',album_key,media_uri FROM albums WHERE media_uri IN(SELECT uri FROM input)
-                UNION ALL SELECT 'artist',artist_key,media_uri FROM artists WHERE media_uri IN(SELECT uri FROM input))
-             SELECT items.kind,items.key,items.media_uri,state.favorite,state.rating FROM items LEFT JOIN user_state state USING(media_uri)",
-        )
-        .bind(serde_json::to_string(page)?)
-        .fetch_all(&mut *connection)
-        .await?;
-        for (kind, key, uri, favorite, rating) in rows {
-            let item = match kind.as_str() {
-                "track" => UserItem::Track(key),
-                "album" => UserItem::Album(key),
-                _ => UserItem::Artist(key),
-            };
-            states.push((item, user_state(favorite, rating), uri));
+        let sql = format!(
+            "WITH input(uri) AS(VALUES {}) SELECT input.uri,state.favorite,state.rating,(SELECT track_key FROM tracks WHERE media_uri=input.uri),(SELECT album_key FROM albums WHERE media_uri=input.uri),(SELECT artist_key FROM artists WHERE media_uri=input.uri) FROM input LEFT JOIN user_state state ON state.media_uri=input.uri",
+            vec!["(?)"; page.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, StateRow>(sqlx::AssertSqlSafe(sql.as_str()));
+        for uri in page {
+            query = query.bind(uri.as_str());
         }
+        states.extend(query.fetch_all(&mut *connection).await?);
     }
     Ok(states)
 }
@@ -1668,45 +1731,9 @@ pub(crate) fn listened_sql(condition: &str) -> String {
     )
 }
 
-async fn read_listened(
-    connection: &mut SqliteConnection,
-    uris: &BTreeSet<String>,
-) -> LibraryResult<Vec<(TrackKey, Stats)>> {
-    let mut stats = Vec::new();
-    for page in uris.iter().collect::<Vec<_>>().chunks(READ_KEYS) {
-        let rows: Vec<(i64, i64, i64, Option<i64>)> = sqlx::query_as(sqlx::AssertSqlSafe(
-            listened_sql("track.media_uri IN(SELECT value FROM json_each(?1))"),
-        ))
-        .bind(serde_json::to_string(page)?)
-        .fetch_all(&mut *connection)
-        .await?;
-        stats.extend(rows.into_iter().map(|(key, plays, skips, last)| {
-            (TrackKey::from_raw(key), Stats::listened(plays, skips, last))
-        }));
-    }
-    Ok(stats)
-}
-
-async fn read_downloads(
-    connection: &mut SqliteConnection,
-    uris: &BTreeSet<String>,
-) -> LibraryResult<Vec<(TrackKey, bool, String)>> {
-    let mut downloads = Vec::new();
-    for page in uris.iter().collect::<Vec<_>>().chunks(READ_KEYS) {
-        let rows: Vec<(i64, bool, String)> = sqlx::query_as("SELECT track.track_key,EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=track.media_uri),track.media_uri FROM tracks track WHERE track.media_uri IN(SELECT value FROM json_each(?1))")
-            .bind(serde_json::to_string(page)?)
-            .fetch_all(&mut *connection)
-            .await?;
-        downloads.extend(
-            rows.into_iter()
-                .map(|(key, downloaded, uri)| (TrackKey::from_raw(key), downloaded, uri)),
-        );
-    }
-    Ok(downloads)
-}
-
-/// The playlist header columns the Catalog holds, in load order.
-pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),playlist_folder_key,created_at,writable,metadata_writable";
+/// The playlist header columns the Catalog holds, in load order. Statements that write a
+/// header return them.
+pub(crate) const PLAYLIST_COLUMNS: &str = "playlist_key,source_key,owner='source',indexed,coalesce(name,''),playlist_folder_key,created_at,writable,metadata_writable,EXISTS(SELECT 1 FROM playlist_file_links link WHERE link.playlist_key=playlists.playlist_key)";
 
 pub(crate) type PlaylistRow = (
     i64,
@@ -1718,11 +1745,22 @@ pub(crate) type PlaylistRow = (
     i64,
     bool,
     bool,
+    bool,
 );
 
 pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playlist {
-    let (key, source, owned_by_source, indexed, name, folder, created, writable, metadata_writable) =
-        row;
+    let (
+        key,
+        source,
+        owned_by_source,
+        indexed,
+        name,
+        folder,
+        created,
+        writable,
+        metadata_writable,
+        linked,
+    ) = row;
     Playlist {
         key,
         source: source.map(SourceKey::from_raw),
@@ -1733,42 +1771,9 @@ pub(crate) fn playlist(row: PlaylistRow, entries: Vec<Entry<TrackKey>>) -> Playl
         created,
         writable,
         metadata_writable,
+        linked,
         entries,
     }
-}
-
-/// A playlist header; its entries are read apart.
-async fn read_playlist(
-    connection: &mut SqliteConnection,
-    key: i64,
-) -> LibraryResult<Option<Playlist>> {
-    let row: Option<PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {PLAYLIST_COLUMNS} FROM playlists WHERE playlist_key=?1"
-    )))
-    .bind(key)
-    .fetch_optional(&mut *connection)
-    .await?;
-    Ok(row.map(|row| playlist(row, Vec::new())))
-}
-
-async fn read_entries(
-    connection: &mut SqliteConnection,
-    playlist: i64,
-) -> LibraryResult<Vec<Entry<TrackKey>>> {
-    let entries: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
-        "SELECT playlist_entry_key,rank,track_key FROM playlist_entries WHERE playlist_key=?1 ORDER BY rank,playlist_entry_key",
-    )
-    .bind(playlist)
-    .fetch_all(&mut *connection)
-    .await?;
-    Ok(entries
-        .into_iter()
-        .map(|(key, rank, track)| Entry {
-            key,
-            rank: rank.into(),
-            track: TrackKey::from_raw(track),
-        })
-        .collect())
 }
 
 /// Applies removed and put entries to entries in rank order. A put entry replaces the one
@@ -1786,12 +1791,13 @@ fn edit_entries(entries: &mut Vec<Entry<TrackKey>>, removed: &[i64], put: Vec<En
     }
 }
 
+/// The smart playlist columns the Catalog holds. Statements that write one return them.
 pub(crate) const SMART_COLUMNS: &str =
     "smart_playlist_key,name,playlist_folder_key,position,definition_json";
 
-pub(crate) fn smart_playlist(
-    (key, name, folder, position, definition): (i64, String, Option<i64>, i64, String),
-) -> SmartPlaylist {
+pub(crate) type SmartRow = (i64, String, Option<i64>, i64, String);
+
+pub(crate) fn smart_playlist((key, name, folder, position, definition): SmartRow) -> SmartPlaylist {
     SmartPlaylist {
         key,
         name,
@@ -1804,231 +1810,10 @@ pub(crate) fn smart_playlist(
     }
 }
 
-async fn read_smart_playlist(
-    connection: &mut SqliteConnection,
-    key: i64,
-) -> LibraryResult<Option<SmartPlaylist>> {
-    let row: Option<(i64, String, Option<i64>, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(
-        format!("SELECT {SMART_COLUMNS} FROM smart_playlists WHERE smart_playlist_key=?1"),
-    ))
-    .bind(key)
-    .fetch_optional(&mut *connection)
-    .await?;
-    Ok(row.map(smart_playlist))
-}
+/// The playlist folder columns the Catalog holds. Statements that write one return them.
+pub(crate) const FOLDER_COLUMNS: &str = "folder_key,object_id,name,smart";
 
-pub(crate) async fn read_playlist_folders(
-    connection: &mut SqliteConnection,
-) -> LibraryResult<BTreeMap<i64, PlaylistFolder>> {
-    let rows: Vec<(i64, String, String, bool)> =
-        sqlx::query_as("SELECT folder_key,object_id,name,smart FROM playlist_folders")
-            .fetch_all(&mut *connection)
-            .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(key, object, name, smart)| {
-            (
-                key,
-                PlaylistFolder {
-                    key,
-                    object,
-                    name,
-                    smart,
-                },
-            )
-        })
-        .collect())
-}
-
-macro_rules! overlay {
-    ($field:ident) => {
-        fn overlay<'b>(write: &'b Write<'_>) -> &'b Overlay<Self> {
-            &write.$field
-        }
-
-        fn overlay_mut<'b>(write: &'b mut Write<'_>) -> &'b mut Overlay<Self> {
-            &mut write.$field
-        }
-    };
-}
-
-impl Resident for Source {
-    const FAMILY: Family = Family::Source;
-    overlay!(sources);
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_source(record.clone()),
-            None => snapshot.remove_source(SourceKey::from_raw(key)),
-        }
-    }
-
-    fn resident_source(_snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        Some(SourceKey::from_raw(key))
-    }
-}
-
-impl Resident for Track {
-    const FAMILY: Family = Family::Track;
-    overlay!(tracks);
-
-    fn links(&mut self, snapshot: &Snapshot) {
-        if let Some(record) = snapshot.tracks.get(self.key.raw()) {
-            let links = snapshot.track_links(record);
-            self.artists = links.artists;
-            self.album_artists = links.album_artists;
-            self.tags = links.tags;
-            self.folders = links.folders;
-        }
-    }
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_track(record),
-            None => snapshot.remove_track(TrackKey::from_raw(key)),
-        }
-    }
-
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        use super::snapshot::Packed;
-        snapshot
-            .tracks
-            .get(key)
-            .and_then(|record| snapshot.source_key(record.source()))
-    }
-
-    /// A track is hidden from when it stops being listed, or from its insertion when nothing
-    /// lists it, so the expiry can forget it.
-    fn normalize(&mut self, before: Option<&Self>, _extras: &Map<String, Value>) {
-        self.hidden_since = if self.indexed {
-            None
-        } else {
-            match before {
-                Some(before) if !before.indexed => before.hidden_since,
-                Some(_) => None,
-                None => self.hidden_since,
-            }
-            .or_else(|| Some(chrono::Utc::now().timestamp()))
-        };
-    }
-
-    fn state(&mut self) -> Option<&mut NativeState> {
-        Some(&mut self.state)
-    }
-
-    fn user_item(&self) -> Option<(UserItem, &str)> {
-        Some((UserItem::Track(self.key.raw()), &self.uri))
-    }
-}
-
-impl Resident for Album {
-    const FAMILY: Family = Family::Album;
-    overlay!(albums);
-
-    fn links(&mut self, snapshot: &Snapshot) {
-        if let Some(record) = snapshot.albums.get(self.key.raw()) {
-            (self.artists, self.genres) = snapshot.album_links(record);
-        }
-    }
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_album(record),
-            None => snapshot.remove_album(crate::AlbumKey::from_raw(key)),
-        }
-    }
-
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        use super::snapshot::Packed;
-        snapshot
-            .albums
-            .get(key)
-            .and_then(|record| snapshot.source_key(record.source()))
-    }
-
-    fn normalize(&mut self, _before: Option<&Self>, extras: &Map<String, Value>) {
-        if let Some(input) = extras.get("input_metadata") {
-            self.input = !input.is_null();
-        }
-    }
-
-    fn state(&mut self) -> Option<&mut NativeState> {
-        Some(&mut self.state)
-    }
-
-    fn user_item(&self) -> Option<(UserItem, &str)> {
-        Some((UserItem::Album(self.key.raw()), &self.uri))
-    }
-}
-
-impl Resident for Artist {
-    const FAMILY: Family = Family::Artist;
-    overlay!(artists);
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_artist(record),
-            None => snapshot.remove_artist(crate::ArtistKey::from_raw(key)),
-        }
-    }
-
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        use super::snapshot::Packed;
-        snapshot
-            .artists
-            .get(key)
-            .and_then(|record| snapshot.source_key(record.source()))
-    }
-
-    fn state(&mut self) -> Option<&mut NativeState> {
-        Some(&mut self.state)
-    }
-
-    fn user_item(&self) -> Option<(UserItem, &str)> {
-        Some((UserItem::Artist(self.key.raw()), &self.uri))
-    }
-}
-
-impl Resident for Tag {
-    const FAMILY: Family = Family::Tag;
-    overlay!(tags);
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_tag(record),
-            None => snapshot.remove_tag(key),
-        }
-    }
-
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        use super::snapshot::Packed;
-        snapshot
-            .tags
-            .get(key)
-            .and_then(|record| snapshot.source_key(record.source()))
-    }
-}
-
-impl Resident for Folder {
-    const FAMILY: Family = Family::Folder;
-    overlay!(folders);
-
-    fn apply(snapshot: &mut Snapshot, key: i64, record: Option<&Self>) {
-        match record {
-            Some(record) => snapshot.put_folder(record),
-            None => snapshot.remove_folder(crate::FolderKey::from_raw(key)),
-        }
-    }
-
-    fn resident_source(snapshot: &Snapshot, key: i64) -> Option<SourceKey> {
-        use super::snapshot::Packed;
-        snapshot
-            .folders
-            .get(key)
-            .and_then(|record| snapshot.source_key(record.source()))
-    }
-}
-
+pub(crate) type FolderRow = (i64, String, String, bool);
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2082,17 +1867,14 @@ mod tests {
 
         let mut write = catalog.write().await.unwrap();
         let source = write
-            .insert(vec![(
-                Source {
-                    key: SourceKey::from_raw(0),
-                    object: SOURCE.into(),
-                    kind: Some("local".into()),
-                    name: "Local".into(),
-                    complete: false,
-                    freshness: None,
-                },
-                Map::new(),
-            )])
+            .insert(vec![Source {
+                key: SourceKey::from_raw(0),
+                object: SOURCE.into(),
+                kind: Some("local".into()),
+                name: "Local".into(),
+                complete: false,
+                freshness: None,
+            }])
             .await
             .unwrap()
             .remove(0);
@@ -2104,7 +1886,7 @@ mod tests {
                 name: name.into(),
                 ..ArtistMetadata::default()
             };
-            artists.push((artist, Map::new()));
+            artists.push(artist);
         }
         let artists = write.insert(artists).await.unwrap();
         let mut tags = Vec::new();
@@ -2115,7 +1897,7 @@ mod tests {
                 name: name.into(),
                 sort_text: None,
             };
-            tags.push((tag, Map::new()));
+            tags.push(tag);
         }
         let tags = write.insert(tags).await.unwrap();
         let mut folder = Folder::new(source.key, "music", uri("folder", "music"));
@@ -2125,11 +1907,7 @@ mod tests {
             name: Some("Music".into()),
             sort_text: None,
         };
-        let folder = write
-            .insert(vec![(folder, Map::new())])
-            .await
-            .unwrap()
-            .remove(0);
+        let folder = write.insert(vec![folder]).await.unwrap().remove(0);
         let mut album = Album::new(source.key, "first", uri("album", "first"));
         album.indexed = true;
         album.facts = AlbumFacts {
@@ -2142,11 +1920,7 @@ mod tests {
         album.artists = vec![artists[0].key];
         album.genres = vec![tags[0].key];
         album.binding = Some(br#"[{"image":{"kind":"album"}}]"#.to_vec());
-        let album = write
-            .insert(vec![(album, Map::new())])
-            .await
-            .unwrap()
-            .remove(0);
+        let album = write.insert(vec![album]).await.unwrap().remove(0);
         let mut inserted = Vec::new();
         for (object, title) in [("t1", "One"), ("t2", "Two"), ("t3", "Three")] {
             let mut record = track(source.key, object, title);
@@ -2160,10 +1934,8 @@ mod tests {
                 record.binding = Some(br#"[{"image":{"kind":"embedded"}}]"#.to_vec());
                 record.cue_path = Some("/music/album.cue".into());
             }
-            inserted.push((
-                record,
-                super::super::merge::extras([("metadata", serde_json::json!({"bpm_source":1}))]),
-            ));
+            record.writes.metadata = Some(serde_json::json!({"bpm_source":1}));
+            inserted.push(record);
         }
         let tracks = write.insert(inserted).await.unwrap();
         assert_eq!(
@@ -2198,7 +1970,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(unchanged.artists, tracks[0].artists);
-        write.put(unchanged, Map::new());
+        write.put(unchanged);
         assert!(write.commit().await.unwrap().is_none());
 
         let mut write = catalog.write().await.unwrap();
@@ -2210,14 +1982,14 @@ mod tests {
         one.facts.title = "One (edit)".into();
         one.artists = vec![artists[1].key];
         one.binding = None;
-        write.put(one.clone(), Map::new());
+        write.put(one.clone());
         let mut two = write
             .get::<Track>(tracks[1].key.raw())
             .await
             .unwrap()
             .unwrap();
         two.indexed = false;
-        write.put(two, Map::new());
+        write.put(two);
         write.remove::<Track>(tracks[2].key.raw());
         assert!(
             write
@@ -2240,7 +2012,7 @@ mod tests {
                 .unwrap();
         assert!(hidden.is_some());
 
-        // User data written with plain SQL and read back by key.
+        // User data written with plain SQL and staged from what its statements returned.
         let target = FavoriteTarget::Track(one.uri.clone());
         catalog.set_favorite(&target, true, true).await.unwrap();
         catalog.set_rating(&target, Some(8), false).await.unwrap();
