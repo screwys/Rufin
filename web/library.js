@@ -23,6 +23,7 @@ import {
   showMenu,
   playRadio,
   goToMenu,
+  mediaLinks,
 } from "./menus.js";
 
 import { renderSources, sources } from "./sources.js";
@@ -484,8 +485,8 @@ async function setFavorite(rows, kind = "track") {
   if (route === "favorites") await loadView();
 }
 
-async function goToMedia(row, kind, anchor) {
-  const metadata = await api(`/media?${new URLSearchParams({ uri: row.uri })}`);
+async function goToMedia(row, kind, anchor, rowKind = "track") {
+  const metadata = await mediaLinks(row, rowKind);
   const links =
     kind === "albums" ? [metadata.album].filter(Boolean) : metadata.artists;
   const open = (link) => openMediaLink(kind, link);
@@ -891,7 +892,7 @@ function bindCards(host) {
       run(() => {
         if (action === "open") return open();
         if (action === "artists" || action === "albums")
-          return goToMedia(row, action, button);
+          return goToMedia(row, action, button, kind);
         if (action === "favorite") return setFavorite([row], kind);
         if (action === "radio") return playRadio(row, kind);
         if (action === "menu") return menu(button);

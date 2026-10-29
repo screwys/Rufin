@@ -38,6 +38,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 
 use rufin_core::runtime::ProductHandles;
+use rufin_core::settings::{LibraryField, LibraryListKey, available_sort_fields};
 
 type Error = (StatusCode, axum::Json<Value>);
 
@@ -639,35 +640,50 @@ fn boolean(parameters: &HashMap<String, String>, key: &str) -> Result<bool, Erro
         .unwrap_or(Ok(false))
 }
 
-fn track_sort(value: &str) -> Result<library::CatalogSort, Error> {
-    use library::CatalogSort::*;
-    match value {
-        "position" => Ok(Position),
-        "title" => Ok(Title),
-        "track_number" => Ok(TrackNumber),
-        "artist" => Ok(Artist),
-        "album_artist" => Ok(AlbumArtist),
-        "album" => Ok(Album),
-        "year" => Ok(Year),
-        "release_date" => Ok(ReleaseDate),
-        "date_added" => Ok(DateAdded),
-        "last_played" => Ok(LastPlayed),
-        "play_count" => Ok(PlayCount),
-        "rating" => Ok(UserRating),
-        "genre" => Ok(Genre),
-        "bpm" => Ok(Bpm),
-        "duration" => Ok(Duration),
-        "favorite" => Ok(Favorite),
-        _ => Err(bad_request("Unknown track sort")),
-    }
-}
+/// The `sort` names help.json documents, and the field each one names.
+const SORTS: [(&str, LibraryField); 18] = [
+    ("position", LibraryField::RowIndex),
+    ("title", LibraryField::Title),
+    ("track_number", LibraryField::TrackNumber),
+    ("artist", LibraryField::Artist),
+    ("album_artist", LibraryField::AlbumArtist),
+    ("album", LibraryField::Album),
+    ("year", LibraryField::Year),
+    ("release_date", LibraryField::ReleaseDate),
+    ("date_added", LibraryField::DateAdded),
+    ("last_played", LibraryField::LastPlayed),
+    ("play_count", LibraryField::PlayCount),
+    ("rating", LibraryField::UserRating),
+    ("genre", LibraryField::Genre),
+    ("bpm", LibraryField::Bpm),
+    ("duration", LibraryField::Duration),
+    ("favorite", LibraryField::Favorite),
+    ("track_count", LibraryField::SongCount),
+    ("album_count", LibraryField::AlbumCount),
+];
 
-fn smart_track_sort(value: Option<&str>) -> Result<Option<library::CatalogSort>, Error> {
-    match value {
-        None | Some("definition") => Ok(None),
-        Some("position") => Err(bad_request("Unknown smart playlist track sort")),
-        Some(value) => track_sort(value).map(Some),
-    }
+/// Reads `sort` as a documented name for a field `key` sorts by. None is the list's own order:
+/// no `sort`, or the name help.json gives a playlist's saved order.
+fn sort(
+    parameters: &HashMap<String, String>,
+    key: LibraryListKey,
+) -> Result<Option<library::CatalogSort>, Error> {
+    let own = match key {
+        LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => Some("position"),
+        LibraryListKey::SmartPlaylistTracks => Some("definition"),
+        _ => None,
+    };
+    let Some(name) = parameters
+        .get("sort")
+        .filter(|name| Some(name.as_str()) != own)
+    else {
+        return Ok(None);
+    };
+    SORTS
+        .iter()
+        .find(|(api, field)| api == name && available_sort_fields(key).contains(field))
+        .map(|(_, field)| Some(field.catalog_sort()))
+        .ok_or_else(|| bad_request("Unknown sort"))
 }
 
 fn track_json(
@@ -675,7 +691,7 @@ fn track_json(
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"links":track.links});
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }
@@ -684,7 +700,7 @@ fn track_json(
 fn track_row_json(row: &library::TrackView) -> Value {
     json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.metadata.title,"artist":row.metadata.artist,"album":row.metadata.album,
         "duration_ms":row.metadata.duration_millis,"track_number":row.metadata.track_number,"disc_number":row.metadata.disc_number,
-        "year":row.metadata.year,"favorite":row.state.favorite,"rating":row.state.rating})
+        "year":row.metadata.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"links":row.links})
 }
 
 fn playback_json(

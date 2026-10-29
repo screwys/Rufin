@@ -50,18 +50,18 @@ pub(super) async fn track_query(
         },
         _ => return Err(bad_request("Unknown media kind")),
     };
+    let list = match scope {
+        Collection::Album(_) => LibraryListKey::AlbumDetailTracks,
+        Collection::Artist { .. } => LibraryListKey::ArtistTracks,
+        Collection::Genre(_) => LibraryListKey::GenreTracks,
+        Collection::Playlist(_) => LibraryListKey::PlaylistTracks,
+        Collection::Smart { .. } => LibraryListKey::SmartPlaylistTracks,
+        _ => LibraryListKey::Tracks,
+    };
     let mut query = MemberRead::new(scope);
     query.folder = folder;
     query.filter = parameters.get("q").cloned().unwrap_or_default();
-    query.sort = if matches!(query.collection, Collection::Smart { .. }) {
-        smart_track_sort(parameters.get("sort").map(String::as_str))?
-    } else {
-        parameters
-            .get("sort")
-            .map(String::as_str)
-            .map(track_sort)
-            .transpose()?
-    };
+    query.sort = sort(parameters, list)?;
     query.descending = boolean(parameters, "descending")?;
     query.favorites_only = boolean(parameters, "favorites")?;
     Ok(query)
@@ -320,20 +320,7 @@ pub(super) async fn artists_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let sort = match parameters
-        .get("sort")
-        .map(String::as_str)
-        .unwrap_or("title")
-    {
-        "title" => library::CatalogSort::Title,
-        "album_count" => library::CatalogSort::AlbumCount,
-        "track_count" => library::CatalogSort::TrackCount,
-        "last_played" => library::CatalogSort::LastPlayed,
-        "play_count" => library::CatalogSort::PlayCount,
-        "rating" => library::CatalogSort::UserRating,
-        "favorite" => library::CatalogSort::Favorite,
-        _ => return Err(bad_request("Unknown artist sort")),
-    };
+    let sort = sort(parameters, LibraryListKey::Artists)?.unwrap_or(CatalogSort::Title);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
     let query = library::ListRead {
@@ -342,7 +329,7 @@ pub(super) async fn artists_data(
             album_artist: boolean(parameters, "album_artists")?,
         },
         source: Some(source),
-        sort: sort,
+        sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -427,24 +414,14 @@ pub(super) async fn smart_playlists_data(
     } else {
         (None, None)
     };
-    let sort = match parameters
-        .get("sort")
-        .map(String::as_str)
-        .unwrap_or("position")
-    {
-        "position" => library::CatalogSort::Position,
-        "title" => library::CatalogSort::Title,
-        "track_count" => library::CatalogSort::TrackCount,
-        "duration" => library::CatalogSort::Duration,
-        _ => return Err(bad_request("Unknown smart playlist sort")),
-    };
+    let sort = sort(parameters, LibraryListKey::SmartPlaylists)?.unwrap_or(CatalogSort::Position);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
     let query = library::ListRead {
         playlist_scope: Default::default(),
         kind: library::ListKind::SmartPlaylists { now: now() },
         source: (source).into(),
-        sort: sort,
+        sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -524,29 +501,12 @@ pub(super) async fn albums_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let sort = match parameters
-        .get("sort")
-        .map(String::as_str)
-        .unwrap_or("title")
-    {
-        "title" => CatalogSort::Title,
-        "album_artist" => CatalogSort::AlbumArtist,
-        "year" => CatalogSort::Year,
-        "release_date" => CatalogSort::ReleaseDate,
-        "date_added" => CatalogSort::DateAdded,
-        "last_played" => CatalogSort::LastPlayed,
-        "play_count" => CatalogSort::PlayCount,
-        "rating" => CatalogSort::UserRating,
-        "track_count" => CatalogSort::TrackCount,
-        "duration" => CatalogSort::Duration,
-        "favorite" => CatalogSort::Favorite,
-        _ => return Err(bad_request("Unknown album sort")),
-    };
+    let sort = sort(parameters, LibraryListKey::Albums)?.unwrap_or(CatalogSort::Title);
     let query = library::ListRead {
         playlist_scope: Default::default(),
         kind: library::ListKind::Albums,
         source: Some(source),
-        sort: sort,
+        sort,
         folder: folder,
         filter: (filter).to_string(),
         descending: descending,

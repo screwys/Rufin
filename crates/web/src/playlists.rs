@@ -324,24 +324,14 @@ pub(super) async fn list_data(
     } else {
         (None, None)
     };
-    let sort = match parameters
-        .get("sort")
-        .map(String::as_str)
-        .unwrap_or("position")
-    {
-        "position" => CatalogSort::Position,
-        "title" => CatalogSort::Title,
-        "track_count" => CatalogSort::TrackCount,
-        "duration" => CatalogSort::Duration,
-        _ => return Err(bad_request("Unknown playlist sort")),
-    };
+    let sort = sort(parameters, LibraryListKey::Playlists)?.unwrap_or(CatalogSort::Position);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let query = library::ListRead {
         playlist_scope: Default::default(),
         kind: library::ListKind::Playlists,
         source: (source).into(),
-        sort: sort,
+        sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -406,7 +396,12 @@ pub(super) async fn entries_data(
         None
     };
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"name":name,"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.track.media_uri,"title":row.track.metadata.title,"artist":row.track.metadata.artist,"album":row.track.metadata.album,"favorite":row.track.state.favorite,"duration_ms":row.track.metadata.duration_millis})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"name":name,"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| {
+            let mut value = track_row_json(&row.track);
+            value["id"] = json!(row.playlist_entry_key);
+            value["position"] = json!(row.position);
+            value
+        }).collect::<Vec<_>>()}),
     )
 }
 
