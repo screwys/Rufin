@@ -1,5 +1,6 @@
 //! Resident records hold 4-byte string ids into one append-only arena.
-//! Written bytes never move. Replaced strings stay as garbage until the next full load.
+//! Written bytes never move. Replaced strings stay as garbage until the next full load; the
+//! image writer loads again once there is enough of it.
 
 use std::collections::HashMap;
 
@@ -8,7 +9,8 @@ const OFFSET_BITS: u32 = 20;
 const LEN_BITS: u32 = 24;
 const MAX_LEN: usize = (1 << LEN_BITS) - 1;
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(transparent)]
 pub(crate) struct StrId(u32);
 
 impl StrId {
@@ -29,6 +31,8 @@ pub(crate) struct Strings {
     // chunk << 44 | offset << 24 | length
     pub(super) entries: Vec<u64>,
     pub(super) interned: HashMap<u64, StrId>,
+    /// Bytes of replaced strings no record shares.
+    pub(super) garbage: usize,
 }
 
 impl Default for Strings {
@@ -37,6 +41,7 @@ impl Default for Strings {
             chunks: Vec::new(),
             entries: vec![0],
             interned: HashMap::new(),
+            garbage: 0,
         }
     }
 }
@@ -91,8 +96,12 @@ impl Strings {
     /// Keeps the previous id when its text is unchanged, so rewrites leave no garbage.
     pub(crate) fn text(&mut self, previous: StrId, text: &str, intern: bool) -> StrId {
         if previous != StrId::NONE && self.get(previous) == text {
-            previous
-        } else if intern {
+            return previous;
+        }
+        if !intern && previous != StrId::NONE {
+            self.garbage += self.get(previous).len();
+        }
+        if intern {
             self.intern(text)
         } else {
             self.push(text)
@@ -149,7 +158,12 @@ impl Strings {
     pub(crate) fn bytes(&self) -> usize {
         self.chunks.iter().map(Vec::capacity).sum::<usize>()
             + self.entries.capacity() * 8
-            + self.interned.capacity() * 13
+            + super::snapshot::map_bytes(&self.interned)
+    }
+
+    /// Whether replaced strings take a sixteenth of the arena.
+    pub(crate) fn wasteful(&self) -> bool {
+        self.garbage * 16 > self.chunks.iter().map(Vec::len).sum::<usize>()
     }
 
     /// Gives back the unused tail of each chunk and of the entry list.

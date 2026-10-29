@@ -25,6 +25,7 @@ tempfile.workspace = true
 futures-util.workspace = true
 futures-executor = "0.3"
 blake3.workspace = true
+bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }
 md5_digest.workspace = true
 libsqlite3-sys.workspace = true
 percent-encoding.workspace = true

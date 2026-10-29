@@ -5,6 +5,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use bytemuck::{Pod, Zeroable};
+
 use super::records::*;
 use super::strings::{StrId, Strings};
 use crate::tags::TagKind;
@@ -101,7 +103,8 @@ impl UserState {
 }
 
 /// Plays a track's listens and carried-over counts add up to, and the counts its source reports.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct Stats {
     pub(crate) plays: u32,
     pub(crate) skips: u32,
@@ -144,9 +147,12 @@ impl Stats {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Records are plain bytes, so the image stores them as they are in memory. Keys are SQLite
+/// rowids, allocated upward from 1, so they fit in 32 bits.
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct TrackRec {
-    pub(crate) key: i64,
+    pub(crate) key: u32,
     pub(crate) title: StrId,
     pub(crate) artist: StrId,
     pub(crate) album_title: StrId,
@@ -170,11 +176,13 @@ pub(crate) struct TrackRec {
     pub(crate) flags: u16,
     pub(crate) native_rating: u8,
     pub(crate) rating: u8,
+    pub(crate) padding: u16,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct AlbumRec {
-    pub(crate) key: i64,
+    pub(crate) key: u32,
     pub(crate) title: StrId,
     pub(crate) artist: StrId,
     pub(crate) sort: StrId,
@@ -190,30 +198,42 @@ pub(crate) struct AlbumRec {
     pub(crate) rating: u8,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct ArtistRec {
-    pub(crate) key: i64,
+    pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
     pub(crate) source: u16,
     pub(crate) flags: u16,
     pub(crate) native_rating: u8,
     pub(crate) rating: u8,
+    pub(crate) padding: u16,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct TagRec {
-    pub(crate) key: i64,
+    pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
     pub(crate) source: u16,
     pub(crate) flags: u16,
-    pub(crate) kind: TagKind,
+    /// A `TagKind`, as `tags.kind` stores it.
+    pub(crate) kind: u8,
+    pub(crate) padding: [u8; 3],
 }
 
-#[derive(Clone, Copy, Debug)]
+impl TagRec {
+    pub(crate) fn kind(&self) -> TagKind {
+        super::families::tag_kind(i64::from(self.kind))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 pub(crate) struct FolderRec {
-    pub(crate) key: i64,
+    pub(crate) key: u32,
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
     pub(crate) source: u16,
@@ -294,7 +314,7 @@ macro_rules! packed {
     ($($record:ty),*) => {$(
         impl Packed for $record {
             fn key(&self) -> i64 {
-                self.key
+                i64::from(self.key)
             }
 
             fn source(&self) -> u16 {
@@ -320,24 +340,30 @@ packed!(
     PlaylistRec
 );
 
-/// Records in slots, found by key.
+/// Records in slots, found by key. Keys are dense rowids, so the slots are indexed by key.
 pub(crate) struct Family<R> {
     pub(crate) records: Vec<R>,
-    pub(crate) keys: HashMap<i64, u32>,
+    /// Slots by key minus `base`; NONE where no live record has the key.
+    pub(crate) keys: Vec<u32>,
+    pub(crate) base: i64,
+    pub(crate) live: usize,
 }
 
 impl<R> Default for Family<R> {
     fn default() -> Self {
         Self {
             records: Vec::new(),
-            keys: HashMap::new(),
+            keys: Vec::new(),
+            base: 0,
+            live: 0,
         }
     }
 }
 
 impl<R: Packed> Family<R> {
     pub(crate) fn slot(&self, key: i64) -> Option<u32> {
-        self.keys.get(&key).copied()
+        let index = usize::try_from(key.checked_sub(self.base)?).ok()?;
+        self.keys.get(index).copied().filter(|slot| *slot != NONE)
     }
 
     pub(crate) fn get(&self, key: i64) -> Option<&R> {
@@ -357,22 +383,34 @@ impl<R: Packed> Family<R> {
 
     /// Writes a record into its slot, or a new one.
     fn place(&mut self, record: R) -> u32 {
-        match self.keys.get(&record.key()) {
-            Some(&slot) => {
-                self.records[slot as usize] = record;
-                slot
-            }
-            None => {
-                let slot = self.records.len() as u32;
-                self.keys.insert(record.key(), slot);
-                self.records.push(record);
-                slot
-            }
+        if let Some(slot) = self.slot(record.key()) {
+            self.records[slot as usize] = record;
+            return slot;
         }
+        let key = record.key();
+        if self.live == 0 {
+            self.keys.clear();
+            self.base = key;
+        } else if key < self.base {
+            let below = (self.base - key) as usize;
+            self.keys.splice(0..0, std::iter::repeat_n(NONE, below));
+            self.base = key;
+        }
+        let index = (key - self.base) as usize;
+        if index >= self.keys.len() {
+            self.keys.resize(index + 1, NONE);
+        }
+        let slot = self.records.len() as u32;
+        self.keys[index] = slot;
+        self.live += 1;
+        self.records.push(record);
+        slot
     }
 
     fn tombstone(&mut self, key: i64) -> Option<u32> {
-        let slot = self.keys.remove(&key)?;
+        let slot = self.slot(key)?;
+        self.keys[(key - self.base) as usize] = NONE;
+        self.live -= 1;
         *self.records[slot as usize].flags_mut() |= DELETED;
         Some(slot)
     }
@@ -388,7 +426,7 @@ impl<R: Packed> Family<R> {
 
     fn reserve(&mut self, records: usize) {
         self.records.reserve_exact(records);
-        self.keys.reserve(records);
+        self.keys.reserve_exact(records);
     }
 
     fn shrink(&mut self) {
@@ -397,7 +435,7 @@ impl<R: Packed> Family<R> {
     }
 
     fn bytes(&self) -> usize {
-        self.records.capacity() * std::mem::size_of::<R>() + self.keys.capacity() * 13
+        self.records.capacity() * std::mem::size_of::<R>() + self.keys.capacity() * 4
     }
 }
 
@@ -618,7 +656,7 @@ impl Snapshot {
             tags: tags
                 .iter()
                 .filter_map(|slot| self.tags.live(*slot))
-                .map(|tag| (tag.kind, tag.key))
+                .map(|tag| (tag.kind(), i64::from(tag.key)))
                 .collect(),
             folders: Self::keys(&self.folders, folders)
                 .into_iter()
@@ -748,11 +786,24 @@ impl Snapshot {
     }
 
     pub(crate) fn put_album(&mut self, album: &Album) {
-        self.pack_album(album, pictured(album.binding.as_deref()));
+        let facts = &album.facts;
+        self.pack_album(
+            album,
+            pictured(album.binding.as_deref()),
+            release(facts.release_date.as_deref()),
+            added(facts.date_added.as_deref(), album.first_seen),
+        );
     }
 
-    /// Packs a row whose picture the caller decided; the load reads no binding.
-    pub(crate) fn pack_album(&mut self, album: &Album, picture: bool) {
+    /// Packs a row whose picture and dates the caller decided; the load reads no binding and
+    /// parses no date.
+    pub(crate) fn pack_album(
+        &mut self,
+        album: &Album,
+        picture: bool,
+        release: u32,
+        added: Option<i64>,
+    ) {
         let previous = self.albums.get(album.key.raw()).copied();
         let mut items = Self::slots(&self.artists, album.artists.iter().map(|key| key.raw()));
         let artists = items.len().min(usize::from(u16::MAX));
@@ -779,12 +830,12 @@ impl Snapshot {
         let old = |field: fn(&AlbumRec) -> StrId| previous.as_ref().map_or(StrId::NONE, field);
         let strings = &mut self.strings;
         let record = AlbumRec {
-            key: album.key.raw(),
+            key: album.key.raw() as u32,
             title: strings.text(old(|record| record.title), &facts.title, true),
             artist: strings.text(old(|record| record.artist), &facts.artist, true),
             sort: strings.text(old(|record| record.sort), &facts.sort, true),
-            added: optional_u32(added(facts.date_added.as_deref(), album.first_seen)),
-            release: release(facts.release_date.as_deref()),
+            added: optional_u32(added),
+            release,
             edges,
             lens: [artists as u16, genres.len() as u16],
             year: year(facts.year),
@@ -811,7 +862,7 @@ impl Snapshot {
         let old = |field: fn(&ArtistRec) -> StrId| previous.as_ref().map_or(StrId::NONE, field);
         let strings = &mut self.strings;
         let record = ArtistRec {
-            key: artist.key.raw(),
+            key: artist.key.raw() as u32,
             name: strings.text(old(|record| record.name), &artist.metadata.name, true),
             sort: strings.optional(
                 old(|record| record.sort),
@@ -823,6 +874,7 @@ impl Snapshot {
                 | previous.map_or(0, |record| record.flags & (FAVORITE_KNOWN | FAVORITE)),
             native_rating: rating(artist.state.rating),
             rating: previous.map_or(UNRATED, |record| record.rating),
+            padding: 0,
         };
         self.artists.place(record);
     }
@@ -842,7 +894,7 @@ impl Snapshot {
         let old = |field: fn(&TagRec) -> StrId| previous.as_ref().map_or(StrId::NONE, field);
         let strings = &mut self.strings;
         let record = TagRec {
-            key: tag.key,
+            key: tag.key as u32,
             name: strings.text(old(|record| record.name), &tag.metadata.name, true),
             sort: strings.optional(
                 old(|record| record.sort),
@@ -851,7 +903,8 @@ impl Snapshot {
             ),
             source,
             flags: native_flags(tag.indexed, tag.native, picture, &NativeState::default()),
-            kind: tag.kind,
+            kind: tag.kind as u8,
+            padding: [0; 3],
         };
         self.tags.place(record);
     }
@@ -871,7 +924,7 @@ impl Snapshot {
         let old = |field: fn(&FolderRec) -> StrId| previous.as_ref().map_or(StrId::NONE, field);
         let strings = &mut self.strings;
         let record = FolderRec {
-            key: folder.key.raw(),
+            key: folder.key.raw() as u32,
             name: strings.optional(
                 old(|record| record.name),
                 folder.metadata.name.as_deref(),
@@ -1173,7 +1226,7 @@ impl Snapshot {
             + self.artists.bytes()
             + self.tags.bytes()
             + self.folders.bytes()
-            + self.stats.capacity() * 25
+            + map_bytes(&self.stats)
             + self.playlists.bytes()
             + self
                 .playlists
@@ -1191,7 +1244,7 @@ impl Snapshot {
     }
 
     pub(crate) fn track_count(&self) -> usize {
-        self.tracks.keys.len()
+        self.tracks.live
     }
 
     /// Slots of catalog records, removed ones included. Removed slots and the texts and edges
@@ -1206,11 +1259,11 @@ impl Snapshot {
 
     pub(crate) fn removed_slots(&self) -> usize {
         self.record_slots()
-            - self.tracks.keys.len()
-            - self.albums.keys.len()
-            - self.artists.keys.len()
-            - self.tags.keys.len()
-            - self.folders.keys.len()
+            - self.tracks.live
+            - self.albums.live
+            - self.artists.live
+            - self.tags.live
+            - self.folders.live
     }
 
     /// Every live record by key, with references resolved to keys and texts, for comparing two
@@ -1303,7 +1356,7 @@ impl Snapshot {
                         format!(
                             "{} {:?} {:?} {:?} {:?} {}",
                             record.key,
-                            record.kind,
+                            record.kind(),
                             source(record.source),
                             text(record.name),
                             text(record.sort),
@@ -1346,6 +1399,12 @@ impl Snapshot {
                 .collect(),
         }
     }
+}
+
+/// What a hash map allocates: hashbrown keeps one control byte per bucket and buckets at 8/7 of
+/// its capacity.
+pub(crate) fn map_bytes<K, V>(map: &HashMap<K, V>) -> usize {
+    map.capacity() * 8 / 7 * (std::mem::size_of::<(K, V)>() + 1)
 }
 
 /// Writes a run into the edge arena, in place when it fits.
@@ -1447,7 +1506,7 @@ impl Packing<'_> {
         });
         let strings = &mut *self.strings;
         let record = TrackRec {
-            key: input.key,
+            key: input.key as u32,
             title: strings.text(old(|record| record.title), input.title, false),
             artist: strings.text(old(|record| record.artist), input.artist, true),
             album_title: strings.text(old(|record| record.album_title), input.album_title, true),
@@ -1456,7 +1515,7 @@ impl Packing<'_> {
             } else {
                 strings.text(old(|record| record.sort), input.sort, false)
             },
-            comment: strings.optional(old(|record| record.comment), input.comment, false),
+            comment: strings.optional(old(|record| record.comment), input.comment, true),
             format: strings.optional(old(|record| record.format), input.format, true),
             album,
             duration_ms: clamp_u32(input.duration_ms),
@@ -1475,10 +1534,17 @@ impl Packing<'_> {
                 | kept,
             native_rating: rating(input.state.rating),
             rating: previous.map_or(UNRATED, |record| record.rating),
+            padding: 0,
         };
         let slot = self.tracks.place(record);
         let stats = self.stats.entry(slot).or_default();
-        stats.native_plays = optional_u32(input.state.play_count);
+        // A count of zero reads as no count: Jellyfin and Emby report zero for every track.
+        stats.native_plays = optional_u32(
+            input
+                .state
+                .play_count
+                .filter(|plays| *plays != 0 || input.state.last_played.is_some()),
+        );
         stats.native_last_played = optional_u32(input.state.last_played);
         if *stats == Stats::default() {
             self.stats.remove(&slot);

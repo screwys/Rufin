@@ -1446,11 +1446,11 @@ impl Catalog {
                 // An artist stays while an indexed track or album still credits it.
                 let credited = snapshot.credited_artists(source);
                 snapshot.indexed_keys(&snapshot.artists, source, |artist| {
-                    !credited.contains(&artist.key)
+                    !credited.contains(&i64::from(artist.key))
                 })
             }
             Kind::Tag(tag) => {
-                snapshot.indexed_keys(&snapshot.tags, source, |record| record.kind == tag)
+                snapshot.indexed_keys(&snapshot.tags, source, |record| record.kind() == tag)
             }
             Kind::Folder => snapshot.indexed_keys(&snapshot.folders, source, |_| true),
             Kind::Playlist => snapshot.indexed_keys(&snapshot.playlists, source, |playlist| {

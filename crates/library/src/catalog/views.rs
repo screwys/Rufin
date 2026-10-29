@@ -175,7 +175,7 @@ impl<'a> Context<'a> {
     }
 
     fn tag_kind(&self, slot: u32) -> Option<TagKind> {
-        self.snapshot.tags.live(slot).map(|tag| tag.kind)
+        self.snapshot.tags.live(slot).map(TagRec::kind)
     }
 
     pub(crate) fn artist_sort(&self, slot: u32) -> Option<Cow<'a, str>> {
@@ -199,7 +199,7 @@ impl<'a> Context<'a> {
             self.snapshot
                 .tags
                 .live(*slot)
-                .filter(|tag| tag.kind == TagKind::Genre)
+                .filter(|tag| tag.kind() == TagKind::Genre)
                 .map(|tag| self.snapshot.name_sort(tag.name, tag.sort))
         })
     }
@@ -303,7 +303,7 @@ impl Derived {
                             record.disc,
                             record.number,
                             snapshot.track_sort(record),
-                            record.key,
+                            i64::from(record.key),
                         );
                         if album_cover_rank.get(&album).is_none_or(|best| rank < *best) {
                             derived.album_covers[album as usize] = slot;
@@ -311,7 +311,7 @@ impl Derived {
                         }
                     }
                 } else if record.flags & PICTURE != 0 {
-                    let rank = (snapshot.track_sort(record), record.key);
+                    let rank = (snapshot.track_sort(record), i64::from(record.key));
                     for artist in dedup(runs[0]) {
                         if artist_track.get(&artist).is_none_or(|best| rank < *best) {
                             artist_track.insert(artist, rank.clone());
@@ -357,7 +357,10 @@ impl Derived {
             }
             let record = &snapshot.albums.records[album as usize];
             if record.flags & PICTURE != 0 || derived.album_covers[album as usize] != NONE {
-                let rank = (Cow::Borrowed(snapshot.text(record.sort)), record.key);
+                let rank = (
+                    Cow::Borrowed(snapshot.text(record.sort)),
+                    i64::from(record.key),
+                );
                 let mut related = owners[0].clone();
                 related.extend(snapshot.album_runs(record)[0]);
                 related.sort_unstable();
@@ -416,7 +419,7 @@ impl Context<'_> {
             .album_of(record)
             .map_or(Art::None, |album| self.album_art(derived, album));
         if record.flags & PICTURE != 0 && (self.distinct || album == Art::None) {
-            return Art::Track(record.key);
+            return Art::Track(i64::from(record.key));
         }
         if album != Art::None {
             return album;
@@ -434,14 +437,14 @@ impl Context<'_> {
             return Art::None;
         };
         if record.flags & PICTURE != 0 {
-            return Art::Album(record.key);
+            return Art::Album(i64::from(record.key));
         }
         if let Some(track) = derived
             .album_covers
             .get(slot as usize)
             .and_then(|cover| self.snapshot.tracks.live(*cover))
         {
-            return Art::Track(track.key);
+            return Art::Track(i64::from(track.key));
         }
         self.snapshot.album_runs(record)[0]
             .first()
@@ -462,13 +465,13 @@ impl Context<'_> {
                 .snapshot
                 .tracks
                 .live(*track)
-                .map(|track| Picture::Track(track.key)),
+                .map(|track| Picture::Track(i64::from(track.key))),
             _ => None,
         };
         if record.flags & PICTURE == 0 && borrowed.is_none() {
             return Art::None;
         }
-        Art::Artist(record.key, borrowed)
+        Art::Artist(i64::from(record.key), borrowed)
     }
 }
 
@@ -592,7 +595,7 @@ impl Context<'_> {
             },
             album_sort: album.map(|album| snapshot.album_sort(album)),
             album_year: album.and_then(|album| year_of(album.year)),
-            album_key: album.map(|album| album.key),
+            album_key: album.map(|album| i64::from(album.key)),
             album_artist: if sort == CatalogSort::AlbumArtist {
                 album.and_then(|_| self.album_artist_sort(record.album))
             } else {
@@ -1317,7 +1320,7 @@ impl Context<'_> {
     }
 
     fn album_row(&self, derived: &Derived, slot: u32, record: &AlbumRec) -> ListRow<'_> {
-        let mut row = ListRow::new(record.key, self.snapshot.album_sort(record));
+        let mut row = ListRow::new(i64::from(record.key), self.snapshot.album_sort(record));
         row.totals = derived.albums[slot as usize];
         row.rating = rating(record.rating, record.native_rating);
         row.favorite = favorite(record.flags) == Some(true);
@@ -1378,7 +1381,7 @@ impl Context<'_> {
                     let record = &snapshot.albums.records[slot as usize];
                     let class = inputs
                         .classes
-                        .get(&record.key)
+                        .get(&i64::from(record.key))
                         .copied()
                         .unwrap_or(AlbumReleaseClass::Album);
                     let text = filters.as_ref().map_or(filter.clone(), |filters| {
@@ -1421,7 +1424,8 @@ impl Context<'_> {
                         && (!read.favorites_only || favorite(record.flags) == Some(true))
                         && (!read.downloaded_only || totals.downloaded > 0)
                     {
-                        let mut row = ListRow::new(record.key, snapshot.artist_sort(record));
+                        let mut row =
+                            ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
                         row.totals = totals;
                         row.rating = rating(record.rating, record.native_rating);
                         row.favorite = favorite(record.flags) == Some(true);
@@ -1440,13 +1444,15 @@ impl Context<'_> {
                     let totals = derived.tags[slot as usize];
                     let listed = totals.tracks > 0 || folder.is_none() && record.indexed();
                     if record.source == source
-                        && record.kind == kind
+                        && record.kind() == kind
                         && listed
                         && contains(snapshot.text(record.name), &filter)
                         && (!read.downloaded_only || totals.downloaded > 0)
                     {
-                        let mut row =
-                            ListRow::new(record.key, snapshot.name_sort(record.name, record.sort));
+                        let mut row = ListRow::new(
+                            i64::from(record.key),
+                            snapshot.name_sort(record.name, record.sort),
+                        );
                         row.totals = totals;
                         rows.push(row);
                     }
@@ -1539,9 +1545,10 @@ impl Context<'_> {
     ) -> Played {
         use crate::SmartPlaylistRuleField as F;
         match period {
-            Some(listens) if field != F::Played => {
-                listens.get(&record.key).copied().unwrap_or_default()
-            }
+            Some(listens) if field != F::Played => listens
+                .get(&i64::from(record.key))
+                .copied()
+                .unwrap_or_default(),
             _ if field == F::SkipCount => self.listened(slot),
             _ => self.played(slot, record),
         }
@@ -2028,7 +2035,7 @@ impl Catalog {
                             .artist_albums(artist, *album_artist, folder)
                             .into_iter()
                             .map(|slot| &snapshot.albums.records[slot as usize])
-                            .map(|album| (album.key, album.flags & COMPILATION != 0))
+                            .map(|album| (i64::from(album.key), album.flags & COMPILATION != 0))
                             .collect::<Vec<_>>(),
                         None => Vec::new(),
                     }
@@ -2310,7 +2317,7 @@ impl Context<'_> {
             .filter(|folder| contains(self.snapshot.text(folder.name), &filter))
             .map(|folder| {
                 (
-                    folder.key,
+                    i64::from(folder.key),
                     self.snapshot
                         .name_sort(folder.name, folder.sort)
                         .into_owned(),

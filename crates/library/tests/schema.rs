@@ -290,7 +290,7 @@ async fn unsupported_version_preserves_library_data() {
     let mut expected = supported;
     for (table, rows) in &mut expected {
         if table == "tracks" {
-            rows.push(r#"[2,1,"two","file:///two.flac",null,null,0,null,0,"","","","",0,0,0,null,null,null,null,null,null,null,0,null,null,null,null]"#.into());
+            rows.push(r#"[2,1,"two","file:///two.flac",null,null,0,null,0,"","","","",0,0,0,null,null,null,0,null,null,null,null,null,0,null,null,null,null]"#.into());
         }
     }
     assert_eq!(durable_rows(&path).await, expected);

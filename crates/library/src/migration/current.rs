@@ -1,5 +1,6 @@
 //! The one conversion of a released 0.15.0-0.16.6 Store and its catalog file, and the salvage
 //! of a damaged or newer Store.
+use crate::catalog::records::{added, picture_flag, release};
 use crate::{LibraryError, LibraryResult, SourceId, source_entity_uri};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::path::Path;
@@ -293,12 +294,6 @@ fn binding(row: &sqlx::sqlite::SqliteRow) -> LibraryResult<Option<Vec<u8>>> {
         .transpose()
 }
 
-fn pictured(binding: Option<&[u8]>) -> bool {
-    binding
-        .and_then(|bytes| serde_json::from_slice::<Vec<serde_json::Value>>(bytes).ok())
-        .is_some_and(|candidates| !candidates.is_empty())
-}
-
 async fn credits(
     connection: &mut SqliteConnection,
     relation: &str,
@@ -466,24 +461,24 @@ async fn copy_named(
                         musicbrainz.as_deref(),
                         artwork.as_deref(),
                     )?;
-                    sqlx::query("INSERT INTO artists(artist_key,source_key,object_id,media_uri,indexed,native_metadata,name,sort_text,musicbrainz_artist_id,native_favorite,native_rating,native_artwork) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10)")
+                    sqlx::query("INSERT INTO artists(artist_key,source_key,object_id,media_uri,indexed,native_metadata,name,sort_text,musicbrainz_artist_id,native_favorite,native_rating,native_artwork,flags) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11)")
                         .bind(entity.key).bind(source_key).bind(&object).bind(uri).bind(&name)
                         .bind(text(row, "sort_text")).bind(musicbrainz)
                         .bind(number(row, "source_favorite")).bind(number(row, "source_rating"))
-                        .bind(artwork)
+                        .bind(&artwork).bind(picture_flag(Some(&artwork)))
                         .execute(&mut *connection).await?;
                 }
                 "folders" => {
-                    sqlx::query("INSERT INTO folders(folder_key,source_key,object_id,media_uri,indexed,native_metadata,name,sort_text,native_artwork) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7)")
+                    sqlx::query("INSERT INTO folders(folder_key,source_key,object_id,media_uri,indexed,native_metadata,name,sort_text,native_artwork,flags) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7,?8)")
                         .bind(entity.key).bind(source_key).bind(&object).bind(uri).bind(&name)
-                        .bind(text(row, "sort_text")).bind(artwork)
+                        .bind(text(row, "sort_text")).bind(&artwork).bind(picture_flag(artwork.as_deref()))
                         .execute(&mut *connection).await?;
                 }
                 _ => {
-                    sqlx::query("INSERT INTO tags(tag_key,source_key,kind,object_id,media_uri,indexed,native_metadata,name,sort_text,native_artwork) VALUES(?1,?2,?3,?4,?5,1,1,?6,?7,?8)")
+                    sqlx::query("INSERT INTO tags(tag_key,source_key,kind,object_id,media_uri,indexed,native_metadata,name,sort_text,native_artwork,flags) VALUES(?1,?2,?3,?4,?5,1,1,?6,?7,?8,?9)")
                         .bind(entity.key + offset).bind(source_key)
                         .bind(i64::from(table == "moods")).bind(&object).bind(uri).bind(&name)
-                        .bind(text(row, "sort_text")).bind(artwork)
+                        .bind(text(row, "sort_text")).bind(&artwork).bind(picture_flag(artwork.as_deref()))
                         .execute(&mut *connection).await?;
                 }
             }
@@ -535,8 +530,10 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 })
                 .transpose()?;
             let lookup = text(row, "release_lookup_identity");
-            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,source_loudness_analysis_key,accepted_audio)
-                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,coalesce(?19,zeroblob(32)),?20)")
+            let artwork = binding(row)?;
+            let first_seen = number(row, "first_seen_at");
+            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,source_loudness_analysis_key,accepted_audio,released,added_at,flags)
+                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,coalesce(?19,zeroblob(32)),?20,?21,?22,?23)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -548,15 +545,18 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(&metadata.release_date)
                 .bind(&metadata.date_added)
                 .bind(metadata.is_compilation)
-                .bind(number(row, "first_seen_at"))
+                .bind(first_seen)
                 .bind(&lookup)
                 .bind(number(row, "source_favorite"))
                 .bind(number(row, "source_rating"))
                 .bind(metadata.details_json()?)
                 .bind(serde_json::to_string(&metadata)?)
-                .bind(binding(row)?)
+                .bind(&artwork)
                 .bind(row.try_get::<Option<Vec<u8>>, _>("source_loudness_analysis_key").ok().flatten())
                 .bind(accepted)
+                .bind(i64::from(release(metadata.release_date.as_deref())))
+                .bind(added(metadata.date_added.as_deref(), first_seen))
+                .bind(picture_flag(artwork.as_deref()))
                 .execute(&mut *connection)
                 .await?;
             if let Some(identity) = lookup {
@@ -616,23 +616,16 @@ async fn copy_tracks(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 album_artists: album_artists.remove(&entity.key).unwrap_or_default(),
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 moods: moods.remove(&entity.key).unwrap_or_default(),
-                album_tags: None,
                 source_loudness: gain(&mut gains, &entity).map(|(_, gain)| gain),
-                album_loudness: None,
+                ..Default::default()
             };
             let artwork = binding(row)?;
             let cue_path = text(row, "cue_path");
-            let flags = if pictured(artwork.as_deref()) {
-                crate::schema::TRACK_HAS_PICTURE
-            } else {
-                0
-            } | if cue_path.is_some() {
-                crate::schema::TRACK_CUE
-            } else {
-                0
-            };
-            sqlx::query("INSERT INTO tracks(track_key,source_key,object_id,media_uri,album_key,indexed,native_metadata,title,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,first_seen_at,bpm,comment,source_format,flags,native_favorite,native_rating)
-                VALUES(?1,?2,?3,?4,?5,1,1,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)")
+            let flags = picture_flag(artwork.as_deref())
+                | i64::from(cue_path.is_some()) * crate::schema::TRACK_CUE;
+            let first_seen = number(row, "first_seen_at");
+            sqlx::query("INSERT INTO tracks(track_key,source_key,object_id,media_uri,album_key,indexed,native_metadata,title,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,first_seen_at,bpm,comment,source_format,flags,native_favorite,native_rating,released,added_at)
+                VALUES(?1,?2,?3,?4,?5,1,1,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -648,13 +641,15 @@ async fn copy_tracks(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(metadata.year)
                 .bind(&metadata.release_date)
                 .bind(&metadata.date_added)
-                .bind(number(row, "first_seen_at"))
+                .bind(first_seen)
                 .bind(metadata.bpm)
                 .bind(&metadata.comment)
                 .bind(&metadata.source_format)
                 .bind(flags)
                 .bind(number(row, "source_favorite"))
                 .bind(number(row, "source_rating"))
+                .bind(i64::from(release(metadata.release_date.as_deref())))
+                .bind(added(metadata.date_added.as_deref(), first_seen))
                 .execute(&mut *connection)
                 .await?;
             sqlx::query("INSERT INTO track_details(track_key,metadata,native_artwork,source_path,cue_path,cue_start_millis,cue_end_millis,source_loudness_analysis_key) VALUES(?1,jsonb(?2),?3,?4,?5,?6,?7,coalesce(?8,zeroblob(32)))")

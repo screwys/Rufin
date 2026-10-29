@@ -408,7 +408,7 @@ impl ListRead {
                 .filter_map(|key| snapshot.albums.get(*key))
                 .map(|album| {
                     (
-                        album.key,
+                        i64::from(album.key),
                         album.flags & crate::catalog::snapshot::COMPILATION != 0,
                     )
                 })

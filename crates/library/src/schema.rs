@@ -15,8 +15,10 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_VERSION: i64 = 60;
 
-/// Bits of `tracks.flags`, copied from the details row so the Catalog load never reads it.
-pub(crate) const TRACK_HAS_PICTURE: i64 = 1;
+/// Bits of the `flags` column of tracks, albums, artists, tags and folders, copied from the
+/// artwork binding and the details row so the Catalog load reads neither.
+pub(crate) const HAS_PICTURE: i64 = 1;
+/// Tracks only.
 pub(crate) const TRACK_CUE: i64 = 2;
 
 /// Roles of `track_links` and `album_links`. Albums use the artist and genre roles.
@@ -51,6 +53,10 @@ CREATE TABLE albums (
     year INTEGER,
     release_date TEXT,
     date_added TEXT,
+    -- release_date as yyyymmdd, missing parts zero; date_added, else first_seen_at, in unix
+    -- seconds. The Catalog load reads these and parses no text.
+    released INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER,
     is_compilation INTEGER,
     first_seen_at INTEGER,
     release_identity TEXT,
@@ -64,6 +70,7 @@ CREATE TABLE albums (
     -- The header a source observed, when it observed one.
     input_metadata BLOB,
     native_artwork BLOB,
+    flags INTEGER NOT NULL DEFAULT 0,
     source_loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
     loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
     accepted_audio BLOB,
@@ -90,6 +97,8 @@ CREATE TABLE tracks (
     year INTEGER,
     release_date TEXT,
     date_added TEXT,
+    released INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER,
     first_seen_at INTEGER,
     bpm INTEGER,
     comment TEXT,
@@ -133,6 +142,7 @@ CREATE TABLE artists (
     native_play_count INTEGER,
     native_last_played INTEGER,
     native_artwork BLOB,
+    flags INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source_key,object_id)
 ) STRICT;
 
@@ -148,6 +158,7 @@ CREATE TABLE tags (
     name TEXT NOT NULL DEFAULT '',
     sort_text TEXT,
     native_artwork BLOB,
+    flags INTEGER NOT NULL DEFAULT 0,
     -- The album URIs of the set-once mosaic a genre or mood without a picture shows.
     mosaic TEXT,
     UNIQUE(source_key,kind,object_id)
@@ -163,6 +174,7 @@ CREATE TABLE folders (
     name TEXT,
     sort_text TEXT,
     native_artwork BLOB,
+    flags INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source_key,object_id)
 ) STRICT;
 

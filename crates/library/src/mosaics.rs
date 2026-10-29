@@ -65,7 +65,7 @@ impl Catalog {
                 tags.extend(
                     owned
                         .iter()
-                        .map(|slot| snapshot.tags.records[*slot as usize].key),
+                        .map(|slot| i64::from(snapshot.tags.records[*slot as usize].key)),
                 );
             }
         }

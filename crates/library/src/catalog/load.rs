@@ -11,105 +11,22 @@ use sqlx::{Connection, SqliteConnection};
 
 use super::records::*;
 use super::rows::{Handle, Rows};
-use super::snapshot::{Entry, Names, Packing, Snapshot, Stats, TrackInput, TrackPart, UserItem};
+use super::snapshot::{Entry, Names, Snapshot, Stats, TrackInput, TrackPart, UserItem};
 use super::write;
-use crate::schema::{LINK_ALBUM_ARTIST, LINK_ARTIST, LINK_FOLDER, LINK_GENRE, LINK_MOOD};
+use crate::schema::{
+    HAS_PICTURE, LINK_ALBUM_ARTIST, LINK_ARTIST, LINK_FOLDER, LINK_GENRE, LINK_MOOD,
+};
 use crate::{
     AlbumKey, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, LibraryError, LibraryResult,
     SourceKey, TagMetadata, TrackKey,
 };
 
-/// Tracks a range reader packs at a time.
-const PAGE: usize = 4_096;
 /// Libraries smaller than this load in one range.
-const RANGE_TRACKS: i64 = 65_536;
+const RANGE_TRACKS: i64 = 8_192;
 const MAX_RANGES: usize = 4;
 
-/// Whether a binding column names a picture, as `pictured` decides for a staged row.
-fn pictured(column: &str) -> String {
-    format!(
-        "coalesce(replace(replace(replace(replace(CAST({column} AS TEXT),' ',''),char(10),''),char(13),''),char(9),'') NOT IN('','[]'),0)"
-    )
-}
-
-/// One track row; its texts are spans of the page's text buffer.
-struct Raw {
-    key: i64,
-    source: Option<SourceKey>,
-    album: Option<i64>,
-    indexed: bool,
-    native: bool,
-    flags: i64,
-    texts: [(u32, u32); 4],
-    comment: Option<(u32, u32)>,
-    format: Option<(u32, u32)>,
-    duration_ms: i64,
-    disc: i64,
-    number: i64,
-    year: Option<i64>,
-    release: u32,
-    added: Option<i64>,
-    bpm: Option<i64>,
-    state: NativeState,
-    /// The span of this track's links in the page's link list.
-    links: (usize, usize),
-}
-
-#[derive(Default)]
-struct Page {
-    text: String,
-    rows: Vec<Raw>,
-    /// (role, target) in track, role and position order.
-    links: Vec<(i64, i64)>,
-}
-
-impl Page {
-    fn span(&mut self, text: &str) -> (u32, u32) {
-        let start = self.text.len() as u32;
-        self.text.push_str(text);
-        (start, self.text.len() as u32)
-    }
-
-    fn text(&self, (start, end): (u32, u32)) -> &str {
-        self.text
-            .get(start as usize..end as usize)
-            .unwrap_or_default()
-    }
-}
-
-const TRACKS: &str = "SELECT track_key,source_key,album_key,indexed,native_metadata,flags,title,display_artist,display_album,sort_text,comment,source_format,duration_millis,disc_number,track_number,year,release_date,date_added,first_seen_at,bpm,native_favorite,native_rating,native_play_count,native_last_played FROM tracks WHERE track_key>?1 AND track_key<=?2 ORDER BY track_key";
+const TRACKS: &str = "SELECT track_key,source_key,album_key,indexed,native_metadata,flags,title,display_artist,display_album,sort_text,comment,source_format,duration_millis,disc_number,track_number,year,released,added_at,bpm,native_favorite,native_rating,native_play_count,native_last_played FROM tracks WHERE track_key>?1 AND track_key<=?2 ORDER BY track_key";
 const LINKS: &str = "SELECT track_key,role,target FROM track_links WHERE track_key>?1 AND track_key<=?2 ORDER BY track_key,role,position";
-
-fn raw(page: &mut Page, row: &Rows<'_>) -> Raw {
-    let texts = [
-        page.span(row.text(6)),
-        page.span(row.text(7)),
-        page.span(row.text(8)),
-        page.span(row.text(9)),
-    ];
-    let comment = row.optional_text(10).map(|text| page.span(text));
-    let format = row.optional_text(11).map(|text| page.span(text));
-    Raw {
-        key: row.int(0),
-        source: row.optional_int(1).map(SourceKey::from_raw),
-        album: row.optional_int(2),
-        indexed: row.flag(3),
-        native: row.flag(4),
-        flags: row.int(5),
-        texts,
-        comment,
-        format,
-        duration_ms: row.int(12),
-        disc: row.int(13),
-        number: row.int(14),
-        year: row.optional_int(15),
-        release: release(row.optional_text(16)),
-        added: added(row.optional_text(17), row.optional_int(18)),
-        bpm: row.optional_int(19),
-        state: native_state(row, 20),
-        links: (0, 0),
-    }
-}
 
 fn native_state(row: &Rows<'_>, start: i32) -> NativeState {
     NativeState {
@@ -120,7 +37,8 @@ fn native_state(row: &Rows<'_>, start: i32) -> NativeState {
     }
 }
 
-/// Reads the tracks with keys in (after, last] and their links, and packs them page by page.
+/// Reads the tracks with keys in (after, last] and their links, and packs each row as it
+/// steps; a row's texts stay valid until the next step of its statement.
 async fn read_range(
     path: &Path,
     names: &Names<'_>,
@@ -136,73 +54,59 @@ async fn read_range(
         tracks.bind(1, after)?.bind(2, last)?;
         links.bind(1, after)?.bind(2, last)?;
         let mut link = links.step()?;
-        let mut page = Page::default();
+        let mut runs: [Vec<i64>; 4] = Default::default();
+        let mut packing = part.packing();
         while tracks.step()? {
-            let mut raw = raw(&mut page, &tracks);
-            let start = page.links.len();
-            while link && links.int(0) < raw.key {
+            let key = tracks.int(0);
+            runs.iter_mut().for_each(Vec::clear);
+            while link && links.int(0) < key {
                 link = links.step()?;
             }
-            while link && links.int(0) == raw.key {
-                page.links.push((links.int(1), links.int(2)));
+            while link && links.int(0) == key {
+                let run = match links.int(1) {
+                    LINK_ARTIST => Some(0),
+                    LINK_ALBUM_ARTIST => Some(1),
+                    LINK_GENRE | LINK_MOOD => Some(2),
+                    LINK_FOLDER => Some(3),
+                    _ => None,
+                };
+                if let Some(run) = run {
+                    runs[run].push(links.int(2));
+                }
                 link = links.step()?;
             }
-            raw.links = (start, page.links.len());
-            page.rows.push(raw);
-            if page.rows.len() == PAGE {
-                pack(names, &mut part.packing(), &std::mem::take(&mut page));
-            }
+            let flags = tracks.int(5);
+            packing.pack(
+                names,
+                TrackInput {
+                    key,
+                    source: tracks.optional_int(1).map(SourceKey::from_raw),
+                    album: tracks.optional_int(2),
+                    indexed: tracks.flag(3),
+                    native: tracks.flag(4),
+                    picture: flags & HAS_PICTURE != 0,
+                    cue: flags & crate::schema::TRACK_CUE != 0,
+                    title: tracks.text(6),
+                    artist: tracks.text(7),
+                    album_title: tracks.text(8),
+                    sort: tracks.text(9),
+                    comment: tracks.optional_text(10),
+                    format: tracks.optional_text(11),
+                    duration_ms: tracks.int(12),
+                    disc: tracks.int(13),
+                    number: tracks.int(14),
+                    year: tracks.optional_int(15),
+                    release: tracks.int(16) as u32,
+                    added: tracks.optional_int(17),
+                    bpm: tracks.optional_int(18),
+                    state: &native_state(&tracks, 19),
+                    links: [&runs[0], &runs[1], &runs[2], &runs[3]],
+                },
+            );
         }
-        pack(names, &mut part.packing(), &page);
     }
     connection.close().await?;
     Ok(part)
-}
-
-fn pack(names: &Names<'_>, packing: &mut Packing<'_>, page: &Page) {
-    let mut links: [Vec<i64>; 4] = Default::default();
-    for raw in &page.rows {
-        for run in &mut links {
-            run.clear();
-        }
-        for (role, target) in &page.links[raw.links.0..raw.links.1] {
-            let run = match *role {
-                LINK_ARTIST => 0,
-                LINK_ALBUM_ARTIST => 1,
-                LINK_GENRE | LINK_MOOD => 2,
-                LINK_FOLDER => 3,
-                _ => continue,
-            };
-            links[run].push(*target);
-        }
-        packing.pack(
-            names,
-            TrackInput {
-                key: raw.key,
-                source: raw.source,
-                album: raw.album,
-                indexed: raw.indexed,
-                native: raw.native,
-                picture: raw.flags & crate::schema::TRACK_HAS_PICTURE != 0,
-                cue: raw.flags & crate::schema::TRACK_CUE != 0,
-                title: page.text(raw.texts[0]),
-                artist: page.text(raw.texts[1]),
-                album_title: page.text(raw.texts[2]),
-                sort: page.text(raw.texts[3]),
-                comment: raw.comment.map(|span| page.text(span)),
-                format: raw.format.map(|span| page.text(span)),
-                duration_ms: raw.duration_ms,
-                added: raw.added,
-                release: raw.release,
-                year: raw.year,
-                disc: raw.disc,
-                number: raw.number,
-                bpm: raw.bpm,
-                state: &raw.state,
-                links: [&links[0], &links[1], &links[2], &links[3]],
-            },
-        );
-    }
 }
 
 /// Reads and packs every track in key ranges on threads of their own, and adds each range's
@@ -285,10 +189,9 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             freshness: rows.blob(5),
         });
     }
-    let mut rows = handle.prepare(&format!(
-        "SELECT folder_key,source_key,indexed,native_metadata,name,sort_text,{} FROM folders ORDER BY folder_key",
-        pictured("native_artwork")
-    ))?;
+    let mut rows = handle.prepare(
+        "SELECT folder_key,source_key,indexed,native_metadata,name,sort_text,flags FROM folders ORDER BY folder_key",
+    )?;
     while rows.step()? {
         let mut folder = Folder::new(SourceKey::from_raw(rows.int(1)), "", String::new());
         folder.key = FolderKey::from_raw(rows.int(0));
@@ -298,12 +201,11 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             name: rows.optional_text(4).map(str::to_owned),
             sort_text: rows.optional_text(5).map(str::to_owned),
         };
-        snapshot.pack_folder(&folder, rows.flag(6));
+        snapshot.pack_folder(&folder, rows.int(6) & HAS_PICTURE != 0);
     }
-    let mut rows = handle.prepare(&format!(
-        "SELECT artist_key,source_key,indexed,native_metadata,name,sort_text,native_favorite,native_rating,native_play_count,native_last_played,{} FROM artists ORDER BY artist_key",
-        pictured("native_artwork")
-    ))?;
+    let mut rows = handle.prepare(
+        "SELECT artist_key,source_key,indexed,native_metadata,name,sort_text,native_favorite,native_rating,native_play_count,native_last_played,flags FROM artists ORDER BY artist_key",
+    )?;
     while rows.step()? {
         let mut artist = Artist::new(SourceKey::from_raw(rows.int(1)), "", String::new());
         artist.key = ArtistKey::from_raw(rows.int(0));
@@ -315,12 +217,11 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             musicbrainz_artist_id: None,
         };
         artist.state = native_state(&rows, 6);
-        snapshot.pack_artist(&artist, rows.flag(10));
+        snapshot.pack_artist(&artist, rows.int(10) & HAS_PICTURE != 0);
     }
-    let mut rows = handle.prepare(&format!(
-        "SELECT tag_key,source_key,kind,indexed,native_metadata,name,sort_text,{} FROM tags ORDER BY tag_key",
-        pictured("native_artwork")
-    ))?;
+    let mut rows = handle.prepare(
+        "SELECT tag_key,source_key,kind,indexed,native_metadata,name,sort_text,flags FROM tags ORDER BY tag_key",
+    )?;
     while rows.step()? {
         let mut tag = Tag::new(
             super::families::tag_kind(rows.int(2)),
@@ -335,13 +236,12 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             name: rows.text(5).to_owned(),
             sort_text: rows.optional_text(6).map(str::to_owned),
         };
-        snapshot.pack_tag(&tag, rows.flag(7));
+        snapshot.pack_tag(&tag, rows.int(7) & HAS_PICTURE != 0);
     }
     let mut album_links = links(handle, "album_links", "album_key")?;
-    let mut rows = handle.prepare(&format!(
-        "SELECT album_key,source_key,indexed,native_metadata,cached_local,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,native_favorite,native_rating,native_play_count,native_last_played,input_metadata IS NOT NULL,{} FROM albums ORDER BY album_key",
-        pictured("native_artwork")
-    ))?;
+    let mut rows = handle.prepare(
+        "SELECT album_key,source_key,indexed,native_metadata,cached_local,title,display_artist,sort_text,year,released,added_at,is_compilation,native_favorite,native_rating,native_play_count,native_last_played,input_metadata IS NOT NULL,flags FROM albums ORDER BY album_key",
+    )?;
     while rows.step()? {
         let key = rows.int(0);
         let mut album = Album::new(SourceKey::from_raw(rows.int(1)), "", String::new());
@@ -354,13 +254,11 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             artist: rows.text(6).to_owned(),
             sort: rows.text(7).to_owned(),
             year: rows.optional_int(8),
-            release_date: rows.optional_text(9).map(str::to_owned),
-            date_added: rows.optional_text(10).map(str::to_owned),
             compilation: rows.optional_int(11).map(|value| value != 0),
+            ..AlbumFacts::default()
         };
-        album.first_seen = rows.optional_int(12);
-        album.state = native_state(&rows, 13);
-        album.input = rows.flag(17);
+        album.state = native_state(&rows, 12);
+        album.input = rows.flag(16);
         for (role, target) in album_links.remove(&key).unwrap_or_default() {
             match role {
                 LINK_ARTIST => album.artists.push(ArtistKey::from_raw(target)),
@@ -368,7 +266,12 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
                 _ => {}
             }
         }
-        snapshot.pack_album(&album, rows.flag(18));
+        snapshot.pack_album(
+            &album,
+            rows.int(17) & HAS_PICTURE != 0,
+            rows.int(9) as u32,
+            rows.optional_int(10),
+        );
     }
     Ok(keys)
 }

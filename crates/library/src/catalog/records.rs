@@ -20,6 +20,11 @@ pub(crate) fn pictured(binding: Option<&[u8]>) -> bool {
     )
 }
 
+/// The `flags` bit of a row with this binding.
+pub(crate) fn picture_flag(binding: Option<&[u8]>) -> i64 {
+    i64::from(pictured(binding)) * crate::schema::HAS_PICTURE
+}
+
 /// A unix time as SQLite's unixepoch() reads ISO-8601 text.
 pub(crate) fn unix_time(text: &str) -> Option<i64> {
     use chrono::{DateTime, NaiveDate, NaiveDateTime};
@@ -229,7 +234,7 @@ impl Track {
 
     /// The `tracks.flags` bits, copied from the details columns so the load never reads them.
     pub(crate) fn flags(&self) -> i64 {
-        i64::from(pictured(self.binding.as_deref())) * crate::schema::TRACK_HAS_PICTURE
+        picture_flag(self.binding.as_deref())
             | i64::from(self.cue_path.is_some()) * crate::schema::TRACK_CUE
     }
 }

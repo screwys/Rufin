@@ -375,12 +375,12 @@ impl Catalog {
                             None => credited || album_credited,
                         }
                     }),
-                    _ => track.key == owner,
+                    _ => i64::from(track.key) == owner,
                 };
                 member
                     && folder.is_none_or(|folder| snapshot.track_runs(track)[3].contains(&folder))
             })
-            .map(|(_, track)| track.key)
+            .map(|(_, track)| i64::from(track.key))
             .collect::<Vec<_>>();
         members.sort_unstable();
         Ok(members)
