@@ -23,6 +23,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use bytes::Bytes;
+use futures_util::StreamExt;
 use http_body_util::{BodyExt, StreamBody};
 use hyper::{Request, Response, StatusCode, body::Frame};
 use hyper_util::{rt::TokioIo, service::TowerToHyperService};
@@ -191,26 +192,10 @@ async fn tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = catalog::track_query(products, parameters, "tracks").await?;
-    let offset = number(parameters, "offset", 0)?;
-    let limit = number(parameters, "limit", 100)?.min(256);
-    let rows = (&query)
-        .rows(
-            &products.library,
-            offset,
-            limit,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(library::MemberRow::into_track)
-                .collect::<Vec<_>>()
-        })
-        .map_err(internal)?;
-    let total = catalog::track_total(products, parameters, &query).await?;
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"offset":offset,"limit":limit,"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        catalog::tracks_page(products, parameters, "tracks", (100, 256), "tracks")
+            .await?
+            .1,
     )
 }
 
@@ -346,14 +331,11 @@ async fn queue_play(
         if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
             products
                 .library
-                .catalog_identity(
-                    library::CatalogKind::Track,
-                    uri,
-                    &library::ReadCancellation::new(),
-                )
+                .track_keys(&[uri.to_owned()], &library::ReadCancellation::new())
                 .await
-                .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
                 .map_err(internal)?
+                .first()
+                .copied()
         } else {
             None
         };
@@ -667,7 +649,7 @@ const SORTS: [(&str, LibraryField); 18] = [
 fn sort(
     parameters: &HashMap<String, String>,
     key: LibraryListKey,
-) -> Result<Option<library::CatalogSort>, Error> {
+) -> Result<Option<LibraryField>, Error> {
     let own = match key {
         LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => Some("position"),
         LibraryListKey::SmartPlaylistTracks => Some("definition"),
@@ -682,7 +664,7 @@ fn sort(
     SORTS
         .iter()
         .find(|(api, field)| api == name && available_sort_fields(key).contains(field))
-        .map(|(_, field)| Some(field.catalog_sort()))
+        .map(|(_, field)| Some(*field))
         .ok_or_else(|| bad_request("Unknown sort"))
 }
 
@@ -697,10 +679,10 @@ fn track_json(
     }
     row
 }
-fn track_row_json(row: &library::TrackView) -> Value {
-    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.metadata.title,"artist":row.metadata.artist,"album":row.metadata.album,
-        "duration_ms":row.metadata.duration_millis,"track_number":row.metadata.track_number,"disc_number":row.metadata.disc_number,
-        "year":row.metadata.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"links":row.links})
+fn track_row_json(row: &library::TrackRow) -> Value {
+    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
+        "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
+        "year":row.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"links":row.links})
 }
 
 fn playback_json(
@@ -994,7 +976,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         products.lyrics.current(),
         products.appearance.subscribe(),
         products.settings.sidebar_changes(),
-        products.source.catalog_publications(),
+        products.source.changes(),
         products.clone(),
         true,
         None,
@@ -1007,12 +989,12 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
             mut lyrics,
             mut appearance,
             mut sidebar,
-            mut catalog,
+            catalog,
             products,
             first,
             mut previous,
         )| async move {
-            let value = if first {
+            let values = if first {
                 let publication = playback.recv().await.ok()?;
                 let mut value = playback_event_json(&products, publication, &mut previous, true);
                 value["source"] = json!(*source.borrow_and_update());
@@ -1023,37 +1005,60 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                 value["appearance"] = json!(*appearance.borrow_and_update());
                 sidebar.borrow_and_update();
                 value["pins_changed"] = json!(true);
-                value
+                vec![value]
             } else {
                 tokio::select! {
-                    publication = playback.recv() => playback_event_json(&products, publication.ok()?, &mut previous, false),
-                    changed = source.changed() => { changed.ok()?; json!({"source":*source.borrow_and_update()}) },
-                    changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)}) },
-                    changed = appearance.changed() => { changed.ok()?; json!({"appearance":*appearance.borrow_and_update()}) },
-                    changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
-                    publication = rufin_core::source::next_publication(&mut catalog) => {
-                        let publication = publication?;
-                        let mut value = json!({"catalog_acquired": matches!(publication.change, rufin_core::runtime::CatalogChange::Broad | rufin_core::runtime::CatalogChange::Favorites), "pins_changed": rufin_core::page::pins_refresh(&products.source, &publication), "activity_changed": publication.change == rufin_core::runtime::CatalogChange::Activity});
-                        // The changed playlist, or null when any may have changed.
-                        if let rufin_core::runtime::CatalogChange::Playlists(playlist) = publication.change {
-                            value["playlists"] = json!(playlist);
-                        }
-                        value
-                    },
+                    publication = playback.recv() => vec![playback_event_json(&products, publication.ok()?, &mut previous, false)],
+                    changed = source.changed() => { changed.ok()?; vec![json!({"source":*source.borrow_and_update()})] },
+                    changed = lyrics.changed() => { changed.ok()?; vec![json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)})] },
+                    changed = appearance.changed() => { changed.ok()?; vec![json!({"appearance":*appearance.borrow_and_update()})] },
+                    changed = sidebar.changed() => { changed.ok()?; vec![json!({"pins_changed":true})] },
+                    changed = catalog.next() => changed_json(&products, &changed?),
                 }
             };
             Some((
-                Ok::<_, Infallible>(Frame::data(Bytes::from(format!(
-                    "event: update\ndata: {value}\n\n"
-                )))),
+                values,
                 (
                     playback, source, lyrics, appearance, sidebar, catalog, products, false,
                     previous,
                 ),
             ))
         },
-    );
+    )
+    .flat_map(|values| {
+        futures_util::stream::iter(values.into_iter().map(|value| {
+            Ok::<_, Infallible>(Frame::data(Bytes::from(format!(
+                "event: update\ndata: {value}\n\n"
+            ))))
+        }))
+    });
     event_response(Body::new(StreamBody::new(stream)))
+}
+
+/// The update frames of one catalog change. The first carries the flags and the first changed
+/// playlist, or null when any may have changed; each further playlist gets a frame of its own.
+fn changed_json(
+    products: &ProductHandles,
+    changed: &rufin_core::source::feed::Changed,
+) -> Vec<Value> {
+    let mut first = json!({
+        "catalog_acquired": changed.all || !changed.sources.is_empty() || !changed.items.is_empty(),
+        "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
+        "activity_changed": changed.listened,
+    });
+    if changed.playlist_lists {
+        first["playlists"] = Value::Null;
+        return vec![first];
+    }
+    let mut playlists = changed.playlists.iter();
+    if let Some(playlist) = playlists.next() {
+        first["playlists"] = json!(playlist);
+    }
+    std::iter::once(first)
+        .chain(playlists.map(|playlist| {
+            json!({"catalog_acquired":false,"pins_changed":false,"activity_changed":false,"playlists":playlist})
+        }))
+        .collect()
 }
 
 fn playback_event_json(

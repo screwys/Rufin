@@ -1,5 +1,5 @@
 use super::*;
-use library::{CatalogSort, PlaylistEntryKey, PlaylistKey};
+use library::{PlaylistEntryKey, PlaylistKey};
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -312,7 +312,6 @@ pub(super) async fn list_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let cancellation = library::ReadCancellation::new();
     let (source, folder) = if parameters.contains_key("source") {
         let (source, folder) = catalog::scope(
             products,
@@ -324,28 +323,27 @@ pub(super) async fn list_data(
     } else {
         (None, None)
     };
-    let sort = sort(parameters, LibraryListKey::Playlists)?.unwrap_or(CatalogSort::Position);
+    let sort = sort(parameters, LibraryListKey::Playlists)?.unwrap_or(LibraryField::RowIndex);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let query = library::ListRead {
-        playlist_scope: Default::default(),
-        kind: library::ListKind::Playlists,
-        source: (source).into(),
-        sort,
-        folder: folder,
-        filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
+        folder,
+        filter: parameters.get("q").cloned().unwrap_or_default(),
         descending: boolean(parameters, "descending")?,
-        favorites_only: false,
-        downloaded_only: false,
-        activity: false,
+        ..library::ListRead::new(library::ListKind::Playlists, source, sort)
     };
-    let rows = query
-        .playlists(&products.library, offset, limit, &cancellation)
-        .await
-        .map_err(internal)?;
-    let total = catalog::page_total(products, parameters, &query).await?;
+    let activity_sensitive = query.activity_sensitive();
+    let (order, total) = catalog::order(products, parameters, library::Read::List(query)).await?;
+    let playlists = catalog::rows(products, &order, offset, limit, true)
+        .await?
+        .into_iter()
+        .filter_map(|row| match row {
+            library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => Some(json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, &row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit,"playlists":playlists}),
     )
 }
 
@@ -366,42 +364,46 @@ pub(super) async fn entries_data(
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
     let query = catalog::track_query(products, parameters, "entries").await?;
+    let activity_sensitive = query.activity_sensitive();
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(256);
-    let rows = (&query)
-        .rows(
-            &products.library,
-            offset,
-            limit,
+    let (order, total) =
+        catalog::order(products, parameters, library::Read::Members(query)).await?;
+    // The first page carries the header name, so an open page shows a rename.
+    let fetched = products
+        .library
+        .fetch(
+            library::Fetch {
+                rows: Some((&order, offset..offset.saturating_add(limit))),
+                header: (offset == 0)
+                    .then(|| key(parameters, "id").map(library::HeaderKey::Playlist))
+                    .transpose()?,
+                ..library::Fetch::default()
+            },
             &library::ReadCancellation::new(),
         )
         .await
-        .map(|rows| {
-            rows.into_iter()
-                .filter_map(library::MemberRow::into_entry)
-                .collect::<Vec<_>>()
-        })
         .map_err(internal)?;
-    let total = catalog::track_total(products, parameters, &query).await?;
-    // The first page carries the header name, so an open page shows a rename.
-    let name = if offset == 0 {
-        products
-            .library
-            .playlists(&[key(parameters, "id")?], &library::ReadCancellation::new())
-            .await
-            .map_err(internal)?
-            .pop()
-            .map(|playlist| playlist.name)
-    } else {
-        None
+    let name = match fetched.header {
+        Some(library::Header::Playlist(playlist)) => Some(playlist.name),
+        _ => None,
     };
+    let entries = fetched
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            library::Row::Track(track) => {
+                let entry = track.entry.as_ref()?;
+                let mut value = track_row_json(track);
+                value["id"] = json!(entry.key);
+                value["position"] = json!(entry.position);
+                Some(value)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"name":name,"total":total,"offset":offset,"limit":limit,"entries":rows.iter().map(|row| {
-            let mut value = track_row_json(&row.track);
-            value["id"] = json!(row.playlist_entry_key);
-            value["position"] = json!(row.position);
-            value
-        }).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":activity_sensitive,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries}),
     )
 }
 
@@ -438,14 +440,26 @@ async fn create(
         .as_ref()
         .and_then(|created| created.settings_error.as_ref());
     let object_id = created.as_ref().map(|created| created.object_id.as_str());
-    let id = if let Some(object) = object_id {
-        products
+    // A playlist of a source the Catalog does not hold has no key; None is Rufin's own.
+    let owner = match &source {
+        Some(source) => products.library.source_key(source).map(Some),
+        None => Some(None),
+    };
+    let id = match (object_id, owner) {
+        (Some(object), Some(owner)) => products
             .library
-            .playlist_key_by_identity(source.as_ref(), object, &cancellation)
+            .catalog_keys(
+                library::CatalogKind::Playlist,
+                owner,
+                &[object.to_owned()],
+                &cancellation,
+            )
             .await
             .map_err(internal)?
-    } else {
-        None
+            .first()
+            .copied()
+            .map(PlaylistKey::from_raw),
+        _ => None,
     };
     Ok(json_response(
         StatusCode::OK,

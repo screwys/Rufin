@@ -20,8 +20,6 @@ pub(super) fn routes() -> Router<ProductHandles> {
 async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
     let settings = products.settings.load();
     let sidebar = settings.sidebar;
-    let catalog = &products.library;
-    let cancellation = ReadCancellation::new();
     let configured = products.source.list_sources();
     let pins = sidebar
         .pins
@@ -29,12 +27,9 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         .filter(|pin| !matches!(pin, SidebarPin::PlaylistFolder { .. }))
         .cloned()
         .collect::<Vec<_>>();
-    let mut rows = catalog
-        .pin_rows(&pins, &cancellation)
-        .await
-        .map_err(internal)?;
-    catalog
-        .complete_pin_rows(&mut rows, catalog::now(), &cancellation)
+    let rows = products
+        .library
+        .pin_rows(&pins, catalog::now(), &ReadCancellation::new())
         .await
         .map_err(internal)?;
     let mut items = Vec::new();
@@ -47,7 +42,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         };
         let mut row = match row {
             PinRow::Album(row) => {
-                json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source,"title":row.metadata.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
+                json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source,"title":row.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
             }
             PinRow::Artist(row) => {
                 let album_artist = matches!(
@@ -57,10 +52,10 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                         ..
                     }
                 );
-                json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source,"name":row.metadata.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
+                json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source,"name":row.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())})
             }
             PinRow::Genre(row) => {
-                json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))})
+                json!({"kind":"genre","id":row.key,"object_id":row.object_id,"source":source,"name":row.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))})
             }
             PinRow::Playlist(row) => {
                 let artwork = row.artwork_binding.as_slice();

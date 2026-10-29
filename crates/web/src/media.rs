@@ -27,7 +27,8 @@ async fn metadata(
             .album(uri, false, &cancel)
             .await
             .map_err(internal)?
-            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Album unavailable"))?;
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Album unavailable"))?
+            .row;
         let artists = row.links.album_artists.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":true})).collect::<Vec<_>>();
         return Ok(json_response(
             StatusCode::OK,
@@ -162,7 +163,7 @@ async fn random_settings(
     )
     .await
     .map_err(internal)?
-    .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
+    .map(|row| json!({"id":row.key,"name":row.name}));
     let total = boolean(&parameters, "total")?.then_some(total as i64);
     Ok(json_response(
         StatusCode::OK,
@@ -336,11 +337,18 @@ async fn artwork(
         .await?;
         products
             .library
-            .genres(&[key::<library::GenreKey>(&parameters, "genre")?], &cancel)
+            .rows_of(
+                &[library::Item::Genre(key(&parameters, "genre")?)],
+                true,
+                &cancel,
+            )
             .await
             .map_err(internal)?
             .into_iter()
-            .find(|row| row.source_key == source)
+            .find_map(|row| match row {
+                library::Row::Tag(row) if row.source_key == source => Some(row),
+                _ => None,
+            })
             .and_then(|row| {
                 row.artwork_binding
                     .as_ref()
