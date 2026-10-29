@@ -357,7 +357,8 @@ pub struct TagRow {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FolderRow {
-    pub folder_key: FolderKey,
+    /// None for a folder from a live listing.
+    pub folder_key: Option<FolderKey>,
     pub object_id: String,
     pub name: String,
     pub summary: CollectionSummary,
@@ -1184,7 +1185,7 @@ impl<'a> Builder<'a> {
                 Some(slot) => {
                     let record = &self.snapshot.folders.records[slot as usize];
                     Some(Row::Folder(FolderRow {
-                        folder_key: key,
+                        folder_key: Some(key),
                         object_id: text(self.snapshot, record.object),
                         name: text(self.snapshot, record.name),
                         summary: self.derived().folders[slot as usize].summary(),

@@ -79,8 +79,7 @@ impl SourceOwner {
         let (artwork, lyrics) = self.shared.settings.cache_downloads();
         for configured in self.shared.settings.load().sources.configured {
             let source_id = &configured.configuration.source_id;
-            let Ok(Some(source_key)) = self.shared.catalog.source_identity_key(source_id).await
-            else {
+            let Some(source_key) = self.shared.catalog.source_key(source_id) else {
                 continue;
             };
             let keys = match only {

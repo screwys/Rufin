@@ -588,10 +588,12 @@ impl MetadataBatch {
                 },
             )
             .await;
-        if source.is_none() && matches!(result, Ok(()) | Err(Error::PartiallySaved { .. })) {
+        if source.is_none()
+            && matches!(result, Ok(()) | Err(Error::PartiallySaved { .. }))
+            && let Some(selected) = self.source.shared.selected()
+        {
             self.source
-                .publish_current_catalog(crate::runtime::CatalogChange::Broad)
-                .await;
+                .notice(crate::source::feed::Notice::Source(selected.source_key));
         }
         if artwork_changed {
             super::EditSession::invalidate_artwork(

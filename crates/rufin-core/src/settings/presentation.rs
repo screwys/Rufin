@@ -219,7 +219,7 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
     }
 }
 
-use library::{TrackArtistLink, TrackView};
+use library::{TrackArtistLink, TrackRow, TrackView};
 
 pub fn format_duration(seconds: u32) -> String {
     let minutes = seconds / 60;
@@ -277,6 +277,49 @@ pub fn track_field(song: &TrackView, field: LibraryField) -> String {
             .join(", "),
         LibraryField::Duration => format_duration((metadata.duration_millis.max(0) / 1_000) as u32),
         LibraryField::Favorite => favorite_text(song.state.favorite),
+        _ => String::new(),
+    }
+}
+
+/// A list row's text for one field, as `track_field` gives it for a full track.
+pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => row.title.clone(),
+        LibraryField::Artist => row.artist.clone(),
+        LibraryField::Album => row.album.clone(),
+        LibraryField::AlbumArtist => joined_credits(&row.links.album_artists),
+        LibraryField::Year => optional_year(row.year),
+        LibraryField::ReleaseDate => row.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => row
+            .date_added
+            .and_then(|seconds| glib::DateTime::from_unix_utc(seconds).ok())
+            .and_then(|date| date.format("%Y-%m-%d").ok())
+            .map(|date| date.to_string())
+            .unwrap_or_default(),
+        LibraryField::LastPlayed => display_unix_date(row.state.last_played),
+        LibraryField::PlayCount => count(row.state.play_count),
+        LibraryField::UserRating => stored_rating(row.state.rating),
+        LibraryField::Bpm => row.bpm.map(|value| value.to_string()).unwrap_or_default(),
+        LibraryField::Bitrate
+        | LibraryField::SampleRate
+        | LibraryField::BitDepth
+        | LibraryField::Channels => audio_property_field(&row.audio, field),
+        LibraryField::Format => row.source_format.clone().unwrap_or_default(),
+        LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
+        LibraryField::Source => row.source_name.clone(),
+        LibraryField::DiscNumber => row.disc_number.to_string(),
+        LibraryField::TrackNumber => {
+            optional_track_number(Some(row.disc_number), Some(row.track_number))
+        }
+        LibraryField::Genre => row
+            .links
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        LibraryField::Duration => format_duration((row.duration_millis.max(0) / 1_000) as u32),
+        LibraryField::Favorite => favorite_text(row.state.favorite),
         _ => String::new(),
     }
 }

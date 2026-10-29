@@ -5,7 +5,6 @@ mod editor;
 mod lyrics;
 mod review;
 mod scan;
-use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
@@ -138,8 +137,8 @@ impl EditSession {
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = row.artwork_binding.clone();
-                    let object = row.object_id.clone();
+                    let binding = row.row.artwork_binding.clone();
+                    let object = row.row.object_id.clone();
                     let draft = match &source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider.read_album_metadata(row).await?
@@ -155,8 +154,8 @@ impl EditSession {
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = row.artwork_binding.clone();
-                    let object = row.object_id.clone();
+                    let binding = row.row.artwork_binding.clone();
+                    let object = row.row.object_id.clone();
                     let draft = match &source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider.read_artist_metadata(row).await?
@@ -217,10 +216,11 @@ impl EditSession {
                 .map_err(string_error)
                 .and_then(|result| result.map_err(string_error))
                 .map_err(SourceMetadataError::SavedRefreshFailed)?;
-                if invalidated && let Some(source) = source {
-                    owner
-                        .artwork_invalidated(source.source_id(), CatalogChange::Broad)
-                        .await;
+                if invalidated
+                    && let Some(source) = source
+                        .and_then(|source| owner.shared.catalog.source_key(source.source_id()))
+                {
+                    owner.notice(crate::source::feed::Notice::Source(source));
                 }
             }
         }
@@ -300,8 +300,9 @@ impl EditSession {
                 .await
                 .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
                 .is_none()
+            && let Some(selected) = owner.shared.selected()
         {
-            owner.publish_current_catalog(CatalogChange::Broad).await;
+            owner.notice(crate::source::feed::Notice::Source(selected.source_key));
         }
         result?;
         if let Some(lyrics) = lyrics {
@@ -436,5 +437,5 @@ async fn track_artwork_binding(
         .album(uri, false, &library::ReadCancellation::new())
         .await
         .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-        .and_then(|album| album.artwork_binding))
+        .and_then(|album| album.row.artwork_binding))
 }

@@ -95,7 +95,7 @@ pub fn album_external_links(
     }
     if settings.server
         && let Some(source) = source
-        && let Some(link) = source_link(source, &album.media_uri)
+        && let Some(link) = source_link(source, &album.row.media_uri)
     {
         links.push(link);
     }
@@ -112,7 +112,7 @@ pub fn artist_external_links(
     }
     let mut links = Vec::new();
     if settings.lastfm
-        && let Some(url) = lastfm_artist_url(&artist.metadata.name)
+        && let Some(url) = lastfm_artist_url(&artist.row.name)
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
@@ -131,7 +131,7 @@ pub fn artist_external_links(
     }
     if settings.server
         && let Some(source) = source
-        && let Some(link) = source_link(source, &artist.media_uri)
+        && let Some(link) = source_link(source, &artist.row.media_uri)
     {
         links.push(link);
     }
@@ -175,7 +175,6 @@ fn musicbrainz_album_url(album: &AlbumView) -> Option<String> {
 
 fn musicbrainz_artist_url(artist: &ArtistView) -> Option<String> {
     let artist_id = artist
-        .metadata
         .musicbrainz_artist_id
         .as_deref()
         .and_then(clean_url_label)?;

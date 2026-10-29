@@ -74,13 +74,19 @@ pub async fn resolve_folder(
     };
     match live {
         Ok(page) => {
-            let known = library::MemberRead::new(library::Collection::Objects {
-                source: selected.source_key,
-                ids: page.tracks.clone().into(),
-            })
-            .count(catalog, cancellation)
-            .await?;
-            if known as usize == page.tracks.len() {
+            let known = catalog
+                .order(
+                    &library::Read::Members(library::MemberRead::new(
+                        library::Collection::Objects {
+                            source: selected.source_key,
+                            ids: page.tracks.clone().into(),
+                        },
+                    )),
+                    cancellation,
+                )
+                .await?
+                .len();
+            if known == page.tracks.len() {
                 let mut folders = page.folders;
                 folders.sort_by_cached_key(|folder| folder.name.to_lowercase());
                 return Ok(FolderProjection::Live {
@@ -95,15 +101,7 @@ pub async fn resolve_folder(
         }
     }
     let resolved = match folder_object_id {
-        Some(object) => catalog
-            .catalog_keys(
-                library::CatalogKind::Folder,
-                Some(selected.source_key),
-                &[(object).to_owned()],
-                cancellation,
-            )
-            .await
-            .map(|keys| keys.into_iter().next().map(library::FolderKey::from_raw))?,
+        Some(object) => folder_key(catalog, selected.source_key, object, cancellation).await?,
         None => None,
     };
     exact_cached_folder_scope(
@@ -112,6 +110,25 @@ pub async fn resolve_folder(
         selected.music_folder_key,
     )
     .map(FolderProjection::Cached)
+}
+
+/// The key of a source's cached folder by object id.
+pub(crate) async fn folder_key(
+    catalog: &library::Catalog,
+    source: library::SourceKey,
+    object_id: &str,
+    cancellation: &ReadCancellation,
+) -> LibraryResult<Option<FolderKey>> {
+    Ok(catalog
+        .catalog_keys(
+            library::CatalogKind::Folder,
+            Some(source),
+            &[object_id.to_owned()],
+            cancellation,
+        )
+        .await?
+        .first()
+        .map(|key| FolderKey::from_raw(*key)))
 }
 
 fn exact_cached_folder_scope(

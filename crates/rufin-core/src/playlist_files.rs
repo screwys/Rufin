@@ -8,12 +8,9 @@ use std::{
 
 use async_channel::Receiver;
 use gio::prelude::*;
-use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation, Scope, SourceId};
+use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, Scope, SourceId};
 
-use crate::{
-    runtime::{CatalogChange, CatalogPublication},
-    source::{Shared, SourceOwner, string_error},
-};
+use crate::source::{Shared, SourceOwner, string_error};
 
 const LOCAL_CONFLICT: &str =
     "Both the playlist and its file have changed. Reload the file or save the Rufin version.";
@@ -198,15 +195,12 @@ pub fn update(
         link.auto_refresh = auto_refresh;
         link.auto_save = auto_save;
         link.path_mode = path_mode;
-        if owner
+        owner
             .shared
             .catalog
             .save_playlist_file_link(&link)
             .await
-            .map_err(string_error)?
-        {
-            publish(&owner, Some(playlist)).await;
-        }
+            .map_err(string_error)?;
         Ok(())
     })
 }
@@ -302,7 +296,6 @@ async fn link_on(
         return Err(error);
     }
     associate(owner, &link).await?;
-    publish(owner, Some(playlist)).await;
     Ok(())
 }
 
@@ -372,7 +365,6 @@ pub fn unlink(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Result<(),
             .unlink_playlist_file(playlist)
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -386,7 +378,6 @@ pub fn save(
         let link = required_link(&owner, playlist).await?;
         let result = save_on(&owner, &link, overwrite).await;
         record_result(&owner, &link, &result).await;
-        publish(&owner, Some(playlist)).await;
         result
     })
 }
@@ -400,7 +391,6 @@ pub fn reload(
         let link = required_link(&owner, playlist).await?;
         let result = reload_on(&owner, &link, discard_changes).await.map(|_| ());
         record_result(&owner, &link, &result).await;
-        publish(&owner, Some(playlist)).await;
         result
     })
 }
@@ -430,7 +420,6 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
             .delete_playlist(playlist)
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -514,7 +503,6 @@ pub fn rename_file(
             .save_playlist_file_link(&link)
             .await
             .map_err(string_error)?;
-        publish(&owner, Some(playlist)).await;
         Ok(())
     })
 }
@@ -919,9 +907,7 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
             let result = async {
                 let current = revision(owner, &link).await?;
                 if link.auto_refresh && link.revision.as_ref() != Some(&current) {
-                    if reload_on(owner, &link, false).await? {
-                        publish(owner, Some(link.playlist)).await;
-                    }
+                    reload_on(owner, &link, false).await?;
                 } else if !link.dirty && link.revision.as_ref() == Some(&current) {
                     if link.error.is_some() {
                         owner
@@ -950,13 +936,7 @@ pub(crate) async fn backfill_file_playlists(owner: &SourceOwner) -> Result<(), S
             continue;
         }
         let source_id = &configuration.source_id;
-        let Some(source) = owner
-            .shared
-            .catalog
-            .cached_source(source_id.as_str(), &ReadCancellation::new())
-            .await
-            .map_err(string_error)?
-        else {
+        let Some(source) = owner.shared.catalog.cached_source(source_id.as_str()) else {
             continue;
         };
         let mut after = None;
@@ -1010,7 +990,7 @@ pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
     else {
         return;
     };
-    let Ok(Some(source_key)) = owner.shared.catalog.source_identity_key(source_id).await else {
+    let Some(source_key) = owner.shared.catalog.source_key(source_id) else {
         return;
     };
     let mut after = None;
@@ -1074,7 +1054,6 @@ pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
                     }
                 };
                 remember(owner, playlist, Some(source_id.clone()), path.clone(), None).await?;
-                publish(owner, Some(playlist)).await;
                 Ok::<_, String>(())
             }
             .await;
@@ -1084,12 +1063,4 @@ pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
         }
     }
     refresh_links(owner, Some(source_id)).await;
-}
-
-async fn publish(owner: &SourceOwner, playlist: Option<PlaylistKey>) {
-    owner.shared.publish(CatalogPublication {
-        source_key: None,
-        favorites: Vec::new(),
-        change: CatalogChange::Playlists(playlist),
-    });
 }

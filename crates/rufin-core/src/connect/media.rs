@@ -241,14 +241,10 @@ impl ConnectOwner {
             };
             let identity = self
                 .catalog
-                .catalog_identity(
-                    library::CatalogKind::Track,
-                    uri,
-                    &library::ReadCancellation::new(),
-                )
+                .track_keys(&[uri.to_owned()], &library::ReadCancellation::new())
                 .await
                 .map_err(error)?
-                .map(|identity| library::TrackKey::from_raw(identity.key));
+                .pop();
             if !snapshot.entries.iter().any(|entry| {
                 Some(entry.track_key) == identity
                     && !(entry.received_from_connect && raw_document_reference(uri))

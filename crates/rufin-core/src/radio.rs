@@ -35,7 +35,7 @@ pub async fn play_saved_random(
                 criteria: library::RandomCriteria {
                     min_year: settings.min_year.map(i64::from),
                     max_year: settings.max_year.map(i64::from),
-                    genre: genre.map(|genre| genre.genre_key),
+                    genre: genre.map(|genre| library::GenreKey::from_raw(genre.key)),
                     played: settings.played_filter,
                     require_media: false,
                     variation: std::time::SystemTime::now()
@@ -66,7 +66,7 @@ pub async fn saved_random_genre(
     source_id: &sources::SourceId,
     source: SourceKey,
     music_folder: Option<&str>,
-) -> Result<Option<library::GenreView>, String> {
+) -> Result<Option<library::TagRow>, String> {
     let Some(object_id) = settings.selected_genre_id(source_id, music_folder) else {
         return Ok(None);
     };
@@ -84,11 +84,19 @@ pub async fn saved_random_genre(
     else {
         return Ok(None);
     };
-    catalog
-        .genres(&[library::GenreKey::from_raw(key)], &cancellation)
+    Ok(catalog
+        .rows_of(
+            &[library::Item::Genre(library::GenreKey::from_raw(key))],
+            false,
+            &cancellation,
+        )
         .await
-        .map(|mut genres| genres.pop())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find_map(|row| match row {
+            library::Row::Tag(tag) => Some(tag),
+            _ => None,
+        }))
 }
 
 pub async fn queue_random(

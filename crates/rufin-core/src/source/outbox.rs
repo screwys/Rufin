@@ -193,9 +193,9 @@ impl SourceOwner {
     async fn rejected(&self, source_id: &SourceId) {
         let source_key = match self.shared.selected() {
             Some(selected) => selected.source_key,
-            None => match self.shared.catalog.source_identity_key(source_id).await {
-                Ok(Some(key)) => key,
-                _ => return,
+            None => match self.shared.catalog.source_key(source_id) {
+                Some(key) => key,
+                None => return,
             },
         };
         self.shared

@@ -337,6 +337,7 @@ pub async fn media_details(
                     msgid("Genre"),
                     Some(
                         album
+                            .row
                             .links
                             .genres
                             .iter()
@@ -345,7 +346,7 @@ pub async fn media_details(
                             .join(", "),
                     ),
                 );
-                add_summary(&mut general, &album.summary);
+                add_summary(&mut general, &album.row.summary);
                 musicbrainz(
                     &mut ids,
                     msgid("MusicBrainz release ID"),
@@ -362,7 +363,7 @@ pub async fn media_details(
                     heading: tr(msgid("Album details")),
                     title: album.metadata.title.clone(),
                     subtitle: album.metadata.artist.clone(),
-                    artwork_binding: album.artwork_binding,
+                    artwork_binding: album.row.artwork_binding,
                     can_edit: true,
                     audio_summary: Vec::new(),
                     sections: vec![general],
@@ -370,8 +371,8 @@ pub async fn media_details(
                 (
                     details,
                     library::source_entity_parts(uri).map(|(id, _, _)| id.to_string()),
-                    Some(album.object_id),
-                    album.state,
+                    Some(album.row.object_id),
+                    album.row.state,
                 )
             }
             MediaDetailsItem::Artist {
@@ -383,28 +384,24 @@ pub async fn media_details(
                     .await?
                     .ok_or_else(unavailable)?;
                 let mut general = section(msgid("General"));
-                add(
-                    &mut general,
-                    msgid("Name"),
-                    Some(artist.metadata.name.clone()),
-                );
+                add(&mut general, msgid("Name"), Some(artist.row.name.clone()));
                 add(
                     &mut general,
                     msgid("Sort name"),
-                    artist.metadata.sort_text.clone(),
+                    Some(artist.row.sort_text.clone()).filter(|text| !text.is_empty()),
                 );
-                add_summary(&mut general, &artist.summary);
+                add_summary(&mut general, &artist.row.summary);
                 musicbrainz(
                     &mut ids,
                     msgid("MusicBrainz artist ID"),
                     "artist",
-                    artist.metadata.musicbrainz_artist_id.clone(),
+                    artist.musicbrainz_artist_id.clone(),
                 );
                 let details = MediaDetails {
                     heading: tr(msgid("Artist details")),
-                    title: artist.metadata.name.clone(),
+                    title: artist.row.name.clone(),
                     subtitle: String::new(),
-                    artwork_binding: artist.artwork_binding,
+                    artwork_binding: artist.row.artwork_binding,
                     can_edit: true,
                     audio_summary: Vec::new(),
                     sections: vec![general],
@@ -412,8 +409,8 @@ pub async fn media_details(
                 (
                     details,
                     library::source_entity_parts(uri).map(|(id, _, _)| id.to_string()),
-                    Some(artist.object_id),
-                    artist.state,
+                    Some(artist.row.object_id),
+                    artist.row.state,
                 )
             }
         };

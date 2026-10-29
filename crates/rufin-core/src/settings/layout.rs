@@ -1,3 +1,4 @@
+pub use library::LibraryField;
 use serde::{Deserialize, Serialize};
 
 pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 17;
@@ -245,65 +246,6 @@ impl LibraryListKey {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum LibraryField {
-    RowIndex,
-    Image,
-    Title,
-    TitleMerged,
-    Artist,
-    AlbumArtist,
-    Album,
-    Year,
-    ReleaseDate,
-    DateAdded,
-    LastPlayed,
-    PlayCount,
-    UserRating,
-    Genre,
-    Bpm,
-    Bitrate,
-    SampleRate,
-    BitDepth,
-    Channels,
-    Format,
-    FilePath,
-    Source,
-    TrackNumber,
-    DiscNumber,
-    SongCount,
-    AlbumCount,
-    Duration,
-    Favorite,
-    Tools,
-}
-impl LibraryField {
-    pub fn catalog_sort(self) -> library::CatalogSort {
-        use library::CatalogSort;
-        match self {
-            Self::RowIndex => CatalogSort::Position,
-            Self::TrackNumber => CatalogSort::TrackNumber,
-            Self::Artist => CatalogSort::Artist,
-            Self::AlbumArtist => CatalogSort::AlbumArtist,
-            Self::Album => CatalogSort::Album,
-            Self::Year => CatalogSort::Year,
-            Self::ReleaseDate => CatalogSort::ReleaseDate,
-            Self::DateAdded => CatalogSort::DateAdded,
-            Self::LastPlayed => CatalogSort::LastPlayed,
-            Self::PlayCount => CatalogSort::PlayCount,
-            Self::UserRating => CatalogSort::UserRating,
-            Self::Genre => CatalogSort::Genre,
-            Self::Bpm => CatalogSort::Bpm,
-            Self::Duration => CatalogSort::Duration,
-            Self::Favorite => CatalogSort::Favorite,
-            Self::SongCount => CatalogSort::TrackCount,
-            Self::AlbumCount => CatalogSort::AlbumCount,
-            _ => CatalogSort::Title,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DisplaySize {

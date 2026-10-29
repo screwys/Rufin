@@ -106,6 +106,7 @@ pub enum Scope {
 
 /// A track, album or artist whose shown favorite or rating changed.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct StateChange {
     pub target: crate::FavoriteTarget,
     /// The favorite it shows now.

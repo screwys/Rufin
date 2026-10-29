@@ -334,8 +334,14 @@ impl PlaybackOwner {
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
-        for (row, (_, id, _)) in rows.iter_mut().zip(requested) {
-            Arc::make_mut(row).occurrence_id = id;
+        // Rows of tracks the Store no longer holds are missing, so match by position.
+        for row in &mut rows {
+            if let Some((_, id, _)) = requested
+                .iter()
+                .find(|(position, ..)| *position == row.position)
+            {
+                Arc::make_mut(row).occurrence_id = *id;
+            }
         }
         Ok(crate::playback::QueuePage {
             rows,

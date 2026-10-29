@@ -1,5 +1,5 @@
 use crate::SettingsHandle;
-use library::{FolderChoice, FolderKey, PlaylistKey, SourceKey};
+use library::{FolderChoice, FolderKey, SourceKey};
 use std::sync::Arc;
 
 use super::source::{ConfiguredSources, SourceOperation};
@@ -30,42 +30,6 @@ pub struct VisualizerPublication {
     pub run: playback::RunId,
     /// Linear amplitudes on the canonical ERB axis; map through the current visualizer preset.
     pub levels: Vec<f64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct CatalogPublication {
-    pub source_key: Option<SourceKey>,
-    /// Favorites a committed change set, as clients show them now.
-    pub favorites: Vec<FavoriteState>,
-    pub change: CatalogChange,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum CatalogChange {
-    Activity,
-    Scope,
-    Broad,
-    /// Only favorites changed; the publication carries them.
-    Favorites,
-    Home,
-    Playlists(Option<PlaylistKey>),
-    Album(String),
-}
-
-/// Counts of committed catalog and play changes, for core caches that outlive one change.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct CatalogRevision {
-    pub(crate) catalog: u64,
-    pub(crate) activity: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct FavoriteState {
-    pub target: library::FavoriteTarget,
-    pub favorite: bool,
 }
 
 #[derive(Clone, Debug)]

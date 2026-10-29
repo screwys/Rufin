@@ -226,7 +226,7 @@ pub fn track_artist_album_links(track: &TrackView) -> DetailLinks {
 pub fn album_artist_links(album: &AlbumView) -> DetailLinks {
     DetailLinks::artist_text(
         &album.metadata.artist,
-        &album.links.album_artists,
+        &album.row.links.album_artists,
         |credit: &AlbumArtistLink| credit.media_uri.clone(),
         |credit| credit.name.as_str(),
         true,

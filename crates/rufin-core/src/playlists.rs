@@ -1,6 +1,6 @@
 //! Playlist routing and publication.
+use crate::runtime::SourceEvent;
 use crate::runtime::source::PlaylistExport;
-use crate::runtime::{CatalogChange, SourceEvent};
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 use futures_util::{StreamExt, TryStreamExt};
@@ -393,10 +393,9 @@ pub async fn create_playlist(
         let target = match source_id {
             None => PlaylistOwner::Local,
             Some(id) => {
+                catalog.loaded().await;
                 let cached = catalog
-                    .cached_source(id.as_str(), &ReadCancellation::new())
-                    .await
-                    .map_err(string_error)?
+                    .cached_source(id.as_str())
                     .ok_or("Source access is unavailable")?;
                 configured_playlist_owner(&owner, &id, cached.source)?
             }
@@ -436,10 +435,15 @@ pub async fn create_playlist(
                     .await
                     .map_err(string_error)?;
                 let playlist = match catalog
-                    .playlist_key_by_object(key, &object, &ReadCancellation::new())
+                    .catalog_keys(
+                        library::CatalogKind::Playlist,
+                        Some(key),
+                        std::slice::from_ref(&object),
+                        &ReadCancellation::new(),
+                    )
                     .await
                 {
-                    Ok(playlist) => playlist,
+                    Ok(keys) => keys.first().copied().map(PlaylistKey::from_raw),
                     Err(error) => {
                         owner.shared.warn_nonfatal(&error.to_string());
                         None
@@ -752,10 +756,8 @@ pub(crate) async fn update_playlist_on(
         .await
         {
             Ok(Ok(true)) => {
-                if let Some(source) = &native_source {
-                    owner
-                        .artwork_invalidated(source, CatalogChange::Playlists(Some(playlist)))
-                        .await;
+                if native_source.is_some() {
+                    owner.notice(crate::source::feed::Notice::Playlist(playlist));
                 }
             }
             Ok(Ok(false)) => {}

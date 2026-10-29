@@ -72,17 +72,13 @@ fn cue_direct_continuation_streams_without_enrollment() {
                             .unwrap();
                         if saved.entries.first().map(|entry| entry.track_key)
                             == a.catalog
-                                .catalog_identity(
-                                    library::CatalogKind::Track,
-                                    &uri,
+                                .track_keys(
+                                    std::slice::from_ref(&uri),
                                     &library::ReadCancellation::new(),
                                 )
                                 .await
-                                .map(|identity| {
-                                    identity
-                                        .map(|identity| library::TrackKey::from_raw(identity.key))
-                                })
                                 .unwrap()
+                                .pop()
                             && !saved.entries.is_empty()
                         {
                             break;
@@ -1119,7 +1115,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 auto_refresh: false, auto_save: None, path_mode: library::PlaylistPathMode::Automatic,
                 revision: Some("older disk revision".into()), dirty: true, error: None,
             }).await.unwrap();
-            let music_key = owner.catalog.cached_source(music.as_str(), &library::ReadCancellation::new()).await.unwrap().unwrap().source;
+            let music_key = owner.catalog.cached_source(music.as_str()).unwrap().source;
             assert!(owner.catalog.observed_playlist_file_page(music_key, None).await.unwrap()[0].playlist_identity.is_none());
             let previous = owner.session.write().await.take().unwrap();
             let profile = previous.profile.clone();
@@ -1160,7 +1156,8 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                     receiving_owner.import_file(exported.path().to_owned(), true, Some(key.clone())).await.unwrap();
                 }
                 let received = &receiving_owner.catalog;
-                let source = received.cached_source(music.as_str(), &cancellation).await.unwrap().unwrap();
+                received.loaded().await;
+                let source = received.cached_source(music.as_str()).unwrap();
                 assert!(source.catalog_complete, "the native catalog is ready before provider refresh");
                 assert!(received.accept_freshness(music.as_str(), &freshness, &cancellation).await.unwrap());
                 assert_eq!(received.source_counts(source.source, &cancellation).await.unwrap(), (1, 130));
@@ -1170,7 +1167,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 assert_eq!(rows[0].metadata, expected_metadata);
                 assert!(rows[0].state.favorite);
                 assert_eq!(rows[0].state.rating, None, "native rating null clears the previous server rating");
-                let playlist = received.playlist_key_by_object(source.source, "server-mix", &cancellation).await.unwrap().unwrap();
+                let playlist = library::PlaylistKey::from_raw(received.catalog_keys(library::CatalogKind::Playlist, Some(source.source), &["server-mix".into()], &cancellation).await.unwrap()[0]);
                 let access = received.playlist_access(playlist, &cancellation).await.unwrap().unwrap();
                 assert!(!access.writable);
                 assert!(access.metadata_writable);
@@ -1181,7 +1178,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 let home = received.home_page(source.source, None, 0, 0, &[], &cancellation).await.unwrap();
                 assert_eq!(home.provider_sections[0].section_id, "featured");
                 assert_eq!(home.provider_sections[0].rows.tracks[0].track.media_uri, uri);
-                let shared = received.playlist_key_by_identity(None, &shared_id, &cancellation).await.unwrap().unwrap();
+                let shared = library::PlaylistKey::from_raw(received.catalog_keys(library::CatalogKind::Playlist, None, std::slice::from_ref(&shared_id), &cancellation).await.unwrap()[0]);
                 assert!(received.get_playlist_file_link(shared).await.unwrap().is_none(), "device file permissions are not imported");
                 crate::playlist_files::discover(&receiving.products.source, &music).await;
                 let associated = received.find_playlist_file_link(Some(&music), "music/copied.m3u").await.unwrap().unwrap();

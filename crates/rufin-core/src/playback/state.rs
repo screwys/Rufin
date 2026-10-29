@@ -1541,14 +1541,13 @@ impl Player {
                 .enumerate()
                 .map(|(position, (_, entry))| (position, entry.clone()))
                 .collect::<Vec<_>>();
+            // An entry whose track the Store no longer holds has no row and keeps the one it has.
             let result = catalog
                 .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
                 .await
                 .map(|rows| {
-                    entries
-                        .into_iter()
-                        .map(|(id, _)| id)
-                        .zip(rows.into_iter().map(|row| row.track.clone()))
+                    rows.iter()
+                        .map(|row| (entries[row.position].0, row.track.clone()))
                         .collect()
                 })
                 .map_err(super::string_error);
