@@ -1,120 +1,130 @@
 //! Set-once mosaics, installed while some playlist, smart playlist, genre or mood without a
 //! picture has fewer than four covers picked. It keeps those owners in memory and picks for one
 //! only when the change feed names its members: a playlist's entries, a smart playlist's rule, a
-//! genre's or mood's added tracks. A smart playlist is picked again at launch and after a
-//! reload. Once every mosaic is complete it goes.
+//! genre's or mood's added tracks. A smart playlist is picked again on each full pass. Once every
+//! mosaic is complete it goes, until a new owner or a removed picture may need one.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
+use futures_util::future::BoxFuture;
 use library::{Change, MosaicOwner, Scope};
-use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
-use super::{Shared, SourceOwner};
+use super::Shared;
+use crate::features::{Feature, Next};
 
-impl SourceOwner {
-    /// Installs the mosaics feature unless it runs; it goes again when nothing is left to pick.
-    pub(super) fn ensure_mosaics(&self) {
-        let mut installed = self
-            .shared
-            .mosaics
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if installed.is_some() {
-            return;
+pub(super) struct Mosaics {
+    shared: Weak<Shared>,
+    picks: Mutex<Picks>,
+}
+
+#[derive(Default)]
+struct Picks {
+    /// The incomplete owners.
+    wanted: HashSet<MosaicOwner>,
+    /// The revision of the feature's own last commit, which it does not hear again.
+    own: Option<u64>,
+}
+
+impl Mosaics {
+    pub(super) fn new(shared: Weak<Shared>) -> Self {
+        Self {
+            shared,
+            picks: Mutex::new(Picks::default()),
         }
-        let changes = self.shared.catalog.changes();
-        *installed = Some(
-            self.shared
-                .runtime
-                .spawn(run(Arc::downgrade(&self.shared), changes))
-                .abort_handle(),
-        );
+    }
+
+    fn picks(&self) -> std::sync::MutexGuard<'_, Picks> {
+        self.picks.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
-async fn run(shared: Weak<Shared>, mut changes: tokio::sync::broadcast::Receiver<Arc<Change>>) {
-    let mut wanted = HashSet::new();
-    // Whether smart playlists, whose members follow plays and dates, are picked again.
-    let mut smart = true;
-    let mut listed = true;
-    let mut picks = HashSet::new();
-    // The feature's own commits, which it does not hear again.
-    let mut own = None;
-    loop {
-        let Some(owner) = shared.upgrade() else {
-            return;
-        };
-        let catalog = &owner.catalog;
-        if listed {
-            match catalog.incomplete_mosaics().await {
-                Ok(incomplete) => {
-                    // Owners never picked get their first pick.
-                    picks.extend(
-                        incomplete
-                            .iter()
-                            .filter(|(owner, picked)| {
-                                !picked || (smart && matches!(owner, MosaicOwner::Smart(_)))
-                            })
-                            .map(|(owner, _)| *owner),
-                    );
-                    wanted = incomplete.into_iter().map(|(owner, _)| owner).collect();
-                }
-                Err(error) => owner.warn_nonfatal(&error.to_string()),
-            }
-            smart = false;
-            listed = false;
-            picks.retain(|owner| wanted.contains(owner));
-        }
-        if !picks.is_empty() {
-            let owners = picks.drain().collect::<Vec<_>>();
-            match catalog.pick_mosaics(&owners).await {
-                Ok((incomplete, revision)) => {
-                    own = revision;
-                    for owner in owners {
-                        if !incomplete.contains(&owner) {
-                            wanted.remove(&owner);
-                        }
-                    }
-                }
-                Err(error) => owner.warn_nonfatal(&error.to_string()),
-            }
-        }
-        if wanted.is_empty() {
-            let mut installed = owner.mosaics.lock().unwrap_or_else(|p| p.into_inner());
-            // A Change that came meanwhile may name a new owner; the next one installs again.
-            if changes.is_empty() {
-                *installed = None;
-                return;
-            }
-        }
-        drop(owner);
-        let mut next = changes.recv().await;
-        loop {
-            match next {
-                Ok(change) if Some(change.revision) == own => {}
-                Ok(change) => {
-                    let Some(owner) = shared.upgrade() else {
-                        return;
-                    };
+impl Feature for Mosaics {
+    /// The full pass reads which owners are incomplete.
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async { true })
+    }
+
+    fn hears(&self, change: &Change) -> bool {
+        let picks = self.picks();
+        Some(change.revision) != picks.own
+            && change.scopes.iter().any(|scope| match scope {
+                Scope::Reload
+                | Scope::Playlists
+                | Scope::Collections { .. }
+                | Scope::Playlist { .. }
+                | Scope::Smart { .. } => true,
+                Scope::Tracks { added, .. } => !added.is_empty() && !picks.wanted.is_empty(),
+                _ => false,
+            })
+    }
+
+    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(shared) = self.shared.upgrade() else {
+                return Next::Done;
+            };
+            let catalog = &shared.catalog;
+            let (mut wanted, own) = {
+                let mut picks = self.picks();
+                (std::mem::take(&mut picks.wanted), picks.own)
+            };
+            // Whether smart playlists, whose members follow plays and dates, are picked again.
+            let (mut listed, mut smart) = (changes.is_none(), changes.is_none());
+            let mut picks = HashSet::new();
+            for change in changes.iter().flatten() {
+                if Some(change.revision) != own {
                     members_changed(
-                        &owner.catalog,
-                        &change,
+                        catalog,
+                        change,
                         &wanted,
                         &mut picks,
                         &mut listed,
                         &mut smart,
                     );
                 }
-                Err(RecvError::Lagged(_)) => (listed, smart) = (true, true),
-                Err(RecvError::Closed) => return,
             }
-            next = match changes.try_recv() {
-                Ok(change) => Ok(change),
-                Err(TryRecvError::Lagged(skipped)) => Err(RecvError::Lagged(skipped)),
-                Err(_) => break,
-            };
-        }
+            if listed {
+                match catalog.incomplete_mosaics().await {
+                    Ok(incomplete) => {
+                        // Owners never picked get their first pick.
+                        picks.extend(
+                            incomplete
+                                .iter()
+                                .filter(|(owner, picked)| {
+                                    !picked || (smart && matches!(owner, MosaicOwner::Smart(_)))
+                                })
+                                .map(|(owner, _)| *owner),
+                        );
+                        wanted = incomplete.into_iter().map(|(owner, _)| owner).collect();
+                    }
+                    Err(error) => shared.warn_nonfatal(&error.to_string()),
+                }
+            }
+            picks.retain(|owner| wanted.contains(owner));
+            let mut own = None;
+            if !picks.is_empty() {
+                let owners = picks.into_iter().collect::<Vec<_>>();
+                match catalog.pick_mosaics(&owners).await {
+                    Ok((incomplete, revision)) => {
+                        own = revision;
+                        for owner in owners {
+                            if !incomplete.contains(&owner) {
+                                wanted.remove(&owner);
+                            }
+                        }
+                    }
+                    Err(error) => shared.warn_nonfatal(&error.to_string()),
+                }
+            }
+            let done = wanted.is_empty();
+            let mut picks = self.picks();
+            picks.wanted = wanted;
+            if own.is_some() {
+                picks.own = own;
+            }
+            if done { Next::Done } else { Next::Wait }
+        })
     }
 }
 
@@ -154,9 +164,5 @@ fn members_changed(
                 .map(MosaicOwner::Tag)
                 .filter(|owner| wanted.contains(owner)),
         );
-    }
-    // A relist keeps the owners still wanted; without one, only those wanted now.
-    if !*listed {
-        picks.retain(|owner| wanted.contains(owner));
     }
 }

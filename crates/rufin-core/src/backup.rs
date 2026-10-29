@@ -337,7 +337,7 @@ impl BackupOwner {
                         .map_err(|e| e.to_string());
                     if let Err(error) = result {
                         if contents.queue {
-                            self.playback.start().await?;
+                            self.playback.start();
                         }
                         return Err(error);
                     }
@@ -364,13 +364,9 @@ impl BackupOwner {
                         }
                     }
                     if contents.queue {
-                        if let Err(error) = self.playback.start().await {
-                            report.warnings.push(format!(
-                                "Queue restored; playback could not resume: {error}"
-                            ));
-                        }
+                        self.playback.start();
                     } else {
-                        self.playback.catalog_changed();
+                        self.playback.library_changed(None);
                     }
                     Ok(report)
                 },

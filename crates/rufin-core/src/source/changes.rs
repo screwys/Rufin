@@ -1,5 +1,4 @@
-//! Publishes the Catalog's Changes as the catalog publications clients read today and runs the
-//! side effects that follow them. A source's catalog changes publish at most once a second
+//! Publishes the Catalog's Changes as the catalog publications clients read today. A source's catalog changes publish at most once a second
 //! while a sync commits page after page, and at once when its listing completes. Plays,
 //! favorites, ratings, playlists and Home rows publish at once.
 
@@ -7,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use library::{Change, PlaylistKey, Scope, SourceKey, SourcePhase, TrackKey};
+use library::{Change, PlaylistKey, Scope, SourceKey, SourcePhase};
 use tokio::sync::broadcast::{Receiver, error::RecvError};
 use tokio::time::{Instant, sleep_until};
 
@@ -32,7 +31,6 @@ pub(super) struct Pending {
     pub(super) sources: BTreeMap<SourceKey, SourceChanged>,
     /// Sources whose listing completed, published without waiting.
     completed: Vec<SourceKey>,
-    pub(super) rekeys: Vec<(TrackKey, TrackKey)>,
     pub(super) reloaded: bool,
     pub(super) activity: bool,
     pub(super) playlists: Vec<Option<PlaylistKey>>,
@@ -65,9 +63,9 @@ impl Pending {
                     self.playlists.push(None)
                 }
                 Scope::Home { source } => self.home.push(*source),
-                Scope::Rekey { old, new } => self.rekeys.push((*old, *new)),
                 Scope::State { items } => self.states.extend(items.iter().cloned()),
                 Scope::Tracks { source: None, .. }
+                | Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Downloads { .. }
                 | Scope::Lyrics { .. } => {}
@@ -108,7 +106,6 @@ impl Pending {
         Self {
             sources,
             completed: Vec::new(),
-            rekeys: std::mem::take(&mut self.rekeys),
             reloaded: std::mem::take(&mut self.reloaded),
             activity: std::mem::take(&mut self.activity),
             playlists: std::mem::take(&mut self.playlists),
@@ -119,7 +116,6 @@ impl Pending {
 
     fn is_empty(&self) -> bool {
         self.sources.is_empty()
-            && self.rekeys.is_empty()
             && !self.reloaded
             && !self.activity
             && self.playlists.is_empty()

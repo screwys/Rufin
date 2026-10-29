@@ -6,13 +6,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
-use library::{Catalog, LoudnessMeasurement, ReadCancellation, Scope, SourceKey};
+use futures_util::future::BoxFuture;
+use library::{Catalog, Change, LoudnessMeasurement, ReadCancellation, Scope, SourceKey};
 use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
-use tokio::sync::broadcast::error::RecvError;
 use tracing::{info, warn};
 
-use crate::playback::prepare_stream;
+use crate::features::{Feature, Next};
+use crate::playback::{PlaybackOwner, prepare_stream};
+use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 
 struct ActiveAnalysis {
@@ -21,8 +23,6 @@ struct ActiveAnalysis {
     cancelled: Arc<AtomicBool>,
     task: Option<tokio::task::AbortHandle>,
     restart: bool,
-    scope: LoudnessNormalizationScope,
-    write_tags: bool,
 }
 
 impl ActiveAnalysis {
@@ -36,12 +36,9 @@ impl ActiveAnalysis {
 
 pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
+    settings: SettingsFile,
     active: Mutex<Option<ActiveAnalysis>>,
     blocked: Mutex<AnalysisFailureBlock>,
-    /// The scope and tag writing while normalization is EBU R128.
-    current: Mutex<Option<(LoudnessNormalizationScope, bool)>>,
-    /// Hears the change feed while normalization is EBU R128.
-    watcher: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 #[derive(Default)]
@@ -61,94 +58,80 @@ impl AnalysisFailureBlock {
     }
 }
 
-impl LoudnessAnalysisOwner {
-    pub(crate) fn new(runtime: tokio::runtime::Handle) -> Arc<Self> {
-        Arc::new(Self {
-            runtime,
-            active: Mutex::new(None),
-            blocked: Mutex::new(AnalysisFailureBlock::default()),
-            current: Mutex::new(None),
-            watcher: Mutex::new(None),
+/// EBU R128 analysis, installed while normalization is EBU R128.
+pub(crate) struct Loudness(pub(crate) Weak<PlaybackOwner>);
+
+impl Feature for Loudness {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            self.0.upgrade().is_some_and(|playback| {
+                playback
+                    .loudness
+                    .settings
+                    .load()
+                    .ui
+                    .playback
+                    .loudness_normalization
+                    == LoudnessNormalization::EbuR128
+            })
         })
     }
 
-    /// Starts hearing the change feed unless it already does.
-    fn watch(self: &Arc<Self>, source_owner: &Arc<SourceOwner>) {
-        let mut watcher = self.watcher.lock().unwrap_or_else(|p| p.into_inner());
-        if watcher.is_some() {
-            return;
-        }
-        let owner = Arc::downgrade(self);
-        let source = Arc::downgrade(source_owner);
-        let mut changes = source_owner.shared.catalog.changes();
-        *watcher = Some(
-            self.runtime
-                .spawn(async move {
-                    loop {
-                        let relevant = match changes.recv().await {
-                            Ok(change) => {
-                                let selected = source
-                                    .upgrade()
-                                    .and_then(|source| source.selected_library())
-                                    .map(|selected| selected.source_key);
-                                change.scopes.iter().any(|scope| match scope {
-                                    Scope::Reload => true,
-                                    Scope::Tracks {
-                                        source: Some(source),
-                                        added,
-                                        ..
-                                    } => !added.is_empty() && Some(*source) == selected,
-                                    _ => false,
-                                })
-                            }
-                            Err(RecvError::Lagged(_)) => true,
-                            Err(RecvError::Closed) => return,
-                        };
-                        let (Some(owner), Some(source)) = (owner.upgrade(), source.upgrade())
-                        else {
-                            return;
-                        };
-                        let current = *owner.current.lock().unwrap_or_else(|p| p.into_inner());
-                        if relevant && let Some((scope, write_tags)) = current {
-                            owner.library_changed(
-                                LoudnessNormalization::EbuR128,
-                                scope,
-                                write_tags,
-                                Some(source),
-                            );
-                        }
-                    }
-                })
-                .abort_handle(),
-        );
+    fn hears(&self, change: &Change) -> bool {
+        let selected = self
+            .0
+            .upgrade()
+            .and_then(|playback| playback.source_owner())
+            .and_then(|source| source.selected_library())
+            .map(|selected| selected.source_key);
+        change.scopes.iter().any(|scope| match scope {
+            Scope::Reload => true,
+            Scope::Tracks {
+                source: Some(source),
+                added,
+                ..
+            } => !added.is_empty() && Some(*source) == selected,
+            _ => false,
+        })
     }
 
-    pub(crate) fn settings_changed(
-        self: &Arc<Self>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        source_owner: Option<Arc<SourceOwner>>,
-    ) {
-        if normalization != LoudnessNormalization::EbuR128 {
-            *self.current.lock().unwrap_or_else(|p| p.into_inner()) = None;
-            if let Some(watcher) = self
-                .watcher
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .take()
-            {
-                watcher.abort();
+    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(playback) = self.0.upgrade() else {
+                return Next::Done;
+            };
+            if changes.is_some() {
+                playback.loudness.library_changed(playback.source_owner());
+            } else {
+                playback.loudness.start(playback.source_owner());
             }
-            self.cancel();
-            return;
+            Next::Wait
+        })
+    }
+
+    fn stopped(&self) {
+        if let Some(playback) = self.0.upgrade() {
+            playback.loudness.cancel();
         }
+    }
+}
+
+impl LoudnessAnalysisOwner {
+    pub(crate) fn new(runtime: tokio::runtime::Handle, settings: SettingsFile) -> Arc<Self> {
+        Arc::new(Self {
+            runtime,
+            settings,
+            active: Mutex::new(None),
+            blocked: Mutex::new(AnalysisFailureBlock::default()),
+        })
+    }
+
+    /// Analyzes what the selected source misses, unless that runs already.
+    fn start(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
         let Some(source_owner) = source_owner else {
             self.cancel();
             return;
         };
-        *self.current.lock().unwrap_or_else(|p| p.into_inner()) = Some((scope, write_tags));
-        self.watch(&source_owner);
         let Some(selected) = source_owner.selected_library() else {
             self.cancel();
             return;
@@ -166,14 +149,18 @@ impl LoudnessAnalysisOwner {
         {
             return;
         }
+        let playback = self.settings.load().ui.playback;
+        let (scope, write_tags) = (
+            playback.loudness_normalization_scope,
+            playback.write_ebu_r128_tags,
+        );
         let cancelled = Arc::new(AtomicBool::new(false));
         {
             let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-            if active.as_ref().is_some_and(|current| {
-                current.source_key == source_key
-                    && current.scope == scope
-                    && current.write_tags == write_tags
-            }) {
+            if active
+                .as_ref()
+                .is_some_and(|current| current.source_key == source_key)
+            {
                 return;
             }
             if let Some(previous) = active.take() {
@@ -185,8 +172,6 @@ impl LoudnessAnalysisOwner {
                 cancelled: Arc::clone(&cancelled),
                 task: None,
                 restart: false,
-                scope,
-                write_tags,
             });
         }
         let owner = Arc::downgrade(self);
@@ -203,7 +188,7 @@ impl LoudnessAnalysisOwner {
             )
             .await;
             if let Some(owner) = owner.upgrade() {
-                owner.finish(&task_cancelled, normalization, scope, write_tags, failed);
+                owner.finish(&task_cancelled, failed);
             }
         });
         let abort = task.abort_handle();
@@ -218,18 +203,12 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    pub(crate) fn library_changed(
-        self: &Arc<Self>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        source_owner: Option<Arc<SourceOwner>>,
-    ) {
-        let Some(source_owner) = source_owner else {
-            self.cancel();
-            return;
-        };
-        let Some(selected) = source_owner.selected_library() else {
+    /// The selected source or its tracks changed: what it misses is analyzed again.
+    pub(crate) fn library_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
+        let Some(selected) = source_owner
+            .as_ref()
+            .and_then(|source_owner| source_owner.selected_library())
+        else {
             self.cancel();
             return;
         };
@@ -246,7 +225,7 @@ impl LoudnessAnalysisOwner {
             return;
         }
         drop(active);
-        self.settings_changed(normalization, scope, write_tags, Some(source_owner));
+        self.start(source_owner);
     }
 
     pub(crate) fn cancel(&self) {
@@ -255,14 +234,7 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    fn finish(
-        self: &Arc<Self>,
-        cancelled: &Arc<AtomicBool>,
-        normalization: LoudnessNormalization,
-        scope: LoudnessNormalizationScope,
-        write_tags: bool,
-        failed: bool,
-    ) {
+    fn finish(self: &Arc<Self>, cancelled: &Arc<AtomicBool>, failed: bool) {
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         let completed = active
             .as_ref()
@@ -283,7 +255,7 @@ impl LoudnessAnalysisOwner {
         }
         drop(active);
         if !failed && let Some(source_owner) = restart {
-            self.settings_changed(normalization, scope, write_tags, Some(source_owner));
+            self.start(Some(source_owner));
         }
     }
 }

@@ -596,9 +596,25 @@ impl ConnectOwner {
         self.runtime.spawn(async move {
             let _action = owner.actions.lock().await;
             let result = async {
-                let working = ProfileStore::database_profile(owner.catalog.path())
-                    .await
-                    .map_err(error)?;
+                // The Store holds Connect state only for Connect, so it is read only while on.
+                let enabled = owner.status().settings.enabled;
+                if enabled
+                    && reset_earlier_state(&owner.directory, &owner.catalog, &owner.settings_apply)
+                        .await?
+                {
+                    owner.status.send_modify(|status| {
+                        status.settings = ConnectSettings::default();
+                        status.profile_status = localization::tr("Connect is not enabled");
+                    });
+                    return Ok(());
+                }
+                let working = if enabled {
+                    ProfileStore::database_profile(owner.catalog.path())
+                        .await
+                        .map_err(error)?
+                } else {
+                    None
+                };
                 let settings = owner.status().settings;
                 if settings.profile != working && settings.enabled {
                     owner.save(|config| {
@@ -651,7 +667,6 @@ impl ConnectOwner {
         let weak = Arc::downgrade(self);
         let stop = session.stop.clone();
         let mut configuration = self.source.configuration_changes();
-        let mut catalog = self.source.catalog_changes();
         let mut settings = self.settings_apply.shared_changes();
         self.runtime.spawn(async move {
             stop.run_until_cancelled(async move {
@@ -689,10 +704,8 @@ impl ConnectOwner {
                         biased;
                         _ = tokio::time::sleep(Duration::from_secs(300)) => true,
                         _ = configuration.changed() => true,
-                        _ = catalog.changed() => false,
                         _ = settings.changed() => false,
                     };
-                    catalog.borrow_and_update();
                     if !configure
                         && let Some(owner) = weak.upgrade()
                         && let Some(network) = owner.network.lock().await.as_ref()
@@ -3286,7 +3299,7 @@ impl ConnectOwner {
                     Ok::<_, String>(())
                 }
                 .await;
-                self.playback.start().await?;
+                self.playback.start();
                 result
             })
             .await?;
@@ -3357,22 +3370,24 @@ impl ConnectOwner {
 
 /// Connect state from earlier versions is reset once instead of upgraded. The
 /// Store is marked last, so an interrupted reset runs again on the next start.
-pub(crate) async fn reset_earlier_state(
-    directory: PathBuf,
+/// Resets Connect state an earlier version left in the Store. Whether it did.
+async fn reset_earlier_state(
+    directory: &std::path::Path,
     catalog: &library::Catalog,
     settings: &SettingsOwner,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if !ProfileStore::reset_pending(catalog).await.map_err(error)? {
-        return Ok(());
+        return Ok(false);
     }
     let settings = settings.clone();
-    let files = directory.clone();
+    let files = directory.to_path_buf();
     tokio::task::spawn_blocking(move || settings.reset_connect(&files))
         .await
         .map_err(error)??;
-    ProfileStore::clear_database(catalog, &directory)
+    ProfileStore::clear_database(catalog, directory)
         .await
-        .map_err(error)
+        .map_err(error)?;
+    Ok(true)
 }
 
 pub(crate) fn write_device_config(

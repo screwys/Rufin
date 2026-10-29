@@ -17,7 +17,6 @@ use library::{Catalog, Change, FolderKey, Scope, SourceKey, TrackKey};
 use serde::{Deserialize, Serialize};
 use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
-use tokio::sync::broadcast::{self, error::RecvError};
 use tracing::warn;
 
 mod quality;
@@ -83,6 +82,8 @@ enum Command {
         media_uris: Vec<String>,
     },
     ConnectChanged,
+    /// The Changes the download rules heard, or None when everything may have changed.
+    LibraryChanged(Option<Vec<Arc<Change>>>),
     Remove {
         media_uris: Vec<String>,
         notify: bool,
@@ -913,6 +914,11 @@ impl Downloads {
     pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
         self.send(Command::SettingsChanged(settings));
     }
+
+    /// Reconciles the rules of the sources these Changes touched, or of every source.
+    pub fn library_changed(&self, changes: Option<Vec<Arc<Change>>>) {
+        self.send(Command::LibraryChanged(changes));
+    }
 }
 
 impl Downloads {
@@ -992,15 +998,6 @@ impl Downloads {
     }
 }
 
-async fn next_change(
-    feed: &mut Option<broadcast::Receiver<Arc<Change>>>,
-) -> Result<Arc<Change>, RecvError> {
-    match feed {
-        Some(feed) => feed.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
 async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiver<PreparedRules>) {
     if let Err(error) = migrate_download_records(&actor.root, &actor.catalog, None, None).await {
         warn!(%error, "could not restore direct download access");
@@ -1016,10 +1013,7 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
-    // The change feed, heard only while some source has download rules.
-    let mut feed = None;
     loop {
-        actor.follow_rules(&mut feed);
         if receiver.is_closed() {
             actor.abort_matching(&mut active, true, |_| true).await;
             break;
@@ -1049,7 +1043,6 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
                     let current = active.swap_remove(index);
                     actor.finish(current, result, &mut active).await;
                 }
-                change = next_change(&mut feed) => actor.library_changed(change, &mut feed),
                 _ = retry.tick() => actor.retry_waiting(),
             }
             continue;
@@ -1064,7 +1057,6 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
             Ok(prepared) = rule_results.recv() => {
                 actor.apply_prepared_rules(prepared, &mut active).await;
             }
-            change = next_change(&mut feed) => actor.library_changed(change, &mut feed),
             _ = retry.tick() => {
                 actor.retry_waiting();
             }
@@ -1207,6 +1199,7 @@ impl Actor {
             Command::ConnectChanged => {
                 self.retry_waiting();
             }
+            Command::LibraryChanged(changes) => self.library_changed(changes.as_deref()),
             Command::Remove { media_uris, notify } => {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
@@ -1394,55 +1387,38 @@ impl Actor {
         }
     }
 
-    /// Hears the change feed while some source has rules, and stops hearing it when none has.
-    fn follow_rules(&self, feed: &mut Option<broadcast::Receiver<Arc<Change>>>) {
-        if !self
-            .settings
-            .values()
-            .any(|settings| !settings.rules.is_empty())
-        {
-            *feed = None;
-        } else if feed.is_none() {
-            *feed = Some(self.catalog.changes());
-        }
-    }
-
-    /// Reconciles the rules of the sources a Change touched: their tracks for every rule,
+    /// Reconciles the rules of the sources Changes touched: their tracks for every rule,
     /// favorites for the favorites rule and playlists for the playlists rule.
-    fn library_changed(
-        &mut self,
-        change: Result<Arc<Change>, RecvError>,
-        feed: &mut Option<broadcast::Receiver<Arc<Change>>>,
-    ) {
-        if matches!(change, Err(RecvError::Closed)) {
-            *feed = None;
-            return;
-        }
-        let sources = self
-            .attached
-            .iter()
-            .filter(|(source_id, attached)| {
-                let rules = self.settings_for(source_id).rules;
-                !rules.is_empty()
-                    && change.as_ref().map_or(true, |change| {
-                        change.scopes.iter().any(|scope| match scope {
-                            Scope::Reload => true,
-                            Scope::Tracks {
-                                source: Some(source),
-                                ..
-                            }
-                            | Scope::Collections { source }
-                            | Scope::Source { key: source, .. } => *source == attached.source_key,
-                            Scope::State { .. } => rules.favorites,
-                            Scope::Playlist { entries: true, .. } | Scope::Playlists => {
-                                rules.all_playlists
-                            }
-                            _ => false,
+    fn library_changed(&mut self, changes: Option<&[Arc<Change>]>) {
+        let sources =
+            self.attached
+                .iter()
+                .filter(|(source_id, attached)| {
+                    let rules = self.settings_for(source_id).rules;
+                    !rules.is_empty()
+                        && changes.is_none_or(|changes| {
+                            changes.iter().flat_map(|change| &change.scopes).any(
+                                |scope| match scope {
+                                    Scope::Reload => true,
+                                    Scope::Tracks {
+                                        source: Some(source),
+                                        ..
+                                    }
+                                    | Scope::Collections { source }
+                                    | Scope::Source { key: source, .. } => {
+                                        *source == attached.source_key
+                                    }
+                                    Scope::State { .. } => rules.favorites,
+                                    Scope::Playlist { entries: true, .. } | Scope::Playlists => {
+                                        rules.all_playlists
+                                    }
+                                    _ => false,
+                                },
+                            )
                         })
-                    })
-            })
-            .map(|(source_id, _)| source_id.clone())
-            .collect::<Vec<_>>();
+                })
+                .map(|(source_id, _)| source_id.clone())
+                .collect::<Vec<_>>();
         for source_id in sources {
             self.reconcile_all_rules(&source_id);
         }
@@ -1644,26 +1620,18 @@ impl Actor {
         replace_unknown: bool,
     ) -> Result<bool, String> {
         let automatic = matches!(owner, DownloadOwner::Subject(DownloadSubject::Rule(_)));
-        let reference = self
+        let revision = self
             .catalog
-            .connect_track_reference(media_uri)
+            .file_track(media_uri)
             .await
             .map_err(|error| error.to_string())?
-            .filter(|reference| {
-                reference["local_media"].as_bool() == Some(true)
-                    || library::file_media_path(media_uri).is_some()
-                    || library::cue_media_parts(media_uri).is_some()
-                    || library::document_media_id(media_uri).is_some()
-            });
+            .map(|file| file.revision);
         let encoding = library::media_encoding_key(quality.encoding());
         let previous = self
             .catalog
             .download_file(media_uri, &encoding)
             .await
             .map_err(|error| error.to_string())?;
-        let revision = reference
-            .as_ref()
-            .map(|reference| reference["revision"].to_string());
         let mut saved = previous
             .as_ref()
             .filter(|file| {
@@ -1681,7 +1649,7 @@ impl Actor {
                 .await
                 .map_err(|error| error.to_string())?;
         }
-        if saved.is_none() && reference.is_none() && !replace_unknown {
+        if saved.is_none() && revision.is_none() && !replace_unknown {
             saved = self
                 .catalog
                 .download_file(media_uri, "unknown")
@@ -2131,19 +2099,8 @@ impl Actor {
                     continue;
                 }
             }
-            let peer_reference = self
-                .catalog
-                .connect_track_reference(&media_uri)
-                .await
-                .ok()
-                .flatten()
-                .filter(|reference| {
-                    reference["local_media"].as_bool() == Some(true)
-                        || library::file_media_path(&media_uri).is_some()
-                        || library::cue_media_parts(&media_uri).is_some()
-                        || library::document_media_id(&media_uri).is_some()
-                });
-            let resolved = if peer_reference.is_some() {
+            let file = self.catalog.file_track(&media_uri).await.ok().flatten();
+            let resolved = if file.is_some() {
                 self.peer.download(&self.catalog, &media_uri, quality).await
             } else if let Some(source) = source.as_ref() {
                 source
@@ -2179,9 +2136,9 @@ impl Actor {
                 custom_directory,
                 transcoded_extension,
             );
-            if let Some(reference) = &peer_reference {
-                let backing = reference["backing_id"].as_str().unwrap_or(&media_uri);
-                let revision = reference["revision"].to_string();
+            if let Some(file) = &file {
+                let backing = file.backing.as_deref().unwrap_or(&media_uri);
+                let revision = file.revision.clone();
                 let key = blake3::hash(
                     format!(
                         "{backing}\0{revision}\0{}",
@@ -2207,7 +2164,7 @@ impl Actor {
                     {
                         let extension = quality
                             .extension()
-                            .or_else(|| reference["source_format"].as_str())
+                            .or_else(|| file.format.as_deref())
                             .unwrap_or("audio");
                         *name = format!("{key}.{extension}");
                     }
@@ -2236,11 +2193,7 @@ impl Actor {
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
-            let revision = Arc::new(Mutex::new(
-                peer_reference
-                    .as_ref()
-                    .map(|reference| reference["revision"].to_string()),
-            ));
+            let revision = Arc::new(Mutex::new(file.as_ref().map(|file| file.revision.clone())));
             let uri = media_uri.clone();
             let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
@@ -2248,7 +2201,7 @@ impl Actor {
                 .as_ref()
                 .map_or([0; 32], |source| source.input_digest);
             let task_source_id = source_id.clone();
-            let peer_assets = peer_reference.is_some().then(|| self.peer.clone());
+            let peer_assets = file.is_some().then(|| self.peer.clone());
             let task_revision = Arc::clone(&revision);
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;

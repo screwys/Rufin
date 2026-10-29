@@ -1,80 +1,126 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{Arc, Weak};
 
 use async_channel::Receiver;
-use library::{Scope, SourceKey, TrackKey};
+use futures_util::future::BoxFuture;
+use library::{Change, Scope, SourceKey, TrackKey};
 use sources::{SourceConfiguration, SourceError, SourceId};
-use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
-use super::SourceOwner;
+use super::{Shared, SourceOwner};
+use crate::features::{Feature, Next};
 use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
+
+/// Automatic artwork and lyrics downloads, installed while either is on. A full pass fetches for
+/// every source; otherwise it fetches only for tracks the change feed reports as added.
+pub(super) struct AssetDownloads(pub(super) Weak<Shared>);
+
+impl Feature for AssetDownloads {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            self.0.upgrade().is_some_and(|shared| {
+                let (artwork, lyrics) = shared.settings.cache_downloads();
+                artwork || lyrics
+            })
+        })
+    }
+
+    fn hears(&self, change: &Change) -> bool {
+        change.scopes.iter().any(|scope| match scope {
+            Scope::Reload => true,
+            Scope::Tracks {
+                source: Some(_),
+                added,
+                ..
+            } => !added.is_empty(),
+            _ => false,
+        })
+    }
+
+    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return Next::Done;
+            };
+            let mut added = BTreeMap::<SourceKey, Vec<TrackKey>>::new();
+            let mut full = changes.is_none();
+            for scope in changes.iter().flatten().flat_map(|change| &change.scopes) {
+                match scope {
+                    Scope::Reload => full = true,
+                    Scope::Tracks {
+                        source: Some(source),
+                        added: keys,
+                        ..
+                    } => added.entry(*source).or_default().extend(keys),
+                    _ => {}
+                }
+            }
+            SourceOwner { shared }
+                .download_assets((!full).then_some(&added))
+                .await;
+            Next::Wait
+        })
+    }
+
+    fn stopped(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            SourceOwner { shared }.publish_asset_operation(SourceOperation::Idle);
+        }
+    }
+}
+
+/// Download rules, installed while some source has rules. The download queue reconciles the
+/// rules of the sources a Change touched.
+pub(super) struct DownloadRules(pub(super) Weak<Shared>);
+
+impl Feature for DownloadRules {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            self.0.upgrade().is_some_and(|shared| {
+                shared
+                    .settings
+                    .load()
+                    .ui
+                    .downloads
+                    .iter()
+                    .any(|settings| !settings.rules.is_empty())
+            })
+        })
+    }
+
+    fn hears(&self, change: &Change) -> bool {
+        change.scopes.iter().any(|scope| {
+            matches!(
+                scope,
+                Scope::Reload
+                    | Scope::Tracks {
+                        source: Some(_),
+                        ..
+                    }
+                    | Scope::Collections { .. }
+                    | Scope::Source { .. }
+                    | Scope::State { .. }
+                    | Scope::Playlist { entries: true, .. }
+                    | Scope::Playlists
+            )
+        })
+    }
+
+    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return Next::Done;
+            };
+            shared.downloads.library_changed(changes);
+            Next::Wait
+        })
+    }
+}
 
 impl SourceOwner {
     pub(crate) fn source_input_digest(&self, source_id: &SourceId) -> [u8; 32] {
         self.configuration(source_id)
             .and_then(|configuration| configuration.input_identity().ok())
             .map_or([0; 32], |input| input.digest)
-    }
-
-    /// Installs automatic artwork and lyrics downloads while either is on. Installed, they make
-    /// one pass over every source when installed after the Catalog loaded or when it reloads,
-    /// and otherwise fetch only for tracks the change feed reports as added.
-    pub(crate) fn asset_downloads_changed(&self) {
-        let (artwork, lyrics) = self.shared.settings.cache_downloads();
-        let mut installed = self
-            .shared
-            .asset_download
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if let Some(task) = installed.take() {
-            task.abort();
-            self.publish_asset_operation(SourceOperation::Idle);
-        }
-        if !(artwork || lyrics) || !self.shared.started.load(Ordering::Acquire) {
-            return;
-        }
-        let weak = Arc::downgrade(&self.shared);
-        let mut changes = self.shared.catalog.changes();
-        let mut full = self.shared.catalog.is_loaded();
-        *installed = Some(self.shared.runtime.spawn(async move {
-            let mut added = BTreeMap::<SourceKey, Vec<TrackKey>>::new();
-            loop {
-                if full || !added.is_empty() {
-                    let Some(shared) = weak.upgrade() else { break };
-                    let only = (!full).then(|| std::mem::take(&mut added));
-                    full = false;
-                    added.clear();
-                    SourceOwner { shared }.download_assets(only.as_ref()).await;
-                }
-                let mut next = changes.recv().await;
-                loop {
-                    match next {
-                        Ok(change) => {
-                            for scope in &change.scopes {
-                                match scope {
-                                    Scope::Reload => full = true,
-                                    Scope::Tracks {
-                                        source: Some(source),
-                                        added: keys,
-                                        ..
-                                    } if !keys.is_empty() => {
-                                        added.entry(*source).or_default().extend(keys);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        Err(RecvError::Lagged(_)) => full = true,
-                        Err(RecvError::Closed) => return,
-                    }
-                    next = match changes.try_recv() {
-                        Ok(change) => Ok(change),
-                        Err(TryRecvError::Lagged(skipped)) => Err(RecvError::Lagged(skipped)),
-                        Err(_) => break,
-                    };
-                }
-            }
-        }));
     }
 
     /// Fetches artwork and lyrics for every source, or only for these tracks.

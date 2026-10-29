@@ -622,6 +622,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             let resumed = crate::source::SourceOwner::open_dormant(
                 guest.products.artwork.clone(),
                 guest.products.library.clone(),
+                &crate::features::Features::new(&guest.products.library.clone(), tokio::runtime::Handle::current()),
                 guest.products.downloads.clone(),
                 b.source.shared.settings.clone(),
                 b.secrets.clone(),

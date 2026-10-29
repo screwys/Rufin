@@ -1,16 +1,19 @@
-//! Delivers favorites and ratings to their servers. The worker runs only while deliveries wait:
-//! the operation that queues one starts or wakes it, and so does a start or a refresh that finds
-//! some waiting. It retries deferred ones when they are due.
+//! Delivers favorites and ratings to their servers. The feature runs only while deliveries wait:
+//! the operation that queues one wakes it, and so does a refresh that may have made a server
+//! reachable. It retries deferred ones when they are due.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use library::{Delivery, DeliveryKind};
+use futures_util::future::BoxFuture;
+use library::{Change, Delivery, DeliveryKind};
 use sources::{SourceEntityKind, SourceError, SourceId};
+use tokio::time::Instant;
 use tracing::info;
 
 use super::{Shared, SourceOwner, source_error_is_temporary, unix_seconds};
+use crate::features::{Feature, Next};
 use crate::runtime::{SourceEvent, SourceNotice, SourceNoticeKind};
 
 /// How long a server that could not take a delivery waits before the next try.
@@ -33,19 +36,46 @@ fn keeps_copy(kind: &str, delivery: &Delivery) -> bool {
         && (kind == "plex" || (kind == "subsonic" && delivery.value.unwrap_or(0) % 20 != 0))
 }
 
-impl SourceOwner {
-    /// Starts the worker unless it runs, else wakes it for the new delivery.
-    pub(super) async fn deliver_outbox(&self) {
-        let mut running = self.shared.outbox_running.lock().await;
-        if *running {
-            self.shared.outbox_wake.notify_one();
-            return;
-        }
-        *running = true;
-        let shared = Arc::downgrade(&self.shared);
-        self.shared.runtime.spawn(run(shared));
+pub(super) struct Outbox(pub(super) Weak<Shared>);
+
+impl Feature for Outbox {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return false;
+            };
+            match shared.catalog.next_delivery_at().await {
+                Ok(next) => next.is_some(),
+                Err(error) => {
+                    shared.warn_nonfatal(&error.to_string());
+                    false
+                }
+            }
+        })
     }
 
+    fn apply(&self, _: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return Next::Done;
+            };
+            let owner = SourceOwner { shared };
+            owner.deliver_due().await;
+            let next = match owner.shared.catalog.next_delivery_at().await {
+                Ok(Some(next)) => next,
+                Ok(None) => return Next::Done,
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error.to_string());
+                    unix_seconds().saturating_add(RETRY_SECONDS)
+                }
+            };
+            let delay = next.saturating_sub(unix_seconds()).max(0) as u64;
+            Next::At(Instant::now() + Duration::from_secs(delay))
+        })
+    }
+}
+
+impl SourceOwner {
     /// One pass over the deliveries that are due. A server that cannot take one now keeps its
     /// later deliveries waiting too.
     async fn deliver_due(&self) {
@@ -207,35 +237,4 @@ fn delivery_target(delivery: &Delivery) -> Option<(SourceId, SourceEntityKind, S
         _ => return None,
     };
     Some((source_id, kind, object_id))
-}
-
-async fn run(shared: Weak<Shared>) {
-    loop {
-        let Some(strong) = shared.upgrade() else {
-            return;
-        };
-        let owner = SourceOwner { shared: strong };
-        owner.deliver_due().await;
-        let next = {
-            let mut running = owner.shared.outbox_running.lock().await;
-            match owner.shared.catalog.next_delivery_at().await {
-                Ok(Some(next)) => next,
-                Ok(None) => {
-                    *running = false;
-                    return;
-                }
-                Err(error) => {
-                    owner.shared.warn_nonfatal(&error.to_string());
-                    unix_seconds().saturating_add(RETRY_SECONDS)
-                }
-            }
-        };
-        let wake = Arc::clone(&owner.shared.outbox_wake);
-        drop(owner);
-        let delay = Duration::from_secs(next.saturating_sub(unix_seconds()).max(0) as u64);
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = wake.notified() => {}
-        }
-    }
 }

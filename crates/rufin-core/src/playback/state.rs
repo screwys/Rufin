@@ -64,7 +64,6 @@ pub enum Command {
     ActivateOccurrence(u64),
     Remove(usize),
     RemoveMany(QueueSelection),
-    Forget(Vec<library::TrackKey>),
     Reorder {
         selection: QueueSelection,
         target: crate::playback::QueueReorderTarget,
@@ -100,8 +99,6 @@ pub enum Command {
     UpdateSettings(PlaybackSettings),
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
-    CatalogChanged,
-    RekeyTracks(Arc<[(library::TrackKey, library::TrackKey)]>),
 }
 
 impl Command {
@@ -254,7 +251,8 @@ enum QueueCompletion {
 pub(super) struct Player {
     owner: Weak<PlaybackOwner>,
     playback: WeakPlayback,
-    backend: Box<dyn PlaybackBackend>,
+    /// Started on first use, so launching starts no audio pipeline.
+    backend: Option<Box<dyn PlaybackBackend>>,
     backend_errors: Vec<BackendEvent>,
     stream_tasks: HashMap<RunId, JoinHandle<()>>,
     dirty: bool,
@@ -298,7 +296,7 @@ impl Player {
         playback_output: PlaybackOutput,
         auto_dj_enabled: bool,
         auto_dj_refill_threshold: usize,
-        mut backend: Box<dyn PlaybackBackend>,
+        mut backend: Option<Box<dyn PlaybackBackend>>,
         owner: Weak<PlaybackOwner>,
         playback: WeakPlayback,
     ) -> Self {
@@ -306,7 +304,9 @@ impl Player {
         let output_volume = settings.volume;
         let output_muted = settings.muted;
         let restored_paused = sequence.selected().is_some();
-        backend.set_event_waker(event_waker(&playback));
+        if let Some(backend) = &mut backend {
+            backend.set_event_waker(event_waker(&playback));
+        }
         Self {
             owner,
             playback,
@@ -1004,7 +1004,6 @@ impl Player {
             }),
             Command::Remove(position) => Ok(self.remove(&position, sample)),
             Command::RemoveMany(selection) => Ok(self.remove_many(&selection, sample)),
-            Command::Forget(positions) => Ok(self.forget(&positions, sample)),
             Command::Reorder { selection, target } => Ok(self.reorder(&selection, &target, sample)),
             Command::Insert { input, target } => Ok(self.insert(input, &target)),
             Command::MoveAfterCurrent(position) => Ok(self.move_after_current(&position, sample)),
@@ -1047,12 +1046,54 @@ impl Player {
                 self.send_backend(BackendCommand::SetVisualizerEnabled(enabled));
             }),
             Command::StreamInputsChanged => Ok(self.stream_inputs_changed()),
-            Command::RekeyTracks(pairs) => Ok({
-                let mut changed = false;
-                self.edit_queue(|sequence| changed = sequence.rekey_tracks(&pairs));
-                self.dirty |= changed;
-            }),
-            Command::CatalogChanged => Ok(self.sequence.refresh_metadata()),
+        }
+    }
+
+    /// Follows committed Changes, or everything after a lag. Identity moves move queue entries,
+    /// whose saved rows their Write moved already. Changed tracks that the queue shows, and
+    /// rating changes of them, read the shown rows again. Entries of a forgotten source, which
+    /// its Write deleted, leave the queue.
+    pub(super) fn library_changed(
+        &mut self,
+        changes: Option<&[Arc<library::Change>]>,
+        sample: &ClockSample,
+    ) {
+        let Some(changes) = changes else {
+            self.sequence.refresh_metadata();
+            return;
+        };
+        let mut rekeys = Vec::new();
+        let mut refresh = false;
+        let mut forgotten = false;
+        for scope in changes.iter().flat_map(|change| &change.scopes) {
+            match scope {
+                library::Scope::Reload => refresh = true,
+                library::Scope::Rekey { old, new } => rekeys.push((*old, *new)),
+                library::Scope::Tracks { keys, .. } => refresh |= self.sequence.shows_any(keys),
+                library::Scope::State { items } => {
+                    refresh |= items.iter().any(|item| {
+                        item.rating
+                            && matches!(&item.target, library::FavoriteTarget::Track(uri)
+                                if self.sequence.shows_uri(uri))
+                    });
+                }
+                library::Scope::Source {
+                    phase: library::SourcePhase::Removed,
+                    ..
+                } => forgotten = true,
+                _ => {}
+            }
+        }
+        if !rekeys.is_empty() {
+            let mut changed = false;
+            self.edit_queue(|sequence| changed = sequence.rekey_tracks(&rekeys));
+            self.dirty |= changed;
+        }
+        if forgotten {
+            self.forget_gone(sample);
+        }
+        if refresh {
+            self.sequence.refresh_metadata();
         }
     }
 
@@ -1707,23 +1748,34 @@ impl Player {
         self.edit_queue(|sequence| sequence.remove(selection));
         self.changed_queue(removing_current, false, sample);
     }
-    fn forget(&mut self, keys: &[library::TrackKey], sample: &ClockSample) {
-        let keys = keys
-            .iter()
-            .copied()
+    /// Removes the entries whose tracks the Catalog no longer holds with a source.
+    fn forget_gone(&mut self, sample: &ClockSample) {
+        let keys = (0..self.sequence.total())
+            .filter_map(|position| self.sequence.entry_at(position))
+            .map(|entry| entry.track_key)
+            .collect::<Vec<_>>();
+        let sourced = self.owner().catalog.tracks_with_source(&keys);
+        let gone = keys
+            .into_iter()
+            .zip(sourced)
+            .filter(|(_, sourced)| !sourced)
+            .map(|(key, _)| key)
             .collect::<std::collections::HashSet<_>>();
+        if gone.is_empty() {
+            return;
+        }
         let ids = (0..self.sequence.total())
             .filter(|&position| {
                 self.sequence
                     .entry_at(position)
-                    .is_some_and(|entry| keys.contains(&entry.track_key))
+                    .is_some_and(|entry| gone.contains(&entry.track_key))
             })
             .collect::<Vec<_>>();
         let previous = self.sequence.selected_index();
         if previous.as_ref().is_some_and(|id| ids.contains(id)) {
             self.finish_queue_run(sample, RunEndReason::Stopped)
         }
-        self.edit_queue(|sequence| sequence.remove(&QueueSelection::Positions(ids.clone())));
+        self.edit_queue(|sequence| sequence.forget(&QueueSelection::Positions(ids.clone())));
         self.changed_queue(
             previous.is_some_and(|position| ids.contains(&position)),
             true,
@@ -2844,10 +2896,29 @@ impl Player {
             .expect("playback owner held by actor turn")
     }
 
+    /// The backend, started now when nothing used it yet.
+    fn backend(&mut self) -> Result<&mut Box<dyn PlaybackBackend>, String> {
+        if self.backend.is_none() {
+            let mut backend = self.owner().start_output_backend(&self.playback_output)?;
+            backend.set_event_waker(event_waker(&self.playback));
+            self.backend = Some(backend);
+        }
+        Ok(self.backend.as_mut().expect("the backend was just started"))
+    }
+
+    pub(super) fn start_backend(&mut self) {
+        if let Err(error) = self.backend() {
+            self.report_error(error);
+        }
+    }
+
     fn send_backend(&mut self, command: BackendCommand) {
         let run = command.run();
-        if let Err(error) = self.backend.send(command) {
-            let error = BackendFailure::new(error.to_string());
+        let sent = self
+            .backend()
+            .and_then(|backend| backend.send(command).map_err(|error| error.to_string()));
+        if let Err(error) = sent {
+            let error = BackendFailure::new(error);
             self.backend_errors.push(match run {
                 Some(run) => BackendEvent::Error { run, error },
                 None => BackendEvent::OperationFailed { run, error },
@@ -2880,7 +2951,11 @@ impl Player {
     }
 
     pub(super) fn drive(&mut self, clock: &dyn Fn() -> ClockSample) {
-        let events = self.backend.drain_events();
+        let events = self
+            .backend
+            .as_mut()
+            .map(|backend| backend.drain_events())
+            .unwrap_or_default();
         if events.is_empty() && self.external.is_none() {
             return;
         }
@@ -2975,15 +3050,16 @@ impl Player {
         output: PlaybackOutput,
         backend: Box<dyn PlaybackBackend>,
     ) {
-        let mut previous = self.install_backend(backend);
-        if let Some(run) = self.current_run()
-            && let Err(error) = previous.send(BackendCommand::Stop { run })
-        {
-            self.report_error(error.to_string());
-        }
-        previous.drain_events();
-        if let Err(error) = previous.shutdown() {
-            self.report_error(error.to_string());
+        if let Some(mut previous) = self.install_backend(backend) {
+            if let Some(run) = self.current_run()
+                && let Err(error) = previous.send(BackendCommand::Stop { run })
+            {
+                self.report_error(error.to_string());
+            }
+            previous.drain_events();
+            if let Err(error) = previous.shutdown() {
+                self.report_error(error.to_string());
+            }
         }
         self.replace_output(output);
     }
@@ -2991,13 +3067,15 @@ impl Player {
     fn install_backend(
         &mut self,
         mut backend: Box<dyn PlaybackBackend>,
-    ) -> Box<dyn PlaybackBackend> {
+    ) -> Option<Box<dyn PlaybackBackend>> {
         backend.set_event_waker(event_waker(&self.playback));
-        std::mem::replace(&mut self.backend, backend)
+        self.backend.replace(backend)
     }
 
     fn swap_backend(&mut self, backend: Box<dyn PlaybackBackend>) -> Result<(), PlaybackError> {
-        let mut previous = self.install_backend(backend);
+        let Some(mut previous) = self.install_backend(backend) else {
+            return Ok(());
+        };
         let stopped = self
             .current_run()
             .map_or(Ok(()), |run| previous.send(BackendCommand::Stop { run }));
@@ -3017,7 +3095,9 @@ impl Player {
         for (_, task) in self.stream_tasks.drain() {
             task.abort();
         }
-        self.backend.shutdown()
+        self.backend
+            .as_mut()
+            .map_or(Ok(()), |backend| backend.shutdown())
     }
 }
 

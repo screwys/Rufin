@@ -82,19 +82,22 @@ impl Playback {
         WeakPlayback(Arc::downgrade(&self.0))
     }
 
+    /// Starts the worker for this handle. What was posted to it before waits for the worker.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn start(
+    pub(super) fn run(
+        &self,
+        receiver: Receiver<Message>,
         sequence: Sequence,
         prefix: impl Into<Arc<str>>,
         settings: PlaybackSettings,
         auto_dj: bool,
         threshold: usize,
         output: PlaybackOutput,
-        backend: Box<dyn PlaybackBackend>,
+        backend: Option<Box<dyn PlaybackBackend>>,
         clock: Clock,
         owner: Weak<PlaybackOwner>,
-    ) -> PlaybackResult<(Self, PlaybackProjection)> {
-        let (playback, receiver) = channel();
+    ) -> PlaybackResult<PlaybackProjection> {
+        let playback = self;
         let mut player = Player::new(
             sequence,
             prefix,
@@ -147,7 +150,7 @@ impl Playback {
             })
             .map_err(|error| PlaybackError::WorkerStart(error.to_string()))?;
         *playback.0.thread.lock().unwrap_or_else(|p| p.into_inner()) = Some(thread);
-        Ok((playback, initial))
+        Ok(initial)
     }
 
     fn request<T: Send + 'static>(

@@ -165,6 +165,30 @@ impl Catalog {
             .map(|source| crate::SourceId::new(source.object.clone()))
     }
 
+    /// The key of a source the Catalog holds.
+    pub fn source_key(&self, source_id: &crate::SourceId) -> Option<SourceKey> {
+        self.snapshot()
+            .sources
+            .values()
+            .find(|source| source.object == source_id.as_str())
+            .map(|source| source.key)
+    }
+
+    /// Whether the Catalog holds each of these tracks with a source.
+    pub fn tracks_with_source(&self, keys: &[crate::TrackKey]) -> Vec<bool> {
+        use crate::catalog::snapshot::Packed;
+        let snapshot = self.snapshot();
+        keys.iter()
+            .map(|key| {
+                snapshot
+                    .tracks
+                    .get(key.raw())
+                    .and_then(|record| snapshot.source_key(record.source()))
+                    .is_some()
+            })
+            .collect()
+    }
+
     /// Every committed Write, in commit order. A receiver that falls behind gets a Lagged
     /// error, which means everything may have changed.
     pub fn changes(&self) -> broadcast::Receiver<Arc<Change>> {
@@ -293,8 +317,7 @@ impl Catalog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Waits until the first load finished.
-    /// Whether the first load finished; the Reload that follows it may still be on its way.
+    /// Whether the first load finished.
     pub fn is_loaded(&self) -> bool {
         *self.inner.loaded.borrow()
     }
@@ -304,7 +327,8 @@ impl Catalog {
         self.snapshot().revision
     }
 
-    pub(crate) async fn loaded(&self) {
+    /// Waits until the first load finished.
+    pub async fn loaded(&self) {
         let mut loaded = self.inner.loaded.subscribe();
         let _ = loaded.wait_for(|loaded| *loaded).await;
     }
@@ -614,12 +638,13 @@ impl CatalogInner {
                 self.reload.store(true, Ordering::Release);
             }
         }
-        self.loaded.send_replace(true);
         // Rows read by key before the load, such as now playing, showed no state or covers.
+        // It goes out first, so whoever waits for the load finds it already sent.
         let _ = self.changes.send(Arc::new(Change {
             revision: 1,
             scopes: vec![crate::Scope::Reload],
         }));
+        self.loaded.send_replace(true);
     }
 }
 
