@@ -40,14 +40,16 @@ pub fn present_playlist_entry_context_menu(
         present_playlist_entry_selection_menu(target, &shell.media_menus, selection, position);
         return;
     }
+    let single = shell
+        .current_playlist_entry_selection_owner()
+        .zip(entry_row.entry.clone())
+        .map(|(selection, entry)| selection.single_entry(entry));
     present_playlist_entry_menu(
         target,
         &shell.media_menus,
         entry_row,
         position,
         playlist,
-        shell
-            .current_playlist_entry_selection_owner()
-            .map(|selection| selection.single_entry(entry)),
+        single,
     );
 }

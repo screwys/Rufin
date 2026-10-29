@@ -666,12 +666,14 @@ fn install_playlist_entry_drag(
             .as_deref()
             .map(artwork::ArtworkBinding::opaque)
             .unwrap_or_default();
-        let key = entry_key(&entry)?;
-        let selection = shell.current_playlist_entry_selection(key).or_else(|| {
-            shell
-                .current_playlist_entry_selection_owner()
-                .map(|selection| selection.single_entry(key))
-        })?;
+        let dragged = entry.entry.clone()?;
+        let selection = shell
+            .current_playlist_entry_selection(dragged.key)
+            .or_else(|| {
+                shell
+                    .current_playlist_entry_selection_owner()
+                    .map(|selection| selection.single_entry(dragged))
+            })?;
         drag_preview.prepare_cache_only(&shell.artwork, title, artwork);
         Some(media_drag_content_provider(
             MediaDragSource::playlist_entries(selection),
@@ -697,36 +699,24 @@ fn install_playlist_entry_drag(
         else {
             return false;
         };
-        if selection.playlist != playlist || !selection.writable || selection.count != 1 {
+        if selection.playlist != playlist || !selection.writable {
             return false;
         }
-        let library::MemberSelection::Entries(order) = &selection.input else {
+        let (Some(moved), Some(target)) = (selection.entry, current().and_then(|row| row.entry))
+        else {
             return false;
         };
-        let Some(entry) = order.first().copied() else {
-            return false;
-        };
-        let Some(target) = current() else {
-            return false;
-        };
-        if Some(entry) == entry_key(&target) {
+        if moved.key == target.key {
             return false;
         }
         let Some(shell) = move_shell.upgrade() else {
             return false;
         };
-        let (Some(target), Some(moved)) = (
-            target
-                .entry
-                .as_ref()
-                .map(|target| i64::from(target.position)),
-            shell
-                .current_playlist_entry_selection_owner()
-                .and_then(|selection| selection.entry_position(entry))
-                .map(i64::from),
-        ) else {
-            return false;
-        };
+        let (entry, moved, target) = (
+            moved.key,
+            i64::from(moved.position),
+            i64::from(target.position),
+        );
         let after = drop
             .widget()
             .is_some_and(|widget| gtk_widgets::media_drag::order_drop_after(&widget, x, y));

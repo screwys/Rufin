@@ -274,6 +274,9 @@ pub struct PlaylistEntrySelectionSnapshot {
     pub playlist_name: Arc<str>,
     pub input: library::MemberSelection,
     pub count: usize,
+    /// The one entry a single-entry selection holds, at its playlist index when it was taken,
+    /// so a drag moves it without reading where it is.
+    pub entry: Option<library::PlaylistEntry>,
 }
 impl PlaylistEntrySelectionSnapshot {
     pub fn play(
