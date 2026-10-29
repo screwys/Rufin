@@ -3,7 +3,7 @@ use library::{
     SmartPlaylistDefinition, TrackReference,
 };
 
-use super::support::{connection, fixture, persist_queue, uris};
+use super::support::{connection, export, fixture, persist_queue, restore, uris};
 
 fn queue_row(item: TrackReference, position: usize) -> QueueTransferRow {
     QueueTransferRow {
@@ -569,18 +569,9 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_now_playing() {
         500
     );
     assert_eq!(restored.entries.len(), 500);
-    let mut exported = Vec::new();
-    fixture
-        .catalog
-        .export_queue_jsonl(&mut exported)
-        .await
-        .unwrap();
+    let exported = export(&fixture.catalog, "queue.jsonl").await;
     let target = super::support::fixture().await;
-    target
-        .catalog
-        .import_queue_jsonl(std::io::Cursor::new(exported))
-        .await
-        .unwrap();
+    restore(&target.catalog, &[("queue.jsonl", &exported)]).await;
     assert_eq!(
         library::QueueRestore {
             ranks: Default::default(),
@@ -719,12 +710,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
                 .await
                 .unwrap();
         assert_eq!(retained, [unavailable.media_uri.clone()]);
-        let mut exported = Vec::new();
-        fixture
-            .catalog
-            .export_queue_jsonl(&mut exported)
-            .await
-            .unwrap();
+        let exported = export(&fixture.catalog, "queue.jsonl").await;
         let header: serde_json::Value =
             serde_json::from_slice(exported.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
         assert_eq!(header["version"], 4);
@@ -740,11 +726,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
                 .all(|entry| entry.get("track_key").is_none() && entry["media_uri"].is_string())
         );
         let target = super::support::fixture().await;
-        target
-            .catalog
-            .import_queue_jsonl(std::io::Cursor::new(exported))
-            .await
-            .unwrap();
+        restore(&target.catalog, &[("queue.jsonl", &exported)]).await;
         assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
         let mut released = header["queue"].clone();
         for (index, entry) in released["entries"]
@@ -776,16 +758,17 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
                 })
             })
             .collect::<Vec<_>>();
-        target
-            .catalog
-            .import_queue_jsonl(std::io::Cursor::new(
-                serde_json::to_vec(&serde_json::json!({
+        restore(
+            &target.catalog,
+            &[(
+                "queue.jsonl",
+                &serde_json::to_vec(&serde_json::json!({
                     "version":3,"queue":released,"snapshots":snapshots,
                 }))
                 .unwrap(),
-            ))
-            .await
-            .unwrap();
+            )],
+        )
+        .await;
         assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
     }
     state.entries = state.entries[..6].to_vec().into();
@@ -869,13 +852,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         true,
     )
     .await;
-    let mut exported = Vec::new();
-    fixture
-        .catalog
-        .export_queue_jsonl(&mut exported)
-        .await
-        .unwrap();
-    let records = String::from_utf8(exported).unwrap();
+    let records = String::from_utf8(export(&fixture.catalog, "queue.jsonl").await).unwrap();
     let metadata = records
         .lines()
         .skip(1)

@@ -49,15 +49,25 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         )
         .await
         .unwrap();
-    fixture
-        .catalog
-        .import_user_media_state_jsonl(std::io::Cursor::new(format!(
-            "{{\"version\":1}}\n{{\"media_uri\":{},\"favorite\":true,\"rating\":87}}\n",
-            serde_json::to_string(uri).unwrap()
-        )))
-        .await
-        .unwrap();
-    fixture.catalog.import_local_locators_jsonl(std::io::Cursor::new(format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n",serde_json::to_string(uri).unwrap()))).await.unwrap();
+    super::support::restore(
+        &fixture.catalog,
+        &[
+            (
+                "user-state.jsonl",
+                format!(
+                    "{{\"version\":1}}\n{{\"media_uri\":{},\"favorite\":true,\"rating\":87}}\n",
+                    serde_json::to_string(uri).unwrap()
+                )
+                .as_bytes(),
+            ),
+            (
+                "local-locators.jsonl",
+                format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n", serde_json::to_string(uri).unwrap())
+                .as_bytes(),
+            ),
+        ],
+    )
+    .await;
     let mut raw = connection(&path, false).await;
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(NULL,'source',?1,'Snapshot','Artist','Album',100,'1970-01',100000,90000,0)").bind(uri).execute(&mut raw).await.unwrap();
     sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();

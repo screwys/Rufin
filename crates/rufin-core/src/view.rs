@@ -8,7 +8,7 @@ use std::sync::Arc;
 use library::{
     AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomePage,
     Item, LibraryError, LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read,
-    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SearchResults, SourceKey,
+    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SourceKey,
 };
 
 use crate::route::{CollectionCategory, Route};
@@ -107,8 +107,7 @@ enum Body {
         track_len: usize,
     },
     Home(Box<HomePage>),
-    Search(Box<SearchResults>),
-    /// The collection the route names is gone or empty.
+    /// The collection the route names is gone or empty, or the route lists nothing itself.
     Missing,
 }
 
@@ -135,7 +134,6 @@ enum Plan {
         tracks: MemberRead,
     },
     Home(Box<HomePage>),
-    Search(Box<SearchResults>),
     Missing,
 }
 
@@ -362,20 +360,8 @@ impl SourceOwner {
                     .await?;
                 (None, Plan::Home(Box::new(home)))
             }
-            Route::Search => {
-                let results = crate::source::search::acquire_search(
-                    self,
-                    catalog,
-                    selected.as_ref(),
-                    options.search_mode,
-                    options.filter.clone(),
-                    60,
-                    cancel.clone(),
-                )
-                .await
-                .map_err(LibraryError::InvalidRequest)?;
-                (None, Plan::Search(Box::new(results)))
-            }
+            // Search reads its results itself.
+            Route::Search => (None, Plan::Missing),
         };
         let mut opened = read(
             View {
@@ -563,7 +549,6 @@ async fn read(
             });
         }
         Plan::Home(home) => (Body::Home(home), None, 0, Vec::new(), None),
-        Plan::Search(results) => (Body::Search(results), None, 0, Vec::new(), None),
         Plan::Missing => (Body::Missing, None, 0, Vec::new(), None),
     };
     view.body = body;
@@ -605,7 +590,7 @@ impl View {
                 track_len,
                 ..
             } => folder_len + track_len,
-            Body::Home(_) | Body::Search(_) | Body::Missing => 0,
+            Body::Home(_) | Body::Missing => 0,
         }
     }
 
@@ -621,13 +606,6 @@ impl View {
     pub fn home(&self) -> Option<&HomePage> {
         match &self.body {
             Body::Home(home) => Some(home),
-            _ => None,
-        }
-    }
-
-    pub fn search(&self) -> Option<&SearchResults> {
-        match &self.body {
-            Body::Search(results) => Some(results),
             _ => None,
         }
     }
@@ -706,7 +684,7 @@ impl View {
                 }
                 Ok(rows)
             }
-            Body::Home(_) | Body::Search(_) | Body::Missing => Ok(Vec::new()),
+            Body::Home(_) | Body::Missing => Ok(Vec::new()),
         }
     }
 
@@ -872,7 +850,7 @@ impl View {
                 (true, None) => return Ok(None),
                 (false, _) => (Read::Members(tracks.clone()), index - folder_len),
             },
-            Body::Home(_) | Body::Search(_) | Body::Missing => return Ok(None),
+            Body::Home(_) | Body::Missing => return Ok(None),
         };
         Ok(catalog
             .order(&read, cancel)
@@ -916,17 +894,6 @@ impl View {
             | Body::Releases { read, .. } => Some(read.clone().selection()),
             _ => None,
         }
-    }
-
-    /// What a committed change means for this view.
-    pub fn change(&self, changed: &Changed) -> Refresh {
-        refresh(
-            &self.owner,
-            &self.route,
-            self.selected.as_ref(),
-            &self.options,
-            changed,
-        )
     }
 
     /// What `current` settings make the page read again. Named lists read again on every
@@ -1139,8 +1106,7 @@ impl View {
 }
 
 /// What a committed change means for a page open on `route` with `options`, opened while
-/// `opened_with` was selected. Views ask through [`View::change`]; a search, which opens no
-/// view, asks here.
+/// `opened_with` was selected.
 pub fn refresh(
     owner: &SourceOwner,
     route: &Route,

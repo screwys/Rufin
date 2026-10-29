@@ -78,8 +78,8 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityImportReport, ActivityRecord, CalendarActivityPeriod,
-    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, ListenDeliveryTarget, ListenWrite,
+    PendingListenDelivery,
 };
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,

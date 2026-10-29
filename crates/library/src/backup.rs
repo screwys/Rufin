@@ -406,12 +406,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let mut original_queue = Vec::new();
-        source
-            .export_queue_jsonl(&mut original_queue)
-            .await
-            .unwrap();
         let (staged, playlist_count) = exported(&source).await;
+        let original_queue = fs::read(staged.path().join("queue.jsonl")).unwrap();
         assert_eq!(playlist_count, 2);
         {
             let mut writer = target.writer().await.unwrap();
@@ -432,11 +428,8 @@ mod tests {
             .unwrap();
             assert_eq!(restored.as_deref(), Some(mosaic));
         }
-        let mut restored_queue = Vec::new();
-        target
-            .export_queue_jsonl(&mut restored_queue)
-            .await
-            .unwrap();
+        let (again, _) = exported(&target).await;
+        let restored_queue = fs::read(again.path().join("queue.jsonl")).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
                 original_queue.split(|byte| *byte == b'\n').next().unwrap()

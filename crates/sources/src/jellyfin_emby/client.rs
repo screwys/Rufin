@@ -1874,12 +1874,11 @@ mod tests {
                 assert_eq!(after.state.favorite, favorite);
                 assert_eq!(after.state.play_count, 3);
                 assert_eq!(after.artwork_binding, before.artwork_binding);
-                let artist_key = after.links.artists[0].artist_key;
-                let mut artists = catalog
-                    .artists(&[artist_key], false, false, &cancel)
+                let artist = catalog
+                    .artist(&after.links.artists[0].media_uri, false, false, &cancel)
                     .await
+                    .unwrap()
                     .unwrap();
-                let artist = artists.pop().unwrap();
                 assert!(artist.row.state.favorite);
                 assert_eq!(artist.musicbrainz_artist_id.as_deref(), Some("artist-mbid"));
             }

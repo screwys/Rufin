@@ -197,39 +197,37 @@ impl Catalog {
             ..crate::read::Shape::of(None)
         };
         let mut built = std::collections::HashMap::new();
-        for items in items.chunks(256) {
-            for row in self
-                .rows_of_on(&mut connection, items, &shape, true)
-                .await?
-            {
-                let (item, row) = match row {
-                    Row::Album(row) => (Item::Album(row.album_key), PinRow::Album(Box::new(row))),
-                    Row::Artist(row) => (
-                        Item::Artist {
-                            key: row.artist_key,
-                            album_artist: row.album_artist,
-                        },
-                        PinRow::Artist(row),
-                    ),
-                    Row::Tag(row) => (
-                        Item::Genre(crate::GenreKey::from_raw(row.key)),
-                        PinRow::Genre(row),
-                    ),
-                    Row::Playlist(PlaylistListRow::Playlist(row)) => {
-                        (Item::Playlist(row.playlist_key), PinRow::Playlist(row))
-                    }
-                    Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => (
-                        Item::Smart(row.smart_playlist_key),
-                        PinRow::SmartPlaylist(row),
-                    ),
-                    Row::Playlist(PlaylistListRow::Folder(row)) => (
-                        Item::PlaylistFolder(row.folder_key),
-                        PinRow::PlaylistFolder(row),
-                    ),
-                    _ => continue,
-                };
-                built.insert(item, row);
-            }
+        for row in self
+            .rows_of_on(&mut connection, &items, &shape, true)
+            .await?
+        {
+            let (item, row) = match row {
+                Row::Album(row) => (Item::Album(row.album_key), PinRow::Album(Box::new(row))),
+                Row::Artist(row) => (
+                    Item::Artist {
+                        key: row.artist_key,
+                        album_artist: row.album_artist,
+                    },
+                    PinRow::Artist(row),
+                ),
+                Row::Tag(row) => (
+                    Item::Genre(crate::GenreKey::from_raw(row.key)),
+                    PinRow::Genre(row),
+                ),
+                Row::Playlist(PlaylistListRow::Playlist(row)) => {
+                    (Item::Playlist(row.playlist_key), PinRow::Playlist(row))
+                }
+                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => (
+                    Item::Smart(row.smart_playlist_key),
+                    PinRow::SmartPlaylist(row),
+                ),
+                Row::Playlist(PlaylistListRow::Folder(row)) => (
+                    Item::PlaylistFolder(row.folder_key),
+                    PinRow::PlaylistFolder(row),
+                ),
+                _ => continue,
+            };
+            built.insert(item, row);
         }
         let rows = pinned
             .into_iter()

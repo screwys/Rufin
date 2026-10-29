@@ -657,7 +657,7 @@ impl Catalog {
     ) -> LibraryResult<Option<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
         let mut want = crate::catalog::fetch::Want::new(true);
-        want.playlist_art.insert(playlist.raw());
+        want.add(crate::catalog::fetch::Part::PlaylistArt, playlist.raw());
         crate::catalog::fetch::run(&mut connection, &want)
             .await?
             .playlist_binding(playlist.raw())

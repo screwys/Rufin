@@ -1354,7 +1354,8 @@ impl Context<'_> {
         }
     }
 
-    /// The keys a list read shows, in order. Playlist folders have negative keys.
+    /// The keys an unfiltered list read shows, in order; a filtered one keeps rows of this
+    /// order. Playlist lists filter here. Playlist folders have negative keys.
     pub(crate) fn list_order(
         &self,
         read: &ListRead,
@@ -1374,16 +1375,11 @@ impl Context<'_> {
         let Some(source) = read.source.and_then(|source| self.source_slot(source)) else {
             return Vec::new();
         };
-        let filter = filter_text(&read.filter);
-        let keep = |key: u32| self.list_keep(read, derived, &filter, i64::from(key));
         let mut rows = Vec::new();
         match &read.kind {
             ListKind::Albums => {
                 for (slot, record) in snapshot.albums.iter() {
-                    if record.source == source
-                        && derived.albums[slot as usize].tracks > 0
-                        && keep(record.key)
-                    {
+                    if record.source == source && derived.albums[slot as usize].tracks > 0 {
                         rows.push(self.album_row(derived, slot, record));
                     }
                 }
@@ -1399,7 +1395,7 @@ impl Context<'_> {
                 };
                 for slot in self.artist_albums(artist, *album_artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
-                    if record.source == source && keep(record.key) {
+                    if record.source == source {
                         let mut row = self.album_row(derived, slot, record);
                         row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
                         rows.push(row);
@@ -1415,7 +1411,7 @@ impl Context<'_> {
                 let role = usize::from(*album_artist);
                 for (slot, record) in snapshot.artists.iter() {
                     let totals = derived.artists[role][slot as usize];
-                    if record.source == source && totals.tracks > 0 && keep(record.key) {
+                    if record.source == source && totals.tracks > 0 {
                         let mut row =
                             ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
                         row.totals = totals;
@@ -1435,11 +1431,7 @@ impl Context<'_> {
                 for (slot, record) in snapshot.tags.iter() {
                     let totals = derived.tags[slot as usize];
                     let listed = totals.tracks > 0 || folder.is_none() && record.indexed();
-                    if record.source == source
-                        && record.kind() == kind
-                        && listed
-                        && keep(record.key)
-                    {
+                    if record.source == source && record.kind() == kind && listed {
                         let mut row = ListRow::new(
                             i64::from(record.key),
                             snapshot.name_sort(record.name, record.sort),

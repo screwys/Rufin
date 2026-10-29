@@ -674,18 +674,6 @@ impl Catalog {
         }
         Ok(state)
     }
-
-    pub async fn export_queue_jsonl(&self, output: impl std::io::Write) -> LibraryResult<()> {
-        let (_export, mut connection) = self.acquire_export().await?;
-        export_queue_jsonl_on(self, &mut connection, output).await
-    }
-
-    pub async fn import_queue_jsonl(&self, input: impl std::io::BufRead) -> LibraryResult<()> {
-        let mut write = self.write().await?;
-        import_queue_jsonl_on(&mut write, input).await?;
-        write.commit().await?;
-        Ok(())
-    }
 }
 
 async fn save_settings(

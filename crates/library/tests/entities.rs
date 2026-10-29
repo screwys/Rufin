@@ -2,7 +2,7 @@ use library::{
     AlbumReleaseResult, FavoriteTarget, Item, LibraryField, ReadCancellation, SearchRequest,
 };
 
-use super::support::{connection, fixture, items, tag, tracks, uris};
+use super::support::{Views, connection, fixture, items, tag, tracks, uris};
 
 #[tokio::test]
 async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {

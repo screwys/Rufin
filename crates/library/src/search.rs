@@ -150,14 +150,8 @@ impl Catalog {
                 album_artist: album_artists,
             }))
             .collect::<Vec<_>>();
-        let (_, [rows, _]) = self
-            .fetch_on(
-                connection,
-                [(&items, &[]), (&[], &[])],
-                &[],
-                &crate::read::Shape::of(None),
-                true,
-            )
+        let rows = self
+            .rows_of_on(connection, &items, &crate::read::Shape::of(None), true)
             .await?;
         let mut results = SearchResults::default();
         for row in rows {

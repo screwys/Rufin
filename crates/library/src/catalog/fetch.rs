@@ -13,8 +13,8 @@ use crate::{AlbumMetadata, LibraryResult, TrackAccess, TrackMetadata};
 /// Columns after the part and the key; a part with fewer pads with NULL.
 const COLUMNS: usize = 5;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Part {
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum Part {
     Track,
     View,
     AlbumText,
@@ -143,22 +143,10 @@ impl Part {
 /// The keys of each part one statement reads.
 #[derive(Default)]
 pub(crate) struct Want {
-    pub(crate) tracks: BTreeSet<i64>,
-    pub(crate) views: BTreeSet<i64>,
-    pub(crate) album_texts: BTreeSet<i64>,
-    pub(crate) album_views: BTreeSet<i64>,
-    pub(crate) artist_views: BTreeSet<i64>,
-    pub(crate) track_art: BTreeSet<i64>,
-    pub(crate) album_art: BTreeSet<i64>,
-    pub(crate) artist_art: BTreeSet<i64>,
-    pub(crate) tag_art: BTreeSet<i64>,
-    pub(crate) tag_mosaics: BTreeSet<i64>,
-    pub(crate) folder_art: BTreeSet<i64>,
-    pub(crate) playlist_art: BTreeSet<i64>,
-    pub(crate) smart_art: BTreeSet<i64>,
+    keys: [BTreeSet<i64>; PARTS.len()],
     /// Bindings carry the blur-hash previews known for their candidates. Mosaic recipes are the
     /// candidates as stored.
-    pub(crate) previews: bool,
+    previews: bool,
 }
 
 impl Want {
@@ -169,47 +157,25 @@ impl Want {
         }
     }
 
-    fn keys(&self, part: Part) -> &BTreeSet<i64> {
-        match part {
-            Part::Track => &self.tracks,
-            Part::View => &self.views,
-            Part::AlbumText => &self.album_texts,
-            Part::AlbumView => &self.album_views,
-            Part::ArtistView => &self.artist_views,
-            Part::TrackArt => &self.track_art,
-            Part::AlbumArt => &self.album_art,
-            Part::ArtistArt => &self.artist_art,
-            Part::TagArt => &self.tag_art,
-            Part::TagMosaic => &self.tag_mosaics,
-            Part::FolderArt => &self.folder_art,
-            Part::PlaylistArt => &self.playlist_art,
-            Part::SmartArt => &self.smart_art,
-        }
+    pub(crate) fn add(&mut self, part: Part, key: i64) {
+        self.keys[part as usize].insert(key);
     }
 
     /// The rows a picture is composed from.
     pub(crate) fn art(&mut self, art: Art) {
         match art {
             Art::None => {}
-            Art::Track(key) => {
-                self.track_art.insert(key);
-            }
-            Art::Album(key) => {
-                self.album_art.insert(key);
-            }
+            Art::Track(key) => self.add(Part::TrackArt, key),
+            Art::Album(key) => self.add(Part::AlbumArt, key),
             Art::Artist(key, borrowed) => {
-                self.artist_art.insert(key);
+                self.add(Part::ArtistArt, key);
                 match borrowed {
-                    Some(Picture::Track(key)) => self.track_art.insert(key),
-                    Some(Picture::Album(key)) => self.album_art.insert(key),
-                    None => false,
-                };
+                    Some(Picture::Track(key)) => self.add(Part::TrackArt, key),
+                    Some(Picture::Album(key)) => self.add(Part::AlbumArt, key),
+                    None => {}
+                }
             }
         }
-    }
-
-    fn is_empty(&self) -> bool {
-        PARTS.iter().all(|part| self.keys(*part).is_empty())
     }
 }
 
@@ -239,13 +205,10 @@ pub(crate) struct Got {
     pub(crate) album_texts: HashMap<i64, (Option<String>, Option<String>)>,
     pub(crate) album_views: HashMap<i64, AlbumMetadata>,
     pub(crate) artist_views: HashMap<i64, Option<String>>,
-    track_art: HashMap<i64, Vec<ArtworkCandidate>>,
-    album_art: HashMap<i64, Vec<ArtworkCandidate>>,
-    artist_art: HashMap<i64, Vec<ArtworkCandidate>>,
-    pub(crate) tag_art: HashMap<i64, Vec<ArtworkCandidate>>,
-    pub(crate) folder_art: HashMap<i64, Vec<ArtworkCandidate>>,
-    pub(crate) playlist_art: HashMap<i64, PlaylistArt>,
-    pub(crate) smart_art: HashMap<i64, PlaylistArt>,
+    /// Stored pictures by art part and key.
+    art: HashMap<(Part, i64), Vec<ArtworkCandidate>>,
+    /// Playlists' and smart playlists' pictures, by whether smart and key.
+    playlists: HashMap<(bool, i64), PlaylistArt>,
     /// The track keys of each tag's mosaic picks; a pick the Store lacks has none.
     pub(crate) mosaics: HashMap<i64, Vec<Option<i64>>>,
     previews: HashMap<String, String>,
@@ -255,18 +218,17 @@ impl Got {
     /// A row's picture as the Catalog chose it. An artist lists its own pictures, then the one
     /// it borrows, then its name lookups.
     fn candidates(&self, art: Art) -> Option<Vec<ArtworkCandidate>> {
+        let stored = |part, key| self.art.get(&(part, key));
         let picture = |picture: Picture| match picture {
-            Picture::Track(key) => self.track_art.get(&key),
-            Picture::Album(key) => self.album_art.get(&key),
+            Picture::Track(key) => stored(Part::TrackArt, key),
+            Picture::Album(key) => stored(Part::AlbumArt, key),
         };
         let mut candidates = match art {
             Art::None => return None,
-            Art::Track(key) => self.track_art.get(&key)?.clone(),
-            Art::Album(key) => self.album_art.get(&key)?.clone(),
+            Art::Track(key) => stored(Part::TrackArt, key)?.clone(),
+            Art::Album(key) => stored(Part::AlbumArt, key)?.clone(),
             Art::Artist(key, borrowed) => {
-                let own = self
-                    .artist_art
-                    .get(&key)
+                let own = stored(Part::ArtistArt, key)
                     .map(Vec::as_slice)
                     .unwrap_or_default();
                 let lookup = |candidate: &&ArtworkCandidate| {
@@ -309,13 +271,9 @@ impl Got {
     }
 
     /// A tag's or folder's own binding with previews.
-    pub(crate) fn own(
-        &self,
-        stored: &HashMap<i64, Vec<ArtworkCandidate>>,
-        key: i64,
-    ) -> LibraryResult<Option<Vec<u8>>> {
-        stored
-            .get(&key)
+    pub(crate) fn own(&self, part: Part, key: i64) -> LibraryResult<Option<Vec<u8>>> {
+        self.art
+            .get(&(part, key))
             .map(|candidates| {
                 let mut candidates = candidates.clone();
                 self.fill(&mut candidates);
@@ -326,8 +284,8 @@ impl Got {
 
     /// A playlist's own binding with previews, without its mosaic.
     pub(crate) fn playlist_binding(&self, key: i64) -> LibraryResult<Option<Vec<u8>>> {
-        self.playlist_art
-            .get(&key)
+        self.playlists
+            .get(&(false, key))
             .and_then(|art| art.candidates.clone())
             .map(|mut candidates| {
                 self.fill(&mut candidates);
@@ -343,12 +301,7 @@ impl Got {
         key: i64,
         owner: (Option<String>, String),
     ) -> LibraryResult<Option<Vec<u8>>> {
-        let stored = if smart {
-            &self.smart_art
-        } else {
-            &self.playlist_art
-        };
-        let Some(art) = stored.get(&key) else {
+        let Some(art) = self.playlists.get(&(smart, key)) else {
             return Ok(None);
         };
         let mut candidates = art.candidates.clone().unwrap_or_default();
@@ -378,13 +331,13 @@ pub(crate) async fn run(
     want: &Want,
 ) -> LibraryResult<Got> {
     let mut got = Got::default();
-    if want.is_empty() {
+    if want.keys.iter().all(BTreeSet::is_empty) {
         return Ok(got);
     }
     let mut parts = Vec::new();
     let mut binds = Vec::new();
     for part in PARTS {
-        let keys = want.keys(part);
+        let keys = &want.keys[part as usize];
         if keys.is_empty() {
             continue;
         }
@@ -465,16 +418,9 @@ pub(crate) async fn run(
             }
             Part::TrackArt | Part::AlbumArt | Part::ArtistArt | Part::TagArt | Part::FolderArt => {
                 previews(&rows, &mut got, 3)?;
-                let Some(stored) = candidates(&rows, 2)? else {
-                    continue;
-                };
-                match part {
-                    Part::TrackArt => got.track_art.insert(key, stored),
-                    Part::AlbumArt => got.album_art.insert(key, stored),
-                    Part::ArtistArt => got.artist_art.insert(key, stored),
-                    Part::TagArt => got.tag_art.insert(key, stored),
-                    _ => got.folder_art.insert(key, stored),
-                };
+                if let Some(stored) = candidates(&rows, 2)? {
+                    got.art.insert((part, key), stored);
+                }
             }
             Part::TagMosaic => {
                 got.mosaics.insert(key, json(&rows, 2)?);
@@ -485,11 +431,7 @@ pub(crate) async fn run(
                     candidates: candidates(&rows, 2)?,
                     mosaic: text(&rows, 4),
                 };
-                if part == Part::PlaylistArt {
-                    got.playlist_art.insert(key, art);
-                } else {
-                    got.smart_art.insert(key, art);
-                }
+                got.playlists.insert((part == Part::SmartArt, key), art);
             }
         }
     }

@@ -377,16 +377,20 @@ async fn artwork(
     } else if parameters.contains_key("smart_playlist") {
         products
             .library
-            .smart_playlist_rows(
-                &[key(&parameters, "smart_playlist")?],
-                catalog::now(),
+            .rows_of(
+                &[library::Item::Smart(key(&parameters, "smart_playlist")?)],
+                true,
                 &cancel,
             )
             .await
             .map_err(internal)?
             .into_iter()
-            .next()
-            .and_then(|row| row.artwork_binding)
+            .find_map(|row| match row {
+                library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(row)) => {
+                    row.artwork_binding
+                }
+                _ => None,
+            })
     } else {
         let uri = required(&parameters, "uri")?;
         products

@@ -2,7 +2,7 @@ use library::{
     CalendarActivityPeriod, ListenDeliveryTarget, ListenWrite, ReadCancellation, SourceId,
 };
 
-use super::support::{connection, fixture, tracks};
+use super::support::{connection, fixture, restore, tracks};
 
 #[tokio::test]
 async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() {
@@ -71,7 +71,6 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
 #[tokio::test]
 async fn listens_accept_empty_optional_recording_ids() {
     let fixture = fixture().await;
-    let mut observed = fixture.catalog.changes();
     let listen = ListenWrite {
         external_id: Some("optional-recording-ids".into()),
         media_uri: "https://audio.invalid/direct.flac".into(),
@@ -91,6 +90,23 @@ async fn listens_accept_empty_optional_recording_ids() {
         listened_millis: 1000,
         skipped: false,
     };
+    let record = library::ActivityRecord {
+        version: 1,
+        listen_key: 100,
+        source_id: None,
+        current_media_uri: None,
+        listen: ListenWrite {
+            external_id: Some("imported-optional-recording-ids".into()),
+            ..listen.clone()
+        },
+    };
+    let report = restore(
+        &fixture.catalog,
+        &[("activity.jsonl", &serde_json::to_vec(&record).unwrap())],
+    )
+    .await;
+    assert_eq!((report.listens, report.skipped_listens), (1, 0));
+    let mut observed = fixture.catalog.changes();
     let key = fixture
         .catalog
         .record_listen(&listen, None, &[])
@@ -105,22 +121,6 @@ async fn listens_accept_empty_optional_recording_ids() {
         key
     );
     assert!(observed.try_recv().is_err());
-    let record = library::ActivityRecord {
-        version: 1,
-        listen_key: 100,
-        source_id: None,
-        current_media_uri: None,
-        listen: ListenWrite {
-            external_id: Some("imported-optional-recording-ids".into()),
-            ..listen
-        },
-    };
-    let report = fixture
-        .catalog
-        .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
-        .await
-        .unwrap();
-    assert_eq!((report.accepted, report.skipped), (1, 0));
     let mut exported = Vec::new();
     fixture
         .catalog
@@ -740,12 +740,9 @@ async fn history_shows_each_listen_from_its_copy_and_source_scope() {
     .collect::<Vec<_>>()
     .join("\n");
     assert_eq!(
-        fixture
-            .catalog
-            .import_activity_jsonl(std::io::Cursor::new(records))
+        restore(&fixture.catalog, &[("activity.jsonl", records.as_bytes())])
             .await
-            .unwrap()
-            .accepted,
+            .listens,
         5
     );
     let all = tracks(
@@ -835,13 +832,9 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     };
     let valid = serde_json::to_string(&input).unwrap();
     let data = format!("malformed\n{valid}\n{{\"version\":999}}\n{valid}\n");
-    let report = fixture
-        .catalog
-        .import_activity_jsonl(std::io::Cursor::new(data))
-        .await
-        .unwrap();
-    assert_eq!(report.accepted, 2);
-    assert_eq!(report.skipped, 2);
+    let report = restore(&fixture.catalog, &[("activity.jsonl", data.as_bytes())]).await;
+    assert_eq!(report.listens, 2);
+    assert_eq!(report.skipped_listens, 2);
     let mut exported = Vec::new();
     assert_eq!(
         fixture
@@ -866,10 +859,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let catalog = library::Catalog::open(empty.path().join("store.sqlite"))
         .await
         .unwrap();
-    catalog
-        .import_activity_jsonl(std::io::Cursor::new(&exported))
-        .await
-        .unwrap();
+    restore(&catalog, &[("activity.jsonl", &exported)]).await;
     catalog.close().await.unwrap();
     let catalog = library::Catalog::open(empty.path().join("store.sqlite"))
         .await
@@ -926,6 +916,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         String::from_utf8(csv).unwrap(),
         "artist,track,album,time\r\n\"Björk\",\"Şarkı, \"\"one\"\"\nsecond line\",\"日本語\",\"1700000000\"\r\n"
     );
+    let mut extended = exported.clone();
     for (index, source) in [Some("another-server"), None].into_iter().enumerate() {
         let mut listen = input.listen.clone();
         listen.external_id = Some(format!("extra-{index}"));
@@ -937,11 +928,10 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
             current_media_uri: None,
             listen,
         };
-        catalog
-            .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
-            .await
-            .unwrap();
+        serde_json::to_writer(&mut extended, &record).unwrap();
+        extended.push(b'\n');
     }
+    restore(&catalog, &[("activity.jsonl", &extended)]).await;
     let source = SourceId::new("forgotten-server");
     let mut scoped = Vec::new();
     assert_eq!(

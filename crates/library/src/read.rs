@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::catalog::fetch::{self, Got, Want};
+use crate::catalog::fetch::{self, Got, Part, Want};
 use crate::catalog::snapshot::{
     COMPILATION, CUE, DOWNLOADED, METADATA_WRITABLE, PICTURE, Packed, SOURCE_OWNED, Snapshot,
     WRITABLE,
@@ -107,7 +107,7 @@ impl Members {
 }
 
 impl Order {
-    pub fn read(&self) -> &Read {
+    pub(crate) fn read(&self) -> &Read {
         &self.0.read
     }
 
@@ -201,21 +201,6 @@ impl Order {
         match &self.0.members {
             Members::AlbumTracks { spans, .. } => Some(spans),
             _ => None,
-        }
-    }
-
-    /// Everything the order lists, or the ranges asked, for playing or queueing.
-    pub fn selection(&self, ranges: Option<Vec<Range<usize>>>) -> Option<MemberSelection> {
-        match &self.0.read {
-            Read::Members(read) => Some(MemberSelection::Members {
-                read: read.clone(),
-                ranges,
-            }),
-            Read::List(read) | Read::AlbumTracks(read) => Some(MemberSelection::Parents {
-                read: read.clone(),
-                ranges,
-            }),
-            Read::Folders(_) => None,
         }
     }
 }
@@ -580,10 +565,10 @@ impl<'a> Builder<'a> {
             return;
         };
         if record.kind() == TagKind::Genre {
-            want.tag_art.insert(key);
+            want.add(Part::TagArt, key);
         }
         if record.kind() == TagKind::Mood || record.flags & PICTURE == 0 {
-            want.tag_mosaics.insert(key);
+            want.add(Part::TagMosaic, key);
         }
     }
 
@@ -635,7 +620,7 @@ impl<'a> Builder<'a> {
         };
         match item {
             Item::Track { key, .. } | Item::AlbumTrack { key, .. } => {
-                want.tracks.insert(key.raw());
+                want.add(Part::Track, key.raw());
                 art(want, self.track_art(key));
             }
             Item::Listen(index) => {
@@ -644,29 +629,19 @@ impl<'a> Builder<'a> {
                 }
             }
             Item::Album(key) | Item::AlbumHeading(key) => {
-                want.album_texts.insert(key.raw());
+                want.add(Part::AlbumText, key.raw());
                 art(want, self.album_art(key));
             }
             Item::Artist { key, .. } => art(want, self.artist_art(key)),
             _ if !self.art => {}
             Item::Genre(key) => self.tag_art(key.raw(), want),
             Item::Mood(key) => self.tag_art(key.raw(), want),
-            Item::Folder(key) => {
-                want.folder_art.insert(key.raw());
-            }
-            Item::Playlist(key) => {
-                want.playlist_art.insert(key.raw());
-            }
-            Item::Smart(key) => {
-                want.smart_art.insert(key.raw());
-            }
+            Item::Folder(key) => want.add(Part::FolderArt, key.raw()),
+            Item::Playlist(key) => want.add(Part::PlaylistArt, key.raw()),
+            Item::Smart(key) => want.add(Part::SmartArt, key.raw()),
             Item::PlaylistFolder(key) => match self.folder_cover(key) {
-                Some((true, key, ..)) => {
-                    want.smart_art.insert(key);
-                }
-                Some((false, key, ..)) => {
-                    want.playlist_art.insert(key);
-                }
+                Some((true, key, ..)) => want.add(Part::SmartArt, key),
+                Some((false, key, ..)) => want.add(Part::PlaylistArt, key),
                 None => {}
             },
         }
@@ -675,13 +650,13 @@ impl<'a> Builder<'a> {
     fn want_header(&self, header: HeaderKey, want: &mut Want) {
         match header {
             HeaderKey::Album { key, .. } => {
-                want.album_views.insert(key.raw());
+                want.add(Part::AlbumView, key.raw());
                 self.want(Item::Album(key), &[], want);
             }
             HeaderKey::Artist {
                 key, album_artist, ..
             } => {
-                want.artist_views.insert(key.raw());
+                want.add(Part::ArtistView, key.raw());
                 self.want(Item::Artist { key, album_artist }, &[], want);
             }
             HeaderKey::Playlist(key) => self.want(Item::Playlist(key), &[], want),
@@ -934,7 +909,7 @@ impl<'a> Builder<'a> {
         let Some(source) = self.source(record.source).filter(|_| record.kind() == kind) else {
             return Ok(None);
         };
-        let artwork_binding = got.own(&got.tag_art, key)?;
+        let artwork_binding = got.own(Part::TagArt, key)?;
         Ok(Some(TagRow {
             key,
             kind,
@@ -1189,7 +1164,7 @@ impl<'a> Builder<'a> {
                         object_id: text(self.snapshot, record.object),
                         name: text(self.snapshot, record.name),
                         summary: self.derived().folders[slot as usize].summary(),
-                        artwork_binding: got.own(&got.folder_art, key.raw())?,
+                        artwork_binding: got.own(Part::FolderArt, key.raw())?,
                     }))
                 }
                 None => None,
@@ -1302,15 +1277,13 @@ impl Catalog {
         &self,
         connection: &mut sqlx::SqliteConnection,
         windows: [(&[Item], &[Listen]); 2],
-        headers: &[HeaderKey],
+        header: Option<HeaderKey>,
         shape: &Shape,
         art: bool,
-    ) -> LibraryResult<(Vec<Header>, [Vec<Row>; 2])> {
+    ) -> LibraryResult<(Option<Header>, [Vec<Row>; 2])> {
         let mut shape = shape.clone();
-        for header in headers {
-            if let HeaderKey::Smart { now, .. } = header {
-                shape.now = *now;
-            }
+        if let Some(HeaderKey::Smart { now, .. }) = header {
+            shape.now = now;
         }
         let inputs = self
             .smart_inputs(
@@ -1318,8 +1291,8 @@ impl Catalog {
                 windows
                     .iter()
                     .flat_map(|(items, _)| items.iter().copied())
-                    .chain(headers.iter().filter_map(|header| match header {
-                        HeaderKey::Smart { key, .. } => Some(Item::Smart(*key)),
+                    .chain(header.and_then(|header| match header {
+                        HeaderKey::Smart { key, .. } => Some(Item::Smart(key)),
                         _ => None,
                     })),
                 shape.now,
@@ -1334,8 +1307,8 @@ impl Catalog {
                     builder.want(*item, listens, &mut want);
                 }
             }
-            for header in headers {
-                builder.want_header(*header, &mut want);
+            if let Some(header) = header {
+                builder.want_header(header, &mut want);
             }
         }
         let got = fetch::run(connection, &want).await?;
@@ -1362,11 +1335,11 @@ impl Catalog {
                 built.extend(builder.row(*item, listens, &got, &galleries)?);
             }
         }
-        let mut built = Vec::with_capacity(headers.len());
-        for header in headers {
-            built.extend(builder.header(*header, &got, &galleries)?);
-        }
-        Ok((built, rows))
+        let header = match header {
+            Some(header) => builder.header(header, &got, &galleries)?,
+            None => None,
+        };
+        Ok((header, rows))
     }
 
     /// One keyed statement: the window's rows, a detail header and an artist's favorite tracks.
@@ -1397,17 +1370,17 @@ impl Catalog {
         let (favorites, favorite_listens) = window(fetch.favorites.as_ref());
         let shape = Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()));
         let mut connection = self.acquire_loaded(cancellation).await?;
-        let (headers, [rows, favorites]) = self
+        let (header, [rows, favorites]) = self
             .fetch_on(
                 &mut connection,
                 [(&rows, listens), (&favorites, favorite_listens)],
-                fetch.header.as_slice(),
+                fetch.header,
                 &shape,
                 fetch.art,
             )
             .await?;
         Ok(Fetched {
-            header: headers.into_iter().next(),
+            header,
             rows,
             favorites,
         })
@@ -1443,10 +1416,12 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Row>> {
         let mut connection = self.acquire_loaded(cancellation).await?;
+        let items = &items[..items.len().min(WINDOW)];
         self.rows_of_on(&mut connection, items, &Shape::of(None), art)
             .await
     }
 
+    /// Rows of items from no order, on a caller's connection.
     pub(crate) async fn rows_of_on(
         &self,
         connection: &mut sqlx::SqliteConnection,
@@ -1454,9 +1429,8 @@ impl Catalog {
         shape: &Shape,
         art: bool,
     ) -> LibraryResult<Vec<Row>> {
-        let items = &items[..items.len().min(WINDOW)];
         let (_, [rows, _]) = self
-            .fetch_on(connection, [(items, &[]), (&[], &[])], &[], shape, art)
+            .fetch_on(connection, [(items, &[]), (&[], &[])], None, shape, art)
             .await?;
         Ok(rows)
     }
@@ -1520,7 +1494,7 @@ impl Catalog {
             let snapshot = self.snapshot();
             let builder = Builder::new(self, &snapshot, &shape, &inputs, true);
             for key in keys {
-                want.views.insert(key.raw());
+                want.add(Part::View, key.raw());
                 builder.want(
                     Item::Track {
                         key: *key,
@@ -1584,19 +1558,18 @@ impl Catalog {
         track_keys_on(&mut connection, uris).await
     }
 
-    /// Full views of these headers in one statement, in the order asked.
-    async fn headers(
+    /// A detail header's full view, as a page shows it.
+    async fn header(
         &self,
-        headers: &[HeaderKey],
+        header: HeaderKey,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<Header>> {
+    ) -> LibraryResult<Option<Header>> {
         let mut connection = self.acquire_loaded(cancellation).await?;
-        let headers = &headers[..headers.len().min(WINDOW)];
         Ok(self
             .fetch_on(
                 &mut connection,
                 [(&[], &[]), (&[], &[])],
-                headers,
+                Some(header),
                 &Shape::of(None),
                 true,
             )
@@ -1614,31 +1587,15 @@ impl Catalog {
         let Some(Item::Album(key)) = self.item(uri) else {
             return Ok(None);
         };
-        Ok(self.albums(&[key], activity, cancellation).await?.pop())
-    }
-
-    pub async fn albums(
-        &self,
-        keys: &[AlbumKey],
-        activity: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumView>> {
-        let headers = keys
-            .iter()
-            .map(|key| HeaderKey::Album {
-                key: *key,
-                activity,
-            })
-            .collect::<Vec<_>>();
-        Ok(self
-            .headers(&headers, cancellation)
-            .await?
-            .into_iter()
-            .filter_map(|header| match header {
-                Header::Album(view) => Some(*view),
+        Ok(
+            match self
+                .header(HeaderKey::Album { key, activity }, cancellation)
+                .await?
+            {
+                Some(Header::Album(view)) => Some(*view),
                 _ => None,
-            })
-            .collect())
+            },
+        )
     }
 
     pub async fn artist(
@@ -1652,36 +1609,15 @@ impl Catalog {
         let Some(Item::Artist { key, .. }) = self.item(uri) else {
             return Ok(None);
         };
-        Ok(self
-            .artists(&[key], album_artist, activity, cancellation)
-            .await?
-            .pop())
-    }
-
-    pub async fn artists(
-        &self,
-        keys: &[ArtistKey],
-        album_artist: bool,
-        activity: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<ArtistView>> {
-        let headers = keys
-            .iter()
-            .map(|key| HeaderKey::Artist {
-                key: *key,
-                album_artist,
-                activity,
-            })
-            .collect::<Vec<_>>();
-        Ok(self
-            .headers(&headers, cancellation)
-            .await?
-            .into_iter()
-            .filter_map(|header| match header {
-                Header::Artist(view) => Some(*view),
-                _ => None,
-            })
-            .collect())
+        let header = HeaderKey::Artist {
+            key,
+            album_artist,
+            activity,
+        };
+        Ok(match self.header(header, cancellation).await? {
+            Some(Header::Artist(view)) => Some(*view),
+            _ => None,
+        })
     }
 
     /// Playlist rows by key, in the order asked. Unnamed playlists are skipped.
@@ -1700,29 +1636,6 @@ impl Catalog {
             .into_iter()
             .filter_map(|row| match row {
                 Row::Playlist(PlaylistListRow::Playlist(row)) => Some(row),
-                _ => None,
-            })
-            .collect())
-    }
-
-    pub async fn smart_playlist_rows(
-        &self,
-        keys: &[SmartPlaylistKey],
-        now: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SmartPlaylistRow>> {
-        let items = keys.iter().map(|key| Item::Smart(*key)).collect::<Vec<_>>();
-        let mut connection = self.acquire_loaded(cancellation).await?;
-        let shape = Shape {
-            now,
-            ..Shape::of(None)
-        };
-        Ok(self
-            .rows_of_on(&mut connection, &items, &shape, true)
-            .await?
-            .into_iter()
-            .filter_map(|row| match row {
-                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => Some(row),
                 _ => None,
             })
             .collect())

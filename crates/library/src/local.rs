@@ -1120,16 +1120,6 @@ impl Catalog {
         write.commit().await?;
         Ok(key)
     }
-
-    pub async fn import_local_locators_jsonl(
-        &self,
-        input: impl std::io::BufRead,
-    ) -> LibraryResult<u64> {
-        let mut write = self.write().await?;
-        let count = import_local_locators_jsonl_on(&mut write, input).await?;
-        write.commit().await?;
-        Ok(count)
-    }
 }
 
 pub(crate) async fn write_local_locator(

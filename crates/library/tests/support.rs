@@ -405,6 +405,134 @@ pub fn shown(facts: Shown) -> bool {
     !facts.is_empty()
 }
 
+/// Album and artist views by key, each read the way its page reads it: by URI.
+pub(crate) trait Views {
+    async fn albums(
+        &self,
+        keys: &[AlbumKey],
+        activity: bool,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::AlbumView>>;
+    async fn artists(
+        &self,
+        keys: &[ArtistKey],
+        album_artist: bool,
+        activity: bool,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::ArtistView>>;
+    async fn smart_playlist_rows(
+        &self,
+        keys: &[library::SmartPlaylistKey],
+        now: i64,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::SmartPlaylistRow>>;
+}
+
+impl Views for Catalog {
+    async fn albums(
+        &self,
+        keys: &[AlbumKey],
+        activity: bool,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::AlbumView>> {
+        self.loaded().await;
+        let mut views = Vec::new();
+        for key in keys {
+            if let Some(uri) = self.uri(library::Item::Album(*key)) {
+                views.extend(self.album(&uri, activity, cancel).await?);
+            }
+        }
+        Ok(views)
+    }
+
+    async fn artists(
+        &self,
+        keys: &[ArtistKey],
+        album_artist: bool,
+        activity: bool,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::ArtistView>> {
+        self.loaded().await;
+        let mut views = Vec::new();
+        for key in keys {
+            let item = library::Item::Artist {
+                key: *key,
+                album_artist,
+            };
+            if let Some(uri) = self.uri(item) {
+                views.extend(self.artist(&uri, album_artist, activity, cancel).await?);
+            }
+        }
+        Ok(views)
+    }
+
+    /// Smart playlist headers as their pages read them at `now`.
+    async fn smart_playlist_rows(
+        &self,
+        keys: &[library::SmartPlaylistKey],
+        now: i64,
+        cancel: &library::ReadCancellation,
+    ) -> library::LibraryResult<Vec<library::SmartPlaylistRow>> {
+        let mut rows = Vec::new();
+        for key in keys {
+            let fetch = library::Fetch {
+                header: Some(library::HeaderKey::Smart { key: *key, now }),
+                ..library::Fetch::default()
+            };
+            if let Some(library::Header::Smart(row)) = self.fetch(fetch, cancel).await?.header {
+                rows.push(*row);
+            }
+        }
+        Ok(rows)
+    }
+}
+
+/// The backup group a backup file belongs to.
+fn group(name: &str) -> library::StateGroups {
+    library::StateGroups {
+        playlists: false,
+        favorites: name == "user-state.jsonl",
+        local_imports: name == "local-locators.jsonl",
+        activity: name == "activity.jsonl",
+        queue: name == "queue.jsonl",
+    }
+}
+
+/// Restores backup files the way a backup restore does: each file's group is replaced.
+pub async fn restore(catalog: &Catalog, files: &[(&str, &[u8])]) -> library::BackupRestoreReport {
+    let directory = tempfile::tempdir().unwrap();
+    let mut groups = group("");
+    for (name, contents) in files {
+        std::fs::write(directory.path().join(name), contents).unwrap();
+        let file = group(name);
+        groups.favorites |= file.favorites;
+        groups.local_imports |= file.local_imports;
+        groups.activity |= file.activity;
+        groups.queue |= file.queue;
+    }
+    if groups.activity {
+        std::fs::write(
+            directory.path().join("legacy-activity.jsonl"),
+            "{\"version\":1}\n",
+        )
+        .unwrap();
+    }
+    catalog
+        .restore_state(directory.path(), groups, 0)
+        .await
+        .unwrap()
+}
+
+/// The backup file `name` a backup export writes.
+pub async fn export(catalog: &Catalog, name: &str) -> Vec<u8> {
+    let directory = tempfile::tempdir().unwrap();
+    catalog
+        .export_state(directory.path(), group(name))
+        .await
+        .unwrap();
+    std::fs::read(directory.path().join(name)).unwrap()
+}
+
 /// Rows written straight to the Store reach the Catalog when it opens again.
 pub async fn reopen(catalog: Catalog, path: &std::path::Path) -> Catalog {
     catalog.close().await.expect("close Library");

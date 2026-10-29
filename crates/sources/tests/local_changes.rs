@@ -248,10 +248,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
     )
     .await[0]
         .album_key;
-    let before = catalog
-        .albums(&[album], false, &ReadCancellation::new())
-        .await
-        .expect("initial Album artwork")[0]
+    let before = album_view(&catalog, album, "initial Album artwork").await
         .row
         .artwork_binding
         .clone();
@@ -272,10 +269,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .await;
     assert!(matches!(interrupted, Err(sources::SourceError::Cancelled)));
     assert_eq!(
-        catalog
-            .albums(&[album], false, &ReadCancellation::new())
-            .await
-            .expect("Album cover after cancelled discovery")[0]
+        album_view(&catalog, album, "Album cover after cancelled discovery").await
             .row
             .artwork_binding,
         before
@@ -305,10 +299,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
             .intersects(sources::Shown::PLAYLIST | sources::Shown::HOME)
     );
     assert_ne!(
-        catalog
-            .albums(&[album], false, &ReadCancellation::new())
-            .await
-            .expect("Album row")[0]
+        album_view(&catalog, album, "Album row").await
             .row
             .artwork_binding,
         before
@@ -1444,15 +1435,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         })
         .unwrap()
         .unwrap();
-    let album = catalog
-        .albums(
-            &[track.links.album_key.unwrap()],
-            false,
-            &ReadCancellation::new(),
-        )
-        .await
-        .unwrap()
-        .remove(0);
+    let album = album_view(&catalog, track.links.album_key.unwrap(), "Album").await;
     let source = Arc::new(source);
     let (editor, _metadata) = sources::FileEditSession::open(
         Some(Arc::clone(&source)),
@@ -1555,15 +1538,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         ("", "", "1995-07-08", Some("1995-07-08"), Some(1995)),
         ("", "", "", None, None),
     ] {
-        let album = catalog
-            .albums(
-                &[current.links.album_key.unwrap()],
-                false,
-                &ReadCancellation::new(),
-            )
-            .await
-            .unwrap()
-            .remove(0);
+        let album = album_view(&catalog, current.links.album_key.unwrap(), "Album").await;
         let (editor, _metadata) = sources::FileEditSession::open(
             Some(Arc::clone(&source)),
             &catalog,
@@ -1606,15 +1581,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                 .await
                 .unwrap();
         }
-        let album = catalog
-            .albums(
-                &[current.links.album_key.unwrap()],
-                false,
-                &ReadCancellation::new(),
-            )
-            .await
-            .unwrap()
-            .remove(0);
+        let album = album_view(&catalog, current.links.album_key.unwrap(), "Album").await;
         for path in [&path, &second_path] {
             let uri = url::Url::from_file_path(path).unwrap().to_string();
             let (_editor, metadata) = sources::FileEditSession::open(
@@ -2162,11 +2129,19 @@ async fn track_count(
         .len()
 }
 
-async fn album_genres(catalog: &Catalog, album: library::AlbumKey) -> Vec<String> {
+/// An album as its page reads it, by URI.
+async fn album_view(catalog: &Catalog, album: library::AlbumKey, read: &str) -> library::AlbumView {
+    catalog.loaded().await;
+    let uri = catalog.uri(library::Item::Album(album)).expect(read);
     catalog
-        .albums(&[album], false, &ReadCancellation::new())
+        .album(&uri, false, &ReadCancellation::new())
         .await
-        .expect("Album row")[0]
+        .expect(read)
+        .expect(read)
+}
+
+async fn album_genres(catalog: &Catalog, album: library::AlbumKey) -> Vec<String> {
+    album_view(&catalog, album, "Album row").await
         .row
         .links
         .genres

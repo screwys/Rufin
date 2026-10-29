@@ -56,9 +56,9 @@ pub struct ActivityRecord {
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
-pub struct ActivityImportReport {
-    pub accepted: u64,
-    pub skipped: u64,
+pub(crate) struct ActivityImportReport {
+    pub(crate) accepted: u64,
+    pub(crate) skipped: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -198,18 +198,6 @@ impl Catalog {
             count += 1;
         }
         Ok(count)
-    }
-
-    /// Salvage/interchange imports keep useful records and never create delivery targets.
-    /// Backup framing is checked by the archive owner before invoking this operation.
-    pub async fn import_activity_jsonl(
-        &self,
-        input: impl BufRead,
-    ) -> LibraryResult<ActivityImportReport> {
-        let mut write = self.write().await?;
-        let report = import_activity_jsonl_on(&mut write, input).await?;
-        write.commit().await?;
-        Ok(report)
     }
 
     pub async fn due_listen_deliveries(

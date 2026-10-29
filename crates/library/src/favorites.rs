@@ -371,18 +371,6 @@ pub struct UserMediaStateWrite {
     pub rating: Option<i64>,
 }
 
-impl Catalog {
-    pub async fn import_user_media_state_jsonl(
-        &self,
-        input: impl std::io::BufRead,
-    ) -> LibraryResult<u64> {
-        let mut write = self.write().await?;
-        let count = import_user_media_state_jsonl_on(&mut write, input).await?;
-        write.commit().await?;
-        Ok(count)
-    }
-}
-
 pub(crate) async fn export_user_media_state_jsonl_on(
     connection: &mut SqliteConnection,
     mut output: impl std::io::Write,

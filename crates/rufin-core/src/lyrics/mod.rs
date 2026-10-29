@@ -1767,16 +1767,12 @@ mod tests {
         let downloaded_uri =
             library::source_entity_uri(&SourceId::new("mapped"), "track", "downloaded");
         let original = directory.path().join("original.flac");
-        let mut locators = String::from("{\"version\":1}\n");
-        for (media_uri, origin, path) in [
-            (&mapped_uri, "mapping", &audio),
-            (&downloaded_uri, "mapping", &original),
-        ] {
-            locators.push_str(
-                &serde_json::to_string(&library::LocalLocatorWrite {
+        for (media_uri, path) in [(&mapped_uri, &audio), (&downloaded_uri, &original)] {
+            catalog
+                .upsert_local_locator(&library::LocalLocatorWrite {
                     source_id: None,
                     media_uri: media_uri.clone(),
-                    origin: origin.to_string(),
+                    origin: "mapping".to_string(),
                     path: path.to_string_lossy().into_owned(),
                     root: directory.path().to_string_lossy().into_owned(),
                     relative_path: path
@@ -1788,14 +1784,9 @@ mod tests {
                         .expect("access URI")
                         .to_string(),
                 })
-                .expect("locator"),
-            );
-            locators.push('\n');
+                .await
+                .expect("local access");
         }
-        catalog
-            .import_local_locators_jsonl(std::io::Cursor::new(locators))
-            .await
-            .expect("local access");
         catalog
             .save_download(&library::DownloadFile {
                 media_uri: downloaded_uri.clone(),

@@ -5,7 +5,7 @@ use library::{
     SmartPlaylistSort,
 };
 
-use super::support::{connection, fixture, items, tracks, uris};
+use super::support::{Views, connection, fixture, items, tracks, uris};
 
 #[tokio::test]
 async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {

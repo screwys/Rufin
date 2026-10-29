@@ -160,19 +160,20 @@ impl Catalog {
                 .collect::<Vec<_>>()
         };
         let mut connection = self.acquire_loaded(cancellation).await?;
-        let mut rows = Vec::with_capacity(writable.len());
-        for items in writable.chunks(256) {
-            rows.extend(
-                self.rows_of_on(&mut connection, items, &crate::read::Shape::of(None), true)
-                    .await?
-                    .into_iter()
-                    .filter_map(|row| match row {
-                        crate::Row::Playlist(crate::PlaylistListRow::Playlist(row)) => Some(row),
-                        _ => None,
-                    }),
-            );
-        }
-        Ok(rows)
+        Ok(self
+            .rows_of_on(
+                &mut connection,
+                &writable,
+                &crate::read::Shape::of(None),
+                true,
+            )
+            .await?
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::Row::Playlist(crate::PlaylistListRow::Playlist(row)) => Some(row),
+                _ => None,
+            })
+            .collect())
     }
 
     pub async fn playlist_edit_entries(

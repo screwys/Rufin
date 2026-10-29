@@ -1564,10 +1564,9 @@ mod tests {
         .await;
         let album = albums.first().expect("rich Album");
         let view = catalog
-            .albums(&[album.album_key], false, &cancellation)
+            .album(&album.media_uri, false, &cancellation)
             .await
             .unwrap()
-            .pop()
             .expect("rich Album view");
         assert_eq!(
             view.metadata.musicbrainz_release_group_id.as_deref(),
@@ -1642,9 +1641,10 @@ mod tests {
         .await;
         assert_eq!(
             catalog
-                .artists(&[artists[0].artist_key], false, false, &cancellation)
+                .artist(&artists[0].media_uri, false, false, &cancellation)
                 .await
-                .unwrap()[0]
+                .unwrap()
+                .unwrap()
                 .musicbrainz_artist_id
                 .as_deref(),
             Some("track-artist-mbid")

@@ -427,13 +427,11 @@ impl Catalog {
         items.extend(genres.iter().copied());
         let mut seen = std::collections::HashSet::new();
         items.retain(|item| seen.insert(*item));
-        let shape = crate::read::Shape::of(None);
-        let (_, [rows, _]) = self
-            .fetch_on(
+        let rows = self
+            .rows_of_on(
                 &mut transaction,
-                [(&items, &[]), (&[], &[])],
-                &[],
-                &shape,
+                &items,
+                &crate::read::Shape::of(None),
                 true,
             )
             .await?;
