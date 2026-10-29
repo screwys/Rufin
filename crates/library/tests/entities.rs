@@ -18,10 +18,10 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     let rows = fixture.catalog.albums(&keys, true, &cancel).await.unwrap();
     assert_eq!(rows.len(), 2);
     for row in &rows {
-        assert_eq!(row.summary.track_count, 2);
-        assert_eq!(row.state.play_count, 3);
-        assert_eq!(row.state.last_played, Some(200));
-        assert_eq!(row.links.album_artists.len(), 1);
+        assert_eq!(row.row.summary.track_count, 2);
+        assert_eq!(row.row.state.play_count, 3);
+        assert_eq!(row.row.state.last_played, Some(200));
+        assert_eq!(row.row.links.album_artists.len(), 1);
     }
     sqlx::query("UPDATE sources SET kind='local'")
         .execute(&mut raw)
@@ -35,17 +35,17 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let rows = fixture.catalog.albums(&keys, true, &cancel).await.unwrap();
     for row in &rows {
-        assert_eq!(row.summary.track_count, 2);
-        assert_eq!(row.state.play_count, 106);
-        assert_eq!(row.state.last_played, Some(900));
+        assert_eq!(row.row.summary.track_count, 2);
+        assert_eq!(row.row.state.play_count, 106);
+        assert_eq!(row.row.state.last_played, Some(900));
     }
     let artist = fixture
         .catalog
         .artists(&[fixture.artists[0]], false, true, &cancel)
         .await
         .unwrap();
-    assert_eq!(artist[0].state.play_count, 106);
-    assert_eq!(artist[0].state.last_played, Some(900));
+    assert_eq!(artist[0].row.state.play_count, 106);
+    assert_eq!(artist[0].row.state.last_played, Some(900));
 }
 
 #[tokio::test]

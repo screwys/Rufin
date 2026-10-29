@@ -554,26 +554,6 @@ impl Catalog {
         Ok(usize::try_from(count?).unwrap_or_default())
     }
 
-    pub async fn downloaded_media_count(
-        &self,
-        media_uris: &[String],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<i64> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar("SELECT count(DISTINCT media_uri) FROM main.downloads WHERE media_uri IN (SELECT value FROM json_each(?1))")
-            .bind(serde_json::to_string(media_uris)?).fetch_one(&mut *connection).await?)
-    }
-
-    pub async fn downloaded_media_uris(
-        &self,
-        media_uris: &[String],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar("SELECT DISTINCT media_uri FROM main.downloads WHERE media_uri IN (SELECT value FROM json_each(?1))")
-            .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
-    }
-
     pub async fn download_metadata(
         &self,
         media_uri: &str,
@@ -896,23 +876,6 @@ impl Catalog {
         .await?)
     }
 
-    pub async fn mapping_track_source_path(
-        &self,
-        source: SourceKey,
-        track: TrackKey,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(
-            "SELECT source_path FROM tracks JOIN track_details USING(track_key)
-             WHERE source_key=?1 AND track_key=?2 AND source_path IS NOT NULL",
-        )
-        .bind(source)
-        .bind(track)
-        .fetch_optional(&mut *connection)
-        .await?)
-    }
-
     pub async fn local_file_roots(&self, source: SourceKey) -> LibraryResult<Vec<String>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         Ok(sqlx::query_scalar(
@@ -973,34 +936,6 @@ impl Catalog {
             WHERE locator.media_uri=?1
         ) WHERE size_bytes IS NOT NULL LIMIT 1")
             .bind(media_uri).fetch_optional(&mut *connection).await?)
-    }
-
-    pub async fn remove_local_access(&self, key: LocalAccessFileKey) -> LibraryResult<bool> {
-        let mut write = self.write().await?;
-        let connection = write.connection().await?;
-        let removed_access = sqlx::query_scalar::<_, String>(
-            "SELECT media_uri FROM local_access_files WHERE local_access_file_key=?1",
-        )
-        .bind(key)
-        .fetch_optional(&mut *connection)
-        .await?;
-        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri=(SELECT access_uri FROM main.local_locators WHERE local_access_file_key=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.local_access_file_key<>?1)")
-            .bind(key)
-            .execute(&mut *connection)
-            .await?;
-        let removed = sqlx::query("DELETE FROM main.local_locators WHERE local_access_file_key=?1")
-            .bind(key)
-            .execute(&mut *connection)
-            .await?
-            .rows_affected()
-            == 1;
-        if let Some(media_uri) = removed_access.as_deref() {
-            write.keep();
-            write.read_downloads(&[media_uri]).await?;
-            refresh_uri_audio(&mut write, &[media_uri]).await?;
-        }
-        write.commit().await?;
-        Ok(removed)
     }
 }
 

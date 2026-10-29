@@ -556,7 +556,7 @@ mod tests {
                 .unwrap();
             assert_eq!(row.metadata.title, album["Name"].as_str().unwrap());
             let binding: Vec<library::ArtworkCandidate> =
-                serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();
+                serde_json::from_slice(row.row.artwork_binding.as_deref().unwrap()).unwrap();
             assert_eq!(
                 match &binding[0].image {
                     library::ArtworkImage::Native { item_id, .. } => item_id.as_str(),

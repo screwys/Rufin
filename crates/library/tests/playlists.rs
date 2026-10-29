@@ -4,7 +4,7 @@ use super::support::{connection, fixture};
 
 #[tokio::test]
 async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
     let catalog = &fixture.catalog;
     let (_, authored) = catalog
         .create_playlist(
@@ -33,6 +33,8 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
     sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name) VALUES (?1,'source','other','Other')")
         .bind(other).execute(&mut raw).await.unwrap();
     drop(raw);
+    fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     assert_eq!(
         catalog

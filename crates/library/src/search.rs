@@ -102,36 +102,26 @@ impl Catalog {
         }
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         let tracks = self
-            .track_keys_by_objects(&mut connection, source, track_objects)
+            .track_keys_by_objects(&mut connection, Some(source), track_objects)
             .await?;
         let keys = {
             let snapshot = self.snapshot();
-            let owner = snapshot.source_slot(source);
-            let albums = album_objects
-                .iter()
-                .filter_map(|object| {
-                    snapshot
-                        .albums
-                        .iter()
-                        .find(|(_, album)| {
-                            Some(album.source) == owner && snapshot.text(album.object) == object
-                        })
-                        .map(|(_, album)| i64::from(album.key))
-                })
-                .collect();
-            let artists = artist_objects
-                .iter()
-                .filter_map(|object| {
-                    snapshot
-                        .artists
-                        .iter()
-                        .find(|(_, artist)| {
-                            Some(artist.source) == owner && snapshot.text(artist.object) == object
-                        })
-                        .map(|(_, artist)| i64::from(artist.key))
-                })
-                .collect();
-            [tracks, albums, artists]
+            let owner = snapshot
+                .source_slot(source)
+                .unwrap_or(crate::catalog::snapshot::NO_SOURCE);
+            let keys = |kind, objects: &[String]| {
+                let objects = objects.iter().map(String::as_str).collect::<Vec<_>>();
+                snapshot
+                    .object_keys(kind, owner, &objects)
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            };
+            [
+                tracks,
+                keys(crate::CatalogKind::Album, album_objects),
+                keys(crate::CatalogKind::Artist, artist_objects),
+            ]
         };
         self.search_rows(&mut connection, &keys, album_artists)
             .await
@@ -160,16 +150,15 @@ impl Catalog {
                 album_artist: album_artists,
             }))
             .collect::<Vec<_>>();
-        let rows = self
+        let (_, [rows, _]) = self
             .fetch_on(
                 connection,
                 [(&items, &[]), (&[], &[])],
-                None,
+                &[],
                 &crate::read::Shape::of(None),
                 true,
             )
-            .await?
-            .rows;
+            .await?;
         let mut results = SearchResults::default();
         for row in rows {
             match row {

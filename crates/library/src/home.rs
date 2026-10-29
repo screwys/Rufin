@@ -428,16 +428,15 @@ impl Catalog {
         let mut seen = std::collections::HashSet::new();
         items.retain(|item| seen.insert(*item));
         let shape = crate::read::Shape::of(None);
-        let rows = self
+        let (_, [rows, _]) = self
             .fetch_on(
                 &mut transaction,
                 [(&items, &[]), (&[], &[])],
-                None,
+                &[],
                 &shape,
                 true,
             )
-            .await?
-            .rows;
+            .await?;
         let mut track_rows = std::collections::HashMap::new();
         let mut album_rows = std::collections::HashMap::new();
         let mut tag_rows = std::collections::HashMap::new();

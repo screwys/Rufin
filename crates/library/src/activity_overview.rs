@@ -182,16 +182,15 @@ impl Catalog {
                 )
             }))
             .collect::<std::collections::HashMap<_, _>>();
-        let rows = self
+        let (_, [rows, _]) = self
             .fetch_on(
                 &mut connection,
                 [(&items, &[]), (&[], &[])],
-                None,
+                &[],
                 &crate::read::Shape::of(None),
                 true,
             )
-            .await?
-            .rows;
+            .await?;
         let (mut track_rows, mut album_rows, mut artist_rows) =
             (Vec::new(), Vec::new(), Vec::new());
         for row in rows {

@@ -7,11 +7,13 @@ use std::sync::Arc;
 
 use crate::catalog::fetch::{self, Got, Want};
 use crate::catalog::snapshot::{
-    COMPILATION, CUE, DOWNLOADED, METADATA_WRITABLE, NONE, PICTURE, Packed, SOURCE_OWNED, Snapshot,
+    COMPILATION, CUE, DOWNLOADED, METADATA_WRITABLE, PICTURE, Packed, SOURCE_OWNED, Snapshot,
     WRITABLE,
 };
 use crate::catalog::strings::StrId;
-use crate::catalog::views::{Art, Context, Derived, Played, Totals, favorite, rating};
+use crate::catalog::views::{
+    Art, Context, Derived, Inputs, Played, Totals, date_text, favorite, known, rating, year_of,
+};
 use crate::*;
 
 /// A list a client opens.
@@ -449,45 +451,6 @@ impl Shape {
     }
 }
 
-/// Where a row's picture comes from.
-#[derive(Clone, Debug)]
-enum Cover {
-    None,
-    Art(Art),
-    Tag(i64),
-    Folder(i64),
-    Playlist {
-        smart: bool,
-        key: i64,
-        source_id: Option<String>,
-        object_id: String,
-    },
-}
-
-/// A row before the statement filled it.
-struct Draft {
-    row: Row,
-    cover: Cover,
-    /// The tag whose mosaic covers it, when it has no picture of its own.
-    mosaic: Option<i64>,
-    /// The listen a History row shows its track as.
-    listen: Option<ListenWrite>,
-}
-
-/// Rows of a plan, in the order asked.
-#[derive(Default)]
-struct Plan {
-    rows: Vec<Draft>,
-    favorites: Vec<Draft>,
-    header: Option<HeaderDraft>,
-}
-
-enum HeaderDraft {
-    Album(Box<AlbumView>, Art),
-    Artist(Box<ArtistView>, Art),
-    Row(Box<Draft>),
-}
-
 fn text(snapshot: &Snapshot, id: StrId) -> String {
     snapshot.text(id).to_owned()
 }
@@ -511,55 +474,72 @@ fn entity_uri(snapshot: &Snapshot, source: u16, kind: &str, object: StrId) -> St
         .unwrap_or_default()
 }
 
-fn year(value: i16) -> Option<i64> {
-    (value != i16::MIN).then_some(i64::from(value))
-}
-
-fn known(value: u32) -> Option<i64> {
-    (value != NONE).then_some(i64::from(value))
-}
-
-/// Displayed play facts of an album or artist: its source's own counts, else its members'
-/// when the list asks for them.
-fn played(native: [u32; 2], totals: &Totals, activity: bool) -> (i64, Option<i64>) {
-    let (plays, last) = if activity {
-        (Some(totals.plays as i64), totals.last_played.map(i64::from))
-    } else {
-        (None, None)
-    };
-    (
-        known(native[0]).or(plays).unwrap_or(0),
-        known(native[1]).or(last),
-    )
-}
-
-fn state(flags: u16, user: u8, native: u8, plays: (i64, Option<i64>)) -> TrackState {
+/// The state a row shows: its favorite and rating, user's first, and its plays.
+fn state(flags: u16, user: u8, native: u8, played: Played) -> TrackState {
     TrackState {
         favorite: favorite(flags).unwrap_or(false),
         rating: rating(user, native).map(|rating| i64::from(rating / 10)),
-        last_played: plays.1,
-        play_count: plays.0,
-        skip_count: 0,
+        last_played: played.last.map(i64::from),
+        play_count: i64::from(played.plays),
+        skip_count: i64::from(played.skips),
     }
 }
 
-/// Builds rows from residents and names what the statement reads for them.
+/// Displayed plays of an album or artist: its source's own counts, else its members' when the
+/// list asks for them.
+fn collection_played(native: [u32; 2], totals: &Totals, activity: bool) -> Played {
+    Played {
+        plays: known(native[0])
+            .or(activity.then_some(totals.plays as u32))
+            .unwrap_or(0),
+        skips: 0,
+        last: known(native[1]).or(totals.last_played.filter(|_| activity)),
+    }
+}
+
+/// Builds rows from residents and what the keyed statement read for them. A first pass names
+/// the statement's keys, `want`; a second builds each row from its record and the statement.
 struct Builder<'a> {
     catalog: &'a Catalog,
     context: Context<'a>,
     snapshot: &'a Snapshot,
     covers: Arc<Derived>,
-    derived: Arc<Derived>,
+    derived: std::cell::OnceCell<Arc<Derived>>,
     shape: &'a Shape,
     art: bool,
-    want: Want,
     /// Listens by smart playlist window.
-    inputs: &'a crate::catalog::views::Inputs,
+    inputs: &'a Inputs,
     /// Entry positions by entry key, read once the first entry row asks.
     positions: Option<HashMap<i64, u32>>,
 }
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
+    fn new(
+        catalog: &'a Catalog,
+        snapshot: &'a Snapshot,
+        shape: &'a Shape,
+        inputs: &'a Inputs,
+        art: bool,
+    ) -> Self {
+        let context = Context::new(snapshot);
+        Self {
+            covers: catalog.covers(&context),
+            catalog,
+            context,
+            snapshot,
+            derived: std::cell::OnceCell::new(),
+            shape,
+            art,
+            inputs,
+            positions: None,
+        }
+    }
+
+    fn derived(&self) -> &Derived {
+        self.derived
+            .get_or_init(|| self.catalog.derived(&self.context, None))
+    }
+
     /// Each entry's index in its playlist's order: of the rows' playlist, else of every one.
     fn positions(&mut self) -> &HashMap<i64, u32> {
         let snapshot = self.snapshot;
@@ -578,46 +558,150 @@ impl Builder<'_> {
         })
     }
 
-    fn draft(&mut self, row: Row, cover: Cover) -> Draft {
-        if self.art {
-            match &cover {
-                Cover::None => {}
-                Cover::Art(art) => self.want.art(*art),
-                Cover::Tag(key) => {
-                    self.want.tag_art.insert(*key);
-                }
-                Cover::Folder(key) => {
-                    self.want.folder_art.insert(*key);
-                }
-                Cover::Playlist { smart, key, .. } => {
-                    if *smart {
-                        self.want.smart_art.insert(*key);
-                    } else {
-                        self.want.playlist_art.insert(*key);
-                    }
-                }
-            }
+    fn track_art(&self, key: TrackKey) -> Option<Art> {
+        let record = self.snapshot.tracks.get(key.raw())?;
+        Some(self.context.track_art(&self.covers, record))
+    }
+
+    fn album_art(&self, key: AlbumKey) -> Option<Art> {
+        let slot = self.snapshot.albums.slot(key.raw())?;
+        Some(self.context.album_art(self.derived(), slot))
+    }
+
+    fn artist_art(&self, key: ArtistKey) -> Option<Art> {
+        let slot = self.snapshot.artists.slot(key.raw())?;
+        Some(self.context.artist_art(self.derived(), slot))
+    }
+
+    /// A genre shows its own picture, else its mosaic; a mood its mosaic.
+    fn tag_art(&self, key: i64, want: &mut Want) {
+        let Some(record) = self.snapshot.tags.get(key) else {
+            return;
+        };
+        if record.kind() == TagKind::Genre {
+            want.tag_art.insert(key);
         }
-        Draft {
-            row,
-            cover,
-            mosaic: None,
-            listen: None,
+        if record.kind() == TagKind::Mood || record.flags & PICTURE == 0 {
+            want.tag_mosaics.insert(key);
         }
     }
 
-    fn track(&mut self, key: TrackKey) -> Option<(TrackRow, Art)> {
+    /// A playlist folder's picture is its first playlist's: smart or not, its key, and the
+    /// owner a mosaic names.
+    fn folder_cover(&self, key: PlaylistFolderKey) -> Option<(bool, i64, Option<String>, String)> {
         let snapshot = self.snapshot;
-        let slot = snapshot.tracks.slot(key.raw())?;
+        if snapshot.playlist_folders.get(&key.raw())?.smart {
+            return snapshot
+                .smart_playlists
+                .values()
+                .filter(|smart| smart.folder == Some(key.raw()))
+                .min_by_key(|smart| smart.key)
+                .map(|smart| (true, smart.key, None, smart.object.clone()));
+        }
+        snapshot
+            .playlists
+            .iter()
+            .map(|(_, record)| record)
+            .filter(|record| {
+                record.folder == key.raw()
+                    && !snapshot.text(record.name).is_empty()
+                    && (record.flags & SOURCE_OWNED == 0 || record.indexed())
+            })
+            .min_by_key(|record| record.key)
+            .map(|record| {
+                (
+                    false,
+                    record.key,
+                    self.source(record.source)
+                        .map(|source| source.object.clone()),
+                    text(snapshot, record.object),
+                )
+            })
+    }
+
+    fn source(&self, slot: u16) -> Option<&'a crate::catalog::records::Source> {
+        self.snapshot
+            .source_key(slot)
+            .and_then(|key| self.snapshot.source(key))
+    }
+
+    /// The statement's keys an item's row reads.
+    fn want(&self, item: Item, listens: &[Listen], want: &mut Want) {
+        let art = |want: &mut Want, art: Option<Art>| {
+            if let Some(art) = art.filter(|_| self.art) {
+                want.art(art);
+            }
+        };
+        match item {
+            Item::Track { key, .. } | Item::AlbumTrack { key, .. } => {
+                want.tracks.insert(key.raw());
+                art(want, self.track_art(key));
+            }
+            Item::Listen(index) => {
+                if let Some(key) = listens.get(index as usize).and_then(|listen| listen.track) {
+                    self.want(Item::Track { key, entry: None }, listens, want);
+                }
+            }
+            Item::Album(key) | Item::AlbumHeading(key) => {
+                want.album_texts.insert(key.raw());
+                art(want, self.album_art(key));
+            }
+            Item::Artist { key, .. } => art(want, self.artist_art(key)),
+            _ if !self.art => {}
+            Item::Genre(key) => self.tag_art(key.raw(), want),
+            Item::Mood(key) => self.tag_art(key.raw(), want),
+            Item::Folder(key) => {
+                want.folder_art.insert(key.raw());
+            }
+            Item::Playlist(key) => {
+                want.playlist_art.insert(key.raw());
+            }
+            Item::Smart(key) => {
+                want.smart_art.insert(key.raw());
+            }
+            Item::PlaylistFolder(key) => match self.folder_cover(key) {
+                Some((true, key, ..)) => {
+                    want.smart_art.insert(key);
+                }
+                Some((false, key, ..)) => {
+                    want.playlist_art.insert(key);
+                }
+                None => {}
+            },
+        }
+    }
+
+    fn want_header(&self, header: HeaderKey, want: &mut Want) {
+        match header {
+            HeaderKey::Album { key, .. } => {
+                want.album_views.insert(key.raw());
+                self.want(Item::Album(key), &[], want);
+            }
+            HeaderKey::Artist {
+                key, album_artist, ..
+            } => {
+                want.artist_views.insert(key.raw());
+                self.want(Item::Artist { key, album_artist }, &[], want);
+            }
+            HeaderKey::Playlist(key) => self.want(Item::Playlist(key), &[], want),
+            HeaderKey::Smart { key, .. } => self.want(Item::Smart(key), &[], want),
+            HeaderKey::Genre(key) => self.want(Item::Genre(key), &[], want),
+            HeaderKey::Mood(key) => self.want(Item::Mood(key), &[], want),
+        }
+    }
+
+    fn track(&self, key: TrackKey, got: &Got) -> LibraryResult<Option<TrackRow>> {
+        let snapshot = self.snapshot;
+        let Some(slot) = snapshot.tracks.slot(key.raw()) else {
+            return Ok(None);
+        };
         let record = &snapshot.tracks.records[slot as usize];
-        let played = self.context.played(slot, record);
-        let source = snapshot
-            .source_key(record.source)
-            .and_then(|key| snapshot.source(key));
+        let source = self.source(record.source);
         let album = self
             .context
             .album_of(record)
             .and_then(|slot| snapshot.albums.live(slot));
+        // The row may name its album: the track is listed, or its album lists another track.
         let named = record.indexed()
             || self
                 .context
@@ -632,33 +716,36 @@ impl Builder<'_> {
             })
         };
         let runs = snapshot.track_runs(record);
-        self.want.tracks.insert(key.raw());
-        let row = TrackRow {
+        let stored = got.tracks.get(&key.raw()).cloned().unwrap_or_default();
+        let title = text(snapshot, record.title);
+        Ok(Some(TrackRow {
             track_key: key,
             entry: None,
             source_key: source.map(|source| source.key),
             source_id: source.map(|source| source.object.clone()),
             source_name: source.map(|source| source.name.clone()).unwrap_or_default(),
-            media_uri: String::new(),
-            object_id: None,
-            title: text(snapshot, record.title),
+            title: if title.is_empty() {
+                stored.media_uri.clone()
+            } else {
+                title
+            },
+            media_uri: stored.media_uri,
+            object_id: stored.object_id,
             artist: text(snapshot, record.artist),
             album: text(snapshot, record.album_title),
             duration_millis: i64::from(record.duration_ms),
             disc_number: i64::from(record.disc),
             track_number: i64::from(record.number),
-            year: year(record.year),
+            year: year_of(record.year).map(i64::from),
             bpm: (record.bpm != u16::MAX).then_some(i64::from(record.bpm)),
-            date_added: known(record.added),
+            date_added: known(record.added).map(i64::from),
             source_format: optional(snapshot, record.format),
-            state: TrackState {
-                favorite: favorite(record.flags).unwrap_or(false),
-                rating: rating(record.rating, record.native_rating)
-                    .map(|rating| i64::from(rating / 10)),
-                last_played: played.last.map(i64::from),
-                play_count: i64::from(played.plays),
-                skip_count: i64::from(played.skips),
-            },
+            state: state(
+                record.flags,
+                record.rating,
+                record.native_rating,
+                self.context.played(slot, record),
+            ),
             is_downloaded: record.flags & DOWNLOADED != 0,
             cue: record.flags & CUE != 0,
             links: TrackLinks {
@@ -688,40 +775,89 @@ impl Builder<'_> {
                     })
                     .collect(),
             },
-            release_date: None,
-            source_path: None,
-            audio: AudioProperties::default(),
-            artwork_binding: None,
-        };
-        Some((row, self.context.track_art(&self.covers, record)))
+            release_date: stored.release_date,
+            source_path: stored.source_path,
+            audio: stored.audio,
+            artwork_binding: got.binding(self.context.track_art(&self.covers, record))?,
+        }))
     }
 
-    fn album(&mut self, key: AlbumKey, activity: bool) -> Option<(AlbumRow, Art)> {
+    /// A track's full view: its row, and the details, CUE window and MBIDs only it reads.
+    fn track_view(&self, key: TrackKey, got: &Got) -> LibraryResult<Option<TrackView>> {
+        let (Some(row), Some((metadata, access)), Some(record)) = (
+            self.track(key, got)?,
+            got.views.get(&key.raw()),
+            self.snapshot.tracks.get(key.raw()),
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(TrackView {
+            track_key: key,
+            source_key: row.source_key,
+            source_id: row.source_id,
+            object_id: row.object_id,
+            metadata: TrackMetadata {
+                title: row.title,
+                artist: row.artist,
+                album: row.album,
+                sort_text: self.snapshot.track_sort(record).into_owned(),
+                duration_millis: row.duration_millis,
+                disc_number: row.disc_number,
+                track_number: row.track_number,
+                year: row.year,
+                release_date: row.release_date,
+                date_added: known(record.added).and_then(date_text),
+                source_format: row.source_format,
+                audio_properties: row.audio,
+                comment: optional(self.snapshot, record.comment),
+                bpm: row.bpm,
+                ..metadata.clone()
+            },
+            media_uri: row.media_uri,
+            state: row.state,
+            access: TrackAccess {
+                source_path: row.source_path,
+                source_name: row.source_name,
+                is_downloaded: row.is_downloaded,
+                ..access.clone()
+            },
+            links: row.links,
+            artwork_binding: row.artwork_binding,
+        }))
+    }
+
+    fn album(&self, key: AlbumKey, activity: bool, got: &Got) -> LibraryResult<Option<AlbumRow>> {
         let snapshot = self.snapshot;
-        let slot = snapshot.albums.slot(key.raw())?;
+        let Some(slot) = snapshot.albums.slot(key.raw()) else {
+            return Ok(None);
+        };
         let record = &snapshot.albums.records[slot as usize];
-        let mut totals = self.derived.albums[slot as usize];
+        let Some(source_key) = snapshot.source_key(record.source) else {
+            return Ok(None);
+        };
+        let mut totals = self.derived().albums[slot as usize];
         totals.albums = u32::from(totals.tracks > 0);
         let runs = snapshot.album_runs(record);
-        self.want.album_texts.insert(key.raw());
-        let row = AlbumRow {
+        let (release_date, date_added) =
+            got.album_texts.get(&key.raw()).cloned().unwrap_or_default();
+        Ok(Some(AlbumRow {
             album_key: key,
-            source_key: snapshot.source_key(record.source)?,
+            source_key,
             object_id: text(snapshot, record.object),
             media_uri: entity_uri(snapshot, record.source, "album", record.object),
             title: text(snapshot, record.title),
             artist: text(snapshot, record.artist),
             sort_text: text(snapshot, record.sort),
-            year: year(record.year),
-            release_date: None,
-            date_added: None,
+            year: year_of(record.year).map(i64::from),
+            release_date,
+            date_added,
             is_compilation: record.flags & COMPILATION != 0,
             release_class: AlbumReleaseClass::of(record.flags),
             state: state(
                 record.flags,
                 record.rating,
                 record.native_rating,
-                played(record.native, &totals, activity),
+                collection_played(record.native, &totals, activity),
             ),
             summary: totals.summary(),
             links: AlbumLinks {
@@ -743,25 +879,30 @@ impl Builder<'_> {
                     })
                     .collect(),
             },
-            artwork_binding: None,
-        };
-        Some((row, self.context.album_art(&self.derived, slot)))
+            artwork_binding: got.binding(self.context.album_art(self.derived(), slot))?,
+        }))
     }
 
     fn artist(
-        &mut self,
+        &self,
         key: ArtistKey,
         album_artist: bool,
         activity: bool,
-    ) -> Option<(ArtistRow, Art)> {
+        got: &Got,
+    ) -> LibraryResult<Option<ArtistRow>> {
         let snapshot = self.snapshot;
-        let slot = snapshot.artists.slot(key.raw())?;
+        let Some(slot) = snapshot.artists.slot(key.raw()) else {
+            return Ok(None);
+        };
         let record = &snapshot.artists.records[slot as usize];
-        let totals = self.derived.artists[usize::from(album_artist)][slot as usize];
-        let row = ArtistRow {
+        let Some(source_key) = snapshot.source_key(record.source) else {
+            return Ok(None);
+        };
+        let totals = self.derived().artists[usize::from(album_artist)][slot as usize];
+        Ok(Some(ArtistRow {
             artist_key: key,
             album_artist,
-            source_key: snapshot.source_key(record.source)?,
+            source_key,
             object_id: text(snapshot, record.object),
             media_uri: entity_uri(snapshot, record.source, "artist", record.object),
             name: text(snapshot, record.name),
@@ -770,25 +911,30 @@ impl Builder<'_> {
                 record.flags,
                 record.rating,
                 record.native_rating,
-                played(record.native, &totals, activity),
+                collection_played(record.native, &totals, activity),
             ),
             summary: totals.summary(),
-            artwork_binding: None,
-        };
-        Some((row, self.context.artist_art(&self.derived, slot)))
+            artwork_binding: got.binding(self.context.artist_art(self.derived(), slot))?,
+        }))
     }
 
-    fn tag(&mut self, key: i64, kind: TagKind) -> Option<Draft> {
+    fn tag(
+        &self,
+        key: i64,
+        kind: TagKind,
+        got: &Got,
+        galleries: &HashMap<i64, Vec<Vec<u8>>>,
+    ) -> LibraryResult<Option<TagRow>> {
         let snapshot = self.snapshot;
-        let slot = snapshot.tags.slot(key)?;
+        let Some(slot) = snapshot.tags.slot(key) else {
+            return Ok(None);
+        };
         let record = &snapshot.tags.records[slot as usize];
-        if record.kind() != kind {
-            return None;
-        }
-        let source = snapshot
-            .source_key(record.source)
-            .and_then(|key| snapshot.source(key))?;
-        let row = TagRow {
+        let Some(source) = self.source(record.source).filter(|_| record.kind() == kind) else {
+            return Ok(None);
+        };
+        let artwork_binding = got.own(&got.tag_art, key)?;
+        Ok(Some(TagRow {
             key,
             kind,
             source_key: source.key,
@@ -796,48 +942,25 @@ impl Builder<'_> {
             object_id: text(snapshot, record.object),
             media_uri: entity_uri(snapshot, record.source, kind.table().name, record.object),
             name: text(snapshot, record.name),
-            summary: self.derived.tags[slot as usize].summary(),
-            artwork_binding: None,
-            representative_artwork: Vec::new(),
-        };
-        // A mood shows its mosaic; a genre its own picture, else its mosaic.
-        let cover = if kind == TagKind::Genre {
-            Cover::Tag(key)
-        } else {
-            Cover::None
-        };
-        let mut draft = self.draft(Row::Tag(row), cover);
-        if self.art && (kind == TagKind::Mood || record.flags & PICTURE == 0) {
-            self.want.tag_mosaics.insert(key);
-            draft.mosaic = Some(key);
-        }
-        Some(draft)
+            summary: self.derived().tags[slot as usize].summary(),
+            representative_artwork: artwork_binding
+                .is_none()
+                .then(|| galleries.get(&key).cloned())
+                .flatten()
+                .unwrap_or_default(),
+            artwork_binding,
+        }))
     }
 
-    fn folder(&mut self, key: FolderKey) -> Option<Draft> {
+    fn playlist(&self, key: PlaylistKey, got: &Got) -> LibraryResult<Option<PlaylistRow>> {
         let snapshot = self.snapshot;
-        let slot = snapshot.folders.slot(key.raw())?;
-        let record = &snapshot.folders.records[slot as usize];
-        let row = FolderRow {
-            folder_key: key,
-            object_id: text(snapshot, record.object),
-            name: text(snapshot, record.name),
-            summary: self.derived.folders[slot as usize].summary(),
-            artwork_binding: None,
+        let Some(record) = snapshot
+            .playlists
+            .get(key.raw())
+            .filter(|record| !snapshot.text(record.name).is_empty())
+        else {
+            return Ok(None);
         };
-        Some(self.draft(Row::Folder(row), Cover::Folder(key.raw())))
-    }
-
-    fn playlist(&mut self, key: PlaylistKey) -> Option<(PlaylistRow, Cover)> {
-        let snapshot = self.snapshot;
-        let record = snapshot.playlists.get(key.raw())?;
-        if snapshot.text(record.name).is_empty() {
-            return None;
-        }
-        let source = snapshot
-            .source_key(record.source)
-            .and_then(|key| snapshot.source(key));
-        let totals = self.context.playlist_totals(record, None);
         let mut genres = HashMap::<u32, u32>::new();
         for entry in &record.entries {
             let Some(track) = snapshot.tracks.live(entry.track) else {
@@ -865,19 +988,24 @@ impl Builder<'_> {
             })
             .collect::<Vec<_>>();
         genres.sort_by(|a, b| (&a.0, &a.1, a.2.key).cmp(&(&b.0, &b.1, b.2.key)));
-        let summary = totals.summary();
+        let summary = self.context.playlist_totals(record, None).summary();
         let object_id = text(snapshot, record.object);
+        let source = self.source(record.source);
         let source_id = source.map(|source| source.object.clone());
-        let row = PlaylistRow {
+        Ok(Some(PlaylistRow {
             playlist_key: key,
             source_key: source.map(|source| source.key),
-            source_id: source_id.clone(),
+            artwork_binding: got.playlist(
+                false,
+                key.raw(),
+                (source_id.clone(), object_id.clone()),
+            )?,
+            source_id,
             source_owned: record.flags & SOURCE_OWNED != 0,
-            object_id: object_id.clone(),
+            object_id,
             name: text(snapshot, record.name),
             writable: record.flags & WRITABLE != 0,
             metadata_writable: record.flags & METADATA_WRITABLE != 0,
-            artwork_binding: None,
             track_count: summary.track_count,
             duration_millis: summary.duration_millis,
             downloaded_count: summary.downloaded_count,
@@ -889,94 +1017,59 @@ impl Builder<'_> {
                     name: text(snapshot, tag.name),
                 })
                 .collect(),
-        };
-        Some((
-            row,
-            Cover::Playlist {
-                smart: false,
-                key: key.raw(),
-                source_id,
-                object_id,
-            },
-        ))
+        }))
     }
 
-    fn smart(&mut self, key: SmartPlaylistKey) -> LibraryResult<Option<(SmartPlaylistRow, Cover)>> {
+    fn smart_totals(&self, smart: &crate::catalog::snapshot::SmartPlaylist) -> Totals {
+        let opened = self
+            .catalog
+            .opened_smart(smart.key, self.shape.now, &smart.definition);
+        self.context.smart_totals(
+            &smart.definition,
+            self.inputs,
+            opened.as_deref().map(Vec::as_slice),
+        )
+    }
+
+    fn smart(&self, key: SmartPlaylistKey, got: &Got) -> LibraryResult<Option<SmartPlaylistRow>> {
         let Some(smart) = self.snapshot.smart_playlists.get(&key.raw()) else {
             return Ok(None);
         };
         let mut definition = smart.definition.clone();
         crate::smart_playlists::normalize_definition(&mut definition)?;
-        let opened = self
-            .catalog
-            .opened_smart(key.raw(), self.shape.now, &smart.definition);
-        let summary = self
-            .context
-            .smart_totals(
-                &smart.definition,
-                self.inputs,
-                opened.as_deref().map(Vec::as_slice),
-            )
-            .summary();
-        Ok(Some((
-            SmartPlaylistRow {
-                smart_playlist_key: key,
-                object_id: smart.object.clone(),
-                name: smart.name.clone(),
-                definition,
-                position: smart.position,
-                track_count: summary.track_count,
-                duration_millis: summary.duration_millis,
-                downloaded_count: summary.downloaded_count,
-                artwork_binding: None,
-            },
-            Cover::Playlist {
-                smart: true,
-                key: key.raw(),
-                source_id: None,
-                object_id: smart.object.clone(),
-            },
-        )))
+        let summary = self.smart_totals(smart).summary();
+        Ok(Some(SmartPlaylistRow {
+            smart_playlist_key: key,
+            object_id: smart.object.clone(),
+            name: smart.name.clone(),
+            definition,
+            position: smart.position,
+            track_count: summary.track_count,
+            duration_millis: summary.duration_millis,
+            downloaded_count: summary.downloaded_count,
+            artwork_binding: got.playlist(true, key.raw(), (None, smart.object.clone()))?,
+        }))
     }
 
-    fn playlist_folder(&mut self, key: PlaylistFolderKey) -> Option<(PlaylistFolderRow, Cover)> {
+    fn playlist_folder(
+        &self,
+        key: PlaylistFolderKey,
+        got: &Got,
+    ) -> LibraryResult<Option<PlaylistFolderRow>> {
         let snapshot = self.snapshot;
-        let folder = snapshot.playlist_folders.get(&key.raw())?;
-        let mut row = PlaylistFolderRow {
-            folder_key: key,
-            object_id: folder.object.clone(),
-            name: folder.name.clone(),
-            smart: folder.smart,
-            artwork_binding: None,
-            track_count: 0,
-            duration_millis: 0,
+        let Some(folder) = snapshot.playlist_folders.get(&key.raw()) else {
+            return Ok(None);
         };
-        // Its cover is its first playlist's.
-        let cover = if folder.smart {
-            for smart in snapshot.smart_playlists.values() {
-                if smart.folder == Some(key.raw()) {
-                    let opened =
-                        self.catalog
-                            .opened_smart(smart.key, self.shape.now, &smart.definition);
-                    let totals = self.context.smart_totals(
-                        &smart.definition,
-                        self.inputs,
-                        opened.as_deref().map(Vec::as_slice),
-                    );
-                    row.track_count += i64::from(totals.tracks);
-                    row.duration_millis += totals.duration as i64;
-                }
-            }
+        let totals = if folder.smart {
             snapshot
                 .smart_playlists
                 .values()
                 .filter(|smart| smart.folder == Some(key.raw()))
-                .min_by_key(|smart| smart.key)
-                .map(|smart| Cover::Playlist {
-                    smart: true,
-                    key: smart.key,
-                    source_id: None,
-                    object_id: smart.object.clone(),
+                .fold(Totals::default(), |mut sum, smart| {
+                    let totals = self.smart_totals(smart);
+                    sum.tracks += totals.tracks;
+                    sum.duration += totals.duration;
+                    sum
                 })
         } else {
             let mut children = self
@@ -989,183 +1082,165 @@ impl Builder<'_> {
             if children.playlist_scope == PlaylistScope::All {
                 children.source = None;
             }
-            if let Some(totals) = self
-                .context
+            self.context
                 .playlist_folder_totals(&children)
-                .get(&key.raw())
-            {
-                row.track_count = i64::from(totals.tracks);
-                row.duration_millis = totals.duration as i64;
-            }
-            snapshot
-                .playlists
-                .iter()
-                .map(|(_, record)| record)
-                .filter(|record| {
-                    record.folder == key.raw()
-                        && !snapshot.text(record.name).is_empty()
-                        && (record.flags & SOURCE_OWNED == 0 || record.indexed())
-                })
-                .min_by_key(|record| record.key)
-                .map(|record| Cover::Playlist {
-                    smart: false,
-                    key: record.key,
-                    source_id: snapshot
-                        .source_key(record.source)
-                        .and_then(|key| snapshot.source(key))
-                        .map(|source| source.object.clone()),
-                    object_id: text(snapshot, record.object),
-                })
+                .remove(&key.raw())
+                .unwrap_or_default()
         };
-        Some((row, cover.unwrap_or(Cover::None)))
+        Ok(Some(PlaylistFolderRow {
+            folder_key: key,
+            object_id: folder.object.clone(),
+            name: folder.name.clone(),
+            smart: folder.smart,
+            artwork_binding: match self.folder_cover(key) {
+                Some((smart, key, source_id, object_id)) => {
+                    got.playlist(smart, key, (source_id, object_id))?
+                }
+                None => None,
+            },
+            track_count: i64::from(totals.tracks),
+            duration_millis: totals.duration as i64,
+        }))
     }
 
-    /// The draft of one item; None when the Catalog no longer holds it.
-    fn item(&mut self, item: Item, listens: &[Listen]) -> LibraryResult<Option<Draft>> {
+    /// The row of one item; None when the Catalog no longer holds it.
+    fn row(
+        &mut self,
+        item: Item,
+        listens: &[Listen],
+        got: &Got,
+        galleries: &HashMap<i64, Vec<Vec<u8>>>,
+    ) -> LibraryResult<Option<Row>> {
         let activity = self.shape.activity;
         Ok(match item {
-            Item::Track { key, entry } => self.track(key).map(|(mut row, art)| {
+            Item::Track { key, entry } => self.track(key, got)?.map(|mut row| {
                 row.entry = entry.and_then(|entry| {
                     Some(PlaylistEntry {
                         key: entry,
                         position: *self.positions().get(&entry.raw())?,
                     })
                 });
-                self.draft(Row::Track(row), Cover::Art(art))
+                Row::Track(row)
             }),
             Item::AlbumTrack { key, index } => self
-                .track(key)
-                .map(|(track, art)| self.draft(Row::AlbumTrack { track, index }, Cover::Art(art))),
+                .track(key, got)?
+                .map(|track| Row::AlbumTrack { track, index }),
             Item::Listen(index) => {
                 let Some(listen) = listens.get(index as usize) else {
                     return Ok(None);
                 };
-                let (row, cover) = match listen.track.and_then(|key| self.track(key)) {
-                    Some((row, art)) => (row, Cover::Art(art)),
-                    None => (
-                        TrackRow {
-                            track_key: TrackKey::from_raw(0),
-                            entry: None,
-                            source_key: None,
-                            source_id: None,
-                            source_name: String::new(),
-                            media_uri: listen.copy.media_uri.clone(),
-                            object_id: None,
-                            title: String::new(),
-                            artist: String::new(),
-                            album: String::new(),
-                            duration_millis: 0,
-                            disc_number: 0,
-                            track_number: 0,
-                            year: None,
-                            bpm: None,
-                            date_added: None,
-                            source_format: None,
-                            state: TrackState::default(),
-                            is_downloaded: false,
-                            cue: false,
-                            links: TrackLinks::default(),
-                            release_date: None,
-                            source_path: None,
-                            audio: AudioProperties::default(),
-                            artwork_binding: None,
-                        },
-                        Cover::None,
-                    ),
-                };
-                let mut draft = self.draft(Row::Track(row), cover);
-                draft.listen = Some(listen.copy.clone());
-                Some(draft)
+                let mut row = match listen.track {
+                    Some(key) => self.track(key, got)?,
+                    None => None,
+                }
+                .unwrap_or_else(|| TrackRow {
+                    track_key: TrackKey::from_raw(0),
+                    entry: None,
+                    source_key: None,
+                    source_id: None,
+                    source_name: String::new(),
+                    media_uri: listen.copy.media_uri.clone(),
+                    object_id: None,
+                    title: String::new(),
+                    artist: String::new(),
+                    album: String::new(),
+                    duration_millis: 0,
+                    disc_number: 0,
+                    track_number: 0,
+                    year: None,
+                    bpm: None,
+                    date_added: None,
+                    source_format: None,
+                    state: TrackState::default(),
+                    is_downloaded: false,
+                    cue: false,
+                    links: TrackLinks::default(),
+                    release_date: None,
+                    source_path: None,
+                    audio: AudioProperties::default(),
+                    artwork_binding: None,
+                });
+                let listened = self
+                    .snapshot
+                    .tracks
+                    .slot(row.track_key.raw())
+                    .map(|slot| self.context.listened(slot))
+                    .unwrap_or_default();
+                show_listen(&mut row, &listen.copy, listened);
+                Some(Row::Track(row))
             }
-            Item::AlbumHeading(key) => self
-                .album(key, activity)
-                .map(|(row, art)| self.draft(Row::AlbumHeading(row), Cover::Art(art))),
-            Item::Album(key) => self
-                .album(key, activity)
-                .map(|(row, art)| self.draft(Row::Album(row), Cover::Art(art))),
+            Item::AlbumHeading(key) => self.album(key, activity, got)?.map(Row::AlbumHeading),
+            Item::Album(key) => self.album(key, activity, got)?.map(Row::Album),
             Item::Artist { key, album_artist } => self
-                .artist(key, album_artist, activity)
-                .map(|(row, art)| self.draft(Row::Artist(row), Cover::Art(art))),
-            Item::Genre(key) => self.tag(key.raw(), TagKind::Genre),
-            Item::Mood(key) => self.tag(key.raw(), TagKind::Mood),
-            Item::Folder(key) => self.folder(key),
-            Item::Playlist(key) => self.playlist(key).map(|(row, cover)| {
-                self.draft(Row::Playlist(PlaylistListRow::Playlist(row)), cover)
-            }),
-            Item::Smart(key) => self.smart(key)?.map(|(row, cover)| {
-                self.draft(Row::Playlist(PlaylistListRow::SmartPlaylist(row)), cover)
-            }),
+                .artist(key, album_artist, activity, got)?
+                .map(Row::Artist),
+            Item::Genre(key) => self
+                .tag(key.raw(), TagKind::Genre, got, galleries)?
+                .map(Row::Tag),
+            Item::Mood(key) => self
+                .tag(key.raw(), TagKind::Mood, got, galleries)?
+                .map(Row::Tag),
+            Item::Folder(key) => match self.snapshot.folders.slot(key.raw()) {
+                Some(slot) => {
+                    let record = &self.snapshot.folders.records[slot as usize];
+                    Some(Row::Folder(FolderRow {
+                        folder_key: key,
+                        object_id: text(self.snapshot, record.object),
+                        name: text(self.snapshot, record.name),
+                        summary: self.derived().folders[slot as usize].summary(),
+                        artwork_binding: got.own(&got.folder_art, key.raw())?,
+                    }))
+                }
+                None => None,
+            },
+            Item::Playlist(key) => self
+                .playlist(key, got)?
+                .map(|row| Row::Playlist(PlaylistListRow::Playlist(row))),
+            Item::Smart(key) => self
+                .smart(key, got)?
+                .map(|row| Row::Playlist(PlaylistListRow::SmartPlaylist(row))),
             Item::PlaylistFolder(key) => self
-                .playlist_folder(key)
-                .map(|(row, cover)| self.draft(Row::Playlist(PlaylistListRow::Folder(row)), cover)),
+                .playlist_folder(key, got)?
+                .map(|row| Row::Playlist(PlaylistListRow::Folder(row))),
         })
     }
 
-    fn header(&mut self, key: HeaderKey) -> LibraryResult<Option<HeaderDraft>> {
+    fn header(
+        &mut self,
+        key: HeaderKey,
+        got: &Got,
+        galleries: &HashMap<i64, Vec<Vec<u8>>>,
+    ) -> LibraryResult<Option<Header>> {
         Ok(match key {
-            HeaderKey::Album { key, activity } => self.album(key, activity).map(|(row, art)| {
-                self.want.album_views.insert(key.raw());
-                if self.art {
-                    self.want.art(art);
-                }
-                HeaderDraft::Album(Box::new(album_view(row)), art)
+            HeaderKey::Album { key, activity } => self.album(key, activity, got)?.map(|row| {
+                Header::Album(Box::new(AlbumView {
+                    row,
+                    metadata: got.album_views.get(&key.raw()).cloned().unwrap_or_default(),
+                }))
             }),
             HeaderKey::Artist {
                 key,
                 album_artist,
                 activity,
-            } => self.artist(key, album_artist, activity).map(|(row, art)| {
-                self.want.artist_views.insert(key.raw());
-                if self.art {
-                    self.want.art(art);
-                }
-                HeaderDraft::Artist(Box::new(artist_view(row)), art)
+            } => self.artist(key, album_artist, activity, got)?.map(|row| {
+                Header::Artist(Box::new(ArtistView {
+                    row,
+                    musicbrainz_artist_id: got.artist_views.get(&key.raw()).cloned().flatten(),
+                }))
             }),
             HeaderKey::Playlist(key) => self
-                .item(Item::Playlist(key), &[])?
-                .map(|draft| HeaderDraft::Row(Box::new(draft))),
+                .playlist(key, got)?
+                .map(|row| Header::Playlist(Box::new(row))),
             HeaderKey::Smart { key, .. } => self
-                .item(Item::Smart(key), &[])?
-                .map(|draft| HeaderDraft::Row(Box::new(draft))),
+                .smart(key, got)?
+                .map(|row| Header::Smart(Box::new(row))),
             HeaderKey::Genre(key) => self
-                .item(Item::Genre(key), &[])?
-                .map(|draft| HeaderDraft::Row(Box::new(draft))),
+                .tag(key.raw(), TagKind::Genre, got, galleries)?
+                .map(Header::Tag),
             HeaderKey::Mood(key) => self
-                .item(Item::Mood(key), &[])?
-                .map(|draft| HeaderDraft::Row(Box::new(draft))),
+                .tag(key.raw(), TagKind::Mood, got, galleries)?
+                .map(Header::Tag),
         })
-    }
-}
-
-/// An album row as the start of its full view; the statement reads the rest.
-fn album_view(row: AlbumRow) -> AlbumView {
-    AlbumView {
-        album_key: row.album_key,
-        source_key: row.source_key,
-        object_id: row.object_id,
-        media_uri: row.media_uri,
-        metadata: AlbumMetadata::default(),
-        state: row.state,
-        summary: row.summary,
-        links: row.links,
-        artwork_binding: None,
-    }
-}
-
-fn artist_view(row: ArtistRow) -> ArtistView {
-    ArtistView {
-        artist_key: row.artist_key,
-        source_key: row.source_key,
-        object_id: row.object_id,
-        media_uri: row.media_uri,
-        metadata: ArtistMetadata {
-            name: row.name,
-            sort_text: (!row.sort_text.is_empty()).then_some(row.sort_text),
-            musicbrainz_artist_id: None,
-        },
-        state: row.state,
-        summary: row.summary,
-        artwork_binding: None,
     }
 }
 
@@ -1185,273 +1260,112 @@ pub(crate) fn show_listen(row: &mut TrackRow, listen: &ListenWrite, listened: Pl
     row.state.skip_count = i64::from(listened.skips);
 }
 
-impl Got {
-    /// Fills a drafted row with what the statement read.
-    fn finish(&self, draft: &mut Draft) -> LibraryResult<()> {
-        let binding = match &draft.cover {
-            Cover::None => None,
-            Cover::Art(art) => self.binding(*art)?,
-            Cover::Tag(key) => self.own(&self.tag_art, *key)?,
-            Cover::Folder(key) => self.own(&self.folder_art, *key)?,
-            Cover::Playlist {
-                smart,
-                key,
-                source_id,
-                object_id,
-            } => self.playlist(*smart, *key, (source_id.clone(), object_id.clone()))?,
-        };
-        let track = |row: &mut TrackRow| {
-            if let Some(text) = self.tracks.get(&row.track_key.raw()) {
-                row.media_uri.clone_from(&text.media_uri);
-                row.object_id.clone_from(&text.object_id);
-                row.release_date.clone_from(&text.release_date);
-                row.source_path.clone_from(&text.source_path);
-                row.audio = text.audio.clone();
-            }
-            if row.title.is_empty() {
-                row.title.clone_from(&row.media_uri);
-            }
-            row.artwork_binding.clone_from(&binding);
-        };
-        match &mut draft.row {
-            Row::Track(row) | Row::AlbumTrack { track: row, .. } => track(row),
-            Row::Album(row) | Row::AlbumHeading(row) => {
-                if let Some((release, added)) = self.album_texts.get(&row.album_key.raw()) {
-                    row.release_date.clone_from(release);
-                    row.date_added.clone_from(added);
-                }
-                row.artwork_binding = binding;
-            }
-            Row::Artist(row) => row.artwork_binding = binding,
-            Row::Tag(row) => row.artwork_binding = binding,
-            Row::Folder(row) => row.artwork_binding = binding,
-            Row::Playlist(PlaylistListRow::Playlist(row)) => row.artwork_binding = binding,
-            Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => row.artwork_binding = binding,
-            Row::Playlist(PlaylistListRow::Folder(row)) => row.artwork_binding = binding,
-        }
-        Ok(())
-    }
-}
-
 impl Catalog {
-    /// Plans rows under one hold of the Catalog.
-    fn plan(
-        &self,
-        windows: [(&[Item], &[Listen]); 2],
-        header: Option<HeaderKey>,
-        shape: &Shape,
-        art: bool,
-        inputs: &crate::catalog::views::Inputs,
-    ) -> LibraryResult<(Plan, Want)> {
-        let snapshot = self.snapshot();
-        let context = Context::new(&snapshot);
-        let covers = self.covers(&context);
-        let derived = self.derived(&context, None);
-        let mut shape = shape.clone();
-        if let Some(HeaderKey::Smart { now, .. }) = header {
-            shape.now = now;
-        }
-        let mut builder = Builder {
-            catalog: self,
-            context,
-            snapshot: &snapshot,
-            covers,
-            derived,
-            shape: &shape,
-            art,
-            want: Want::new(true),
-            inputs,
-            positions: None,
-        };
-        let mut plan = Plan::default();
-        for (index, (items, listens)) in windows.into_iter().enumerate() {
-            for item in items {
-                if let Some(draft) = builder.item(*item, listens)? {
-                    if index == 0 {
-                        plan.rows.push(draft);
-                    } else {
-                        plan.favorites.push(draft);
-                    }
-                }
-            }
-        }
-        if let Some(key) = header {
-            plan.header = builder.header(key)?;
-        }
-        Ok((plan, builder.want))
-    }
-
     /// Listens in the windows the smart playlists these items total read.
     async fn smart_inputs(
         &self,
         connection: &mut sqlx::SqliteConnection,
         items: impl Iterator<Item = Item>,
-        header: Option<HeaderKey>,
         now: i64,
-    ) -> LibraryResult<crate::catalog::views::Inputs> {
-        let mut inputs = crate::catalog::views::Inputs::default();
+    ) -> LibraryResult<Inputs> {
+        let mut inputs = Inputs::default();
         let periods = {
             let snapshot = self.snapshot();
             let mut periods = Vec::new();
-            let mut add = |smart: &crate::catalog::snapshot::SmartPlaylist| {
-                periods.extend(crate::catalog::views::smart_period(&smart.definition));
-            };
-            for item in items.chain(header.and_then(|header| match header {
-                HeaderKey::Smart { key, .. } => Some(Item::Smart(key)),
-                _ => None,
-            })) {
-                match item {
-                    Item::Smart(key) => {
-                        if let Some(smart) = snapshot.smart_playlists.get(&key.raw()) {
-                            add(smart);
-                        }
+            for item in items {
+                for smart in snapshot.smart_playlists.values() {
+                    let counted = match item {
+                        Item::Smart(key) => smart.key == key.raw(),
+                        Item::PlaylistFolder(key) => smart.folder == Some(key.raw()),
+                        _ => false,
+                    };
+                    if counted {
+                        periods.extend(crate::catalog::views::smart_period(&smart.definition));
                     }
-                    Item::PlaylistFolder(key) => {
-                        for smart in snapshot.smart_playlists.values() {
-                            if smart.folder == Some(key.raw()) {
-                                add(smart);
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
             periods.sort_unstable();
             periods.dedup();
             periods
         };
-        let now = match header {
-            Some(HeaderKey::Smart { now, .. }) => now,
-            _ => now,
-        };
-        if periods.is_empty() {
-            return Ok(inputs);
+        if !periods.is_empty() {
+            self.read_periods(connection, &mut inputs, periods, now)
+                .await?;
         }
-        self.read_periods(connection, &mut inputs, periods, now)
-            .await?;
         Ok(inputs)
     }
 
-    /// Rows of these windows and a header, read on one connection: residents, then one
+    /// Rows of these windows and headers, read on one connection: residents, then one
     /// statement, then a second only for the mosaics of tags without a picture.
     pub(crate) async fn fetch_on(
         &self,
         connection: &mut sqlx::SqliteConnection,
         windows: [(&[Item], &[Listen]); 2],
-        header: Option<HeaderKey>,
+        headers: &[HeaderKey],
         shape: &Shape,
         art: bool,
-    ) -> LibraryResult<Fetched> {
+    ) -> LibraryResult<(Vec<Header>, [Vec<Row>; 2])> {
+        let mut shape = shape.clone();
+        for header in headers {
+            if let HeaderKey::Smart { now, .. } = header {
+                shape.now = *now;
+            }
+        }
         let inputs = self
             .smart_inputs(
                 connection,
-                windows.iter().flat_map(|(items, _)| items.iter().copied()),
-                header,
+                windows
+                    .iter()
+                    .flat_map(|(items, _)| items.iter().copied())
+                    .chain(headers.iter().filter_map(|header| match header {
+                        HeaderKey::Smart { key, .. } => Some(Item::Smart(*key)),
+                        _ => None,
+                    })),
                 shape.now,
             )
             .await?;
-        let (mut plan, want) = self.plan(windows, header, shape, art, &inputs)?;
+        let mut want = Want::new(true);
+        {
+            let snapshot = self.snapshot();
+            let builder = Builder::new(self, &snapshot, &shape, &inputs, art);
+            for (items, listens) in windows {
+                for item in items {
+                    builder.want(*item, listens, &mut want);
+                }
+            }
+            for header in headers {
+                builder.want_header(*header, &mut want);
+            }
+        }
         let got = fetch::run(connection, &want).await?;
-        let mosaics = plan
-            .rows
-            .iter()
-            .chain(&plan.favorites)
-            .chain(plan.header.iter().filter_map(|header| match header {
-                HeaderDraft::Row(draft) => Some(&**draft),
-                _ => None,
-            }))
-            .filter_map(|draft| draft.mosaic)
-            .filter_map(|key| Some((key, got.mosaics.get(&key)?)))
-            .collect::<Vec<_>>();
-        let galleries = if mosaics.is_empty() {
-            HashMap::new()
-        } else {
+        let mut galleries = HashMap::new();
+        if !got.mosaics.is_empty() {
+            let picks = got.mosaics.iter().collect::<Vec<_>>();
             let arts = self.arts(
-                mosaics
+                picks
                     .iter()
                     .flat_map(|(_, picks)| picks.iter())
                     .map(|key| key.map(crate::catalog::views::Owner::Track)),
             );
             let mut bindings = fetch::bindings(connection, &arts).await?.into_iter();
-            mosaics
-                .iter()
-                .map(|(key, picks)| {
-                    (
-                        *key,
-                        bindings
-                            .by_ref()
-                            .take(picks.len())
-                            .flatten()
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .collect()
-        };
-        let listened = |key: TrackKey| {
-            let snapshot = self.snapshot();
-            let context = Context::new(&snapshot);
-            snapshot
-                .tracks
-                .slot(key.raw())
-                .map(|slot| context.listened(slot))
-                .unwrap_or_default()
-        };
-        let finish = |mut draft: Draft| -> LibraryResult<Row> {
-            got.finish(&mut draft)?;
-            if let (Row::Track(row), Some(listen)) = (&mut draft.row, &draft.listen) {
-                show_listen(row, listen, listened(row.track_key));
+            for (key, picks) in picks {
+                let gallery = bindings.by_ref().take(picks.len()).flatten().collect();
+                galleries.insert(*key, gallery);
             }
-            if let (Row::Tag(row), Some(key)) = (&mut draft.row, draft.mosaic)
-                && row.artwork_binding.is_none()
-            {
-                row.representative_artwork = galleries.get(&key).cloned().unwrap_or_default();
+        }
+        let snapshot = self.snapshot();
+        let mut builder = Builder::new(self, &snapshot, &shape, &inputs, art);
+        let mut rows = [Vec::new(), Vec::new()];
+        for (built, (items, listens)) in rows.iter_mut().zip(windows) {
+            for item in items {
+                built.extend(builder.row(*item, listens, &got, &galleries)?);
             }
-            Ok(draft.row)
-        };
-        let header = match plan.header.take() {
-            None => None,
-            Some(HeaderDraft::Album(mut view, art)) => {
-                if let Some((object_id, media_uri, metadata)) =
-                    got.album_views.get(&view.album_key.raw())
-                {
-                    view.object_id.clone_from(object_id);
-                    view.media_uri.clone_from(media_uri);
-                    view.metadata = serde_json::from_str(metadata)?;
-                }
-                view.artwork_binding = got.binding(art)?;
-                Some(Header::Album(view))
-            }
-            Some(HeaderDraft::Artist(mut view, art)) => {
-                if let Some((object_id, media_uri, mbid)) =
-                    got.artist_views.get(&view.artist_key.raw())
-                {
-                    view.object_id.clone_from(object_id);
-                    view.media_uri.clone_from(media_uri);
-                    view.metadata.musicbrainz_artist_id.clone_from(mbid);
-                }
-                view.artwork_binding = got.binding(art)?;
-                Some(Header::Artist(view))
-            }
-            Some(HeaderDraft::Row(draft)) => Some(match finish(*draft)? {
-                Row::Tag(row) => Header::Tag(row),
-                Row::Playlist(PlaylistListRow::Playlist(row)) => Header::Playlist(Box::new(row)),
-                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => Header::Smart(Box::new(row)),
-                _ => unreachable!("headers are tags and playlists"),
-            }),
-        };
-        Ok(Fetched {
-            header,
-            rows: plan
-                .rows
-                .into_iter()
-                .map(finish)
-                .collect::<LibraryResult<_>>()?,
-            favorites: plan
-                .favorites
-                .into_iter()
-                .map(finish)
-                .collect::<LibraryResult<_>>()?,
-        })
+        }
+        let mut built = Vec::with_capacity(headers.len());
+        for header in headers {
+            built.extend(builder.header(*header, &got, &galleries)?);
+        }
+        Ok((built, rows))
     }
 
     /// One keyed statement: the window's rows, a detail header and an artist's favorite tracks.
@@ -1464,34 +1378,38 @@ impl Catalog {
             let Some((order, range)) = order else {
                 return (Vec::new(), &[]);
             };
-            {
-                let limit = if matches!(
-                    order.read(),
-                    Read::List(ListRead {
-                        kind: ListKind::ArtistAlbums { .. },
-                        ..
-                    })
-                ) {
-                    WINDOW / 2
-                } else {
-                    WINDOW
-                };
-                let end = range.end.min(range.start.saturating_add(limit));
-                (order.items(range.start..end), order.listens())
-            }
+            let limit = if matches!(
+                order.read(),
+                Read::List(ListRead {
+                    kind: ListKind::ArtistAlbums { .. },
+                    ..
+                })
+            ) {
+                WINDOW / 2
+            } else {
+                WINDOW
+            };
+            let end = range.end.min(range.start.saturating_add(limit));
+            (order.items(range.start..end), order.listens())
         }
         let (rows, listens) = window(fetch.rows.as_ref());
         let (favorites, favorite_listens) = window(fetch.favorites.as_ref());
         let shape = Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()));
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
-        self.fetch_on(
-            &mut connection,
-            [(&rows, listens), (&favorites, favorite_listens)],
-            fetch.header,
-            &shape,
-            fetch.art,
-        )
-        .await
+        let (headers, [rows, favorites]) = self
+            .fetch_on(
+                &mut connection,
+                [(&rows, listens), (&favorites, favorite_listens)],
+                fetch.header.as_slice(),
+                &shape,
+                fetch.art,
+            )
+            .await?;
+        Ok(Fetched {
+            header: headers.into_iter().next(),
+            rows,
+            favorites,
+        })
     }
 
     /// `fetch` with rows only. A window is at most 256 rows, 128 for an artist's albums.
@@ -1536,15 +1454,16 @@ impl Catalog {
         art: bool,
     ) -> LibraryResult<Vec<Row>> {
         let items = &items[..items.len().min(WINDOW)];
-        Ok(self
-            .fetch_on(connection, [(items, &[]), (&[], &[])], None, shape, art)
-            .await?
-            .rows)
+        let (_, [rows, _]) = self
+            .fetch_on(connection, [(items, &[]), (&[], &[])], &[], shape, art)
+            .await?;
+        Ok(rows)
     }
 
     /// A collection URI's item, from resident object ids. Track URIs are not resident.
     pub fn item(&self, uri: &str) -> Option<Item> {
         let (source, kind, object) = source_entity_parts(uri)?;
+        let kind = CatalogKind::of(&kind)?;
         let snapshot = self.snapshot();
         let source = snapshot.source_slot(
             snapshot
@@ -1553,62 +1472,7 @@ impl Catalog {
                 .find(|known| known.object == source.as_str())?
                 .key,
         )?;
-        let find = |object_of: &dyn Fn(u32) -> Option<(u16, StrId, i64)>, len: usize| {
-            (0..len as u32).find_map(|slot| {
-                let (owner, id, key) = object_of(slot)?;
-                (owner == source && snapshot.text(id) == object).then_some(key)
-            })
-        };
-        let tag = |wanted: TagKind| {
-            find(
-                &|slot| {
-                    snapshot
-                        .tags
-                        .live(slot)
-                        .filter(|tag| tag.kind() == wanted)
-                        .map(|tag| (tag.source, tag.object, i64::from(tag.key)))
-                },
-                snapshot.tags.records.len(),
-            )
-        };
-        match kind.as_str() {
-            "album" => find(
-                &|slot| {
-                    snapshot
-                        .albums
-                        .live(slot)
-                        .map(|album| (album.source, album.object, i64::from(album.key)))
-                },
-                snapshot.albums.records.len(),
-            )
-            .map(|key| Item::Album(AlbumKey::from_raw(key))),
-            "artist" => find(
-                &|slot| {
-                    snapshot
-                        .artists
-                        .live(slot)
-                        .map(|artist| (artist.source, artist.object, i64::from(artist.key)))
-                },
-                snapshot.artists.records.len(),
-            )
-            .map(|key| Item::Artist {
-                key: ArtistKey::from_raw(key),
-                album_artist: false,
-            }),
-            "folder" => find(
-                &|slot| {
-                    snapshot
-                        .folders
-                        .live(slot)
-                        .map(|folder| (folder.source, folder.object, i64::from(folder.key)))
-                },
-                snapshot.folders.records.len(),
-            )
-            .map(|key| Item::Folder(FolderKey::from_raw(key))),
-            "genre" => tag(TagKind::Genre).map(|key| Item::Genre(GenreKey::from_raw(key))),
-            "mood" => tag(TagKind::Mood).map(|key| Item::Mood(MoodKey::from_raw(key))),
-            _ => None,
-        }
+        kind.item(snapshot.object_keys(kind, source, &[&object])[0]?)
     }
 
     /// A collection item's URI, built from its resident object id. Tracks have none here.
@@ -1640,67 +1504,38 @@ impl Catalog {
         Some(entity_uri(&snapshot, source, kind, object)).filter(|uri| !uri.is_empty())
     }
 
-    /// Full track views by key, in the order asked, on a caller's connection so a Write reads
-    /// the tracks it staged. Keys the Store does not hold are skipped; a key asked twice reads
-    /// twice.
+    /// Full track views by key, in the order asked, once the Catalog has loaded. Keys it does
+    /// not hold are skipped; a key asked twice reads twice.
     pub(crate) async fn track_views_on(
         &self,
         connection: &mut sqlx::SqliteConnection,
         keys: &[TrackKey],
     ) -> LibraryResult<Vec<TrackView>> {
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
+        self.loaded().await;
+        let shape = Shape::of(None);
+        let inputs = Inputs::default();
         let mut want = Want::new(true);
-        let resident = {
+        {
             let snapshot = self.snapshot();
-            let context = Context::new(&snapshot);
-            let covers = self.covers(&context);
-            keys.iter()
-                .map(|key| {
-                    want.views.insert(key.raw());
-                    let slot = snapshot.tracks.slot(key.raw())?;
-                    let record = &snapshot.tracks.records[slot as usize];
-                    let played = context.played(slot, record);
-                    let art = context.track_art(&covers, record);
-                    want.art(art);
-                    Some((
-                        TrackState {
-                            favorite: favorite(record.flags).unwrap_or(false),
-                            rating: rating(record.rating, record.native_rating)
-                                .map(|rating| i64::from(rating / 10)),
-                            last_played: played.last.map(i64::from),
-                            play_count: i64::from(played.plays),
-                            skip_count: i64::from(played.skips),
-                        },
-                        record.flags & DOWNLOADED != 0,
-                        // The row may name its album: the track is listed, or its album lists
-                        // another track.
-                        record.indexed()
-                            || context
-                                .album_of(record)
-                                .is_some_and(|album| covers.albums[album as usize].tracks > 0),
-                        art,
-                    ))
-                })
-                .collect::<Vec<_>>()
-        };
-        let got = fetch::run(connection, &want).await?;
-        let mut views = Vec::with_capacity(keys.len());
-        for (key, resident) in keys.iter().zip(resident) {
-            let Some(mut view) = got.views.get(&key.raw()).cloned() else {
-                continue;
-            };
-            if let Some((state, downloaded, album, art)) = resident {
-                view.state = state;
-                view.access.is_downloaded = downloaded;
-                if !album {
-                    view.links.album_key = None;
-                    view.links.album_media_uri = None;
-                }
-                view.artwork_binding = got.binding(art)?;
+            let builder = Builder::new(self, &snapshot, &shape, &inputs, true);
+            for key in keys {
+                want.views.insert(key.raw());
+                builder.want(
+                    Item::Track {
+                        key: *key,
+                        entry: None,
+                    },
+                    &[],
+                    &mut want,
+                );
             }
-            views.push(view);
+        }
+        let got = fetch::run(connection, &want).await?;
+        let snapshot = self.snapshot();
+        let builder = Builder::new(self, &snapshot, &shape, &inputs, true);
+        let mut views = Vec::with_capacity(keys.len());
+        for key in keys {
+            views.extend(builder.track_view(*key, &got)?);
         }
         Ok(views)
     }
@@ -1711,7 +1546,7 @@ impl Catalog {
         keys: &[TrackKey],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackView>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
         self.track_views_on(&mut connection, &keys[..keys.len().min(WINDOW)])
             .await
     }
@@ -1733,29 +1568,39 @@ impl Catalog {
         uris: &[String],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackView>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let keys =
-            crate::query::track_keys_by_uris(&mut connection, &uris[..uris.len().min(WINDOW)])
-                .await?;
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let keys = track_keys_on(&mut connection, &uris[..uris.len().min(WINDOW)]).await?;
         self.track_views_on(&mut connection, &keys).await
     }
 
-    async fn header_view(
+    /// Track keys by URI, in the order asked. URIs the Store does not hold are skipped.
+    pub async fn track_keys(
         &self,
-        header: HeaderKey,
+        uris: &[String],
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<Header>> {
+    ) -> LibraryResult<Vec<TrackKey>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        track_keys_on(&mut connection, uris).await
+    }
+
+    /// Full views of these headers in one statement, in the order asked.
+    async fn headers(
+        &self,
+        headers: &[HeaderKey],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<Header>> {
         let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        let headers = &headers[..headers.len().min(WINDOW)];
         Ok(self
             .fetch_on(
                 &mut connection,
                 [(&[], &[]), (&[], &[])],
-                Some(header),
+                headers,
                 &Shape::of(None),
                 true,
             )
             .await?
-            .header)
+            .0)
     }
 
     pub async fn album(
@@ -1777,22 +1622,22 @@ impl Catalog {
         activity: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<AlbumView>> {
-        let mut views = Vec::new();
-        for key in &keys[..keys.len().min(WINDOW)] {
-            if let Some(Header::Album(view)) = self
-                .header_view(
-                    HeaderKey::Album {
-                        key: *key,
-                        activity,
-                    },
-                    cancellation,
-                )
-                .await?
-            {
-                views.push(*view);
-            }
-        }
-        Ok(views)
+        let headers = keys
+            .iter()
+            .map(|key| HeaderKey::Album {
+                key: *key,
+                activity,
+            })
+            .collect::<Vec<_>>();
+        Ok(self
+            .headers(&headers, cancellation)
+            .await?
+            .into_iter()
+            .filter_map(|header| match header {
+                Header::Album(view) => Some(*view),
+                _ => None,
+            })
+            .collect())
     }
 
     pub async fn artist(
@@ -1819,23 +1664,23 @@ impl Catalog {
         activity: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<ArtistView>> {
-        let mut views = Vec::new();
-        for key in &keys[..keys.len().min(WINDOW)] {
-            if let Some(Header::Artist(view)) = self
-                .header_view(
-                    HeaderKey::Artist {
-                        key: *key,
-                        album_artist,
-                        activity,
-                    },
-                    cancellation,
-                )
-                .await?
-            {
-                views.push(*view);
-            }
-        }
-        Ok(views)
+        let headers = keys
+            .iter()
+            .map(|key| HeaderKey::Artist {
+                key: *key,
+                album_artist,
+                activity,
+            })
+            .collect::<Vec<_>>();
+        Ok(self
+            .headers(&headers, cancellation)
+            .await?
+            .into_iter()
+            .filter_map(|header| match header {
+                Header::Artist(view) => Some(*view),
+                _ => None,
+            })
+            .collect())
     }
 
     /// Playlist rows by key, in the order asked. Unnamed playlists are skipped.
@@ -1880,6 +1725,105 @@ impl Catalog {
                 _ => None,
             })
             .collect())
+    }
+}
+
+/// Track keys by media URI, in the order asked. URIs the Store does not hold are skipped.
+pub(crate) async fn track_keys_on(
+    connection: &mut sqlx::SqliteConnection,
+    uris: &[String],
+) -> LibraryResult<Vec<TrackKey>> {
+    Ok(sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+        .bind(serde_json::to_string(uris)?)
+        .fetch_all(connection)
+        .await?)
+}
+
+impl CatalogKind {
+    /// The kind a collection URI names.
+    fn of(word: &str) -> Option<Self> {
+        Some(match word {
+            "album" => Self::Album,
+            "artist" => Self::Artist,
+            "genre" => Self::Genre,
+            "mood" => Self::Mood,
+            "folder" => Self::Folder,
+            _ => return None,
+        })
+    }
+
+    fn item(self, key: i64) -> Option<Item> {
+        Some(match self {
+            Self::Album => Item::Album(AlbumKey::from_raw(key)),
+            Self::Artist => Item::Artist {
+                key: ArtistKey::from_raw(key),
+                album_artist: false,
+            },
+            Self::Genre => Item::Genre(GenreKey::from_raw(key)),
+            Self::Mood => Item::Mood(MoodKey::from_raw(key)),
+            Self::Folder => Item::Folder(FolderKey::from_raw(key)),
+            Self::Playlist => Item::Playlist(PlaylistKey::from_raw(key)),
+            Self::Track => return None,
+        })
+    }
+}
+
+impl Snapshot {
+    /// Keys of a source's collections of one kind by object id, in the order asked, from one
+    /// pass over the family. Track object ids are not resident; unnamed playlists have none.
+    pub(crate) fn object_keys(
+        &self,
+        kind: CatalogKind,
+        source: u16,
+        objects: &[&str],
+    ) -> Vec<Option<i64>> {
+        let mut found = objects
+            .iter()
+            .map(|object| (*object, None))
+            .collect::<HashMap<_, Option<i64>>>();
+        let mut look = |owner: u16, object: StrId, key: i64| {
+            if owner == source
+                && let Some(slot) = found.get_mut(self.text(object))
+            {
+                slot.get_or_insert(key);
+            }
+        };
+        match kind {
+            CatalogKind::Album => {
+                for (_, album) in self.albums.iter() {
+                    look(album.source, album.object, i64::from(album.key));
+                }
+            }
+            CatalogKind::Artist => {
+                for (_, artist) in self.artists.iter() {
+                    look(artist.source, artist.object, i64::from(artist.key));
+                }
+            }
+            CatalogKind::Genre | CatalogKind::Mood => {
+                let wanted = if kind == CatalogKind::Genre {
+                    TagKind::Genre
+                } else {
+                    TagKind::Mood
+                };
+                for (_, tag) in self.tags.iter().filter(|(_, tag)| tag.kind() == wanted) {
+                    look(tag.source, tag.object, i64::from(tag.key));
+                }
+            }
+            CatalogKind::Folder => {
+                for (_, folder) in self.folders.iter() {
+                    look(folder.source, folder.object, i64::from(folder.key));
+                }
+            }
+            CatalogKind::Playlist => {
+                for (_, playlist) in self.playlists.iter() {
+                    if !self.text(playlist.name).is_empty() {
+                        look(playlist.source, playlist.object, playlist.key);
+                    }
+                }
+            }
+            CatalogKind::Track => {}
+        }
+        objects.iter().map(|object| found[object]).collect()
     }
 }
 

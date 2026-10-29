@@ -86,7 +86,7 @@ impl JellyfinEmbySource {
         album: library::AlbumView,
     ) -> Result<MetadataDraft, SourceMetadataError> {
         self.read_metadata(
-            &album.object_id,
+            &album.row.object_id,
             SourceEntityKind::Album,
             [
                 ("title", Some(album.metadata.title)),
@@ -101,7 +101,7 @@ impl JellyfinEmbySource {
                     album.metadata.musicbrainz_release_group_id,
                 ),
             ],
-            album.summary.track_count.max(0) as usize,
+            album.row.summary.track_count.max(0) as usize,
         )
         .await
     }
@@ -111,16 +111,13 @@ impl JellyfinEmbySource {
         artist: library::ArtistView,
     ) -> Result<MetadataDraft, SourceMetadataError> {
         self.read_metadata(
-            &artist.object_id,
+            &artist.row.object_id,
             SourceEntityKind::Artist,
             [
-                ("title", Some(artist.metadata.name)),
-                (
-                    "musicbrainz_artist_id",
-                    artist.metadata.musicbrainz_artist_id,
-                ),
+                ("title", Some(artist.row.name)),
+                ("musicbrainz_artist_id", artist.musicbrainz_artist_id),
             ],
-            artist.summary.track_count.max(0) as usize,
+            artist.row.summary.track_count.max(0) as usize,
         )
         .await
     }

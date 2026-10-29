@@ -1079,7 +1079,7 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
             )
             .await
             .unwrap();
-        rows.unwrap().artwork_binding.unwrap()
+        rows.unwrap().row.artwork_binding.unwrap()
     };
     let artist: Vec<library::ArtworkCandidate> = serde_json::from_slice(&artist).unwrap();
     assert_eq!(serde_json::to_vec(&artist[..1]).unwrap(), br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/8799b34127e8fddd3fdcdff25c21b7dd","image":{"kind":"native","source_id":"source","item_id":"artist-art","tag":null},"blur_hash":null}]"#);
@@ -1128,7 +1128,7 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
             rows
         };
         (
-            album.artwork_binding.unwrap(),
+            album.row.artwork_binding.unwrap(),
             tracks[0].artwork_binding.clone().unwrap(),
             tracks[1].artwork_binding.clone().unwrap(),
         )
@@ -1195,7 +1195,7 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
             rows
         };
         (
-            album.artwork_binding.unwrap(),
+            album.row.artwork_binding.unwrap(),
             tracks[0].artwork_binding.clone().unwrap(),
             tracks[1].artwork_binding.clone().unwrap(),
         )
@@ -2012,7 +2012,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         ),
         ("ALBÜM", "albüm", Some(2024), Some("2024-05-06"), Some(true))
     );
-    assert_eq!(album.links.album_artists[0].name, "Artist");
+    assert_eq!(album.row.links.album_artists[0].name, "Artist");
     assert_eq!(album.metadata.release_types, ["album"]);
     assert_eq!(
         reopened.all_source_counts().await.unwrap()[&library::SourceId::new("file-restart")],
@@ -2375,7 +2375,7 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(row.state.favorite, index < 2);
+        assert_eq!(row.row.state.favorite, index < 2);
     }
 }
 

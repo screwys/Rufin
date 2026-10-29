@@ -891,19 +891,20 @@ mod tests {
                         .unwrap()
                         .is_some()
                 );
-                let playlist = catalog
-                    .playlist_key_by_object(
-                        {
-                            catalog.loaded().await;
-                            catalog.source_key(&library::SourceId::new(&catalog_source_id))
-                        }
-                        .unwrap(),
-                        "cached-playlist",
-                        &cancellation,
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap();
+                let playlist = library::PlaylistKey::from_raw(
+                    catalog
+                        .catalog_keys(
+                            library::CatalogKind::Playlist,
+                            {
+                                catalog.loaded().await;
+                                catalog.source_key(&library::SourceId::new(&catalog_source_id))
+                            },
+                            &["cached-playlist".into()],
+                            &cancellation,
+                        )
+                        .await
+                        .unwrap()[0],
+                );
                 assert_eq!(
                     catalog
                         .selected_track_uris(

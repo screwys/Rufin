@@ -666,7 +666,7 @@ impl FileEditSession {
                             .album(&(album), false, &cancel)
                             .await
                             .map_err(failure)?
-                            .and_then(|album| album.artwork_binding)
+                            .and_then(|album| album.row.artwork_binding)
                     } else {
                         None
                     };
@@ -700,7 +700,7 @@ impl FileEditSession {
                     .ok_or(Error::Unavailable)?;
                 (
                     tags::readonly_album_metadata(&row, None),
-                    row.artwork_binding,
+                    row.row.artwork_binding,
                     String::new(),
                     None,
                 )
@@ -713,8 +713,8 @@ impl FileEditSession {
                     .ok_or(Error::Unavailable)?;
                 (
                     tags::readonly_artist_metadata(&row, None),
-                    row.artwork_binding,
-                    row.metadata.name,
+                    row.row.artwork_binding,
+                    row.row.name,
                     None,
                 )
             }

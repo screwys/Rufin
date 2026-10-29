@@ -118,78 +118,49 @@ impl Catalog {
     /// The item of a pinned row, when the Catalog still holds it.
     fn pin_item(&self, pin: &SidebarPin) -> Option<Item> {
         let snapshot = self.snapshot();
-        let source = |id: &SourceId| {
-            let key = snapshot
-                .sources
-                .values()
-                .find(|source| source.object == id.as_str())?
-                .key;
-            snapshot.source_slot(key)
+        let find = |kind: crate::CatalogKind, source: Option<&SourceId>, object: &str| {
+            let source = match source {
+                Some(id) => snapshot.source_slot(
+                    snapshot
+                        .sources
+                        .values()
+                        .find(|source| source.object == id.as_str())?
+                        .key,
+                )?,
+                None => crate::catalog::snapshot::NO_SOURCE,
+            };
+            snapshot.object_keys(kind, source, &[object])[0]
         };
         match pin {
             SidebarPin::Album {
                 source_id,
                 album_id,
-            } => {
-                let source = source(source_id)?;
-                snapshot
-                    .albums
-                    .iter()
-                    .find(|(_, album)| {
-                        album.source == source && snapshot.text(album.object) == album_id
-                    })
-                    .map(|(_, album)| Item::Album(crate::AlbumKey::from_raw(i64::from(album.key))))
-            }
+            } => find(crate::CatalogKind::Album, Some(source_id), album_id)
+                .map(|key| Item::Album(crate::AlbumKey::from_raw(key))),
             SidebarPin::Artist {
                 source_id,
                 artist_id,
                 album_artist,
-            } => {
-                let source = source(source_id)?;
-                snapshot
-                    .artists
-                    .iter()
-                    .find(|(_, artist)| {
-                        artist.source == source && snapshot.text(artist.object) == artist_id
-                    })
-                    .map(|(_, artist)| Item::Artist {
-                        key: crate::ArtistKey::from_raw(i64::from(artist.key)),
-                        album_artist: *album_artist,
-                    })
-            }
+            } => find(crate::CatalogKind::Artist, Some(source_id), artist_id).map(|key| {
+                Item::Artist {
+                    key: crate::ArtistKey::from_raw(key),
+                    album_artist: *album_artist,
+                }
+            }),
             SidebarPin::Genre {
                 source_id,
                 genre_id,
-            } => {
-                let source = source(source_id)?;
-                snapshot
-                    .tags
-                    .iter()
-                    .find(|(_, tag)| {
-                        tag.kind() == crate::TagKind::Genre
-                            && tag.source == source
-                            && snapshot.text(tag.object) == genre_id
-                    })
-                    .map(|(_, tag)| Item::Genre(crate::GenreKey::from_raw(i64::from(tag.key))))
-            }
+            } => find(crate::CatalogKind::Genre, Some(source_id), genre_id)
+                .map(|key| Item::Genre(crate::GenreKey::from_raw(key))),
             SidebarPin::Playlist {
                 source_id,
                 playlist_id,
-            } => {
-                let source = match source_id {
-                    Some(id) => source(id)?,
-                    None => crate::catalog::snapshot::NO_SOURCE,
-                };
-                snapshot
-                    .playlists
-                    .iter()
-                    .find(|(_, playlist)| {
-                        playlist.source == source
-                            && !snapshot.text(playlist.name).is_empty()
-                            && snapshot.text(playlist.object) == playlist_id
-                    })
-                    .map(|(_, playlist)| Item::Playlist(crate::PlaylistKey::from_raw(playlist.key)))
-            }
+            } => find(
+                crate::CatalogKind::Playlist,
+                source_id.as_ref(),
+                playlist_id,
+            )
+            .map(|key| Item::Playlist(crate::PlaylistKey::from_raw(key))),
             SidebarPin::SmartPlaylist { playlist_id } => snapshot
                 .smart_playlists
                 .values()

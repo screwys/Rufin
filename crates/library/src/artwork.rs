@@ -627,22 +627,27 @@ impl Catalog {
                 "artwork URI window exceeds 128".into(),
             ));
         }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let owners: Vec<(Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
-            "SELECT track.track_key,album.album_key,artist.artist_key FROM json_each(?1) requested
-             LEFT JOIN tracks track ON track.media_uri=requested.value
-             LEFT JOIN albums album ON album.media_uri=requested.value
-             LEFT JOIN artists artist ON artist.media_uri=requested.value ORDER BY requested.key",
+        let (_permit, mut connection) = self.acquire_loaded(cancellation).await?;
+        // Album and artist URIs resolve resident; the rest are track URIs.
+        let tracks: Vec<Option<i64>> = sqlx::query_scalar(
+            "SELECT track.track_key FROM json_each(?1) requested
+             LEFT JOIN tracks track ON track.media_uri=requested.value ORDER BY requested.key",
         )
         .bind(serde_json::to_string(media_uris)?)
         .fetch_all(&mut *connection)
         .await?;
-        let arts = self.arts(owners.into_iter().map(|(track, album, artist)| {
-            track
-                .map(Owner::Track)
-                .or(album.map(Owner::Album))
-                .or(artist.map(Owner::Artist))
-        }));
+        let owners = media_uris
+            .iter()
+            .zip(tracks)
+            .map(|(uri, track)| {
+                track.map(Owner::Track).or_else(|| match self.item(uri)? {
+                    crate::Item::Album(key) => Some(Owner::Album(key.raw())),
+                    crate::Item::Artist { key, .. } => Some(Owner::Artist(key.raw())),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        let arts = self.arts(owners);
         crate::catalog::fetch::bindings(&mut connection, &arts).await
     }
 

@@ -1,6 +1,5 @@
 //! The read vocabulary: which members or which list a client asks for.
 use crate::*;
-use sqlx::SqliteConnection;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -98,45 +97,9 @@ pub enum CatalogKind {
     Playlist,
 }
 
-impl CatalogKind {
-    /// The table, key column and kind predicate of rows of this kind.
-    fn sql(self) -> (&'static str, &'static str, &'static str) {
-        match self {
-            Self::Track => ("tracks", "track_key", "1"),
-            Self::Album => ("albums", "album_key", "1"),
-            Self::Artist => ("artists", "artist_key", "1"),
-            Self::Genre => ("tags", "tag_key", "kind=0"),
-            Self::Mood => ("tags", "tag_key", "kind=1"),
-            Self::Folder => ("folders", "folder_key", "1"),
-            Self::Playlist => ("playlists", "playlist_key", "1"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, sqlx::FromRow)]
-pub struct CatalogIdentity {
-    pub key: i64,
-    pub source_key: Option<SourceKey>,
-    pub object_id: Option<String>,
-    pub media_uri: String,
-}
-
 impl Catalog {
-    pub async fn catalog_identity(
-        &self,
-        kind: CatalogKind,
-        uri: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<CatalogIdentity>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let (table, key, scope) = kind.sql();
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {key} key,source_key,object_id,media_uri FROM {table} WHERE media_uri=?1 AND {scope}"
-        )))
-        .bind(uri)
-        .fetch_optional(&mut *connection)
-        .await?)
-    }
+    /// Keys of a source's rows of one kind by object id, in the order asked; ids it does not
+    /// hold are skipped. Collection object ids are resident; track ones are read.
     pub async fn catalog_keys(
         &self,
         kind: CatalogKind,
@@ -144,9 +107,30 @@ impl Catalog {
         objects: &[String],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<i64>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let (table, key, scope) = kind.sql();
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT entity.{key} FROM json_each(?1) requested JOIN {table} entity ON entity.object_id=requested.value WHERE entity.source_key IS ?2 AND {scope} ORDER BY CAST(requested.key AS INTEGER)"))).bind(serde_json::to_string(objects)?).bind(source).fetch_all(&mut *connection).await?)
+        if kind == CatalogKind::Track {
+            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            return self
+                .track_keys_by_objects(&mut connection, source, objects)
+                .await;
+        }
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+        }
+        let snapshot = self.snapshot();
+        let source = match source {
+            Some(source) => match snapshot.source_slot(source) {
+                Some(slot) => slot,
+                None => return Ok(Vec::new()),
+            },
+            None => crate::catalog::snapshot::NO_SOURCE,
+        };
+        let objects = objects.iter().map(String::as_str).collect::<Vec<_>>();
+        Ok(snapshot
+            .object_keys(kind, source, &objects)
+            .into_iter()
+            .flatten()
+            .collect())
     }
 }
 
@@ -219,17 +203,6 @@ impl ListRead {
             ranges: None,
         }
     }
-}
-
-/// Track keys by media URI, in the order asked. URIs the Store does not hold are skipped.
-pub(crate) async fn track_keys_by_uris(
-    connection: &mut SqliteConnection,
-    uris: &[String],
-) -> LibraryResult<Vec<TrackKey>> {
-    Ok(sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-        .bind(serde_json::to_string(uris)?)
-        .fetch_all(connection)
-        .await?)
 }
 
 pub(crate) fn selection_ranges(

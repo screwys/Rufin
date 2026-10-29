@@ -26,9 +26,7 @@ pub use metadata::*;
 mod collections;
 mod field;
 pub use field::LibraryField;
-pub use query::{
-    CatalogIdentity, CatalogKind, Collection, ListKind, ListRead, MemberRead, PlaylistScope,
-};
+pub use query::{CatalogKind, Collection, ListKind, ListRead, MemberRead, PlaylistScope};
 mod read;
 pub use read::{
     AlbumRow, AlbumSpan, ArtistRow, Fetch, Fetched, FolderRead, FolderRow, Header, HeaderKey, Item,

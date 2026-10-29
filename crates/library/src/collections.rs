@@ -89,33 +89,20 @@ pub struct AlbumLinks {
     pub genres: Vec<AlbumGenreLink>,
 }
 
-/// The full view of one album, for detail headers and editors.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+/// The full view of one album, for detail headers and editors: its row and its whole metadata.
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct AlbumView {
-    pub album_key: AlbumKey,
-    pub source_key: SourceKey,
-    pub object_id: String,
-    pub media_uri: String,
+    pub row: crate::AlbumRow,
     pub metadata: crate::AlbumMetadata,
-    pub state: crate::TrackState,
-    pub summary: CollectionSummary,
-    pub links: AlbumLinks,
-    pub artwork_binding: Option<Vec<u8>>,
 }
 
 /// The full view of one artist, for detail headers and editors.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct ArtistView {
-    pub artist_key: ArtistKey,
-    pub source_key: SourceKey,
-    pub object_id: String,
-    pub media_uri: String,
-    pub metadata: crate::ArtistMetadata,
-    pub state: crate::TrackState,
-    pub summary: CollectionSummary,
-    pub artwork_binding: Option<Vec<u8>>,
+    pub row: crate::ArtistRow,
+    pub musicbrainz_artist_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -340,16 +327,5 @@ impl Catalog {
                 name: snapshot.text(folder.name).to_owned(),
             })
             .collect()
-    }
-
-    /// The folder a source lists under an object id.
-    pub fn folder_identity_key(&self, source: SourceKey, object_id: &str) -> Option<FolderKey> {
-        let snapshot = self.snapshot();
-        let owner = snapshot.source_slot(source)?;
-        snapshot
-            .folders
-            .iter()
-            .find(|(_, folder)| folder.source == owner && snapshot.text(folder.object) == object_id)
-            .map(|(_, folder)| FolderKey::from_raw(i64::from(folder.key)))
     }
 }

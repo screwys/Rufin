@@ -41,7 +41,7 @@ pub(crate) struct Played {
     pub(crate) last: Option<u32>,
 }
 
-fn known(value: u32) -> Option<u32> {
+pub(crate) fn known(value: u32) -> Option<u32> {
     (value != NONE).then_some(value)
 }
 
@@ -61,7 +61,7 @@ pub(crate) fn rating(user: u8, native: u8) -> Option<u8> {
     [user, native].into_iter().find(|rating| *rating != UNRATED)
 }
 
-fn year_of(year: i16) -> Option<i16> {
+pub(crate) fn year_of(year: i16) -> Option<i16> {
     (year != i16::MIN).then_some(year)
 }
 
@@ -1521,7 +1521,7 @@ enum Fact<'a> {
     Date(Option<String>),
 }
 
-fn date_text(seconds: u32) -> Option<String> {
+pub(crate) fn date_text(seconds: u32) -> Option<String> {
     chrono::DateTime::from_timestamp(i64::from(seconds), 0)
         .map(|time| time.format("%Y-%m-%d").to_string())
 }
@@ -2270,7 +2270,9 @@ impl Catalog {
         match read {
             Read::Members(read) => match &read.collection {
                 Collection::Objects { source, ids } => {
-                    inputs.objects = self.track_keys_by_objects(connection, *source, ids).await?;
+                    inputs.objects = self
+                        .track_keys_by_objects(connection, Some(*source), ids)
+                        .await?;
                 }
                 Collection::History { source } => {
                     inputs.history =
@@ -2399,13 +2401,17 @@ impl Catalog {
     pub(crate) async fn track_keys_by_objects(
         &self,
         connection: &mut SqliteConnection,
-        source: SourceKey,
+        source: Option<SourceKey>,
         ids: &[String],
     ) -> LibraryResult<Vec<i64>> {
         let ids = serde_json::to_string(ids)?;
         let handle = super::rows::Handle::lock(connection).await?;
-        let mut rows = handle.prepare("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.source_key=?2 AND track.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)")?;
-        rows.bind_text(1, &ids)?.bind(2, source.raw())?;
+        let mut rows = handle.prepare("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.source_key IS ?2 AND track.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)")?;
+        rows.bind_text(1, &ids)?;
+        // An unbound source reads as NULL: tracks of no source.
+        if let Some(source) = source {
+            rows.bind(2, source.raw())?;
+        }
         let mut keys = Vec::new();
         while rows.step()? {
             keys.push(rows.int(0));

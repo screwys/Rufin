@@ -382,7 +382,7 @@ impl Catalog {
         let mut write = self.write().await?;
         let mut entries = vec![None; total];
         let mut order = Vec::new();
-        let mut rows = Vec::new();
+        let mut playing = None;
         for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
             let payload: Option<String> = sqlx::query_scalar(
                 "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
@@ -415,21 +415,7 @@ impl Catalog {
                     provenance: row.provenance.clone(),
                 });
                 if row.position == current {
-                    let song = self
-                        .track_views_on(
-                            write.connection().await?,
-                            &[slot.as_ref().unwrap().track_key],
-                        )
-                        .await?
-                        .pop()
-                        .expect("requested canonical queue song");
-                    rows.push(Arc::new(QueueRow {
-                        position: row.position,
-                        track: song,
-                        provenance: row.provenance,
-                        received_from_connect: true,
-                        occurrence_id: None,
-                    }));
+                    playing = Some((slot.as_ref().unwrap().track_key, row.provenance));
                 }
             }
             order.extend(page.order);
@@ -440,6 +426,23 @@ impl Catalog {
             ));
         }
         write.commit().await?;
+        // The staged tracks are resident once the transfer commits.
+        let mut rows = Vec::new();
+        if let Some((key, provenance)) = playing {
+            let mut connection = self.acquire_reader().await?;
+            let song = self
+                .track_views_on(&mut connection, &[key])
+                .await?
+                .pop()
+                .expect("requested canonical queue song");
+            rows.push(Arc::new(QueueRow {
+                position: current,
+                track: song,
+                provenance,
+                received_from_connect: true,
+                occurrence_id: None,
+            }));
+        }
         let entries = entries.into_iter().map(Option::unwrap).collect::<Vec<_>>();
         let current_index = Some(current);
         Ok(QueueRestore {

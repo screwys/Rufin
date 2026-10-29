@@ -3,7 +3,7 @@
 
 use sqlx::{Connection, FromRow, SqliteConnection};
 
-use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, SOURCE_OWNED, WRITABLE};
+use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, Packed, SOURCE_OWNED, WRITABLE};
 use crate::catalog::write::{Scope, Write};
 use crate::{
     Catalog, FolderKey, LibraryError, LibraryResult, MemberSelection, PlaylistEntryKey,
@@ -82,40 +82,6 @@ impl Catalog {
             writable: record.flags & WRITABLE != 0,
             metadata_writable: record.flags & METADATA_WRITABLE != 0,
         }))
-    }
-
-    pub async fn playlist_key_by_object(
-        &self,
-        source: SourceKey,
-        object_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(
-            "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
-        )
-        .bind(source)
-        .bind(object_id)
-        .fetch_optional(&mut *connection)
-        .await?)
-    }
-
-    pub async fn playlist_key_by_identity(
-        &self,
-        source_id: Option<&crate::SourceId>,
-        object_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(
-            "SELECT playlist_key FROM playlists
-             WHERE source_key IS (SELECT source_key FROM sources WHERE object_id=?1)
-               AND (?1 IS NULL OR source_key IS NOT NULL) AND object_id=?2 AND name IS NOT NULL",
-        )
-        .bind(source_id.map(crate::SourceId::as_str))
-        .bind(object_id)
-        .fetch_optional(&mut *connection)
-        .await?)
     }
 
     /// URIs of a source's tracks that some playlist holds, by title.
@@ -284,18 +250,42 @@ impl Catalog {
         .await?)
     }
 
+    /// Object ids of a source's named playlists that Rufin owns or the source lists, by name.
     pub async fn source_playlist_object_ids(
         &self,
         source: SourceKey,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_scalar(
-            "SELECT object_id FROM playlists WHERE source_key=?1 AND name IS NOT NULL AND (owner='rufin' OR indexed) ORDER BY lower(name),playlist_key",
-        )
-        .bind(source)
-        .fetch_all(&mut *connection)
-        .await?)
+        tokio::select! {
+            () = self.loaded() => {}
+            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+        }
+        let snapshot = self.snapshot();
+        let Some(owner) = snapshot.source_slot(source) else {
+            return Ok(Vec::new());
+        };
+        let mut playlists = snapshot
+            .playlists
+            .iter()
+            .map(|(_, record)| record)
+            .filter(|record| {
+                record.source == owner
+                    && !snapshot.text(record.name).is_empty()
+                    && (record.flags & SOURCE_OWNED == 0 || record.indexed())
+            })
+            .map(|record| {
+                (
+                    snapshot.text(record.name).to_ascii_lowercase(),
+                    record.key,
+                    snapshot.text(record.object),
+                )
+            })
+            .collect::<Vec<_>>();
+        playlists.sort_unstable();
+        Ok(playlists
+            .into_iter()
+            .map(|(.., object)| object.to_owned())
+            .collect())
     }
 
     pub async fn source_playlist_track_ids(

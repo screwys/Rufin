@@ -1086,14 +1086,7 @@ async fn local_mapping_selects_one_exact_or_representative_track_without_a_libra
         .expect("representative mapping Track")
         .pop()
         .expect("mapping Track");
-    let exact_path = fixture
-        .catalog
-        .mapping_track_source_path(fixture.source, representative.track_key, &cancel)
-        .await
-        .expect("exact mapping Track")
-        .expect("exact mapping Track");
-
-    assert_eq!(exact_path, representative.source_path);
+    assert_eq!(representative.source_path, "/server/music/track.flac");
 }
 
 #[tokio::test]

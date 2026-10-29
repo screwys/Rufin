@@ -321,11 +321,6 @@ impl Catalog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether the first load finished.
-    pub fn is_loaded(&self) -> bool {
-        *self.inner.loaded.borrow()
-    }
-
     /// The revision of the last committed Change.
     pub fn revision(&self) -> u64 {
         self.snapshot().revision

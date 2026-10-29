@@ -1783,7 +1783,7 @@ pub(crate) fn readonly_album_metadata(
         .collect(),
     );
     metadata.revision = revision;
-    metadata.track_count = album.summary.track_count.max(0) as usize;
+    metadata.track_count = album.row.summary.track_count.max(0) as usize;
     metadata
 }
 
@@ -1794,19 +1794,15 @@ pub(crate) fn readonly_artist_metadata(
     let mut metadata = MetadataDraft::new(
         SourceEntityKind::Artist,
         vec![
-            MetadataField::new("title", artist.metadata.name.clone(), false),
+            MetadataField::new("title", artist.row.name.clone(), false),
             MetadataField::new(
                 "musicbrainz_artist_id",
-                artist
-                    .metadata
-                    .musicbrainz_artist_id
-                    .clone()
-                    .unwrap_or_default(),
+                artist.musicbrainz_artist_id.clone().unwrap_or_default(),
                 false,
             ),
         ],
     );
     metadata.revision = revision;
-    metadata.track_count = artist.summary.track_count.max(0) as usize;
+    metadata.track_count = artist.row.summary.track_count.max(0) as usize;
     metadata
 }

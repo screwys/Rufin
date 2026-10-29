@@ -8,10 +8,10 @@ use std::collections::{BTreeSet, HashMap};
 use super::rows::{Handle, Rows};
 use super::views::{Art, Picture};
 use crate::artwork::{ArtworkCandidate, ArtworkImage};
-use crate::{LibraryResult, TrackArtistLink, TrackGenreLink};
+use crate::{AlbumMetadata, LibraryResult, TrackAccess, TrackMetadata};
 
 /// Columns after the part and the key; a part with fewer pads with NULL.
-const COLUMNS: usize = 15;
+const COLUMNS: usize = 5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Part {
@@ -59,7 +59,7 @@ fn previews(binding: &str, wanted: bool) -> String {
 impl Part {
     /// The part's columns and what it reads them from; `requested` is the key list.
     fn sql(self, previews_wanted: bool) -> (Vec<String>, String) {
-        use crate::schema::{LINK_ARTIST, LINK_GENRE};
+        use crate::schema::LINK_ARTIST;
         let art = |table: &str, key: &str, column: &str| {
             (
                 vec![
@@ -72,7 +72,6 @@ impl Part {
             )
         };
         let source_path = "CASE WHEN source.kind='local' THEN (SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END";
-        let track_from = "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN sources source ON source.source_key=track.source_key";
         match self {
             Self::Track => (
                 vec![
@@ -82,36 +81,22 @@ impl Part {
                     source_path.into(),
                     "json_extract(details.metadata,'$.audio_properties')".into(),
                 ],
-                track_from.into(),
+                "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN sources source ON source.source_key=track.source_key".into(),
             ),
-            Self::View => {
-                let metadata = crate::metadata::track_metadata_sql("track", "details");
-                (
-                    vec![
-                        "track.source_key".into(),
-                        "source.object_id".into(),
-                        "track.object_id".into(),
-                        "track.media_uri".into(),
-                        format!("json_patch({metadata},json_object('title',coalesce(nullif(track.title,''),track.media_uri),
-                        'date_added',date(coalesce(unixepoch(track.date_added),track.first_seen_at),'unixepoch'),
-                        'album_display_artist',coalesce(nullif(album.display_artist,''),json_extract(details.metadata,'$.album_display_artist')),
-                        'musicbrainz_album_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_id'),json_extract(details.metadata,'$.musicbrainz_album_id')),
-                        'musicbrainz_release_group_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_group_id'),json_extract(details.metadata,'$.musicbrainz_release_group_id')),
-                        'primary_artist_musicbrainz_id',coalesce((SELECT artist.musicbrainz_artist_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST} ORDER BY credit.position LIMIT 1),json_extract(details.metadata,'$.primary_artist_musicbrainz_id'))))"),
-                        source_path.into(),
-                        "coalesce(source.display_name,'')".into(),
-                        "coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path)".into(),
-                        "details.cue_start_millis".into(),
-                        "details.cue_end_millis".into(),
-                        "track.album_key".into(),
-                        "album.media_uri".into(),
-                        format!("(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST})"),
-                        format!("(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM album_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.album_key=track.album_key AND credit.role={LINK_ARTIST})"),
-                        format!("(SELECT json_group_array(json_object('genre_key',tag.tag_key,'name',tag.name) ORDER BY credit.position) FROM track_links credit JOIN tags tag ON tag.tag_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_GENRE})"),
-                    ],
-                    format!("{track_from} LEFT JOIN albums album ON album.album_key=track.album_key"),
-                )
-            }
+            // What a full view adds to its row: the details JSON with the album's and first
+            // artist's MBIDs and display artist, and the CUE window.
+            Self::View => (
+                vec![
+                    format!("json_patch(coalesce(json(details.metadata),'{{}}'),json_object('album_display_artist',coalesce(nullif(album.display_artist,''),json_extract(details.metadata,'$.album_display_artist')),
+                    'musicbrainz_album_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_id'),json_extract(details.metadata,'$.musicbrainz_album_id')),
+                    'musicbrainz_release_group_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_group_id'),json_extract(details.metadata,'$.musicbrainz_release_group_id')),
+                    'primary_artist_musicbrainz_id',coalesce((SELECT artist.musicbrainz_artist_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST} ORDER BY credit.position LIMIT 1),json_extract(details.metadata,'$.primary_artist_musicbrainz_id'))))"),
+                    "coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path)".into(),
+                    "details.cue_start_millis".into(),
+                    "details.cue_end_millis".into(),
+                ],
+                "JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details ON details.track_key=track.track_key LEFT JOIN albums album ON album.album_key=track.album_key".into(),
+            ),
             Self::AlbumText => (
                 vec![
                     "album.release_date".into(),
@@ -120,19 +105,11 @@ impl Part {
                 "JOIN albums album ON album.album_key=requested.value".into(),
             ),
             Self::AlbumView => (
-                vec![
-                    "album.object_id".into(),
-                    "album.media_uri".into(),
-                    "json_patch(json(album.metadata),json_object('title',album.title,'artist',album.display_artist,'sort_text',album.sort_text,'year',album.year,'release_date',album.release_date,'date_added',coalesce(date(album.date_added),album.date_added,date(album.first_seen_at,'unixepoch')),'is_compilation',json(CASE album.is_compilation WHEN 1 THEN 'true' WHEN 0 THEN 'false' END)))".into(),
-                ],
+                vec!["json_patch(json(album.metadata),json_object('title',album.title,'artist',album.display_artist,'sort_text',album.sort_text,'year',album.year,'release_date',album.release_date,'date_added',coalesce(date(album.date_added),album.date_added,date(album.first_seen_at,'unixepoch')),'is_compilation',json(CASE album.is_compilation WHEN 1 THEN 'true' WHEN 0 THEN 'false' END)))".into()],
                 "JOIN albums album ON album.album_key=requested.value".into(),
             ),
             Self::ArtistView => (
-                vec![
-                    "artist.object_id".into(),
-                    "artist.media_uri".into(),
-                    "artist.musicbrainz_artist_id".into(),
-                ],
+                vec!["artist.musicbrainz_artist_id".into()],
                 "JOIN artists artist ON artist.artist_key=requested.value".into(),
             ),
             Self::TrackArt => art("track_details", "track_key", "native_artwork"),
@@ -257,11 +234,11 @@ pub(crate) struct PlaylistArt {
 #[derive(Default)]
 pub(crate) struct Got {
     pub(crate) tracks: HashMap<i64, TrackText>,
-    pub(crate) views: HashMap<i64, crate::TrackView>,
+    /// A full view's details and its CUE window; the rest of the access its row fills.
+    pub(crate) views: HashMap<i64, (TrackMetadata, TrackAccess)>,
     pub(crate) album_texts: HashMap<i64, (Option<String>, Option<String>)>,
-    /// Object id, URI and the whole metadata JSON.
-    pub(crate) album_views: HashMap<i64, (String, String, String)>,
-    pub(crate) artist_views: HashMap<i64, (String, String, Option<String>)>,
+    pub(crate) album_views: HashMap<i64, AlbumMetadata>,
+    pub(crate) artist_views: HashMap<i64, Option<String>>,
     track_art: HashMap<i64, Vec<ArtworkCandidate>>,
     album_art: HashMap<i64, Vec<ArtworkCandidate>>,
     artist_art: HashMap<i64, Vec<ArtworkCandidate>>,
@@ -277,7 +254,7 @@ pub(crate) struct Got {
 impl Got {
     /// A row's picture as the Catalog chose it. An artist lists its own pictures, then the one
     /// it borrows, then its name lookups.
-    pub(crate) fn candidates(&self, art: Art) -> Option<Vec<ArtworkCandidate>> {
+    fn candidates(&self, art: Art) -> Option<Vec<ArtworkCandidate>> {
         let picture = |picture: Picture| match picture {
             Picture::Track(key) => self.track_art.get(&key),
             Picture::Album(key) => self.album_art.get(&key),
@@ -316,7 +293,7 @@ impl Got {
     }
 
     /// Fills the preview hashes the Store knows for candidates without one.
-    pub(crate) fn fill(&self, candidates: &mut [ArtworkCandidate]) {
+    fn fill(&self, candidates: &mut [ArtworkCandidate]) {
         for candidate in candidates {
             if candidate.blur_hash.is_none() {
                 candidate.blur_hash = self.previews.get(&candidate.key).cloned();
@@ -463,36 +440,17 @@ pub(crate) async fn run(
                 );
             }
             Part::View => {
-                let artists: Vec<TrackArtistLink> = json(&rows, 14)?;
-                let album_artists: Vec<TrackArtistLink> = json(&rows, 15)?;
-                let genres: Vec<TrackGenreLink> = json(&rows, 16)?;
                 got.views.insert(
                     key,
-                    crate::TrackView {
-                        track_key: crate::TrackKey::from_raw(key),
-                        source_key: rows.optional_int(2).map(crate::SourceKey::from_raw),
-                        source_id: text(&rows, 3),
-                        object_id: text(&rows, 4),
-                        media_uri: rows.text(5).to_owned(),
-                        metadata: json(&rows, 6)?,
-                        state: Default::default(),
-                        access: crate::TrackAccess {
-                            source_path: text(&rows, 7),
-                            source_name: rows.text(8).to_owned(),
-                            cue_path: text(&rows, 9),
-                            cue_start_millis: rows.optional_int(10),
-                            cue_end_millis: rows.optional_int(11),
-                            is_downloaded: false,
+                    (
+                        json(&rows, 2)?,
+                        TrackAccess {
+                            cue_path: text(&rows, 3),
+                            cue_start_millis: rows.optional_int(4),
+                            cue_end_millis: rows.optional_int(5),
+                            ..TrackAccess::default()
                         },
-                        links: crate::TrackLinks {
-                            album_key: rows.optional_int(12).map(crate::AlbumKey::from_raw),
-                            album_media_uri: text(&rows, 13),
-                            artists,
-                            album_artists,
-                            genres,
-                        },
-                        artwork_binding: None,
-                    },
+                    ),
                 );
             }
             Part::AlbumText => {
@@ -500,24 +458,10 @@ pub(crate) async fn run(
                     .insert(key, (text(&rows, 2), text(&rows, 3)));
             }
             Part::AlbumView => {
-                got.album_views.insert(
-                    key,
-                    (
-                        rows.text(2).to_owned(),
-                        rows.text(3).to_owned(),
-                        rows.text(4).to_owned(),
-                    ),
-                );
+                got.album_views.insert(key, json(&rows, 2)?);
             }
             Part::ArtistView => {
-                got.artist_views.insert(
-                    key,
-                    (
-                        rows.text(2).to_owned(),
-                        rows.text(3).to_owned(),
-                        text(&rows, 4),
-                    ),
-                );
+                got.artist_views.insert(key, text(&rows, 2));
             }
             Part::TrackArt | Part::AlbumArt | Part::ArtistArt | Part::TagArt | Part::FolderArt => {
                 previews(&rows, &mut got, 3)?;

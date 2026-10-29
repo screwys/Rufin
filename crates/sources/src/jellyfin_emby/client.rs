@@ -1563,11 +1563,8 @@ mod tests {
                     .await
                     .unwrap();
                 let artist = artists.pop().unwrap();
-                assert!(artist.state.favorite);
-                assert_eq!(
-                    artist.metadata.musicbrainz_artist_id.as_deref(),
-                    Some("artist-mbid")
-                );
+                assert!(artist.row.state.favorite);
+                assert_eq!(artist.musicbrainz_artist_id.as_deref(), Some("artist-mbid"));
             }
         }
     }

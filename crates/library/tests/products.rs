@@ -95,12 +95,18 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT playlist_key,'entry',(SELECT track_key FROM tracks WHERE media_uri=?1),X'8000' FROM playlists WHERE object_id='native'")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
-    let native = fixture
-        .catalog
-        .playlist_key_by_object(fixture.source, "native", &cancel)
-        .await
-        .unwrap()
-        .unwrap();
+    let native = library::PlaylistKey::from_raw(
+        fixture
+            .catalog
+            .catalog_keys(
+                library::CatalogKind::Playlist,
+                Some(fixture.source),
+                &["native".into()],
+                &cancel,
+            )
+            .await
+            .unwrap()[0],
+    );
     let local = fixture
         .catalog
         .create_playlist(
@@ -742,8 +748,8 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             .artists(&[fixture.artists[0]], album_artist, true, &cancel)
             .await
             .unwrap();
-        assert_eq!(rows[0].state.play_count, 2);
-        assert_eq!(rows[0].state.last_played, Some(200));
+        assert_eq!(rows[0].row.state.play_count, 2);
+        assert_eq!(rows[0].row.state.last_played, Some(200));
     }
     let home = fixture
         .catalog
