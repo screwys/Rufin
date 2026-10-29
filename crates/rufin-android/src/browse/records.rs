@@ -1,4 +1,6 @@
 use super::*;
+use library::PlaylistListRow;
+use rufin_core::settings::app::RecentSearchResult;
 
 #[derive(uniffi::Record)]
 pub struct AndroidPlaylistImport {
@@ -159,43 +161,21 @@ pub struct AndroidPinPage {
 }
 
 #[derive(Clone, uniffi::Enum)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "nearly every row is a library row"
+)]
 pub enum AndroidBrowseItem {
-    Track {
-        row: library::TrackView,
+    Library {
+        row: library::Row,
     },
-    PlaylistEntry {
-        row: library::PlaylistEntryView,
-    },
-    Album {
-        row: library::AlbumView,
-    },
-    Artist {
-        row: library::ArtistView,
-        album_artist: bool,
-    },
-    Genre {
-        row: library::GenreView,
-    },
-    Mood {
-        row: library::MoodView,
-    },
-    Playlist {
-        row: library::PlaylistRow,
-    },
-    SmartPlaylist {
-        row: library::SmartPlaylistRow,
-    },
-    PlaylistFolder {
-        row: library::PlaylistFolderRow,
-    },
-    Recent {
-        row: rufin_core::settings::app::RecentSearchResult,
-    },
+    /// A child folder and the route that opens it.
     Folder {
-        key: String,
-        title: String,
         route: Route,
         artwork: Option<Vec<u8>>,
+    },
+    Recent {
+        row: RecentSearchResult,
     },
 }
 
@@ -205,13 +185,11 @@ pub struct AndroidBrowseRow {
     pub fields: Vec<AndroidFieldValue>,
     pub display_title: Option<String>,
     pub lyrics_snippet: Option<library::LyricsSnippet>,
-    pub album_header: bool,
     pub pin: Option<SidebarPin>,
     pub section: String,
     pub section_id: String,
     pub section_kind: String,
     pub section_refreshable: bool,
-    pub context_source_id: Option<String>,
 }
 
 impl AndroidBrowseRow {
@@ -221,31 +199,31 @@ impl AndroidBrowseRow {
             fields: Vec::new(),
             display_title: None,
             lyrics_snippet: None,
-            album_header: false,
             pin: None,
             section: String::new(),
             section_id: String::new(),
             section_kind: String::new(),
             section_refreshable: false,
-            context_source_id: None,
         }
     }
 
-    pub(super) fn track_key(&self) -> Option<library::TrackKey> {
+    pub(super) fn track(&self) -> Option<&library::TrackRow> {
         match &self.item {
-            AndroidBrowseItem::Track { row } => Some(row.track_key),
-            AndroidBrowseItem::PlaylistEntry { row } => Some(row.track.track_key),
+            AndroidBrowseItem::Library {
+                row: Row::Track(track) | Row::AlbumTrack { track, .. },
+            } => Some(track),
             _ => None,
         }
     }
 
     pub(super) fn matches_filter(&self, filter: &str) -> bool {
         let (title, subtitle) = match &self.item {
-            AndroidBrowseItem::Track { row } => (
-                &row.metadata.title,
-                format!("{} · {}", row.metadata.artist, row.metadata.album),
-            ),
-            AndroidBrowseItem::Album { row } => (&row.metadata.title, row.metadata.artist.clone()),
+            AndroidBrowseItem::Library {
+                row: Row::Track(track),
+            } => (&track.title, format!("{} · {}", track.artist, track.album)),
+            AndroidBrowseItem::Library {
+                row: Row::Album(album),
+            } => (&album.title, album.artist.clone()),
             _ => return true,
         };
         format!(
@@ -258,85 +236,58 @@ impl AndroidBrowseRow {
     }
 }
 
-impl From<library::TrackView> for AndroidBrowseRow {
-    fn from(row: library::TrackView) -> Self {
-        Self::new(AndroidBrowseItem::Track { row })
-    }
-}
-impl From<library::AlbumView> for AndroidBrowseRow {
-    fn from(row: library::AlbumView) -> Self {
-        let pin = library::source_entity_parts(&row.media_uri).map(|(source_id, _, album_id)| {
-            SidebarPin::Album {
-                source_id,
-                album_id,
+impl From<Row> for AndroidBrowseRow {
+    fn from(row: Row) -> Self {
+        let pin = match &row {
+            Row::Album(album) | Row::AlbumHeading(album) => {
+                library::source_entity_parts(&album.media_uri).map(|(source_id, _, album_id)| {
+                    SidebarPin::Album {
+                        source_id,
+                        album_id,
+                    }
+                })
             }
-        });
+            Row::Artist(artist) => {
+                library::source_entity_parts(&artist.media_uri).map(|(source_id, _, artist_id)| {
+                    SidebarPin::Artist {
+                        source_id,
+                        artist_id,
+                        album_artist: artist.album_artist,
+                    }
+                })
+            }
+            Row::Tag(tag) if tag.kind == library::TagKind::Genre => Some(SidebarPin::Genre {
+                source_id: sources::SourceId::new(tag.source_id.clone()),
+                genre_id: tag.object_id.clone(),
+            }),
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => Some(SidebarPin::Playlist {
+                source_id: playlist.source_id.as_ref().map(sources::SourceId::new),
+                playlist_id: playlist.object_id.clone(),
+            }),
+            Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
+                Some(SidebarPin::SmartPlaylist {
+                    playlist_id: playlist.object_id.clone(),
+                })
+            }
+            Row::Playlist(PlaylistListRow::Folder(folder)) => Some(SidebarPin::PlaylistFolder {
+                folder_id: folder.object_id.clone(),
+                smart: folder.smart,
+            }),
+            _ => None,
+        };
+        let display_title = match &row {
+            Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
+                Some(rufin_core::playlists::smart_playlist_display_name(
+                    &playlist.object_id,
+                    &playlist.name,
+                ))
+            }
+            _ => None,
+        };
         Self {
             pin,
-            ..Self::new(AndroidBrowseItem::Album { row })
-        }
-    }
-}
-impl From<library::GenreView> for AndroidBrowseRow {
-    fn from(row: library::GenreView) -> Self {
-        let pin = Some(SidebarPin::Genre {
-            source_id: sources::SourceId::new(row.source_id.clone()),
-            genre_id: row.object_id.clone(),
-        });
-        Self {
-            context_source_id: Some(row.source_id.clone()),
-            pin,
-            ..Self::new(AndroidBrowseItem::Genre { row })
-        }
-    }
-}
-impl From<library::MoodView> for AndroidBrowseRow {
-    fn from(row: library::MoodView) -> Self {
-        Self::new(AndroidBrowseItem::Mood { row })
-    }
-}
-impl From<library::PlaylistRow> for AndroidBrowseRow {
-    fn from(row: library::PlaylistRow) -> Self {
-        let pin = Some(SidebarPin::Playlist {
-            source_id: row.source_id.as_ref().map(sources::SourceId::new),
-            playlist_id: row.object_id.clone(),
-        });
-        Self {
-            context_source_id: row.source_id.clone(),
-            pin,
-            ..Self::new(AndroidBrowseItem::Playlist { row })
-        }
-    }
-}
-impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
-    fn from(row: library::SmartPlaylistRow) -> Self {
-        let title = Some(rufin_core::playlists::smart_playlist_display_name(
-            &row.object_id,
-            &row.name,
-        ));
-        let pin = Some(SidebarPin::SmartPlaylist {
-            playlist_id: row.object_id.clone(),
-        });
-        Self {
-            display_title: title,
-            pin,
-            ..Self::new(AndroidBrowseItem::SmartPlaylist { row })
-        }
-    }
-}
-impl From<library::HomeAlbumRow> for AndroidBrowseRow {
-    fn from(row: library::HomeAlbumRow) -> Self {
-        Self {
-            display_title: Some(row.title),
-            ..row.album.into()
-        }
-    }
-}
-impl From<library::HomeTrackRow> for AndroidBrowseRow {
-    fn from(row: library::HomeTrackRow) -> Self {
-        Self {
-            display_title: Some(row.title),
-            ..row.track.into()
+            display_title,
+            ..Self::new(AndroidBrowseItem::Library { row })
         }
     }
 }
@@ -347,29 +298,6 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
             title: link.title.to_string(),
             url: link.url,
             icon_id: link.icon_name.into(),
-        }
-    }
-}
-
-impl From<library::PlaylistFolderRow> for AndroidBrowseRow {
-    fn from(row: library::PlaylistFolderRow) -> Self {
-        let pin = Some(SidebarPin::PlaylistFolder {
-            folder_id: row.object_id.clone(),
-            smart: row.smart,
-        });
-        Self {
-            pin,
-            ..Self::new(AndroidBrowseItem::PlaylistFolder { row })
-        }
-    }
-}
-
-impl From<library::PlaylistListRow> for AndroidBrowseRow {
-    fn from(row: library::PlaylistListRow) -> Self {
-        match row {
-            library::PlaylistListRow::Playlist(row) => row.into(),
-            library::PlaylistListRow::SmartPlaylist(row) => row.into(),
-            library::PlaylistListRow::Folder(row) => row.into(),
         }
     }
 }

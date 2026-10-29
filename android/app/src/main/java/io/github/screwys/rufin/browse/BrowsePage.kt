@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -136,8 +136,8 @@ internal class BrowsePage(
         fun sameContext(previous: PageContext?, current: PageContext?): Boolean =
             previous != null && previous == current
         launch {
-            connection.catalogPublications.collect { publication ->
-                if (if (pins) browse.library?.pinsRefresh(publication) == true else currentQuery?.refresh(publication) == true) changes++
+            connection.changes.collect { changed ->
+                if (if (pins) browse.library?.pinsRefresh(changed) == true else currentQuery?.refresh(changed) == true) changes++
             }
         }
         var favoriteJob: Job? = null

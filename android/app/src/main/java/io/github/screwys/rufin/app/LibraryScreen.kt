@@ -2,6 +2,7 @@ package io.github.screwys.rufin.app
 
 import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.browse.*
 import android.content.Intent
 import android.net.Uri

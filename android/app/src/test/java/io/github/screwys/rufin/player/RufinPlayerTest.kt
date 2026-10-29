@@ -39,7 +39,7 @@ class RufinPlayerTest {
                 albumTags = null, sourceLoudness = null, albumLoudness = null,
             ),
             state = TrackState(false, null, null, 0L, 0L),
-            access = TrackAccess(null, "", null, null, null, false, ByteArray(32)),
+            access = TrackAccess(null, "", null, null, null, false),
             links = TrackLinks(null, null, emptyList(), emptyList(), emptyList()),
         )
     }

@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -92,7 +92,7 @@ internal fun DetailContent(
             page.options.preparationError?.let { message -> item("detail-error") {
                 io.github.screwys.rufin.ui.ErrorNotice(message, Modifier.padding(horizontal = 16.dp))
             } }
-            if (artist && favorites != null && favoritesPage != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
+            if (artist && favorites != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))
                     if (summary.showTrackHeader) DetailTrackHeader(favoritesPage.detailTrackFields, favoritesPage.displaySettings?.size)

@@ -22,7 +22,7 @@ internal class BrowseOptions {
     var filter by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
     var downloadedOnly by mutableStateOf(false)
-    var sort by mutableStateOf<io.github.screwys.rufin.shared.rufin_core.LibraryField?>(null)
+    var sort by mutableStateOf<io.github.screwys.rufin.shared.library.LibraryField?>(null)
     var descending by mutableStateOf(false)
     var displaySettings by mutableStateOf<AndroidBrowseDisplay?>(null)
     /** When a Smart Playlist page opened: it keeps those members until the next visit. */
@@ -133,8 +133,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             }
         }
         scope.launch(Dispatchers.Default) {
-            connection.catalogPublications.collect { publication ->
-                if (library?.searchRefresh(searchMode, publication) == true) searchChanges++
+            connection.changes.collect { changed ->
+                if (library?.searchRefresh(searchMode, changed) == true) searchChanges++
             }
         }
         scope.launch {
@@ -284,8 +284,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             library?.playRows("pin:${item.row.key}", listOf(item.row.mediaUri), 0UL, placement, shuffled, translate("Pins"))
             return@playRequest
         }
-        if (item.query != null) item.query.play(item.index, item.row.mediaUri, item.row.trackKey, item.row.key,
-            item.row.albumKey, item.row.albumMediaUri, item.row.album, placement, shuffled, item.contextTitle)
+        if (item.query != null) item.query.play(item.index, placement, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
         else {
             val order = item.searchOrder ?: listOf(item.row.mediaUri)
             library?.playRows(item.searchContext ?: "track:${item.row.mediaUri}", order,

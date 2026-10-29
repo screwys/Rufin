@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -14,7 +14,6 @@ import io.github.screwys.rufin.shared.library.PlaylistFolderMember
 import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.shared.library.DownloadItem
 import io.github.screwys.rufin.shared.library.DownloadStatus
-import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
@@ -84,21 +83,15 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
 
 internal val AndroidBrowseRow.downloadItem: DownloadItem?
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> DownloadItem.Track(item.row.mediaUri)
-        is AndroidBrowseItem.PlaylistEntry -> DownloadItem.Track(item.row.track.mediaUri)
-        is AndroidBrowseItem.Album -> DownloadItem.Album(item.row.mediaUri)
-        is AndroidBrowseItem.Artist -> DownloadItem.Artist(item.row.mediaUri, item.albumArtist)
-        is AndroidBrowseItem.Genre -> DownloadItem.Genre(item.row.genreKey)
-        is AndroidBrowseItem.Mood -> DownloadItem.Mood(item.row.moodKey)
-        is AndroidBrowseItem.Playlist -> DownloadItem.Playlist(item.row.playlistKey)
-        is AndroidBrowseItem.SmartPlaylist -> DownloadItem.SmartPlaylist(item.row.smartPlaylistKey)
-        is AndroidBrowseItem.Recent -> when (item.row.kind) {
-            RecentSearchKind.TRACK -> DownloadItem.Track(item.row.mediaUri)
-            RecentSearchKind.ALBUM -> DownloadItem.Album(item.row.mediaUri)
-            RecentSearchKind.ARTIST -> DownloadItem.Artist(item.row.mediaUri, false)
-        }
-        else -> null
+    get() = when (val route = detailRoute) {
+        is Route.AlbumDetail -> DownloadItem.Album(route.v1)
+        is Route.ArtistDetail -> DownloadItem.Artist(route.v1, false)
+        is Route.AlbumArtistDetail -> DownloadItem.Artist(route.v1, true)
+        is Route.GenreDetail -> DownloadItem.Genre(route.v1)
+        is Route.MoodDetail -> DownloadItem.Mood(route.v1)
+        is Route.PlaylistDetail -> DownloadItem.Playlist(route.v1)
+        is Route.SmartPlaylistDetail -> DownloadItem.SmartPlaylist(route.v1)
+        else -> if (kind == "track") DownloadItem.Track(mediaUri) else null
     }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -207,8 +200,8 @@ internal fun BrowseMenuSheet(
     var delete by remember { mutableStateOf(false) }
     var random by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf(false) }
-    val playlistFolder = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.PlaylistFolder)?.row
-    val smartPlaylist = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.SmartPlaylist)?.row
+    val playlistFolder = item.row.playlistFolder
+    val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
     var memberFolder by remember(item.row.key) { mutableStateOf<Long?>(null) }
     LaunchedEffect(folderMember, browse.library) {
@@ -228,7 +221,7 @@ internal fun BrowseMenuSheet(
         if (canRate) ratingVisible = withContext(Dispatchers.IO) {
             model.connectedService().runtime.value!!.getOrThrow().settings().use { it.applicationPreferences().contextMenu.ratingVisible }
         }
-        if (item.row.item is io.github.screwys.rufin.core.AndroidBrowseItem.Recent) {
+        if (item.row.item is AndroidBrowseItem.Recent) {
             try { rating = browse.library?.rating(favoriteTarget(item.row.kind, item.row.mediaUri)) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { model.runAction { throw error } }
@@ -349,7 +342,7 @@ internal fun BrowseMenuSheet(
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
                 BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
             }
-            if ((item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.Playlist)?.row?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
+            if (item.row.playlist?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
                 MediaMenuDivider()
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
                 BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
@@ -566,7 +559,7 @@ internal fun PlaylistPickerSheet(
                             if (folderKind != null) {
                                 val source = model.sourceOwner ?: return@runAction
                                 movePlaylistToFolder(source, item.row.playlistFolderMember!!,
-                                    (playlist.item as AndroidBrowseItem.PlaylistFolder).row.folderKey)
+                                    playlist.playlistFolder!!.folderKey)
                             } else playlist.detailRoute?.let { destination ->
                                 browse.library?.let { library ->
                                     playlistSelection(library, item).use { selection ->

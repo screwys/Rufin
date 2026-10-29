@@ -37,75 +37,53 @@ impl AndroidBrowseQuery {
     ) -> Result<AndroidBrowsePage, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let page = self.opened_page(&cancel).await.map_err(error)?;
-            let OpenedCollection::Detail(Some(detail)) = page.opened() else {
-                let rows = self
-                    .rows(
-                        0,
-                        if matches!(page.opened(), OpenedCollection::Home(_)) {
-                            usize::MAX
-                        } else {
-                            64
-                        },
-                        &cancel,
-                    )
-                    .await
-                    .map_err(error)?;
-                let count = if matches!(page.opened(), OpenedCollection::Home(_)) {
-                    rows.len()
-                } else {
-                    page.len()
-                };
+            let opened = self.open(&cancel).await.map_err(error)?;
+            let view = &opened.view;
+            if view.home().is_some() {
+                let rows = self.home_rows(view).to_vec();
+                let _ = self.view.set(opened.view);
                 return Ok(AndroidBrowsePage {
-                    count: count as u64,
+                    count: rows.len() as u64,
                     rows,
                     summary: None,
                     groups: Vec::new(),
                     favorite_rows: Vec::new(),
                 });
-            };
-            let detail = detail.clone();
+            }
+            let rows = self.browse_rows(view, opened.rows, opened.first);
             let mut groups = Vec::new();
-            let mut favorite_rows = Vec::new();
-            let mut favorite_total = 0;
-            let (count, rows) = match detail.content {
-                rufin_core::browse::DetailContent::Tracks(page) => {
-                    let rows = self.member_rows(page.page.rows, page.page.first_row_position);
-                    (page.page.count as u64, rows)
+            if let Some((counts, _)) = view.release_counts() {
+                let mut index = 0;
+                for ((id, title), total) in ARTIST_RELEASE_GROUPS.iter().zip(counts) {
+                    groups.push(AndroidArtistReleaseGroup {
+                        id: (*id).into(),
+                        title: (*title).into(),
+                        total: total as u64,
+                        index,
+                    });
+                    index += total as u64;
                 }
-                rufin_core::browse::DetailContent::Releases { page, favorites } => {
-                    let mut first_rows = page.page.rows.into_iter();
-                    let mut rows = Vec::new();
-                    let mut index = 0;
-                    for (class, ((id, title), total)) in
-                        ARTIST_RELEASE_GROUPS.iter().zip(page.counts).enumerate()
-                    {
-                        rows.extend(
-                            first_rows
-                                .by_ref()
-                                .take(total)
-                                .map(|album| release_row(album, class)),
-                        );
-                        groups.push(AndroidArtistReleaseGroup {
-                            id: (*id).into(),
-                            title: (*title).into(),
-                            total: total as u64,
-                            index,
-                        });
-                        index += total as u64;
-                    }
-                    if let Some(page) = favorites {
-                        favorite_total = page.page.count as u64;
-                        favorite_rows =
-                            self.member_rows(page.page.rows, page.page.first_row_position);
-                    }
-                    (index, rows)
-                }
-            };
-            let summary = if embedded {
-                None
-            } else {
-                Some(self.detail_summary(detail.summary, favorite_total).await?)
+            }
+            let favorite_rows = opened
+                .favorites
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| match row {
+                    Row::Track(ref track) => AndroidBrowseRow {
+                        fields: self.track_fields(track, index),
+                        ..row.into()
+                    },
+                    row => row.into(),
+                })
+                .collect();
+            let favorite_total = view.favorites_len().unwrap_or(0) as u64;
+            let count = view.len() as u64;
+            let header = opened.header.filter(|_| !view.is_missing() && !embedded);
+            let _ = self.view.set(opened.view);
+            let summary = match header {
+                Some(header) => Some(self.detail_summary(header, favorite_total).await?),
+                None => None,
             };
             Ok(AndroidBrowsePage {
                 count,
@@ -122,45 +100,49 @@ impl AndroidBrowseQuery {
 impl AndroidBrowseQuery {
     async fn detail_summary(
         &self,
-        summary: rufin_core::browse::DetailSummary,
+        header: library::Header,
         favorite_total: u64,
     ) -> Result<AndroidDetailSummary, AndroidError> {
-        use rufin_core::browse::DetailSummary;
+        use library::{Header, PlaylistListRow, TagKind};
         let catalog = &self.catalog;
         let folder = self
             .selected
             .as_ref()
             .and_then(|selected| selected.music_folder_key);
-        let named = match &summary {
-            DetailSummary::Playlist(row) => Some((
-                AndroidBrowseRow::from(row.as_ref().clone()),
+        let named = match &header {
+            Header::Playlist(row) => Some((
                 row.artwork_binding.iter().cloned().collect(),
                 "Playlist",
+                Row::Playlist(PlaylistListRow::Playlist(row.as_ref().clone())),
             )),
-            DetailSummary::SmartPlaylist(row) => Some((
-                AndroidBrowseRow::from(row.as_ref().clone()),
+            Header::Smart(row) => Some((
                 row.artwork_binding.iter().cloned().collect(),
                 "Playlist",
+                Row::Playlist(PlaylistListRow::SmartPlaylist(row.as_ref().clone())),
             )),
-            DetailSummary::Genre(row) => Some((
-                AndroidBrowseRow::from(row.as_ref().clone()),
-                row.artwork_binding
-                    .as_ref()
-                    .map(std::slice::from_ref)
-                    .unwrap_or(&row.representative_artwork)
-                    .to_vec(),
-                "Genre",
-            )),
-            DetailSummary::Mood(row) => Some((
-                AndroidBrowseRow::from(row.as_ref().clone()),
-                row.representative_artwork.clone(),
-                "Mood",
-            )),
+            Header::Tag(row) => Some(if row.kind == TagKind::Genre {
+                (
+                    row.artwork_binding
+                        .as_ref()
+                        .map(std::slice::from_ref)
+                        .unwrap_or(&row.representative_artwork)
+                        .to_vec(),
+                    "Genre",
+                    Row::Tag(row.clone()),
+                )
+            } else {
+                (
+                    row.representative_artwork.clone(),
+                    "Mood",
+                    Row::Tag(row.clone()),
+                )
+            }),
             _ => None,
         };
-        if let Some((row, artwork_bindings, label)) = named {
-            let links = if let AndroidBrowseItem::Playlist { row: playlist } = &row.item {
-                row.context_source_id
+        if let Some((artwork_bindings, label, row)) = named {
+            let links = if let Header::Playlist(playlist) = &header {
+                playlist
+                    .source_id
                     .as_ref()
                     .and_then(|id| {
                         self.source
@@ -186,7 +168,7 @@ impl AndroidBrowseQuery {
                 .iter()
                 .any(|field| matches!(field, LibraryField::Image | LibraryField::TitleMerged));
             return Ok(AndroidDetailSummary {
-                row,
+                row: row.into(),
                 artwork_bindings,
                 artist_text: String::new(),
                 artist_links: Vec::new(),
@@ -239,8 +221,7 @@ impl AndroidBrowseQuery {
                 })
                 .collect::<Vec<AndroidDetailLink>>()
         };
-        if let DetailSummary::Album(album) = summary {
-            let album = *album;
+        if let Header::Album(album) = header {
             let links = present_links(rufin_core::detail_links::album_external_links(
                 &link_settings,
                 configuration.as_ref(),
@@ -254,13 +235,10 @@ impl AndroidBrowseQuery {
             let credited = rufin_core::route::detail_links::album_artist_links(&album);
             let artist_text = credited.display_text().to_string();
             let artist_links = AndroidArtistLink::from_detail_links(&credited)?;
-            let artwork_bindings = album.artwork_binding.iter().cloned().collect();
-            let mut row: AndroidBrowseRow = album.into();
-            row.context_source_id =
-                library::source_entity_parts(&uri).map(|(source, _, _)| source.to_string());
+            let artwork_bindings = album.row.artwork_binding.iter().cloned().collect();
             return Ok(AndroidDetailSummary {
                 artwork_bindings,
-                row,
+                row: Row::Album(album.row).into(),
                 artist_text,
                 artist_links,
                 label: "Album".into(),
@@ -275,7 +253,7 @@ impl AndroidBrowseQuery {
                 show_track_header: self.display.display.show_header,
             });
         }
-        let DetailSummary::Artist(artist) = summary else {
+        let Header::Artist(artist) = header else {
             unreachable!("artist detail")
         };
         let links = present_links(rufin_core::detail_links::artist_external_links(
@@ -283,11 +261,9 @@ impl AndroidBrowseQuery {
             configuration.as_ref(),
             &artist,
         ));
-        let album_count = artist.summary.album_count.max(0) as u64;
-        let artwork_bindings = artist.artwork_binding.iter().cloned().collect();
-        let mut row = artist_row(*artist, album_artist);
-        row.context_source_id =
-            library::source_entity_parts(&uri).map(|(source, _, _)| source.to_string());
+        let album_count = artist.row.summary.album_count.max(0) as u64;
+        let artwork_bindings = artist.row.artwork_binding.iter().cloned().collect();
+        let row = Row::Artist(artist.row).into();
         let favorite_route = if album_artist {
             Route::AlbumArtistFavoriteTracks(uri.clone())
         } else {

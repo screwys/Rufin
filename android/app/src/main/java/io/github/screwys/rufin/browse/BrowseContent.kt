@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.shared.rufin_core.LibraryField
+import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -73,7 +73,6 @@ import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
 import io.github.screwys.rufin.core.AndroidSortField
-import io.github.screwys.rufin.core.AndroidBrowseItem
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
@@ -375,7 +374,7 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true,
     title: String = item.row.title) {
     val row = item.row
-    val occurrence = row.item is AndroidBrowseItem.PlaylistEntry
+    val occurrence = row.track?.entry != null
     val queryContext = remember(item.query, occurrence) { if (occurrence) item.query?.contextId() else null }
     val playing by remember(row.kind, row.mediaUri, row.playbackContextId, occurrence, item.index, queryContext, player) { derivedStateOf {
         player != null && player.playingMediaUri != null &&
@@ -389,7 +388,7 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
             }
     } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (row.item is AndroidBrowseItem.PlaylistFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
+        if (row.playlistFolder != null) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
         if (playing) PlayingIndicator()
         Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,

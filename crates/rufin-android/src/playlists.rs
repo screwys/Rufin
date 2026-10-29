@@ -35,7 +35,7 @@ impl AndroidLibrary {
                 library::ListKind::Playlists
             },
             selected.as_ref().map(|selected| selected.source_key),
-            library::CatalogSort::Title,
+            library::LibraryField::Title,
         );
         read.folder = selected.and_then(|selected| selected.music_folder_key);
         read.filter = filter;
@@ -48,14 +48,19 @@ impl AndroidLibrary {
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
-                let count = read.count(&catalog, &cancel).await.map_err(error)? as u64;
-                let rows = read
-                    .playlist_items(&catalog, offset as usize, limit as usize, &cancel)
+                let order = catalog
+                    .order(&library::Read::List(read), &cancel)
+                    .await
+                    .map_err(error)?;
+                let offset = usize::try_from(offset).map_err(error)?;
+                let rows = catalog
+                    .rows(&order, offset..offset + limit as usize, true, &cancel)
                     .await
                     .map_err(error)?
                     .into_iter()
                     .map(Into::into)
                     .collect();
+                let count = order.len() as u64;
                 Ok(AndroidPlaylistChoices { count, rows })
             })
             .await
@@ -224,20 +229,11 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub async fn playlist_member_folder(
+    pub fn playlist_member_folder(
         &self,
         member: library::PlaylistFolderMember,
-    ) -> Result<Option<library::PlaylistFolderKey>, AndroidError> {
-        let catalog = self.catalog.clone();
-        self.runtime
-            .spawn(async move {
-                catalog
-                    .playlist_member_folder(&member, &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)?
+    ) -> Option<library::PlaylistFolderKey> {
+        self.catalog.playlist_member_folder(&member)
     }
 
     pub async fn save_smart_playlist(

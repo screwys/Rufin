@@ -12,7 +12,6 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
 import io.github.screwys.rufin.shared.library.PlaylistFolderRow
@@ -25,7 +24,7 @@ private data class PlaylistDrag(val member: PlaylistFolderMember, val smart: Boo
 @Composable
 internal fun Modifier.playlistFolderDrag(item: BrowseItem, model: RufinConnection): Modifier {
     val member = item.row.playlistFolderMember
-    val folder = (item.row.item as? AndroidBrowseItem.PlaylistFolder)?.row
+    val folder = item.row.playlistFolder
     if (member != null) return dragAndDropSource(transferData = { _ ->
         DragAndDropTransferData(ClipData.newPlainText("Rufin playlist", ""),
             localState = PlaylistDrag(member, member is PlaylistFolderMember.SmartPlaylist))

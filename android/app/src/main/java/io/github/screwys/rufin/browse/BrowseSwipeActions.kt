@@ -124,7 +124,7 @@ internal fun BrowseSwipeActions(
                 dragging = false
                 if (activate) {
                     val action = when { released < -threshold -> left; released > threshold -> right; else -> null }
-                    if (action != null) actions?.activate?.invoke(currentItem, action)
+                    if (action != null) actions.activate(currentItem, action)
                 }
                 settled.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow))

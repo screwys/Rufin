@@ -1,17 +1,21 @@
 use super::*;
+use library::{Item, MemberRead};
 use rufin_core::collection_context::CollectionTarget;
+use rufin_core::playback::PlayRequest;
+use rufin_core::source::feed::Changed;
+use rufin_core::view::Refresh;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
     /// Whether a committed change means the page reads again.
-    pub fn refresh(&self, publication: rufin_core::runtime::CatalogPublication) -> bool {
-        rufin_core::page::refresh(
+    pub fn refresh(&self, changed: Changed) -> bool {
+        rufin_core::view::refresh(
             &self.source,
             &self.route,
             self.selected.as_ref(),
-            &self.open_options(),
-            &publication,
-        ) != rufin_core::page::Refresh::Nothing
+            &self.options,
+            &changed,
+        ) != Refresh::Nothing
     }
 
     pub fn context_id(&self) -> String {
@@ -26,7 +30,7 @@ impl AndroidBrowseQuery {
         );
         format!(
             "{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
-            self.filter,
+            self.options.filter,
             self.selected
                 .as_ref()
                 .map_or("rufin", |selected| selected.source_id.as_str()),
@@ -48,11 +52,11 @@ impl AndroidBrowseQuery {
         ))
     }
     pub fn supports_downloaded_filter(&self) -> bool {
-        rufin_core::browse::supports_downloaded_filter(&self.route, self.category)
+        rufin_core::view::supports_downloaded_filter(&self.route, self.options.category)
     }
 
     pub fn supports_favorite_filter(&self) -> bool {
-        rufin_core::browse::supports_favorite_filter(&self.route, self.category)
+        rufin_core::view::supports_favorite_filter(&self.route, self.options.category)
     }
 
     pub fn breadcrumbs(&self) -> Vec<AndroidBreadcrumb> {
@@ -82,7 +86,7 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
             let sections = self
-                .opened_page(&cancel)
+                .view(&cancel)
                 .await
                 .map_err(error)?
                 .sections(&cancel)
@@ -115,24 +119,20 @@ impl AndroidBrowseQuery {
         runtime
             .spawn(async move {
                 let cancel = ReadCancellation::new();
+                let view = self.view(&cancel).await.map_err(error)?;
                 let selections = self
-                    .home_rows(&cancel)
-                    .await
-                    .map_err(error)?
+                    .home_rows(view)
                     .iter()
-                    .filter(|(row, _)| row.section_id == section_id)
-                    .map(|(_, selection)| selection.clone())
+                    .filter(|row| row.section_id == section_id)
+                    .filter_map(home_selection)
                     .collect();
                 self.playback.play_selection(
-                    rufin_core::playback::PlayRequest::captured(
-                        MemberSelection::Concat(selections),
-                        0,
-                        placement,
-                        false,
-                    )
-                    .with_context(format!("home:{}:{section_id}", self.selected().source_id).into())
-                    .with_context_title(title)
-                    .shuffled(shuffled),
+                    PlayRequest::captured(MemberSelection::Concat(selections), 0, placement, false)
+                        .with_context(
+                            format!("home:{}:{section_id}", self.selected().source_id).into(),
+                        )
+                        .with_context_title(title)
+                        .shuffled(shuffled),
                 );
                 Ok(())
             })
@@ -143,11 +143,11 @@ impl AndroidBrowseQuery {
     pub async fn count(self: Arc<Self>) -> Result<u64, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let page = self.opened_page(&cancel).await.map_err(error)?;
-            let count = if matches!(page.opened(), OpenedCollection::Home(_)) {
-                self.home_rows(&cancel).await.map_err(error)?.len()
+            let view = self.view(&cancel).await.map_err(error)?;
+            let count = if view.home().is_some() {
+                self.home_rows(view).len()
             } else {
-                page.len()
+                view.len()
             };
             Ok(count as u64)
         })
@@ -155,7 +155,7 @@ impl AndroidBrowseQuery {
     }
 
     pub fn sort_fields(&self) -> Vec<AndroidSortField> {
-        let key = library_list_key(&self.route, self.category);
+        let key = library_list_key(&self.route, self.options.category);
         rufin_core::settings::available_sort_fields(key)
             .iter()
             .map(|field| AndroidSortField {
@@ -171,7 +171,10 @@ impl AndroidBrowseQuery {
         let mut display = self.display.clone();
         display.sort_key = self.sort;
         display.descending = self.descending;
-        browse_display(library_list_key(&self.route, self.category), &display)
+        browse_display(
+            library_list_key(&self.route, self.options.category),
+            &display,
+        )
     }
 
     pub async fn page(
@@ -181,122 +184,128 @@ impl AndroidBrowseQuery {
     ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            self.rows(
-                usize::try_from(offset).map_err(error)?,
-                limit.min(256) as usize,
-                &cancel,
-            )
-            .await
-            .map_err(error)
+            let offset = usize::try_from(offset).map_err(error)?;
+            self.rows(offset..offset + limit.min(256) as usize, &cancel)
+                .await
+                .map_err(error)
         })
         .await
     }
 
+    /// Plays the page from its row `index`. A track of the Albums list in Detail layout plays
+    /// its album, which `context_title` names.
     pub async fn play(
         self: Arc<Self>,
         index: u64,
-        media_uri: String,
-        track_key: Option<i64>,
-        row_key: String,
-        album_key: Option<i64>,
-        album_media_uri: Option<String>,
-        album_title: String,
         placement: String,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
         let placement = queue_placement(&placement)?;
-        let context_title = context_caption(&self.route, context_title);
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
                 let index = usize::try_from(index).map_err(error)?;
                 let cancel = ReadCancellation::new();
-                let track_key = match track_key {
-                    Some(key) => library::TrackKey::from_raw(key),
-                    None => self
-                        .catalog
-                        .track(&media_uri, &cancel)
-                        .await
-                        .map_err(error)?
-                        .map(|row| row.track_key)
-                        .ok_or_else(|| error("Track is no longer available"))?,
-                };
-                let (selection, anchor, entry, title, context) = if self.album_detail_layout() {
-                    let album = album_key
-                        .map(library::AlbumKey::from_raw)
-                        .ok_or_else(|| error("Album is no longer available"))?;
-                    let mut query = MemberRead::new(Collection::Album(album));
-                    query.sort = Some(self.album_tracks.sort_key.catalog_sort());
-                    query.descending = self.album_tracks.descending;
-                    let title = Some(Arc::new(library::QueueContextTitle {
-                        kind: Some("Album".into()),
-                        title: album_title.into(),
-                    }));
-                    (
-                        query.selection(),
-                        0,
-                        None,
-                        title,
-                        format!(
-                            "{}|query=|sort={:?}|descending={}",
-                            CollectionTarget::Album(album_media_uri.unwrap_or_default())
-                                .context_id(),
-                            self.album_tracks.sort_key,
-                            self.album_tracks.descending
-                        ),
-                    )
-                } else if let Some(query) =
-                    self.opened_page(&cancel).await.map_err(error)?.members()
-                {
-                    let entry = if matches!(query.collection, Collection::Playlist(_)) {
-                        Some(serde_json::from_str(&row_key).map_err(error)?)
-                    } else {
-                        None
-                    };
-                    (
-                        query.clone().selection(),
-                        if let OpenedCollection::Folders(page) =
-                            self.opened_page(&cancel).await.map_err(error)?.opened()
-                        {
-                            index.saturating_sub(page.folder_count)
-                        } else {
-                            index
-                        },
-                        entry,
-                        context_title,
-                        self.context_id(),
-                    )
-                } else {
-                    let rows = self.rows(0, usize::MAX, &cancel).await.map_err(error)?;
+                let view = self.view(&cancel).await.map_err(error)?;
+                let gone = || error("Track is no longer in this route");
+                let caption = context_caption(&self.route, context_title.clone());
+                let request = if view.home().is_some() {
+                    let rows = self.home_rows(view);
+                    let key = rows
+                        .get(index)
+                        .and_then(AndroidBrowseRow::track)
+                        .ok_or_else(gone)?
+                        .track_key;
                     let keys = rows
-                        .into_iter()
-                        .filter_map(|row| row.track_key())
-                        .collect::<Vec<_>>();
-                    let anchor = keys
                         .iter()
-                        .position(|key| *key == track_key)
-                        .ok_or_else(|| error("Track is no longer in this route"))?;
-                    (
+                        .filter_map(|row| Some(row.track()?.track_key))
+                        .collect::<Vec<_>>();
+                    let anchor = rows[..index]
+                        .iter()
+                        .filter(|row| row.track().is_some())
+                        .count();
+                    PlayRequest::captured(
                         MemberSelection::Keys {
                             source: None,
                             keys: keys.into(),
                         },
                         anchor,
-                        None,
-                        context_title,
-                        self.context_id(),
+                        placement,
+                        false,
                     )
+                    .with_context(self.context_id().into())
+                    .with_anchor(key, None)
+                    .with_context_title(caption)
+                } else {
+                    match view.item(index, &cancel).await.map_err(error)? {
+                        Some(Item::AlbumTrack { key, .. }) if self.album_detail_layout() => {
+                            let album = view
+                                .album_spans(&cancel)
+                                .await
+                                .map_err(error)?
+                                .unwrap_or_default()
+                                .into_iter()
+                                .rfind(|span| span.first < index)
+                                .ok_or_else(gone)?
+                                .album;
+                            let mut read = MemberRead::new(Collection::Album(album));
+                            read.sort = Some(self.album_tracks.sort_key);
+                            read.descending = self.album_tracks.descending;
+                            let album_uri = self
+                                .catalog
+                                .uri(Item::Album(album))
+                                .ok_or_else(|| error("Album is no longer available"))?;
+                            PlayRequest::captured(read.selection(), 0, placement, false)
+                                .with_context(
+                                    format!(
+                                        "{}|query=|sort={:?}|descending={}",
+                                        CollectionTarget::Album(album_uri).context_id(),
+                                        self.album_tracks.sort_key,
+                                        self.album_tracks.descending
+                                    )
+                                    .into(),
+                                )
+                                .with_anchor(key, None)
+                                .with_context_title(context_title.map(|title| {
+                                    Arc::new(library::QueueContextTitle {
+                                        kind: Some("Album".into()),
+                                        title: title.into(),
+                                    })
+                                }))
+                        }
+                        item => {
+                            let read = view.members().ok_or_else(gone)?;
+                            let (key, entry) = match item {
+                                Some(Item::Track { key, entry }) => (key, entry),
+                                // A History row names its listen; its row holds the track.
+                                Some(Item::Listen(_)) => (
+                                    view.rows(index..index + 1, &cancel)
+                                        .await
+                                        .map_err(error)?
+                                        .into_iter()
+                                        .find_map(|row| match row {
+                                            Row::Track(track) => Some(track.track_key),
+                                            _ => None,
+                                        })
+                                        .ok_or_else(gone)?,
+                                    None,
+                                ),
+                                _ => return Err(gone()),
+                            };
+                            PlayRequest::captured(
+                                read.clone().selection(),
+                                index - view.folder_len().unwrap_or(0),
+                                placement,
+                                false,
+                            )
+                            .with_context(self.context_id().into())
+                            .with_anchor(key, entry)
+                            .with_context_title(caption)
+                        }
+                    }
                 };
-                self.playback.play_selection(
-                    rufin_core::playback::PlayRequest::captured(
-                        selection, anchor, placement, false,
-                    )
-                    .with_context(context.into())
-                    .with_anchor(track_key, entry)
-                    .with_context_title(title)
-                    .shuffled(shuffled),
-                );
+                self.playback.play_selection(request.shuffled(shuffled));
                 Ok(())
             })
             .await

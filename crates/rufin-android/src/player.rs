@@ -171,54 +171,63 @@ impl AndroidPlayer {
             .spawn(async move {
                 use rufin_core::route::Route;
                 use rufin_core::route::detail_links::{
-                    DetailLinks, album_artist_links, metadata_links, track_artist_links,
+                    DetailLinks, metadata_links, track_artist_links,
                 };
-                use rufin_core::settings::layout::LibraryField;
+                use rufin_core::settings::LibraryField;
                 let cancellation = library::ReadCancellation::new();
-                let entity = library::source_entity_parts(&media_uri);
-                let (artists, album, source_id) = match entity {
-                    Some((source, kind, _)) if kind == "album" => {
-                        let Some(album) = catalog
-                            .album(&media_uri, false, &cancellation)
-                            .await
-                            .map_err(error)?
-                        else {
+                let (artists, album, source_id) = match library::source_entity_parts(&media_uri) {
+                    Some((source, kind, _)) if kind == "album" || kind == "artist" => {
+                        catalog.loaded().await;
+                        let Some(item) = catalog.item(&media_uri) else {
                             return Ok(None);
                         };
-                        (
-                            album_artist_links(&album),
-                            DetailLinks::route(
-                                &album.metadata.title,
-                                Some(Route::AlbumDetail(media_uri.clone())),
-                            ),
-                            Some(source.to_string()),
-                        )
-                    }
-                    Some((source, kind, _)) if kind == "artist" => {
-                        let Some(artist) = catalog
-                            .artist(
-                                &media_uri,
-                                matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
-                                false,
-                                &cancellation,
-                            )
+                        let row = catalog
+                            .rows_of(&[item], false, &cancellation)
                             .await
                             .map_err(error)?
-                        else {
-                            return Ok(None);
-                        };
-                        let name = artist.metadata.name;
-                        let route = match &origin_route {
-                            Some(Route::AlbumArtistDetail(uri)) if *uri == media_uri => {
-                                Route::AlbumArtistDetail(uri.clone())
+                            .pop();
+                        match row {
+                            Some(library::Row::Album(album)) => {
+                                let credits = album
+                                    .links
+                                    .album_artists
+                                    .into_iter()
+                                    .map(|credit| library::TrackArtistLink {
+                                        artist_key: credit.artist_key,
+                                        media_uri: credit.media_uri,
+                                        name: credit.name,
+                                    })
+                                    .collect::<Vec<_>>();
+                                (
+                                    metadata_links(
+                                        LibraryField::AlbumArtist,
+                                        &album.artist,
+                                        None,
+                                        &[],
+                                        &credits,
+                                    ),
+                                    DetailLinks::route(
+                                        &album.title,
+                                        Some(Route::AlbumDetail(media_uri.clone())),
+                                    ),
+                                    Some(source.to_string()),
+                                )
                             }
-                            _ => Route::ArtistDetail(media_uri.clone()),
-                        };
-                        (
-                            DetailLinks::route(&name, Some(route)),
-                            DetailLinks::default(),
-                            Some(source.to_string()),
-                        )
+                            Some(library::Row::Artist(artist)) => {
+                                let route = match &origin_route {
+                                    Some(Route::AlbumArtistDetail(uri)) if *uri == media_uri => {
+                                        Route::AlbumArtistDetail(uri.clone())
+                                    }
+                                    _ => Route::ArtistDetail(media_uri.clone()),
+                                };
+                                (
+                                    DetailLinks::route(&artist.name, Some(route)),
+                                    DetailLinks::default(),
+                                    Some(source.to_string()),
+                                )
+                            }
+                            _ => return Ok(None),
+                        }
                     }
                     _ => {
                         let Some(track) = catalog
@@ -255,32 +264,35 @@ impl AndroidPlayer {
                 );
                 let mut artist_links = AndroidArtistLink::from_detail_links(&artists)?;
                 let mut album_links = AndroidArtistLink::from_detail_links(&album)?;
-                let media_uris: Vec<_> = artists
-                    .spans()
+                // Each link shows its album's or artist's picture.
+                let items = artist_links
                     .iter()
-                    .chain(album.spans())
-                    .map(|link| match &link.route {
-                        rufin_core::route::Route::ArtistDetail(uri)
-                        | rufin_core::route::Route::AlbumArtistDetail(uri)
-                        | rufin_core::route::Route::AlbumDetail(uri) => uri.clone(),
-                        _ => unreachable!("Artist and album metadata links"),
+                    .chain(&album_links)
+                    .filter_map(|link| match &link.route {
+                        Route::ArtistDetail(uri)
+                        | Route::AlbumArtistDetail(uri)
+                        | Route::AlbumDetail(uri) => catalog.item(uri),
+                        _ => None,
                     })
-                    .collect();
-                let mut bindings = Vec::with_capacity(media_uris.len());
-                for window in media_uris.chunks(128) {
-                    bindings.extend(
-                        catalog
-                            .artwork_bindings(window, &cancellation)
-                            .await
-                            .map_err(error)?,
-                    );
-                }
-                for (link, binding) in artist_links
-                    .iter_mut()
-                    .chain(&mut album_links)
-                    .zip(bindings)
-                {
-                    link.artwork_identity = binding;
+                    .collect::<Vec<_>>();
+                let pictures = catalog
+                    .rows_of(&items, true, &cancellation)
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .filter_map(|row| match row {
+                        library::Row::Album(row) => Some((row.media_uri, row.artwork_binding)),
+                        library::Row::Artist(row) => Some((row.media_uri, row.artwork_binding)),
+                        _ => None,
+                    })
+                    .collect::<std::collections::HashMap<_, _>>();
+                for link in artist_links.iter_mut().chain(&mut album_links) {
+                    if let Route::ArtistDetail(uri)
+                    | Route::AlbumArtistDetail(uri)
+                    | Route::AlbumDetail(uri) = &link.route
+                    {
+                        link.artwork_identity = pictures.get(uri).cloned().flatten();
+                    }
                 }
                 Ok(Some(AndroidPlayerMetadata {
                     media_uri,

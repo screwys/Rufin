@@ -98,7 +98,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
-    val combined = lyricsEnabled && visualizerEnabled && application?.rightPanel?.combined == true
+    val combined = lyricsEnabled && visualizerEnabled && application.rightPanel.combined
     val background = animateColorAsState(
         if (application?.display?.fullscreenDynamicBackground == true)
             lerp(MaterialTheme.colorScheme.surface, artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)

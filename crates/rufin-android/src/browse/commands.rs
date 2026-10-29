@@ -1,4 +1,5 @@
 use super::*;
+use rufin_core::source::feed::Changed;
 
 fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
     let descriptor = sidebar_route_descriptor(item);
@@ -36,15 +37,28 @@ impl AndroidLibrary {
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             let mut read = query
-                .opened_page(&cancel)
+                .view(&cancel)
                 .await
                 .map_err(error)?
                 .members()
                 .expect("Folder query has members")
                 .clone();
-            let total = read.count(&catalog, &cancel).await.map_err(error)? as u64;
+            let count = |read: library::MemberRead| {
+                let catalog = &catalog;
+                let cancel = &cancel;
+                async move {
+                    Ok::<_, AndroidError>(
+                        catalog
+                            .order(&library::Read::Members(read), cancel)
+                            .await
+                            .map_err(error)?
+                            .len() as u64,
+                    )
+                }
+            };
+            let total = count(read.clone()).await?;
             read.downloaded_only = true;
-            let downloaded = read.count(&catalog, &cancel).await.map_err(error)? as u64;
+            let downloaded = count(read).await?;
             Ok(library::DownloadStatus { total, downloaded })
         })
         .await
@@ -120,28 +134,37 @@ impl AndroidLibrary {
         {
             return Err(error("No source selected"));
         }
+        let options = OpenOptions {
+            category,
+            filter,
+            sort: Some(sort),
+            descending: Some(descending),
+            favorites_only,
+            downloaded_only,
+            history_source: selected
+                .as_ref()
+                .filter(|_| history_current_only)
+                .map(|selected| selected.source_id.clone()),
+            smart_opened,
+            ..Default::default()
+        };
         Ok(Arc::new(AndroidBrowseQuery {
             selected,
             catalog: self.catalog.clone(),
             runtime: self.runtime.clone(),
             playback: self.playback.clone(),
+            source: self.source.clone(),
+            settings: self.settings.clone(),
             route,
-            home_snapshot: tokio::sync::OnceCell::new(),
-            history_current_only,
-            smart_opened,
-            favorites_only,
-            downloaded_only,
-            category,
+            options,
+            sort,
+            descending,
             display,
             album_tracks: settings.library_list(LibraryListKey::AlbumDetailTracks),
             artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
-            source: self.source.clone(),
-            settings: self.settings.clone(),
-            page: tokio::sync::OnceCell::new(),
-            filter,
-            sort,
-            descending,
             blocks: settings.application.home_blocks,
+            view: tokio::sync::OnceCell::new(),
+            home: std::sync::OnceLock::new(),
         }))
     }
 }
@@ -255,34 +278,26 @@ impl AndroidLibrary {
             library::RadioSeed::Track(media_uri)
         } else {
             let route = route.ok_or_else(|| error("Choose a radio seed"))?;
-            let catalog = self.catalog.clone();
-            self.runtime
-                .spawn(async move {
-                    let cancel = ReadCancellation::new();
-                    match route {
-                        Route::AlbumDetail(uri) => catalog
-                            .album(&uri, false, &cancel)
-                            .await
-                            .map_err(error)?
-                            .map(|row| library::RadioSeed::Album(row.album_key)),
-                        Route::ArtistDetail(uri) => catalog
-                            .artist(&uri, false, false, &cancel)
-                            .await
-                            .map_err(error)?
-                            .map(|row| library::RadioSeed::Artist(row.artist_key)),
-                        Route::AlbumArtistDetail(uri) => catalog
-                            .artist(&uri, true, false, &cancel)
-                            .await
-                            .map_err(error)?
-                            .map(|row| library::RadioSeed::AlbumArtist(row.artist_key)),
-                        Route::GenreDetail(key) => Some(library::RadioSeed::Genre(key)),
-                        Route::PlaylistDetail(key) => Some(library::RadioSeed::Playlist(key)),
-                        _ => None,
+            match &route {
+                Route::AlbumDetail(uri)
+                | Route::ArtistDetail(uri)
+                | Route::AlbumArtistDetail(uri) => match (self.catalog.item(uri), &route) {
+                    (Some(library::Item::Album(key)), Route::AlbumDetail(_)) => {
+                        Some(library::RadioSeed::Album(key))
                     }
-                    .ok_or_else(|| error("This item has no radio action"))
-                })
-                .await
-                .map_err(error)??
+                    (Some(library::Item::Artist { key, .. }), Route::ArtistDetail(_)) => {
+                        Some(library::RadioSeed::Artist(key))
+                    }
+                    (Some(library::Item::Artist { key, .. }), Route::AlbumArtistDetail(_)) => {
+                        Some(library::RadioSeed::AlbumArtist(key))
+                    }
+                    _ => None,
+                },
+                Route::GenreDetail(key) => Some(library::RadioSeed::Genre(*key)),
+                Route::PlaylistDetail(key) => Some(library::RadioSeed::Playlist(*key)),
+                _ => None,
+            }
+            .ok_or_else(|| error("This item has no radio action"))?
         };
         self.playback
             .play_radio(rufin_core::playback::RadioPlayRequest {
@@ -426,23 +441,16 @@ impl AndroidLibrary {
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        let catalog = self.catalog.clone();
-        self.runtime
-            .spawn(async move {
-                let genre = catalog
-                    .genres(&[key], &ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                    .pop()
-                    .ok_or_else(|| error("Genre is no longer available"))?;
-                Ok(Some(rufin_core::settings::RandomPlayGenreSelection {
-                    source_id: selected.source_id,
-                    music_folder_id: selected.music_folder_object_id,
-                    genre_id: genre.object_id,
-                }))
-            })
-            .await
-            .map_err(error)?
+        let (_, _, genre_id) = self
+            .catalog
+            .uri(library::Item::Genre(key))
+            .and_then(|uri| library::source_entity_parts(&uri))
+            .ok_or_else(|| error("Genre is no longer available"))?;
+        Ok(Some(rufin_core::settings::RandomPlayGenreSelection {
+            source_id: selected.source_id,
+            music_folder_id: selected.music_folder_object_id,
+            genre_id,
+        }))
     }
 
     pub async fn random_genre_title(
@@ -468,10 +476,7 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        Ok(genre.map_or_else(
-            || localization::tr("Any genre"),
-            |genre| genre.metadata.name,
-        ))
+        Ok(genre.map_or_else(|| localization::tr("Any genre"), |genre| genre.name))
     }
 
     pub async fn random_play(
@@ -584,12 +589,12 @@ impl AndroidLibrary {
                             .album(uri, false, &cancellation)
                             .await
                             .map_err(error)?
-                            .and_then(|row| row.state.rating),
+                            .and_then(|row| row.row.state.rating),
                         library::FavoriteTarget::Artist(uri) => catalog
                             .artist(uri, false, false, &cancellation)
                             .await
                             .map_err(error)?
-                            .and_then(|row| row.state.rating),
+                            .and_then(|row| row.row.state.rating),
                     };
                     rating.and_then(|value| u8::try_from(value).ok())
                 };
@@ -621,7 +626,7 @@ impl AndroidLibrary {
             .pop()
             .ok_or_else(|| error("Playlist no longer exists"))?;
         Ok(AndroidPlaylistImport {
-            row: row.into(),
+            row: Row::Playlist(library::PlaylistListRow::Playlist(row)).into(),
             skipped: imported.skipped,
         })
     }
@@ -631,17 +636,13 @@ impl AndroidLibrary {
     }
 
     /// Whether a committed change can change the pins.
-    pub fn pins_refresh(&self, publication: rufin_core::runtime::CatalogPublication) -> bool {
-        rufin_core::page::pins_refresh(&self.source, &publication)
+    pub fn pins_refresh(&self, changed: Changed) -> bool {
+        rufin_core::view::pins_refresh(&self.source, &changed)
     }
 
     /// Whether a committed change means a search reads again.
-    pub fn search_refresh(
-        &self,
-        mode: library::SearchMode,
-        publication: rufin_core::runtime::CatalogPublication,
-    ) -> bool {
-        rufin_core::page::refresh(
+    pub fn search_refresh(&self, mode: library::SearchMode, changed: Changed) -> bool {
+        rufin_core::view::refresh(
             &self.source,
             &Route::Search,
             None,
@@ -649,8 +650,8 @@ impl AndroidLibrary {
                 search_mode: mode,
                 ..Default::default()
             },
-            &publication,
-        ) != rufin_core::page::Refresh::Nothing
+            &changed,
+        ) != rufin_core::view::Refresh::Nothing
     }
 
     pub async fn pins(&self, offset: u64, limit: u32) -> Result<AndroidPinPage, AndroidError> {
@@ -677,48 +678,34 @@ impl AndroidLibrary {
         self.runtime
             .spawn(async move {
                 let cancel = ReadCancellation::new();
-                let mut pinned = catalog.pin_rows(&pins, &cancel).await.map_err(error)?;
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_err(error)?
                     .as_secs() as i64;
-                catalog
-                    .complete_pin_rows(&mut pinned, now, &cancel)
+                let rows = catalog
+                    .pin_rows(&pins, now, &cancel)
                     .await
-                    .map_err(error)?;
-                let mut rows = Vec::new();
-                for (pin, row) in pinned {
-                    let mut row: AndroidBrowseRow = match row {
-                        library::PinRow::Album(row) => (*row).into(),
-                        library::PinRow::Artist(row) => artist_row(
-                            row,
-                            matches!(
-                                pin,
-                                SidebarPin::Artist {
-                                    album_artist: true,
-                                    ..
-                                }
-                            ),
-                        ),
-                        library::PinRow::Genre(row) => row.into(),
-                        library::PinRow::Playlist(row) => row.into(),
-                        library::PinRow::SmartPlaylist(row) => row.into(),
-                        library::PinRow::PlaylistFolder(row) => row.into(),
-                    };
-                    row.context_source_id = match &pin {
-                        SidebarPin::Album { source_id, .. }
-                        | SidebarPin::Artist { source_id, .. }
-                        | SidebarPin::Genre { source_id, .. } => Some(source_id.to_string()),
-                        SidebarPin::Playlist { source_id, .. } => {
-                            source_id.as_ref().map(ToString::to_string)
+                    .map_err(error)?
+                    .into_iter()
+                    .map(|(pin, row)| AndroidBrowseRow {
+                        pin: Some(pin),
+                        ..match row {
+                            library::PinRow::Album(row) => Row::Album(*row),
+                            library::PinRow::Artist(row) => Row::Artist(row),
+                            library::PinRow::Genre(row) => Row::Tag(row),
+                            library::PinRow::Playlist(row) => {
+                                Row::Playlist(library::PlaylistListRow::Playlist(row))
+                            }
+                            library::PinRow::SmartPlaylist(row) => {
+                                Row::Playlist(library::PlaylistListRow::SmartPlaylist(row))
+                            }
+                            library::PinRow::PlaylistFolder(row) => {
+                                Row::Playlist(library::PlaylistListRow::Folder(row))
+                            }
                         }
-                        SidebarPin::SmartPlaylist { .. } | SidebarPin::PlaylistFolder { .. } => {
-                            None
-                        }
-                    };
-                    row.pin = Some(pin);
-                    rows.push(row);
-                }
+                        .into()
+                    })
+                    .collect();
                 Ok(AndroidPinPage {
                     rows,
                     next_offset,

@@ -1,7 +1,7 @@
 package io.github.screwys.rufin.app
 
 import io.github.screwys.rufin.shared.rufin_core.Route
-import io.github.screwys.rufin.shared.rufin_core.CatalogPublication
+import io.github.screwys.rufin.shared.rufin_core.Changed
 import io.github.screwys.rufin.shared.library.sourceIdForUri
 
 import io.github.screwys.rufin.browse.BrowseConnection
@@ -26,7 +26,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.core.AndroidLibrary
 import io.github.screwys.rufin.core.AndroidLibraryEvents
-import io.github.screwys.rufin.shared.rufin_core.FavoriteState
+import io.github.screwys.rufin.shared.library.StateChange
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.SourceOperation
 import io.github.screwys.rufin.shared.rufin_core.SourceOwner
@@ -55,10 +55,10 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
     /** Favorites as they were committed; rows that show them update in place. */
-    private val states = MutableSharedFlow<FavoriteState>(extraBufferCapacity = 32)
-    private val publications = MutableSharedFlow<CatalogPublication>(extraBufferCapacity = 64)
+    private val states = MutableSharedFlow<StateChange>(extraBufferCapacity = 32)
+    private val feed = MutableSharedFlow<Changed>(extraBufferCapacity = 64)
     /** Committed library changes; each page asks its query whether one touches it. */
-    internal val catalogPublications = publications.asSharedFlow()
+    internal val changes = feed.asSharedFlow()
     internal val favoriteStates = states.asSharedFlow()
     internal var overviewExportName by mutableStateOf<String?>(null)
         private set
@@ -166,7 +166,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 sourceOwner = owner
                 val sourceChanges = owner.subscribe()
                 val operations = owner.subscribeOperation()
-                val catalog = owner.subscribeCatalog()
+                val catalog = owner.changes()
                 debugLogging = core.debugLogging()
                 try {
                     sources = withContext(Dispatchers.Default) { sourceChanges.next() }
@@ -186,10 +186,10 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                         }
                         launch {
                             while (isActive) {
-                                val publication = withContext(Dispatchers.Default) { catalog.next() }
-                                publication.favorites.forEach { states.emit(it) }
+                                val changed = withContext(Dispatchers.Default) { catalog.next() } ?: break
+                                changed.items.forEach { states.emit(it) }
                                 catalogChanges++
-                                publications.emit(publication)
+                                feed.emit(changed)
                             }
                         }
                         while (isActive) {
