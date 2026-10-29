@@ -3,18 +3,20 @@ use std::{
     collections::HashSet,
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::Ordering},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
 use async_channel::Receiver;
+use futures_util::future::BoxFuture;
 use gio::prelude::*;
 use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, ReadCancellation, Scope, SourceId};
-use tokio::sync::broadcast::error::RecvError;
+use tokio::time::Instant;
 
 use crate::{
+    features::{Feature, Next},
     runtime::{CatalogChange, CatalogPublication},
-    source::{SourceOwner, string_error},
+    source::{Shared, SourceOwner, string_error},
 };
 
 const LOCAL_CONFLICT: &str =
@@ -25,103 +27,105 @@ pub(crate) const FILE_CONFLICT: &str =
 /// How often linked files are checked for changes made outside Rufin.
 const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Linked playlist files, installed while some playlist is linked: a check of the files every
-/// five minutes, and edits heard on the change feed save the file when it saves automatically.
-/// The edit itself marks its link changed.
-#[derive(Default)]
+/// Linked playlist files, installed while some playlist is linked: a check of the files when it
+/// installs and every five minutes, and edits heard on the change feed save the file when it
+/// saves automatically. The edit itself marks its link changed.
 pub(crate) struct Links {
-    linked: HashSet<PlaylistKey>,
-    task: Option<tokio::task::AbortHandle>,
-}
-
-/// Reads which playlists are linked, and installs or removes the feature to match.
-pub(crate) async fn links_changed(owner: &SourceOwner) {
-    let linked = match owner.shared.catalog.linked_playlists().await {
-        Ok(linked) => linked,
-        Err(error) => {
-            owner.shared.warn_nonfatal(&error.to_string());
-            return;
-        }
-    };
-    let mut links = owner.shared.links.lock().unwrap_or_else(|p| p.into_inner());
-    if !links.set(linked) || links.task.is_some() || !owner.shared.started.load(Ordering::Acquire) {
-        return;
-    }
-    let weak = Arc::downgrade(&owner.shared);
-    let mut changes = owner.shared.catalog.changes();
-    links.task = Some(
-        owner
-            .shared
-            .runtime
-            .spawn(async move {
-                let mut interval = tokio::time::interval(CHECK_INTERVAL);
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let Some(shared) = weak.upgrade() else { return };
-                            refresh_links(&SourceOwner { shared }, None).await;
-                        }
-                        change = changes.recv() => match change {
-                            Ok(change) => {
-                                let Some(shared) = weak.upgrade() else { return };
-                                edited(&SourceOwner { shared }, &change).await;
-                            }
-                            // The next check finds what was saved meanwhile.
-                            Err(RecvError::Lagged(_)) => {}
-                            Err(RecvError::Closed) => return,
-                        },
-                    }
-                }
-            })
-            .abort_handle(),
-    );
+    shared: Weak<Shared>,
+    linked: Mutex<HashSet<PlaylistKey>>,
+    /// The linked playlists were just read to decide that the feature is wanted.
+    fresh: std::sync::atomic::AtomicBool,
 }
 
 impl Links {
-    /// Takes the linked playlists as the Store holds them; with none left the feature goes.
-    /// Whether some remain.
-    fn set(&mut self, linked: Vec<PlaylistKey>) -> bool {
-        self.linked = linked.into_iter().collect();
-        if self.linked.is_empty()
-            && let Some(task) = self.task.take()
-        {
-            task.abort();
+    pub(crate) fn new(shared: Weak<Shared>) -> Self {
+        Self {
+            shared,
+            linked: Mutex::new(HashSet::new()),
+            fresh: std::sync::atomic::AtomicBool::new(false),
         }
-        !self.linked.is_empty()
+    }
+
+    fn linked(&self) -> std::sync::MutexGuard<'_, HashSet<PlaylistKey>> {
+        self.linked.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Reads which playlists are linked. Whether some are.
+    async fn read_linked(&self, owner: &SourceOwner) -> bool {
+        match owner.shared.catalog.linked_playlists().await {
+            Ok(linked) => {
+                let mut current = self.linked();
+                *current = linked.into_iter().collect();
+                !current.is_empty()
+            }
+            Err(error) => {
+                owner.shared.warn_nonfatal(&error.to_string());
+                !self.linked().is_empty()
+            }
+        }
     }
 }
 
-/// Linked playlists a Change touched are saved when their links are marked changed and save
-/// automatically.
-async fn edited(owner: &SourceOwner, change: &library::Change) {
-    let mut listed = false;
-    let mut edited = Vec::new();
-    {
-        let links = owner.shared.links.lock().unwrap_or_else(|p| p.into_inner());
-        for scope in &change.scopes {
-            match scope {
-                Scope::Playlist { key, .. } if links.linked.contains(key) => edited.push(*key),
-                Scope::Playlists | Scope::Reload => listed = true,
-                _ => {}
-            }
-        }
+impl Feature for Links {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move {
+            let Some(shared) = self.shared.upgrade() else {
+                return false;
+            };
+            let linked = self.read_linked(&SourceOwner { shared }).await;
+            self.fresh.store(true, std::sync::atomic::Ordering::Release);
+            linked
+        })
     }
-    for playlist in edited {
-        after_edit(owner, playlist).await;
+
+    fn hears(&self, change: &library::Change) -> bool {
+        let linked = self.linked();
+        change.scopes.iter().any(|scope| match scope {
+            Scope::Playlist { key, .. } => linked.contains(key),
+            Scope::Playlists | Scope::Reload => true,
+            _ => false,
+        })
     }
-    if listed {
-        match owner.shared.catalog.linked_playlists().await {
-            Ok(linked) => {
-                owner
-                    .shared
-                    .links
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .set(linked);
+
+    /// Linked playlists a Change touched are saved when their links are marked changed and
+    /// save automatically.
+    fn apply(&self, changes: Option<Vec<Arc<library::Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let Some(shared) = self.shared.upgrade() else {
+                return Next::Done;
+            };
+            let owner = SourceOwner { shared };
+            let Some(changes) = changes else {
+                if !self.fresh.swap(false, std::sync::atomic::Ordering::AcqRel)
+                    && !self.read_linked(&owner).await
+                {
+                    return Next::Done;
+                }
+                refresh_links(&owner, None).await;
+                return Next::At(Instant::now() + CHECK_INTERVAL);
+            };
+            let mut listed = false;
+            let mut edited = Vec::new();
+            {
+                let linked = self.linked();
+                for scope in changes.iter().flat_map(|change| &change.scopes) {
+                    match scope {
+                        Scope::Playlist { key, .. } if linked.contains(key) => edited.push(*key),
+                        Scope::Playlists | Scope::Reload => listed = true,
+                        _ => {}
+                    }
+                }
             }
-            Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
-        }
+            edited.sort_unstable();
+            edited.dedup();
+            for playlist in edited {
+                after_edit(&owner, playlist).await;
+            }
+            if listed && !self.read_linked(&owner).await {
+                return Next::Done;
+            }
+            Next::Wait
+        })
     }
 }
 
@@ -371,7 +375,7 @@ async fn link_on(
         return Err(error);
     }
     associate(owner, &link).await?;
-    links_changed(owner).await;
+    owner.shared.links.check();
     publish(owner, Some(playlist)).await;
     Ok(())
 }
@@ -442,7 +446,7 @@ pub fn unlink(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Result<(),
             .unlink_playlist_file(playlist)
             .await
             .map_err(string_error)?;
-        links_changed(&owner).await;
+        owner.shared.links.check();
         publish(&owner, Some(playlist)).await;
         Ok(())
     })
@@ -735,7 +739,7 @@ pub(crate) async fn remember(
         .await
         .map_err(string_error)?;
     associate(owner, &link).await?;
-    links_changed(owner).await;
+    owner.shared.links.check();
     Ok(())
 }
 

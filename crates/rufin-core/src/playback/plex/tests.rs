@@ -159,6 +159,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         catalog.clone(),
+        &crate::features::Features::new(&catalog.clone(), tokio::runtime::Handle::current()),
         downloads,
         settings.clone(),
         secrets,
@@ -194,6 +195,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         .unwrap()
     }));
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
+    let features = crate::features::Features::new(&catalog, tokio::runtime::Handle::current());
     let owner = PlaybackOwner::new(
         catalog,
         settings,
@@ -206,10 +208,11 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
+        &features,
         |_| Ok(Box::new(Idle)),
     );
     owner.install_source_owner(&source);
-    owner.start().await.unwrap();
+    owner.start();
     owner
         .settings
         .update(|stored| {
@@ -275,11 +278,11 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     plex.observe(stopped_timeline(), false).await.unwrap();
     let plex = Arc::new(plex);
     *owner.plex.lock().unwrap() = Some(plex.clone());
-    owner.output.lock().unwrap().selected = plex.output.clone();
+    *owner.output.lock().unwrap() = plex.output.clone();
     tokio::task::spawn_blocking(move || {
         owner.leave_plex(Arc::new(AtomicBool::new(false))).unwrap();
         assert!(owner.plex.lock().unwrap().is_none());
-        assert_eq!(owner.output.lock().unwrap().selected, PlaybackOutput::Local);
+        assert_eq!(*owner.output.lock().unwrap(), PlaybackOutput::Local);
         assert!(plex.cancelled.load(Ordering::Acquire));
         drop(plex);
         owner.shutdown();

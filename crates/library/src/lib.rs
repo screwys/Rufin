@@ -56,7 +56,7 @@ mod queue;
 pub mod rank;
 mod waveform;
 pub use connect_media::{CatalogFile, CatalogFileDependency, CatalogFileStamp};
-pub use downloads::{DownloadFile, media_encoding_key};
+pub use downloads::{DownloadFile, FileTrack, media_encoding_key};
 mod catalog;
 mod radio;
 mod scroll_sections;

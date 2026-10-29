@@ -12,10 +12,13 @@ use crate::runtime::{
     ScrobblingConnectionEvent, ScrobblingPreferences,
 };
 use async_channel::{Receiver, bounded};
+use futures_util::future::BoxFuture;
+use library::{Change, Scope};
 use scrobbling::{AudioscrobblerAuthorization, AudioscrobblerSession, Scrobbler};
 use secrets::{SecretStore, SwitchableSecretStore};
 use tracing::warn;
 
+use crate::features::{Feature, FeatureHandle, Features, Next};
 use crate::settings::{SettingsFile, load_scrobbling_settings, persist_scrobbling_settings};
 
 const AUTHORIZATION_THREAD_NAME: &str = "rufin-scrobbling-auth";
@@ -38,6 +41,29 @@ async fn wait_for_authorization(
     session.map_err(|_| AUTHORIZATION_TASK_FAILED.to_string())?
 }
 
+/// Sends recorded listens, installed while a scrobbling account exists.
+struct Listens(Arc<Scrobbler>);
+
+impl Feature for Listens {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async move { self.0.has_accounts() })
+    }
+
+    fn hears(&self, change: &Change) -> bool {
+        change
+            .scopes
+            .iter()
+            .any(|scope| matches!(scope, Scope::Listened { .. }))
+    }
+
+    fn apply(&self, _: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            self.0.wake();
+            Next::Wait
+        })
+    }
+}
+
 #[derive(Clone)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ScrobblingOwner {
@@ -45,6 +71,7 @@ pub struct ScrobblingOwner {
     secrets: Arc<SwitchableSecretStore>,
     runtime: tokio::runtime::Handle,
     scrobbler: Arc<Scrobbler>,
+    listens: FeatureHandle,
     settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
     credential_work: Arc<Mutex<bool>>,
 }
@@ -55,12 +82,14 @@ impl ScrobblingOwner {
         secrets: Arc<SwitchableSecretStore>,
         runtime: tokio::runtime::Handle,
         scrobbler: Arc<Scrobbler>,
+        features: &Arc<Features>,
         settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
     ) -> Arc<Self> {
         Arc::new(Self {
             settings,
             secrets,
             runtime,
+            listens: features.add(Arc::new(Listens(Arc::clone(&scrobbler)))),
             scrobbler,
             settings_committed,
             credential_work: Arc::new(Mutex::new(false)),
@@ -75,6 +104,7 @@ impl ScrobblingOwner {
         ) {
             warn!(%error, "could not update external scrobbling settings");
         }
+        self.listens.check();
         if credentials_changed {
             let owner = self.clone();
             self.runtime
@@ -99,6 +129,7 @@ impl ScrobblingOwner {
             }) {
                 warn!(%error, "could not load saved scrobbling credentials");
             }
+            self.listens.check();
             *loaded = true;
         }
     }
@@ -113,6 +144,7 @@ impl ScrobblingOwner {
         if let Err(error) = self.scrobbler.update_credentials(committed.clone()) {
             warn!(%error, "could not update external scrobbling settings");
         }
+        self.listens.check();
         (self.settings_committed)(&self.settings.load().ui);
         Ok(preferences(&committed))
     }
@@ -270,10 +302,12 @@ impl ScrobblingOwner {
         {
             warn!(%error, "could not reset scrobbling credentials");
         }
+        self.listens.check();
     }
 
     pub fn shutdown(&self) {
         self.scrobbler.shutdown();
+        self.listens.check();
     }
 }
 

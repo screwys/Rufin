@@ -22,10 +22,7 @@ impl PlaybackOwner {
         .await
         .map_err(string_error)?
         .map_err(string_error)?;
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = playback::PlaybackOutput::Local;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
         Ok(())
     }
 
@@ -253,10 +250,7 @@ impl PlaybackOwner {
         save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
             .await
             .map_err(string_error)?;
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = playback::PlaybackOutput::Local;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
         Ok(())
     }
 }

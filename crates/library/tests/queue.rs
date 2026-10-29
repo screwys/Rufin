@@ -327,13 +327,14 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
         .restore_queue()
         .await
         .expect("restore Queue");
+    // A restore reads now playing only.
     assert_eq!(
         restored
             .rows
             .iter()
             .map(|row| row.position)
             .collect::<Vec<_>>(),
-        [0, 1, 2]
+        [0]
     );
     assert_eq!(restored.current_index, Some(0));
     assert_eq!(restored.progress_millis, 1_500);
@@ -345,7 +346,17 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
         occurrences[0].item.artwork_binding
     );
 
-    let page = &restored.rows;
+    let window = restored
+        .order
+        .iter()
+        .enumerate()
+        .map(|(position, index)| (position, restored.entries[*index as usize].clone()))
+        .collect::<Vec<_>>();
+    let page = fixture
+        .catalog
+        .queue_rows_for_entries(&window, &ReadCancellation::new())
+        .await
+        .unwrap();
     assert_eq!(page[1].track.media_uri, page[2].track.media_uri);
     assert_ne!(page[1].position, page[2].position);
     assert_eq!(
@@ -656,7 +667,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
 }
 
 #[tokio::test]
-async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
+async fn saved_queue_keeps_compact_choices_and_reads_only_now_playing() {
     let fixture = fixture().await;
     let mut state = super::support::resolve_queue(
         &fixture.catalog,
@@ -680,11 +691,23 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     fixture.catalog.save_queue(&state).await.unwrap();
     let restored = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(
+        restored
+            .rows
+            .iter()
+            .map(|row| row.position)
+            .collect::<Vec<_>>(),
+        state.current_index.into_iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
         library::QueueRestore {
             ranks: Default::default(),
+            rows: Vec::new(),
             ..restored.clone()
         },
-        state
+        library::QueueRestore {
+            rows: Vec::new(),
+            ..state.clone()
+        }
     );
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
@@ -710,9 +733,13 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     assert_eq!(
         library::QueueRestore {
             ranks: Default::default(),
+            rows: Vec::new(),
             ..target.catalog.restore_queue().await.unwrap()
         },
-        state
+        library::QueueRestore {
+            rows: Vec::new(),
+            ..state
+        }
     );
 }
 
@@ -826,13 +853,6 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
                 );
             }
         }
-        let mut source_members = fixture
-            .catalog
-            .queue_positions_for_source(&state, fixture.source)
-            .await
-            .unwrap();
-        source_members.sort();
-        assert_eq!(source_members, [6, 7]);
         fixture
             .catalog
             .queue_entries(

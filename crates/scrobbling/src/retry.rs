@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use library::ListenWrite;
 use library::TrackMetadata;
-use library::{Catalog, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation, Scope};
+use library::{Catalog, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
 use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use tracing::warn;
@@ -190,13 +190,12 @@ fn take_stable_now_playing(
     stable.then(|| pending.take().expect("stable update must be pending").0)
 }
 
-/// The delivery thread, which runs while an account exists. It wakes for listens on the
-/// change feed, for now-playing updates and when a deferred scrobble is due.
+/// The delivery thread, which runs while an account exists. It wakes for recorded listens,
+/// for now-playing updates and when a deferred scrobble is due.
 struct Worker {
     sender: SyncSender<()>,
     pending: Arc<Mutex<PendingWork>>,
     thread: Mutex<Option<JoinHandle<()>>>,
-    listens: tokio::task::AbortHandle,
 }
 
 impl Worker {
@@ -208,8 +207,7 @@ impl Worker {
         let (sender, receiver) = sync_channel(NOTIFICATION_CAPACITY);
         let pending = Arc::new(Mutex::new(PendingWork::default()));
         let worker_pending = Arc::clone(&pending);
-        let mut changes = catalog.changes();
-        let thread_runtime = runtime.clone();
+        let thread_runtime = runtime;
         let thread = std::thread::Builder::new()
             .name("rufin-scrobbling".to_string())
             .spawn(move || {
@@ -234,33 +232,10 @@ impl Worker {
                 );
             })
             .map_err(|error| error.to_string())?;
-        let woken = Arc::clone(&pending);
-        let wake = sender.clone();
-        let listens = runtime
-            .spawn(async move {
-                use tokio::sync::broadcast::error::RecvError;
-                loop {
-                    let listened = match changes.recv().await {
-                        Ok(change) => change
-                            .scopes
-                            .iter()
-                            .any(|scope| matches!(scope, Scope::Listened { .. })),
-                        Err(RecvError::Lagged(_)) => true,
-                        Err(RecvError::Closed) => return,
-                    };
-                    if listened && let Ok(mut pending) = woken.lock() {
-                        pending.wake = true;
-                        drop(pending);
-                        let _ = wake.try_send(());
-                    }
-                }
-            })
-            .abort_handle();
         Ok(Self {
             sender,
             pending,
             thread: Mutex::new(Some(thread)),
-            listens,
         })
     }
 
@@ -284,7 +259,6 @@ impl Worker {
     }
 
     fn shutdown(&self) {
-        self.listens.abort();
         if let Ok(mut pending) = self.pending.lock() {
             pending.closed = true;
         }
@@ -333,10 +307,19 @@ impl Scrobbler {
         Ok(())
     }
 
-    fn wake(&self) {
+    /// Sends what waits, such as listens recorded since.
+    pub fn wake(&self) {
         if let Some(worker) = &*self.worker.lock().unwrap_or_else(|p| p.into_inner()) {
             worker.wake();
         }
+    }
+
+    /// Whether an account exists, so the worker runs.
+    pub fn has_accounts(&self) -> bool {
+        self.worker
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
     }
 
     pub fn new(

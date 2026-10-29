@@ -471,10 +471,7 @@ impl PlaybackOwner {
         if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
             plex.cancel();
         }
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = output;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = output;
         let weak = Arc::downgrade(&receiver);
         let task = self.runtime.spawn(async move {
             loop {
@@ -544,10 +541,7 @@ impl PlaybackOwner {
         })?;
         receiver.cancel();
         self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take();
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = PlaybackOutput::Local;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = PlaybackOutput::Local;
         Ok(())
     }
 

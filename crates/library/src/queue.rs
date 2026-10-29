@@ -8,7 +8,7 @@ use std::sync::Arc;
 use sqlx::{Connection, Row, SqliteConnection};
 
 use crate::catalog::write::Scope;
-use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackReference};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, TrackReference};
 
 pub const QUEUE_CONTEXT_LIMIT: usize = 100;
 
@@ -637,10 +637,12 @@ impl Catalog {
         Ok(())
     }
 
+    /// Saves playback's queue edits. Clients hear of the queue only when rows changed.
     pub async fn apply_queue_update(&self, update: &QueueUpdate) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        apply_queue_update_on(write.connection().await?, update).await?;
-        write.changed(Scope::Queue);
+        if apply_queue_update_on(write.connection().await?, update).await? > 0 {
+            write.changed(Scope::Queue);
+        }
         write.commit().await?;
         Ok(())
     }
@@ -651,14 +653,12 @@ impl Catalog {
         let mut state = restore_queue_on(&mut transaction).await?;
         transaction.commit().await?;
         drop(reader);
-        let start = state.current_index.unwrap_or(0).saturating_sub(10);
+        // Now playing reads its one track; playback reads the rest of the shown window.
         let entries = state
-            .order
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(QUEUE_CONTEXT_LIMIT)
-            .map(|(position, index)| (position, state.entries[*index as usize].clone()))
+            .current_index
+            .and_then(|position| Some((position, *state.order.get(position)?)))
+            .map(|(position, index)| (position, state.entries[index as usize].clone()))
+            .into_iter()
             .collect::<Vec<_>>();
         state.rows = self
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
@@ -680,29 +680,6 @@ impl Catalog {
         write.commit().await?;
         Ok(())
     }
-
-    pub async fn queue_positions_for_source(
-        &self,
-        queue: &QueueRestore,
-        source: SourceKey,
-    ) -> LibraryResult<Vec<usize>> {
-        let mut reader = self.acquire_reader().await?;
-        let mut positions = Vec::new();
-        for (page, order) in queue.order.chunks(4096).enumerate() {
-            let keys = order
-                .iter()
-                .map(|i| queue.entries[*i as usize].track_key)
-                .collect::<Vec<_>>();
-            let matching=sqlx::query_scalar::<_,i64>("SELECT CAST(requested.key AS INTEGER) FROM json_each(?1) requested JOIN tracks ON track_key=requested.value WHERE source_key=?2 ORDER BY CAST(requested.key AS INTEGER)")
-                .bind(serde_json::to_string(&keys)?).bind(source).fetch_all(&mut *reader).await?;
-            positions.extend(
-                matching
-                    .into_iter()
-                    .map(|position| page * 4096 + position as usize),
-            );
-        }
-        Ok(positions)
-    }
 }
 
 async fn save_settings(
@@ -711,10 +688,9 @@ async fn save_settings(
     progress: i64,
     repeat: QueueRepeatMode,
     shuffled: bool,
-) -> LibraryResult<()> {
-    sqlx::query("INSERT INTO queue_state(singleton,current_index,progress_millis,repeat_mode,shuffled) VALUES(1,?1,?2,?3,?4) ON CONFLICT(singleton) DO UPDATE SET current_index=excluded.current_index,progress_millis=excluded.progress_millis,repeat_mode=excluded.repeat_mode,shuffled=excluded.shuffled WHERE (current_index,progress_millis,repeat_mode,shuffled) IS NOT (excluded.current_index,excluded.progress_millis,excluded.repeat_mode,excluded.shuffled)")
-        .bind(current.map(|index| index as i64)).bind(progress.max(0)).bind(repeat.as_str()).bind(shuffled).execute(connection).await?;
-    Ok(())
+) -> LibraryResult<u64> {
+    Ok(sqlx::query("INSERT INTO queue_state(singleton,current_index,progress_millis,repeat_mode,shuffled) VALUES(1,?1,?2,?3,?4) ON CONFLICT(singleton) DO UPDATE SET current_index=excluded.current_index,progress_millis=excluded.progress_millis,repeat_mode=excluded.repeat_mode,shuffled=excluded.shuffled WHERE (current_index,progress_millis,repeat_mode,shuffled) IS NOT (excluded.current_index,excluded.progress_millis,excluded.repeat_mode,excluded.shuffled)")
+        .bind(current.map(|index| index as i64)).bind(progress.max(0)).bind(repeat.as_str()).bind(shuffled).execute(connection).await?.rows_affected())
 }
 
 /// Replaces the saved queue. A queue without saved ranks gets the ranks of a list built by
@@ -785,33 +761,40 @@ pub(crate) async fn save_queue_on(
         },
     )
     .await
+    .map(drop)
 }
 
+/// Writes a queue update. The rows it changed.
+/// Writes a queue update. The rows it changed.
 async fn apply_queue_update_on(
     connection: &mut sqlx::SqliteConnection,
     update: &QueueUpdate,
-) -> LibraryResult<()> {
+) -> LibraryResult<u64> {
+    let mut changed = 0;
     if update.replace {
-        sqlx::raw_sql("DELETE FROM queue_entries; DELETE FROM queue_contexts;")
+        changed += sqlx::raw_sql("DELETE FROM queue_entries; DELETE FROM queue_contexts;")
             .execute(&mut *connection)
-            .await?;
+            .await?
+            .rows_affected();
     } else {
         for removed in update.removed.iter().collect::<Vec<_>>().chunks(1000) {
             let contexts = sqlx::query_scalar::<_, Option<i64>>(
                 "DELETE FROM queue_entries WHERE entry_id IN (SELECT value FROM json_each(?1)) RETURNING context_key",
             ).bind(serde_json::to_string(removed)?).fetch_all(&mut *connection).await?;
+            changed += contexts.len() as u64;
             sqlx::query("DELETE FROM queue_contexts WHERE context_key IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM queue_entries WHERE context_key=queue_contexts.context_key)")
                 .bind(serde_json::to_string(&contexts)?).execute(&mut *connection).await?;
         }
         if update.unshuffled {
-            sqlx::query(
+            changed += sqlx::query(
                 "UPDATE queue_entries SET shuffle_rank=NULL WHERE shuffle_rank IS NOT NULL",
             )
             .execute(&mut *connection)
-            .await?;
+            .await?
+            .rows_affected();
         }
     }
-    let mut contexts = HashMap::new();
+    let contexts = stored_contexts(connection, update).await?;
     let mut entries = update.entries.iter().collect::<Vec<_>>();
     entries.sort_unstable_by_key(|(id, _)| *id);
     for entries in entries.chunks(1000) {
@@ -822,25 +805,13 @@ async fn apply_queue_update_on(
                     context_id,
                     context_title,
                     source_rank,
-                } => {
-                    let key = (context_id.as_ref(), context_title.as_deref());
-                    let context_key = if let Some(key) = contexts.get(&key) {
-                        *key
-                    } else {
-                        let value = serde_json::to_string(&match context_title {
-                            Some(title) => SavedContext::Titled {
-                                id: context_id.as_ref(),
-                                title: title.clone(),
-                            },
-                            None => SavedContext::Legacy(context_id.as_ref()),
-                        })?;
-                        let stored: i64 = sqlx::query_scalar("INSERT INTO queue_contexts(context) VALUES(?1) ON CONFLICT(context) DO UPDATE SET context=excluded.context RETURNING context_key")
-                            .bind(value).fetch_one(&mut *connection).await?;
-                        contexts.insert(key, stored);
-                        stored
-                    };
-                    (Some(context_key), Some(*source_rank as i64), None)
-                }
+                } => (
+                    contexts
+                        .get(&(context_id.as_ref(), context_title.as_deref()))
+                        .copied(),
+                    Some(*source_rank as i64),
+                    None,
+                ),
                 provenance => (None, None, Some(serde_json::to_string(provenance)?)),
             };
             rows.push((
@@ -854,22 +825,84 @@ async fn apply_queue_update_on(
                 rank.shuffle.as_deref().map(crate::rank::hex),
             ));
         }
-        sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,received_from_connect,rank,shuffle_rank)
+        // A stored entry keeps its provenance, so only its track and places can change.
+        changed += sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,received_from_connect,rank,shuffle_rank)
             SELECT value->>0,value->>1,value->>2,value->>3,value->>4,value->>5,unhex(value->>6),unhex(value->>7) FROM json_each(?1) WHERE true
-            ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank,shuffle_rank=excluded.shuffle_rank")
-            .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?;
+            ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank,shuffle_rank=excluded.shuffle_rank
+            WHERE (track_key,rank,shuffle_rank) IS NOT (excluded.track_key,excluded.rank,excluded.shuffle_rank)")
+            .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?.rows_affected();
     }
-    if !update.state {
-        return Ok(());
+    if update.state {
+        changed += save_settings(
+            connection,
+            update.current_index,
+            update.progress_millis,
+            update.repeat_mode,
+            update.shuffled,
+        )
+        .await?;
     }
-    save_settings(
-        connection,
-        update.current_index,
-        update.progress_millis,
-        update.repeat_mode,
-        update.shuffled,
+    Ok(changed)
+}
+
+/// The stored keys of the contexts an update's entries name; contexts not stored yet are
+/// stored now.
+async fn stored_contexts<'a>(
+    connection: &mut sqlx::SqliteConnection,
+    update: &'a QueueUpdate,
+) -> LibraryResult<HashMap<(&'a str, Option<&'a QueueContextTitle>), i64>> {
+    let mut named = HashMap::new();
+    for (entry, _) in update.entries.values() {
+        if let QueueProvenance::Context {
+            context_id,
+            context_title,
+            ..
+        } = &entry.provenance
+        {
+            if let std::collections::hash_map::Entry::Vacant(vacant) =
+                named.entry((context_id.as_ref(), context_title.as_deref()))
+            {
+                vacant.insert(serde_json::to_string(&match context_title {
+                    Some(title) => SavedContext::Titled {
+                        id: context_id.as_ref(),
+                        title: title.clone(),
+                    },
+                    None => SavedContext::Legacy(context_id.as_ref()),
+                })?);
+            }
+        }
+    }
+    if named.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let values = named.values().collect::<Vec<_>>();
+    let mut stored: HashMap<String, i64> = sqlx::query_as::<_, (i64, String)>(
+        "SELECT context_key,context FROM queue_contexts WHERE context IN (SELECT value FROM json_each(?1))",
     )
-    .await
+    .bind(serde_json::to_string(&values)?)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|(key, context)| (context, key))
+    .collect();
+    let mut keys = HashMap::with_capacity(named.len());
+    for (name, value) in named {
+        let key = match stored.get(&value) {
+            Some(key) => *key,
+            None => {
+                let key: i64 = sqlx::query_scalar(
+                    "INSERT INTO queue_contexts(context) VALUES(?1) RETURNING context_key",
+                )
+                .bind(&value)
+                .fetch_one(&mut *connection)
+                .await?;
+                stored.insert(value, key);
+                key
+            }
+        };
+        keys.insert(name, key);
+    }
+    Ok(keys)
 }
 
 async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryResult<QueueRestore> {
@@ -882,7 +915,7 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
             .into_iter()
             .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
             .collect::<LibraryResult<HashMap<_, _>>>()?;
-    let rows = sqlx::query("SELECT * FROM queue_entries ORDER BY rank,entry_id")
+    let rows = sqlx::query("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance,received_from_connect FROM queue_entries ORDER BY rank,entry_id")
         .fetch_all(&mut *connection)
         .await?;
     let mut entries = Vec::with_capacity(rows.len());

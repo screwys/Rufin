@@ -582,6 +582,16 @@ impl Sequence {
         self.trim_rows();
         self.changed(true);
     }
+    /// Removes entries whose saved rows are gone already.
+    pub(super) fn forget(&mut self, selection: &QueueSelection) {
+        let forgotten = self.selection(selection);
+        self.remove(selection);
+        if let Some(dirty) = &mut self.dirty {
+            for id in forgotten {
+                dirty.removed.remove(&id.0);
+            }
+        }
+    }
     pub(super) fn reorder(&mut self, selection: &QueueSelection, target: &QueueReorderTarget) {
         let selected = self.selection(selection);
         let (target_id, after) = self.target(target);
@@ -703,6 +713,8 @@ impl Sequence {
         }
         changed
     }
+    /// Moves entries to their tracks' new keys. The Write that moved the identities moved the
+    /// saved entries too, so only entries waiting to be saved change.
     pub(super) fn rekey_tracks(
         &mut self,
         pairs: &[(library::TrackKey, library::TrackKey)],
@@ -717,10 +729,13 @@ impl Sequence {
                 && key != entry.track_key
             {
                 entry.track_key = key;
-                self.dirty
-                    .get_or_insert_default()
-                    .entries
-                    .insert(id.0, (entry.clone(), self.ranks[id].clone()));
+                if let Some((waiting, _)) = self
+                    .dirty
+                    .as_mut()
+                    .and_then(|dirty| dirty.entries.get_mut(&id.0))
+                {
+                    waiting.track_key = key;
+                }
                 changed = true;
             }
         }
@@ -730,10 +745,21 @@ impl Sequence {
                     Arc::make_mut(row).track.track_key = key;
                 }
             }
-            self.changed(true);
+            self.revision += 1;
             self.refresh_metadata();
         }
         changed
+    }
+
+    /// Whether the rows shown hold one of these tracks.
+    pub(super) fn shows_any(&self, keys: &[library::TrackKey]) -> bool {
+        self.rows
+            .iter()
+            .any(|row| keys.contains(&row.track.track_key))
+    }
+
+    pub(super) fn shows_uri(&self, uri: &str) -> bool {
+        self.rows.iter().any(|row| row.track.media_uri == uri)
     }
 
     pub(super) fn need_metadata(&mut self) {

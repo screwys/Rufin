@@ -12,22 +12,25 @@ use playback::{
 async fn canceled_queue_preparation_publishes_loading_completion() {
     let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "queue-preparation",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "queue-preparation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     let mut updates = owner.updates.subscribe();
     assert!(!updates.recv().await.unwrap().unwrap().view.queue_loading);
     for placement in [Placement::Now, Placement::End] {
@@ -57,22 +60,25 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
 async fn repeated_operation_failures_publish_notices_without_a_current_track() {
     let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "failed-operation",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "failed-operation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     let mut updates = owner.updates.subscribe();
     for _ in 0..2 {
         playback
@@ -102,22 +108,25 @@ async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
             Provenance::Manual,
         )])
         .await;
-        let (playback, _) = Playback::start(
-            sequence,
-            "failure-feedback",
-            PlaybackSettings::default(),
-            false,
-            1,
-            PlaybackOutput::Local,
-            Box::new(IdleBackend(commands)),
-            Arc::new(|| ClockSample {
-                monotonic_millis: 0,
-                unix_seconds: 0,
-                local_period: "1970-01".into(),
-            }),
-            Arc::downgrade(&owner),
-        )
-        .unwrap();
+        let (playback, receiver) = super::channel();
+        playback
+            .run(
+                receiver,
+                sequence,
+                "failure-feedback",
+                PlaybackSettings::default(),
+                false,
+                1,
+                PlaybackOutput::Local,
+                Some(Box::new(IdleBackend(commands))),
+                Arc::new(|| ClockSample {
+                    monotonic_millis: 0,
+                    unix_seconds: 0,
+                    local_period: "1970-01".into(),
+                }),
+                Arc::downgrade(&owner),
+            )
+            .unwrap();
         playback.command(Command::Play).unwrap();
         let message = if backend_failure {
             "Resource not found."
@@ -206,22 +215,25 @@ fn replace_queue(owner: &PlaybackOwner, prefix: &str, count: usize) {
 async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     let (_directory, catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
-    let (playback, _) = Playback::start(
-        sequence,
-        "persistence-test",
-        PlaybackSettings::default(),
-        false,
-        1,
-        PlaybackOutput::Local,
-        Box::new(IdleBackend(commands)),
-        Arc::new(|| ClockSample {
-            monotonic_millis: 0,
-            unix_seconds: 0,
-            local_period: "1970-01".into(),
-        }),
-        Arc::downgrade(&owner),
-    )
-    .unwrap();
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "persistence-test",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            Some(Box::new(IdleBackend(commands))),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
     *owner.active.lock().unwrap() = Some(playback.clone());
     let (started, blocked) = mpsc::sync_channel(1);
     let (release, resume) = mpsc::sync_channel(1);
@@ -246,11 +258,12 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     replace_queue(&owner, "first", 150);
     let restored = published_queue_snapshot(&mut updates, &owner).await;
     assert_eq!(restored.entries.len(), 150);
-    assert_eq!(restored.rows.len(), library::QUEUE_CONTEXT_LIMIT);
+    // A restore reads now playing; the shown window is read when playback shows it.
+    assert_eq!(restored.rows.len(), 1);
 
     replace_queue(&owner, "replacement", 3);
     let restored = published_queue_snapshot(&mut updates, &owner).await;
-    assert_eq!(restored.rows.len(), 3);
+    assert_eq!(restored.entries.len(), 3);
     assert!(
         restored
             .rows
@@ -259,12 +272,12 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     );
     assert_eq!(restored.current_index, Some(0));
 
-    owner.remove(restored.rows[2].position);
+    owner.remove(2);
     playback.projection().unwrap();
     assert_eq!(
         published_queue_snapshot(&mut updates, &owner)
             .await
-            .rows
+            .entries
             .len(),
         2
     );

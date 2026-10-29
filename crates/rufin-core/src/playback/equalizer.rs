@@ -656,11 +656,11 @@ impl PlaybackOwner {
             return;
         }
         state.observed_route = route;
-        if !selection.selected.is_local() {
+        if !selection.is_local() {
             return;
         }
         let output = output_id(
-            &selection.selected,
+            &selection,
             state
                 .local_device
                 .as_deref()
@@ -1143,12 +1143,9 @@ impl PlaybackOwner {
     pub(super) fn equalizer_output_changed(&self, local: Option<&str>) {
         let selection = self.output.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.equalizer.lock().unwrap_or_else(|e| e.into_inner());
-        let id = output_id(
-            &selection.selected,
-            local.or(state.observed_route.as_deref()),
-        );
+        let id = output_id(&selection, local.or(state.observed_route.as_deref()));
         let changed = state.current_output != id
-            || (selection.selected.is_local() && state.local_device.as_deref() != local);
+            || (selection.is_local() && state.local_device.as_deref() != local);
         state.local_device = local.map(str::to_string);
         state.current_output = id.clone();
         if changed {

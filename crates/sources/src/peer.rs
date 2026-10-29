@@ -223,6 +223,15 @@ impl PeerAccess {
         catalog: &Catalog,
         uri: &str,
     ) -> SourceResult<Option<(LocalMediaLocation, Vec<String>)>> {
+        // Connect sets the folders while it is on; without them nothing maps.
+        if self
+            .folders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty()
+        {
+            return Ok(None);
+        }
         let Some(reference) = catalog.connect_track_reference(uri).await? else {
             return Ok(None);
         };

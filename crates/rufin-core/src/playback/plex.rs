@@ -1376,10 +1376,7 @@ impl PlaybackOwner {
         {
             previous.cancel();
         }
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = output;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = output;
         let observed = plex.clone();
         let task = self.runtime.spawn(async move {
             let mut failed_since = None;
@@ -1578,10 +1575,7 @@ impl PlaybackOwner {
             Ok::<_, String>(())
         })?;
         self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
-        self.output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected = PlaybackOutput::Local;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = PlaybackOutput::Local;
         self.runtime.spawn(async move {
             if let Err(error) = plex.control(|client| client.stop()).await {
                 tracing::debug!(%error, "Could not stop the previous Plex player");
@@ -1659,7 +1653,6 @@ impl PlaybackOwner {
             Command::UpdateSettings(_)
                 | Command::SetAutoDj { .. }
                 | Command::SetVisualizerEnabled(_)
-                | Command::CatalogChanged
         ) {
             return Some(command);
         }

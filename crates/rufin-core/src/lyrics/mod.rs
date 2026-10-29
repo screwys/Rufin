@@ -1811,6 +1811,10 @@ mod tests {
         let source_owner = crate::source::SourceOwner::open_dormant(
             artwork::Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
             Arc::new(catalog.clone()),
+            &crate::features::Features::new(
+                &Arc::new(catalog.clone()),
+                tokio::runtime::Handle::current(),
+            ),
             downloads::Downloads::new(
                 artwork::Artwork::new(
                     (directory.path().join("downloads")).join("artwork"),

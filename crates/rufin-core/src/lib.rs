@@ -11,6 +11,7 @@ pub mod collection_context;
 pub mod connect;
 pub mod detail_links;
 pub mod diagnostics;
+mod features;
 mod loudness;
 pub mod page;
 pub mod paths;

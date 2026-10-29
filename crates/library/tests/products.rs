@@ -2050,10 +2050,12 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .await
             .unwrap();
         assert_eq!(smart_rows[0].artwork_binding, expected_binding);
-        let queue = catalog.restore_queue().await.unwrap().rows;
-        assert_eq!(queue[0].track.artwork_binding, expected_binding);
         let restored = catalog.restore_queue().await.unwrap();
-        assert_eq!(restored.rows[0].track.artwork_binding, expected_binding);
+        let queue = catalog
+            .queue_rows_for_entries(&[(0, restored.entries[0].clone())], &cancel)
+            .await
+            .unwrap();
+        assert_eq!(queue[0].track.artwork_binding, expected_binding);
         let history = (&library::MemberRead {
             descending: true,
             ..library::MemberRead::new(library::Collection::History { source: None })

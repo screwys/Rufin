@@ -85,6 +85,7 @@ where
         Err(error) => return Err(string_error(error)),
     };
     let library = Arc::new(catalog);
+    let features = crate::features::Features::new(&library, runtime.clone());
     library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
     library.set_use_sort_tags(stored.ui.application.use_sort_tags);
     let scrobbling_library = library.as_ref().clone();
@@ -139,6 +140,7 @@ where
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         library.clone(),
+        &features,
         downloads.clone(),
         settings.clone(),
         Arc::clone(&secrets),
@@ -210,6 +212,7 @@ where
         observe_playback,
         audio_outputs,
         Arc::clone(&scrobbler),
+        &features,
         start_backend,
     );
     let observed_playback = Arc::clone(&playback);
@@ -219,12 +222,13 @@ where
         });
     settings_committed(&stored.ui);
     playback.install_source_owner(&source);
-    playback.start().await?;
+    playback.start();
     let scrobbling = ScrobblingOwner::new(
         settings.clone(),
         Arc::clone(&secrets),
         runtime.clone(),
         scrobbler,
+        &features,
         Arc::clone(&settings_committed),
     );
     scrobbling.start();
@@ -263,7 +267,8 @@ where
                     .waveform_setting_changed(current.ui.player_display.seekbar_waveform_enabled);
             }
             if previous.ui.playback != current.ui.playback {
-                settings_playback.playback_settings_changed(current.ui.playback.clone());
+                settings_playback
+                    .playback_settings_changed(&previous.ui.playback, current.ui.playback.clone());
             }
             if previous.ui.application.cast_proxy_enabled
                 != current.ui.application.cast_proxy_enabled
@@ -302,10 +307,11 @@ where
                 || previous.ui.application.download_lyrics_automatically
                     != current.ui.application.download_lyrics_automatically
             {
-                settings_source.asset_downloads_changed();
+                settings_source.shared.asset_downloads.restart();
             }
             if previous.ui.downloads != current.ui.downloads {
                 settings_downloads.settings_changed(current.ui.downloads.clone());
+                settings_source.shared.download_rules.check();
             }
         },
     );
@@ -343,11 +349,6 @@ where
             }
         }
     });
-    if let Err(error) =
-        crate::connect::reset_earlier_state(paths.connect_dir(), &library, &settings_handle).await
-    {
-        warn!(%error, "could not reset Rufin Connect state from an earlier version");
-    }
     let connect = crate::connect::ConnectOwner::new(
         paths.connect_dir(),
         Arc::clone(&library),

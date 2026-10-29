@@ -79,6 +79,10 @@ pub(in crate::playback) async fn seeded(
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         Arc::new(catalog.clone()),
+        &crate::features::Features::new(
+            &Arc::new(catalog.clone()),
+            tokio::runtime::Handle::current(),
+        ),
         downloads,
         settings.clone(),
         Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
@@ -118,6 +122,10 @@ pub(in crate::playback) async fn seeded(
     let commands = Arc::new(Mutex::new(Vec::new()));
     let backend_commands = commands.clone();
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
+    let features = crate::features::Features::new(
+        &Arc::new(catalog.clone()),
+        tokio::runtime::Handle::current(),
+    );
     let owner = PlaybackOwner::new(
         Arc::new(catalog.clone()),
         settings,
@@ -130,6 +138,7 @@ pub(in crate::playback) async fn seeded(
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
+        &features,
         move |_| Ok(Box::new(IdleBackend(backend_commands.clone()))),
     );
     owner.install_source_owner(&source);
@@ -202,7 +211,7 @@ async fn active_two_track_session() -> (
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -231,7 +240,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -335,7 +344,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(destination_commands.clone())),
+        Some(Box::new(IdleBackend(destination_commands.clone()))),
         Arc::downgrade(&destination_owner),
         destination_playback.downgrade(),
     );
@@ -487,7 +496,7 @@ async fn editing_upcoming_queue_does_not_block_continuation() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -601,7 +610,7 @@ async fn already_qualified_continuation_does_not_create_another_submission() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -752,7 +761,7 @@ async fn refill_preserves_live_progress_and_prepared_positions() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -918,7 +927,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn catalog_publication_preserves_run_progress_prepared_next_and_positions() {
+async fn library_changes_preserve_run_progress_prepared_next_and_positions() {
     let (_directory, _catalog, mut session, owner, commands, _playback, _inbox) =
         active_two_track_session().await;
     let sample = ClockSample {
@@ -929,9 +938,7 @@ async fn catalog_publication_preserves_run_progress_prepared_next_and_positions(
     let before = session.view();
     let run = session.current_run();
     let next_run = session.next_plan.as_ref().map(|plan| plan.next_run);
-    session
-        .handle_command(Command::CatalogChanged, &sample)
-        .unwrap();
+    session.library_changed(None, &sample);
     let rows = session
         .sequence
         .read_request()
@@ -1204,7 +1211,7 @@ async fn restored_media_stays_paused_until_first_play_starts_one_resolution() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -1244,7 +1251,7 @@ async fn playback_modes_publish_their_state_without_an_active_run() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -1307,7 +1314,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                     PlaybackOutput::Local,
                     false,
                     3,
-                    Box::new(IdleBackend(commands.clone())),
+                    Some(Box::new(IdleBackend(commands.clone()))),
                     Arc::downgrade(&owner),
                     playback.downgrade(),
                 );
@@ -1431,7 +1438,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 PlaybackOutput::Local,
                 false,
                 3,
-                Box::new(IdleBackend(commands.clone())),
+                Some(Box::new(IdleBackend(commands.clone()))),
                 Arc::downgrade(&owner),
                 playback.downgrade(),
             );
@@ -1562,7 +1569,8 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     );
     let source = SourceOwner::open_dormant(
         artwork,
-        Arc::new(catalog),
+        Arc::new(catalog.clone()),
+        &crate::features::Features::new(&catalog, tokio::runtime::Handle::current()),
         downloads,
         owner.settings.clone(),
         Arc::new(secrets::SwitchableSecretStore::new(secrets)),
@@ -1580,7 +1588,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -1768,7 +1776,7 @@ async fn receiver_window_survives_local_hydration_ticks() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -1823,7 +1831,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -2048,7 +2056,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
             PlaybackOutput::Local,
             !delayed_completion,
             refill_threshold,
-            Box::new(IdleBackend(commands.clone())),
+            Some(Box::new(IdleBackend(commands.clone()))),
             Arc::downgrade(&owner),
             playback.downgrade(),
         );
@@ -2119,7 +2127,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
         );
         finish_queue(&mut session, &inbox, &sample).await;
         assert_eq!(
-            catalog.restore_queue().await.unwrap().rows.len(),
+            catalog.restore_queue().await.unwrap().entries.len(),
             queue_length + 2
         );
         assert_eq!(
@@ -2170,7 +2178,7 @@ async fn failed_stream_preserves_selected_media_and_player_controls() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -2204,7 +2212,7 @@ async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() 
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -2254,7 +2262,7 @@ async fn backend_advancing_during_removal_uses_the_exact_surviving_successor() {
             PlaybackOutput::Local,
             false,
             3,
-            Box::new(IdleBackend(commands.clone())),
+            Some(Box::new(IdleBackend(commands.clone()))),
             Arc::downgrade(&owner),
             playback.downgrade(),
         );
@@ -2359,7 +2367,7 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -2396,7 +2404,7 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );
@@ -2445,7 +2453,7 @@ async fn skip_session(
         PlaybackOutput::Local,
         false,
         3,
-        Box::new(IdleBackend(commands.clone())),
+        Some(Box::new(IdleBackend(commands.clone()))),
         Arc::downgrade(&owner),
         playback.downgrade(),
     );

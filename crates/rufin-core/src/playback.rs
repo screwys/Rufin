@@ -23,14 +23,16 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
         .contains(&position_millis)
 }
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::features::{Feature, FeatureHandle, Features, Next};
 use crate::runtime::VisualizerPublication;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
+use futures_util::future::BoxFuture;
 use library::QueueUpdate;
-use library::{Catalog, ListenWrite, ReadCancellation};
+use library::{Catalog, Change, ListenWrite, ReadCancellation, Scope};
 use playback::{
     PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
 };
@@ -39,15 +41,55 @@ use scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 
-use crate::loudness::LoudnessAnalysisOwner;
+use crate::loudness::{Loudness, LoudnessAnalysisOwner};
 use crate::lyrics::{LyricsContext, LyricsService};
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 use crate::waveform::{WaveformMedia, WaveformOwner};
 
-struct OutputSelection {
-    selected: playback::PlaybackOutput,
-    prepared: Option<Box<dyn PlaybackBackend>>,
+/// Follows the change feed for the queue: identity moves, changed tracks it shows and
+/// forgotten sources.
+struct QueueTracks {
+    playback: Weak<PlaybackOwner>,
+    /// The queue restores after the Catalog loaded, so the full pass of the install has nothing
+    /// to read again; later ones follow a lag.
+    installed: std::sync::atomic::AtomicBool,
+}
+
+impl Feature for QueueTracks {
+    fn wanted(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async { true })
+    }
+
+    fn hears(&self, change: &Change) -> bool {
+        change.scopes.iter().any(|scope| {
+            matches!(
+                scope,
+                Scope::Reload
+                    | Scope::Rekey { .. }
+                    | Scope::Tracks { .. }
+                    | Scope::State { .. }
+                    | Scope::Source {
+                        phase: library::SourcePhase::Removed,
+                        ..
+                    }
+            )
+        })
+    }
+
+    fn apply(&self, changes: Option<Vec<Arc<Change>>>) -> BoxFuture<'_, Next> {
+        Box::pin(async move {
+            let installed = self
+                .installed
+                .swap(true, std::sync::atomic::Ordering::AcqRel);
+            if (installed || changes.is_some())
+                && let Some(playback) = self.playback.upgrade()
+            {
+                playback.library_changed(changes);
+            }
+            Next::Wait
+        })
+    }
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
@@ -59,13 +101,15 @@ pub struct PlaybackOwner {
     visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
-    loudness: Arc<LoudnessAnalysisOwner>,
+    pub(crate) loudness: Arc<LoudnessAnalysisOwner>,
+    analysis: FeatureHandle,
     pub(crate) lyrics: Arc<LyricsService>,
     observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
     source: Mutex<std::sync::Weak<SourceOwner>>,
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
+    /// Takes commands from construction on; they wait until the restored queue is in place.
     active: Mutex<Option<Playback>>,
     pending_queue: Mutex<Option<QueueUpdate>>,
     equalizer: Mutex<equalizer::EqualizerState>,
@@ -80,7 +124,7 @@ pub struct PlaybackOwner {
             + Sync,
     >,
     cast: playback_cast::CastManager,
-    output: Mutex<OutputSelection>,
+    output: Mutex<playback::PlaybackOutput>,
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
     rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
@@ -158,6 +202,7 @@ impl PlaybackOwner {
         observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
         audio_outputs: fn() -> Vec<playback::AudioOutput>,
         scrobbler: Arc<Scrobbler>,
+        features: &Arc<Features>,
         start_backend: StartBackend,
     ) -> Arc<Self>
     where
@@ -185,15 +230,16 @@ impl PlaybackOwner {
                 stream.row.as_ref()?.track.artwork_binding.as_deref(),
             )
         };
-        let owner = Arc::new(Self {
+        let owner = Arc::new_cyclic(|weak: &Weak<Self>| Self {
             catalog,
+            loudness: LoudnessAnalysisOwner::new(runtime.clone(), settings.clone()),
+            analysis: features.add(Arc::new(Loudness(weak.clone()))),
             settings,
             runtime: runtime.clone(),
             updates: playback::PlaybackUpdates::default(),
             visualizer_events,
             visualizer_drain,
             waveform,
-            loudness: LoudnessAnalysisOwner::new(runtime),
             lyrics,
             observe_playback,
             audio_outputs,
@@ -212,14 +258,15 @@ impl PlaybackOwner {
                 ui.cast_network_interface,
                 cast_artwork_path,
             ),
-            output: Mutex::new(OutputSelection {
-                selected: playback::PlaybackOutput::Local,
-                prepared: None,
-            }),
+            output: Mutex::new(playback::PlaybackOutput::Local),
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
         });
+        features.add(Arc::new(QueueTracks {
+            playback: Arc::downgrade(&owner),
+            installed: std::sync::atomic::AtomicBool::new(false),
+        }));
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
             while let Ok((source_id, report)) = report_receiver.recv().await {
@@ -258,46 +305,59 @@ impl PlaybackOwner {
         *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
     }
 
-    pub(crate) async fn start(self: &Arc<Self>) -> Result<PlaybackProjection, String> {
-        let stored = self.settings.load();
-        let sequence = match self.catalog.restore_queue().await {
-            Ok(mut restore) => {
-                if restore.entries.is_empty() {
-                    restore.repeat_mode = stored.ui.repeat_mode;
-                    restore.shuffled = stored.ui.shuffle_enabled;
-                }
-                Sequence::from_window(restore, 0, 0).map_err(string_error)
-            }
-            Err(error) => Err(string_error(error)),
-        }.unwrap_or_else(|error| {
-            warn!(%error, "could not restore optional Queue; starting with an empty playback window");
-            Sequence::new()
-        });
-        let owner = Arc::downgrade(self);
-        let clock_owner = Arc::downgrade(self);
-        let backend_owner = Arc::clone(self);
-        let (playback_output, backend) =
-            tokio::task::spawn_blocking(move || backend_owner.take_selected_backend())
-                .await
-                .map_err(string_error)??;
-        let (playback, projection) = Playback::start(
-            sequence,
-            random_identity(),
-            stored.ui.playback,
-            stored.ui.auto_dj_enabled,
-            usize::from(stored.ui.application.auto_dj_refill_threshold),
-            playback_output,
-            backend,
-            Arc::new(move || {
-                clock_owner
-                    .upgrade()
-                    .map_or_else(empty_clock_sample, |owner| owner.clock_sample())
-            }),
-            owner,
-        )
-        .map_err(string_error)?;
+    /// Takes commands at once; they wait until the saved queue is restored after the Catalog
+    /// loaded, so the first rows come first. The backend starts then, or for the first play.
+    pub(crate) fn start(self: &Arc<Self>) {
+        let (playback, receiver) = actor::channel();
         *self.active.lock().unwrap_or_else(|p| p.into_inner()) = Some(playback.clone());
-        Ok(projection)
+        let owner = Arc::downgrade(self);
+        let catalog = Arc::clone(&self.catalog);
+        self.runtime.spawn(async move {
+            catalog.loaded().await;
+            let Some(strong) = owner.upgrade() else {
+                return;
+            };
+            let stored = strong.settings.load();
+            let sequence = match strong.catalog.restore_queue().await {
+                Ok(mut restore) => {
+                    if restore.entries.is_empty() {
+                        restore.repeat_mode = stored.ui.repeat_mode;
+                        restore.shuffled = stored.ui.shuffle_enabled;
+                    }
+                    Sequence::from_window(restore, 0, 0).map_err(string_error)
+                }
+                Err(error) => Err(string_error(error)),
+            }
+            .unwrap_or_else(|error| {
+                warn!(%error, "could not restore optional Queue; starting with an empty playback window");
+                Sequence::new()
+            });
+            let clock_owner = owner.clone();
+            let output = strong.playback_output();
+            drop(strong);
+            if let Err(error) = playback.run(
+                receiver,
+                sequence,
+                random_identity(),
+                stored.ui.playback,
+                stored.ui.auto_dj_enabled,
+                usize::from(stored.ui.application.auto_dj_refill_threshold),
+                output,
+                None,
+                Arc::new(move || {
+                    clock_owner
+                        .upgrade()
+                        .map_or_else(empty_clock_sample, |owner| owner.clock_sample())
+                }),
+                owner,
+            ) {
+                warn!(%error, "could not start playback");
+                return;
+            }
+            playback
+                .downgrade()
+                .post(|player, _| player.start_backend());
+        });
     }
 
     pub async fn waveform_cache_usage(&self) -> Result<library::CacheUsage, String> {
@@ -335,28 +395,6 @@ impl PlaybackOwner {
         self.waveform
             .remove_source_cache(source)
             .map_err(|error| error.to_string())
-    }
-
-    pub(crate) async fn forget_source(&self, source: library::SourceKey) -> Result<(), String> {
-        let Some(active) = self.active() else {
-            return Ok(());
-        };
-        let queue = active.handoff_snapshot().map_err(string_error)?.0;
-        let positions = self
-            .catalog
-            .queue_positions_for_source(&queue, source)
-            .await
-            .map_err(string_error)?;
-        if !positions.is_empty() {
-            let keys = positions
-                .into_iter()
-                .map(|position| queue.entries[queue.order[position] as usize].track_key)
-                .collect();
-            active
-                .command(Command::Forget(keys))
-                .map_err(string_error)?;
-        }
-        Ok(())
     }
 
     fn take_active(&self) -> Option<Playback> {
@@ -594,14 +632,23 @@ impl PlaybackOwner {
             self.current_media().map(|media| self.waveform_media(media)),
         );
     }
-    pub(crate) fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
+    pub(crate) fn playback_settings_changed(
+        &self,
+        previous: &playback::PlaybackSettings,
+        settings: playback::PlaybackSettings,
+    ) {
         self.equalizer_output_changed(settings.audio_output.as_deref());
-        self.loudness.settings_changed(
+        if (
+            previous.loudness_normalization,
+            previous.loudness_normalization_scope,
+            previous.write_ebu_r128_tags,
+        ) != (
             settings.loudness_normalization,
             settings.loudness_normalization_scope,
             settings.write_ebu_r128_tags,
-            self.source_owner(),
-        );
+        ) {
+            self.analysis.restart();
+        }
         self.send(Command::UpdateSettings(settings));
     }
     pub(crate) fn cancel_loudness_analysis(&self) {
@@ -627,25 +674,21 @@ impl PlaybackOwner {
             .command(Command::StreamInputsChanged)
             .map_err(string_error)
     }
-    pub(crate) fn rekey_tracks(&self, pairs: Arc<[(library::TrackKey, library::TrackKey)]>) {
-        self.send(Command::RekeyTracks(pairs));
-    }
-    pub(crate) fn catalog_changed(&self) {
-        if self.active().is_some() {
-            self.send(Command::CatalogChanged);
+    /// Committed Changes the queue hears, or None after a lag.
+    pub(crate) fn library_changed(&self, changes: Option<Vec<Arc<Change>>>) {
+        if let Some(active) = self.active() {
+            active.downgrade().post(move |player, sample| {
+                player.library_changed(changes.as_deref(), sample);
+            });
         }
     }
 
-    /// A source was selected: loudness analysis turns to it.
+    /// A source was selected: the queue's rows read again, and loudness analysis turns to it.
     pub(crate) fn source_selected(&self) {
-        self.catalog_changed();
-        let playback = self.settings.load().ui.playback;
-        self.loudness.library_changed(
-            playback.loudness_normalization,
-            playback.loudness_normalization_scope,
-            playback.write_ebu_r128_tags,
-            self.source_owner(),
-        );
+        self.library_changed(None);
+        if self.analysis.installed() {
+            self.loudness.library_changed(self.source_owner());
+        }
     }
     pub(crate) fn current_media(&self) -> Option<Arc<playback::CurrentMedia>> {
         self.updates
@@ -661,7 +704,7 @@ impl PlaybackOwner {
             .clone()
     }
 
-    fn source_owner(&self) -> Option<Arc<SourceOwner>> {
+    pub(crate) fn source_owner(&self) -> Option<Arc<SourceOwner>> {
         self.source
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -729,19 +772,6 @@ impl PlaybackOwner {
         }
     }
 
-    fn take_selected_backend(
-        &self,
-    ) -> Result<(playback::PlaybackOutput, Box<dyn PlaybackBackend>), String> {
-        let (selected, prepared) = {
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            (output.selected.clone(), output.prepared.take())
-        };
-        let backend = match prepared {
-            Some(backend) => backend,
-            None => self.start_output_backend(&selected)?,
-        };
-        Ok((selected, backend))
-    }
     fn start_output_backend(
         &self,
         output: &playback::PlaybackOutput,
@@ -764,13 +794,7 @@ impl PlaybackOwner {
         selected: playback::PlaybackOutput,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<(), String> {
-        if self
-            .output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .selected
-            == selected
-        {
+        if *self.output.lock().unwrap_or_else(|p| p.into_inner()) == selected {
             return Ok(());
         }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
@@ -813,19 +837,14 @@ impl PlaybackOwner {
                 return Ok(());
             }
         }
+        let active = self
+            .active()
+            .ok_or_else(|| "Playback is unavailable".to_string())?;
         let backend = self.start_output_backend(&selected)?;
-        if let Some(active) = self.active() {
-            active
-                .replace_backend(selected.clone(), backend)
-                .map_err(string_error)?;
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            output.selected = selected;
-            output.prepared = None;
-        } else {
-            let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-            output.selected = selected;
-            output.prepared = Some(backend);
-        }
+        active
+            .replace_backend(selected.clone(), backend)
+            .map_err(string_error)?;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = selected;
         self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
         Ok(())
     }
@@ -1086,7 +1105,6 @@ impl PlaybackOwner {
         self.output
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .selected
             .clone()
     }
     pub fn discover_remote_outputs(&self) -> Result<Vec<playback::RemoteOutput>, String> {
@@ -1117,15 +1135,6 @@ impl PlaybackOwner {
         }
         if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
             plex.cancel();
-        }
-        if let Some(mut backend) = self
-            .output
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .prepared
-            .take()
-        {
-            let _ = backend.shutdown();
         }
         if let Some(active) = self.active() {
             let _ = active.shutdown();
