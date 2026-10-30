@@ -12,10 +12,10 @@ use crate::{SourceConfiguration, SourceError, SourceId, SourceResult};
 
 pub(crate) mod artwork;
 pub(crate) mod changes;
+mod folder_file;
 pub(crate) mod input;
 pub(crate) mod metadata;
 mod playlist;
-mod profile_file;
 pub(crate) mod reader;
 pub(crate) mod scan;
 pub(crate) mod smb;

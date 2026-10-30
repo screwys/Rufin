@@ -783,7 +783,7 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn profile_file_source(&self) -> SourceResult<&crate::FileSource> {
+    pub fn file_connection(&self) -> SourceResult<&crate::FileSource> {
         match &self.implementation {
             Implementation::Files(source) => Ok(source),
             _ => Err(SourceError::InvalidRequest(

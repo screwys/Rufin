@@ -310,6 +310,22 @@ impl WebDavClient {
         require_status(&response, &[StatusCode::CREATED, StatusCode::NO_CONTENT])
     }
 
+    /// Creates a collection; one already there is left as it is.
+    pub async fn create_collection(&self, url: &Url) -> SourceResult<()> {
+        let response = self
+            .request(
+                Method::from_bytes(b"MKCOL").unwrap(),
+                url,
+                HeaderMap::new(),
+                Body::Empty,
+            )
+            .await?;
+        require_status(
+            &response,
+            &[StatusCode::CREATED, StatusCode::METHOD_NOT_ALLOWED],
+        )
+    }
+
     pub async fn remove(&self, url: &Url) -> SourceResult<()> {
         let response = self
             .request(Method::DELETE, url, HeaderMap::new(), Body::Empty)

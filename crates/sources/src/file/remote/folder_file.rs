@@ -1,24 +1,75 @@
-use super::{FileSource, input::FileInput, webdav::client::Body};
+//! Files of a sync folder on a file connection.
+use super::{FileSource, input::FileInput};
 use crate::{SourceError, SourceResult};
-use reqwest::{
-    Method, StatusCode,
-    header::{ETAG, HeaderMap, HeaderValue, IF_MATCH, IF_NONE_MATCH},
-};
+use reqwest::{StatusCode, header::ETAG};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
 impl FileSource {
-    pub async fn list_profile_files(
+    /// The files directly in `relative` whose names end with `suffix`, as (name, path); a
+    /// missing folder holds none.
+    pub async fn list_folder_files(
         &self,
         relative: &str,
-    ) -> SourceResult<Vec<(String, Option<String>)>> {
+        suffix: &str,
+    ) -> SourceResult<Vec<(String, String)>> {
         let mut files = Vec::new();
-        self.visit_files(relative, ".rufin-connect", |entry| {
-            files.push(entry);
-            std::future::ready(Ok(()))
-        })
-        .await?;
-        Ok(files)
+        let listed = self
+            .visit_files(relative, suffix, |(path, _)| {
+                let name = crate::file::documents::relative_parts(&path).0;
+                let name = name.rsplit('/').next().unwrap_or(name).to_owned();
+                files.push((name, path));
+                std::future::ready(Ok(()))
+            })
+            .await;
+        match listed {
+            Ok(()) => Ok(files),
+            Err(SourceError::NotFound) => Ok(Vec::new()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Creates `relative` and the folders above it that are missing.
+    pub async fn create_folders(&self, relative: &str) -> SourceResult<()> {
+        self.location(relative)?;
+        let input = self.input().await?;
+        let parts = relative
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if let FileInput::Documents(access) = input.input() {
+            let root = access.root.uri.clone();
+            return tokio::task::spawn_blocking(move || {
+                crate::create_document_directories(&root, &parts).map(|_| ())
+            })
+            .await
+            .map_err(error)?;
+        }
+        for depth in 1..=parts.len() {
+            let path = parts[..depth].join("/");
+            match input.input() {
+                FileInput::Smb(client) => match client.stat(&path).await {
+                    Ok(_) => {}
+                    Err(SourceError::NotFound) => client.create_directory(&path).await?,
+                    Err(error) => return Err(error),
+                },
+                FileInput::WebDav(client) => {
+                    let mut url =
+                        url::Url::parse(&self.input_path(input.input(), &path)?).map_err(error)?;
+                    url.path_segments_mut()
+                        .map_err(|_| SourceError::NotFound)?
+                        .push("");
+                    client.create_collection(&url).await?;
+                }
+                FileInput::Documents(_) | FileInput::Link { .. } => {
+                    return Err(SourceError::InvalidRequest(
+                        "Choose a WebDAV or SMB connection",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn visit_files<F, Fut>(
@@ -203,63 +254,27 @@ impl FileSource {
         Ok(Some(etag))
     }
 
-    pub async fn write_profile_file(
-        &self,
-        relative: &str,
-        file: tempfile::NamedTempFile,
-        previous: Option<Option<String>>,
-    ) -> SourceResult<()> {
+    /// Writes the file at `relative`, replacing one already there.
+    pub async fn write_file(&self, relative: &str, file: &Path) -> SourceResult<()> {
         self.location(relative)?;
         let input = self.input().await?;
-        if matches!(input.input(), FileInput::Smb(_) | FileInput::Documents(_)) {
-            let previous = if previous == Some(None) {
-                match self.stat(&input, relative).await {
-                    Ok(entry) => Some(entry.revision),
-                    Err(SourceError::NotFound) => None,
-                    Err(error) => return Err(error),
-                }
-            } else {
-                previous
-            };
-            return self
-                .commit_file(
-                    relative,
-                    file.path(),
-                    previous.as_ref().and_then(|value| value.as_deref()),
-                    previous.is_some(),
-                )
-                .await
-                .map_err(error);
+        if let FileInput::WebDav(client) = input.input() {
+            let url = url::Url::parse(&self.input_path(input.input(), relative)?).map_err(error)?;
+            return client.upload(&url, file, false).await;
         }
-        let FileInput::WebDav(client) = input.input() else {
-            return Err(SourceError::InvalidRequest(
-                "Choose a WebDAV or SMB connection",
-            ));
+        let revision = match self.stat(&input, relative).await {
+            Ok(entry) => Some(entry.revision),
+            Err(SourceError::NotFound) => None,
+            Err(error) => return Err(error),
         };
-        let url = url::Url::parse(&self.input_path(input.input(), relative)?).map_err(error)?;
-        let mut headers = HeaderMap::new();
-        match previous {
-            None => {
-                headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
-            }
-            Some(Some(etag)) => {
-                headers.insert(IF_MATCH, HeaderValue::from_str(&etag).map_err(error)?);
-            }
-            Some(None) => {}
-        }
-        let response = client
-            .request(Method::PUT, &url, headers, Body::File(file.path()))
-            .await?;
-        match response.status() {
-            StatusCode::OK | StatusCode::CREATED | StatusCode::NO_CONTENT => Ok(()),
-            StatusCode::PRECONDITION_FAILED => Err(SourceError::Other(
-                "The Connect file changed. Refresh to merge it before writing again".into(),
-            )),
-            status => Err(SourceError::Server {
-                status: status.as_u16(),
-                message: "Could not write the Connect file".into(),
-            }),
-        }
+        self.commit_file(
+            relative,
+            file,
+            revision.as_ref().and_then(|revision| revision.as_deref()),
+            revision.is_some(),
+        )
+        .await
+        .map_err(error)
     }
 }
 
@@ -273,28 +288,44 @@ mod tests {
     use crate::{FileAuthentication, FileSourceSettings, SourceId};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
-        matchers::{header, method, path},
+        matchers::{method, path},
     };
 
     #[tokio::test]
-    async fn profile_exchange_uses_existing_dav_login_and_conditional_write() {
+    async fn sync_folder_files_use_the_dav_login() {
         let server = MockServer::start().await;
-        Mock::given(method("PROPFIND")).respond_with(ResponseTemplate::new(207).set_body_string(
-            "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"
-        )).mount(&server).await;
+        Mock::given(method("PROPFIND"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(207).set_body_string(
+                "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("PROPFIND"))
+            .and(path("/Rufin%20Connect/"))
+            .respond_with(ResponseTemplate::new(207).set_body_string(
+                "<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/Rufin%20Connect/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/Rufin%20Connect/000000000001-000000000002.rcs</d:href><d:propstat><d:prop><d:resourcetype/><d:getetag>\"v1\"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/Rufin%20Connect/notes.txt</d:href><d:propstat><d:prop><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("MKCOL"))
+            .and(path("/Rufin%20Connect/"))
+            .respond_with(ResponseTemplate::new(405))
+            .expect(1)
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
-            .and(path("/profile.rufin-connect"))
+            .and(path("/Rufin%20Connect/000000000001-000000000002.rcs"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("ETag", "\"v1\"")
-                    .set_body_bytes(b"encrypted profile"),
+                    .set_body_bytes(b"encrypted segment"),
             )
             .mount(&server)
             .await;
         Mock::given(method("PUT"))
-            .and(path("/profile.rufin-connect"))
-            .and(header("If-Match", "\"v1\""))
-            .respond_with(ResponseTemplate::new(412))
+            .and(path("/Rufin%20Connect/000000000003-000000000003.rcs"))
+            .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
@@ -314,17 +345,24 @@ mod tests {
             .configuration(SourceId::new("dav"), "webdav", "Files".into())
             .unwrap();
         let source = FileSource::open(&config, None).unwrap();
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let version = source
-            .copy_file("profile.rufin-connect", file.path())
+        source.create_folders("Rufin Connect").await.unwrap();
+        let files = source
+            .list_folder_files("Rufin Connect", ".rcs")
             .await
             .unwrap();
-        assert_eq!(version, Some(Some("\"v1\"".into())));
-        assert_eq!(std::fs::read(file.path()).unwrap(), b"encrypted profile");
-        let error = source
-            .write_profile_file("profile.rufin-connect", file, version)
+        assert_eq!(
+            files,
+            vec![(
+                "000000000001-000000000002.rcs".to_owned(),
+                "Rufin Connect/000000000001-000000000002.rcs".to_owned()
+            )]
+        );
+        let file = tempfile::NamedTempFile::new().unwrap();
+        source.copy_file(&files[0].1, file.path()).await.unwrap();
+        assert_eq!(std::fs::read(file.path()).unwrap(), b"encrypted segment");
+        source
+            .write_file("Rufin Connect/000000000003-000000000003.rcs", file.path())
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("changed"));
+            .unwrap();
     }
 }
