@@ -133,7 +133,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             .reconcile_source(&SourceId::new("source"), "subsonic", "Source")
             .await
             .unwrap();
-        let mut observation = catalog.observe("source", None).await.unwrap();
+        let mut observation = catalog.observe("source").await.unwrap();
         observation.start_observation().await.unwrap();
         observation
             .apply_catalog(

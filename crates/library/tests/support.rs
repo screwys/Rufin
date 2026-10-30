@@ -79,7 +79,7 @@ pub async fn fixture() -> Fixture {
         .await
         .unwrap()
         .source;
-    let mut observation = catalog.observe("source", None).await.unwrap();
+    let mut observation = catalog.observe("source").await.unwrap();
     observation.start_observation().await.unwrap();
     let mut batch = library::CatalogBatch::default();
     for (id, title, artist, sort, date) in [
@@ -694,8 +694,8 @@ impl PlaybackLoudness for Catalog {
             .await?
             .map(|playable| {
                 (
-                    playable.gains.track_loudness(playable.audio_hash),
-                    playable.gains.album_loudness(playable.audio_hash),
+                    playable.gains.track_loudness(),
+                    playable.gains.album_loudness(),
                 )
             })
             .unwrap_or_default())

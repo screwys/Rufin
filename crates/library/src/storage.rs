@@ -27,7 +27,12 @@ impl Catalog {
     }
 
     pub async fn loudness_cache_usage(&self) -> LibraryResult<CacheUsage> {
-        self.cached_table_usage("loudness").await
+        let tracks = self.cached_table_usage("loudness").await?;
+        let albums = self.cached_table_usage("album_loudness").await?;
+        Ok(CacheUsage {
+            entries: tracks.entries + albums.entries,
+            bytes: tracks.bytes + albums.bytes,
+        })
     }
 
     pub async fn lyrics_cache_usage(&self) -> LibraryResult<CacheUsage> {

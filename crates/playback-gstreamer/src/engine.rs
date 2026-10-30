@@ -3605,7 +3605,6 @@ mod tests {
     fn gapless_normalization_can_share_the_audio_graph() {
         let direct_loudness = TrackLoudness {
             track: Some(Box::new(LoudnessMeasurement {
-                analysis_key: [1; 32],
                 integrated_lufs: None,
                 true_peak: None,
                 replay_gain_db: Some(-4.0),

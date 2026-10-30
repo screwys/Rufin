@@ -62,7 +62,7 @@ async fn fixture() -> (tempfile::TempDir, Catalog) {
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        catalog.observe("source", None).await
+        catalog.observe("source").await
     }
     .await
     .unwrap();
@@ -168,7 +168,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         (false, 2, true, false),
     ] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         {
             for (kind, id, state) in &[
                 (
@@ -248,7 +248,7 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for replace in [false, true] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         track(&mut scan_observation, None, None).await;
         if replace {
             {
@@ -290,7 +290,7 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
         .unwrap();
     for (favorite, changed) in [(false, true), (false, false), (true, true)] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         let ids = |id: &str| {
             if favorite {
                 vec![id.to_string()]
@@ -357,7 +357,7 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
         (false, None, true),
     ] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         let entries = if populated {
             vec![library::HomeEntryInput {
                 position: 0,
@@ -425,7 +425,7 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
 async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
     let (directory, catalog) = fixture().await;
 
-    let mut scan_observation = catalog.observe("source", None).await.unwrap();
+    let mut scan_observation = catalog.observe("source").await.unwrap();
     scan_observation
         .replace_source_home_section(
             "most-played",
@@ -452,7 +452,7 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        catalog.observe("source", None).await
+        catalog.observe("source").await
     }
     .await
     .unwrap();
@@ -522,7 +522,7 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
         &[][..],
     ] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         {
             let write = library::CatalogBatch {
                 playlists: vec![library::PlaylistObservation {
@@ -579,7 +579,7 @@ async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
         .execute(&mut raw).await.unwrap();
 
     changes.facts();
-    let mut scan_observation = catalog.observe("source", None).await.unwrap();
+    let mut scan_observation = catalog.observe("source").await.unwrap();
     track(&mut scan_observation, None, None).await;
     let update = changes.facts();
     assert!(!super::support::shown(update));
@@ -591,7 +591,7 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
     let mut changes = super::support::Changes::of(&catalog);
     for changed in [true, false] {
         changes.facts();
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         track(&mut scan_observation, None, Some(5)).await;
         let update = changes.facts();
         // Server play counts are activity, not catalog rows.
@@ -631,7 +631,7 @@ async fn absent_favorites_preserve_known_state_and_explicit_false_clears_it() {
     let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for (favorite, expected) in [(None, true), (Some(false), false), (None, false)] {
-        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source").await.unwrap();
         track(&mut scan_observation, favorite, None).await;
         assert_eq!(
             sqlx::query_scalar::<_, bool>("SELECT coalesce(native_favorite,0) FROM tracks")

@@ -580,7 +580,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 .reconcile_source(&source_id, "local", "Cached")
                 .await
                 .unwrap();
-            let mut observation = b.catalog.observe(source_id.as_str(), None).await.unwrap();
+            let mut observation = b.catalog.observe(source_id.as_str()).await.unwrap();
             observation.start_observation().await.unwrap();
             observation
                 .apply_catalog(
@@ -1065,7 +1065,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             tracks[0].user_data = library::NativeUserState { favorite: Some(true), rating: Some(None), play_count: Some(7), ..Default::default() };
             tracks[0].source_path = Some(track_file.path.clone());
             let freshness = library::Freshness::new(b"received-native-catalog".to_vec()).unwrap();
-            let mut observation = owner.catalog.observe(music.as_str(), None).await.unwrap();
+            let mut observation = owner.catalog.observe(music.as_str()).await.unwrap();
             observation.start_observation().await.unwrap();
             observation.apply_catalog(&library::CatalogBatch {
                 tracks: tracks.clone(),
@@ -1112,7 +1112,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             assert!(reopened[0].playlist_identity.is_some(), "opening an existing profile publishes released file associations without another scan or export");
             assert_eq!(reopened[0].playlist, Some(shared_playlist));
             tracks[0].metadata.title = "Edited track".into();
-            owner.catalog.observe(music.as_str(), None).await.unwrap()
+            owner.catalog.observe(music.as_str()).await.unwrap()
                 .write_files(library::FileBatch { files: vec![track_file], tracks: vec![tracks[0].clone()], ..Default::default() }).await.unwrap();
             let uri = library::source_entity_uri(&music, "track", "track-0");
             let cancellation = library::ReadCancellation::new();
@@ -1134,7 +1134,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 receiving_owner.catalog.reconcile_source(&music, "webdav", "Music server").await.unwrap();
                 let mut previous = tracks[0].clone();
                 previous.user_data = library::NativeUserState { favorite: Some(false), rating: Some(Some(70)), ..Default::default() };
-                receiving_owner.catalog.observe(music.as_str(), Some(0)).await.unwrap().apply_catalog(&library::CatalogBatch { tracks: vec![previous], ..Default::default() }, true).await.unwrap();
+                receiving_owner.catalog.observe(music.as_str()).await.unwrap().apply_catalog(&library::CatalogBatch { tracks: vec![previous], ..Default::default() }, true).await.unwrap();
                 if paired {
                     pair(owner, receiving_owner).await;
                 } else {

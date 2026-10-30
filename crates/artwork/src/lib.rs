@@ -722,7 +722,7 @@ mod tests {
             .await
             .unwrap();
         catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .apply_catalog(
@@ -757,7 +757,7 @@ mod tests {
         let mut changes = catalog.changes();
         while changes.try_recv().is_ok() {}
         {
-            let mut observation = catalog.observe("source", None).await.unwrap();
+            let mut observation = catalog.observe("source").await.unwrap();
             observation
                 .apply_catalog(
                     &library::CatalogBatch {

@@ -76,7 +76,7 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
         .await
         .unwrap();
     a.catalog
-        .observe("server", None)
+        .observe("server")
         .await
         .unwrap()
         .apply_catalog(

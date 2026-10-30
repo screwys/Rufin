@@ -504,7 +504,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("emby").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         let albums: Vec<Value> =
             serde_json::from_str(include_str!("fixtures/alternate-album-covers.json")).unwrap();
@@ -532,7 +532,7 @@ mod tests {
             .unwrap();
         }
         let catalog_source_id = ("emby").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         for album in &albums {
             (async {
                 let mut batch = library::CatalogBatch::default();

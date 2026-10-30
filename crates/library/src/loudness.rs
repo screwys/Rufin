@@ -12,7 +12,6 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LoudnessMeasurement {
-    pub analysis_key: [u8; 32],
     pub integrated_lufs: Option<f64>,
     pub true_peak: Option<f64>,
     pub replay_gain_db: Option<f64>,

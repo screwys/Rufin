@@ -961,7 +961,7 @@ mod tests {
             .await
             .unwrap();
         catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .apply_catalog(

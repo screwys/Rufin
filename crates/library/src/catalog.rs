@@ -119,13 +119,8 @@ pub struct LocalArtworkCandidate {
 }
 
 impl Catalog {
-    /// An observation of a source's rows. The second argument is no longer read; the callers
-    /// outside the file lane drop it at the phase merge.
-    pub async fn observe<'a>(
-        &'a self,
-        source_id: &'a str,
-        _unused: Option<i64>,
-    ) -> LibraryResult<Observation<'a>> {
+    /// An observation of a source's rows.
+    pub async fn observe<'a>(&'a self, source_id: &'a str) -> LibraryResult<Observation<'a>> {
         self.loaded().await;
         let source = self
             .source_key(&SourceId::new(source_id))

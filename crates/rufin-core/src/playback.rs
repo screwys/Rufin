@@ -1292,14 +1292,8 @@ async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, 
 /// The gains a playable carries, as the backend takes them.
 pub(crate) fn track_loudness(playable: &library::Playable) -> playback::TrackLoudness {
     playback::TrackLoudness {
-        track: playable
-            .gains
-            .track_loudness(playable.audio_hash)
-            .map(Box::new),
-        album: playable
-            .gains
-            .album_loudness(playable.audio_hash)
-            .map(Box::new),
+        track: playable.gains.track_loudness().map(Box::new),
+        album: playable.gains.album_loudness().map(Box::new),
     }
 }
 

@@ -2174,7 +2174,7 @@ fn write_silent_wav(path: &Path, seconds: u32) -> std::io::Result<()> {
 /// Every stored file row of a source, in walk order.
 async fn stored_files(catalog: &Catalog, source: &str) -> Vec<library::LocalFileWrite> {
     catalog
-        .observe(source, None)
+        .observe(source)
         .await
         .unwrap()
         .file_rows(&[], &[], None, false, 8192)

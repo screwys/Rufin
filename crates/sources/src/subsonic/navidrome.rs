@@ -1234,7 +1234,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         (async {
             let mut batch = library::CatalogBatch::default();
@@ -1269,7 +1269,7 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             {
                 let result = source
                     .acquire_collection(
@@ -1510,7 +1510,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("navidrome:test").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         (async {

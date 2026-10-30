@@ -71,24 +71,23 @@ pub struct Gains {
 
 impl Gains {
     /// The track's gain: the source's, else the analysed one.
-    pub fn track_loudness(&self, hash: Option<[u8; 32]>) -> Option<LoudnessMeasurement> {
+    pub fn track_loudness(&self) -> Option<LoudnessMeasurement> {
         self.track
             .as_ref()
-            .map(|gain| measurement(gain, hash))
+            .map(measurement)
             .or_else(|| self.analysed.clone())
     }
 
-    pub fn album_loudness(&self, hash: Option<[u8; 32]>) -> Option<LoudnessMeasurement> {
+    pub fn album_loudness(&self) -> Option<LoudnessMeasurement> {
         self.album
             .as_ref()
-            .map(|gain| measurement(gain, hash))
+            .map(measurement)
             .or_else(|| self.album_analysed.clone())
     }
 }
 
-fn measurement(gain: &NativeGain, hash: Option<[u8; 32]>) -> LoudnessMeasurement {
+fn measurement(gain: &NativeGain) -> LoudnessMeasurement {
     LoudnessMeasurement {
-        analysis_key: hash.unwrap_or_default(),
         integrated_lufs: gain.integrated_lufs,
         true_peak: gain.true_peak,
         replay_gain_db: gain.replay_gain_db,
@@ -197,7 +196,6 @@ impl Catalog {
         };
         let analysed = |lufs: Option<f64>, peak: Option<f64>| {
             (lufs.is_some() || peak.is_some()).then(|| LoudnessMeasurement {
-                analysis_key: audio_hash.unwrap_or_default(),
                 integrated_lufs: lufs,
                 true_peak: peak,
                 replay_gain_db: None,

@@ -184,7 +184,7 @@ mod tests {
             state,
         })
         .collect::<Vec<_>>();
-        let mut observation = catalog.observe("files", None).await?;
+        let mut observation = catalog.observe("files").await?;
         observation
             .write_files(crate::FileBatch {
                 files: files.clone(),
@@ -234,7 +234,7 @@ mod tests {
             .associate_playlist_files(&source, &[(rows[0].path.clone(), playlist)])
             .await?;
         catalog
-            .observe("files", None)
+            .observe("files")
             .await?
             .write_files(crate::FileBatch {
                 files: files.clone(),

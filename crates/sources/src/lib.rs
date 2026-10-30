@@ -153,7 +153,7 @@ pub(crate) async fn stored_files(
     source: &str,
 ) -> Vec<library::LocalFileWrite> {
     catalog
-        .observe(source, None)
+        .observe(source)
         .await
         .unwrap()
         .file_rows(&[], &[], None, false, 8192)

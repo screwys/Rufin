@@ -372,7 +372,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("plex").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         (async {
@@ -396,7 +396,7 @@ mod tests {
         for refresh in [false, true] {
             if refresh {
                 let catalog_source_id = ("plex").to_string();
-                let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
 
                 (async {
                     for batch in read_items(

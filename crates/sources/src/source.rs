@@ -788,7 +788,7 @@ impl Source {
             return Err(SourceError::Cancelled.into());
         }
         let mut observation = catalog
-            .observe(self.source_id.as_str(), None)
+            .observe(self.source_id.as_str())
             .await
             .map_err(SourceError::from)?;
         work(&mut observation).await
@@ -2783,8 +2783,7 @@ mod refresh_laws {
             .await
             .unwrap();
         let catalog_source_id = ("mapping-test").to_string();
-        let stamp: Option<i64> = None;
-        let mut observation = catalog.observe(&catalog_source_id, stamp).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         for (id, path) in [
             ("one", "/server/music/Artist/one.flac"),
             ("two", "/server/music/Artist/two.flac"),

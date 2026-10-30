@@ -20,7 +20,7 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        catalog.observe("source", None).await
+        catalog.observe("source").await
     }
     .await
     .unwrap();
@@ -213,7 +213,7 @@ async fn artist_names_and_sort_names_survive_sparse_credits_and_reset_with_compl
     };
     {
         let result = catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .apply_catalog(&write, true)
@@ -266,7 +266,7 @@ async fn artist_names_and_sort_names_survive_sparse_credits_and_reset_with_compl
         };
         {
             let result = catalog
-                .observe("source", None)
+                .observe("source")
                 .await
                 .unwrap()
                 .apply_catalog(&write, true)
@@ -316,7 +316,7 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
     };
     {
         let result = catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .apply_catalog(&write, true)
@@ -359,7 +359,7 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
         }
         {
             let result = catalog
-                .observe("source", None)
+                .observe("source")
                 .await
                 .unwrap()
                 .apply_catalog(&write, true)
@@ -395,7 +395,7 @@ async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_
     };
     {
         let result = catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .apply_catalog(&write, true)
@@ -439,7 +439,7 @@ async fn write_small_catalog(
                 )
                 .await?;
         }
-        catalog.observe("source-one", None).await
+        catalog.observe("source-one").await
     }
     .await
     .expect("begin scan");
@@ -1002,7 +1002,7 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
             .unwrap();
             let previous_title=sqlx::query_scalar::<_,String>("SELECT title FROM albums WHERE object_id='album-one'").fetch_one(&mut reader).await.unwrap();
 
-let mut point_observation = catalog.observe("source-one", None).await.unwrap();
+let mut point_observation = catalog.observe("source-one").await.unwrap();
             {
 let write = library::CatalogBatch { artists: vec![library::ArtistObservation{user_data:library::NativeUserState{favorite:Some(false),..Default::default()},metadata:library::ArtistMetadata{name:"Artist One".into(),sort_text:Some("artist one".into()),musicbrainz_artist_id:Some("artist-mbid-one".into()),..Default::default()},object_id: "artist-one".into(),artwork_binding: Some(br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/8799b34127e8fddd3fdcdff25c21b7dd","image":{"kind":"native","source_id":"source","item_id":"artist-art","tag":null},"blur_hash":null}]"#.to_vec()),..Default::default()}], ..Default::default() };
         point_observation.apply_catalog(&write, true).await.unwrap();
@@ -1043,7 +1043,7 @@ async fn incomplete_collection_publishes_valid_pages_without_removal_authority()
     let mut changes = super::support::Changes::of(&catalog);
     write_small_catalog(&catalog, &mut changes, "complete", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
 
-    let mut scan_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut scan_observation = catalog.observe("source-one").await.unwrap();
     write_track(
         &mut scan_observation,
         "track-one",
@@ -1149,7 +1149,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
                     .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                     .await?;
             }
-            catalog.observe("source", None).await
+            catalog.observe("source").await
         }
         .await
         .unwrap();
@@ -1206,7 +1206,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
         );
     }
 
-    let mut point_observation = catalog.observe("source", None).await.unwrap();
+    let mut point_observation = catalog.observe("source").await.unwrap();
     {
         let write = library::CatalogBatch {
             tags: vec![library::TagObservation {
@@ -1237,7 +1237,7 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        catalog.observe("source", None).await
+        catalog.observe("source").await
     }
     .await
     .unwrap();
@@ -1328,7 +1328,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .unwrap();
 
-    let mut failed_observation = catalog.observe("source-two", None).await.unwrap();
+    let mut failed_observation = catalog.observe("source-two").await.unwrap();
     failed_observation.start_observation().await.unwrap();
     let mut write = library::CatalogBatch::default();
     {
@@ -1457,10 +1457,10 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         (true, 2)
     );
 
-    let mut old_observation = catalog.observe("source-two", None).await.unwrap();
+    let mut old_observation = catalog.observe("source-two").await.unwrap();
     old_observation.start_observation().await.unwrap();
 
-    let mut third_observation = catalog.observe("source-three", None).await.unwrap();
+    let mut third_observation = catalog.observe("source-three").await.unwrap();
     third_observation.start_observation().await.unwrap();
     let tracks = (0..130)
         .map(|index| library::TrackObservation {
@@ -1514,7 +1514,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     };
     {
         let result = catalog
-            .observe("source-two", None)
+            .observe("source-two")
             .await
             .unwrap()
             .apply_catalog(&point, true)
@@ -1548,7 +1548,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .remove_source(&library::SourceId::new("source-two"))
         .await
         .unwrap();
-    assert!(catalog.observe("source-two", None).await.is_err());
+    assert!(catalog.observe("source-two").await.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE object_id='source-two'")
             .fetch_one(&mut outside)
@@ -1562,7 +1562,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .await
         .unwrap();
     for title in ["Reacquired", "Refreshed"] {
-        let mut observation = catalog.observe("source-two", None).await.unwrap();
+        let mut observation = catalog.observe("source-two").await.unwrap();
         observation.start_observation().await.unwrap();
         point.tracks[0].metadata.title = title.into();
         observation.apply_catalog(&point, true).await.unwrap();
@@ -1586,7 +1586,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .bind(library::source_entity_uri(&library::SourceId::new("file-restart"), "album", "file-album"))
         .execute(&mut outside).await.unwrap();
     let catalog = super::support::reopen(catalog, &path).await;
-    let mut interrupted_observation = catalog.observe("file-restart", None).await.unwrap();
+    let mut interrupted_observation = catalog.observe("file-restart").await.unwrap();
     interrupted_observation.start_observation().await.unwrap();
     let write = library::CatalogBatch {
         tracks: vec![library::TrackObservation {
@@ -1689,7 +1689,7 @@ async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
     let mut changes = super::support::Changes::of(&catalog);
     write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
 
-    let mut point_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut point_observation = catalog.observe("source-one").await.unwrap();
 
     {
         let write = library::CatalogBatch {
@@ -1730,7 +1730,7 @@ async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
         .await
         .unwrap();
 
-    let mut removal_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut removal_observation = catalog.observe("source-one").await.unwrap();
 
     removal_observation
         .remove_source_items("playlist", &["playlist-two".into()])
@@ -1761,7 +1761,7 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
         write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
     assert!(initial.1.intersects(super::support::Shown::CATALOG));
 
-    let mut point_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut point_observation = catalog.observe("source-one").await.unwrap();
 
     {
         let write = library::CatalogBatch {
@@ -1812,7 +1812,7 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
     let mut changes = super::support::Changes::of(&catalog);
     write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
 
-    let mut scan_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut scan_observation = catalog.observe("source-one").await.unwrap();
 
     for _ in 0..2 {
         {
@@ -1869,7 +1869,7 @@ async fn duplicate_provider_entries_keep_first_occurrence_and_dense_positions() 
     let mut changes = super::support::Changes::of(&catalog);
     write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
 
-    let mut scan_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut scan_observation = catalog.observe("source-one").await.unwrap();
 
     {
         let write = library::CatalogBatch {
@@ -1932,7 +1932,7 @@ async fn playlist_point_update_preserves_playlist_scope() {
     let mut changes = super::support::Changes::of(&catalog);
     write_small_catalog(&catalog, &mut changes, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
 
-    let mut point_observation = catalog.observe("source-one", None).await.unwrap();
+    let mut point_observation = catalog.observe("source-one").await.unwrap();
 
     {
         let write = library::CatalogBatch {
@@ -1983,7 +1983,7 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
         .into_iter()
         .enumerate()
     {
-        let mut scan_observation = catalog.observe("source-one", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source-one").await.unwrap();
         {
             let write = library::CatalogBatch {
                 artists: vec![library::ArtistObservation {
@@ -2085,7 +2085,7 @@ async fn reference_names_can_change_and_complete_artist_names_take_precedence() 
         };
         {
             let result = catalog
-                .observe("source", None)
+                .observe("source")
                 .await
                 .unwrap()
                 .apply_catalog(&write, true)

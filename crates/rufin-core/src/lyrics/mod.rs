@@ -1959,7 +1959,7 @@ mod tests {
             .await
             .unwrap();
         catalog
-            .observe("local", None)
+            .observe("local")
             .await
             .expect("store CUE title")
             .apply_catalog(

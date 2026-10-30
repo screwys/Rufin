@@ -268,7 +268,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
                 .unwrap();
         fixture
             .catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .set_source_artwork(
@@ -849,7 +849,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .unwrap();
     assert_eq!(missing_row.metadata.release_types, ["Album".to_string()]);
 
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source").await.unwrap();
     let write = library::CatalogBatch {
         albums: vec![library::AlbumObservation {
             user_data: library::NativeUserState {
@@ -1190,7 +1190,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let track = fixture.tracks[0];
     for refresh in 0..2 {
         changes.facts();
-        let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
+        let mut scan_observation = fixture.catalog.observe("source").await.unwrap();
         {
             let write = library::CatalogBatch {
                 tracks: vec![library::TrackObservation {
@@ -1440,7 +1440,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
                 .unwrap();
         fixture
             .catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .set_source_artwork(

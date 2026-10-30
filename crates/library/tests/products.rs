@@ -1977,7 +1977,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 .await
                 .unwrap();
         catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .set_source_artwork(
@@ -2416,7 +2416,7 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
                 .unwrap();
         fixture
             .catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .set_source_artwork(
@@ -2542,7 +2542,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             .fetch_all(&mut raw)
             .await
             .unwrap();
-    fixture.catalog.observe("source", None).await.unwrap().set_source_artwork("album", &album_objects.iter().cloned().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+    fixture.catalog.observe("source").await.unwrap().set_source_artwork("album", &album_objects.iter().cloned().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
 
     let track_artist = fixture
         .catalog
@@ -2656,7 +2656,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
 
     fixture
         .catalog
-        .observe("source", None)
+        .observe("source")
         .await
         .unwrap()
         .set_source_artwork(
@@ -2707,7 +2707,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
         fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
         fixture
             .catalog
-            .observe("source", None)
+            .observe("source")
             .await
             .unwrap()
             .write_native_user_data(

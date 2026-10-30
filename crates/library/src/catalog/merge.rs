@@ -2244,7 +2244,7 @@ mod tests {
             .reconcile_source(&SourceId::new("source"), "subsonic", "Source")
             .await
             .unwrap();
-        let mut observation = catalog.observe("source", None).await.unwrap();
+        let mut observation = catalog.observe("source").await.unwrap();
         observation.start_observation().await.unwrap();
         let batch = CatalogBatch {
             folders: vec![crate::FolderObservation {
@@ -2447,7 +2447,7 @@ mod tests {
         assert_reloads(&catalog).await;
 
         drop(observation);
-        let mut later = catalog.observe("source", None).await.unwrap();
+        let mut later = catalog.observe("source").await.unwrap();
         later.start_observation().await.unwrap();
         later
             .apply_catalog(

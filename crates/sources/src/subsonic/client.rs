@@ -566,7 +566,7 @@ impl SubsonicSource {
         } else {
             self.read_playlist(source_id, &playlist).await?
         };
-        let mut observation = catalog.observe(source_id, None).await?;
+        let mut observation = catalog.observe(source_id).await?;
         self.write_playlist_snapshot(&mut observation, &snapshot)
             .await?;
         Ok(playlist)
@@ -1902,7 +1902,7 @@ mod tests {
                 "subsonic-response":{"status":"ok","version":"1.16.1","album":{"id":"album-one","name":"Album","artistId":"artist-one","artist":"Artist","song":songs}}
             }))).mount(&server).await;
         let catalog_source_id = (source_id.as_str()).to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         {
             let result = source
                 .acquire_collection(
@@ -1974,7 +1974,7 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = (source_id.as_str()).to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             if cached {
                 (async { let mut batch = library::CatalogBatch::default(); let result = batch.albums.extend_from_slice(&[(super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();

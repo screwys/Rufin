@@ -306,7 +306,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source
@@ -332,7 +332,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source

@@ -1516,10 +1516,7 @@ mod tests {
             root.join(".").join("café %.wav"),
             library::file_media_path(&uri).unwrap(),
         ] {
-            let mut observation = catalog
-                .observe(source.source_id().as_str(), None)
-                .await
-                .unwrap();
+            let mut observation = catalog.observe(source.source_id().as_str()).await.unwrap();
             let (file, facts) =
                 crate::file::local::scan::read_saved_file(&observation, &uri, &path)
                     .await

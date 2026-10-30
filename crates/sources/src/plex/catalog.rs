@@ -1004,7 +1004,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         {
             let result = source
@@ -1103,11 +1103,7 @@ pub(super) mod tests {
         assert_eq!(moods[0].summary.track_count, 1);
         let playable = crate::playable(&catalog, &uri).await;
         assert_eq!(
-            playable
-                .gains
-                .track_loudness(playable.audio_hash)
-                .unwrap()
-                .replay_gain_db,
+            playable.gains.track_loudness().unwrap().replay_gain_db,
             Some(-4.25)
         );
         let playlist_key = crate::playlist_key(
@@ -1177,7 +1173,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         {
             let result = source
@@ -1215,7 +1211,7 @@ pub(super) mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("plex-test").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             {
                 let result = source

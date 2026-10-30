@@ -3883,7 +3883,7 @@ mod source_tests {
                 .unwrap();
             let source_key = catalog.source_key(&source_id).unwrap();
             {
-                let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                let mut observation = catalog.observe(source_id.as_str()).await.unwrap();
                 observation
                     .apply_catalog(
                         &library::CatalogBatch {
@@ -4069,7 +4069,7 @@ mod source_tests {
                 })
                 .unwrap();
             {
-                let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                let mut observation = catalog.observe(source_id.as_str()).await.unwrap();
                 observation
                     .apply_catalog(
                         &library::CatalogBatch {
@@ -4176,7 +4176,7 @@ mod source_tests {
                     0
                 );
                 {
-                    let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                    let mut observation = catalog.observe(source_id.as_str()).await.unwrap();
                     observation
                         .remove_source_items("track", &["new-track".to_string()])
                         .await

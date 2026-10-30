@@ -13,7 +13,7 @@ async fn observe_track(
     revision: [u8; 32],
     gain: Option<f64>,
 ) {
-    let mut observation = catalog.observe("source", None).await.unwrap();
+    let mut observation = catalog.observe("source").await.unwrap();
     let batch = library::CatalogBatch {
         tracks: vec![library::TrackObservation {
             metadata: library::TrackMetadata {
@@ -47,7 +47,6 @@ async fn loudness_is_keyed_by_audio_hash_and_source_facts_win() {
     let uris = &fixture.track_uris;
     let cancel = ReadCancellation::new();
     let measured = |lufs: Option<f64>, peak: f64| LoudnessMeasurement {
-        analysis_key: [0; 32],
         integrated_lufs: lufs,
         true_peak: Some(peak),
         replay_gain_db: None,
@@ -250,7 +249,7 @@ async fn source_artwork_pages_distinct_bindings() {
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     fixture
         .catalog
-        .observe("source", None)
+        .observe("source")
         .await
         .unwrap()
         .set_source_artwork(
@@ -668,7 +667,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         .await
         .expect("write source lyrics");
 
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source").await.unwrap();
     {
         let write = library::CatalogBatch {
             tracks: vec![library::TrackObservation {

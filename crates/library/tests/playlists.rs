@@ -70,7 +70,7 @@ async fn playlist_mosaics_pick_distinct_covers_and_keep_them() {
     });
     fixture
         .catalog
-        .observe("source", None)
+        .observe("source")
         .await
         .unwrap()
         .set_source_artwork(

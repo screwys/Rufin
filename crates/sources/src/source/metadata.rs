@@ -744,7 +744,7 @@ impl FileEditSession {
         let mut observation = match &self.source {
             Some(source) => Some(
                 catalog
-                    .observe(source.source_id().as_str(), None)
+                    .observe(source.source_id().as_str())
                     .await
                     .map_err(failure)?,
             ),
@@ -1442,10 +1442,7 @@ impl NativeFile {
             .await
             .map_err(failure)?
         {
-            let mut observation = catalog
-                .observe(source_id.as_str(), None)
-                .await
-                .map_err(failure)?;
+            let mut observation = catalog.observe(source_id.as_str()).await.map_err(failure)?;
             let (file, track) =
                 crate::file::local::scan::read_saved_file(&observation, &self.media_uri, path)
                     .await

@@ -3361,7 +3361,7 @@ mod tests {
             .unwrap()
             .source;
         catalog
-            .observe(source_id, None)
+            .observe(source_id)
             .await
             .unwrap()
             .apply_catalog(
@@ -3411,7 +3411,7 @@ mod tests {
             .unwrap()
             .to_string();
         catalog
-            .observe(source_id.as_str(), None)
+            .observe(source_id.as_str())
             .await
             .unwrap()
             .apply_catalog(

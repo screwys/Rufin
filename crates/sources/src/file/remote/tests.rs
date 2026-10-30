@@ -460,7 +460,7 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
                 .await
                 .unwrap();
             let catalog_source_id = (configuration.source_id.as_str()).to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             let cancelled = std::sync::atomic::AtomicBool::new(false);
             let configured = [source.location("").unwrap()];
@@ -491,7 +491,7 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
             .await
             .unwrap();
         let catalog_source_id = (configuration.source_id.as_str()).to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         let catalog_source = observation.source;
         let configured = [source.location("").unwrap()];
@@ -693,7 +693,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
             .await
             .unwrap();
         let catalog_source_id = (configuration.source_id.as_str()).to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         let catalog_source = observation.source;
         walk::walk(

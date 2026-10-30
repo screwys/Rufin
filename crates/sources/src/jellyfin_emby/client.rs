@@ -1287,7 +1287,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         (async {
@@ -1436,7 +1436,7 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = (source_id.as_str()).to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             if cached {
                 (async { let mut batch = library::CatalogBatch::default(); let result = batch.albums.extend_from_slice(&[(album_from_item(crate::ServerKind::Jellyfin, catalog_source_id.as_str(), &serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap()).unwrap().unwrap()).clone()]); observation.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
@@ -1650,7 +1650,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source
@@ -1755,7 +1755,7 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             (async {
                 let mut batch = library::CatalogBatch::default();
@@ -1860,7 +1860,7 @@ mod tests {
                 }
                 let prior = catalog.track(&(&uri), &cancel).await.unwrap().unwrap();
                 let catalog_source_id = ("source").to_string();
-                let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
 
                 source
                     .acquire_items(&mut observation, vec!["track".into()], vec![], &|| false)
@@ -1968,7 +1968,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("jellyfin:test").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         (async {

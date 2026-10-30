@@ -955,7 +955,6 @@ mod tests {
 
     fn measurement(integrated_lufs: f64, true_peak: Option<f64>) -> LoudnessMeasurement {
         LoudnessMeasurement {
-            analysis_key: [1; 32],
             integrated_lufs: Some(integrated_lufs),
             true_peak,
             replay_gain_db: None,
@@ -1043,7 +1042,6 @@ mod tests {
         initialize_gstreamer();
         let loudness = TrackLoudness {
             track: Some(Box::new(LoudnessMeasurement {
-                analysis_key: [1; 32],
                 integrated_lufs: Some(-20.0),
                 true_peak: Some(0.8),
                 replay_gain_db: Some(2.0),
@@ -1302,7 +1300,6 @@ mod tests {
             DEFAULT_PLAYBACK_RATE,
             test_stream(TrackLoudness {
                 track: Some(Box::new(LoudnessMeasurement {
-                    analysis_key: [1; 32],
                     integrated_lufs: None,
                     true_peak: None,
                     replay_gain_db: Some(6.0),
@@ -1466,7 +1463,6 @@ mod tests {
         initialize_gstreamer();
         let loudness = TrackLoudness {
             track: Some(Box::new(LoudnessMeasurement {
-                analysis_key: [0; 32],
                 integrated_lufs: None,
                 true_peak: None,
                 replay_gain_db: Some(-6.020599913279624),

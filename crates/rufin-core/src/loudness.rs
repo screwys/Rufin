@@ -456,7 +456,6 @@ impl Analysis<'_> {
 
 fn measurement(value: AnalyzedLoudness) -> LoudnessMeasurement {
     LoudnessMeasurement {
-        analysis_key: [0; 32],
         integrated_lufs: value.integrated_lufs,
         true_peak: value.true_peak,
         replay_gain_db: None,

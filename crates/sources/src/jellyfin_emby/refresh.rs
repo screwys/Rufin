@@ -993,7 +993,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         (async {
             let mut batch = library::CatalogBatch::default();
@@ -1084,7 +1084,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source
@@ -1117,8 +1117,8 @@ mod tests {
                 assert_eq!(track.links.artists.len(), 2);
                 let playable = crate::playable(&catalog, &uri).await;
                 let (track_gain, album_gain) = (
-                    playable.gains.track_loudness(playable.audio_hash),
-                    playable.gains.album_loudness(playable.audio_hash),
+                    playable.gains.track_loudness(),
+                    playable.gains.album_loudness(),
                 );
                 assert_eq!(track_gain.unwrap().replay_gain_db, Some(-4.25));
                 assert_eq!(album_gain.unwrap().replay_gain_db, Some(-3.5));
@@ -1221,7 +1221,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source
@@ -1339,7 +1339,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("jellyfin:test").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
 
         source

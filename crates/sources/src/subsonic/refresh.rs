@@ -715,7 +715,7 @@ mod tests {
         for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 2), (6, 2), (4, 3), (5, 3)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             let result = {
                 let result = source
                     .acquire_user_collections(&mut observation, &|_| {}, &|| false)
@@ -851,7 +851,7 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         let stamp = Some(observation.start_observation().await.unwrap());
         (async {
             let mut batch = library::CatalogBatch::default();
@@ -926,7 +926,7 @@ mod tests {
         for (next, expected) in [(2, true), (1, false), (0, true)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             let result = {
                 let result = source
                     .acquire_user_collections(&mut observation, &|_| {}, &|| false)
@@ -995,7 +995,7 @@ mod tests {
         }
         crate::published(&mut updates);
         let catalog_source_id = ("source").to_string();
-        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         let result = {
             let result = source
                 .acquire_user_collections(&mut observation, &|_| {}, &|| false)
@@ -1093,7 +1093,7 @@ mod tests {
                     .await
                     .unwrap();
                 let catalog_source_id = ("source").to_string();
-                let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
                 observation.start_observation().await.unwrap();
                 let batch=library::CatalogBatch {
                     albums:vec![super::album_from_json(source,"source",&serde_json::json!({"id":"album","name":"Album","artist":"Artist"})).unwrap().unwrap()],
@@ -1142,7 +1142,7 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             let stamp = Some(observation.start_observation().await.unwrap());
             let complete = {
                 let result = source
