@@ -179,56 +179,6 @@ impl FilesystemCache {
         }
     }
 
-    pub(crate) fn family_file(
-        &self,
-        request: &crate::CacheImageRequest,
-    ) -> io::Result<Option<ArtworkCacheEntry>> {
-        self.path_for_key(&format!("originals/{}/original.png", request.family))?;
-        if let ImageSize::Thumbnail(size) = request.size
-            && let Some(entry) = self.display_file(&request.family, size)?
-        {
-            return Ok(Some(entry));
-        }
-        let directory = match fs::read_dir(self.root.join("originals").join(&request.family)) {
-            Ok(directory) => directory,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        for entry in directory {
-            let entry = entry?;
-            let metadata = entry.metadata()?;
-            if metadata.is_file()
-                && metadata.len() > 0
-                && let Some(key) = cache_key(&self.root, &entry.path())
-            {
-                return Ok(Some(ArtworkCacheEntry {
-                    key,
-                    path: entry.path(),
-                }));
-            }
-        }
-        Ok(None)
-    }
-
-    pub(crate) fn import_missing(&self, key: &str, source: &Path) -> io::Result<bool> {
-        let path = self.path_for_key(key)?;
-        if source.metadata()?.len() == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "artwork response was empty",
-            ));
-        }
-        if self.file(key)?.is_some() {
-            return Ok(false);
-        }
-        if is_budgeted_path(&self.root, &path) {
-            self.write_tracked(&path, fs::File::open(source)?)?;
-        } else {
-            atomic_write(&path, fs::File::open(source)?)?;
-        }
-        Ok(true)
-    }
-
     fn path_for_key(&self, key: &str) -> io::Result<PathBuf> {
         if valid_cache_key(key) {
             Ok(key
@@ -713,10 +663,6 @@ mod tests {
         assert_eq!(cache.ready_entry(&native()).unwrap().path, path);
         assert_eq!(fs::read(path).unwrap(), bytes);
         assert!(!cache.is_missing(&native()));
-        let request = crate::CacheImageRequest {
-            family: native().key,
-            size: ImageSize::Original,
-        };
         let display = cache
             .write_ready(&native(), ImageSize::Thumbnail(540), bytes)
             .unwrap();
@@ -727,53 +673,6 @@ mod tests {
         assert_eq!(cache.display_path(&native(), 512), Some(display.clone()));
         assert_eq!(cache.display_path(&native(), 96), Some(smaller.clone()));
         assert!(cache.display_path(&native(), 768).is_none());
-        assert_eq!(
-            cache.family_file(&request).unwrap().unwrap().path,
-            cache.ready_entry(&native()).unwrap().path
-        );
-        let display_request = crate::CacheImageRequest {
-            size: ImageSize::Thumbnail(540),
-            ..request.clone()
-        };
-        assert_eq!(
-            cache.family_file(&display_request).unwrap().unwrap().path,
-            display
-        );
-        let keys = [
-            format!("originals/{}/original.png", request.family),
-            format!("displays/{}/540.image", request.family),
-            format!("displays/{}/256.image", request.family),
-        ];
-        assert_eq!(
-            request.select_key(keys.iter().map(String::as_str)),
-            Some(keys[0].as_str())
-        );
-        assert_eq!(
-            display_request.select_key(keys.iter().map(String::as_str)),
-            Some(keys[1].as_str())
-        );
-        assert_eq!(request.select_key([keys[1].as_str()]), None);
-        let other_size = crate::CacheImageRequest {
-            size: ImageSize::Thumbnail(96),
-            ..request.clone()
-        };
-        assert_eq!(
-            other_size.select_key(keys.iter().map(String::as_str)),
-            Some(keys[2].as_str())
-        );
-        assert_eq!(
-            cache.family_file(&other_size).unwrap().unwrap().path,
-            smaller
-        );
-        let larger = crate::CacheImageRequest {
-            size: ImageSize::Thumbnail(768),
-            ..request.clone()
-        };
-        assert_eq!(larger.select_key([keys[1].as_str()]), None);
-        assert_eq!(
-            cache.family_file(&larger).unwrap().unwrap().path,
-            cache.ready_entry(&native()).unwrap().path
-        );
         let external = Candidate::new(
             ArtworkImage::Artist {
                 name: "Artist".into(),

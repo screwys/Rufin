@@ -464,7 +464,7 @@ impl FileSource {
             && !match input.input() {
                 FileInput::Smb(client) => client.is_disconnected(),
                 FileInput::WebDav(client) => client.is_disconnected(),
-                FileInput::Documents(_) | FileInput::Peer { .. } => false,
+                FileInput::Documents(_) | FileInput::Link { .. } => false,
             }
         {
             return Ok(Arc::clone(input));
@@ -637,7 +637,7 @@ impl FileSource {
 
     pub(crate) fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
         match input {
-            FileInput::Smb(_) | FileInput::Documents(_) | FileInput::Peer { .. } => {
+            FileInput::Smb(_) | FileInput::Documents(_) | FileInput::Link { .. } => {
                 Ok(relative.into())
             }
             FileInput::WebDav(client) => {

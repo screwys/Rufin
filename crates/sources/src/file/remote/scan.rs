@@ -53,7 +53,7 @@ impl FileSource {
     ) -> SourceResult<(Entry, Option<(String, crate::DocumentEntry)>)> {
         let name = |path: &str| path.rsplit('/').next().unwrap_or_default().to_owned();
         let entry = match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));
@@ -384,7 +384,7 @@ impl walk::FileSource for FileSource {
         let input = self.input().await?;
         let mut entries = Vec::new();
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));

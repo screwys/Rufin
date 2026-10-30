@@ -21,8 +21,8 @@ pub(crate) enum FileInput {
     Smb(Arc<SmbClient>),
     WebDav(Arc<WebDavClient>),
     Documents(Arc<crate::file::documents::DocumentAccess>),
-    Peer {
-        peer: Arc<dyn crate::PeerMedia>,
+    Link {
+        link: Arc<dyn crate::PeerMedia>,
         encoding: Option<library::AudioEncoding>,
     },
 }
@@ -194,7 +194,7 @@ async fn serve(
         FileInput::Smb(client) => smb_response(client, &path, &request).await,
         FileInput::WebDav(client) => dav_response(client, &path, &request).await,
         FileInput::Documents(access) => document_response(access, &path, &request).await,
-        FileInput::Peer { peer, encoding } => peer_response(peer, *encoding, &path, &request).await,
+        FileInput::Link { link, encoding } => link_response(link, *encoding, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
         tracing::warn!(%error, "file input request failed");
@@ -212,8 +212,8 @@ async fn serve(
     })
 }
 
-async fn peer_response(
-    peer: &Arc<dyn crate::PeerMedia>,
+async fn link_response(
+    link: &Arc<dyn crate::PeerMedia>,
     encoding: Option<library::AudioEncoding>,
     uri: &str,
     request: &Request<hyper::body::Incoming>,
@@ -256,7 +256,7 @@ async fn peer_response(
         })
     };
     let window = time("start_ms").map(|start| (start, time("end_ms")));
-    let mut audio = peer.open(uri, encoding, range, window).await?;
+    let mut audio = link.open(uri, encoding, range, window).await?;
     let etag = |audio: &crate::PeerAudio| {
         audio
             .validator
@@ -270,7 +270,7 @@ async fn peer_response(
             .is_some_and(|value| etag(&audio).is_none_or(|etag| value != etag.as_str()))
     {
         range = None;
-        audio = peer.open(uri, encoding, None, window).await?;
+        audio = link.open(uri, encoding, None, window).await?;
     }
     let etag = etag(&audio);
     let revision = crate::peer::encode_peer_revision(&audio.revision);

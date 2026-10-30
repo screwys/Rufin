@@ -235,7 +235,7 @@ impl FileSource {
         self.location(to)?;
         let input = self.input().await?;
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));
@@ -271,7 +271,7 @@ impl FileSource {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
                 ));

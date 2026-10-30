@@ -108,7 +108,7 @@ impl FileSource {
             .unwrap_or_default();
         let temporary = format!("{parent}.rufin-write-{token}.tmp");
         match input.input() {
-            FileInput::Peer { .. } => {
+            FileInput::Link { .. } => {
                 return Err(SourceMetadataError::Write(
                     "Peer access provides audio bytes".into(),
                 ));

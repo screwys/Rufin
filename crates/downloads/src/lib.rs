@@ -24,7 +24,7 @@ pub use quality::{DOWNLOAD_BITRATES, download_bitrates};
 mod storage;
 mod track_download;
 pub use storage::DownloadDirectory;
-use storage::{DownloadAudio, is_folder};
+use storage::is_folder;
 
 use track_download::*;
 
@@ -51,7 +51,6 @@ const MAX_ACTIVE_DOWNLOADS: usize = 3;
 pub struct Downloads {
     root: Arc<PathBuf>,
     commands: Sender<Command>,
-    peer: sources::PeerAccess,
     status: tokio::sync::watch::Receiver<DownloadStatus>,
 }
 
@@ -84,7 +83,6 @@ enum Command {
         subject: DownloadSubject,
         media_uris: Vec<String>,
     },
-    ConnectChanged,
     /// The Changes the download rules heard, or None when everything may have changed.
     LibraryChanged(Option<Vec<Arc<Change>>>),
     Remove {
@@ -376,7 +374,7 @@ async fn load_direct_queue(
     let Some((bytes, recovered, path, part)) = read_queue_file(root, None)? else {
         return Ok(Vec::new());
     };
-    let mut queue: QueueFile = serde_json::from_slice(&bytes)
+    let queue: QueueFile = serde_json::from_slice(&bytes)
         .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
     if queue.version != QUEUE_VERSION {
         return Err("the saved direct download queue has an unsupported version".to_string());
@@ -384,7 +382,6 @@ async fn load_direct_queue(
     if recovered && let Err(error) = std::fs::rename(&part, &path) {
         warn!(%error, path=%part.display(), "could not finish recovering the direct download queue");
     }
-    queue.jobs.retain(|job| !matches!(&job.subject, DownloadSubject::Prepared { context_id, .. } if context_id=="connect-local"));
     let mut grouped = HashMap::<Option<SourceId>, Vec<DownloadJob>>::new();
     for mut job in queue.jobs {
         let completed = std::mem::take(&mut job.completed);
@@ -825,7 +822,6 @@ struct Actor {
     catalog: Catalog,
     events: DownloadEvents,
     transfers: Arc<TransferClients>,
-    peer: sources::PeerAccess,
     prepared_rules: Sender<PreparedRules>,
     sources: Arc<SourceResolver>,
     attached: HashMap<SourceId, AttachedSource>,
@@ -839,10 +835,6 @@ struct Actor {
 }
 
 impl Downloads {
-    pub fn peer_access(&self) -> sources::PeerAccess {
-        self.peer.clone()
-    }
-
     pub fn default_directory(&self) -> &Path {
         &self.root
     }
@@ -862,7 +854,6 @@ impl Downloads {
             root: Arc::new(root),
             commands,
             status: changes,
-            peer: sources::PeerAccess::default(),
         };
         runtime.spawn(run(
             Actor {
@@ -875,7 +866,6 @@ impl Downloads {
                     counts_dirty: Mutex::new(HashSet::new()),
                 },
                 transfers: Arc::new(TransferClients::default()),
-                peer: downloads.peer.clone(),
                 prepared_rules,
                 sources: Arc::new(|_| None),
                 attached: HashMap::new(),
@@ -941,10 +931,6 @@ impl Downloads {
     /// names `path`; its rules download it again.
     pub fn forget(&self, media_uri: String, path: String) {
         self.send(Command::Forget { media_uri, path });
-    }
-
-    pub fn connect_changed(&self) {
-        self.send(Command::ConnectChanged);
     }
 
     pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
@@ -1220,9 +1206,6 @@ impl Actor {
                 } else {
                     self.publish_subject_complete(&subject);
                 }
-            }
-            Command::ConnectChanged => {
-                self.retry_waiting();
             }
             Command::LibraryChanged(changes) => self.library_changed(changes.as_deref()),
             Command::Remove { media_uris, notify } => {
@@ -1596,114 +1579,28 @@ impl Actor {
         source_id: Option<&SourceId>,
         media_uri: &str,
         owner: &DownloadOwner,
-        quality: DownloadQuality,
     ) -> Result<bool, String> {
-        let automatic = matches!(owner, DownloadOwner::Subject(DownloadSubject::Rule(_)));
-        let revision = self
-            .catalog
-            .file_track(media_uri)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(|file| file.revision);
-        let encoding = library::media_encoding_key(quality.encoding());
-        let previous = self
+        let Some(mut file) = self
             .catalog
             .download_file(media_uri)
             .await
-            .map_err(|error| error.to_string())?;
-        let mut saved = previous
-            .as_ref()
-            .filter(|file| {
-                revision
-                    .as_ref()
-                    .is_none_or(|revision| *revision == file.revision)
-            })
-            .cloned();
-        if saved.is_none()
-            && let Some(revision) = &revision
-        {
-            saved = self
-                .catalog
-                .shared_download_file(media_uri, revision)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        if saved.is_none()
-            && previous.is_none()
-            && !automatic
-            && quality == DownloadQuality::Original
-            && let Some(location) = self
-                .peer
-                .original_file(&self.catalog, media_uri)
-                .await
-                .map_err(|error| error.to_string())?
-        {
-            let (path, root, relative) = match location {
-                library::LocalMediaLocation::File(path) => (
-                    reqwest::Url::from_file_path(&path)
-                        .map(String::from)
-                        .map_err(|_| "Media path must be absolute")?,
-                    path.parent()
-                        .unwrap_or(&path)
-                        .to_string_lossy()
-                        .into_owned(),
-                    path.file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
-                library::LocalMediaLocation::Document(uri) => (uri.clone(), uri, String::new()),
-            };
-            saved = Some(library::DownloadFile {
-                media_uri: media_uri.into(),
-                encoding,
-                revision: revision.unwrap_or_default(),
-                path,
-                storage_root: root,
-                relative_path: relative,
-                managed: false,
-                ..Default::default()
-            });
-        }
-        let saved = match saved {
-            Some(file) => {
-                let paths = completed_download_paths(&self.root, &file)?;
-                paths
-                    .audio
-                    .inspect()
-                    .await?
-                    .filter(|metadata| {
-                        !metadata.size.is_some_and(|size| {
-                            file.completed_size
-                                .is_some_and(|expected| size != expected as u64)
-                        })
-                    })
-                    .map(|_| (file, paths))
-            }
-            None => None,
-        };
-        if automatic
-            && saved.as_ref().is_none_or(|(file, _)| !file.managed)
-            && self
-                .peer
-                .original_file(&self.catalog, media_uri)
-                .await
-                .map_err(|error| error.to_string())?
-                .is_some()
-        {
-            return Ok(true);
-        }
-        let Some((mut file, paths)) = saved else {
+            .map_err(|error| error.to_string())?
+        else {
             return Ok(false);
         };
+        let paths = completed_download_paths(&self.root, &file)?;
+        if paths.audio.inspect().await?.is_none_or(|metadata| {
+            metadata.size.is_some_and(|size| {
+                file.completed_size
+                    .is_some_and(|expected| size != expected as u64)
+            })
+        }) {
+            return Ok(false);
+        }
         file.media_uri = media_uri.into();
         file.source_id = source_id.map(ToString::to_string);
         let mut owners = download_owners(&file)?;
-        if !owners.insert(owner.clone())
-            && previous.as_ref().is_some_and(|previous| {
-                previous.path == file.path && previous.revision == file.revision
-            })
-        {
+        if !owners.insert(owner.clone()) {
             self.retire_previous_files(&mut file).await?;
             return Ok(true);
         }
@@ -1716,11 +1613,6 @@ impl Actor {
             .save_download(&file)
             .await
             .map_err(|error| error.to_string())?;
-        if let Some(previous) =
-            previous.filter(|old| old.path != file.path || old.revision != file.revision)
-        {
-            self.retire_receipt(&previous).await?;
-        }
         Ok(true)
     }
 
@@ -1745,7 +1637,7 @@ impl Actor {
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(source_id.as_ref(), media_uri, &owner, quality)
+                .add_download_owner(source_id.as_ref(), media_uri, &owner)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1897,7 +1789,7 @@ impl Actor {
         let mut remaining = Vec::new();
         for media_uri in media_uris.iter().filter(|uri| !blocked.contains(*uri)) {
             match self
-                .add_download_owner(Some(&source_id), media_uri, &owner, quality)
+                .add_download_owner(Some(&source_id), media_uri, &owner)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1999,7 +1891,7 @@ impl Actor {
                 .and_then(|attached| attached.directory.as_ref());
             let owner = DownloadOwner::Subject(subject.clone());
             match self
-                .add_download_owner(source_id.as_ref(), &media_uri, &owner, quality)
+                .add_download_owner(source_id.as_ref(), &media_uri, &owner)
                 .await
             {
                 Ok(true) => {
@@ -2017,14 +1909,11 @@ impl Actor {
                     continue;
                 }
             }
-            let file = self.catalog.file_track(&media_uri).await.ok().flatten();
             let playable = match source {
                 Some(_) => playable(&self.catalog, &media_uri).await,
                 None => Err(SourceError::NotFound),
             };
-            let resolved = if file.is_some() {
-                self.peer.download(&self.catalog, &media_uri, quality).await
-            } else if let Some(source) = source.as_ref() {
+            let resolved = if let Some(source) = source.as_ref() {
                 match &playable {
                     Ok(playable) => source.resolve_download(playable, quality).await,
                     Err(_) => Err(SourceError::NotFound),
@@ -2051,7 +1940,7 @@ impl Actor {
                 .await
                 .ok()
                 .flatten();
-            let mut paths = new_download_paths(
+            let paths = new_download_paths(
                 &self.root,
                 source_id.as_ref(),
                 &media_uri,
@@ -2059,51 +1948,6 @@ impl Actor {
                 custom_directory,
                 transcoded_extension,
             );
-            if let Some(file) = &file {
-                let backing = file.backing.as_deref().unwrap_or(&media_uri);
-                let revision = file.revision.clone();
-                let key = blake3::hash(
-                    format!(
-                        "{backing}\0{revision}\0{}",
-                        library::media_encoding_key(quality.encoding())
-                    )
-                    .as_bytes(),
-                )
-                .to_hex()
-                .to_string();
-                if custom_directory.is_none()
-                    && let Ok(Some((root, mut relative))) =
-                        self.peer.destination(&self.catalog, &media_uri).await
-                {
-                    let previous = self.catalog.download_file(&media_uri).await.ok().flatten();
-                    if (quality != DownloadQuality::Original
-                        || previous.is_some_and(|file| file.revision != revision))
-                        && let Some(name) = relative.last_mut()
-                    {
-                        let extension = quality
-                            .extension()
-                            .or_else(|| file.format.as_deref())
-                            .unwrap_or("audio");
-                        *name = format!("{key}.{extension}");
-                    }
-                    paths.audio = match root {
-                        library::LocalMediaLocation::File(root) => DownloadAudio::Native {
-                            path: relative
-                                .iter()
-                                .fold(root.clone(), |path, part| path.join(part)),
-                            root: Some(root),
-                        },
-                        library::LocalMediaLocation::Document(root) => DownloadAudio::Document {
-                            root,
-                            relative,
-                            file: None,
-                        },
-                    };
-                } else if let DownloadAudio::Native { path, .. } = &mut paths.audio {
-                    let extension = path.extension().unwrap_or_default().to_string_lossy();
-                    *path = path.with_file_name(format!("{key}.{extension}"));
-                }
-            }
             if let Some(folder) = paths.audio.folder_in_place().await {
                 let error = format!("A folder is in the download's place: {}", folder.display());
                 warn!(%error, source_id=?source_id, %media_uri, "could not download track");
@@ -2124,12 +1968,11 @@ impl Actor {
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
-            let revision = Arc::new(Mutex::new(file.as_ref().map(|file| file.revision.clone())));
+            let revision = Arc::new(Mutex::new(None));
             let uri = media_uri.clone();
             let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
             let task_source_id = source_id.clone();
-            let peer_assets = file.is_some().then(|| self.peer.clone());
             let task_revision = Arc::clone(&revision);
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;
@@ -2212,7 +2055,7 @@ impl Actor {
                 // Companion failures do not discard successfully downloaded audio.
                 tokio::select! {
                     _ = &mut cancelled => {},
-                    _ = cache_track_assets(&catalog, &artwork, source.as_deref(), peer_assets.as_ref(), &uri) => {},
+                    _ = cache_track_assets(&catalog, &artwork, source.as_deref(), &uri) => {},
                 }
                 Ok(())
             });
@@ -3208,14 +3051,8 @@ async fn cache_track_assets(
     catalog: &Catalog,
     artwork: &artwork::Artwork,
     source: Option<&Source>,
-    peer: Option<&sources::PeerAccess>,
     media_uri: &str,
 ) {
-    if let Some(peer) = peer
-        && let Err(error) = peer.cache_assets(catalog, media_uri).await
-    {
-        warn!(%error, %media_uri, "could not download accompanying media");
-    }
     let images = async {
         let bindings = catalog
             .track_artwork_bindings(&[media_uri.to_owned()], &library::ReadCancellation::new())
@@ -3959,7 +3796,6 @@ mod tests {
             },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
-            peer: sources::PeerAccess::default(),
             sources: Arc::new(|_| None),
             attached: HashMap::from([(
                 source_id.clone(),
