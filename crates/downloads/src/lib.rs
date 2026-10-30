@@ -3,11 +3,11 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -23,8 +23,8 @@ mod quality;
 pub use quality::{DOWNLOAD_BITRATES, download_bitrates};
 mod storage;
 mod track_download;
-use storage::DownloadAudio;
 pub use storage::DownloadDirectory;
+use storage::{DownloadAudio, is_folder};
 
 use track_download::*;
 
@@ -36,9 +36,13 @@ uniffi::custom_type!(DownloadCount, u64, {
     try_lift: |value| Ok(usize::try_from(value)?),
 });
 
+/// Finds a source's current client, which its owner keeps and may replace at any time.
+pub type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
+
 const QUEUE_VERSION: u32 = 3;
 const QUEUE_FILE: &str = "queue.json";
 const QUEUE_PART_FILE: &str = "queue.json.part";
+const BLOCKED_FILE: &str = "blocked.json";
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_ACTIVE_DOWNLOADS: usize = 3;
 
@@ -69,10 +73,10 @@ enum Command {
         limit: u32,
         response: Sender<Result<DownloadPage, String>>,
     },
+    SourceResolver(Arc<SourceResolver>),
     Attach {
         source_id: SourceId,
         source_key: SourceKey,
-        source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
         response: Sender<Result<(), String>>,
     },
@@ -125,7 +129,6 @@ enum Command {
 #[derive(Clone)]
 struct AttachedSource {
     source_key: SourceKey,
-    source: Option<Weak<Source>>,
     folder: Option<FolderKey>,
     directory: Option<DownloadDirectory>,
 }
@@ -141,14 +144,6 @@ struct RuleIntent {
 impl RuleIntent {
     fn same_context(&self, other: &Self) -> bool {
         self.source_key == other.source_key && self.folder == other.folder
-    }
-}
-
-fn same_weak_target<T>(left: &Option<Weak<T>>, right: &Option<Weak<T>>) -> bool {
-    match (left, right) {
-        (Some(left), Some(right)) => Weak::ptr_eq(left, right),
-        (None, None) => true,
-        _ => false,
     }
 }
 
@@ -248,6 +243,34 @@ async fn persist_queue(
     tokio::fs::rename(&part, &path)
         .await
         .map_err(|error| format!("could not finish the download queue: {error}"))
+}
+
+/// Tracks a folder keeps from their download's place, with that place, so that rules do not
+/// offer them again at every launch.
+type Blocked = BTreeMap<String, PathBuf>;
+
+fn load_blocked(root: &Path, source_id: &SourceId) -> Blocked {
+    std::fs::read(source_directory(root, Some(source_id)).join(BLOCKED_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+async fn save_blocked(root: &Path, source_id: &SourceId, blocked: &Blocked) {
+    let path = source_directory(root, Some(source_id)).join(BLOCKED_FILE);
+    let saved = if blocked.is_empty() {
+        remove_file_if_present(&path).await
+    } else {
+        match serde_json::to_vec(blocked) {
+            Ok(encoded) => tokio::fs::write(&path, encoded)
+                .await
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        }
+    };
+    if let Err(error) = saved {
+        warn!(%error, %source_id, "could not save the blocked downloads");
+    }
 }
 
 fn read_queue_file(
@@ -804,11 +827,13 @@ struct Actor {
     transfers: Arc<TransferClients>,
     peer: sources::PeerAccess,
     prepared_rules: Sender<PreparedRules>,
+    sources: Arc<SourceResolver>,
     attached: HashMap<SourceId, AttachedSource>,
     settings: HashMap<SourceId, SourceDownloadSettings>,
     running_rules: Option<RuleIntent>,
     pending_rules: Option<RuleIntent>,
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
+    blocked: HashMap<SourceId, Blocked>,
     paused: bool,
     next_job: u64,
 }
@@ -852,6 +877,7 @@ impl Downloads {
                 transfers: Arc::new(TransferClients::default()),
                 peer: downloads.peer.clone(),
                 prepared_rules,
+                sources: Arc::new(|_| None),
                 attached: HashMap::new(),
                 settings: settings
                     .into_iter()
@@ -860,6 +886,7 @@ impl Downloads {
                 running_rules: None,
                 pending_rules: None,
                 jobs: HashMap::new(),
+                blocked: HashMap::new(),
                 paused: false,
                 next_job: 0,
             },
@@ -869,11 +896,18 @@ impl Downloads {
         downloads
     }
 
+    /// Downloads ask `resolve` for a source's client each time they start one.
+    pub fn install_source_resolver(
+        &self,
+        resolve: impl Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync + 'static,
+    ) {
+        self.send(Command::SourceResolver(Arc::new(resolve)));
+    }
+
     pub async fn attach(
         &self,
         source_id: SourceId,
         source_key: SourceKey,
-        source: Option<Arc<Source>>,
         folder: Option<FolderKey>,
     ) -> Result<(), String> {
         let (response, result) = async_channel::bounded(1);
@@ -881,7 +915,6 @@ impl Downloads {
             .send(Command::Attach {
                 source_id,
                 source_key,
-                source: source.as_ref().map(Arc::downgrade),
                 folder,
                 response,
             })
@@ -1121,29 +1154,26 @@ impl Actor {
                     .send(self.queue_page(scope, offset, limit).await)
                     .await;
             }
+            Command::SourceResolver(resolve) => self.sources = resolve,
             Command::Attach {
                 source_id,
                 source_key,
-                source,
                 folder,
                 response,
             } => {
                 let directory = self.settings_for(&source_id).directory;
-                let directory_changed = self
+                if self
                     .attached
                     .get(&source_id)
-                    .is_some_and(|attached| attached.directory != directory);
-                let source_changed = self
-                    .attached
-                    .get(&source_id)
-                    .is_some_and(|attached| !same_weak_target(&attached.source, &source));
-                self.discard_matching(active, !directory_changed, |download| {
-                    download.source_id.as_ref() == Some(&source_id)
-                        && (source_changed || directory_changed)
-                })
-                .await;
+                    .is_some_and(|attached| attached.directory != directory)
+                {
+                    self.discard_matching(active, false, |download| {
+                        download.source_id.as_ref() == Some(&source_id)
+                    })
+                    .await;
+                }
                 let result = self
-                    .attach(source_id.clone(), source_key, source, folder, directory)
+                    .attach(source_id.clone(), source_key, folder, directory)
                     .await;
                 let ready = result.is_ok();
                 self.pending_rules = None;
@@ -1476,22 +1506,21 @@ impl Actor {
         &mut self,
         source_id: SourceId,
         source_key: SourceKey,
-        source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
         directory: Option<DownloadDirectory>,
     ) -> Result<(), String> {
         let unchanged = self.attached.get(&source_id).is_some_and(|attached| {
-            attached.directory == directory
-                && attached.source_key == source_key
-                && same_weak_target(&attached.source, &source)
+            attached.directory == directory && attached.source_key == source_key
         });
         self.discard_previous_directory(&source_id, &directory)
             .await;
+        self.blocked
+            .entry(source_id.clone())
+            .or_insert_with(|| load_blocked(&self.root, &source_id));
         self.attached.insert(
             source_id.clone(),
             AttachedSource {
                 source_key,
-                source: source.clone(),
                 folder,
                 directory: directory.clone(),
             },
@@ -1518,7 +1547,6 @@ impl Actor {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(group.clone());
-        let source_available = source.as_ref().and_then(Weak::upgrade).is_some();
         let mut jobs = if let Some(jobs) = self.jobs.get(&group) {
             jobs.clone()
         } else {
@@ -1541,11 +1569,7 @@ impl Actor {
         let quality = self.settings_for(&source_id).quality;
         jobs.retain_mut(|job| {
             job.quality = quality;
-            job.state = if source_available {
-                DownloadQueueState::Queued
-            } else {
-                DownloadQueueState::WaitingForConnection
-            };
+            job.state = DownloadQueueState::Queued;
             !job.remaining.is_empty()
         });
         let queued_tracks = jobs
@@ -1707,16 +1731,6 @@ impl Actor {
         quality: DownloadQuality,
         media_uris: Vec<String>,
     ) -> Option<DownloadFeedback> {
-        let attached = source_id
-            .as_ref()
-            .and_then(|source_id| self.attached.get(source_id));
-        let source_available = source_id.is_none()
-            || attached
-                .and_then(|attached| attached.source.as_ref())
-                .and_then(Weak::upgrade)
-                .is_some();
-        let can_start = !self.paused && source_available;
-
         let mut seen = HashSet::new();
         let media_uris = media_uris
             .into_iter()
@@ -1774,11 +1788,7 @@ impl Actor {
                 scheduled_tracks = additions.len();
                 existing.remaining.extend(additions);
                 if existing.state != DownloadQueueState::Downloading {
-                    existing.state = if source_available {
-                        DownloadQueueState::Queued
-                    } else {
-                        DownloadQueueState::WaitingForConnection
-                    };
+                    existing.state = DownloadQueueState::Queued;
                 }
                 if existing.remaining.is_empty() {
                     jobs.remove(existing_index);
@@ -1793,11 +1803,7 @@ impl Actor {
                     completed,
                     failed: false,
                     remaining: remaining.into(),
-                    state: if source_available {
-                        DownloadQueueState::Queued
-                    } else {
-                        DownloadQueueState::WaitingForConnection
-                    },
+                    state: DownloadQueueState::Queued,
                 });
             }
         }
@@ -1807,10 +1813,10 @@ impl Actor {
             subject,
             preview_uris: media_uris.iter().take(4).cloned().collect(),
             item_count: scheduled_tracks,
-            kind: if can_start {
-                DownloadFeedbackKind::Started
-            } else {
+            kind: if self.paused {
                 DownloadFeedbackKind::Queued
+            } else {
+                DownloadFeedbackKind::Started
             },
         })
     }
@@ -1823,12 +1829,10 @@ impl Actor {
         media_uris: Vec<String>,
         active: &mut Vec<ActiveDownload>,
     ) {
-        let Some(attached) = self.attached.get(&source_id).cloned() else {
+        if !self.attached.contains_key(&source_id) {
             warn!(%source_id, "ignored download reconciliation for an unattached source");
             return;
-        };
-        let source_available = attached.source.as_ref().and_then(Weak::upgrade).is_some();
-        let can_start = !self.paused && source_available;
+        }
 
         let mut seen = HashSet::new();
         let media_uris = media_uris
@@ -1888,9 +1892,10 @@ impl Actor {
             }
         }
 
+        let blocked = self.still_blocked(&source_id).await;
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
-        for media_uri in &media_uris {
+        for media_uri in media_uris.iter().filter(|uri| !blocked.contains(*uri)) {
             match self
                 .add_download_owner(Some(&source_id), media_uri, &owner, quality)
                 .await
@@ -1925,10 +1930,8 @@ impl Actor {
             });
             let state = if active_job_id.as_deref() == Some(id.as_str()) {
                 DownloadQueueState::Downloading
-            } else if source_available {
-                DownloadQueueState::Queued
             } else {
-                DownloadQueueState::WaitingForConnection
+                DownloadQueueState::Queued
             };
             let job = DownloadJob {
                 id,
@@ -1951,10 +1954,10 @@ impl Actor {
                     subject,
                     preview_uris: media_uris.iter().take(4).cloned().collect(),
                     item_count: scheduled_tracks,
-                    kind: if can_start {
-                        DownloadFeedbackKind::Started
-                    } else {
+                    kind: if self.paused {
                         DownloadFeedbackKind::Queued
+                    } else {
+                        DownloadFeedbackKind::Started
                     },
                 }))
                 .await;
@@ -1980,10 +1983,10 @@ impl Actor {
                 .as_ref()
                 .and_then(|source_id| self.attached.get(source_id))
                 .cloned();
-            let source = attached
-                .as_ref()
-                .and_then(|attached| attached.source.as_ref())
-                .and_then(Weak::upgrade);
+            let source = match &source_id {
+                Some(source_id) => self.source(source_id).await,
+                None => None,
+            };
             if source_id.is_some() && source.is_none() {
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::WaitingForConnection;
@@ -2100,6 +2103,19 @@ impl Actor {
                     let extension = path.extension().unwrap_or_default().to_string_lossy();
                     *path = path.with_file_name(format!("{key}.{extension}"));
                 }
+            }
+            if let Some(folder) = paths.audio.folder_in_place().await {
+                let error = format!("A folder is in the download's place: {}", folder.display());
+                warn!(%error, source_id=?source_id, %media_uri, "could not download track");
+                if let Some(source_id) = &source_id {
+                    let blocked = self.blocked.entry(source_id.clone()).or_default();
+                    blocked.insert(media_uri.clone(), folder.to_owned());
+                    save_blocked(&self.root, source_id, blocked).await;
+                }
+                self.mark_subject_incomplete(&subject).await;
+                self.remove_job_track(&source_id, &job_id, &media_uri, false);
+                self.persist_and_publish(source_id.as_ref()).await;
+                continue;
             }
             if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                 job.state = DownloadQueueState::Downloading;
@@ -2577,7 +2593,7 @@ impl Actor {
     }
 
     async fn discard_previous_directory(
-        &self,
+        &mut self,
         source_id: &SourceId,
         directory: &Option<DownloadDirectory>,
     ) {
@@ -2596,6 +2612,9 @@ impl Actor {
         .await
         {
             warn!(%error, %source_id, "could not remove download staging from the previous folder");
+        }
+        if self.blocked.remove(source_id).is_some() {
+            save_blocked(&self.root, source_id, &Blocked::new()).await;
         }
     }
 
@@ -2694,23 +2713,43 @@ impl Actor {
         });
     }
 
+    /// The source's blocked tracks whose folder is still in their download's place; the others are
+    /// offered again.
+    async fn still_blocked(&mut self, source_id: &SourceId) -> HashSet<String> {
+        let Some(blocked) = self.blocked.get_mut(source_id) else {
+            return HashSet::new();
+        };
+        let before = blocked.len();
+        let mut kept = Blocked::new();
+        for (media_uri, folder) in std::mem::take(blocked) {
+            if is_folder(&folder).await {
+                kept.insert(media_uri, folder);
+            }
+        }
+        *blocked = kept;
+        if blocked.len() != before {
+            save_blocked(&self.root, source_id, blocked).await;
+        }
+        blocked.keys().cloned().collect()
+    }
+
+    /// Lets the first waiting job of each queue try again; starting it asks for the source.
     fn retry_waiting(&mut self) {
-        for (source_id, jobs) in &mut self.jobs {
-            let available = source_id.as_ref().is_none_or(|source_id| {
-                self.attached.get(source_id).is_some_and(|attached| {
-                    attached
-                        .source
-                        .as_ref()
-                        .is_some_and(|source| source.strong_count() > 0)
-                })
-            });
+        for jobs in self.jobs.values_mut() {
             if let Some(first) = jobs.first_mut()
-                && available
                 && first.state == DownloadQueueState::WaitingForConnection
             {
                 first.state = DownloadQueueState::Queued;
             }
         }
+    }
+
+    async fn source(&self, source_id: &SourceId) -> Option<Arc<Source>> {
+        let (resolve, source_id) = (Arc::clone(&self.sources), source_id.clone());
+        tokio::task::spawn_blocking(move || resolve(&source_id))
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn force_remove(
@@ -3031,6 +3070,7 @@ impl Actor {
             .get(source_id)
             .and_then(|attached| attached.directory.clone());
         self.jobs.remove(&Some(source_id.clone()));
+        self.blocked.remove(source_id);
         let directory = source_directory(&self.root, Some(source_id));
         let result = async {
             cleanup_staging(
@@ -3058,6 +3098,7 @@ impl Actor {
             }
             remove_file_if_present(&directory.join(QUEUE_FILE)).await?;
             remove_file_if_present(&directory.join(QUEUE_PART_FILE)).await?;
+            remove_file_if_present(&directory.join(BLOCKED_FILE)).await?;
             match tokio::fs::remove_dir(&directory).await {
                 Ok(()) => Ok(()),
                 Err(error)
@@ -3405,7 +3446,7 @@ mod tests {
         });
         actor.settings.insert(source_id.clone(), settings.clone());
         actor
-            .attach(source_id.clone(), source, None, None, None)
+            .attach(source_id.clone(), source, None, None)
             .await
             .unwrap();
         assert_eq!(
@@ -3919,11 +3960,11 @@ mod tests {
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
             peer: sources::PeerAccess::default(),
+            sources: Arc::new(|_| None),
             attached: HashMap::from([(
                 source_id.clone(),
                 AttachedSource {
                     source_key,
-                    source: None,
                     folder: None,
                     directory: None,
                 },
@@ -3932,6 +3973,7 @@ mod tests {
             running_rules: None,
             pending_rules: None,
             jobs: HashMap::new(),
+            blocked: HashMap::new(),
             paused: false,
             next_job: 0,
         }

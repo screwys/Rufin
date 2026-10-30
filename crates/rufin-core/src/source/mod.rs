@@ -440,6 +440,11 @@ impl SourceOwner {
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
+        let clients = weak.clone();
+        shared.downloads.install_source_resolver(move |source_id| {
+            let shared = clients.upgrade()?;
+            Self { shared }.client(source_id).ok()
+        });
         shared
             .runtime
             .spawn(feed::run(weak, shared.catalog.changes(), notices));
@@ -772,7 +777,6 @@ impl SourceOwner {
                 .attach(
                     source_id.clone(),
                     selected.source_key,
-                    source.as_ref().ok().cloned(),
                     selected.music_folder_key,
                 )
                 .await
@@ -913,7 +917,6 @@ impl SourceOwner {
                     .attach(
                         selected.source_id.clone(),
                         selected.source_key,
-                        Some(source),
                         selected.music_folder_key,
                     )
                     .await
@@ -2560,18 +2563,16 @@ impl SourceOwner {
             }
             source_ids.sort();
             source_ids.dedup();
+            owner.shared.catalog.loaded().await;
             for source_id in source_ids {
-                let (source, source_key) = match owner.source_target(&source_id).await {
-                    Ok(target) => target,
-                    Err(error) => {
-                        owner.shared.warn_nonfatal(&error);
-                        continue;
-                    }
+                let Some(source_key) = owner.shared.catalog.source_key(&source_id) else {
+                    owner.shared.warn_nonfatal(&source_access_unavailable());
+                    continue;
                 };
                 if let Err(error) = owner
                     .shared
                     .downloads
-                    .attach(source_id.clone(), source_key, Some(source), None)
+                    .attach(source_id.clone(), source_key, None)
                     .await
                 {
                     owner.shared.warn_nonfatal(&error);
@@ -2746,12 +2747,7 @@ impl SourceOwner {
                     if let Err(error) = downloads_owner
                         .shared
                         .downloads
-                        .attach(
-                            source_id.clone(),
-                            source_key,
-                            downloads_owner.cached_client(&source_id),
-                            key,
-                        )
+                        .attach(source_id.clone(), source_key, key)
                         .await
                     {
                         downloads_owner.shared.warn_nonfatal(&error);
@@ -2960,7 +2956,9 @@ impl SourceOwner {
             );
             return Ok(source);
         }
-        Err(SourceError::Cancelled.to_string())
+        drop(clients);
+        // The settings changed while the client opened, so it opens from the new ones.
+        self.client(source_id)
     }
 
     pub(crate) async fn open_client(&self, source_id: SourceId) -> Result<Arc<Source>, String> {

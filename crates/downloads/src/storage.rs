@@ -35,6 +35,12 @@ impl std::fmt::Display for DownloadDirectory {
     }
 }
 
+pub(super) async fn is_folder(path: &Path) -> bool {
+    tokio::fs::symlink_metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir())
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum DownloadAudio {
     Native {
@@ -127,6 +133,12 @@ impl DownloadAudio {
         }
     }
 
+    /// The folder that holds the copy's path, where the finished file could never land.
+    pub async fn folder_in_place(&self) -> Option<&Path> {
+        let path = self.native()?;
+        is_folder(path).await.then_some(path)
+    }
+
     pub async fn publish(&self, partial: &Path) -> Result<Self, String> {
         match self {
             Self::Native { path, .. } => {
@@ -192,7 +204,16 @@ impl DownloadAudio {
         match self {
             Self::Native { path, .. } => match tokio::fs::remove_file(path).await {
                 Ok(()) => Ok(true),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    Ok(false)
+                }
+                // A folder in the copy's place is not the copy, so there is nothing to remove.
+                Err(_) if path.is_dir() => Ok(false),
                 Err(error) => Err(error.to_string()),
             },
             Self::Document {
