@@ -573,6 +573,7 @@ name = "audio-processing"
 version = "0.16.6"
 dependencies = [
  "base64 0.23.1",
+ "blake3",
  "ebur128",
  "gio",
  "gstreamer",
@@ -7852,7 +7853,6 @@ dependencies = [
  "library",
  "localization",
  "lyrics",
- "md-5 0.10.6",
  "metadata-lookup",
  "playback",
  "playback-cast",

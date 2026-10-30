@@ -187,7 +187,7 @@ where
     let waveform = WaveformOwner::new(
         runtime.clone(),
         waveform_events,
-        paths.playback_dir(),
+        &paths.playback_dir(),
         stored.ui.player_display.seekbar_waveform_enabled,
     );
     let lyrics = crate::lyrics::LyricsService::new(

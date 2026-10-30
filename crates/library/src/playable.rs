@@ -27,6 +27,8 @@ pub struct Playable {
     pub file: Option<PlayableFile>,
     /// The CUE window; None for a one-track CUE, which plays whole.
     pub window: Option<(u64, u64)>,
+    /// When the audio may have changed; an audio hash is recorded against it.
+    pub audio_revision: Option<[u8; 32]>,
     pub audio_hash: Option<[u8; 32]>,
     pub channels: Option<u32>,
     pub gains: Gains,
@@ -102,13 +104,14 @@ impl Catalog {
         quality: &str,
     ) -> LibraryResult<Option<Playable>> {
         let whole_file = crate::local::whole_file_cue_sql("track", "details");
-        let gained = |path: &str| {
+        let gained = |details: &str| {
             format!(
-                "json_type({path})='object' AND(json_extract({path},'$.integrated_lufs') IS NOT NULL OR json_extract({path},'$.replay_gain_db') IS NOT NULL)"
+                "(json_extract({details}.metadata,'$.album_loudness.integrated_lufs') IS NOT NULL OR json_extract({details}.metadata,'$.album_loudness.replay_gain_db') IS NOT NULL)"
             )
         };
-        let own = gained("details.metadata,'$.album_loudness'");
-        let member = gained("member_details.metadata,'$.album_loudness'");
+        let own = gained("details");
+        let member = gained("member_details");
+        let members = crate::loudness::album_members_sql("track.album_key");
         let sql = format!(
             "SELECT track.source_key,track.object_id,track.media_uri,track.source_format,details.source_path,details.cue_path,details.cue_start_millis,
                 CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END,
@@ -123,13 +126,11 @@ impl Catalog {
                     SELECT json(json_extract(member_details.metadata,'$.album_loudness')) FROM tracks member JOIN track_details member_details USING(track_key)
                     WHERE member.album_key=track.album_key AND member.indexed=1 AND {member}
                     ORDER BY coalesce(member_details.cue_path,member_details.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,
-                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak
+                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision
              FROM tracks track LEFT JOIN track_details details USING(track_key)
              LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
              LEFT JOIN loudness measured ON measured.audio_hash=details.audio_hash
-             LEFT JOIN album_loudness album ON album.members=(
-                SELECT CASE WHEN count(*)=count(member_details.audio_hash) THEN group_concat(substr(hex(member_details.audio_hash),1,16),'' ORDER BY member_details.audio_hash) END
-                FROM tracks member JOIN track_details member_details USING(track_key) WHERE member.album_key=track.album_key AND member.indexed=1)
+             LEFT JOIN album_loudness album ON album.members={members}
              WHERE track.track_key=?1"
         );
         let mut connection = self.acquire_reader().await?;
@@ -164,6 +165,7 @@ impl Catalog {
         let peak: Option<f64> = row.try_get(19)?;
         let album_lufs: Option<f64> = row.try_get(20)?;
         let album_peak: Option<f64> = row.try_get(21)?;
+        let audio_revision: Option<Vec<u8>> = row.try_get(22)?;
         let source = source.map(SourceKey::from_raw);
         let (source_id, source_kind) = source
             .and_then(|source| {
@@ -238,6 +240,7 @@ impl Catalog {
                     }
                 }),
             window,
+            audio_revision: audio_revision.and_then(|revision| revision.try_into().ok()),
             audio_hash,
             channels: channels.and_then(|channels| u32::try_from(channels).ok()),
             gains: Gains {

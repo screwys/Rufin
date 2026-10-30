@@ -1,30 +1,23 @@
 //! Current-track waveform selection, caching, and cancellation.
 //!
 //! Playback supplies the one current-media identity. This owner keeps at most
-//! one selected waveform, reuses the disk cache, and rejects work from a
-//! replaced Track or source session. The UI only receives matching peaks.
+//! one selected waveform, reuses the one stored for the same audio, and rejects
+//! work from a replaced Track or source session. The UI only receives matching peaks.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::runtime::WaveformProjection;
 use async_channel::Sender;
 use audio_processing::generate_waveform_peaks_cancellable;
-use md5_digest::{Digest, Md5};
 use playback::{CurrentMedia, CurrentMediaId, StreamRequest};
-use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::playback::prepare_stream;
 
-const CACHE_VERSION: u8 = 1;
-const CACHE_DIRECTORY: &str = "waveforms";
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct WaveformKey {
-    source_id: Option<sources::SourceId>,
     media_uri: String,
     duration_millis: i64,
     source_format: Option<String>,
@@ -33,26 +26,10 @@ struct WaveformKey {
 impl WaveformKey {
     fn for_media(media: &CurrentMedia) -> Self {
         Self {
-            source_id: library::source_entity_parts(&media.row.track.media_uri)
-                .and_then(|(source_id, kind, _)| (kind == "track").then_some(source_id)),
             media_uri: media.row.track.media_uri.clone(),
             duration_millis: media.row.track.metadata.duration_millis,
             source_format: media.row.track.metadata.source_format.clone(),
         }
-    }
-
-    fn cache_path(&self, root: &Path) -> PathBuf {
-        let identity = format!(
-            "{}\n{}\n{:?}\n{}",
-            self.duration_millis, self.media_uri, self.source_format, CACHE_VERSION,
-        );
-        let source = self.source_id.as_ref().map_or_else(
-            || "direct".to_string(),
-            |source| format!("{:x}", Md5::digest(source.as_str())),
-        );
-        root.join(CACHE_DIRECTORY)
-            .join(source)
-            .join(format!("{:x}.json", Md5::digest(identity)))
     }
 }
 
@@ -73,17 +50,9 @@ impl Drop for CurrentWaveform {
     }
 }
 
-#[derive(Deserialize)]
-struct CachedWaveform {
-    version: u8,
-    duration_millis: i64,
-    peaks: Vec<(f64, f64)>,
-}
-
 pub(crate) struct WaveformOwner {
     runtime: tokio::runtime::Handle,
     events: Sender<WaveformProjection>,
-    cache_root: PathBuf,
     enabled: AtomicBool,
     current: Mutex<Option<CurrentWaveform>>,
     next_request: AtomicU64,
@@ -101,13 +70,21 @@ impl WaveformOwner {
     pub(crate) fn new(
         runtime: tokio::runtime::Handle,
         events: Sender<WaveformProjection>,
-        cache_root: PathBuf,
+        cache_root: &Path,
         enabled: bool,
     ) -> Arc<Self> {
+        // Waveforms were once JSON files here; the Store holds them now.
+        let legacy = cache_root.join("waveforms");
+        runtime.spawn_blocking(move || {
+            if let Err(error) = std::fs::remove_dir_all(&legacy)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                warn!(%error, "could not remove the old waveform cache");
+            }
+        });
         Arc::new(Self {
             runtime,
             events,
-            cache_root,
             enabled: AtomicBool::new(enabled),
             current: Mutex::new(None),
             next_request: AtomicU64::new(1),
@@ -181,61 +158,6 @@ impl WaveformOwner {
         self.start_decode(request, key, input);
     }
 
-    pub(crate) fn legacy_cache_usage(&self) -> std::io::Result<library::CacheUsage> {
-        let mut usage = library::CacheUsage::default();
-        self.visit_cache_files(|path| {
-            match path.metadata() {
-                Ok(metadata) => {
-                    usage.entries += 1;
-                    usage.bytes += metadata.len();
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-            Ok(())
-        })?;
-        Ok(usage)
-    }
-
-    pub(crate) fn clear_legacy_cache(&self) -> std::io::Result<()> {
-        self.visit_cache_files(|path| match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        })
-    }
-
-    fn visit_cache_files(
-        &self,
-        mut visit: impl FnMut(PathBuf) -> std::io::Result<()>,
-    ) -> std::io::Result<()> {
-        let directories = match fs::read_dir(self.cache_root.join(CACHE_DIRECTORY)) {
-            Ok(directories) => directories,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        for directory in directories {
-            let directory = directory?;
-            if !directory.file_type()?.is_dir() {
-                continue;
-            }
-            let files = match fs::read_dir(directory.path()) {
-                Ok(files) => files,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            for file in files {
-                let file = file?;
-                if file.file_type()?.is_file()
-                    && file.path().extension().is_some_and(|ext| ext == "json")
-                {
-                    visit(file.path())?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn clear(&self) {
         self.next_request.fetch_add(1, Ordering::AcqRel);
         self.current
@@ -248,31 +170,9 @@ impl WaveformOwner {
     fn start_decode(self: &Arc<Self>, request: u64, key: WaveformKey, input: WaveformMedia) {
         let owner = Arc::downgrade(self);
         let task_key = key.clone();
-        let cache_root = self.cache_root.clone();
         let task = self.runtime.spawn(async move {
-            let analysis_key = input.catalog.audio_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
-                warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform analysis key");
-                None
-            });
-            let mut cached = input.catalog.waveform_cache(&task_key.media_uri).await.unwrap_or_else(|error| {
-                warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform cache");
-                None
-            }).map(|row| row.peaks);
-            if cached.is_none() {
-                let cache_key = task_key.clone();
-                cached = tokio::task::spawn_blocking(move || load_cached(&cache_root, &cache_key)).await.ok().flatten();
-                if let (Some(analysis_key), Some(peaks)) = (analysis_key, cached.as_ref()) {
-                    let row = library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() };
-                    if let Err(error) = input.catalog.write_waveform_cache(&row).await { warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform"); }
-                }
-            }
-            if let Some(peaks) = cached {
-                if let Some(owner) = owner.upgrade() { owner.accept_peaks(request, &task_key, Arc::new(peaks)); }
-                return;
-            }
-            let catalog = Arc::clone(&input.catalog);
             let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
-            let playable = match input.catalog.playable(input.media.row.track.track_key, "original").await {
+            let playable = match crate::loudness::hashed_playable(&input.catalog, input.media.row.track.track_key).await {
                 Ok(Some(playable)) => playable,
                 result => {
                     if let Err(error) = result {
@@ -284,6 +184,18 @@ impl WaveformOwner {
                     return;
                 }
             };
+            let hash = playable.audio_hash;
+            if let Some(hash) = hash {
+                match input.catalog.waveform(hash).await {
+                    Ok(Some(peaks)) => {
+                        if let Some(owner) = owner.upgrade() { owner.accept_peaks(request, &task_key, Arc::new(peaks)); }
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(error) => warn!(%error, media_uri = %task_key.media_uri, "failed to read the stored waveform"),
+                }
+            }
+            let catalog = Arc::clone(&input.catalog);
             let stream = match prepare_stream(&input.catalog, &playable, input.request, local.as_ref(), None, move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
@@ -341,8 +253,8 @@ impl WaveformOwner {
             if !owner.matches(request, &task_key) {
                 return;
             }
-            if let Some(analysis_key) = analysis_key
-                && let Err(error) = catalog.write_waveform_cache(&library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() }).await
+            if let Some(hash) = hash
+                && let Err(error) = catalog.put_waveform(hash, &peaks).await
             {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform");
             }
@@ -422,15 +334,6 @@ fn projection_for(current: &CurrentWaveform) -> WaveformProjection {
     }
 }
 
-fn load_cached(root: &Path, key: &WaveformKey) -> Option<Vec<(f64, f64)>> {
-    let value = fs::read_to_string(key.cache_path(root)).ok()?;
-    let cached = serde_json::from_str::<CachedWaveform>(&value).ok()?;
-    if cached.version != CACHE_VERSION || cached.duration_millis != key.duration_millis {
-        return None;
-    }
-    sanitize_peaks(cached.peaks)
-}
-
 fn sanitize_peaks(peaks: Vec<(f64, f64)>) -> Option<Vec<(f64, f64)>> {
     let peaks = peaks
         .into_iter()
@@ -454,100 +357,4 @@ fn is_dsd(value: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .any(|part| matches!(part, "dsf" | "dff" | "dsdiff") || part.starts_with("dsd"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn enabling_waveform_uses_cached_peaks_without_a_provider_or_duration() {
-        let directory = tempfile::tempdir().expect("waveform directory");
-        let catalog = library::Catalog::open(directory.path().join("library.db"))
-            .await
-            .expect("catalog");
-        let media_uri =
-            library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track");
-        let media_id = CurrentMediaId {
-            run: None,
-            media_uri: media_uri.clone(),
-        };
-        let entries = catalog
-            .queue_entries(
-                library::QueueLoad::items(vec![(
-                    playback::TrackReference::direct(
-                        media_uri.clone(),
-                        "Track",
-                        "Artist",
-                        "Album",
-                        0,
-                    ),
-                    playback::Provenance::Manual,
-                )]),
-                None,
-            )
-            .await
-            .expect("admit track")
-            .entries;
-        let row = catalog
-            .queue_rows_for_entries(
-                &entries.into_iter().enumerate().collect::<Vec<_>>(),
-                &library::ReadCancellation::new(),
-            )
-            .await
-            .expect("queue rows")
-            .pop()
-            .expect("admitted track row");
-        let media = Arc::new(CurrentMedia {
-            stream: None,
-            id: media_id.clone(),
-            row,
-        });
-        let peaks = vec![(0.1, 0.2), (0.3, 0.4)];
-        let key = WaveformKey::for_media(&media);
-        let path = key.cache_path(directory.path());
-        fs::create_dir_all(path.parent().expect("cache directory"))
-            .expect("create cache directory");
-        fs::write(
-            path,
-            serde_json::to_vec(&serde_json::json!({
-                "version": CACHE_VERSION,
-                "duration_millis": key.duration_millis,
-                "peaks": &peaks,
-            }))
-            .expect("legacy waveform JSON"),
-        )
-        .expect("cached waveform");
-        let input = WaveformMedia {
-            request: StreamRequest::original(media.row.track.media_uri.clone()),
-            media,
-            source: Weak::new(),
-            catalog: Arc::new(catalog),
-        };
-        let (events, received) = async_channel::unbounded();
-        let owner = WaveformOwner::new(
-            tokio::runtime::Handle::current(),
-            events,
-            directory.path().to_path_buf(),
-            false,
-        );
-        owner.current_changed(Some(input.clone()));
-        assert_eq!(
-            received.recv().await.expect("disabled waveform"),
-            WaveformProjection::default()
-        );
-        owner.settings_changed(true, Some(input));
-        let projection = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                let projection = received.recv().await.expect("waveform event");
-                if projection.peaks.is_some() {
-                    break projection;
-                }
-            }
-        })
-        .await
-        .expect("cached waveform publication");
-        assert_eq!(projection.media_id, Some(media_id));
-        assert_eq!(projection.peaks.as_deref(), Some(&peaks));
-    }
 }
