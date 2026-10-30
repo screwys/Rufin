@@ -50,9 +50,6 @@
       </div>
 
     </section>
-    <section data-connect-section="media" hidden>
-      <div id="connect-folder-section" hidden><h3>{{ localization::tr("Local music folders") }} <span class="icon" data-icon="info" tabindex="0" title="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}" aria-label="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}"></span></h3><div id="connect-folders" class="connect-card-list"></div></div>
-    </section>
     <section data-connect-section="file" hidden>
       <strong>{{ localization::tr("Import") }}</strong>
       <div class="connect-inline"><label for="connect-storage">{{ localization::tr("Storage") }}</label><select id="connect-storage"><option value="">{{ localization::tr("Local storage") }}</option><option value="webdav">{{ localization::tr("WebDAV / Nextcloud") }}</option><option value="smb">{{ localization::tr("SMB / Samba") }}</option></select><button id="connect-storage-connection" hidden>{{ localization::tr("Choose connection") }}</button></div>

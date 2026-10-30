@@ -1,32 +1,5 @@
-//! Device-local representations of shared collection entries.
-use crate::{Catalog, LibraryResult, LocalFileWrite, LocalMediaLocation};
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CatalogFileStamp {
-    pub size_bytes: Option<i64>,
-    pub mtime_ns: i64,
-    pub revision: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CatalogFileDependency {
-    pub path: String,
-    pub accepted: Option<CatalogFileStamp>,
-    pub file: Option<LocalFileWrite>,
-    #[serde(default)]
-    pub root_id: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CatalogFile {
-    pub file: LocalFileWrite,
-    #[serde(default)]
-    pub root_id: Option<String>,
-    pub parsed: Option<(CatalogFileStamp, Option<i64>)>,
-    pub directory_complete: bool,
-    pub dependencies: Vec<CatalogFileDependency>,
-}
+//! Where a track a peer asks for lives on this device.
+use crate::{Catalog, LibraryResult, LocalMediaLocation};
 
 impl Catalog {
     pub async fn connect_original_file(

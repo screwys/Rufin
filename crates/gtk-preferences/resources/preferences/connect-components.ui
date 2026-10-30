@@ -71,14 +71,4 @@
       <response id="join" appearance="destructive" translatable="yes">Join profile</response>
     </responses>
   </object>
-  <object class="AdwEntryRow" id="folder_mapping">
-    <property name="show-apply-button">true</property>
-    <child type="suffix">
-      <object class="GtkButton" id="browse_folder">
-        <property name="icon-name">rufin-document-open-symbolic</property>
-        <property name="tooltip-text" translatable="yes">Choose folder</property>
-        <property name="valign">center</property>
-      </object>
-    </child>
-  </object>
 </interface>

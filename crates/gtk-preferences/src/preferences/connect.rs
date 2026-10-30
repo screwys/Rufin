@@ -323,7 +323,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         join_method: adw::ComboRow, pairing: adw::PreferencesGroup,
         start_section: gtk::Box, join_section: gtk::Box, invite_section: adw::ActionRow, file_section: gtk::Box,
         verify_section: gtk::Box, connecting_section: gtk::Box, devices_section: gtk::Box,
-        media_section: gtk::Box, network_section: gtk::Box, approval_status: gtk::Label,
+        network_section: gtk::Box, approval_status: gtk::Label,
         membership_status_text: gtk::Label, connecting_status: gtk::Label,
         collection_progress: gtk::ProgressBar, collection_spinner: gtk::Spinner,
         collection_counter: gtk::Label,
@@ -334,17 +334,14 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         pair_name: gtk::Label, emoji: gtk::Label,
         peer: adw::EntryRow, nearby: adw::SwitchRow, relay: adw::EntryRow,
         relay_enabled: gtk::Switch,
-        folders_section: gtk::Box,
         storage: adw::ComboRow,
         choose_connection: gtk::Button,
         file: adw::EntryRow,
-        folders: adw::PreferencesGroup,
         create: gtk::Button, copy_invitation: gtk::Button, join: gtk::Button,
         approve: gtk::Button, reject: gtk::Button, refresh: gtk::Button, discover: gtk::Button,
         cancel_pairing: gtk::Button,
         import: gtk::Button, browse_file: gtk::Button,
         leave: gtk::Button, file_chooser: gtk::FileDialog,
-        folder_chooser: gtk::FileDialog,
     });
     *shell.state.connect_feedback.borrow_mut() = Some(
         gtk_widgets::feedback::ControlFeedbackState::new(&feedback_label, shell.settings.clone()),
@@ -383,7 +380,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let connecting_section = connecting_section.downgrade();
         let devices_section = devices_section.downgrade();
         let network_section = network_section.downgrade();
-        let media_section = media_section.downgrade();
         let leave = leave.downgrade();
         let pairing = pairing.downgrade();
         let nearby_devices = nearby_devices.downgrade();
@@ -434,7 +430,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                 (&verify_section, state.pairing.is_some()),
                 (&connecting_section, progress_visible),
                 (&network_section, !busy && !importing),
-                (&media_section, profile_controls),
                 (
                     &devices_section,
                     !busy && state.devices.iter().any(|device| device.enrolled),
@@ -611,113 +606,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         }
     });
     let weak = Rc::downgrade(shell);
-    let folders_weak = folders.downgrade();
-    let parent = shell.window.downgrade();
-    folders
-        .bind_property("visible", &folders_section, "visible")
-        .sync_create()
-        .build();
-    let folder_rows = Rc::new(RefCell::new(Vec::<adw::EntryRow>::new()));
-    let load_folders: Rc<dyn Fn()> = Rc::new(move || {
-        let (Some(shell), Some(group), Some(parent)) =
-            (weak.upgrade(), folders_weak.upgrade(), parent.upgrade())
-        else {
-            return;
-        };
-        let owner = shell.products.connect.clone();
-        let sources = shell.products.source.list_sources().sources;
-        let result = shell.products.runtime.spawn(async move {
-            let mut mappings = Vec::new();
-            for source in sources.iter() {
-                for root in owner
-                    .roots(source.id.to_string())
-                    .await
-                    .map_err(|error| error.to_string())?
-                {
-                    mappings.push((source.id.to_string(), source.name.clone(), root));
-                }
-            }
-            Ok::<_, String>(mappings)
-        });
-        let rows = folder_rows.clone();
-        let chooser = folder_chooser.clone();
-        gtk::glib::spawn_future_local(async move {
-            let values = match result.await {
-                Ok(Ok(values)) => values,
-                Ok(Err(error)) => {
-                    show_feedback(&shell, error);
-                    return;
-                }
-                Err(_) => return,
-            };
-            for row in rows.borrow_mut().drain(..) {
-                group.remove(&row);
-            }
-            group.set_visible(!values.is_empty());
-            for (source, name, root) in values {
-                let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-                let builder = gtk_widgets::ui_resource::builder(resource);
-                gtk_widgets::objects!(builder, resource, { folder_mapping: adw::EntryRow, browse_folder: gtk::Button });
-                folder_mapping.set_title(&format!("{name} · {}", root.label));
-                let key = format!("{source}/{}", root.id);
-                let settings = shell.products.connect.status().settings;
-                let path = settings
-                    .folders
-                    .get(&key)
-                    .or_else(|| settings.folders.get(&source));
-                folder_mapping.set_text(&path.map(ToString::to_string).unwrap_or_default());
-                let weak = Rc::downgrade(&shell);
-                let id = root.id.clone();
-                let source_id = source.clone();
-                folder_mapping.connect_apply(move |row| {
-                    if let Some(shell) = weak.upgrade() {
-                        run(
-                            &shell,
-                            Action::Folder {
-                                source: source_id.clone(),
-                                root_id: Some(id.clone()),
-                                path: downloads::DownloadDirectory::Native(
-                                    row.text().as_str().into(),
-                                ),
-                            },
-                        );
-                    }
-                });
-                let weak = Rc::downgrade(&shell);
-                let row = folder_mapping.downgrade();
-                let parent = parent.downgrade();
-                let chooser = chooser.clone();
-                browse_folder.connect_clicked(move |_| {
-                    let (Some(shell), Some(row), Some(parent)) =
-                        (weak.upgrade(), row.upgrade(), parent.upgrade())
-                    else {
-                        return;
-                    };
-                    let chooser = chooser.clone();
-                    let source = source.clone();
-                    let root_id = root.id.clone();
-                    gtk::glib::spawn_future_local(async move {
-                        if let Ok(file) = chooser.select_folder_future(Some(&parent)).await
-                            && let Some(path) = file.path()
-                        {
-                            row.set_text(&path.to_string_lossy());
-                            run(
-                                &shell,
-                                Action::Folder {
-                                    source,
-                                    root_id: Some(root_id),
-                                    path: downloads::DownloadDirectory::Native(path),
-                                },
-                            );
-                        }
-                    });
-                });
-                group.add(&folder_mapping);
-                rows.borrow_mut().push(folder_mapping);
-            }
-        });
-    });
-    let weak = Rc::downgrade(shell);
     device_name.connect_apply(move |row| {
         if let Some(shell) = weak.upgrade() {
             run(
@@ -737,8 +625,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             flash_success(button, "rufin-edit-copy-symbolic");
         }
     });
-    let reload_folders = load_folders.clone();
-    refresh.connect_clicked(move |_| reload_folders());
     let retry_label = connection_error.button_label();
     let weak = Rc::downgrade(shell);
     connection_error.connect_button_clicked(move |_| {
@@ -919,7 +805,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
     let parent = connect_dialog.downgrade();
     let device_rows = Rc::new(RefCell::new(Vec::new()));
     let nearby_rows = Rc::new(RefCell::new(Vec::new()));
-    load_folders();
     let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
     let running = task.clone();
     connect_content.connect_map(move |_| {
@@ -930,7 +815,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let weak = weak.clone();
         let device_rows = device_rows.clone();
         let nearby_rows = nearby_rows.clone();
-        let load_folders = load_folders.clone();
         let update_view = update_view.clone();
         let updating_network = updating_network.clone();
         let nearby = nearby.clone();
@@ -950,8 +834,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let nearby_devices = nearby_devices.clone();
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             let mut previous_devices = None;
-            let mut previous_profile = initial.settings.profile;
-            let mut previous_working = initial.connecting;
             let mut completed_pairings = initial.completed_pairings;
             let mut previous_network = (
                 initial.settings.nearby,
@@ -1023,12 +905,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                     pair_name.set_text(&pairing.name);
                     emoji.set_text(&pairing.emoji.join(" "));
                 }
-                let working = state.connecting;
-                if previous_profile != state.settings.profile || (previous_working && !working) {
-                    previous_profile = state.settings.profile.clone();
-                    load_folders();
-                }
-                previous_working = working;
                 let membership: Vec<_> = state
                     .devices
                     .iter()

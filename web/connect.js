@@ -37,7 +37,6 @@ function updateView() {
     devices: !busy && state.devices.some(device => device.enrolled),
     nearby: !busy && !importing && state.devices.some(device => !device.enrolled),
     network: !busy && (profileControls || (joining && !importing)),
-    media: profileControls,
   };
   for (const section of document.querySelectorAll("[data-connect-section]")) {
     if (section.dataset.connectSection in visible)
@@ -143,10 +142,8 @@ function textNode(tag, text, className = "") {
 }
 function show(value) {
   const pairingChanged = value.pairing?.session !== state?.pairing?.session;
-  const profileChanged = state && state.settings.profile !== value.settings.profile;
   const networkChanged = state && (state.settings.nearby !== value.settings.nearby || state.settings.relay !== value.settings.relay || state.settings.public_relay !== value.settings.public_relay);
   const completed = state && state.completed_pairings !== value.completed_pairings;
-  const ready = state?.connecting && !value.connecting;
   state = value;
   const counter = showCollectionProgress(value);
   if (networkChanged) {
@@ -183,7 +180,6 @@ function show(value) {
   }
   updateView();
   if (value.pairing && pairingChanged && !element("dialog").open) present(value);
-  if ((profileChanged || ready) && element("dialog").open) run(loadFolders);
   const signature = JSON.stringify(value.devices.map(device => [device.id, device.enrolled]));
   for (const card of element("dialog").querySelectorAll("[data-device-id]")) {
     const device = value.devices.find(device => device.id === card.dataset.deviceId);
@@ -289,37 +285,6 @@ function showRelay() {
   element("relay").hidden = !enabled;
 }
 
-async function loadFolders() {
-  const profile = state.settings.profile;
-  const configured = await api("/sources");
-  const folders = [];
-  for (const source of configured.sources || []) {
-    const roots = await api(`/connect/roots?source=${encodeURIComponent(source.id)}`);
-    if (state.settings.profile !== profile) return;
-    for (const root of roots) folders.push({ source, root });
-  }
-  element("folder-section").hidden = folders.length === 0;
-  const list = element("folders");
-  list.replaceChildren();
-  for (const { source, root } of folders) {
-    const card = document.createElement("div");
-    card.className = "connect-inline";
-    const label = document.createElement("label");
-    label.textContent = `${source.name} · ${root.label}`;
-    const input = document.createElement("input");
-    input.value = state.settings.folders[`${source.id}/${root.id}`] || state.settings.folders[source.id] || "";
-    input.spellcheck = false;
-    const inputId = `connect-folder-${list.childElementCount}`;
-    input.id = inputId;
-    label.htmlFor = inputId;
-    card.append(label, input);
-    card.append(button(tr("Use folder"), () => action({
-      action: "folder", source: source.id, root_id: root.id, path: input.value,
-    })));
-    list.append(card);
-  }
-}
-
 function fileSource() {
   return storageConnection;
 }
@@ -339,7 +304,6 @@ function present(value) {
   element("dialog").showModal();
   if (!value.pairing && !value.connecting) {
     run(showStorageConnection);
-    run(loadFolders);
     run(refreshContinuation);
   }
 }
@@ -412,10 +376,7 @@ export function init() {
       run(() => action({ action: "enable", enabled: false }));
     }
   });
-  click("refresh", async () => {
-    await action({ action: "refresh" });
-    await loadFolders();
-  });
+  click("refresh", () => action({ action: "refresh" }));
   click("copy", async () => {
     const field = element("invitation");
     if (navigator.clipboard) {
