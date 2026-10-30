@@ -91,8 +91,19 @@ impl Catalog {
             .execute(&mut *snapshot)
             .await?;
         let mut tx = snapshot.begin().await?;
-        // The profile carries no device-local file rows; the next Local walk reads this device's files.
-        sqlx::raw_sql("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri)
+        // The profile carries no device-local file rows, so this device keeps its own. An accepted
+        // file the profile has no track for is left out, and the next walk reads it.
+        sqlx::raw_sql("INSERT INTO files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,parse_version,picture_index,artist_pictures,playlist_identity,state)
+                SELECT source.source_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.parse_version,file.picture_index,file.artist_pictures,file.playlist_identity,file.state
+                FROM receiving.files file JOIN receiving.sources old USING(source_key) JOIN main.sources source ON source.object_id=old.object_id
+                WHERE NOT(file.root LIKE 'http://%' OR file.root LIKE 'https://%' OR file.root LIKE 'smb://%')
+                AND(file.state<>'accepted' OR file.kind IN('image','directory') OR EXISTS(SELECT 1 FROM main.track_details details JOIN main.tracks track USING(track_key)
+                    WHERE track.source_key=source.source_key AND(details.source_path=file.path OR details.cue_path=file.path)));
+                INSERT INTO file_inputs(file_key,position,path) SELECT file.file_key,input.position,input.path
+                FROM receiving.file_inputs input JOIN receiving.files old USING(file_key) JOIN receiving.sources old_source ON old_source.source_key=old.source_key
+                JOIN main.sources source ON source.object_id=old_source.object_id JOIN main.files file ON file.source_key=source.source_key AND file.path=old.path
+                WHERE NOT(old.root LIKE 'http://%' OR old.root LIKE 'https://%' OR old.root LIKE 'smb://%');
+                INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri)
                 SELECT source.source_key,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM receiving.local_locators locator LEFT JOIN receiving.sources old USING(source_key)
                 LEFT JOIN main.sources source ON source.object_id=old.object_id WHERE EXISTS(SELECT 1 FROM main.tracks WHERE media_uri=locator.media_uri);
                 INSERT INTO downloads SELECT * FROM receiving.downloads;
