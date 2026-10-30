@@ -1164,7 +1164,7 @@ impl ConnectOwner {
         if let Err(error) = self.leave(true).await {
             tracing::warn!(%error, "Could not turn Connect off");
         }
-        self.failed(localization::tr(REMOVED_FROM_PROFILE));
+        self.failed(error(REMOVED_FROM_PROFILE));
     }
 
     /// The relay record changed the shared relay choice.
@@ -1730,8 +1730,10 @@ fn profile_key(identity_ref: &str, profile: &str) -> SecretKey {
 fn error(error: impl std::fmt::Display) -> String {
     let message = error.to_string();
     match message.as_str() {
-        INCOMPATIBLE => localization::tr(INCOMPATIBLE),
-        REMOVED_FROM_PROFILE => localization::tr(REMOVED_FROM_PROFILE),
+        INCOMPATIBLE => localization::tr(
+            "Devices using Rufin Connect are no longer compatible. Please update Rufin.",
+        ),
+        REMOVED_FROM_PROFILE => localization::tr("This device was removed from the profile"),
         _ => message,
     }
 }
