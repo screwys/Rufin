@@ -354,12 +354,14 @@ where
     let connect = crate::connect::ConnectOwner::new(
         paths.connect_dir(),
         Arc::clone(&library),
+        settings.clone(),
         settings_handle.as_ref().clone(),
         Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
         runtime.clone(),
     );
+    source.install_connect(&connect);
     connect.start();
 
     source.start()?;

@@ -203,6 +203,11 @@ impl Store {
         read_profile(&self.pool).await
     }
 
+    /// Closes the file for a storage reset.
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     /// Turning off: the file and its journal go.
     pub async fn delete(self) -> Result<()> {
         self.pool.close().await;

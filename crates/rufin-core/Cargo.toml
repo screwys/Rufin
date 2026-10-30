@@ -16,6 +16,7 @@ bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindi
 [dependencies]
 uniffi = { workspace = true, optional = true }
 rufin-connect.workspace = true
+anyhow = "1"
 age.workspace = true
 # Bundle age error translations in development packages too.
 rust-embed.workspace = true
@@ -50,6 +51,7 @@ lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+notify.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
