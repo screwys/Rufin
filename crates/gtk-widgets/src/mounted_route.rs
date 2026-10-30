@@ -1,4 +1,4 @@
-use crate::sparse_model::SparseLoad;
+use crate::sparse_model::{SparseRouteModel, SparseSource};
 use adw::prelude::*;
 use gtk::glib;
 use playback::TransportStatus;
@@ -195,57 +195,47 @@ impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R>
 /// The view a mounted route reads; its models read their windows from the view it holds now.
 pub type RouteView = Rc<RefCell<Arc<View>>>;
 
-/// A read of a route: its view and what came with it, the header, the seed window starting at
-/// `first`, an artist's favorite tracks, an album's disc sections and the Albums list's spans in
-/// Detail layout.
-pub struct RouteRead {
-    pub view: Arc<View>,
-    pub header: Option<library::Header>,
-    pub first: usize,
-    pub rows: Vec<library::Row>,
-    pub favorites: Option<Vec<library::Row>>,
-    pub discs: Vec<(u32, i64)>,
-    pub spans: Option<Vec<library::AlbumSpan>>,
+/// The view holder of a route opened with `read`.
+pub fn route_view(read: &Opened) -> RouteView {
+    Rc::new(RefCell::new(Arc::clone(&read.view)))
 }
 
-impl RouteRead {
-    pub async fn of(
-        opened: Opened,
-        cancel: &library::ReadCancellation,
-    ) -> library::LibraryResult<Self> {
-        let discs = opened.view.disc_sections(cancel).await?;
-        let spans = opened.view.album_spans(cancel).await?;
-        Ok(Self {
-            view: Arc::new(opened.view),
-            header: opened.header,
-            first: opened.first,
-            rows: opened.rows,
-            favorites: opened.favorites,
-            discs,
-            spans,
-        })
-    }
-
-    pub fn route_view(&self) -> RouteView {
-        Rc::new(RefCell::new(Arc::clone(&self.view)))
-    }
-}
-
-/// A sparse loader that reads windows of the view `view` holds and keeps the rows `map` takes.
-pub fn view_rows<K, R: Send + 'static>(
+/// A sparse model of the rows `view` lists, seeded with the window `read` took with it. The
+/// seed and every later window keep the rows `map` takes.
+pub fn view_model<K, R>(
+    runtime: tokio::runtime::Handle,
     view: &RouteView,
     map: fn(library::Row) -> Option<R>,
-) -> SparseLoad<K, R> {
-    let view = Rc::clone(view);
-    Rc::new(move |_, range, cancel| {
-        let view = Arc::clone(&view.borrow());
-        Box::pin(async move {
-            view.rows(range, &cancel)
-                .await
-                .map(|rows| rows.into_iter().filter_map(map).collect())
-                .map_err(|error| error.to_string())
-        })
-    })
+    read: &mut Opened,
+) -> Rc<SparseRouteModel<K, R>>
+where
+    K: Clone + Eq + Send + Sync + 'static,
+    R: Clone + Send + Sync + 'static,
+{
+    let load_view = Rc::clone(view);
+    let model = SparseRouteModel::new(
+        SparseSource::Query {
+            count: read.view.len(),
+        },
+        runtime,
+        Rc::new(move |_, range, cancel| {
+            let view = Arc::clone(&load_view.borrow());
+            Box::pin(async move {
+                view.rows(range, &cancel)
+                    .await
+                    .map(|rows| rows.into_iter().filter_map(map).collect())
+                    .map_err(|error| error.to_string())
+            })
+        }),
+    );
+    model.seed_at(
+        read.first,
+        std::mem::take(&mut read.rows)
+            .into_iter()
+            .filter_map(map)
+            .collect(),
+    );
+    model
 }
 
 /// A mounted route's view and the reads that replace it; the latest request wins. The route
@@ -253,7 +243,7 @@ pub fn view_rows<K, R: Send + 'static>(
 pub struct PageReread {
     view: RouteView,
     inputs: Box<dyn Fn(&OpenOptions) -> OpenOptions>,
-    read: Rc<LatestMountedRouteRead<Result<RouteRead, String>, PageRequest>>,
+    read: Rc<LatestMountedRouteRead<Result<Opened, String>, PageRequest>>,
 }
 
 #[derive(Clone)]
@@ -270,10 +260,10 @@ impl PageReread {
         context: &'static str,
         view: &RouteView,
         inputs: impl Fn(&OpenOptions) -> OpenOptions + 'static,
-        apply: impl Fn(RouteRead) -> bool + 'static,
+        apply: impl Fn(Opened) -> bool + 'static,
     ) -> Rc<Self> {
         let current = Rc::downgrade(view);
-        let apply = Rc::new(move |_, result: Result<RouteRead, String>| {
+        let apply = Rc::new(move |_, result: Result<Opened, String>| {
             let read = match result {
                 Ok(read) => read,
                 Err(error) => {
@@ -293,16 +283,12 @@ impl PageReread {
         let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
             Box::pin(async move {
                 let view = &request.view;
-                let opened = match request.read {
+                match request.read {
                     Reread::Page => view.reread(request.options, request.window, &cancel).await,
                     Reread::Releases => {
                         view.reread_releases(request.options, request.window, &cancel)
                             .await
                     }
-                };
-                match opened {
-                    Ok(opened) => RouteRead::of(opened, &cancel).await,
-                    Err(error) => Err(error),
                 }
                 .map_err(|error| error.to_string())
             }) as Pin<Box<dyn Future<Output = _> + Send>>

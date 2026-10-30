@@ -60,7 +60,7 @@ pub(crate) enum Members {
     /// Playlists or smart playlists, with their folders as negative keys.
     Playlists(Box<[i64]>),
     AlbumTracks {
-        spans: Box<[AlbumSpan]>,
+        spans: Arc<[AlbumSpan]>,
         tracks: Box<[u32]>,
     },
 }
@@ -219,6 +219,7 @@ impl Order {
                     let index = position - span.first - 1;
                     Item::AlbumTrack {
                         key: TrackKey::from_raw(key(&tracks[span.first - at + index])),
+                        album: span.album,
                         index: index as u32,
                     }
                 })
@@ -243,7 +244,7 @@ impl Order {
         self.0.counts
     }
 
-    pub fn album_spans(&self) -> Option<&[AlbumSpan]> {
+    pub fn album_spans(&self) -> Option<&Arc<[AlbumSpan]>> {
         match &self.0.members {
             Members::AlbumTracks { spans, .. } => Some(spans),
             _ => None,
@@ -259,6 +260,7 @@ pub enum Item {
     },
     AlbumTrack {
         key: TrackKey,
+        album: AlbumKey,
         index: u32,
     },
     AlbumHeading(AlbumKey),
@@ -1118,7 +1120,7 @@ impl<'a> Builder<'a> {
                 });
                 Row::Track(row)
             }),
-            Item::AlbumTrack { key, index } => self
+            Item::AlbumTrack { key, index, .. } => self
                 .track(key, got)?
                 .map(|track| Row::AlbumTrack { track, index }),
             Item::Listen(index) => {

@@ -31,7 +31,7 @@ pub struct GroupedDetailData {
     pub summary_items: Vec<(&'static str, String)>,
     pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
     pub view: gtk_widgets::mounted_route::RouteView,
-    pub tracks: gtk_widgets::mounted_route::RouteRead,
+    pub tracks: rufin_core::view::Opened,
     pub table_context: &'static str,
     pub playback_context: String,
     pub play_label: &'static str,

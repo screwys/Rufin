@@ -6,10 +6,9 @@ use library::{Catalog, Row, TrackKey, TrackRow};
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 
 use gtk_widgets::library_fields::TrackPresentation;
-use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
+use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
-
-const TRACK_OVERSCAN: usize = 64;
+use rufin_core::view::Opened;
 
 #[derive(Clone)]
 enum TrackRead {
@@ -60,27 +59,17 @@ pub struct TrackCollectionModel(Rc<TrackModelState>);
 
 impl TrackCollectionModel {
     /// The tracks of `view`, seeded with the rows `read` took with it.
-    pub fn new(runtime: tokio::runtime::Handle, view: &RouteView, read: RouteRead) -> Self {
+    pub fn new(runtime: tokio::runtime::Handle, view: &RouteView, mut read: Opened) -> Self {
         let members = read
             .view
             .members()
             .cloned()
             .expect("a track page reads members");
         let filter = RefCell::new(members.filter.clone());
-        let sparse = SparseRouteModel::new(
-            SparseSource::Query {
-                count: read.view.len(),
-            },
-            TRACK_OVERSCAN,
-            runtime,
-            view_rows(view, track_row),
-        );
-        sparse.seed_matching_at(
-            read.first,
-            read.rows.into_iter().filter_map(track_row).collect(),
-            |row| row.track_key,
-        );
-        sparse.list_model().set_sections(read.discs);
+        let sparse = view_model(runtime, view, track_row, &mut read);
+        sparse
+            .list_model()
+            .set_sections(read.view.disc_sections().to_vec());
         Self(Rc::new(TrackModelState {
             sparse,
             applied: Rc::new(RefCell::new(TrackRead::Members(members))),
@@ -99,7 +88,6 @@ impl TrackCollectionModel {
         let load_view = Rc::clone(view);
         let sparse = SparseRouteModel::new(
             SparseSource::Query { count },
-            TRACK_OVERSCAN,
             runtime,
             Rc::new(move |_, range, cancel| {
                 let view = Arc::clone(&load_view.borrow());
@@ -111,9 +99,7 @@ impl TrackCollectionModel {
                 })
             }),
         );
-        sparse.seed_matching_at(0, rows.into_iter().filter_map(track_row).collect(), |row| {
-            row.track_key
-        });
+        sparse.seed_at(0, rows.into_iter().filter_map(track_row).collect());
         Self(Rc::new(TrackModelState {
             sparse,
             filter: RefCell::new(members.filter.clone()),
@@ -140,7 +126,6 @@ impl TrackCollectionModel {
         let keys: Arc<[TrackKey]> = rows.iter().map(|row| row.track_key).collect();
         let sparse = SparseRouteModel::new(
             SparseSource::Keys(keys.clone()),
-            TRACK_OVERSCAN,
             runtime,
             Rc::new(move |keys: Vec<TrackKey>, _, cancel| {
                 let catalog = catalog.clone();
@@ -207,7 +192,7 @@ impl TrackCollectionModel {
     }
 
     /// Takes a reread of the page; a read for another search is stale.
-    pub fn replace_page(&self, read: RouteRead) -> bool {
+    pub fn replace_page(&self, read: Opened) -> bool {
         let Some(members) = read.view.members().cloned() else {
             return false;
         };
@@ -221,7 +206,7 @@ impl TrackCollectionModel {
             },
             read.first,
             read.rows.into_iter().filter_map(track_row).collect(),
-            read.discs,
+            read.view.disc_sections().to_vec(),
             |row| row.track_key,
         )
     }

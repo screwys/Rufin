@@ -871,7 +871,6 @@ fn add_download_queue(
     let source = source_id.clone();
     let jobs = SparseRouteModel::<String, downloads::DownloadQueueItem>::new(
         SparseSource::Query { count: 0 },
-        64,
         shell.products.runtime.clone(),
         Rc::new(move |_, range, _| {
             let owner = owner.clone();

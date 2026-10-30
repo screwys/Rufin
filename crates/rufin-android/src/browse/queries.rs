@@ -238,16 +238,7 @@ impl AndroidBrowseQuery {
                     .with_context_title(caption)
                 } else {
                     match view.item(index, &cancel).await.map_err(error)? {
-                        Some(Item::AlbumTrack { key, .. }) if self.album_detail_layout() => {
-                            let album = view
-                                .album_spans(&cancel)
-                                .await
-                                .map_err(error)?
-                                .unwrap_or_default()
-                                .into_iter()
-                                .rfind(|span| span.first < index)
-                                .ok_or_else(gone)?
-                                .album;
+                        Some(Item::AlbumTrack { key, album, .. }) if self.album_detail_layout() => {
                             let mut read = MemberRead::new(Collection::Album(album));
                             read.sort = Some(self.album_tracks.sort_key);
                             read.descending = self.album_tracks.descending;

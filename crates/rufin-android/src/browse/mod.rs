@@ -169,7 +169,7 @@ pub struct AndroidBrowseQuery {
     display: LibraryListSettings,
     album_tracks: LibraryListSettings,
     artist_tracks: LibraryListSettings,
-    view: tokio::sync::OnceCell<View>,
+    view: tokio::sync::OnceCell<Arc<View>>,
     home: std::sync::OnceLock<Vec<AndroidBrowseRow>>,
 }
 
@@ -235,6 +235,7 @@ impl AndroidBrowseQuery {
         self.view
             .get_or_try_init(|| async { Ok(self.open(cancel).await?.view) })
             .await
+            .map(Arc::as_ref)
     }
 
     fn downloaded(&self) -> bool {

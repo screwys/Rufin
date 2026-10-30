@@ -212,7 +212,7 @@ impl Shell {
         let load_route = route.clone();
         let load_selected = selected.clone();
         let task = self.products.runtime.spawn(async move {
-            let opened = source
+            source
                 .open(
                     load_route,
                     load_selected,
@@ -221,8 +221,7 @@ impl Shell {
                     true,
                     &cancellation,
                 )
-                .await?;
-            RouteRead::of(opened, &cancellation).await
+                .await
         });
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {

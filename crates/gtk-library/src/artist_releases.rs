@@ -21,10 +21,11 @@ use crate::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
 use gtk_widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
-use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
+use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
+use rufin_core::view::Opened;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 
@@ -609,7 +610,7 @@ impl ArtistReleaseProjections {
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
         view: &RouteView,
-        read: RouteRead,
+        mut read: Opened,
     ) -> Self {
         let settings = shell
             .settings
@@ -623,19 +624,7 @@ impl ArtistReleaseProjections {
             release_read(&read.view).expect("an open artist page reads its releases"),
         ));
         let counts = Rc::new(Cell::new(counts));
-        let sparse = SparseRouteModel::new(
-            SparseSource::Query {
-                count: counts.get().iter().sum(),
-            },
-            32,
-            shell.runtime.clone(),
-            view_rows(view, release_row),
-        );
-        sparse.seed_matching_at(
-            read.first,
-            read.rows.into_iter().filter_map(release_row).collect(),
-            |row| row.album_key,
-        );
+        let sparse = view_model(shell.runtime.clone(), view, release_row, &mut read);
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
@@ -797,7 +786,7 @@ impl ArtistReleaseProjections {
     }
 
     /// Shows a reread's releases; false when it has none because the artist is gone.
-    pub fn replace_page(&self, read: RouteRead) -> bool {
+    pub fn replace_page(&self, read: Opened) -> bool {
         let Some(query) = release_read(&read.view) else {
             return false;
         };

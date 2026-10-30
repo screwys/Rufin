@@ -102,7 +102,6 @@ pub fn build_batch_dialog(
         SparseSource::Query {
             count: batch.track_count() as usize,
         },
-        64,
         runtime.clone(),
         load,
     );
