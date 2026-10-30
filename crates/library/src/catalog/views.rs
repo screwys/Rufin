@@ -397,6 +397,8 @@ pub(crate) enum Art {
     Album(i64),
     /// An artist's own candidates and the picture it borrows.
     Artist(i64, Option<Picture>),
+    /// An album's cover lookup, then the first artist's art as `Artist` holds it.
+    Release(i64, Option<(i64, Option<Picture>)>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -405,29 +407,44 @@ pub(crate) enum Picture {
     Album(i64),
 }
 
+impl Art {
+    fn artist(self) -> Option<(i64, Option<Picture>)> {
+        match self {
+            Self::Artist(key, borrowed) => Some((key, borrowed)),
+            _ => None,
+        }
+    }
+}
+
 impl Context<'_> {
     /// Own picture when covers are distinct or the album has none, else the album's, else the
-    /// first artist's.
+    /// first artist's; an album's cover lookup falls back to that artist.
     pub(crate) fn track_art(&self, derived: &Derived, record: &TrackRec) -> Art {
         let album = self
             .album_of(record)
             .map_or(Art::None, |album| self.album_art(derived, album));
         if record.flags & PICTURE != 0
-            && (self.snapshot.distinct_track_covers || album == Art::None)
+            && (self.snapshot.distinct_track_covers
+                || matches!(album, Art::None | Art::Release(_, None)))
         {
             return Art::Track(i64::from(record.key));
         }
-        if album != Art::None {
-            return album;
+        let artist = || {
+            self.snapshot.track_runs(record)[0]
+                .iter()
+                .map(|artist| self.artist_art(derived, *artist))
+                .find(|art| *art != Art::None)
+                .unwrap_or(Art::None)
+        };
+        match album {
+            Art::None => artist(),
+            Art::Release(album, None) => Art::Release(album, artist().artist()),
+            album => album,
         }
-        self.snapshot.track_runs(record)[0]
-            .iter()
-            .map(|artist| self.artist_art(derived, *artist))
-            .find(|art| *art != Art::None)
-            .unwrap_or(Art::None)
     }
 
-    /// Own picture, else its first pictured track's, else its first artist's.
+    /// Own picture, else its first pictured track's, else its cover lookup when lookup is on,
+    /// else its first artist's.
     pub(crate) fn album_art(&self, derived: &Derived, slot: u32) -> Art {
         let Some(record) = self.snapshot.albums.live(slot) else {
             return Art::None;
@@ -442,9 +459,13 @@ impl Context<'_> {
         {
             return Art::Track(i64::from(track.key));
         }
-        self.snapshot.album_runs(record)[0]
+        let artist = self.snapshot.album_runs(record)[0]
             .first()
-            .map_or(Art::None, |artist| self.artist_art(derived, *artist))
+            .map_or(Art::None, |artist| self.artist_art(derived, *artist));
+        if self.snapshot.cover_lookup {
+            return Art::Release(i64::from(record.key), artist.artist());
+        }
+        artist
     }
 
     pub(crate) fn artist_art(&self, derived: &Derived, slot: u32) -> Art {
