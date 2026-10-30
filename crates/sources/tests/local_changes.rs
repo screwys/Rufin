@@ -483,6 +483,8 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         2_000
     );
     catalog.close().await.expect("close before file removal");
+    // An empty root reads as an unmounted one and keeps its rows.
+    fs::create_dir(root.path().join("Other")).unwrap();
     fs::remove_file(&track).expect("remove cached file while stopped");
     let catalog = Catalog::open(&database_path)
         .await
@@ -1234,6 +1236,68 @@ async fn local_refresh_after_a_deleted_album_track_removes_it() {
     let removed = sources::published(&mut updates).expect("catalog update");
     assert_eq!(track_count(&catalog, &removed).await, 1);
     refresh().await.expect("later refresh");
+}
+
+#[tokio::test]
+async fn a_moved_folder_larger_than_a_write_keeps_every_track_identity() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("a")).unwrap();
+    for index in 0..160 {
+        write_silent_wav(&root.path().join(format!("a/{index:03}.wav")), 1).unwrap();
+    }
+    let store = tempfile::tempdir().unwrap();
+    let database_path = store.path().join("library.sqlite");
+    let catalog = Catalog::open(&database_path).await.unwrap();
+    let (configuration, source, _) = Source::connect(
+        SourceId::new("local-moved"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .unwrap()
+    .into_parts();
+    catalog
+        .reconcile_source(
+            &configuration.source_id,
+            &configuration.kind,
+            &configuration.name,
+        )
+        .await
+        .unwrap();
+    let refresh = async || {
+        source
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sources::Refresh::Changed,
+            )
+            .await
+            .unwrap()
+    };
+    refresh().await;
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_state SELECT media_uri,1,80,0 FROM tracks WHERE indexed=1")
+        .execute(&mut stored)
+        .await
+        .unwrap();
+    // All 160 renames are staged at once and written over two batches.
+    fs::create_dir(root.path().join("b")).unwrap();
+    fs::rename(root.path().join("a"), root.path().join("b/a")).unwrap();
+    refresh().await;
+    let favorites: (i64, i64) = sqlx::query_as(
+        "SELECT count(*),count(user_state.media_uri) FROM tracks LEFT JOIN user_state USING(media_uri) WHERE indexed=1",
+    )
+    .fetch_one(&mut stored)
+    .await
+    .unwrap();
+    assert_eq!(favorites, (160, 160));
 }
 
 #[tokio::test]
