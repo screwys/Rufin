@@ -1315,10 +1315,6 @@ pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> Libr
     sqlx::query("UPDATE tracks SET hidden_since=unixepoch() WHERE indexed=0")
         .execute(&mut *transaction)
         .await?;
-    // Released Connect state is not imported. The first start resets it.
-    sqlx::query("UPDATE connect_profile SET schema_version=0 WHERE singleton=1")
-        .execute(&mut *transaction)
-        .await?;
     transaction.commit().await?;
     sqlx::raw_sql("PRAGMA main.optimize=0x10002")
         .execute(&mut connection)

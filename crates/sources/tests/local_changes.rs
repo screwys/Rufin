@@ -70,17 +70,6 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     .await
     .unwrap()
     .into_parts();
-    let profile = library::profile::ProfileStore::open(
-        catalog.clone(),
-        1,
-        "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
-            .parse()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-    profile.bind_profile("shared", "source").await.unwrap();
-    catalog.connect_set_active(true).await.unwrap();
     fs::rename(&root, &offline).unwrap();
     assert!(
         source
@@ -398,56 +387,6 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         assert_eq!(observation.state, library::LocalFileState::Accepted);
         catalog.close().await.unwrap();
     }
-    let catalog = Catalog::open(&database_path).await.unwrap();
-    let received_path = track.canonicalize().unwrap();
-    let previous = stored_files(&catalog, configuration.source_id.as_str())
-        .await
-        .into_iter()
-        .find(|file| file.path == received_path.to_string_lossy())
-        .unwrap();
-    let snapshot = store.path().join("profile.sqlite");
-    let profile = library::profile::ProfileStore::open(
-        catalog.clone(),
-        1,
-        "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
-            .parse()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-    profile.bind_profile("shared", "source").await.unwrap();
-    let key = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
-        .parse()
-        .unwrap();
-    profile
-        .export_database(&snapshot, &key, &[], &[])
-        .await
-        .unwrap();
-    profile.close().await.unwrap();
-    library::profile::ProfileStore::prepare_database(&snapshot, &key, &key)
-        .await
-        .unwrap();
-    library::profile::ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
-        .await
-        .unwrap();
-    let received = stored_files(&catalog, configuration.source_id.as_str())
-        .await
-        .into_iter()
-        .find(|file| file.path == received_path.to_string_lossy())
-        .unwrap();
-    assert_eq!(received, previous);
-    catalog.close().await.unwrap();
-    let catalog = Catalog::open(&database_path).await.unwrap();
-    source
-        .acquire_catalog(
-            &catalog,
-            &|progress| panic!("received index started parsing: {progress:?}"),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            sources::Refresh::Changed,
-        )
-        .await
-        .unwrap();
-    catalog.close().await.unwrap();
     write_silent_wav(&track, 2).expect("edit WAV in place");
     let catalog = Catalog::open(&database_path)
         .await

@@ -609,16 +609,14 @@ async fn released_stores_upgrade_with_their_user_data() {
         );
         // Analysis results are measured again; nothing derived is stored.
         assert_eq!(
-            values(&mut raw, "SELECT json_array((SELECT count(*) FROM loudness),(SELECT count(*) FROM album_loudness),(SELECT count(*) FROM waveform),(SELECT count(*) FROM fingerprint),(SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name<>'documents'))").await,
+            values(&mut raw, "SELECT json_array((SELECT count(*) FROM loudness),(SELECT count(*) FROM album_loudness),(SELECT count(*) FROM waveform),(SELECT count(*) FROM fingerprint),(SELECT count(*) FROM sqlite_schema WHERE type='trigger'))").await,
             ["[0,0,0,0,0]"],
             "{version}"
         );
+        // Released Connect state is not imported.
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT schema_version FROM connect_profile")
-                .fetch_one(&mut raw)
-                .await
-                .unwrap(),
-            0,
+            values(&mut raw, "SELECT json_array(count(*)) FROM sqlite_schema WHERE name IN ('connect_profile','documents','file_revision','sync_cursors','history_peers','history_acknowledgements','history_pending','queue_transfer_pages')").await,
+            ["[0]"],
             "{version}"
         );
         raw.close().await.unwrap();

@@ -498,7 +498,7 @@ impl Catalog {
                       WHERE media_uri=requested.value AND source.kind='local')),
                 EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
                 EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value)
-                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value AND NOT entry.received_from_connect),
+                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value),
                 (SELECT json_array(source.object_id,details.source_path,json_extract(details.metadata,'$.audio_properties.size_bytes'))
                     FROM tracks track JOIN sources source USING(source_key) JOIN track_details details USING(track_key)
                     WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL)
@@ -579,24 +579,6 @@ impl Catalog {
             WHERE EXISTS(SELECT 1 FROM main.sources WHERE object_id=json_extract(requested.value,'$[1]') AND catalog_complete=1)
               AND NOT EXISTS(SELECT 1 FROM main.tracks WHERE media_uri=json_extract(requested.value,'$[0]') AND indexed=1)")
             .bind(serde_json::to_string(media)?).fetch_all(&mut *connection).await?)
-    }
-
-    /// A native scan establishes local access even if the URI is also shared.
-    pub async fn file_media_is_remote(
-        &self,
-        media_uri: &str,
-        received_from_connect: bool,
-    ) -> LibraryResult<bool> {
-        let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(
-            "SELECT
-            NOT EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE media_uri=?1)
-            AND (EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=?1 AND details.source_path IS NOT NULL) OR ?2)",
-        )
-        .bind(media_uri)
-        .bind(received_from_connect)
-        .fetch_one(&mut *connection)
-        .await?)
     }
 
     pub async fn media_uri_for_file_path(
@@ -722,23 +704,6 @@ impl Catalog {
             return Ok(None);
         };
         tokio::task::spawn_blocking(move || playable.mapped_locator())
-            .await
-            .map_err(|error| LibraryError::InvalidRequest(error.to_string()))
-    }
-
-    /// The track's mapped file while it is there.
-    pub(crate) async fn located_mapped_file(
-        &self,
-        media_uri: &str,
-    ) -> LibraryResult<Option<LocalMediaLocation>> {
-        let Some(mapped) = self
-            .playable_by_uri(media_uri)
-            .await?
-            .and_then(|playable| playable.mapped)
-        else {
-            return Ok(None);
-        };
-        tokio::task::spawn_blocking(move || mapped.locate())
             .await
             .map_err(|error| LibraryError::InvalidRequest(error.to_string()))
     }

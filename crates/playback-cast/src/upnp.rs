@@ -2404,7 +2404,6 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            received_from_connect: false,
             provenance: playback::Provenance::Manual,
             track: {
                 let reference = playback::TrackReference {

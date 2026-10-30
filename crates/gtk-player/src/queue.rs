@@ -1500,7 +1500,6 @@ mod tests {
                 links: Default::default(),
                 artwork_binding: None,
             },
-            received_from_connect: false,
             provenance: library::QueueProvenance::Manual,
         })
     }

@@ -1235,7 +1235,6 @@ mod playback_refresh_tests {
             row: Arc::new(QueueRow {
                 occurrence_id: None,
                 position: 0,
-                received_from_connect: false,
                 provenance: Provenance::Manual,
                 track: {
                     let reference = TrackReference {

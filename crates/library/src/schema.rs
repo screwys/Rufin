@@ -414,8 +414,7 @@ CREATE TABLE queue_entries (
     shuffle_rank BLOB,
     provenance TEXT,
     context_key INTEGER REFERENCES queue_contexts,
-    source_rank INTEGER,
-    received_from_connect INTEGER NOT NULL DEFAULT 0
+    source_rank INTEGER
 ) STRICT;
 CREATE INDEX queue_entries_track_idx ON queue_entries(track_key);
 CREATE INDEX queue_entries_context_idx ON queue_entries(context_key) WHERE context_key IS NOT NULL;
@@ -497,42 +496,6 @@ CREATE TABLE store_commits (
     commits INTEGER NOT NULL
 ) STRICT;
 INSERT INTO store_commits VALUES (1, randomblob(16), 0);
-
--- Connect's pairing, device and document tables. They hold no library rows.
-CREATE TABLE connect_profile (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    profile TEXT, publisher TEXT,
-    -- crate::profile::SCHEMA_VERSION; an older value resets Connect state once.
-    schema_version INTEGER NOT NULL DEFAULT 3,
-    actor TEXT NOT NULL DEFAULT '0',
-    clock INTEGER NOT NULL DEFAULT 0,
-    enabled INTEGER NOT NULL DEFAULT 0
-) STRICT;
-INSERT INTO connect_profile(singleton) VALUES (1);
-CREATE TABLE queue_transfer_pages (
-    transfer TEXT NOT NULL, page_offset INTEGER NOT NULL, payload TEXT NOT NULL,
-    PRIMARY KEY(transfer, page_offset)
-) STRICT;
-CREATE TABLE file_revision (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL) STRICT;
-INSERT INTO file_revision(id, revision) VALUES (1, 0);
-CREATE TABLE documents (
-    name TEXT PRIMARY KEY, snapshot BLOB NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 0,
-    version BLOB NOT NULL DEFAULT X''
-) STRICT;
-CREATE INDEX documents_revision ON documents(revision, name);
-CREATE INDEX documents_kind ON documents(substr(name, 1, instr(name, ':') - 1), name);
-CREATE TRIGGER file_revision_delete AFTER DELETE ON documents BEGIN UPDATE file_revision SET revision = revision + 1; END;
-CREATE TABLE sync_cursors (
-    peer TEXT NOT NULL, setup INTEGER NOT NULL, revision INTEGER NOT NULL,
-    PRIMARY KEY(peer, setup)
-) STRICT;
-CREATE TABLE history_peers (peer TEXT PRIMARY KEY) STRICT;
-CREATE TABLE history_acknowledgements (
-    peer TEXT NOT NULL, name TEXT NOT NULL, version BLOB NOT NULL,
-    PRIMARY KEY(peer, name)
-) STRICT;
-CREATE TABLE history_pending (name TEXT PRIMARY KEY) STRICT;
 "#;
 
 /// Creates a new Store, and refuses any other version than the current one. Released Stores

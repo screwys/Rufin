@@ -112,7 +112,6 @@ impl Saved {
             .map(|(track_key, provenance)| QueueEntry {
                 track_key,
                 provenance,
-                received_from_connect: false,
             })
             .collect::<Vec<_>>();
         (

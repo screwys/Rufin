@@ -32,10 +32,6 @@ pub use read::{
     AlbumRow, AlbumSpan, ArtistRow, Fetch, Fetched, FolderRead, FolderRow, Header, HeaderKey, Item,
     Order, PlaylistEntry, Read, Row, TagRow, TrackRow,
 };
-pub mod connect;
-pub mod profile;
-pub use connect::connect_current_kind;
-mod connect_media;
 mod db;
 mod downloads;
 mod favorites;
@@ -66,7 +62,7 @@ pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
 pub mod rank;
 mod waveform;
-pub use downloads::{DownloadFile, FileTrack, media_encoding_key};
+pub use downloads::{DownloadFile, media_encoding_key};
 mod catalog;
 mod radio;
 mod scroll_sections;
@@ -102,7 +98,6 @@ pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
     AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice,
 };
-pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, RecordStamp, StampedRecord};
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use fingerprint::FingerprintRow;
@@ -137,7 +132,7 @@ pub use playlists::{
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,
     QueueProvenance, QueueRank, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
-    QueueTransferPage, QueueTransferRow, QueueUpdate, shuffle_order,
+    QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};

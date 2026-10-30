@@ -1,288 +1,12 @@
 use library::{
-    LibraryField, QueueProvenance, QueueRepeatMode, QueueTransferRow, ReadCancellation,
-    SmartPlaylistDefinition, TrackReference,
+    LibraryField, QueueProvenance, QueueRepeatMode, ReadCancellation, SmartPlaylistDefinition,
+    TrackReference,
 };
 
 use super::support::{connection, export, fixture, persist_queue, restore, uris};
 
-fn queue_row(item: TrackReference, position: usize) -> QueueTransferRow {
-    QueueTransferRow {
-        received_from_connect: false,
-        item,
-        position,
-        provenance: QueueProvenance::Manual,
-    }
-}
-
-#[tokio::test]
-async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue_until_commit() {
-    let fixture = fixture().await;
-    let catalog = &fixture.catalog;
-    let captured = catalog
-        .queue_entries(
-            library::QueueLoad::items(
-                (0..205)
-                    .map(|index| {
-                        (
-                            TrackReference::direct(
-                                format!("https://example.test/{}", index % 3),
-                                format!("Occurrence {index}"),
-                                "Artist",
-                                "Album",
-                                180_000,
-                            ),
-                            QueueProvenance::Manual,
-                        )
-                    })
-                    .collect(),
-            ),
-            None,
-        )
-        .await
-        .unwrap();
-    let queue = library::QueueRestore {
-        order: (0..205u32).rev().collect(),
-        entries: captured.entries.into(),
-        current_index: Some(12),
-        progress_millis: 42_000,
-        repeat_mode: QueueRepeatMode::All,
-        shuffled: true,
-        ..Default::default()
-    };
-    catalog.save_queue(&queue).await.unwrap();
-    let receiver_directory = tempfile::tempdir().unwrap();
-    let receiver = library::Catalog::open(receiver_directory.path().join("receiver.sqlite3"))
-        .await
-        .unwrap();
-    for offset in (0..205).step_by(library::QUEUE_CONTEXT_LIMIT) {
-        let page = catalog.queue_transfer_page(&queue, offset).await.unwrap();
-        assert!(page.rows.len() <= library::QUEUE_CONTEXT_LIMIT);
-        receiver
-            .stage_queue_transfer_page("transfer", &page)
-            .await
-            .unwrap();
-        // Repeated delivery replaces the page without repeating occurrences.
-        receiver
-            .stage_queue_transfer_page("transfer", &page)
-            .await
-            .unwrap();
-        assert!(receiver.restore_queue().await.unwrap().entries.is_empty());
-    }
-    let mut prepared = receiver
-        .prepare_queue_transfer("transfer", 205, queue.current_index.unwrap())
-        .await
-        .unwrap();
-    assert_eq!(
-        receiver
-            .selected_track_uris(
-                &library::MemberSelection::Keys {
-                    source: None,
-                    keys: ((&prepared
-                        .entries
-                        .iter()
-                        .map(|entry| entry.track_key)
-                        .collect::<Vec<_>>())
-                        .iter()
-                        .map(|key| key.raw())
-                        .collect::<Vec<i64>>())
-                    .into_iter()
-                    .map(library::TrackKey::from_raw)
-                    .collect::<Vec<_>>()
-                    .into()
-                },
-                None,
-                &ReadCancellation::new()
-            )
-            .await
-            .unwrap(),
-        catalog
-            .selected_track_uris(
-                &library::MemberSelection::Keys {
-                    source: None,
-                    keys: ((&queue
-                        .entries
-                        .iter()
-                        .map(|entry| entry.track_key)
-                        .collect::<Vec<_>>())
-                        .iter()
-                        .map(|key| key.raw())
-                        .collect::<Vec<i64>>())
-                    .into_iter()
-                    .map(library::TrackKey::from_raw)
-                    .collect::<Vec<_>>()
-                    .into()
-                },
-                None,
-                &ReadCancellation::new()
-            )
-            .await
-            .unwrap(),
-    );
-    assert_eq!(
-        prepared
-            .entries
-            .iter()
-            .map(|entry| &entry.provenance)
-            .collect::<Vec<_>>(),
-        queue
-            .entries
-            .iter()
-            .map(|entry| &entry.provenance)
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(prepared.order, queue.order);
-    assert_eq!(prepared.current_index, queue.current_index);
-    assert_eq!(prepared.rows.len(), 1);
-    prepared.progress_millis = queue.progress_millis;
-    prepared.repeat_mode = queue.repeat_mode;
-    prepared.shuffled = queue.shuffled;
-    receiver
-        .commit_queue_transfer("transfer", &prepared)
-        .await
-        .unwrap();
-    let restored = receiver.restore_queue().await.unwrap();
-    assert_eq!(restored.entries, prepared.entries);
-    assert_eq!(restored.order, queue.order);
-    assert_eq!(restored.current_index, queue.current_index);
-    assert_eq!(restored.progress_millis, 42_000);
-    assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
-    assert!(restored.shuffled);
-    assert!(restored.rows.len() <= library::QUEUE_CONTEXT_LIMIT);
-    assert!(
-        restored
-            .entries
-            .iter()
-            .all(|entry| entry.received_from_connect)
-    );
-    assert!(
-        queue
-            .entries
-            .iter()
-            .all(|entry| !entry.received_from_connect)
-    );
-    receiver.save_queue(&restored).await.unwrap();
-    assert!(
-        receiver
-            .restore_queue()
-            .await
-            .unwrap()
-            .entries
-            .iter()
-            .all(|entry| entry.received_from_connect)
-    );
-    let final_page = receiver.queue_transfer_page(&restored, 200).await.unwrap();
-    assert_eq!(final_page.rows[4].item.metadata.title, "Occurrence 204");
-}
-
-#[tokio::test]
-async fn continuation_uses_local_artwork_before_starting_the_current_track() {
-    let fixture = fixture().await;
-    let mut connection = connection(&fixture.path).await;
-    let [local_binding, transferred_binding] =
-        ["local-cover", "transferred-cover"].map(|item_id| {
-            serde_json::to_vec(&[library::ArtworkCandidate::new(
-                library::ArtworkImage::Native {
-                    source_id: library::SourceId::new("source"),
-                    item_id: item_id.into(),
-                    tag: None,
-                },
-                None,
-            )])
-            .unwrap()
-        });
-    {
-        let objects =
-            sqlx::query_scalar::<_, String>("SELECT object_id FROM tracks WHERE media_uri=?1")
-                .bind(&fixture.track_uris[0])
-                .fetch_all(&mut connection)
-                .await
-                .unwrap();
-        fixture
-            .catalog
-            .observe("source")
-            .await
-            .unwrap()
-            .set_source_artwork(
-                &[],
-                &[(
-                    "track",
-                    &objects
-                        .into_iter()
-                        .map(|id| (id, Some((&local_binding).to_vec())))
-                        .collect::<Vec<_>>(),
-                )],
-            )
-            .await
-            .unwrap();
-    };
-    let mut item = TrackReference::direct(
-        &fixture.track_uris[0],
-        "Transferred title",
-        "Artist",
-        "Album",
-        180_000,
-    );
-    item.artwork_binding = Some(transferred_binding);
-    let page = library::QueueTransferPage {
-        offset: 0,
-        rows: vec![queue_row(item, 0)],
-        order: vec![0],
-    };
-    fixture
-        .catalog
-        .stage_queue_transfer_page("artwork", &page)
-        .await
-        .unwrap();
-    let prepared = fixture
-        .catalog
-        .prepare_queue_transfer("artwork", 1, 0)
-        .await
-        .unwrap();
-    assert_eq!(
-        prepared.rows[0].track.artwork_binding.as_ref(),
-        Some(&local_binding)
-    );
-    assert_eq!(prepared.rows[0].track.metadata.title, "Alpha");
-}
-
-#[tokio::test]
-async fn interrupted_or_invalid_continuation_retains_saved_queue() {
-    let fixture = fixture().await;
-    let catalog = &fixture.catalog;
-    let before = catalog.restore_queue().await.unwrap();
-    let row = queue_row(
-        TrackReference::direct(
-            "https://example.test/track",
-            "Track",
-            "Artist",
-            "Album",
-            180_000,
-        ),
-        0,
-    );
-    let page = library::QueueTransferPage {
-        offset: 0,
-        rows: vec![row],
-        order: vec![99],
-    };
-    catalog
-        .stage_queue_transfer_page("incomplete", &page)
-        .await
-        .unwrap();
-    assert!(
-        catalog
-            .prepare_queue_transfer("incomplete", 101, 0)
-            .await
-            .is_err()
-    );
-    assert!(
-        catalog
-            .prepare_queue_transfer("incomplete", 1, 0)
-            .await
-            .is_err()
-    );
-    assert_eq!(catalog.restore_queue().await.unwrap(), before);
-    catalog.discard_queue_transfer("incomplete").await.unwrap();
+fn queue_row(item: TrackReference) -> (TrackReference, QueueProvenance) {
+    (item, QueueProvenance::Manual)
 }
 
 #[tokio::test]
@@ -311,9 +35,9 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     unavailable.artwork_binding = Some(br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/071c303459c767b7d3d7208c71f5bbf6","image":{"kind":"native","source_id":"source","item_id":"saved-art","tag":null},"blur_hash":null}]"#.to_vec());
 
     let occurrences = vec![
-        queue_row(unavailable, 2),
-        queue_row(media[0].clone(), 0),
-        queue_row(media[0].clone(), 1),
+        queue_row(unavailable),
+        queue_row(media[0].clone()),
+        queue_row(media[0].clone()),
     ];
     persist_queue(
         &fixture.catalog,
@@ -346,7 +70,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     assert_eq!(restored.rows[0].track.metadata.title, "Offline");
     assert_eq!(
         restored.rows[0].track.artwork_binding,
-        occurrences[0].item.artwork_binding
+        occurrences[0].0.artwork_binding
     );
 
     let window = restored
@@ -380,11 +104,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
     for (position, media) in media.iter_mut().enumerate() {
         media.media_uri = format!("file:///transition-{position}.flac");
     }
-    let occurrences = media
-        .into_iter()
-        .enumerate()
-        .map(|(position, media)| queue_row(media, position))
-        .collect::<Vec<_>>();
+    let occurrences = media.into_iter().map(queue_row).collect::<Vec<_>>();
     persist_queue(
         &fixture.catalog,
         &occurrences,
@@ -635,12 +355,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         QueueProvenance::Legacy,
     ]
     .into_iter()
-    .enumerate()
-    .map(|(index, provenance)| {
-        let mut row = queue_row(unavailable.clone(), index);
-        row.provenance = provenance;
-        row
-    })
+    .map(|provenance| (unavailable.clone(), provenance))
     .collect::<Vec<_>>();
     persist_queue(
         &fixture.catalog,
@@ -740,10 +455,6 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         {
             entry["occurrence"] = format!("queue:batch{}:{}", index % 2, index / 2).into();
             entry["playlist_entry_id"] = serde_json::Value::Null;
-            entry
-                .as_object_mut()
-                .unwrap()
-                .remove("received_from_connect");
         }
         released["next_id"] = 0.into();
         let snapshots = restored
@@ -828,7 +539,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     let fixture = fixture().await;
     let mut rows = (0..205)
         .map(|index| {
-            let mut row = queue_row(
+            (
                 TrackReference::direct(
                     format!("https://example.test/duplicate/{}", index % 3),
                     format!("Saved title {index}"),
@@ -836,14 +547,12 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
                     "Album",
                     index as i64,
                 ),
-                index,
-            );
-            row.provenance = QueueProvenance::Context {
-                context_title: None,
-                context_id: "original".into(),
-                source_rank: 700 + index,
-            };
-            row
+                QueueProvenance::Context {
+                    context_title: None,
+                    context_id: "original".into(),
+                    source_rank: 700 + index,
+                },
+            )
         })
         .collect::<Vec<_>>();
     persist_queue(
@@ -870,10 +579,9 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         ["Saved title 204", "Saved title 202", "Saved title 203"]
     );
     rows.reverse();
-    for (position, row) in rows.iter_mut().enumerate() {
-        row.position = position;
-        row.item.metadata.title = "Changed supplied metadata".into();
-        row.provenance = QueueProvenance::Radio;
+    for row in &mut rows {
+        row.0.metadata.title = "Changed supplied metadata".into();
+        row.1 = QueueProvenance::Radio;
     }
     persist_queue(
         &fixture.catalog,
@@ -910,7 +618,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
             .await
             .unwrap(),
         rows.iter()
-            .map(|row| row.item.media_uri.clone())
+            .map(|row| row.0.media_uri.clone())
             .collect::<Vec<_>>()
     );
     assert!(

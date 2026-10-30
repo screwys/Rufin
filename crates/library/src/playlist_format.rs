@@ -1289,14 +1289,6 @@ mod tests {
         }
         assert_eq!(
             catalog
-                .connect_track_reference(&provider)
-                .await
-                .unwrap()
-                .unwrap()["backing_id"],
-            crate::document_media_uri("native-track")
-        );
-        assert_eq!(
-            catalog
                 .media_uris_for_document_ids(&[
                     "native-track".into(),
                     "missing".into(),

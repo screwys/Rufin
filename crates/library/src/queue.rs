@@ -51,16 +51,12 @@ pub struct QueueRow {
     pub position: usize,
     pub track: crate::TrackView,
     pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueueEntry {
     pub track_key: crate::TrackKey,
     pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
 }
 
 /// Where an entry sits: its rank in the queue's order and, while shuffle is on, its rank in the
@@ -132,34 +128,6 @@ impl QueueUpdate {
     }
 }
 
-/// A page in play order, with each row's canonical member index.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueueTransferPage {
-    pub offset: usize,
-    pub rows: Vec<QueueTransferRow>,
-    pub order: Vec<u32>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueueTransferRow {
-    pub position: usize,
-    pub item: TrackReference,
-    pub provenance: QueueProvenance,
-    #[serde(default)]
-    pub received_from_connect: bool,
-}
-
-impl From<&QueueRow> for QueueTransferRow {
-    fn from(row: &QueueRow) -> Self {
-        Self {
-            position: row.position,
-            item: row.track.clone().into(),
-            provenance: row.provenance.clone(),
-            received_from_connect: row.received_from_connect,
-        }
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 enum SavedContext<S> {
@@ -211,7 +179,6 @@ impl QueueLoad {
                 .map(|track_key| QueueEntry {
                     track_key,
                     provenance: provenance.clone(),
-                    received_from_connect: false,
                 })
                 .collect(),
         )
@@ -312,187 +279,6 @@ impl Catalog {
         Ok((positions, total))
     }
 
-    pub async fn queue_transfer_page(
-        &self,
-        queue: &QueueRestore,
-        offset: usize,
-    ) -> LibraryResult<QueueTransferPage> {
-        let end = offset
-            .saturating_add(QUEUE_CONTEXT_LIMIT)
-            .min(queue.entries.len());
-        let order = queue.order.get(offset..end).ok_or_else(|| {
-            LibraryError::InvalidRequest("Queue transfer offset is out of range".into())
-        })?;
-        let requested = order
-            .iter()
-            .enumerate()
-            .map(|(index, canonical)| (offset + index, queue.entries[*canonical as usize].clone()))
-            .collect::<Vec<_>>();
-        let rows = self
-            .queue_rows_for_entries(&requested, &ReadCancellation::new())
-            .await?
-            .into_iter()
-            .map(|row| QueueTransferRow::from(row.as_ref()))
-            .collect();
-        Ok(QueueTransferPage {
-            offset,
-            rows,
-            order: queue.order[offset..end].to_vec(),
-        })
-    }
-
-    /// Staging does not replace this device's queue or disturb its metadata.
-    pub async fn stage_queue_transfer_page(
-        &self,
-        transfer: &str,
-        page: &QueueTransferPage,
-    ) -> LibraryResult<()> {
-        if page.rows.len() > QUEUE_CONTEXT_LIMIT
-            || page.rows.len() != page.order.len()
-            || !page.offset.is_multiple_of(QUEUE_CONTEXT_LIMIT)
-        {
-            return Err(LibraryError::InvalidRequest(
-                "Invalid queue transfer page".into(),
-            ));
-        }
-        let payload = serde_json::to_string(page)?;
-        let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO queue_transfer_pages(transfer,page_offset,payload) VALUES(?1,?2,?3) ON CONFLICT(transfer,page_offset) DO UPDATE SET payload=excluded.payload")
-            .bind(transfer).bind(page.offset as i64).bind(payload)
-            .execute(&mut *writer).await?;
-        Ok(())
-    }
-
-    pub async fn discard_queue_transfer(&self, transfer: &str) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(&mut *writer)
-            .await?;
-        Ok(())
-    }
-
-    /// Read one page at a time; only compact membership and order stay in memory.
-    pub async fn prepare_queue_transfer(
-        &self,
-        transfer: &str,
-        total: usize,
-        current: usize,
-    ) -> LibraryResult<QueueRestore> {
-        let mut write = self.write().await?;
-        let mut entries = vec![None; total];
-        let mut order = Vec::new();
-        let mut playing = None;
-        for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
-            let payload: Option<String> = sqlx::query_scalar(
-                "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
-            )
-            .bind(transfer)
-            .bind(offset as i64)
-            .fetch_optional(write.connection().await?)
-            .await?;
-            let mut page: QueueTransferPage = serde_json::from_str(&payload.ok_or_else(|| {
-                LibraryError::InvalidRequest("Queue transfer is incomplete".into())
-            })?)?;
-            if page.rows.len() != QUEUE_CONTEXT_LIMIT.min(total - offset) {
-                return Err(LibraryError::InvalidRequest(
-                    "Queue transfer is incomplete".into(),
-                ));
-            }
-            for (index, mut row) in page.rows.drain(..).enumerate() {
-                let canonical = page.order[index] as usize;
-                let slot = entries
-                    .get_mut(canonical)
-                    .filter(|slot| slot.is_none())
-                    .ok_or_else(|| {
-                        LibraryError::InvalidRequest("Invalid queue play order".into())
-                    })?;
-                row.position = offset + index;
-                row.received_from_connect = true;
-                *slot = Some(QueueEntry {
-                    received_from_connect: true,
-                    track_key: write.put_reference(&row.item).await?,
-                    provenance: row.provenance.clone(),
-                });
-                if row.position == current {
-                    playing = Some((slot.as_ref().unwrap().track_key, row.provenance));
-                }
-            }
-            order.extend(page.order);
-        }
-        if current >= total {
-            return Err(LibraryError::InvalidRequest(
-                "Invalid queue current position".into(),
-            ));
-        }
-        write.commit().await?;
-        // The staged tracks are resident once the transfer commits.
-        let mut rows = Vec::new();
-        if let Some((key, provenance)) = playing {
-            let song = self
-                .tracks(&[key], &ReadCancellation::new())
-                .await?
-                .pop()
-                .expect("requested canonical queue song");
-            rows.push(Arc::new(QueueRow {
-                position: current,
-                track: song,
-                provenance,
-                received_from_connect: true,
-                occurrence_id: None,
-            }));
-        }
-        let entries = entries.into_iter().map(Option::unwrap).collect::<Vec<_>>();
-        let current_index = Some(current);
-        Ok(QueueRestore {
-            entries: entries.into(),
-            order: order.into(),
-            rows,
-            current_index,
-            ..Default::default()
-        })
-    }
-
-    /// Save the accepted queue and delete its staged pages in one Store transaction.
-    pub async fn commit_queue_transfer(
-        &self,
-        transfer: &str,
-        queue: &QueueRestore,
-    ) -> LibraryResult<()> {
-        let mut write = self.write().await?;
-        save_queue_on(write.connection().await?, queue).await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(write.connection().await?)
-            .await?;
-        write.changed(Scope::Queue);
-        write.commit().await?;
-        Ok(())
-    }
-
-    /// Import a captured input without replacing the currently playing queue.
-    pub async fn queue_from_transfer(
-        &self,
-        transfer: &str,
-        total: usize,
-        current: usize,
-    ) -> LibraryResult<(QueueLoad, usize)> {
-        let queue = self
-            .prepare_queue_transfer(transfer, total, current)
-            .await?;
-        self.discard_queue_transfer(transfer).await?;
-        Ok((
-            QueueLoad::Captured(
-                queue
-                    .order
-                    .iter()
-                    .map(|index| queue.entries[*index as usize].clone())
-                    .collect(),
-            ),
-            queue.current_index.unwrap_or_default(),
-        ))
-    }
-
     pub async fn remember_media_uris(
         &self,
         uris: &[String],
@@ -544,7 +330,6 @@ impl Catalog {
                         entries.push(QueueEntry {
                             track_key,
                             provenance,
-                            received_from_connect: false,
                         });
                     }
                 }
@@ -563,7 +348,6 @@ impl Catalog {
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
-                                received_from_connect: false,
                             });
                         }
                     }
@@ -584,7 +368,6 @@ impl Catalog {
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
-                                received_from_connect: false,
                             });
                         }
                     }
@@ -629,7 +412,6 @@ impl Catalog {
                     position: *position,
                     track: songs.get(&entry.track_key)?.clone(),
                     provenance: entry.provenance.clone(),
-                    received_from_connect: entry.received_from_connect,
                 }))
             })
             .collect())
@@ -814,14 +596,13 @@ async fn apply_queue_update_on(
                 provenance,
                 context_key,
                 source_rank,
-                entry.received_from_connect,
                 crate::rank::hex(&rank.rank),
                 rank.shuffle.as_deref().map(crate::rank::hex),
             ));
         }
         // A stored entry keeps its provenance, so only its track and places can change.
-        changed += sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,received_from_connect,rank,shuffle_rank)
-            SELECT value->>0,value->>1,value->>2,value->>3,value->>4,value->>5,unhex(value->>6),unhex(value->>7) FROM json_each(?1) WHERE true
+        changed += sqlx::query("INSERT INTO queue_entries(entry_id,track_key,provenance,context_key,source_rank,rank,shuffle_rank)
+            SELECT value->>0,value->>1,value->>2,value->>3,value->>4,unhex(value->>5),unhex(value->>6) FROM json_each(?1) WHERE true
             ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank,shuffle_rank=excluded.shuffle_rank
             WHERE (track_key,rank,shuffle_rank) IS NOT (excluded.track_key,excluded.rank,excluded.shuffle_rank)")
             .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?.rows_affected();
@@ -909,7 +690,7 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
             .into_iter()
             .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
             .collect::<LibraryResult<HashMap<_, _>>>()?;
-    let rows = sqlx::query("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance,received_from_connect FROM queue_entries ORDER BY rank,entry_id")
+    let rows = sqlx::query("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance FROM queue_entries ORDER BY rank,entry_id")
         .fetch_all(&mut *connection)
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
@@ -940,7 +721,6 @@ async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryRes
         entries.push(QueueEntry {
             track_key: row.try_get("track_key")?,
             provenance,
-            received_from_connect: row.try_get("received_from_connect")?,
         });
     }
     let mut order = (0..entries.len() as u32).collect::<Vec<_>>();
@@ -989,7 +769,6 @@ impl LegacyQueueRow {
         QueueEntry {
             track_key,
             provenance: self.provenance.clone(),
-            received_from_connect: false,
         }
     }
 }

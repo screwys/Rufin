@@ -1,6 +1,6 @@
 use library::{
     ListenDeliveryTarget, ListenWrite, LoudnessMeasurement, QueueProvenance, QueueRepeatMode,
-    QueueTransferRow, ReadCancellation,
+    ReadCancellation,
 };
 
 use super::support::{PlaybackLoudness, connection, fixture, persist_queue};
@@ -701,12 +701,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         .remove(0);
     persist_queue(
         &fixture.catalog,
-        &[QueueTransferRow {
-            received_from_connect: false,
-            item: queue_media,
-            position: 0,
-            provenance: QueueProvenance::Manual,
-        }],
+        &[(queue_media, QueueProvenance::Manual)],
         Some(0),
         0,
         QueueRepeatMode::Off,

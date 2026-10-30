@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use library::{
     AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    QueueRepeatMode, QueueTransferRow, SourceKey, TrackKey,
+    QueueProvenance, QueueRepeatMode, SourceKey, TrackKey, TrackReference,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -25,34 +25,18 @@ pub struct Fixture {
 
 pub async fn persist_queue(
     catalog: &Catalog,
-    occurrences: &[QueueTransferRow],
+    occurrences: &[(TrackReference, QueueProvenance)],
     current: Option<usize>,
     progress_millis: i64,
     repeat_mode: QueueRepeatMode,
     shuffled: bool,
 ) {
     let captured = catalog
-        .queue_entries(
-            library::QueueLoad::items(
-                occurrences
-                    .iter()
-                    .map(|row| (row.item.clone(), row.provenance.clone()))
-                    .collect(),
-            ),
-            None,
-        )
+        .queue_entries(library::QueueLoad::items(occurrences.to_vec()), None)
         .await
         .expect("capture Queue metadata");
     let state = library::QueueRestore {
-        entries: captured
-            .entries
-            .into_iter()
-            .zip(occurrences)
-            .map(|(mut entry, row)| {
-                entry.received_from_connect = row.received_from_connect;
-                entry
-            })
-            .collect(),
+        entries: captured.entries.into(),
         order: (0..occurrences.len() as u32).collect(),
         current_index: current,
         progress_millis,

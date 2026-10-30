@@ -401,11 +401,6 @@ impl Catalog {
         self.inner.image_current.store(true, Ordering::Release);
     }
 
-    /// Drops the image of a Store that is being replaced.
-    pub(crate) fn forget_image(&self) {
-        image::remove(&self.inner.store.path);
-    }
-
     /// Builds a fresh Snapshot while the old one keeps serving readers, then swaps them.
     /// Holding the writer means no commit lands between the read and the swap.
     pub(crate) async fn reload_under(&self, _writer: &mut WriterGuard<'_>) -> LibraryResult<u64> {
@@ -904,38 +899,6 @@ pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> 
         return Err(error.into());
     }
     Ok(connection)
-}
-
-#[allow(unsafe_code)]
-pub(crate) async fn copy_database(
-    source: &mut SqliteConnection,
-    destination: &mut SqliteConnection,
-) -> LibraryResult<()> {
-    destination.clear_cached_statements().await?;
-    let mut source = source.lock_handle().await?;
-    let mut destination = destination.lock_handle().await?;
-    // SAFETY: SQLx keeps both handles alive and excludes its workers for these guards.
-    unsafe {
-        let destination = destination.as_raw_handle().as_ptr();
-        let backup = libsqlite3_sys::sqlite3_backup_init(
-            destination,
-            c"main".as_ptr(),
-            source.as_raw_handle().as_ptr(),
-            c"main".as_ptr(),
-        );
-        if !backup.is_null() {
-            let copied = libsqlite3_sys::sqlite3_backup_step(backup, -1);
-            let finished = libsqlite3_sys::sqlite3_backup_finish(backup);
-            if copied == libsqlite3_sys::SQLITE_DONE && finished == libsqlite3_sys::SQLITE_OK {
-                return Ok(());
-            }
-        }
-        Err(LibraryError::InvalidStore(
-            std::ffi::CStr::from_ptr(libsqlite3_sys::sqlite3_errmsg(destination))
-                .to_string_lossy()
-                .into_owned(),
-        ))
-    }
 }
 
 pub(crate) fn reader_options(path: &Path) -> SqliteConnectOptions {
