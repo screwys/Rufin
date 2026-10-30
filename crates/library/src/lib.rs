@@ -127,7 +127,7 @@ pub use playlist_format::{
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
     PlaylistAccess, PlaylistEditEntry, PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity,
-    PlaylistRow,
+    PlaylistRow, SourceEntryEdit,
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,

@@ -422,14 +422,7 @@ impl SubsonicSource {
                 &[("id", raw_item_id(playlist_id).to_string())],
             )
             .await?;
-        let playlist =
-            playlist_from_json(self, source_id, &body["playlist"])?.ok_or(SourceError::NotFound)?;
-        let entries = playlist_entries_from_json(
-            self,
-            &playlist.header.object_id,
-            &body["playlist"]["entry"],
-        );
-        Ok(PlaylistSnapshot { playlist, entries })
+        playlist_snapshot(self, source_id, &body["playlist"])
     }
 }
 
@@ -534,27 +527,48 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
+    /// Creates the playlist and writes it from the server's answer, which holds its entries.
     pub async fn create_playlist(
         &self,
+        catalog: &library::Catalog,
+        source_id: &str,
         name: &str,
         track_ids: &[String],
         public: Option<bool>,
     ) -> SourceResult<PlaylistId> {
+        let form = self.extension_version("formPost").await.unwrap_or_default() > 0;
+        // Without formPost the ids go in the URL, so the rest are added in bounded calls.
+        let first = if form {
+            track_ids.len()
+        } else {
+            track_ids.len().min(256)
+        };
         let mut extra = vec![("name", name.trim().to_string())];
         extra.extend(
-            track_ids
+            track_ids[..first]
                 .iter()
                 .map(|track_id| ("songId", raw_item_id(track_id).to_string())),
         );
-        let body: Value = self.get_json("createPlaylist", &extra).await?;
+        let body = self.change("createPlaylist", &extra).await?;
         let playlist = json::id(&body["playlist"]["id"])
             .map(|id| self.id("playlist", &id))
             .ok_or(SourceError::NotFound)?;
+        for tracks in track_ids[first..].chunks(256) {
+            self.edit_playlist_entries(&playlist, &[], tracks).await?;
+        }
         if let Some(public) = public
             && json::boolean(&body["playlist"]["public"]) != Some(public)
         {
             self.update_playlist(&playlist, None, Some(public)).await?;
         }
+        let snapshot = if first == track_ids.len() {
+            playlist_snapshot(self, source_id, &body["playlist"])?
+        } else {
+            self.read_playlist(source_id, &playlist).await?
+        };
+        let mut observation = catalog.observe(source_id, None).await?;
+        self.write_playlist_snapshot(&mut observation, &snapshot)
+            .await?;
         Ok(playlist)
     }
     pub async fn update_playlist(
@@ -589,64 +603,47 @@ impl SubsonicSource {
         )
         .await
     }
-    pub async fn add_playlist_tracks(
+    /// One updatePlaylist: removes the entries at these indexes of the server's order, then
+    /// appends these tracks. A move removes the tail from its lower index and appends it again.
+    pub async fn edit_playlist_entries(
         &self,
         playlist_id: &str,
-        track_ids: &[String],
+        remove: &[usize],
+        add: &[String],
     ) -> SourceResult<()> {
         let mut extra = vec![("playlistId", raw_item_id(playlist_id).to_string())];
         extra.extend(
-            track_ids
+            remove
                 .iter()
+                .map(|index| ("songIndexToRemove", index.to_string())),
+        );
+        extra.extend(
+            add.iter()
                 .map(|track_id| ("songIdToAdd", raw_item_id(track_id).to_string())),
         );
-        self.get_unit("updatePlaylist", &extra).await
+        self.change("updatePlaylist", &extra).await.map(drop)
     }
-    pub async fn remove_playlist_entries(
-        &self,
-        playlist_id: &str,
-        entry_ids: &[String],
-    ) -> SourceResult<()> {
-        let prefix = format!("{}:", playlist_id);
-        let mut extra = vec![("playlistId", raw_item_id(playlist_id).to_string())];
-        for entry_id in entry_ids {
-            let index = entry_id
-                .strip_prefix(&prefix)
-                .and_then(|value| value.split_once(':'))
-                .and_then(|(index, _)| index.parse::<usize>().ok())
-                .ok_or(SourceError::InvalidRequest(
-                    "playlist entry does not belong to this playlist",
-                ))?;
-            extra.push(("songIndexToRemove", index.to_string()));
+
+    /// A call that changes the server. With formPost its fields go in the body, so a long list
+    /// of ids fits.
+    async fn change(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<Value> {
+        if self.extension_version("formPost").await.unwrap_or_default() == 0 {
+            return self.get_json(method, extra).await;
         }
-        self.get_unit("updatePlaylist", &extra).await
-    }
-    pub async fn move_playlist_entry(
-        &self,
-        playlist_id: &str,
-        entry_id: &str,
-        new_index: usize,
-    ) -> SourceResult<()> {
-        let body = self
-            .get_json(
-                "getPlaylist",
-                &[("id", raw_item_id(playlist_id).to_string())],
-            )
-            .await?;
-        let id = self.id(
-            "playlist",
-            &json::id(&body["playlist"]["id"]).ok_or(SourceError::NotFound)?,
-        );
-        let mut entries = playlist_entries_from_json(self, &id, &body["playlist"]["entry"]);
-        if let Some(old_index) = entries.iter().position(|entry| entry.object_id == entry_id) {
-            let entry = entries.remove(old_index);
-            entries.insert(new_index.min(entries.len()), entry);
-        }
-        let ids = entries
+        let mut fields = self
+            .credential
+            .common_query(&self.username, &[])
             .into_iter()
-            .map(|entry| entry.track_id)
+            .map(|(key, value)| (key, value.to_owned()))
             .collect::<Vec<_>>();
-        self.replace_playlist_tracks(playlist_id, &ids).await
+        fields.extend(extra.iter().cloned());
+        subsonic_json(
+            self.client
+                .post(endpoint(&self.base_url, method)?)
+                .form(&fields),
+        )
+        .await
+        .map(|response| response.body)
     }
 }
 
@@ -1259,9 +1256,6 @@ pub(super) fn redacted_subsonic_url(url: &Url) -> String {
     redact_subsonic_query(&mut redacted);
     redacted.to_string()
 }
-pub(super) fn playlist_entry_id(playlist_id: &str, index: usize, track_id: &str) -> String {
-    format!("{}:{index}:{track_id}", playlist_id)
-}
 pub(super) fn current_year() -> u16 {
     let days_since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1366,20 +1360,17 @@ impl SubsonicSource {
             .filter_map(|song| json::id(&song["id"]).map(|id| self.id("track", &id)))
             .collect())
     }
+}
 
-    async fn replace_playlist_tracks(
-        &self,
-        playlist_id: &str,
-        track_ids: &[String],
-    ) -> SourceResult<()> {
-        let mut extra = vec![("playlistId", raw_item_id(playlist_id).to_string())];
-        extra.extend(
-            track_ids
-                .iter()
-                .map(|track_id| ("songId", raw_item_id(track_id).to_string())),
-        );
-        self.get_unit("createPlaylist", &extra).await
-    }
+fn playlist_snapshot(
+    source: &SubsonicSource,
+    source_id: &str,
+    playlist: &Value,
+) -> SourceResult<PlaylistSnapshot> {
+    Ok(PlaylistSnapshot {
+        playlist: playlist_from_json(source, source_id, playlist)?.ok_or(SourceError::NotFound)?,
+        entries: playlist_entries_from_json(source, &playlist["entry"]),
+    })
 }
 
 #[cfg(test)]
@@ -1540,10 +1531,7 @@ mod tests {
         );
         let playlist = source.read_playlist("source", "list").await.unwrap();
         assert_eq!(playlist.entries.len(), 2);
-        assert_eq!(
-            playlist.entries[1].object_id,
-            super::playlist_entry_id(&playlist.playlist.header.object_id, 2, "one")
-        );
+        assert_eq!(playlist.entries[1].track_id, source.id("track", "one"));
         let folder = source.browse_folder(Some("root"), None).await.unwrap();
         assert_eq!(folder.folders[0].object_id, "subsonic:folder:folder");
         assert_eq!(folder.tracks, ["subsonic:track:one"]);

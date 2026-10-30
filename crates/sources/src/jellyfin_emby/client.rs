@@ -1051,7 +1051,28 @@ impl JellyfinEmbySource {
         self.get_json::<Value>(url).await
     }
 
-    pub(super) async fn get_json<T: DeserializeOwned>(&self, mut url: Url) -> SourceResult<T> {
+    pub(super) async fn get_json<T: DeserializeOwned>(&self, url: Url) -> SourceResult<T> {
+        self.send_json(self.client.get(self.emby_fields(url))).await
+    }
+
+    /// A GET with the server's clock, for a catch-up's start.
+    pub(super) async fn get_json_dated<T: DeserializeOwned>(
+        &self,
+        url: Url,
+    ) -> SourceResult<(T, Option<i64>)> {
+        remote_http::json_dated(
+            self.authenticated(self.client.get(self.emby_fields(url)))
+                .await?,
+            http_policy(self.kind),
+            BodyLimit {
+                max_bytes: JELLYFIN_JSON_MAX_BYTES,
+                context: self.kind.name(),
+            },
+        )
+        .await
+    }
+
+    fn emby_fields(&self, mut url: Url) -> Url {
         if self.kind == ServerKind::Emby {
             let params = url
                 .query_pairs()
@@ -1060,7 +1081,10 @@ impl JellyfinEmbySource {
                         let mut fields: Vec<_> = value
                             .split(',')
                             .filter(|field| {
-                                !matches!(*field, "NormalizationGain" | "AlbumNormalizationGain")
+                                !matches!(
+                                    *field,
+                                    "" | "NormalizationGain" | "AlbumNormalizationGain"
+                                )
                             })
                             .collect();
                         fields.push("UserDataLastPlayedDate");
@@ -1073,7 +1097,7 @@ impl JellyfinEmbySource {
                 .collect::<Vec<_>>();
             url.query_pairs_mut().clear().extend_pairs(params);
         }
-        self.send_json(self.client.get(url)).await
+        url
     }
 
     pub(super) async fn send_json<T: DeserializeOwned>(

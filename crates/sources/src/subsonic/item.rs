@@ -421,19 +421,17 @@ pub(super) fn playlist_from_json(
     }))
 }
 
+/// Subsonic names no entries, only positions: the ids are empty and stored entries keep theirs.
 pub(super) fn playlist_entries_from_json(
     source: &SubsonicSource,
-    playlist_id: &str,
     entries: &Value,
 ) -> Vec<library::PlaylistEntryObservation> {
     json::items(entries)
         .iter()
-        .enumerate()
-        .filter_map(|(index, song)| {
-            let raw_track_id = json::id(&song["id"])?;
+        .filter_map(|song| {
             Some(library::PlaylistEntryObservation {
-                object_id: playlist_entry_id(playlist_id, index, &raw_track_id),
-                track_id: source.id("track", &raw_track_id),
+                object_id: String::new(),
+                track_id: source.id("track", &json::id(&song["id"])?),
             })
         })
         .collect()

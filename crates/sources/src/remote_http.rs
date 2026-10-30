@@ -116,6 +116,19 @@ pub async fn json_with_header<T: DeserializeOwned>(
     Ok((deserialize_json(body, &checked.request)?, value))
 }
 
+/// A JSON response with the server's clock from its Date header, in unix seconds.
+pub async fn json_dated<T: DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+) -> SourceResult<(T, Option<i64>)> {
+    let (value, date) = json_with_header(request, policy, limit, &header::DATE).await?;
+    let date = date
+        .and_then(|date| chrono::DateTime::parse_from_rfc2822(&date).ok())
+        .map(|date| date.timestamp());
+    Ok((value, date))
+}
+
 fn deserialize_json<T: DeserializeOwned>(
     mut body: impl Buf,
     request: &RequestMetadata,

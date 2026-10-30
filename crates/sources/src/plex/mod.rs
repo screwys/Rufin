@@ -129,6 +129,20 @@ impl PlexSource {
         .await
     }
 
+    /// A GET with the server's clock, for a catch-up's start.
+    pub(crate) async fn get_dated(
+        &self,
+        path: &str,
+        params: &[(&str, String)],
+    ) -> SourceResult<(Value, Option<i64>)> {
+        remote_http::json_dated(
+            self.request(Method::GET, path, params).await?,
+            HTTP,
+            RESPONSE,
+        )
+        .await
+    }
+
     async fn unit(
         &self,
         method: Method,
