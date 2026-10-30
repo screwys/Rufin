@@ -135,21 +135,19 @@ pub(crate) async fn selected_tracks_on(
                         .map(|key| (*key, None)),
                 );
             }
-            MemberSelection::Uris(uris) => {
-                let found: Vec<TrackKey> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-                    .bind(serde_json::to_string(uris.as_ref())?)
-                    .fetch_all(&mut *connection)
-                    .await?;
-                rows.extend(found.into_iter().map(|key| (key, None)));
-            }
-            MemberSelection::Objects { source, ids } => {
-                let found: Vec<TrackKey> = sqlx::query_scalar("SELECT track.track_key FROM json_each(?1) requested JOIN tracks track ON track.source_key=?2 AND track.object_id=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-                    .bind(serde_json::to_string(ids.as_ref())?)
-                    .bind(source)
-                    .fetch_all(&mut *connection)
-                    .await?;
-                rows.extend(found.into_iter().map(|key| (key, None)));
-            }
+            MemberSelection::Uris(uris) => rows.extend(
+                crate::read::track_keys_on(connection, uris)
+                    .await?
+                    .into_iter()
+                    .map(|key| (key, None)),
+            ),
+            MemberSelection::Objects { source, ids } => rows.extend(
+                catalog
+                    .track_keys_by_objects(connection, Some(*source), ids)
+                    .await?
+                    .into_iter()
+                    .map(|key| (TrackKey::from_raw(key), None)),
+            ),
             MemberSelection::Entries(entries) => {
                 let found: Vec<(TrackKey, PlaylistEntryKey)> = sqlx::query_as("SELECT entry.track_key,entry.playlist_entry_key FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
                     .bind(serde_json::to_string(entries.as_ref())?)
