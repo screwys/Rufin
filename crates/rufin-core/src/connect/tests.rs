@@ -1085,7 +1085,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             // Discovery follows every committed catalog change. Ignoring the file keeps this
             // device's released link below as it was until the profile opens again.
             owner.catalog.ignore_playlist_file(Some(&music), "music/copied.m3u").await.unwrap();
-            observation.write_file_observations(&[(track_file.clone(), Vec::new()), (playlist_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
+            observation.write_files(library::FileBatch { files: vec![track_file.clone(), playlist_file], tracks: vec![tracks[0].clone()], ..Default::default() }).await.unwrap();
             observation.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
             observation.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
             observation.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
@@ -1113,7 +1113,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             assert_eq!(reopened[0].playlist, Some(shared_playlist));
             tracks[0].metadata.title = "Edited track".into();
             owner.catalog.observe(music.as_str(), None).await.unwrap()
-                .write_file_observations(&[(track_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
+                .write_files(library::FileBatch { files: vec![track_file], tracks: vec![tracks[0].clone()], ..Default::default() }).await.unwrap();
             let uri = library::source_entity_uri(&music, "track", "track-0");
             let cancellation = library::ReadCancellation::new();
             let rows = owner.catalog.tracks_by_uris(std::slice::from_ref(&uri), &cancellation).await.unwrap();

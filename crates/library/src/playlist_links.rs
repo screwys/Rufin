@@ -157,41 +157,39 @@ mod tests {
                 "album/other.pls",
                 "other.pls",
                 crate::LocalFileKind::Media,
-                crate::LocalFileState::Observed,
+                crate::LocalFileState::Accepted,
             ),
             (
                 "album/folder.xspf",
                 "folder.xspf",
                 crate::LocalFileKind::Directory,
-                crate::LocalFileState::Observed,
+                crate::LocalFileState::Accepted,
             ),
         ]
         .into_iter()
-        .map(|(path, relative, kind, state)| {
-            (
-                crate::LocalFileWrite {
-                    path: path.into(),
-                    root: "album".into(),
-                    relative_path: relative.into(),
-                    kind,
-                    size_bytes: None,
-                    mtime_ns: 1,
-                    device_id: None,
-                    inode: None,
-                    native_id: None,
-                    picture_index: None,
-                    artist_pictures: None,
-                    revision: None,
-                    parse_version: Some(1),
-                    state,
-                },
-                Vec::new(),
-            )
+        .map(|(path, relative, kind, state)| crate::LocalFileWrite {
+            path: path.into(),
+            root: "album".into(),
+            relative_path: relative.into(),
+            kind,
+            size_bytes: None,
+            mtime_ns: 1,
+            device_id: None,
+            inode: None,
+            native_id: None,
+            picture_index: None,
+            artist_pictures: None,
+            revision: None,
+            parse_version: Some(1),
+            state,
         })
         .collect::<Vec<_>>();
         let mut observation = catalog.observe("files", None).await?;
         observation
-            .write_file_observations(&files, Vec::new(), true)
+            .write_files(crate::FileBatch {
+                files: files.clone(),
+                ..Default::default()
+            })
             .await?;
         drop(observation);
         let source = SourceId::new("files");
@@ -238,7 +236,10 @@ mod tests {
         catalog
             .observe("files", None)
             .await?
-            .write_file_observations(&files, Vec::new(), true)
+            .write_files(crate::FileBatch {
+                files: files.clone(),
+                ..Default::default()
+            })
             .await?;
         let associated = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
@@ -578,7 +579,7 @@ impl Catalog {
         path: &str,
     ) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
             .bind(source_id.as_str()).bind(path).fetch_one(&mut *reader).await?)
     }
 
@@ -588,7 +589,7 @@ impl Catalog {
         after: Option<crate::LocalFileKey>,
     ) -> LibraryResult<Vec<ObservedPlaylistFile>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT observed.local_file_key,observed.path,observed.root,observed.relative_path,observed.size_bytes,observed.mtime_ns,observed.revision,file.playlist_identity,(SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=json_extract(file.playlist_identity,'$[0]')) AND (json_extract(file.playlist_identity,'$[0]') IS NULL OR playlist.source_key IS NOT NULL) AND playlist.object_id=json_extract(file.playlist_identity,'$[1]') AND playlist.owner='rufin' AND playlist.name IS NOT NULL) playlist FROM local_files file JOIN observed_local_files observed USING(local_file_key) WHERE file.source_key=?1 AND file.local_file_key>?2 AND (lower(file.path) LIKE '%.m3u' OR lower(file.path) LIKE '%.m3u8' OR lower(file.path) LIKE '%.pls' OR lower(file.path) LIKE '%.xspf') AND observed.kind<>'directory' AND (lower(observed.path) LIKE '%.m3u' OR lower(observed.path) LIKE '%.m3u8' OR lower(observed.path) LIKE '%.pls' OR lower(observed.path) LIKE '%.xspf') ORDER BY file.local_file_key LIMIT 256")
+        Ok(sqlx::query_as("SELECT file.file_key local_file_key,file.path,file.root,file.relative_path,file.size_bytes,file.mtime_ns,file.revision,file.playlist_identity,(SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=json_extract(file.playlist_identity,'$[0]')) AND (json_extract(file.playlist_identity,'$[0]') IS NULL OR playlist.source_key IS NOT NULL) AND playlist.object_id=json_extract(file.playlist_identity,'$[1]') AND playlist.owner='rufin' AND playlist.name IS NOT NULL) playlist FROM files file WHERE file.source_key=?1 AND file.file_key>?2 AND (lower(file.path) LIKE '%.m3u' OR lower(file.path) LIKE '%.m3u8' OR lower(file.path) LIKE '%.pls' OR lower(file.path) LIKE '%.xspf') AND file.kind<>'directory' ORDER BY file.file_key LIMIT 256")
             .bind(source).bind(after.map_or(0, crate::LocalFileKey::raw)).fetch_all(&mut *reader).await?)
     }
     pub async fn associate_playlist_files(
@@ -599,7 +600,7 @@ impl Catalog {
         let mut write = self.write().await?;
         let connection = write.connection().await?;
         for (path, playlist) in files {
-            sqlx::query("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target)")
+            sqlx::query("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE files SET playlist_identity=(SELECT identity FROM target) WHERE file_key=(SELECT file.file_key FROM files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target)")
                 .bind(source.as_str()).bind(path).bind(playlist).execute(&mut *connection).await?;
         }
         write.keep();

@@ -12,7 +12,6 @@ use crate::{SourceConfiguration, SourceError, SourceId, SourceResult};
 
 pub(crate) mod artwork;
 pub(crate) mod changes;
-mod cue;
 pub(crate) mod input;
 pub(crate) mod metadata;
 mod playlist;
@@ -221,6 +220,7 @@ pub struct FileSource {
     backend: FileBackend,
     directory_version: i64,
     input: Mutex<Option<Arc<FileInputServer>>>,
+    pub(crate) artwork: crate::file::walk::ArtworkState,
 }
 
 #[expect(
@@ -325,6 +325,7 @@ impl FileSource {
             ))),
             directory_version: DIRECTORY_VERSION,
             input: Mutex::new(None),
+            artwork: Default::default(),
         }
     }
 
@@ -423,6 +424,7 @@ impl FileSource {
             },
             directory_version,
             input: Mutex::new(None),
+            artwork: Default::default(),
         })
     }
 

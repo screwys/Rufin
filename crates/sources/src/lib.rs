@@ -146,6 +146,24 @@ pub(crate) async fn playable(catalog: &library::Catalog, uri: &str) -> library::
     catalog.playable(key, "original").await.unwrap().unwrap()
 }
 
+/// Every stored file row of a source, in walk order.
+#[cfg(test)]
+pub(crate) async fn stored_files(
+    catalog: &library::Catalog,
+    source: &str,
+) -> Vec<library::LocalFileWrite> {
+    catalog
+        .observe(source, None)
+        .await
+        .unwrap()
+        .file_rows(&[], &[], None, false, 8192)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.file)
+        .collect()
+}
+
 /// The key of a source playlist by its object id.
 #[cfg(test)]
 pub(crate) async fn playlist_key(

@@ -155,7 +155,7 @@ impl WebDavClient {
         depth: u8,
         accept: impl FnMut(dav::Entry) -> F,
     ) -> SourceResult<()> {
-        const PROPERTIES: &[u8] = br#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><d:sync-token/><o:id/><o:fileid/><o:permissions/></d:prop></d:propfind>"#;
+        const PROPERTIES: &[u8] = br#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><o:id/><o:fileid/><o:permissions/></d:prop></d:propfind>"#;
         let mut headers = xml_headers();
         headers.insert(
             "Depth",
@@ -199,29 +199,6 @@ impl WebDavClient {
         })
         .await?;
         found.ok_or(SourceError::NotFound)
-    }
-
-    pub async fn sync<F: std::future::Future<Output = SourceResult<()>>>(
-        &self,
-        url: &Url,
-        token: &str,
-        accept: impl FnMut(dav::Entry) -> F,
-    ) -> SourceResult<Option<String>> {
-        let token = quick_xml::escape::escape(token);
-        let body = format!(
-            r#"<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns"><d:sync-token>{token}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:resource-id/><o:id/><o:fileid/><o:permissions/></d:prop></d:sync-collection>"#
-        );
-        let response = self
-            .request(
-                Method::from_bytes(b"REPORT").unwrap(),
-                url,
-                xml_headers(),
-                Body::Bytes(body.as_bytes()),
-            )
-            .await?;
-        require_status(&response, &[StatusCode::MULTI_STATUS])?;
-        let stream = response.bytes_stream().map_err(std::io::Error::other);
-        dav::parse(BufReader::new(StreamReader::new(stream)), accept).await
     }
 
     /// A short exclusive write lock, when the server implements DAV locking.

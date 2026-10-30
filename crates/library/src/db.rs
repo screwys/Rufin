@@ -89,13 +89,11 @@ pub(crate) enum Mark {
     Live,
 }
 
-/// The rows each open walk saw, by family and key, and the file stamps of each source.
+/// The rows each open walk saw, by family and key.
 #[derive(Default)]
 struct Walks {
     open: HashMap<u64, (SourceKey, HashMap<(Family, i64), Mark>)>,
     last: u64,
-    /// The next file observation stamp of each source this process started one for.
-    stamps: HashMap<SourceKey, i64>,
     /// When this process last forgot each source's expired tracks.
     expired: HashMap<SourceKey, i64>,
 }
@@ -319,14 +317,6 @@ impl Catalog {
                 }
             }
         }
-    }
-
-    /// The next file observation stamp of a source this process hands out.
-    pub(crate) fn next_stamp(&self, source: SourceKey) -> i64 {
-        let mut walks = self.walks();
-        let stamp = walks.stamps.get(&source).copied().unwrap_or(1);
-        walks.stamps.insert(source, stamp + 1);
-        stamp
     }
 }
 

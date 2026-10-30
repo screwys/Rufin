@@ -1242,12 +1242,8 @@ mod tests {
                 .execute(&mut *writer)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO local_files(source_key,path,root,root_id,relative_path,kind,mtime_ns,state) SELECT track.source_key,details.source_path,'root','root-id','Artist/one.flac','media',0,'accepted' FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=?1")
+            sqlx::query("INSERT INTO files(source_key,path,root,relative_path,kind,mtime_ns,native_id,state) SELECT track.source_key,details.source_path,'root','Artist/one.flac','media',0,'native-track','accepted' FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=?1")
                 .bind(&provider).execute(&mut *writer).await.unwrap();
-            sqlx::query("INSERT INTO local_file_access_roots(source_key,root,root_id) SELECT source_key,root,root_id FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *writer).await.unwrap();
-            sqlx::query("INSERT INTO local_file_observations(local_file_key,path,root,relative_path,mtime_ns,native_id,state) SELECT local_file_key,path,root,relative_path,mtime_ns,'native-track',state FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *writer).await.unwrap();
         }
         assert_eq!(
             catalog

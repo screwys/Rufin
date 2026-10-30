@@ -1525,7 +1525,11 @@ mod tests {
                     .await
                     .unwrap();
             observation
-                .write_file_observations(&file.into_iter().collect::<Vec<_>>(), vec![facts], true)
+                .write_files(library::FileBatch {
+                    files: file.into_iter().collect(),
+                    tracks: vec![facts],
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
             let after = catalog
@@ -1604,42 +1608,30 @@ mod tests {
             catalog.source_key(source.source_id())
         }
         .unwrap();
-        let mut physical = catalog
-            .source_files(
-                source.source_id().as_str(),
-                &[audio.to_string_lossy().into_owned()],
-            )
-            .await
-            .unwrap()
-            .pop()
-            .unwrap();
-        physical.root = audio
-            .ancestors()
-            .last()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        catalog
-            .observe(source.source_id().as_str(), None)
-            .await
-            .unwrap()
-            .write_file_observations(&[(physical, Vec::new())], Vec::new(), true)
+        // A released point import held this file under the filesystem root.
+        use sqlx::Connection as _;
+        let mut stored = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE files SET root=?1 WHERE path=?2")
+            .bind(audio.ancestors().last().unwrap().to_string_lossy().as_ref())
+            .bind(audio.to_string_lossy().as_ref())
+            .execute(&mut stored)
             .await
             .unwrap();
-        let progress = std::sync::Mutex::new(Vec::new());
+        stored.close().await.unwrap();
+        // The listed root takes the row over.
         source
             .acquire_catalog(
                 &catalog,
-                &|update| progress.lock().unwrap().push(update),
+                &|_| {},
                 Arc::new(AtomicBool::new(false)),
                 crate::Refresh::Changed,
             )
             .await
             .unwrap();
-        assert!(
-            progress.into_inner().unwrap().is_empty(),
-            "accepted released metadata does not need a new read"
-        );
         assert_eq!(
             crate::listed_tracks(
                 &catalog,
@@ -1685,10 +1677,8 @@ mod tests {
         }
         .unwrap();
         assert_eq!(
-            catalog
-                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            crate::stored_files(&catalog, source.source_id().as_str())
                 .await
-                .unwrap()
                 .into_iter()
                 .find(|file| file.path == imported.to_string_lossy())
                 .unwrap()
@@ -1700,10 +1690,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            catalog
-                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            crate::stored_files(&catalog, source.source_id().as_str())
                 .await
-                .unwrap()
                 .into_iter()
                 .find(|file| file.path == imported.to_string_lossy())
                 .unwrap()
@@ -1772,10 +1760,7 @@ mod tests {
         let entries = catalog.playlist_entry_uri_page(playlist, 0).await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].1, imported_uri);
-        let inventory = catalog
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
+        let inventory = crate::stored_files(&catalog, source.source_id().as_str()).await;
         assert!(!inventory.is_empty());
         assert!(
             inventory
@@ -1839,10 +1824,7 @@ mod tests {
         .await;
         assert_eq!(tracks.len(), 3);
         assert!(tracks.iter().any(|track| track.media_uri == file_uri));
-        let inventory = catalog
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
+        let inventory = crate::stored_files(&catalog, source.source_id().as_str()).await;
         assert!(
             inventory
                 .iter()
@@ -1908,18 +1890,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cached.len(), 1);
-        let physical = catalog
-            .local_file_page(key, None, 128, &library::ReadCancellation::new())
-            .await
-            .unwrap();
-        assert!(
-            physical
-                .iter()
-                .find(|file| Path::new(&file.path) == audio)
-                .unwrap()
-                .current_output,
-            "removing a configured root keeps its accepted parsed output"
-        );
         let edit = crate::Source::edit(
             configuration,
             None,

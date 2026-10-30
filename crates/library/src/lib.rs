@@ -89,9 +89,10 @@ pub use artwork::{
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
-    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FolderObservation,
-    Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation, PlaylistObservation,
-    Scope, SourcePhase, StateChange, TagObservation, TrackObservation,
+    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FileBatch,
+    FolderObservation, Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation,
+    PlaylistObservation, Scope, SourcePhase, StateChange, StoredFile, TagObservation,
+    TrackObservation, walk_key,
 };
 pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
@@ -113,9 +114,8 @@ pub use keys::{
     source_entity_uri, source_id_for_uri,
 };
 pub use local::{
-    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileRow,
-    LocalFileState, LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
-    ObservedMediaFile,
+    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState,
+    LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;

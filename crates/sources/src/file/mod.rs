@@ -11,6 +11,7 @@ pub(crate) mod media;
 pub(crate) mod metadata;
 pub(crate) mod playlist;
 pub(crate) mod remote;
+pub(crate) mod walk;
 
 fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> crate::SourceResult<()> {
     if cancelled() {

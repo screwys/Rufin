@@ -25,7 +25,8 @@ pub(crate) struct ScannedTrack {
     pub(crate) audio_revision: blake3::Hasher,
     /// The revision stands for the audio hash: the file is not read whole to hash it.
     pub(crate) revision_hashes_audio: bool,
-    pub(crate) lyrics_paths: Vec<String>,
+    /// The MD5 of the decoded audio a FLAC STREAMINFO block records.
+    pub(crate) flac_md5: Option<[u8; 16]>,
     pub(crate) lyrics: Option<lyrics::LyricsBundle>,
 }
 
@@ -60,7 +61,18 @@ impl ScannedTrack {
             .update(&track.cue_end_millis.unwrap_or(-1).to_le_bytes());
         let revision = *self.audio_revision.finalize().as_bytes();
         track.audio_revision = Some(revision);
-        track.audio_hash = self.revision_hashes_audio.then_some(revision);
+        track.audio_hash = match self.flac_md5 {
+            // The audio hash survives tag edits: it is the decoded audio's, cut to the window.
+            Some(md5) => {
+                let mut hash = blake3::Hasher::new();
+                hash.update(b"flac-md5");
+                hash.update(&md5);
+                hash.update(&track.cue_start_millis.unwrap_or(-1).to_le_bytes());
+                hash.update(&track.cue_end_millis.unwrap_or(-1).to_le_bytes());
+                Some(*hash.finalize().as_bytes())
+            }
+            None => self.revision_hashes_audio.then_some(revision),
+        };
         self.track
     }
 }
@@ -157,6 +169,7 @@ pub(crate) fn read_media_input(
     {
         return MediaRead::Rejected;
     }
+    let md5 = flac_md5(file);
     if file.rewind().is_err() {
         return MediaRead::Unreadable;
     }
@@ -245,6 +258,7 @@ pub(crate) fn read_media_input(
             .map(i64::from)
             .or_else(|| tagged_file.is_none().then_some(-1));
     }
+    track.flac_md5 = md5;
     MediaRead::Accepted(Box::new(track))
 }
 
@@ -536,9 +550,33 @@ fn scanned_track(
         artist_pictures: Vec::new(),
         audio_revision: blake3::Hasher::new(),
         revision_hashes_audio: false,
-        lyrics_paths: Vec::new(),
+        flac_md5: None,
         lyrics: None,
     }
+}
+
+/// The STREAMINFO MD5 of a FLAC stream, after an ID3v2 tag if one leads; None when the encoder
+/// left it zero.
+fn flac_md5(file: &mut (impl Read + Seek)) -> Option<[u8; 16]> {
+    let mut head = [0; 10];
+    file.rewind().ok()?;
+    file.read_exact(&mut head).ok()?;
+    let start = if &head[..3] == b"ID3" {
+        let size = head[6..10]
+            .iter()
+            .fold(0_u64, |size, byte| size << 7 | u64::from(byte & 0x7f));
+        10 + size + if head[5] & 0x10 != 0 { 10 } else { 0 }
+    } else {
+        0
+    };
+    let mut block = [0; 42];
+    file.seek(std::io::SeekFrom::Start(start)).ok()?;
+    file.read_exact(&mut block).ok()?;
+    if &block[..4] != b"fLaC" || block[4] & 0x7f != 0 {
+        return None;
+    }
+    let md5: [u8; 16] = block[26..42].try_into().ok()?;
+    (md5 != [0; 16]).then_some(md5)
 }
 
 /// The title of a file whose tags name none.
