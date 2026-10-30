@@ -1,18 +1,13 @@
-//! Persists bounded Local observations, dependency paths, and point playback access.
-//! Walking, parsing, retries, and filesystem policy remain owned by Sources.
+//! Reads of file-source tracks, downloads and locators. Walking, parsing, retries and
+//! filesystem policy remain owned by Sources.
 
-use std::collections::BTreeMap;
-
-use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
+use sqlx::{Connection, FromRow};
 
 use crate::catalog::snapshot::Packed;
 use crate::catalog::write::Write;
 use crate::{
-    Catalog, LibraryError, LibraryResult, LocalAccessFileKey, LocalFileKey, ReadCancellation,
-    SourceKey, TrackKey,
+    Catalog, LibraryError, LibraryResult, LocalAccessFileKey, ReadCancellation, SourceKey, TrackKey,
 };
-
-const LOCAL_FILE_PAGE_LIMIT: usize = 128;
 
 pub(crate) fn whole_file_cue_sql(track: &str, details: &str) -> String {
     format!("{track}.indexed=1 AND {details}.cue_path IS NOT NULL AND {details}.source_path IS NOT NULL AND {details}.cue_start_millis=0
@@ -108,7 +103,6 @@ pub enum LocalFileState {
     Accepted,
     Rejected,
     Unreadable,
-    Observed,
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -127,48 +121,6 @@ pub struct LocalFileWrite {
     pub artist_pictures: Option<String>,
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LocalFileRow {
-    pub local_file_key: LocalFileKey,
-    pub path: String,
-    pub root: String,
-    pub relative_path: String,
-    pub kind: LocalFileKind,
-    pub size_bytes: Option<i64>,
-    pub mtime_ns: i64,
-    pub device_id: Option<i64>,
-    pub inode: Option<i64>,
-    pub native_id: Option<String>,
-    pub revision: Option<String>,
-    pub picture_index: Option<i64>,
-    pub artist_pictures: Option<String>,
-    pub parse_version: Option<i64>,
-    pub state: LocalFileState,
-    pub dependencies: Vec<String>,
-    pub track_object_id: Option<String>,
-    pub current_output: bool,
-    pub imported: bool,
-}
-
-#[derive(Clone, Debug, FromRow)]
-struct LocalFileScalar {
-    local_file_key: LocalFileKey,
-    path: String,
-    root: String,
-    relative_path: String,
-    kind: LocalFileKind,
-    size_bytes: Option<i64>,
-    mtime_ns: i64,
-    device_id: Option<i64>,
-    inode: Option<i64>,
-    native_id: Option<String>,
-    revision: Option<String>,
-    picture_index: Option<i64>,
-    artist_pictures: Option<String>,
-    parse_version: Option<i64>,
-    state: LocalFileState,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, FromRow)]
@@ -203,12 +155,13 @@ impl Catalog {
         let mut parent = parent.map(str::to_owned);
         if parent.is_none() {
             let mut roots: Vec<String> = sqlx::query_scalar(
-                "SELECT DISTINCT root FROM observed_local_files WHERE source_key=?1 AND kind='directory' AND root IN(SELECT value FROM json_each(?2))",
+                "SELECT DISTINCT root FROM files WHERE source_key=?1 AND kind='directory' AND root IN(SELECT value FROM json_each(?2))",
             )
             .bind(source).bind(&roots_json)
             .fetch_all(&mut *transaction)
             .await?;
-            let tracks: Vec<String> = sqlx::query_scalar("SELECT track.object_id FROM tracks track JOIN local_track_access location USING(track_key) WHERE track.source_key=?1 AND track.indexed=1 AND NOT EXISTS(SELECT 1 FROM observed_local_files file WHERE file.source_key=track.source_key AND file.path=coalesce(location.cue_path,location.source_path) AND file.relative_path<>'') AND EXISTS(SELECT 1 FROM observed_local_files scope WHERE scope.source_key=track.source_key AND scope.path=coalesce(location.cue_path,location.source_path) AND scope.root IN(SELECT value FROM json_each(?2)))")
+            // Single-file roots list their tracks beside the folders.
+            let tracks: Vec<String> = sqlx::query_scalar("SELECT track.object_id FROM json_each(?2) root CROSS JOIN files file ON file.source_key=?1 AND file.root=root.value AND replace(file.relative_path,'/',char(1))='' AND file.kind<>'directory' CROSS JOIN track_details details ON details.source_path=file.path OR details.cue_path=file.path CROSS JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1 AND track.indexed=1")
                 .bind(source).bind(&roots_json).fetch_all(&mut *transaction).await?;
             if roots.len() == 1 && tracks.is_empty() {
                 parent = roots.pop();
@@ -238,15 +191,15 @@ impl Catalog {
         let tail = format!("substr(path,length({prefix})+1)");
         let folders: Vec<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "WITH folders(path) AS (SELECT DISTINCT {prefix}||CASE WHEN instr({tail},{separator})>0 THEN substr({tail},1,instr({tail},{separator})-1) ELSE {tail} END
-                FROM observed_local_files WHERE source_key=?1 AND kind='directory' AND root IN(SELECT value FROM json_each(?2))
+                FROM files WHERE source_key=?1 AND kind='directory' AND root IN(SELECT value FROM json_each(?2))
                   AND path>={prefix} AND path<{prefix}||char(1114111) AND {tail}<>'')
-              SELECT folders.path,file.relative_path FROM folders LEFT JOIN observed_local_files file ON file.source_key=?1 AND file.path=folders.path"
+              SELECT folders.path,file.relative_path FROM folders LEFT JOIN files file ON file.source_key=?1 AND file.path=folders.path"
         ))).bind(source).bind(&roots_json).fetch_all(&mut *transaction).await?;
         let tracks = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT object_id FROM tracks track JOIN local_track_access location USING(track_key) WHERE track.source_key=?1 AND indexed=1 AND location.source_path>={prefix}
-               AND location.source_path<{prefix}||char(1114111)
-               AND instr(substr(location.source_path,length({prefix})+1),{separator})=0
-               AND EXISTS(SELECT 1 FROM observed_local_files scope WHERE scope.source_key=track.source_key AND scope.path=coalesce(location.cue_path,location.source_path) AND scope.root IN(SELECT value FROM json_each(?2)))"
+            "SELECT object_id FROM track_details details CROSS JOIN tracks track USING(track_key) WHERE track.source_key=?1 AND indexed=1 AND details.source_path>={prefix}
+               AND details.source_path<{prefix}||char(1114111)
+               AND instr(substr(details.source_path,length({prefix})+1),{separator})=0
+               AND EXISTS(SELECT 1 FROM files scope WHERE scope.source_key=track.source_key AND scope.path=coalesce(details.cue_path,details.source_path) AND scope.root IN(SELECT value FROM json_each(?2)))"
         )))
         .bind(source).bind(&roots_json)
         .fetch_all(&mut *transaction)
@@ -382,11 +335,10 @@ impl Catalog {
         Ok(sqlx::query_scalar(
             "SELECT (
                 SELECT track.media_uri FROM sources source
-                CROSS JOIN observed_local_files file ON file.source_key=source.source_key AND file.native_id=requested.value
-                JOIN local_file_access_roots access ON access.source_key=file.source_key AND access.root=file.root
-                JOIN local_track_access location ON location.source_key=file.source_key AND location.source_path=file.path
-                JOIN tracks track USING(track_key) JOIN track_details details USING(track_key)
-                WHERE location.cue_path IS NULL AND details.cue_start_millis IS NULL
+                CROSS JOIN files file ON file.source_key=source.source_key AND file.native_id=requested.value
+                CROSS JOIN track_details details ON details.source_path=file.path
+                CROSS JOIN tracks track ON track.track_key=details.track_key AND track.source_key=file.source_key
+                WHERE details.cue_path IS NULL AND details.cue_start_millis IS NULL
                 ORDER BY track.indexed DESC,track.track_key LIMIT 1
              ) FROM json_each(?1) requested ORDER BY requested.key",
         )
@@ -401,10 +353,9 @@ impl Catalog {
         media_uri: &str,
     ) -> LibraryResult<Option<(String, Option<String>, Option<LocalFileWrite>)>> {
         let mut connection = self.acquire_reader().await?;
-        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,details.source_path,CASE WHEN file.local_file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',canonical.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'native_id',file.native_id,'revision',file.revision,'picture_index',canonical.picture_index,'artist_pictures',canonical.artist_pictures,'parse_version',canonical.parse_version,'state',CASE WHEN file.state IN('accepted','rejected') AND file.accepted_facts IS NOT canonical.parsed_stamp THEN 'observed' ELSE file.state END) END
+        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,details.source_path,CASE WHEN file.file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',file.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'native_id',file.native_id,'revision',file.revision,'picture_index',file.picture_index,'artist_pictures',file.artist_pictures,'parse_version',file.parse_version,'state',file.state) END
             FROM tracks track LEFT JOIN track_details details USING(track_key)
-            LEFT JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=details.source_path
-            LEFT JOIN local_file_observations file ON file.local_file_key=canonical.local_file_key
+            LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
             WHERE track.source_key=?1 AND track.media_uri=?2")
             .bind(source).bind(media_uri).fetch_optional(&mut *connection).await?;
         row.map(|(id, path, file)| {
@@ -777,34 +728,6 @@ impl Catalog {
         .await?)
     }
 
-    pub async fn local_file_roots(&self, source: SourceKey) -> LibraryResult<Vec<String>> {
-        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_scalar(
-            "SELECT DISTINCT root FROM local_file_access_roots WHERE source_key=?1",
-        )
-        .bind(source)
-        .fetch_all(&mut *connection)
-        .await?)
-    }
-
-    pub async fn local_file_page(
-        &self,
-        source: SourceKey,
-        after: Option<LocalFileKey>,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<LocalFileRow>> {
-        let limit = limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64;
-        let mut connection = self.acquire_cancellable(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM observed_local_files WHERE source_key=?1 AND EXISTS(SELECT 1 FROM local_file_access_roots access WHERE access.source_key=observed_local_files.source_key AND access.root=observed_local_files.root) AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
-            .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
-            .fetch_all(&mut *transaction).await?;
-        let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
     /// Writes locators in one Write; a locator replaces the one of its track and origin.
     pub async fn write_local_locators(&self, locators: &[LocalLocatorWrite]) -> LibraryResult<()> {
         if locators.is_empty() {
@@ -844,100 +767,6 @@ fn folder_path_name(path: &str) -> String {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string())
     }
-}
-
-pub(crate) async fn local_file_reuse_candidates_on(
-    connection: &mut sqlx::SqliteConnection,
-    source: SourceKey,
-    files: &[LocalFileWrite],
-) -> LibraryResult<Vec<LocalFileRow>> {
-    if files.is_empty() {
-        return Ok(Vec::new());
-    }
-    let input = serde_json::to_string(files)?;
-    let scalars=sqlx::query_as::<_,LocalFileScalar>("WITH requested AS MATERIALIZED(SELECT CAST(key AS INTEGER) position,value file FROM json_each(?2)),roots AS MATERIALIZED(
-        SELECT requested.position,access.root_id FROM requested JOIN local_file_access_roots access ON access.source_key=?1 AND access.root=json_extract(requested.file,'$.root')
-        UNION SELECT requested.position,file.root_id FROM requested JOIN local_files file ON file.source_key=?1 AND file.root=json_extract(requested.file,'$.root') AND file.relative_path=json_extract(requested.file,'$.relative_path')
-        WHERE NOT EXISTS(SELECT 1 FROM local_file_access_roots access WHERE access.source_key=?1 AND access.root=json_extract(requested.file,'$.root'))),candidates AS(
-        SELECT requested.position,file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.artist_pictures,file.parse_version,file.state
-        FROM requested JOIN observed_local_files file ON file.source_key=?1 AND(file.path=json_extract(requested.file,'$.path') OR(file.native_id IS NOT NULL AND file.native_id=json_extract(requested.file,'$.native_id')) OR(file.device_id IS NOT NULL AND file.inode IS NOT NULL AND(file.device_id,file.inode) IS(json_extract(requested.file,'$.device_id'),json_extract(requested.file,'$.inode'))))
-        UNION ALL
-        SELECT requested.position,file.local_file_key,json_extract(requested.file,'$.path'),json_extract(requested.file,'$.root'),json_extract(requested.file,'$.relative_path'),file.kind,file.size_bytes,file.mtime_ns,json_extract(requested.file,'$.device_id'),json_extract(requested.file,'$.inode'),json_extract(requested.file,'$.native_id'),file.revision,file.picture_index,file.artist_pictures,coalesce(json_extract(file.parsed_stamp,'$[3]'),file.parse_version),file.state
-        FROM requested JOIN roots USING(position) CROSS JOIN local_files file ON file.source_key=?1 AND file.root_id=roots.root_id AND file.relative_path=json_extract(requested.file,'$.relative_path')
-        WHERE NOT EXISTS(SELECT 1 FROM local_file_observations access WHERE access.local_file_key=file.local_file_key) AND(file.size_bytes,file.mtime_ns,file.revision) IS(json_extract(requested.file,'$.size_bytes'),json_extract(requested.file,'$.mtime_ns'),json_extract(requested.file,'$.revision')))
-        SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state FROM candidates ORDER BY position,local_file_key")
-        .bind(source).bind(input).fetch_all(&mut *connection).await?;
-    load_local_file_rows(connection, source, scalars).await
-}
-
-async fn load_local_file_rows(
-    connection: &mut sqlx::SqliteConnection,
-    source: SourceKey,
-    scalars: Vec<LocalFileScalar>,
-) -> LibraryResult<Vec<LocalFileRow>> {
-    let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
-    let mut track_objects = BTreeMap::<LocalFileKey, (Option<String>, bool, bool)>::new();
-    if !scalars.is_empty() {
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,position) AS (");
-        query.push_values(scalars.iter().enumerate(), |mut row, (position, file)| {
-            row.push_bind(file.local_file_key)
-                .push_bind(position as i64);
-        });
-        query.push(") SELECT dependency.local_file_key,dependency.dependency_path FROM requested JOIN observed_file_dependencies dependency USING(local_file_key) ORDER BY requested.position,dependency.position");
-        for (file, dependency) in query
-            .build_query_as::<(LocalFileKey, String)>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?
-        {
-            dependencies.entry(file).or_default().push(dependency);
-        }
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,kind) AS(");
-        query.push_values(&scalars, |mut row, file| {
-            row.push_bind(file.local_file_key).push_bind(file.kind);
-        });
-        query.push(") SELECT requested.local_file_key,min(CASE WHEN requested.kind='cue' OR details.cue_path IS NULL THEN track.object_id END),max(CASE WHEN requested.kind='cue' OR details.cue_path IS NULL THEN 1 ELSE 0 END),max(track.indexed=1 AND EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import')) FROM requested JOIN tracks track ON track.local_file_key=requested.local_file_key LEFT JOIN track_details details ON details.track_key=track.track_key WHERE track.source_key=")
-            .push_bind(source).push(" GROUP BY requested.local_file_key");
-        for (file, object_id, current_output, imported) in query
-            .build_query_as::<(LocalFileKey, Option<String>, bool, bool)>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?
-        {
-            track_objects.insert(file, (object_id, current_output, imported));
-        }
-    }
-    Ok(scalars
-        .into_iter()
-        .map(|scalar| {
-            let (track_object_id, current_output, imported) = track_objects
-                .remove(&scalar.local_file_key)
-                .unwrap_or((None, false, false));
-            LocalFileRow {
-                local_file_key: scalar.local_file_key,
-                path: scalar.path,
-                root: scalar.root,
-                relative_path: scalar.relative_path,
-                kind: scalar.kind,
-                size_bytes: scalar.size_bytes,
-                mtime_ns: scalar.mtime_ns,
-                device_id: scalar.device_id,
-                inode: scalar.inode,
-                native_id: scalar.native_id,
-                revision: scalar.revision,
-                picture_index: scalar.picture_index,
-                artist_pictures: scalar.artist_pictures,
-                parse_version: scalar.parse_version,
-                state: scalar.state,
-                dependencies: dependencies
-                    .remove(&scalar.local_file_key)
-                    .unwrap_or_default(),
-                track_object_id,
-                current_output,
-                imported,
-            }
-        })
-        .collect())
 }
 
 impl Catalog {
@@ -1021,105 +850,24 @@ pub(crate) async fn import_local_locators_jsonl_on(
 }
 
 impl Catalog {
-    pub async fn imported_local_uri_page(
+    /// A playlist's local entries by URI, with the path a walk reads each from: the CUE sheet
+    /// or file its track was read from, else the import locator's access path.
+    pub async fn playlist_import_page(
         &self,
-        playlist: Option<crate::PlaylistKey>,
+        playlist: crate::PlaylistKey,
         after: &str,
     ) -> LibraryResult<Vec<(String, Option<String>)>> {
         let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_as(
-            "SELECT imported.media_uri,(SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key AND access.local_file_key IS NOT NULL) FROM (SELECT track.media_uri FROM playlist_entries entry JOIN tracks track USING(track_key)
-            WHERE (?1 IS NULL OR entry.playlist_key=?1) AND track.media_uri>?2
-              AND (track.media_uri LIKE 'file:%' OR track.media_uri LIKE 'rufin:cue/%' OR track.media_uri LIKE 'rufin:document/%' OR track.media_uri LIKE 'content:%')
-            UNION SELECT media_uri FROM user_state WHERE ?1 IS NULL AND media_uri>?2
-              AND (favorite=1 OR rating IS NOT NULL)
-              AND (media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%' OR media_uri LIKE 'rufin:document/%' OR media_uri LIKE 'content:%')
-            UNION SELECT media_uri FROM local_locators WHERE ?1 IS NULL AND origin='import' AND media_uri>?2
-              AND(media_uri LIKE 'file:%' OR media_uri LIKE 'rufin:cue/%' OR media_uri LIKE 'rufin:document/%' OR media_uri LIKE 'content:%')
-            ) imported LEFT JOIN tracks track USING(media_uri)
-            WHERE EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=track.track_key) OR NOT EXISTS(SELECT 1 FROM track_details details WHERE details.track_key=track.track_key AND details.source_path IS NOT NULL)
-              OR EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=imported.media_uri AND locator.origin='import')
-            ORDER BY imported.media_uri LIMIT 128",
+            "SELECT DISTINCT track.media_uri,coalesce(details.cue_path,details.source_path,(SELECT locator.access_uri FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import'))
+             FROM playlist_entries entry JOIN tracks track USING(track_key) LEFT JOIN track_details details USING(track_key)
+             WHERE entry.playlist_key=?1 AND track.media_uri>?2
+               AND(track.media_uri LIKE 'file:%' OR track.media_uri LIKE 'rufin:cue/%' OR track.media_uri LIKE 'rufin:document/%' OR track.media_uri LIKE 'content:%')
+             ORDER BY track.media_uri LIMIT 128",
         )
         .bind(playlist)
         .bind(after)
         .fetch_all(&mut *connection)
         .await?)
-    }
-}
-
-impl crate::Observation<'_> {
-    pub async fn record_imported_files(
-        &mut self,
-        playlist: Option<crate::PlaylistKey>,
-    ) -> LibraryResult<()> {
-        let mut after = -1_i64;
-        loop {
-            let mut write = self.write().await?;
-            let (owner, cursor, references) = if playlist.is_some() {
-                (
-                    "playlist_entries requested CROSS JOIN tracks track USING(track_key)",
-                    "requested.playlist_entry_key",
-                    "requested.playlist_key=?3 AND requested.playlist_entry_key>?2",
-                )
-            } else {
-                (
-                    "tracks track NOT INDEXED",
-                    "track.track_key",
-                    "track.track_key>?2 AND(EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key) OR EXISTS(SELECT 1 FROM user_state state WHERE state.media_uri=track.media_uri AND(state.favorite=1 OR state.rating IS NOT NULL))) AND ?3 IS NULL",
-                )
-            };
-            let rows: Vec<(i64,String,String,String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "SELECT {cursor} ordinal,track.media_uri,location.source_path,file.root
-                 FROM {owner} JOIN local_track_access location USING(track_key) JOIN observed_local_files file ON file.local_file_key=location.local_file_key
-                 WHERE track.source_key=?1 AND track.indexed=1
-                 AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import')
-                 AND {references}
-                 ORDER BY ordinal LIMIT 128"
-            ))).bind(self.source).bind(after).bind(playlist).fetch_all(write.connection().await?).await?;
-            let Some(last) = rows.last() else {
-                break;
-            };
-            after = last.0;
-            let locators = rows
-                .into_iter()
-                .filter_map(|(_, uri, path, root)| {
-                    url::Url::from_file_path(&path).ok().map(|access| {
-                        let relative = std::path::Path::new(&path)
-                            .strip_prefix(&root)
-                            .unwrap_or(std::path::Path::new(&path))
-                            .to_string_lossy()
-                            .into_owned();
-                        (uri, path, root, relative, access.to_string())
-                    })
-                })
-                .collect::<Vec<_>>();
-            if !locators.is_empty() {
-                let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                    "INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri)",
-                );
-                insert.push_values(&locators, |mut row, (uri, path, root, relative, access)| {
-                    row.push_bind(self.source)
-                        .push_bind(uri)
-                        .push_bind("import")
-                        .push_bind(path)
-                        .push_bind(root)
-                        .push_bind(relative)
-                        .push_bind(access);
-                });
-                let inserted = insert
-                    .push(" ON CONFLICT(media_uri,origin) DO NOTHING")
-                    .build()
-                    .execute(write.connection().await?)
-                    .await?
-                    .rows_affected();
-                // Import locators are read by key only, so clients hear nothing of them.
-                if inserted != 0 {
-                    write.keep();
-                }
-            }
-            write.commit().await?;
-        }
-        Ok(())
     }
 }

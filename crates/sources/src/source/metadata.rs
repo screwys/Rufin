@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use library::{Catalog, ReadCancellation};
-use sqlx::{Connection, Row};
 
 use super::{Implementation, Source};
 use crate::file::metadata::{self as tags, TagUpdate};
@@ -420,7 +419,6 @@ impl PreparedFile {
                     let input = files.input().await.map_err(failure)?;
                     let (observation, facts) = files
                         .read_saved_file(
-                            observation.catalog,
                             &self.target.media_uri,
                             &files.relative(path).map_err(failure)?,
                             &input,
@@ -468,7 +466,7 @@ impl PreparedFile {
 }
 
 struct SavedFile {
-    observation: Option<(library::LocalFileWrite, Vec<String>)>,
+    observation: Option<library::LocalFileWrite>,
     facts: library::TrackObservation,
 }
 
@@ -479,65 +477,23 @@ async fn publish_saved_files(
     if pending.is_empty() {
         return Ok(());
     }
-    let mut files = Vec::new();
-    let mut tracks = Vec::new();
+    let mut batch = library::FileBatch::default();
     for saved in pending.drain(..) {
-        if let Some(file) = saved.observation {
-            files.push(file);
-        }
-        tracks.push(saved.facts);
+        batch.files.extend(saved.observation);
+        batch.tracks.push(saved.facts);
     }
     observation
-        .write_file_observations(&files, tracks, true)
+        .write_files(batch)
         .await
         .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
     Ok(())
 }
 
-struct SaveWork(sqlx::SqliteConnection);
-
-impl SaveWork {
-    async fn new() -> Result<Self, Error> {
-        let options = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename("")
-            .create_if_missing(true)
-            .pragma("temp_store", "FILE")
-            .journal_mode(sqlx::sqlite::SqliteJournalMode::Off)
-            .synchronous(sqlx::sqlite::SqliteSynchronous::Off);
-        let mut connection = sqlx::SqliteConnection::connect_with(&options)
-            .await
-            .map_err(failure)?;
-        sqlx::raw_sql("CREATE TABLE folders(identity TEXT PRIMARY KEY); CREATE TABLE members(member INTEGER PRIMARY KEY,object_id TEXT NOT NULL)")
-            .execute(&mut connection).await.map_err(failure)?;
-        Ok(Self(connection))
-    }
-
-    async fn remember<'a>(
-        &mut self,
-        page: impl Iterator<Item = (i64, &'a str)>,
-    ) -> Result<(), Error> {
-        let members = page.collect::<Vec<_>>();
-        if members.is_empty() {
-            return Ok(());
-        }
-        let mut insert =
-            sqlx::QueryBuilder::new("INSERT OR IGNORE INTO members(member,object_id) ");
-        insert.push_values(members, |mut row, (key, id)| {
-            row.push_bind(key).push_bind(id);
-        });
-        insert.build().execute(&mut self.0).await.map_err(failure)?;
-        Ok(())
-    }
-
-    async fn first_folder(&mut self, identity: &str) -> Result<bool, Error> {
-        Ok(sqlx::query("INSERT OR IGNORE INTO folders VALUES(?1)")
-            .bind(identity)
-            .execute(&mut self.0)
-            .await
-            .map_err(failure)?
-            .rows_affected()
-            > 0)
-    }
+/// What a tag save remembers: the server ids to read again, and the folders it wrote art to.
+#[derive(Default)]
+struct SaveWork {
+    members: Vec<String>,
+    folders: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Default)]
@@ -815,11 +771,7 @@ impl FileEditSession {
                 .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
                 || tags::artist_image_needs_rename(edit, artist, hint.as_deref().map(Path::new))
         });
-        let mut work = if mapped || folder_changed {
-            Some(SaveWork::new().await?)
-        } else {
-            None
-        };
+        let mut work = (mapped || folder_changed).then(SaveWork::default);
         let scope_tags_changed = edits.iter().any(|(edit, _, _)| {
             !edit.changes.is_empty()
                 || edit
@@ -854,12 +806,10 @@ impl FileEditSession {
                     ordinal += 1;
                 }
                 if mapped {
-                    work.as_mut()
-                        .unwrap()
-                        .remember(page.iter().filter_map(|(key, file)| {
-                            file.as_ref().ok()?.1.as_deref().map(|id| (*key, id))
-                        }))
-                        .await?;
+                    work.as_mut().unwrap().members.extend(
+                        page.iter()
+                            .filter_map(|(_, file)| file.as_ref().ok()?.1.clone()),
+                    );
                 }
                 for (ordinal, resolved) in page {
                     let file_result = async {
@@ -882,7 +832,7 @@ impl FileEditSession {
                                     .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
                             });
                         if folder_changed && work.is_none() {
-                            work = Some(SaveWork::new().await?);
+                            work = Some(SaveWork::default());
                         }
                         if tags_changed {
                             let prepared =
@@ -979,20 +929,15 @@ impl FileEditSession {
                                 continue;
                             }
                             let directory = file.folder_identity(hint.as_deref())?;
-                            if work
-                                .as_mut()
-                                .unwrap()
-                                .first_folder(&format!(
-                                    "{}:{directory}:{}",
-                                    edit.kind.as_str(),
-                                    if edit.kind == SourceEntityKind::Track {
-                                        ordinal
-                                    } else {
-                                        -1
-                                    }
-                                ))
-                                .await?
-                            {
+                            if work.as_mut().unwrap().folders.insert(format!(
+                                "{}:{directory}:{}",
+                                edit.kind.as_str(),
+                                if edit.kind == SourceEntityKind::Track {
+                                    ordinal
+                                } else {
+                                    -1
+                                }
+                            )) {
                                 if cancelled() {
                                     return Err(crate::SourceError::Cancelled.into());
                                 }
@@ -1138,11 +1083,7 @@ impl Source {
         Ok((file, row))
     }
 
-    fn refresh_metadata_after_write(
-        self: &Arc<Self>,
-        catalog: &Catalog,
-        mut work: Option<SaveWork>,
-    ) {
+    fn refresh_metadata_after_write(self: &Arc<Self>, catalog: &Catalog, work: Option<SaveWork>) {
         if !matches!(self.implementation, Implementation::OpenSubsonic(_)) {
             return;
         }
@@ -1154,22 +1095,18 @@ impl Source {
                     let Implementation::OpenSubsonic(provider) = &source.implementation else {
                         unreachable!()
                     };
-                    provider.start_metadata_scan_and_wait(&|| source.is_retired()).await?;
-                    if let Some(work) = &mut work {
-                        let mut after = -1i64;
-                        loop {
-                            if source.is_retired() {
-                                return Err(crate::SourceError::Cancelled.into());
-                            }
-                            let rows = sqlx::query("SELECT member,object_id FROM members WHERE member>?1 ORDER BY member LIMIT 128")
-                                .bind(after).fetch_all(&mut work.0).await.map_err(failure)?;
-                            if rows.is_empty() {
-                                break;
-                            }
-                            after = rows.last().unwrap().get(0);
-                            let ids = rows.into_iter().map(|row| source.item_request_id("track", row.get::<&str,_>(1))).collect();
-                            source.acquire_items(observation, ids, Vec::new()).await?;
+                    provider
+                        .start_metadata_scan_and_wait(&|| source.is_retired())
+                        .await?;
+                    for ids in work.iter().flat_map(|work| work.members.chunks(128)) {
+                        if source.is_retired() {
+                            return Err(crate::SourceError::Cancelled.into());
                         }
+                        let ids = ids
+                            .iter()
+                            .map(|id| source.item_request_id("track", id))
+                            .collect();
+                        source.acquire_items(observation, ids, Vec::new()).await?;
                     }
                     Ok(())
                 })
@@ -1513,9 +1450,12 @@ impl NativeFile {
                 crate::file::local::scan::read_saved_file(&observation, &self.media_uri, path)
                     .await
                     .map_err(failure)?;
-            let files = file.into_iter().collect::<Vec<_>>();
             observation
-                .write_file_observations(&files, vec![track], true)
+                .write_files(library::FileBatch {
+                    files: file.into_iter().collect(),
+                    tracks: vec![track],
+                    ..Default::default()
+                })
                 .await
                 .map_err(failure)?;
         } else {

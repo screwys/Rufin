@@ -229,9 +229,10 @@ impl super::Observation<'_> {
         write.commit().await?;
         Ok(())
     }
+    /// A playlist of the indexed tracks an import listed: files at or under `paths`.
     pub async fn create_observed_playlist(
         &mut self,
-        observed: i64,
+        paths: &[String],
         name: &str,
     ) -> LibraryResult<crate::PlaylistKey> {
         let mut write = self.write().await?;
@@ -240,7 +241,14 @@ impl super::Observation<'_> {
         let rank = crate::rank::nth_sql(
             "row_number() OVER(ORDER BY coalesce(details.cue_path,details.source_path),track.disc_number,track.track_number,track.object_id)-1",
         );
-        let entries: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.track_key,{rank} FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE track.source_key=?2 AND track.local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=?2 AND observed_stamp=?3) RETURNING playlist_entry_key,rank,track_key"))).bind(key).bind(source).bind(observed).fetch_all(write.connection().await?).await?;
+        let scopes = paths
+            .iter()
+            .map(|path| {
+                let path = path.trim_end_matches(std::path::MAIN_SEPARATOR);
+                (path, format!("{path}{}", std::path::MAIN_SEPARATOR))
+            })
+            .collect::<Vec<_>>();
+        let entries: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track.track_key,{rank} FROM tracks track JOIN track_details details USING(track_key) WHERE track.source_key=?2 AND track.indexed=1 AND EXISTS(SELECT 1 FROM json_each(?3) scope WHERE coalesce(details.cue_path,details.source_path)=json_extract(scope.value,'$[0]') OR(coalesce(details.cue_path,details.source_path)>=json_extract(scope.value,'$[1]') AND coalesce(details.cue_path,details.source_path)<json_extract(scope.value,'$[1]')||char(1114111))) RETURNING playlist_entry_key,rank,track_key"))).bind(key).bind(source).bind(serde_json::to_string(&scopes)?).fetch_all(write.connection().await?).await?;
         write.put_entries(
             key.raw(),
             entries

@@ -1728,15 +1728,13 @@ struct HomeEntry {
 impl Observation<'_> {
     /// Starts a walk: a listing whose completion hides what it did not see. Returns the stamp
     /// the walk's file rows carry.
-    pub async fn start_observation(&mut self) -> LibraryResult<i64> {
+    pub async fn start_observation(&mut self) -> LibraryResult<()> {
         if let Some(walk) = self.walk.take() {
             self.catalog.close_walk(walk);
         }
         self.memberships.clear();
-        let stamp = self.catalog.next_stamp(self.source);
-        self.observed = Some(stamp);
         self.walk = Some(self.catalog.open_walk(self.source));
-        Ok(stamp)
+        Ok(())
     }
 
     /// Whether this observation changed what the catalog lists show.
@@ -2517,8 +2515,10 @@ mod tests {
         );
 
         // An alias renames a track, or folds it into the row that holds the new URI.
-        later
-            .merge_local_file_uris(&[
+        let mut write = later.write().await.unwrap();
+        super::super::files::merge_local_file_uris_on(
+            &mut write,
+            &[
                 (
                     "file:///music/x.flac".into(),
                     "file:///music/y.flac".into(),
@@ -2529,9 +2529,12 @@ mod tests {
                     "file:///music/y.flac".into(),
                     "t1".into(),
                 ),
-            ])
-            .await
-            .unwrap();
+            ],
+            &mut Touched::default(),
+        )
+        .await
+        .unwrap();
+        later.commit(write).await.unwrap();
         assert_reloads(&catalog).await;
         let (folded, indexed, object): (i64, bool, Option<String>) = sqlx::query_as(
             "SELECT track_key,indexed,object_id FROM tracks WHERE media_uri='file:///music/y.flac'",

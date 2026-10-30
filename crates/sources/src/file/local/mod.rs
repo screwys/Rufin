@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::file::check_cancelled;
+use crate::file::walk::{self, Entry, Root, WalkScope};
 use crate::source::SourceReadProgress;
 use crate::{
     ConnectedSource, ImageBytes, SourceConfiguration, SourceEditResult, SourceError, SourceResult,
@@ -111,6 +112,7 @@ pub struct LocalSource {
     roots: Vec<PathBuf>,
     excluded_folders: Vec<PathBuf>,
     pub(crate) documents: Vec<crate::file::remote::FileSource>,
+    artwork: walk::ArtworkState,
 }
 
 impl LocalSource {
@@ -126,6 +128,7 @@ impl LocalSource {
                 .into_iter()
                 .map(|root| crate::file::remote::FileSource::documents(configuration, root))
                 .collect(),
+            artwork: walk::ArtworkState::default(),
         })
     }
 
@@ -135,6 +138,7 @@ impl LocalSource {
             roots,
             excluded_folders: Vec::new(),
             documents: Vec::new(),
+            artwork: walk::ArtworkState::default(),
         })
     }
 
@@ -196,100 +200,143 @@ impl LocalSource {
         Ok(roots)
     }
 
-    pub(crate) async fn acquire_catalog(
+    /// Walks the folders, then each document folder.
+    pub(crate) async fn walk(
         &self,
         observation: &mut library::Observation<'_>,
+        scope: WalkScope<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-        reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        observation
-            .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
-            .await?;
-        let mut completed =
-            scan::acquire_catalog(observation, self, progress, cancelled, reuse_unchanged).await?;
-        for source in &self.documents {
-            completed += source
-                .acquire_catalog(
-                    observation,
-                    &|mut update| {
-                        if update.stage == crate::SourceReadStage::Tracks {
-                            update.completed += completed;
-                        }
-                        progress(update);
-                    },
-                    cancelled,
-                )
-                .await?;
-        }
-        scan::acquire_imported_paths(
+        let configured = self.configured_file_roots()?;
+        let (paths, rename) = match &scope {
+            WalkScope::Paths { paths, rename } => (Some(*paths), *rename),
+            WalkScope::All { .. } => (None, None),
+        };
+        let documents = |source: &crate::file::remote::FileSource| {
+            paths.map(|paths| {
+                paths
+                    .iter()
+                    .filter(|path| source.relative(path).is_ok())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+        };
+        let native = paths.map(|paths| {
+            paths
+                .iter()
+                .filter(|path| self.document_source(path).is_none())
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        let mut walked = walk::walk(
+            &LocalFiles::importing(self, &[]),
             observation,
-            self,
-            None,
-            &|count| {
-                progress(SourceReadProgress {
-                    stage: crate::SourceReadStage::Tracks,
-                    completed: completed + count,
-                    total: None,
-                })
+            &configured,
+            match &native {
+                Some(paths) => WalkScope::Paths {
+                    paths,
+                    rename: rename.filter(|(old, _)| self.document_source(old).is_none()),
+                },
+                None => scope_of(&scope),
             },
+            progress,
             cancelled,
         )
         .await?;
-        if observation.changed() {
-            observation.record_imported_files(None).await?;
+        for source in &self.documents {
+            let paths = documents(source);
+            if paths.as_ref().is_some_and(Vec::is_empty) {
+                continue;
+            }
+            let documents = walk::walk(
+                source,
+                observation,
+                &configured,
+                match &paths {
+                    Some(paths) => WalkScope::Paths {
+                        paths,
+                        rename: rename.filter(|(old, _)| source.relative(old).is_ok()),
+                    },
+                    None => scope_of(&scope),
+                },
+                progress,
+                cancelled,
+            )
+            .await?;
+            walked.directories.extend(documents.directories);
         }
         check_cancelled(cancelled)?;
-        crate::file::artwork::ArtworkFiles::Local
-            .acquire(observation, cancelled)
-            .await?;
-        Ok(())
+        walk::artwork(
+            crate::file::artwork::ArtworkFiles::Local,
+            observation,
+            &walked,
+            &self.artwork,
+            cancelled,
+        )
+        .await
     }
 
+    /// A playlist's local entries: each file outside the folders is an import root, and every
+    /// entry's file stays listed when its folder is removed.
     pub(crate) async fn import_playlist_files(
         &self,
         observation: &mut library::Observation<'_>,
         playlist: library::PlaylistKey,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        observation.start_observation().await?;
-        scan::acquire_imported_paths(observation, self, Some(playlist), &|_| {}, cancelled).await?;
-        observation.record_imported_files(Some(playlist)).await?;
-        crate::file::artwork::ArtworkFiles::Local
-            .acquire(observation, cancelled)
-            .await
-    }
-
-    pub(crate) async fn acquire_paths(
-        &self,
-        observation: &mut library::Observation<'_>,
-        paths: &[PathBuf],
-        rename: Option<&(PathBuf, PathBuf)>,
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        for documents in &self.documents {
-            let relative = paths
-                .iter()
-                .filter_map(|path| documents.relative(&path.to_string_lossy()).ok())
-                .collect::<Vec<_>>();
-            if !relative.is_empty() {
-                let renamed = rename.and_then(|(from, to)| {
-                    Some((
-                        documents.relative(&from.to_string_lossy()).ok()?,
-                        documents.relative(&to.to_string_lossy()).ok()?,
-                    ))
-                });
-                documents
-                    .acquire_paths(observation, &relative, renamed.as_ref(), cancelled)
-                    .await?;
+        let mut after = String::new();
+        let mut paths = Vec::new();
+        loop {
+            let page = observation
+                .catalog
+                .playlist_import_page(playlist, &after)
+                .await?;
+            let Some((last, _)) = page.last() else { break };
+            after.clone_from(last);
+            for (uri, path) in page {
+                let path = path
+                    .or_else(|| {
+                        library::file_media_path(&uri)
+                            .map(|path| path.to_string_lossy().into_owned())
+                    })
+                    .or_else(|| uri.starts_with("content:").then(|| uri.clone()));
+                if let Some(path) = path.filter(|path| {
+                    path.starts_with("content:") || std::path::Path::new(path).is_absolute()
+                }) {
+                    paths.push(path);
+                }
             }
         }
-        let native = paths
-            .iter()
-            .filter(|path| self.document_source(&path.to_string_lossy()).is_none())
-            .cloned()
-            .collect::<Vec<_>>();
-        scan::acquire_paths(observation, self, &native, rename, &|_| {}, cancelled).await?;
+        let configured = self.configured_file_roots()?;
+        paths.retain(|path| {
+            !configured
+                .iter()
+                .any(|root| std::path::Path::new(path).starts_with(root))
+        });
+        if !paths.is_empty() {
+            let walked = walk::walk(
+                &LocalFiles::importing(self, &paths),
+                observation,
+                &configured,
+                WalkScope::Paths {
+                    paths: &paths,
+                    rename: None,
+                },
+                &|_| {},
+                cancelled,
+            )
+            .await?;
+            walk::artwork(
+                crate::file::artwork::ArtworkFiles::Local,
+                observation,
+                &walked,
+                &self.artwork,
+                cancelled,
+            )
+            .await?;
+        }
+        observation.record_imported_files(playlist).await?;
         Ok(())
     }
 
@@ -487,4 +534,276 @@ fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
         }
     }
     Ok(normalized)
+}
+
+fn scope_of<'a>(scope: &WalkScope<'a>) -> WalkScope<'a> {
+    match scope {
+        WalkScope::All { resync } => WalkScope::All { resync: *resync },
+        WalkScope::Paths { paths, rename } => WalkScope::Paths {
+            paths,
+            rename: *rename,
+        },
+    }
+}
+
+/// The facts of a listed or opened file.
+pub(crate) fn entry(name: String, metadata: &fs::Metadata) -> Entry {
+    #[cfg(unix)]
+    let (device_id, inode) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            i64::try_from(metadata.dev()).ok(),
+            i64::try_from(metadata.ino()).ok(),
+        )
+    };
+    #[cfg(not(unix))]
+    let (device_id, inode) = (None, None);
+    Entry {
+        native: name.clone(),
+        name,
+        directory: metadata.is_dir(),
+        size: (!metadata.is_dir())
+            .then(|| i64::try_from(metadata.len()).ok())
+            .flatten(),
+        mtime_ns: metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
+            .unwrap_or_default(),
+        device_id,
+        inode,
+        native_id: None,
+        revision: None,
+    }
+}
+
+fn local_path(root: &str, relative: &str) -> PathBuf {
+    if relative.is_empty() {
+        PathBuf::from(root)
+    } else {
+        std::path::Path::new(root).join(relative.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+}
+
+pub(crate) fn local_row(root: &str, relative: &str, entry: &Entry) -> library::LocalFileWrite {
+    let path = local_path(root, relative);
+    let kind = if entry.directory {
+        library::LocalFileKind::Directory
+    } else if scan::is_cue(&path) {
+        library::LocalFileKind::Cue
+    } else if crate::file::artwork::supported_image(&path) {
+        library::LocalFileKind::Image
+    } else {
+        library::LocalFileKind::Media
+    };
+    library::LocalFileWrite {
+        path: path.to_string_lossy().into_owned(),
+        root: root.to_owned(),
+        relative_path: relative.to_owned(),
+        kind,
+        size_bytes: entry.size,
+        mtime_ns: entry.mtime_ns,
+        device_id: entry.device_id,
+        inode: entry.inode,
+        native_id: entry.native_id.clone(),
+        revision: entry.revision.clone(),
+        picture_index: None,
+        artist_pictures: None,
+        parse_version: Some(scan::LOCAL_PARSER_VERSION),
+        state: library::LocalFileState::Accepted,
+    }
+}
+
+/// The Local folders as a walk lists them, plus the roots an import adds.
+pub(crate) struct LocalFiles<'a> {
+    local: &'a LocalSource,
+    /// Dropped files and folders, and playlist entries, outside the folders.
+    pub(crate) imports: Vec<String>,
+}
+
+impl<'a> LocalFiles<'a> {
+    pub(crate) fn importing(local: &'a LocalSource, paths: &[String]) -> Self {
+        let imports = paths
+            .iter()
+            .filter(|path| {
+                !local
+                    .roots
+                    .iter()
+                    .any(|root| std::path::Path::new(path).starts_with(root))
+            })
+            .cloned()
+            .collect();
+        Self { local, imports }
+    }
+
+    fn walked(&self) -> impl Iterator<Item = String> + '_ {
+        self.local
+            .roots
+            .iter()
+            .filter(|root| !self.local.excludes(root))
+            .map(|root| root.to_string_lossy().into_owned())
+            .chain(self.imports.iter().cloned())
+    }
+}
+
+impl walk::FileSource for LocalFiles<'_> {
+    fn roots(&self) -> SourceResult<Vec<Root>> {
+        Ok(self
+            .walked()
+            .map(|root| Root {
+                root,
+                starts: vec![(String::new(), String::new())],
+            })
+            .collect())
+    }
+
+    fn excluded(&self, root: &str, relative: &str) -> bool {
+        !relative.is_empty() && self.local.excludes(&local_path(root, relative))
+    }
+
+    fn row(
+        &self,
+        root: &str,
+        relative: &str,
+        _native: &str,
+        entry: &Entry,
+    ) -> SourceResult<library::LocalFileWrite> {
+        Ok(local_row(root, relative, entry))
+    }
+
+    fn place(&self, path: &str) -> Option<(String, String, String)> {
+        if path.starts_with("content:") {
+            return self
+                .imports
+                .contains(&path.to_owned())
+                .then(|| (path.to_owned(), String::new(), String::new()));
+        }
+        let path = std::path::Path::new(path);
+        let root = self
+            .walked()
+            .filter(|root| path.starts_with(root))
+            .max_by_key(String::len)?;
+        let relative = path
+            .strip_prefix(&root)
+            .ok()?
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        Some((root, relative.clone(), relative))
+    }
+
+    async fn list(&self, root: &str, native: &str) -> SourceResult<Vec<Entry>> {
+        let directory = local_path(root, native);
+        tokio::task::spawn_blocking(move || {
+            let mut entries = Vec::new();
+            for entry in
+                fs::read_dir(&directory).map_err(|error| SourceError::Other(error.to_string()))?
+            {
+                let entry = entry.map_err(|error| SourceError::Other(error.to_string()))?;
+                let kind = entry
+                    .file_type()
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                // Symbolic links are not followed.
+                if !kind.is_file() && !kind.is_dir() {
+                    continue;
+                }
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                entries.push(self::entry(
+                    entry.file_name().to_string_lossy().into_owned(),
+                    &metadata,
+                ));
+            }
+            Ok(entries)
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+    }
+
+    async fn stat(&self, root: &str, native: &str) -> SourceResult<Entry> {
+        if root.starts_with("content:") {
+            let uri = root.to_owned();
+            let document = tokio::task::spawn_blocking(move || crate::stat_document(&uri))
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))??;
+            return Ok(Entry {
+                name: document.name.clone(),
+                native: document.name,
+                directory: document.directory,
+                size: document.size.and_then(|size| i64::try_from(size).ok()),
+                native_id: Some(document.native_id),
+                revision: document.revision,
+                ..Entry::default()
+            });
+        }
+        let path = local_path(root, native);
+        tokio::task::spawn_blocking(move || match fs::metadata(&path) {
+            Ok(metadata) => Ok(entry(
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                &metadata,
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(SourceError::NotFound)
+            }
+            Err(error) => Err(SourceError::Other(error.to_string())),
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+    }
+
+    async fn read_media(
+        &self,
+        file: &mut library::LocalFileWrite,
+        _native: &str,
+        worker: std::sync::Arc<std::sync::Mutex<crate::file::media::Worker>>,
+        _siblings: Option<&std::collections::BTreeSet<String>>,
+    ) -> SourceResult<crate::file::media::MediaRead> {
+        if file.path.starts_with("content:") {
+            // A document a playlist named, outside the document folders.
+            let (_, mut read) =
+                crate::file::documents::read_document_media(&file.path, LOCAL_SOURCE_ID).await?;
+            if let crate::file::media::MediaRead::Accepted(track) = &mut read {
+                let identity = crate::document_identity(&file.path)?;
+                track.track.object_id = crate::file::media::track_id(std::path::Path::new(
+                    file.native_id.as_deref().unwrap_or(&file.path),
+                ));
+                track.track.media_uri = Some(library::document_media_uri(&identity));
+                track.track.source_path = Some(file.path.clone());
+                track.audio_revision = crate::file::remote::scan::audio_revision(
+                    &file.path,
+                    file.revision.as_deref(),
+                    file.size_bytes,
+                );
+                track.revision_hashes_audio = true;
+            }
+            file.parse_version = Some(crate::file::remote::scan::PARSER_VERSION);
+            return Ok(read);
+        }
+        let path = PathBuf::from(&file.path);
+        tokio::task::spawn_blocking(move || {
+            let mut worker = worker.lock().unwrap_or_else(|error| error.into_inner());
+            media::read_media(&mut worker, path, None)
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))
+    }
+
+    async fn read_cue(
+        &self,
+        file: &mut library::LocalFileWrite,
+        _native: &str,
+        worker: std::sync::Arc<std::sync::Mutex<crate::file::media::Worker>>,
+        _siblings: Option<&std::collections::BTreeSet<String>>,
+    ) -> SourceResult<walk::CueRead> {
+        let path = PathBuf::from(&file.path);
+        tokio::task::spawn_blocking(move || {
+            let mut worker = worker.lock().unwrap_or_else(|error| error.into_inner());
+            scan::read_local_cue(&mut worker, &path)
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))
+    }
 }

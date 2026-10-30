@@ -1169,7 +1169,7 @@ pub(crate) async fn enrich_imported_playlist(
     if owner
         .shared
         .catalog
-        .imported_local_uri_page(Some(playlist), "")
+        .playlist_import_page(playlist, "")
         .await
         .map_err(string_error)?
         .is_empty()

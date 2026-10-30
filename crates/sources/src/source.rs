@@ -268,8 +268,13 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match change {
-            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)
-            | SelectedFeedChange::Local(LocalLiveChange::Rescan) => Ok(false),
+            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => Ok(false),
+            // The watcher lost events: the walk lists what changed.
+            SelectedFeedChange::Local(LocalLiveChange::Rescan) => self
+                .source
+                .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Changed)
+                .await
+                .map(|_| true),
             SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => self
                 .source
                 .apply_changes(catalog, items)
@@ -1136,13 +1141,14 @@ impl Source {
                     return Ok((false, freshness.clone()));
                 }
             }
-            let stamp = Some(changes.start_observation().await?);
+            changes.start_observation().await?;
             let started = unix_now();
             let report = |value| {
                 if !check || !matches!(&self.implementation, Implementation::Files(_)) {
                     progress(value);
                 }
             };
+            let resync = refresh == Refresh::Resync;
             let complete = match &self.implementation {
                 Implementation::Plex(source) => {
                     source
@@ -1151,16 +1157,33 @@ impl Source {
                     true
                 }
                 Implementation::Files(source) => {
-                    source
-                        .acquire_catalog(changes, &report, &cancelled_fn)
-                        .await?;
-                    catalog
-                        .source_file_reads_complete(source_id, stamp.unwrap())
-                        .await?
+                    let walked = crate::file::walk::walk(
+                        source,
+                        changes,
+                        &[source.location("")?],
+                        crate::file::walk::WalkScope::All { resync },
+                        &report,
+                        &cancelled_fn,
+                    )
+                    .await?;
+                    crate::file::walk::artwork(
+                        crate::file::artwork::ArtworkFiles::Remote(source),
+                        changes,
+                        &walked,
+                        &source.artwork,
+                        &cancelled_fn,
+                    )
+                    .await?;
+                    true
                 }
                 Implementation::Local(source) => {
                     source
-                        .acquire_catalog(changes, &report, &cancelled_fn, true)
+                        .walk(
+                            changes,
+                            crate::file::walk::WalkScope::All { resync },
+                            &report,
+                            &cancelled_fn,
+                        )
                         .await?;
                     true
                 }
@@ -1178,12 +1201,6 @@ impl Source {
             };
             if cancelled_fn() || self.is_retired() {
                 return Err(SourceError::Cancelled);
-            }
-            if matches!(
-                self.implementation,
-                Implementation::Local(_) | Implementation::Files(_)
-            ) {
-                changes.purge_source_file_absences(stamp.unwrap()).await?;
             }
             let files = matches!(
                 self.implementation,
@@ -1629,19 +1646,13 @@ impl Source {
         name: &str,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     ) -> SourceResult<library::PlaylistKey> {
-        let configured = match &self.implementation {
-            Implementation::Local(source) => source.roots(),
-            _ => &[],
+        let Implementation::Local(local) = &self.implementation else {
+            return Err(SourceError::InvalidRequest("Only Local imports files"));
         };
         self.catalog_operation(catalog, async |changes| {
-            crate::file::local::scan::import_paths(
-                changes,
-                configured,
-                paths,
-                name,
-                progress,
-                &|| self.is_retired(),
-            )
+            crate::file::local::scan::import_paths(changes, local, paths, name, progress, &|| {
+                self.is_retired()
+            })
             .await
         })
         .await
@@ -1865,53 +1876,52 @@ impl Source {
         .await
     }
 
-    async fn acquire_paths(
+    /// A live change: the changed paths are walked in a live observation.
+    pub(crate) async fn acquire_paths(
         &self,
         changes: &mut library::Observation<'_>,
         paths: &[String],
         rename: Option<&(String, String)>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let previous = changes.observed;
-        let result = async {
-            let cancelled = || self.is_retired() || cancelled();
-            if cancelled() {
-                return Err(SourceError::Cancelled);
-            }
-            let stamp = Some(changes.start_observation().await?);
-            match &self.implementation {
-                Implementation::Local(local) => {
-                    local
-                        .acquire_paths(
-                            changes,
-                            &paths.iter().map(PathBuf::from).collect::<Vec<_>>(),
-                            rename
-                                .map(|(a, b)| (PathBuf::from(a), PathBuf::from(b)))
-                                .as_ref(),
-                            &cancelled,
-                        )
-                        .await?
-                }
-                Implementation::Files(files) => {
-                    files
-                        .acquire_paths(changes, paths, rename, &cancelled)
-                        .await?
-                }
-                _ => {
-                    return Err(SourceError::InvalidRequest(
-                        "Source does not have file paths",
-                    ));
-                }
-            }
-            if cancelled() {
-                return Err(SourceError::Cancelled);
-            }
-            changes.purge_source_file_absences(stamp.unwrap()).await?;
-            Ok(())
+        let cancelled = || self.is_retired() || cancelled();
+        if cancelled() {
+            return Err(SourceError::Cancelled);
         }
-        .await;
-        changes.observed = previous;
-        result
+        let scope = crate::file::walk::WalkScope::Paths { paths, rename };
+        match &self.implementation {
+            Implementation::Local(local) => {
+                local.walk(changes, scope, &|_| {}, &cancelled).await?;
+            }
+            Implementation::Files(files) => {
+                let walked = crate::file::walk::walk(
+                    files,
+                    changes,
+                    &[files.location("")?],
+                    scope,
+                    &|_| {},
+                    &cancelled,
+                )
+                .await?;
+                crate::file::walk::artwork(
+                    crate::file::artwork::ArtworkFiles::Remote(files),
+                    changes,
+                    &walked,
+                    &files.artwork,
+                    &cancelled,
+                )
+                .await?;
+            }
+            _ => {
+                return Err(SourceError::InvalidRequest(
+                    "Source does not have file paths",
+                ));
+            }
+        }
+        if cancelled() {
+            return Err(SourceError::Cancelled);
+        }
+        Ok(())
     }
 
     pub(crate) async fn acquire_items(

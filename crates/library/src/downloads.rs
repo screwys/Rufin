@@ -50,8 +50,8 @@ impl Catalog {
         let mut reader = self.acquire_reader().await?;
         let needed = crate::connect::NEEDED_TRACK_KEYS;
         let row: Option<(Option<String>, bool, Option<String>, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT (SELECT revision FROM local_files WHERE source_key=r.source_key AND path=coalesce(d.source_path,(SELECT path FROM local_locators WHERE media_uri=r.media_uri AND origin IN ('local','import') LIMIT 1)) LIMIT 1),
-                EXISTS(SELECT 1 FROM local_files f WHERE f.source_key=r.source_key AND f.path=d.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM local_locators l WHERE l.media_uri=r.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%'),
+            "SELECT (SELECT revision FROM files WHERE source_key=r.source_key AND path=coalesce(d.source_path,(SELECT path FROM local_locators WHERE media_uri=r.media_uri AND origin IN ('local','import') LIMIT 1)) LIMIT 1),
+                EXISTS(SELECT 1 FROM files f WHERE f.source_key=r.source_key AND f.path=d.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM local_locators l WHERE l.media_uri=r.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%'),
                 coalesce(d.source_path,d.metadata->>'$.source_path'),coalesce(r.source_format,d.metadata->>'$.source_format')
              FROM tracks r LEFT JOIN track_details d USING(track_key) WHERE r.media_uri=?1 AND (r.indexed=1 OR (r.track_key IN ({needed}) AND (d.source_path IS NOT NULL OR EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=r.media_uri AND locator.origin IN ('local','import')))))"
         )))

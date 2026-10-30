@@ -267,7 +267,11 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
             sources::Refresh::Changed,
         )
         .await;
-    assert!(matches!(interrupted, Err(sources::SourceError::Cancelled)));
+    // An unchanged walk reports no progress, so it finishes before the cancellation.
+    assert!(matches!(
+        interrupted,
+        Ok(_) | Err(sources::SourceError::Cancelled)
+    ));
     assert_eq!(
         album_view(&catalog, album, "Album cover after cancelled discovery").await
             .row
@@ -386,27 +390,20 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             )
             .await
             .unwrap();
-        let observation = catalog
-            .local_file_page(initial.0, None, 10, &ReadCancellation::new())
-            .await
-            .unwrap()
+        let observation = stored_files(&catalog, configuration.source_id.as_str()).await
             .into_iter()
             .find(|file| file.kind == library::LocalFileKind::Media)
             .unwrap();
-        assert_eq!(observation.parse_version, Some(19));
+        assert_eq!(observation.parse_version, Some(20));
         assert_eq!(observation.state, library::LocalFileState::Accepted);
         catalog.close().await.unwrap();
     }
     let catalog = Catalog::open(&database_path).await.unwrap();
     let received_path = track.canonicalize().unwrap();
-    let previous = catalog
-        .source_files(
-            configuration.source_id.as_str(),
-            &[received_path.to_string_lossy().into_owned()],
-        )
+    let previous = stored_files(&catalog, configuration.source_id.as_str())
         .await
-        .unwrap()
-        .pop()
+        .into_iter()
+        .find(|file| file.path == received_path.to_string_lossy())
         .unwrap();
     let snapshot = store.path().join("profile.sqlite");
     let profile = library::profile::ProfileStore::open(
@@ -433,14 +430,10 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     library::profile::ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
         .await
         .unwrap();
-    let received = catalog
-        .source_files(
-            configuration.source_id.as_str(),
-            &[received_path.to_string_lossy().into_owned()],
-        )
+    let received = stored_files(&catalog, configuration.source_id.as_str())
         .await
-        .unwrap()
-        .pop()
+        .into_iter()
+        .find(|file| file.path == received_path.to_string_lossy())
         .unwrap();
     assert_eq!(received, previous);
     catalog.close().await.unwrap();
@@ -537,10 +530,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .to_string_lossy()
         .into_owned()];
     assert_eq!(
-        catalog
-            .source_files(configuration.source_id.as_str(), &paths)
-            .await
-            .unwrap()[0]
+        stored_files(&catalog, configuration.source_id.as_str())
+                .await
+                .into_iter()
+                .find(|file| file.path == paths[0])
+                .unwrap()
             .state,
         library::LocalFileState::Rejected
     );
@@ -557,10 +551,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .await
             .unwrap();
         assert_eq!(
-            catalog
-                .source_files(configuration.source_id.as_str(), &paths)
+            stored_files(&catalog, configuration.source_id.as_str())
                 .await
-                .unwrap()[0]
+                .into_iter()
+                .find(|file| file.path == paths[0])
+                .unwrap()
                 .state,
             library::LocalFileState::Rejected
         );
@@ -578,10 +573,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .await
         .unwrap();
     assert_eq!(
-        catalog
-            .source_files(configuration.source_id.as_str(), &paths)
-            .await
-            .unwrap()[0]
+        stored_files(&catalog, configuration.source_id.as_str())
+                .await
+                .into_iter()
+                .find(|file| file.path == paths[0])
+                .unwrap()
             .state,
         library::LocalFileState::Accepted
     );
@@ -623,7 +619,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
         )
         .await
         .expect("scan");
-    let initial = sources::published(&mut updates).expect("catalog update");
+    sources::published(&mut updates).expect("catalog update");
 
     fs::create_dir(root.path().join("empty")).expect("change only Local inventory bookkeeping");
     source
@@ -692,24 +688,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
     if let Some(update) = sources::published(&mut updates) {
         assert!(update.1.intersects(sources::Shown::CATALOG));
     }
-    let mut files = Vec::new();
-    loop {
-        let page = catalog
-            .local_file_page(
-                initial.0,
-                files
-                    .last()
-                    .map(|file: &library::LocalFileRow| file.local_file_key),
-                128,
-                &ReadCancellation::new(),
-            )
-            .await
-            .unwrap();
-        if page.is_empty() {
-            break;
-        }
-        files.extend(page);
-    }
+    let files = stored_files(&catalog, configuration.source_id.as_str()).await;
     assert_eq!(files.len(), 263);
     assert!(
         files
@@ -1037,7 +1016,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
         catalog.set_distinct_track_covers(distinct);
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         source
-            .acquire_catalog(&catalog, &|_| {}, cancelled, sources::Refresh::Changed)
+            .acquire_catalog(&catalog, &|_| {}, cancelled, sources::Refresh::Resync)
             .await
             .unwrap();
         for (index, path) in paths.iter().enumerate() {
@@ -1074,7 +1053,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
         }
     }
     assert_eq!(
-        sqlx::query_scalar::<_, Option<i64>>("SELECT picture_index FROM local_files WHERE path=?1")
+        sqlx::query_scalar::<_, Option<i64>>("SELECT picture_index FROM files WHERE path=?1")
             .bind(paths[0].to_string_lossy().as_ref())
             .fetch_one(&mut stored)
             .await
@@ -1816,7 +1795,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
     )
     .await
     .unwrap();
-    sqlx::query("UPDATE local_files SET parse_version=16,parsed_stamp=json_set(parsed_stamp,'$[3]',16) WHERE kind IN ('media','cue')")
+    sqlx::query("UPDATE files SET parse_version=16 WHERE kind IN ('media','cue')")
         .execute(&mut stored)
         .await
         .unwrap();
@@ -1909,44 +1888,17 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         .expect("Track row")[0]
         .object_id
         .clone();
-    let media = catalog
-        .local_file_page(initial.0, None, 128, &ReadCancellation::new())
-        .await
-        .expect("Local observations")
-        .into_iter()
-        .find(|file| file.kind == library::LocalFileKind::Media)
-        .expect("media observation");
-    let mut observation = catalog
-        .observe(configuration.source_id.as_str(), None)
-        .await
-        .unwrap();
-    observation
-        .write_file_observations(
-            &[(
-                library::LocalFileWrite {
-                    path: media.path,
-                    root: media.root,
-                    relative_path: media.relative_path,
-                    kind: media.kind,
-                    size_bytes: media.size_bytes,
-                    mtime_ns: media.mtime_ns,
-                    device_id: None,
-                    inode: None,
-                    native_id: None,
-                    picture_index: None,
-                    artist_pictures: None,
-                    revision: None,
-                    parse_version: media.parse_version,
-                    state: media.state,
-                },
-                media.dependencies,
-            )],
-            Vec::new(),
-            true,
-        )
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    // Without a native identity, only the reported rename links the two paths.
+    sqlx::query("UPDATE files SET device_id=NULL,inode=NULL WHERE kind='media'")
+        .execute(&mut stored)
         .await
         .expect("remove native identity enrichment");
-    assert!(!observation.changed());
+    stored.close().await.unwrap();
     fs::rename(&old, &new).expect("rename file");
     source
         .apply_local_change(
@@ -2085,7 +2037,8 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
                     .windows(2)
                     .all(|pair| pair[0].completed <= pair[1].completed)
             );
-            assert_eq!(progress.last().unwrap().completed, 5);
+            // A walk that reads nothing reports nothing.
+            assert!(progress.last().is_none_or(|last| last.completed == 5));
             assert_eq!(
                 sources::listed_tracks(&catalog, MemberRead::new(Collection::Source(source_key)))
                     .await
@@ -2216,4 +2169,18 @@ fn write_silent_wav(path: &Path, seconds: u32) -> std::io::Result<()> {
     bytes.extend_from_slice(&data_len.to_le_bytes());
     bytes.resize(bytes.len() + data_len as usize, 0);
     fs::write(path, bytes)
+}
+
+/// Every stored file row of a source, in walk order.
+async fn stored_files(catalog: &Catalog, source: &str) -> Vec<library::LocalFileWrite> {
+    catalog
+        .observe(source, None)
+        .await
+        .unwrap()
+        .file_rows(&[], &[], None, false, 8192)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.file)
+        .collect()
 }

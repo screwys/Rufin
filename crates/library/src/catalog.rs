@@ -1,6 +1,6 @@
 //! Canonical observations and concrete source membership writes.
 use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
-use sqlx::{FromRow, SqliteConnection};
+use sqlx::FromRow;
 use std::collections::{HashMap, HashSet};
 pub(crate) mod albums;
 pub(crate) mod artwork;
@@ -19,6 +19,7 @@ pub(crate) mod snapshot;
 pub(crate) mod strings;
 pub(crate) mod views;
 pub(crate) mod write;
+pub use files::{FileBatch, StoredFile, walk_key};
 pub use observations::*;
 pub use write::{Change, Scope, SourcePhase, StateChange};
 
@@ -44,8 +45,6 @@ impl Freshness {
 pub struct Observation<'a> {
     pub catalog: &'a Catalog,
     pub source_id: &'a str,
-    /// The stamp file rows carry for this observation.
-    pub observed: Option<i64>,
     pub source: SourceKey,
     /// The walk `start_observation` opened: a listing whose completion hides what it did not
     /// see. Without one, every Write of this observation is a live change.
@@ -120,10 +119,12 @@ pub struct LocalArtworkCandidate {
 }
 
 impl Catalog {
+    /// An observation of a source's rows. The second argument is no longer read; the callers
+    /// outside the file lane drop it at the phase merge.
     pub async fn observe<'a>(
         &'a self,
         source_id: &'a str,
-        observed: Option<i64>,
+        _unused: Option<i64>,
     ) -> LibraryResult<Observation<'a>> {
         self.loaded().await;
         let source = self
@@ -133,7 +134,6 @@ impl Catalog {
             catalog: self,
             source_id,
             source,
-            observed,
             walk: None,
             changed: false,
             memberships: HashMap::new(),

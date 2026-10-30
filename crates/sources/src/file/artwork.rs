@@ -260,22 +260,26 @@ impl<'a> ArtworkFiles<'a> {
         }
     }
 
+    /// Album, track and artist pictures of the albums with tracks in `directories` or the
+    /// directory below, and of the artists those tracks credit; every album when None.
     pub(crate) async fn acquire(
         &self,
         observation: &mut library::Observation<'_>,
+        directories: Option<&[String]>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let catalog = observation.catalog;
         let source_id = observation.source_id;
-        let stamp = observation.observed;
         let mut after_album = String::new();
         loop {
             let albums = catalog
-                .source_artwork_album_page(source_id, &after_album, stamp)
+                .source_artwork_album_page(source_id, &after_album, directories)
                 .await?;
             if albums.is_empty() {
                 break;
             }
+            // A short page is the last one.
+            let last_albums = albums.len() < 128;
             for album in albums {
                 check_cancelled(cancelled)?;
                 after_album.clone_from(&album);
@@ -289,6 +293,7 @@ impl<'a> ArtworkFiles<'a> {
                     if tracks.is_empty() {
                         break;
                     }
+                    let last = tracks.len() < 128;
                     for track in tracks {
                         check_cancelled(cancelled)?;
                         for (slot, prefix) in
@@ -322,7 +327,7 @@ impl<'a> ArtworkFiles<'a> {
                             break;
                         }
                     }
-                    if folder_cover.is_some() {
+                    if folder_cover.is_some() || last {
                         break;
                     }
                 }
@@ -336,6 +341,7 @@ impl<'a> ArtworkFiles<'a> {
                         if tracks.is_empty() {
                             break;
                         }
+                        let last = tracks.len() < 128;
                         let mut bindings = Vec::new();
                         let mut inspected = Vec::new();
                         for track in tracks {
@@ -363,7 +369,7 @@ impl<'a> ArtworkFiles<'a> {
                         observation.record_source_file_images(&inspected).await?;
                         check_cancelled(cancelled)?;
                         observation.set_source_artwork("track", &bindings).await?;
-                        if found && !catalog.distinct_track_covers() {
+                        if found && !catalog.distinct_track_covers() || last {
                             break;
                         }
                     }
@@ -377,9 +383,13 @@ impl<'a> ArtworkFiles<'a> {
                     )
                     .await?;
             }
+            if last_albums {
+                break;
+            }
         }
-        self.acquire_artist_artwork(observation, cancelled).await?;
-        if matches!(self, Self::Local) {
+        self.acquire_artist_artwork(observation, directories, cancelled)
+            .await?;
+        if matches!(self, Self::Local) && directories.is_none() {
             observation.clear_partial_file_image_observations().await?;
         }
         Ok(())
@@ -388,19 +398,20 @@ impl<'a> ArtworkFiles<'a> {
     async fn acquire_artist_artwork(
         &self,
         observation: &mut library::Observation<'_>,
+        directories: Option<&[String]>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let catalog = observation.catalog;
         let source_id = observation.source_id;
-        let stamp = observation.observed;
         let mut after_artist = String::new();
         loop {
             let artists = catalog
-                .source_artwork_artist_page(source_id, &after_artist, stamp)
+                .source_artwork_artist_page(source_id, &after_artist, directories)
                 .await?;
             if artists.is_empty() {
                 break;
             }
+            let last_artists = artists.len() < 128;
             let mut bindings = Vec::new();
             let result: SourceResult<()> = async {
                 for (artist, name) in artists {
@@ -418,6 +429,7 @@ impl<'a> ArtworkFiles<'a> {
                             if tracks.is_empty() {
                                 break;
                             }
+                            let last = tracks.len() < 128;
                             let mut pictures = Vec::new();
                             let result: SourceResult<()> = async {
                                 for track in tracks {
@@ -465,7 +477,7 @@ impl<'a> ArtworkFiles<'a> {
                             .await;
                             observation.record_source_file_images(&pictures).await?;
                             result?;
-                            if image.is_some() {
+                            if image.is_some() || last {
                                 break;
                             }
                         }
@@ -482,6 +494,9 @@ impl<'a> ArtworkFiles<'a> {
             check_cancelled(cancelled)?;
             observation.set_source_artwork("artist", &bindings).await?;
             result?;
+            if last_artists {
+                break;
+            }
         }
         Ok(())
     }
