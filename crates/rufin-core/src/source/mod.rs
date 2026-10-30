@@ -3002,7 +3002,9 @@ impl SourceOwner {
             );
             return Ok(source);
         }
-        Err(SourceError::Cancelled.to_string())
+        drop(clients);
+        // The settings changed while the client opened, so it opens from the new ones.
+        self.client(source_id)
     }
 
     pub(crate) async fn open_client(&self, source_id: SourceId) -> Result<Arc<Source>, String> {
