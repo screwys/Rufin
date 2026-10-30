@@ -483,6 +483,8 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         2_000
     );
     catalog.close().await.expect("close before file removal");
+    // An empty root reads as an unmounted one and keeps its rows.
+    fs::create_dir(root.path().join("Other")).unwrap();
     fs::remove_file(&track).expect("remove cached file while stopped");
     let catalog = Catalog::open(&database_path)
         .await

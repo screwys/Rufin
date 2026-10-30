@@ -678,6 +678,15 @@ impl<F: FileSource> Walker<'_, '_, F> {
                     return self.keep_subtree(root, &key).await;
                 }
             };
+            // An empty root with stored rows is an unmounted mount point, as unavailable as an
+            // unplugged drive.
+            if relative.is_empty()
+                && entries.is_empty()
+                && self.peek().await?.is_some_and(|row| row.file.root == root)
+            {
+                self.fail(format!("File source root {root} is empty"));
+                return self.keep_subtree(root, &key).await;
+            }
             let mut entries = entries
                 .into_iter()
                 .filter(|entry| !self.files.excluded(root, &join(relative, &entry.name)))
