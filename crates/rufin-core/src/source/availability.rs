@@ -30,35 +30,13 @@ impl SourceOwner {
         let paths = catalog
             .local_media_locations(uris)
             .await
-            .map_err(string_error)?;
-        let shared: Vec<_> = paths.iter().map(|(_, _, shared)| *shared).collect();
-        let paths = paths.into_iter().map(|(_, paths, _)| paths).collect();
-        let mut available = sources::local_files_available(paths)
+            .map_err(string_error)?
+            .into_iter()
+            .map(|(_, paths, _)| paths)
+            .collect();
+        let available = sources::local_files_available(paths)
             .await
             .map_err(string_error)?;
-        let native: Vec<_> = uris
-            .iter()
-            .enumerate()
-            .filter(|(index, uri)| direct_local_media(uri) && !available[*index])
-            .map(|(index, uri)| (index, uri.clone()))
-            .collect();
-        if !native.is_empty() {
-            let connect = self
-                .shared
-                .connect
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .upgrade();
-            if let Some(connect) = connect {
-                let requested: Vec<_> = native.iter().map(|(_, uri)| uri.clone()).collect();
-                let peers = connect.media_availability(&requested).await?;
-                for ((index, _), peer) in native.iter().zip(peers) {
-                    available[*index] = peer;
-                }
-            } else if native.iter().any(|(index, _)| shared[*index]) {
-                return Err("Rufin Connect is unavailable".into());
-            }
-        }
         for (index, uri) in uris.iter().enumerate() {
             if available[index] {
                 continue;

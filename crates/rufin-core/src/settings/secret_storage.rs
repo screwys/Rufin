@@ -101,7 +101,6 @@ impl KeyringSecretStore {
                         *session = false;
                     }
                 }
-                stored.shared_settings.persist_credentials();
                 Ok(())
             })
             .map_err(SecretError::Config)

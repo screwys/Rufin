@@ -127,7 +127,6 @@ pub struct LyricsService {
     dictionary_status: Mutex<::lyrics::JapaneseDictionaryStatus>,
     catalog: Catalog,
     source_owner: Arc<crate::source::SourceOwner>,
-    connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     runtime: tokio::runtime::Handle,
     events: Sender<LyricsEvent>,
     current: tokio::sync::watch::Sender<CurrentLyrics>,
@@ -158,7 +157,6 @@ impl LyricsService {
             dictionary_status: Mutex::new(::lyrics::JapaneseDictionaryStatus::Idle),
             catalog,
             source_owner,
-            connect: Mutex::new(std::sync::Weak::new()),
             runtime,
             events,
             current: tokio::sync::watch::channel(CurrentLyrics::Cleared).0,
@@ -592,7 +590,7 @@ impl LyricsService {
             LyricsAuthority::Source => "source",
             LyricsAuthority::External => "external",
         };
-        let mut cached = self
+        let Some(cached) = self
             .catalog
             .lyrics_cache_for_role(
                 request.media_uri(),
@@ -604,26 +602,8 @@ impl LyricsService {
             )
             .await
             .ok()
-            .flatten();
-        if cached.is_none() && self.matches_current(request.id) {
-            let connect = self
-                .connect
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .upgrade();
-            if let Some(connect) = connect {
-                cached = connect
-                    .fetch_cached_lyrics(crate::connect::LyricsCacheQuery {
-                        media_uri: request.media_uri().to_owned(),
-                        authority: authority.into(),
-                        role,
-                        language,
-                        script,
-                    })
-                    .await;
-            }
-        }
-        let Some(cached) = cached else {
+            .flatten()
+        else {
             return false;
         };
         let candidate = LyricsBundle::from_cache_payload(&cached.lyrics)
@@ -1422,14 +1402,6 @@ impl Drop for LyricsService {
 }
 
 impl LyricsHandle {
-    pub(crate) fn install_connect(&self, owner: &Arc<crate::connect::ConnectOwner>) {
-        *self
-            .service
-            .connect
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(owner);
-    }
-
     pub fn current(&self) -> tokio::sync::watch::Receiver<CurrentLyrics> {
         self.service.current.subscribe()
     }
@@ -1905,7 +1877,6 @@ mod tests {
                             artwork_binding: None,
                         },
                         position: index,
-                        received_from_connect: false,
                         provenance: playback::Provenance::Manual,
                     }),
                 }),
@@ -2024,7 +1995,6 @@ mod tests {
                         artwork_binding: None,
                     },
                     position: 0,
-                    received_from_connect: false,
                     provenance: playback::Provenance::Manual,
                 }),
             }),

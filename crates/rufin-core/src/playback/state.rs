@@ -418,69 +418,6 @@ impl Player {
         })
     }
 
-    pub(super) fn stop_continuation(
-        &mut self,
-        expected: &playback::ContinuationHeader,
-        sample: &ClockSample,
-    ) -> Option<playback::ContinuationHeader> {
-        let Some(current) = self.continuation(sample) else {
-            return None;
-        };
-        if current.header.current != expected.current
-            || current.header.listen.as_ref().map(|listen| &listen.play_id)
-                != expected.listen.as_ref().map(|listen| &listen.play_id)
-        {
-            return None;
-        }
-
-        self.qualify_current();
-        let header = self.continuation(sample).map(|state| state.header);
-        self.sequence.set_selected_duration(self.duration_millis());
-        self.stop(sample, false);
-
-        header
-    }
-
-    pub(super) fn adopt_continuation(
-        &mut self,
-        continuation: playback::Continuation,
-        stream: PreparedStream,
-        backend: Box<dyn PlaybackBackend>,
-        sample: &ClockSample,
-    ) -> Result<(), PlaybackError> {
-        let playback::Continuation { header, mut queue } = continuation;
-        queue.current_index = Some(header.current);
-        queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
-        queue.repeat_mode = header.repeat;
-        queue.shuffled = header.shuffled;
-        let sequence =
-            Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
-        if sequence.selected().is_none() {
-            return Err(SequenceError::MissingSelectedEntry.into());
-        }
-
-        self.swap_backend(backend)?;
-        self.finish_current(RunEndReason::Replaced, sample);
-        self.cancel_queue_read();
-        self.cancel_candidate_tasks(false);
-        self.deferred_queue.clear();
-        self.queue_loading = false;
-        self.queue_transport = None;
-        self.settings.playback_rate = header.playback_rate;
-        self.auto_dj_enabled = header.auto_dj;
-        self.auto_dj_refill_threshold = header.auto_dj_refill_threshold;
-        self.adopt_sequence(sequence, stream, header.desired_playing);
-        if let (Some(current), Some(listen)) = (self.current_run.as_mut(), header.listen) {
-            current.play_id = listen.play_id;
-            current.started_at_unix_seconds = listen.started_at_unix_seconds;
-            current.local_period = listen.local_period;
-            current.audible_millis = listen.audible_millis;
-            current.qualified = listen.qualified;
-            current.last_monotonic_millis = Some(sample.monotonic_millis);
-        }
-
-        Ok(())
-    }
     pub(super) fn external_queue_extent(&self) -> Option<(usize, usize)> {
         self.external
             .as_ref()
@@ -632,6 +569,7 @@ impl Player {
         stream: PreparedStream,
         playing: bool,
         backend: Box<dyn PlaybackBackend>,
+        sample: &ClockSample,
     ) -> Result<(), PlaybackError> {
         let sequence =
             Sequence::from_window(queue, self.sequence.revision() + 1, self.sequence.next_id())?;
@@ -639,6 +577,12 @@ impl Player {
             return Err(SequenceError::MissingSelectedEntry.into());
         }
         let _ = self.swap_backend(backend);
+        self.finish_current(RunEndReason::Replaced, sample);
+        self.cancel_queue_read();
+        self.cancel_candidate_tasks(false);
+        self.deferred_queue.clear();
+        self.queue_loading = false;
+        self.queue_transport = None;
         self.adopt_sequence(sequence, stream, playing);
         Ok(())
     }

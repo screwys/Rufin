@@ -17,7 +17,8 @@ pub enum StorageReset {
 pub struct StorageResetRequest {
     reset: StorageReset,
     stored: Box<StoredSettings>,
-    connect: Box<crate::connect::ConnectSettings>,
+    /// Connect's device identity and profile keys.
+    connect_keys: Vec<secrets::SecretKey>,
     secrets: Arc<dyn secrets::SecretStore>,
 }
 
@@ -25,7 +26,7 @@ impl SettingsOwner {
     pub(crate) fn prepare_storage_reset(
         &self,
         reset: StorageReset,
-        connect: crate::connect::ConnectSettings,
+        connect_keys: Vec<secrets::SecretKey>,
     ) -> Result<StorageResetRequest, String> {
         let stored = self.file.load();
         let secrets = if reset == StorageReset::AllData
@@ -40,25 +41,8 @@ impl SettingsOwner {
         Ok(StorageResetRequest {
             reset,
             stored: Box::new(stored),
-            connect: Box::new(connect),
+            connect_keys,
             secrets,
-        })
-    }
-
-    /// Remove an earlier version's Connect keys, files and shared settings
-    /// stamps. The keys are named in device.json, so they go first.
-    pub(crate) fn reset_connect(&self, directory: &Path) -> Result<(), String> {
-        let connect = fs::read(directory.join("device.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
-        for key in crate::connect::secret_keys(&connect) {
-            self.secrets.delete_secret(&key).map_err(error)?;
-        }
-        clear_directory(directory, &[])?;
-        self.file.update(|stored| {
-            stored.shared_settings = Default::default();
-            Ok(())
         })
     }
 }
@@ -69,7 +53,7 @@ impl StorageResetRequest {
         let Self {
             reset,
             stored,
-            mut connect,
+            connect_keys,
             secrets,
         } = self;
         let roots = [
@@ -87,6 +71,8 @@ impl StorageResetRequest {
             keep.extend(
                 ["secrets.json", "backup-password.json"].map(|name| paths.config_dir().join(name)),
             );
+            // The device keeps its name and identity; Connect's records go with the Store.
+            keep.push(paths.connect_dir().join("device.json"));
         }
         let retained = if reset == StorageReset::KeepCredentials {
             retained_connections(*stored)
@@ -117,7 +103,7 @@ impl StorageResetRequest {
                     .copied()
                     .map(super::scrobbling_secret_key),
             );
-            keys.extend(crate::connect::secret_keys(&connect));
+            keys.extend(connect_keys);
             for key in keys {
                 secrets.delete_secret(&key).map_err(error)?;
             }
@@ -126,10 +112,6 @@ impl StorageResetRequest {
         ::lyrics::release_japanese_reader();
         for root in roots {
             clear_directory(&root, &keep)?;
-        }
-        if reset == StorageReset::KeepCredentials {
-            connect.pending_import = None;
-            crate::connect::write_device_config(&paths.connect_dir(), &connect)?;
         }
         fs::create_dir_all(paths.config_dir()).map_err(error)?;
         // Replace the whole document, including settings unknown to this version.

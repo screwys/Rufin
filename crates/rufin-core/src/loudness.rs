@@ -442,11 +442,9 @@ impl Analysis<'_> {
         debug!(track = %playable.track, "decoding for loudness");
         let owner = Arc::clone(self.source_owner);
         let stream = prepare_stream(
-            self.catalog,
             playable,
             StreamRequest::new(&playable.media_uri, StreamQuality::Original),
             Some(self.configuration),
-            None,
             Some(self.source_owner.downloads()),
             move |source_id| async move {
                 tokio::task::spawn_blocking(move || owner.client(&source_id))

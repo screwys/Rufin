@@ -12,7 +12,6 @@ mod plex;
 mod queue;
 pub(crate) mod state;
 pub use commands::*;
-pub(crate) use continuation::PreparedContinuation;
 #[cfg(test)]
 mod queue_tests;
 
@@ -61,7 +60,6 @@ pub struct PlaybackOwner {
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
     source: Mutex<std::sync::Weak<SourceOwner>>,
-    connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     /// Takes commands from construction on; they wait until the restored queue is in place.
     active: Mutex<Option<Playback>>,
     pending_queue: Mutex<Option<QueueUpdate>>,
@@ -102,10 +100,6 @@ fn keep_playable(
 }
 
 enum PlaybackStoreWork {
-    Continue {
-        prepared: Box<PreparedContinuation>,
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
     Activity(library::TrackKey, Box<ListenWrite>),
     Flush(std::sync::mpsc::SyncSender<()>),
     Output {
@@ -214,7 +208,6 @@ impl PlaybackOwner {
             audio_outputs,
             scrobbler,
             source: Mutex::new(std::sync::Weak::new()),
-            connect: Mutex::new(std::sync::Weak::new()),
             active: Mutex::new(None),
             pending_queue: Mutex::new(None),
             equalizer: Mutex::new(eq),
@@ -285,10 +278,6 @@ impl PlaybackOwner {
             .source
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(source);
-    }
-
-    pub(crate) fn install_connect(&self, connect: &Arc<crate::connect::ConnectOwner>) {
-        *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
     }
 
     /// Takes commands at once; they wait until the saved queue is restored after the Catalog
@@ -411,9 +400,6 @@ impl PlaybackOwner {
                 self.equalizer_write_finished(&result);
                 let _ = reply.send(result);
             }
-            PlaybackStoreWork::Continue { prepared, reply } => {
-                let _ = reply.send(self.commit_continuation(*prepared, failed_queue_save).await);
-            }
             PlaybackStoreWork::Activity(key, activity) => self.store_activity(key, *activity).await,
             PlaybackStoreWork::Flush(reply) => {
                 if let Err(error) =
@@ -524,11 +510,6 @@ impl PlaybackOwner {
         let lyrics = Arc::clone(&self.lyrics);
         let source_owner = self.source_owner();
         let local = self.settings.local_configuration();
-        let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade();
         self.runtime.spawn(async move {
             let playable = match catalog.playable(occurrence.track.track_key).await {
                 Ok(Some(playable)) => Arc::new(playable),
@@ -548,15 +529,9 @@ impl PlaybackOwner {
             lyrics.playable_resolved(Arc::clone(&playable));
             let downloads = source_owner.as_ref().map(|owner| owner.downloads().clone());
             let result = prepare_stream(
-                &catalog,
                 &playable,
                 request,
                 local.as_ref(),
-                // A track's file comes through Connect only while Connect is on.
-                connect
-                    .as_deref()
-                    .filter(|connect| connect.status().settings.enabled)
-                    .map(|connect| (connect, occurrence.as_ref())),
                 downloads.as_ref(),
                 move |source_id| async move {
                     tokio::task::spawn_blocking(move || {
@@ -1114,17 +1089,14 @@ impl PlaybackOwner {
 }
 
 /// Opens a playable from the first usable of its download, its mapped file and its own local
-/// file, then the Connect peer while Connect is on, then its source's remote file or server
-/// stream. A local copy is usable when it is a regular file with the size it should have; one
-/// that cannot be looked at is skipped. A managed download gone from its folder or the wrong
-/// size is forgotten, so its rules download it again. A local track with no usable copy is
-/// unavailable.
+/// file, then its source's remote file or server stream. A local copy is usable when it is a
+/// regular file with the size it should have; one that cannot be looked at is skipped. A
+/// managed download gone from its folder or the wrong size is forgotten, so its rules download
+/// it again. A local track with no usable copy is unavailable.
 pub(crate) async fn prepare_stream<F>(
-    catalog: &Catalog,
     playable: &library::Playable,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
-    file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
     downloads: Option<&downloads::Downloads>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
 ) -> Result<audio_processing::ResolvedStream, playback::BackendFailure>
@@ -1178,63 +1150,9 @@ where
         .as_ref()
         .zip(download.as_ref())
         .is_some_and(|(chosen, download)| *chosen == download.uri);
-    let mut access = chosen;
-    let mut fetched_uri = None;
-    if let Some((connect, occurrence)) = file_transfer
-        && connect
-            .is_local_media(&request.media_uri)
-            .await
-            .map_err(failure)?
-    {
-        if occurrence.received_from_connect && file_uri.starts_with("content://") {
-            return Err(failure(
-                "The source device did not provide a portable document identity".into(),
-            ));
-        }
-        let received_document = url::Url::parse(file_uri)
-            .is_ok_and(|uri| uri.scheme() == "content")
-            && occurrence.received_from_connect;
-        if received_document && !from_download {
-            access = None;
-        }
-        // A file URI received from another device names that device's file.
-        if playable.local_uri().is_none()
-            && access.as_deref() == Some(file_uri)
-            && catalog
-                .file_media_is_remote(&request.media_uri, occurrence.received_from_connect)
-                .await
-                .map_err(|error| failure(error.to_string()))?
-        {
-            access = None;
-        }
-        if access.is_none() {
-            let peer = connect.peer_access();
-            if let Some(location) = peer
-                .mapped_file(catalog, &request.media_uri)
-                .await
-                .map_err(|error| failure(error.to_string()))?
-            {
-                fetched_uri = Some(match location {
-                    library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
-                        .map(String::from)
-                        .map_err(|_| failure("Media path must be absolute".to_owned()))?,
-                    library::LocalMediaLocation::Document(uri) => uri,
-                });
-            } else {
-                let mut stream = peer
-                    .stream(request.clone())
-                    .await
-                    .map_err(|error| failure(error.to_string()))?;
-                if let Some((start, end)) = playable.window {
-                    stream = stream.with_window(start, end);
-                }
-                return Ok(stream);
-            }
-        }
-    }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
-    let content_type = match &access {
+    let content_type = match &chosen {
         Some(uri) if from_download => {
             let path = if uri.starts_with("content:") {
                 let uri = uri.clone();
@@ -1257,24 +1175,21 @@ where
         }
         _ => None,
     };
-    let access_uri = access.or(fetched_uri);
     // A local track has nothing else to play from.
-    if access_uri.is_none() && (local_media || playable.source_kind.as_deref() == Some("local")) {
+    if chosen.is_none() && (local_media || playable.source_kind.as_deref() == Some("local")) {
         return Err(unavailable());
     }
     if let Some((start, end)) = playable
         .window
-        .filter(|_| access_uri.is_some() || cue.is_some())
+        .filter(|_| chosen.is_some() || cue.is_some())
     {
-        return Ok(
-            direct_stream(access_uri.unwrap_or_else(|| file_uri.to_owned()))
-                .await
-                .map_err(failure)?
-                .with_content_type(content_type)
-                .with_window(start, end),
-        );
+        return Ok(direct_stream(chosen.unwrap_or_else(|| file_uri.to_owned()))
+            .await
+            .map_err(failure)?
+            .with_content_type(content_type)
+            .with_window(start, end));
     }
-    if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
+    if let Some(uri) = chosen.or_else(|| library::normalize_direct_media_uri(file_uri)) {
         return Ok(direct_stream(uri)
             .await
             .map_err(failure)?
@@ -1543,7 +1458,6 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            received_from_connect: false,
             provenance: playback::Provenance::Manual,
             track: {
                 let reference = test_media(source_format);
@@ -1633,13 +1547,11 @@ mod tests {
             .unwrap()[0];
         let playable = catalog.playable(key).await.unwrap().unwrap();
         let stream = super::prepare_stream(
-            &catalog,
             &playable,
             playback::StreamRequest::new(
                 occurrence.track.media_uri.clone(),
                 playback::StreamQuality::Original,
             ),
-            None,
             None,
             None,
             |_| async { panic!("a completed download must resolve without contacting its source") },

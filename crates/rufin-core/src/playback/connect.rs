@@ -79,9 +79,6 @@ impl RufinPlayback {
                 )
                 .await
                 .map_err(string_error)?;
-            for (entry, row) in page.entries.iter_mut().zip(&state.rows) {
-                entry.received_from_connect = row.received_from_connect;
-            }
             let rows = self
                 .catalog
                 .queue_rows_for_entries(
@@ -136,20 +133,6 @@ impl RufinPlayback {
     pub(super) async fn snapshot(&self) -> Result<Option<playback::Continuation>, String> {
         let _command = self.commands.lock().await;
         self.connection()?.receiver_queue(&self.peer).await
-    }
-
-    pub(super) async fn stop_continuation(
-        &self,
-        expected: &playback::ContinuationHeader,
-    ) -> Result<Option<playback::ContinuationHeader>, String> {
-        let header = self
-            .connection()?
-            .stop_receiver_continuation(&self.peer)
-            .await?;
-        Ok((header.current == expected.current
-            && header.listen.as_ref().map(|listen| &listen.play_id)
-                == expected.listen.as_ref().map(|listen| &listen.play_id))
-        .then_some(header))
     }
 
     async fn input(
@@ -277,10 +260,7 @@ impl PlaybackOwner {
                 .entries
                 .into_iter()
                 .zip(&page.rows)
-                .map(|(mut entry, row)| {
-                    entry.received_from_connect = row.received_from_connect;
-                    (row.position, entry)
-                })
+                .map(|(entry, row)| (row.position, entry))
                 .collect::<Vec<_>>();
             let rows = self
                 .catalog
@@ -393,12 +373,7 @@ impl PlaybackOwner {
     }
 
     pub(super) fn discover_rufin(&self) -> Vec<playback::RemoteOutput> {
-        let Some(connect) = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade()
-        else {
+        let Some(connect) = self.source_owner().and_then(|source| source.connect()) else {
             return Vec::new();
         };
         let status = connect.status();
@@ -429,10 +404,8 @@ impl PlaybackOwner {
             unreachable!();
         };
         let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade()
+            .source_owner()
+            .and_then(|source| source.connect())
             .ok_or("Connect is unavailable")?;
         let active = self.active().ok_or("Playback is unavailable")?;
         let volume_changed = Arc::new(tokio::sync::Notify::new());

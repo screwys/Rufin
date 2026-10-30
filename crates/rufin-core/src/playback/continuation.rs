@@ -1,12 +1,5 @@
-//! Connected continuation uses fresh player state, never portable profile state.
+//! Another device's queue continues here, as an ordinary queue restore.
 use super::*;
-
-pub(crate) struct PreparedContinuation {
-    transfer: String,
-    continuation: playback::Continuation,
-    stream: PreparedStream,
-    backend: Box<dyn PlaybackBackend>,
-}
 
 impl PlaybackOwner {
     pub(crate) async fn return_empty_local(&self) -> Result<(), String> {
@@ -26,113 +19,36 @@ impl PlaybackOwner {
         Ok(())
     }
 
-    pub(crate) fn has_continuation(&self) -> bool {
-        self.active()
-            .and_then(|active| active.projection().ok())
-            .is_some_and(|projection| {
-                projection.view.transport.current.is_some()
-                    && projection.view.transport.state != playback::TransportStatus::Stopped
-            })
-    }
-
-    pub(crate) fn continuation_snapshot(&self) -> Result<Option<playback::Continuation>, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return self.runtime.block_on(receiver.snapshot());
-        }
-        let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(plex) = plex {
-            return self.runtime.block_on(plex.continuation_snapshot());
-        }
-        self.active()
-            .ok_or("Playback is unavailable")?
-            .continuation()
-            .map_err(string_error)
-    }
-
-    pub(crate) async fn continuation_page(
+    /// Replaces the queue with `queue` and resumes its current entry at its position on this
+    /// device's own output.
+    pub(crate) async fn continue_queue(
         &self,
-        snapshot: &playback::Continuation,
-        offset: usize,
-    ) -> Result<library::QueueTransferPage, String> {
-        let end = offset
-            .saturating_add(library::QUEUE_CONTEXT_LIMIT)
-            .min(snapshot.queue.entries.len());
-        let entries = snapshot
-            .queue
-            .order
-            .get(offset..end)
-            .ok_or("Queue transfer offset is out of range")?
-            .iter()
-            .enumerate()
-            .map(|(index, member)| {
-                (
-                    offset + index,
-                    snapshot.queue.entries[*member as usize].clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let rows = self
-            .catalog
-            .queue_rows_for_entries(&entries, &ReadCancellation::new())
-            .await
-            .map_err(string_error)?;
-        Ok(library::QueueTransferPage {
-            offset,
-            rows: rows
-                .iter()
-                .map(|row| library::QueueTransferRow::from(row.as_ref()))
-                .collect(),
-            order: snapshot.queue.order[offset..end].to_vec(),
-        })
-    }
-
-    pub(crate) async fn stage_continuation_page(
-        &self,
-        transfer: &str,
-        page: &library::QueueTransferPage,
+        mut queue: library::QueueRestore,
+        playing: bool,
     ) -> Result<(), String> {
-        self.catalog
-            .stage_queue_transfer_page(transfer, page)
-            .await
-            .map_err(string_error)
-    }
-
-    pub(crate) async fn discard_continuation(&self, transfer: &str) -> Result<(), String> {
-        self.catalog
-            .discard_queue_transfer(transfer)
-            .await
-            .map_err(string_error)
-    }
-
-    pub(crate) async fn prepare_continuation(
-        &self,
-        transfer: String,
-        header: playback::ContinuationHeader,
-    ) -> Result<PreparedContinuation, String> {
-        let mut queue = self
+        let current = queue
+            .current_index
+            .ok_or("The current track is unavailable")?;
+        let entry = queue
+            .order
+            .get(current)
+            .and_then(|member| queue.entries.get(*member as usize))
+            .cloned()
+            .ok_or("The current track is unavailable")?;
+        queue.rows = self
             .catalog
-            .prepare_queue_transfer(&transfer, header.total, header.current)
+            .queue_rows_for_entries(&[(current, entry)], &ReadCancellation::new())
             .await
             .map_err(string_error)?;
-        queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;
-        queue.repeat_mode = header.repeat;
-        queue.shuffled = header.shuffled;
         let occurrence = queue
             .rows
             .first()
             .cloned()
             .ok_or("The current track is unavailable")?;
-        let mut request = StreamRequest::new(
+        let request = StreamRequest::new(
             (&occurrence.track).media_uri.clone(),
             self.settings.playback_stream_quality(),
         );
-        request.session_identifier = header.listen.as_ref().map(|listen| listen.play_id.clone());
-        let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade();
         let source = self.source_owner();
         let downloads = source.as_ref().map(|owner| owner.downloads().clone());
         let local = self.settings.local_configuration();
@@ -143,13 +59,9 @@ impl PlaybackOwner {
             .map_err(string_error)?
             .ok_or("The current track is unavailable")?;
         let stream = prepare_stream(
-            &self.catalog,
             &playable,
             request,
             local.as_ref(),
-            connect
-                .as_deref()
-                .map(|connect| (connect, occurrence.as_ref())),
             downloads.as_ref(),
             move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
@@ -166,72 +78,6 @@ impl PlaybackOwner {
         let stream = prepare_media_stream(stream, super::track_loudness(&playable), occurrence);
         let backend =
             (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
-        Ok(PreparedContinuation {
-            transfer,
-            continuation: playback::Continuation { header, queue },
-            stream,
-            backend,
-        })
-    }
-
-    pub(crate) fn stop_continuation(
-        &self,
-        expected: playback::ContinuationHeader,
-    ) -> Result<Option<playback::ContinuationHeader>, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return self.runtime.block_on(receiver.stop_continuation(&expected));
-        }
-        let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(plex) = plex {
-            return self.runtime.block_on(plex.stop_continuation(&expected));
-        }
-        self.active()
-            .ok_or("Playback is unavailable")?
-            .stop_continuation(expected)
-            .map_err(string_error)
-    }
-
-    pub(crate) async fn apply_continuation(
-        &self,
-        mut prepared: PreparedContinuation,
-        final_header: playback::ContinuationHeader,
-    ) -> Result<(), String> {
-        if prepared.continuation.header.current != final_header.current
-            || prepared
-                .continuation
-                .header
-                .listen
-                .as_ref()
-                .map(|listen| &listen.play_id)
-                != final_header.listen.as_ref().map(|listen| &listen.play_id)
-        {
-            return Err("The other device changed playback. Try continuing again.".into());
-        }
-        prepared.continuation.queue.progress_millis =
-            final_header.position_millis.min(i64::MAX as u64) as i64;
-        prepared.continuation.header = final_header;
-        let (reply, result) = tokio::sync::oneshot::channel();
-        self.store_sender
-            .send(PlaybackStoreWork::Continue {
-                prepared: Box::new(prepared),
-                reply,
-            })
-            .await
-            .map_err(string_error)?;
-        result.await.map_err(string_error)?
-    }
-
-    pub(super) async fn commit_continuation(
-        &self,
-        prepared: PreparedContinuation,
-        failed_queue_save: &mut Option<library::QueueUpdate>,
-    ) -> Result<(), String> {
-        // Queue persistence has one writer. Older local saves complete before
-        // transferred metadata becomes the active queue.
-        save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
-            .await
-            .map_err(string_error)?;
         let active = self.active().ok_or("Playback is unavailable")?;
         if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
             receiver.cancel();
@@ -241,18 +87,9 @@ impl PlaybackOwner {
             plex.stop_for_continuation().await?;
             self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
         }
-        self.catalog
-            .commit_queue_transfer(&prepared.transfer, &prepared.continuation.queue)
+        tokio::task::spawn_blocking(move || active.adopt_local(queue, stream, playing, backend))
             .await
-            .map_err(string_error)?;
-        tokio::task::spawn_blocking(move || {
-            active.adopt_continuation(prepared.continuation, prepared.stream, prepared.backend)
-        })
-        .await
-        .map_err(string_error)?
-        .map_err(string_error)?;
-        save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
-            .await
+            .map_err(string_error)?
             .map_err(string_error)?;
         *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
         Ok(())

@@ -5,7 +5,6 @@ pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPrefer
 pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
 pub use preferences::{CommittedPreferences, PreferenceSubscription};
 pub mod app;
-mod connect;
 pub mod context_menu;
 pub mod layout;
 mod library_lists;
@@ -148,8 +147,6 @@ pub struct StoredSettings {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(crate) scrobbling_credentials: std::collections::BTreeMap<String, Credential>,
     #[serde(default)]
-    pub(crate) shared_settings: connect::SharedSettings,
-    #[serde(default)]
     pub(crate) sources: SourceSettings,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) secret_scope_id: String,
@@ -167,7 +164,6 @@ impl Default for StoredSettings {
             scrobbling: ScrobblingSettings::default(),
             scrobbling_secrets_present: false,
             scrobbling_credentials: Default::default(),
-            shared_settings: Default::default(),
             sources: SourceSettings::default(),
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
@@ -197,7 +193,8 @@ impl StoredSettings {
 
 #[derive(Clone)]
 pub struct SettingsFile {
-    shared: tokio::sync::watch::Sender<u64>,
+    /// Rises with every persisted change.
+    revision: tokio::sync::watch::Sender<u64>,
     preferences: tokio::sync::watch::Sender<Arc<UiSettings>>,
     sidebar: tokio::sync::watch::Sender<SidebarSettings>,
     appearance: tokio::sync::watch::Sender<AppearancePreferences>,
@@ -254,7 +251,7 @@ impl SettingsFile {
             }
         }
         Ok(Self {
-            shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
+            revision: tokio::sync::watch::channel(0).0,
             preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
@@ -283,7 +280,7 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
-            shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
+            revision: tokio::sync::watch::channel(0).0,
             preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
@@ -414,8 +411,8 @@ impl SettingsFile {
         let mut next = previous.clone();
         let output = operation(&mut next)?;
         next.prepare()?;
-        connect::stamp_changes(&saved, &mut next)?;
-        if next != *saved {
+        let changed = next != *saved;
+        if changed {
             self.persist(&next)?;
         }
         *saved = next.clone();
@@ -430,20 +427,20 @@ impl SettingsFile {
         )?;
         *current = next;
         self.publish_changes(&current);
+        if changed {
+            self.revision.send_modify(|revision| *revision += 1);
+        }
         Ok(output)
     }
 
     pub(crate) fn flush(&self) -> Result<(), String> {
         let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
         let result = (|| {
-            let mut next = self.load();
-            connect::stamp_changes(&saved, &mut next)?;
+            let next = self.load();
             if next != *saved {
                 self.persist(&next)?;
-                let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
-                current.shared_settings = next.shared_settings.clone();
                 *saved = next;
-                self.publish_changes(&current);
+                self.revision.send_modify(|revision| *revision += 1);
             }
             Ok(())
         })();
@@ -518,6 +515,10 @@ impl SettingsOwner {
         })
     }
 
+    pub(crate) fn revision_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.file.revision.subscribe()
+    }
+
     pub(crate) fn restore(
         &self,
         restore: impl FnOnce(&mut StoredSettings) -> Result<(), String>,
@@ -532,14 +533,6 @@ impl SettingsOwner {
 
 impl SettingsFile {
     fn publish_changes(&self, stored: &StoredSettings) {
-        self.shared.send_if_modified(|revision| {
-            let next = stored.shared_settings.revision();
-            if *revision == next {
-                return false;
-            }
-            *revision = next;
-            true
-        });
         self.preferences.send_if_modified(|current| {
             if **current == stored.ui {
                 return false;
@@ -1197,7 +1190,6 @@ fn persistent_settings(value: &StoredSettings) -> StoredSettings {
     persistent
         .scrobbling_credentials
         .retain(|_, credential| !credential.session());
-    persistent.shared_settings.remove_session_credentials();
     persistent
 }
 

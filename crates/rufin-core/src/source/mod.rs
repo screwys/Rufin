@@ -585,58 +585,6 @@ impl SourceOwner {
         result
     }
 
-    /// Called only for an applied Connect page. Empty synchronization passes do not
-    /// publish catalog events or rebuild the selected source.
-    pub(crate) async fn connect_changed(&self, sources_changed: bool) -> Result<(), String> {
-        let current = self.shared.settings.load();
-        if sources_changed {
-            self.shared.retire_changed_clients(false).await?;
-        }
-        self.shared.load_source_counts().await?;
-        let reconnect = self
-            .shared
-            .selected()
-            .is_none_or(|selected| self.cached_client(&selected.source_id).is_none());
-        if reconnect {
-            self.release_selected().await;
-            if let Some(source) = current
-                .sources
-                .selected_source_id
-                .filter(|id| {
-                    current
-                        .sources
-                        .configured
-                        .iter()
-                        .any(|source| source.configuration.source_id == *id)
-                })
-                .or_else(|| {
-                    let counts = self
-                        .shared
-                        .catalog_counts
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    current
-                        .sources
-                        .configured
-                        .iter()
-                        .find(|source| {
-                            counts
-                                .get(&source.configuration.source_id)
-                                .is_some_and(|(_, tracks)| *tracks > 0)
-                        })
-                        .map(|source| source.configuration.source_id.clone())
-                })
-            {
-                let owner = self.clone();
-                self.shared.runtime.spawn(async move {
-                    let _ = owner.select_source(source).await;
-                });
-            }
-        }
-        self.notice(feed::Notice::All);
-        Ok(())
-    }
-
     async fn remove_source_resources(
         &self,
         source_id: &SourceId,
@@ -2003,14 +1951,8 @@ impl SourceOwner {
                 if !changing {
                     return Ok(());
                 }
-                let connect = owner
-                    .shared
-                    .connect
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .upgrade();
-                if let Some(connect) = connect {
-                    connect.reset_secret_storage().await?;
+                if let Some(connect) = owner.connect() {
+                    connect.turn_off().await?;
                 }
                 let settings = owner.shared.settings.clone();
                 let secrets = Arc::clone(&owner.shared.secrets);
@@ -2534,12 +2476,12 @@ impl SourceOwner {
             .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
     }
 
-    pub(crate) fn peer_access(&self) -> sources::PeerAccess {
-        self.shared.downloads.peer_access()
-    }
-
-    pub(crate) fn connect_media_changed(&self) {
-        self.shared.downloads.connect_changed();
+    pub(crate) fn connect(&self) -> Option<Arc<crate::connect::ConnectOwner>> {
+        self.shared
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .upgrade()
     }
 
     pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
@@ -4001,10 +3943,8 @@ mod source_tests {
             let local_stream = tokio::time::timeout(
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(
-                    &catalog,
                     &playable,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
-                    None,
                     None,
                     None,
                     |source_id| owner.open_client(source_id),

@@ -197,7 +197,7 @@ impl WaveformOwner {
             }
             let catalog = Arc::clone(&input.catalog);
             let downloads = input.source.upgrade().map(|owner| owner.downloads().clone());
-            let stream = match prepare_stream(&input.catalog, &playable, input.request, local.as_ref(), None, downloads.as_ref(), move |source_id| async move {
+            let stream = match prepare_stream(&playable, input.request, local.as_ref(), downloads.as_ref(), move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
                 }).await.map_err(|error| error.to_string())?

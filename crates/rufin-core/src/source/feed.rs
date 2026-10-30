@@ -23,7 +23,7 @@ const PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Changed {
-    /// Anything may have changed: a reload, a lag, display flags or applied Connect data.
+    /// Anything may have changed: a reload, a lag or display flags.
     pub all: bool,
     /// Sources whose catalog rows changed.
     pub sources: Vec<SourceKey>,
@@ -65,7 +65,7 @@ impl Changes {
 /// Changes core announces that no Write states.
 #[derive(Debug)]
 pub(crate) enum Notice {
-    /// Connect data was applied outside a Write.
+    /// Every page reads again, such as after a file outside every source changed.
     All,
     /// A source's pages must read again after this instant, such as after an invalidated
     /// cover. Goes out at once unless the source went out since.

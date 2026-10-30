@@ -70,7 +70,7 @@ impl ProductHandles {
         reset: crate::settings::StorageReset,
     ) -> Result<crate::settings::StorageResetRequest, String> {
         self.settings
-            .prepare_storage_reset(reset, self.connect.status().settings)
+            .prepare_storage_reset(reset, self.connect.secret_keys())
     }
 
     pub async fn close_storage(&self) -> Result<(), String> {

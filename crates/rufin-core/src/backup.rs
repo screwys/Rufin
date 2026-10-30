@@ -134,8 +134,6 @@ impl BackupOwner {
             export.ui.sidebar.pins.clear();
             export.ui.sidebar.playlist_pin_imported_sources.clear();
             export.secret_scope_id.clear();
-            // Connect stamps belong to this device. Restore keeps the current ones.
-            export.shared_settings = Default::default();
             export.scrobbling_secrets_present = false;
             for descriptor in scrobbling::secret_descriptors() {
                 descriptor.value_mut(&mut export.scrobbling).clear();
@@ -599,7 +597,6 @@ fn preserve_destination_settings(
     incoming: &mut StoredSettings,
 ) -> Result<(), String> {
     incoming.secret_scope_id = previous.secret_scope_id.clone();
-    incoming.shared_settings = previous.shared_settings.clone();
     incoming.ui.application.secret_storage_mode = previous.ui.application.secret_storage_mode;
     incoming.jellyfin_device_id = previous.jellyfin_device_id.clone();
     incoming.ui.downloads = previous.ui.downloads.clone();

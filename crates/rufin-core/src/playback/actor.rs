@@ -195,22 +195,6 @@ impl Playback {
     pub(crate) fn continuation(&self) -> PlaybackResult<Option<playback::Continuation>> {
         self.request(|player, sample| Ok(player.continuation(sample)))
     }
-    pub(crate) fn stop_continuation(
-        &self,
-        expected: playback::ContinuationHeader,
-    ) -> PlaybackResult<Option<playback::ContinuationHeader>> {
-        self.request(move |player, sample| Ok(player.stop_continuation(&expected, sample)))
-    }
-    pub(crate) fn adopt_continuation(
-        &self,
-        continuation: playback::Continuation,
-        stream: PreparedStream,
-        backend: Box<dyn PlaybackBackend>,
-    ) -> PlaybackResult<()> {
-        self.request(move |player, sample| {
-            player.adopt_continuation(continuation, stream, backend, sample)
-        })
-    }
     pub(crate) fn handoff_snapshot(
         &self,
     ) -> PlaybackResult<(
@@ -240,7 +224,9 @@ impl Playback {
         playing: bool,
         backend: Box<dyn PlaybackBackend>,
     ) -> PlaybackResult<()> {
-        self.request(move |player, _| player.adopt_local(queue, stream, playing, backend))
+        self.request(move |player, sample| {
+            player.adopt_local(queue, stream, playing, backend, sample)
+        })
     }
     pub(crate) fn auto_dj_unavailable(
         &self,

@@ -31,28 +31,15 @@ pub(super) struct PlexPlayback {
 }
 
 impl PlexPlayback {
-    pub(super) async fn continuation_snapshot(
-        &self,
-    ) -> Result<Option<playback::Continuation>, String> {
-        self.queue_snapshot(false).await
-    }
-
     pub(super) async fn cast_queue_snapshot(
         &self,
-    ) -> Result<Option<playback::Continuation>, String> {
-        self.queue_snapshot(true).await
-    }
-
-    async fn queue_snapshot(
-        &self,
-        include_stopped: bool,
     ) -> Result<Option<playback::Continuation>, String> {
         let _guard = self.commands.lock().await;
         let timeline = self.current().await?;
         self.observe(timeline.clone(), false).await?;
         let mut snapshot = match self.playback.continuation().map_err(string_error)? {
             Some(snapshot) => snapshot,
-            None if include_stopped => {
+            None => {
                 let queue = self.playback.handoff_snapshot().map_err(string_error)?.0;
                 let Some(current) = queue.current_index else {
                     return Ok(None);
@@ -76,7 +63,6 @@ impl PlexPlayback {
                     queue,
                 }
             }
-            None => return Ok(None),
         };
         let items = self.all_items(&timeline, &self.cancelled).await?;
         snapshot.queue.entries = self
@@ -106,40 +92,6 @@ impl PlexPlayback {
         snapshot.header.current = current;
         snapshot.header.total = items.len();
         Ok(Some(snapshot))
-    }
-
-    pub(super) async fn stop_continuation(
-        &self,
-        expected: &playback::ContinuationHeader,
-    ) -> Result<Option<playback::ContinuationHeader>, String> {
-        let _guard = self.commands.lock().await;
-        let mut timeline = self.current().await?;
-        self.observe(timeline.clone(), false).await?;
-        let Some(mut snapshot) = self.playback.continuation().map_err(string_error)? else {
-            return Ok(None);
-        };
-        let offset = self
-            .queue
-            .lock()
-            .await
-            .as_ref()
-            .map_or(0, |queue| queue.offset);
-        if snapshot.header.current + offset != expected.current
-            || snapshot
-                .header
-                .listen
-                .as_ref()
-                .map(|listen| &listen.play_id)
-                != expected.listen.as_ref().map(|listen| &listen.play_id)
-        {
-            return Ok(None);
-        }
-        self.control(|client| client.stop()).await?;
-        timeline.state = "stopped".into();
-        self.observe(timeline, false).await?;
-        snapshot.header.current = expected.current;
-        snapshot.header.total = expected.total;
-        Ok(Some(snapshot.header))
     }
 
     pub(super) async fn stop_for_continuation(&self) -> Result<(), String> {
@@ -1543,15 +1495,9 @@ impl PlaybackOwner {
                 .await
                 .map_err(string_error)?
                 .ok_or("The current Plex track is not available locally")?;
-            let stream = prepare_stream(
-                &self.catalog,
-                &playable,
-                request,
-                local.as_ref(),
-                None,
-                None,
-                move |_| async { Ok(source) },
-            )
+            let stream = prepare_stream(&playable, request, local.as_ref(), None, move |_| async {
+                Ok(source)
+            })
             .await
             .map_err(string_error)?;
             let prepared = prepare_media_stream(stream, super::track_loudness(&playable), row);
