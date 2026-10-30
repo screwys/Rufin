@@ -240,12 +240,8 @@ impl AndroidBrowseQuery {
                     match view.item(index, &cancel).await.map_err(error)? {
                         Some(Item::AlbumTrack { key, .. }) if self.album_detail_layout() => {
                             let album = view
-                                .album_spans(&cancel)
-                                .await
-                                .map_err(error)?
-                                .unwrap_or_default()
-                                .into_iter()
-                                .rfind(|span| span.first < index)
+                                .album_spans()
+                                .and_then(|spans| spans.iter().rfind(|span| span.first < index))
                                 .ok_or_else(gone)?
                                 .album;
                             let mut read = MemberRead::new(Collection::Album(album));

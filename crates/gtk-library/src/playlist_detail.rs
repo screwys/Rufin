@@ -12,7 +12,8 @@ use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::format_duration_units;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view};
+use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -164,7 +165,7 @@ impl CatalogUi {
     pub fn smart_playlist_detail_route(
         self: &Rc<Self>,
         key: SmartPlaylistKey,
-        mut read: RouteRead,
+        mut read: Opened,
     ) -> MountedRoute {
         let (false, Some(library::Header::Smart(summary))) =
             (read.view.is_missing(), read.header.take())
@@ -182,7 +183,7 @@ impl CatalogUi {
         else {
             unreachable!("Smart Playlist pages read their playlist")
         };
-        let view = read.route_view();
+        let view = route_view(&read);
         let owner = PlaylistDetailOwner::Smart {
             key,
             now,
@@ -253,7 +254,7 @@ impl CatalogUi {
     pub fn playlist_detail_route(
         self: &Rc<Self>,
         key: PlaylistKey,
-        mut read: RouteRead,
+        mut read: Opened,
     ) -> MountedRoute {
         let (false, Some(library::Header::Playlist(summary))) =
             (read.view.is_missing(), read.header.take())
@@ -263,7 +264,7 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        let view = read.route_view();
+        let view = route_view(&read);
         let owner = PlaylistDetailOwner::Saved {
             key,
             summary: *summary,

@@ -84,10 +84,13 @@ pub struct View {
 }
 
 enum Body {
-    /// Lists, detail tracks, History, playlist entries and albums with their tracks.
+    /// Lists, detail tracks, History, playlist entries and albums with their tracks. An album
+    /// page holds where each disc starts, the Albums list in Detail layout where each album does.
     Rows {
         read: Read,
         len: usize,
+        discs: Vec<(u32, i64)>,
+        spans: Option<Arc<[AlbumSpan]>>,
     },
     /// An artist's releases, counted per release group as filtered and unfiltered, and the
     /// artist's favorite tracks when the page shows them.
@@ -115,7 +118,7 @@ enum Body {
 /// `first`, and an artist's favorite tracks. `header` and `favorites` are None when this read
 /// did not read them; a reread of detail tracks or of releases keeps what the page shows.
 pub struct Opened {
-    pub view: View,
+    pub view: Arc<View>,
     pub header: Option<Header>,
     pub first: usize,
     pub rows: Vec<Row>,
@@ -128,6 +131,8 @@ enum Plan {
     Releases {
         read: ListRead,
         favorites: Option<MemberRead>,
+        /// The favorite tracks a reread of the releases keeps.
+        kept: Option<(MemberRead, usize)>,
     },
     Folders {
         projection: FolderProjection,
@@ -142,7 +147,7 @@ impl SourceOwner {
         &self,
         route: Route,
         selected: Option<SelectedLibrary>,
-        mut options: OpenOptions,
+        options: OpenOptions,
         seed: RouteSeedWindow,
         art: bool,
         cancel: &ReadCancellation,
@@ -151,12 +156,12 @@ impl SourceOwner {
         let (header, plan) = self
             .plan(&route, selected.as_ref(), &options, &settings, cancel)
             .await?;
-        let mut opened = read(
+        read(
             View {
                 owner: self.clone(),
                 route,
                 selected,
-                options: options.clone(),
+                options,
                 settings,
                 art,
                 body: Body::Missing,
@@ -166,37 +171,7 @@ impl SourceOwner {
             seed,
             cancel,
         )
-        .await?;
-        // A gone or empty collection reads as missing.
-        let found = match &opened.header {
-            Some(Header::Tag(tag)) => tag.summary.track_count > 0,
-            Some(_) => true,
-            None => header.is_none(),
-        };
-        if !found {
-            opened.view.body = Body::Missing;
-            opened.rows.clear();
-            opened.first = 0;
-        }
-        // Smart Playlists keep the members they opened with when the page reads again.
-        let smart = match &opened.view.body {
-            Body::Rows {
-                read:
-                    Read::List(ListRead {
-                        kind: ListKind::SmartPlaylists { now },
-                        ..
-                    })
-                    | Read::Members(MemberRead {
-                        collection: Collection::Smart { now, .. },
-                        ..
-                    }),
-                ..
-            } => Some(*now),
-            _ => None,
-        };
-        options.smart_opened = smart.or(options.smart_opened);
-        opened.view.options = options;
-        Ok(opened)
+        .await
     }
 
     /// Everything `route` lists, for playing, queueing or downloading it whole, without
@@ -345,6 +320,7 @@ impl SourceOwner {
                             Plan::Releases {
                                 read: release_query(read, &options, &settings),
                                 favorites,
+                                kept: None,
                             }
                         } else {
                             Plan::Rows(Read::Members(tracks))
@@ -458,6 +434,7 @@ impl SourceOwner {
 }
 
 /// Reads `plan` into `view`: its orders, then one statement for its header and seed window.
+/// A gone or empty collection reads as missing.
 async fn read(
     mut view: View,
     plan: Plan,
@@ -466,7 +443,8 @@ async fn read(
     cancel: &ReadCancellation,
 ) -> LibraryResult<Opened> {
     let catalog = Arc::clone(&view.owner.shared.catalog);
-    let (body, header, first, rows, favorites) = match plan {
+    let named = header.is_some();
+    let (header, first, rows, favorites) = match plan {
         Plan::Rows(read) => {
             let order = catalog.order(&read, cancel).await?;
             let range = seed.range(order.len());
@@ -481,16 +459,26 @@ async fn read(
                     cancel,
                 )
                 .await?;
-            let len = order.len();
-            (
-                Body::Rows { read, len },
-                fetched.header,
-                range.start,
-                fetched.rows,
-                None,
-            )
+            let discs = match &read {
+                Read::Members(MemberRead {
+                    collection: Collection::Album(_),
+                    ..
+                }) => catalog.disc_sections(&order),
+                _ => Vec::new(),
+            };
+            view.body = Body::Rows {
+                len: order.len(),
+                discs,
+                spans: order.album_spans().cloned(),
+                read,
+            };
+            (fetched.header, range.start, fetched.rows, None)
         }
-        Plan::Releases { read, favorites } => {
+        Plan::Releases {
+            read,
+            favorites,
+            kept,
+        } => {
             let mut unfiltered = read.clone();
             unfiltered.filter.clear();
             if let ListKind::ArtistAlbums { filters, .. } = &mut unfiltered.kind {
@@ -536,13 +524,15 @@ async fn read(
                     cancel,
                 )
                 .await?;
+            view.body = Body::Releases {
+                read,
+                counts,
+                source_counts,
+                favorites: favorites
+                    .zip(favorite_order.as_ref().map(library::Order::len))
+                    .or(kept),
+            };
             (
-                Body::Releases {
-                    read,
-                    counts,
-                    source_counts,
-                    favorites: favorites.zip(favorite_order.as_ref().map(library::Order::len)),
-                },
                 fetched.header,
                 range.start,
                 fetched.rows,
@@ -585,20 +575,47 @@ async fn read(
             };
             let range = seed.range(folder_len + track_len);
             let rows = view.rows(range.clone(), cancel).await?;
-            return Ok(Opened {
-                view,
-                header: None,
-                first: range.start,
-                rows,
-                favorites: None,
-            });
+            (None, range.start, rows, None)
         }
-        Plan::Home(home) => (Body::Home(home), None, 0, Vec::new(), None),
-        Plan::Missing => (Body::Missing, None, 0, Vec::new(), None),
+        Plan::Home(home) => {
+            view.body = Body::Home(home);
+            (None, 0, Vec::new(), None)
+        }
+        Plan::Missing => (None, 0, Vec::new(), None),
     };
-    view.body = body;
+    let found = match &header {
+        Some(Header::Tag(tag)) => tag.summary.track_count > 0,
+        Some(_) => true,
+        None => !named,
+    };
+    if !found {
+        view.body = Body::Missing;
+        return Ok(Opened {
+            view: Arc::new(view),
+            header,
+            first: 0,
+            rows: Vec::new(),
+            favorites,
+        });
+    }
+    // Smart Playlists keep the members they opened with when the page reads again.
+    if let Body::Rows {
+        read:
+            Read::List(ListRead {
+                kind: ListKind::SmartPlaylists { now },
+                ..
+            })
+            | Read::Members(MemberRead {
+                collection: Collection::Smart { now, .. },
+                ..
+            }),
+        ..
+    } = &view.body
+    {
+        view.options.smart_opened = Some(*now);
+    }
     Ok(Opened {
-        view,
+        view: Arc::new(view),
         header,
         first,
         rows,
@@ -829,19 +846,11 @@ impl View {
     }
 
     /// Where each disc of an album page starts, when it has several.
-    pub async fn disc_sections(&self, cancel: &ReadCancellation) -> LibraryResult<Vec<(u32, i64)>> {
-        let catalog = self.catalog();
-        Ok(match &self.body {
-            Body::Rows {
-                read:
-                    read @ Read::Members(MemberRead {
-                        collection: Collection::Album(_),
-                        ..
-                    }),
-                ..
-            } => catalog.disc_sections(&catalog.order(read, cancel).await?),
-            _ => Vec::new(),
-        })
+    pub fn disc_sections(&self) -> &[(u32, i64)] {
+        match &self.body {
+            Body::Rows { discs, .. } => discs,
+            _ => &[],
+        }
     }
 
     /// An artist page's albums per release group: filtered, then unfiltered.
@@ -857,22 +866,11 @@ impl View {
     }
 
     /// Where each album of the Albums list in Detail layout starts.
-    pub async fn album_spans(
-        &self,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<Vec<AlbumSpan>>> {
-        Ok(match &self.body {
-            Body::Rows {
-                read: read @ Read::AlbumTracks(_),
-                ..
-            } => self
-                .catalog()
-                .order(read, cancel)
-                .await?
-                .album_spans()
-                .map(<[_]>::to_vec),
+    pub fn album_spans(&self) -> Option<&Arc<[AlbumSpan]>> {
+        match &self.body {
+            Body::Rows { spans, .. } => spans.as_ref(),
             _ => None,
-        })
+        }
     }
 
     /// The item at `index`, for anchors and plays by index. A live folder has none.
@@ -1101,25 +1099,18 @@ impl View {
             unreachable!("releases reread an artist page");
         };
         let releases = release_query(releases.clone(), &options, &settings);
-        let favorites = favorites.clone();
-        let mut opened = read(
+        read(
             self.again(options, settings),
             Plan::Releases {
                 read: releases,
                 favorites: None,
+                kept: favorites.clone(),
             },
             None,
             seed,
             cancel,
         )
-        .await?;
-        if let Body::Releases {
-            favorites: kept, ..
-        } = &mut opened.view.body
-        {
-            *kept = favorites;
-        }
-        Ok(opened)
+        .await
     }
 
     /// This view's route with new options and settings, before its body is read.

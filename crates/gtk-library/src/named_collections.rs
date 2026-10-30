@@ -13,7 +13,8 @@ use localization::{album_count_text, msgid, track_count_text};
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey};
 use gtk_widgets::artwork::CoverGroupProjection;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead, view_rows};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view, view_model};
+use rufin_core::view::Opened;
 
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
@@ -41,7 +42,7 @@ use gtk_widgets::route::Route;
 use gtk_widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
 
 impl CatalogUi {
-    pub fn library_tags_route(self: &Rc<Self>, read: RouteRead, genres: bool) -> MountedRoute {
+    pub fn library_tags_route(self: &Rc<Self>, read: Opened, genres: bool) -> MountedRoute {
         self.collection_list_route(
             if genres {
                 LibraryListKey::Genres
@@ -60,34 +61,19 @@ impl CatalogUi {
         key: LibraryListKey,
         empty_body: &'static str,
         favorites_only: bool,
-        read: RouteRead,
+        mut read: Opened,
         row_key: impl Fn(&R) -> K + 'static,
     ) -> MountedRoute
     where
         K: Clone + Eq + Send + Sync + 'static,
         R: CollectionRow<Key = K>,
     {
-        let view = read.route_view();
-        let sparse = SparseRouteModel::new(
-            SparseSource::Query {
-                count: read.view.len(),
-            },
-            32,
-            self.runtime.clone(),
-            view_rows(&view, R::row),
-        );
+        let view = route_view(&read);
+        let sparse = view_model(self.runtime.clone(), &view, R::row, &mut read);
         let row_key = Rc::new(row_key);
         gtk_widgets::media_drag::install_parent_selection(&sparse, &view, {
             move |row| row.playback(key)
         });
-        sparse.seed_matching_at(
-            read.first,
-            read.rows.into_iter().filter_map(R::row).collect(),
-            {
-                let row_key = Rc::clone(&row_key);
-                move |row| row_key(row)
-            },
-        );
         let content = R::projection(self, Rc::clone(&sparse), key);
         let search = gtk::SearchEntry::new();
         gtk_widgets::controls::configure_search_entry(&search);
@@ -109,7 +95,7 @@ impl CatalogUi {
             let page = page.clone();
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
-            move |read: RouteRead| {
+            move |read: Opened| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };

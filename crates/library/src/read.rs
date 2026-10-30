@@ -60,7 +60,7 @@ pub(crate) enum Members {
     /// Playlists or smart playlists, with their folders as negative keys.
     Playlists(Box<[i64]>),
     AlbumTracks {
-        spans: Box<[AlbumSpan]>,
+        spans: Arc<[AlbumSpan]>,
         tracks: Box<[u32]>,
     },
 }
@@ -243,7 +243,7 @@ impl Order {
         self.0.counts
     }
 
-    pub fn album_spans(&self) -> Option<&[AlbumSpan]> {
+    pub fn album_spans(&self) -> Option<&Arc<[AlbumSpan]>> {
         match &self.0.members {
             Members::AlbumTracks { spans, .. } => Some(spans),
             _ => None,

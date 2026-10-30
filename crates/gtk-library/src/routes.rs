@@ -7,9 +7,10 @@ use gtk::glib;
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey, LibraryListSettings};
 use gtk_widgets::localization::bind_search_placeholder;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead, RouteView};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
 use localization::msgid;
 use rufin_core::collection_context::CollectionTarget;
+use rufin_core::view::Opened;
 
 use super::album_detail::AlbumCollectionModels;
 use super::collections::{
@@ -210,7 +211,7 @@ pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reread: &Rc<PageRer
 }
 
 impl CatalogUi {
-    pub fn opened_collection_view(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
+    pub fn opened_collection_view(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let route = read.view.route().clone();
         let selected = read.view.selected().cloned();
         let category = read.view.options().category;
@@ -294,11 +295,11 @@ impl CatalogUi {
 
     pub fn library_albums_route(
         self: &Rc<Self>,
-        read: RouteRead,
+        read: Opened,
         favorites_only: bool,
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
-        let view = read.route_view();
+        let view = route_view(&read);
         let models = AlbumCollectionModels::new(&self.runtime, &view, read);
         let models = Rc::new(RefCell::new(models));
 
@@ -327,7 +328,7 @@ impl CatalogUi {
             let content = content.clone();
             let page = page.clone();
             let view = Rc::clone(&view);
-            move |read: RouteRead| {
+            move |read: Opened| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
@@ -336,7 +337,7 @@ impl CatalogUi {
                 }
                 let settings = shell.settings.current.borrow().library_list(key);
                 let current_models = models.borrow().clone();
-                let replace_model = current_models.is_detail() != read.spans.is_some();
+                let replace_model = current_models.is_detail() != read.view.album_spans().is_some();
                 if replace_model {
                     models.replace(AlbumCollectionModels::new(&shell.runtime, &view, read));
                 } else if !current_models.replace_prepared(read) {
@@ -434,7 +435,7 @@ impl CatalogUi {
 
     pub fn library_tracks_route(
         self: &Rc<Self>,
-        read: RouteRead,
+        read: Opened,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         self.root_track_route(
@@ -451,7 +452,7 @@ impl CatalogUi {
 
     pub fn favorites_route(
         self: &Rc<Self>,
-        read: RouteRead,
+        read: Opened,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::FavoriteTracks;
@@ -470,7 +471,7 @@ impl CatalogUi {
     fn root_track_route(
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
-        read: RouteRead,
+        read: Opened,
         selected: rufin_core::runtime::SelectedLibrary,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -478,7 +479,7 @@ impl CatalogUi {
             || format!("{}:all", options.context),
             |folder_key| format!("{}:{folder_key}", options.context),
         );
-        let view = read.route_view();
+        let view = route_view(&read);
         let projection = self.searchable_track_collection(
             &view,
             read,
@@ -507,9 +508,9 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, reread)
     }
 
-    pub fn history_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
+    pub fn history_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let key = LibraryListKey::History;
-        let view = read.route_view();
+        let view = route_view(&read);
         let projection = self.searchable_track_collection(
             &view,
             read,
@@ -553,11 +554,7 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, reread)
     }
 
-    pub fn library_artist_list_route(
-        self: &Rc<Self>,
-        read: RouteRead,
-        route: Route,
-    ) -> MountedRoute {
+    pub fn library_artist_list_route(self: &Rc<Self>, read: Opened, route: Route) -> MountedRoute {
         let (key, empty_body) = match route {
             Route::Favorites => (LibraryListKey::Artists, msgid("No favorite artists yet")),
             Route::AlbumArtists => (LibraryListKey::AlbumArtists, msgid("Nothing here yet")),
@@ -572,7 +569,7 @@ impl CatalogUi {
         )
     }
 
-    pub fn library_playlists_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
+    pub fn library_playlists_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::Playlists,
             msgid("No playlists yet"),
@@ -582,7 +579,7 @@ impl CatalogUi {
         )
     }
 
-    pub fn library_smart_playlists_route(self: &Rc<Self>, read: RouteRead) -> MountedRoute {
+    pub fn library_smart_playlists_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::SmartPlaylists,
             msgid("No smart playlists yet"),
@@ -595,7 +592,7 @@ impl CatalogUi {
     pub fn searchable_track_collection(
         self: &Rc<Self>,
         view: &RouteView,
-        read: RouteRead,
+        read: Opened,
         key: LibraryListKey,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {

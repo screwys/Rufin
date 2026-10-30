@@ -20,12 +20,11 @@ use gtk_widgets::interactions::install_context_menu_openers;
 
 use super::collection_context::present_track_context_menu;
 use gtk_widgets::library_fields::{opaque_artwork, track_row_field};
-use gtk_widgets::mounted_route::{
-    ItemScrollPosition, NativeListScroll, RouteRead, RouteView, view_rows,
-};
+use gtk_widgets::mounted_route::{ItemScrollPosition, NativeListScroll, RouteView, view_model};
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseObjectModel, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
+use rufin_core::view::Opened;
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;
 
@@ -88,21 +87,10 @@ fn detail_row(row: Row) -> Option<Row> {
 }
 
 impl AlbumCollectionModels {
-    pub fn new(runtime: &tokio::runtime::Handle, view: &RouteView, read: RouteRead) -> Self {
-        let count = read.view.len();
-        if let Some(spans) = read.spans {
-            let native = DetailRowsModel::new(Arc::new(DetailLayout::new(spans.into(), [0, 0])));
-            let rows = SparseRouteModel::new(
-                SparseSource::Query { count },
-                32,
-                runtime.clone(),
-                view_rows(view, detail_row),
-            );
-            rows.seed_matching_at(
-                read.first,
-                read.rows.into_iter().filter_map(detail_row).collect(),
-                |_| (),
-            );
+    pub fn new(runtime: &tokio::runtime::Handle, view: &RouteView, mut read: Opened) -> Self {
+        if let Some(spans) = read.view.album_spans().cloned() {
+            let native = DetailRowsModel::new(Arc::new(DetailLayout::new(spans, [0, 0])));
+            let rows = view_model(runtime.clone(), view, detail_row, &mut read);
             native
                 .imp()
                 .source
@@ -120,22 +108,12 @@ impl AlbumCollectionModels {
                 }),
             });
         }
-        let rows = SparseRouteModel::new(
-            SparseSource::Query { count },
-            32,
-            runtime.clone(),
-            view_rows(view, album_row),
-        );
+        let rows = view_model(runtime.clone(), view, album_row, &mut read);
         gtk_widgets::media_drag::install_parent_selection(&rows, view, |row| {
             Some(gtk_widgets::selection::collection_play_request(
                 library::Collection::Album(row.album_key),
             ))
         });
-        rows.seed_matching_at(
-            read.first,
-            read.rows.into_iter().filter_map(album_row).collect(),
-            |row| row.album_key,
-        );
         Self::Rows(rows)
     }
     pub fn is_detail(&self) -> bool {
@@ -180,9 +158,9 @@ impl AlbumCollectionModels {
             library::RouteSeedWindow::position,
         )
     }
-    pub fn replace_prepared(&self, read: RouteRead) -> bool {
+    pub fn replace_prepared(&self, read: Opened) -> bool {
         let count = read.view.len();
-        match (self, read.spans) {
+        match (self, read.view.album_spans().cloned()) {
             (Self::Rows(rows), None) => rows.replace_prepared_at(
                 SparseSource::Query { count },
                 read.first,
@@ -193,7 +171,7 @@ impl AlbumCollectionModels {
             (Self::Detail(detail), Some(spans)) => {
                 let inner = &detail.inner;
                 let previous = inner.native.layout();
-                let layout = Arc::new(DetailLayout::new(spans.into(), previous.minimum));
+                let layout = Arc::new(DetailLayout::new(spans, previous.minimum));
                 inner.initial_position.set(read.first);
                 inner.native.imp().layout.replace(Some(layout));
                 let replaced = inner.rows.replace_prepared_at(

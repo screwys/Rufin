@@ -125,7 +125,6 @@ pub(super) fn present(
         SparseSource::Query {
             count: review.progress().total as usize,
         },
-        64,
         runtime,
         load,
     );

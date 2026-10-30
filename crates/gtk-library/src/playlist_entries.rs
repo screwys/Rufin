@@ -38,12 +38,13 @@ use gtk_widgets::detail_links::DetailLinks;
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, opaque_artwork,
 };
-use gtk_widgets::mounted_route::{RouteRead, RouteView};
+use gtk_widgets::mounted_route::RouteView;
 use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
 use rufin_core::settings::presentation::track_row_field;
+use rufin_core::view::Opened;
 
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
@@ -95,7 +96,7 @@ impl PlaylistEntriesView {
         library::RouteSeedWindow::position(self.model.first_live_position())
     }
 
-    pub fn replace_prepared(&self, read: RouteRead) -> bool {
+    pub fn replace_prepared(&self, read: Opened) -> bool {
         let empty = read.view.is_empty();
         if !self.model.replace_prepared(read) {
             return false;
@@ -122,7 +123,7 @@ impl CatalogUi {
         playlist_name: String,
         writable: bool,
         view: &RouteView,
-        read: RouteRead,
+        read: Opened,
     ) -> PlaylistEntriesView {
         let model = PlaylistEntryModel::new(self.runtime.clone(), playlist, view, read);
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 8);

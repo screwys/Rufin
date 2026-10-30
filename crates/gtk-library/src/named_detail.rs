@@ -11,7 +11,8 @@ use crate::CatalogUi;
 use crate::LibraryListKey;
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::format_duration_units;
-use gtk_widgets::mounted_route::{MountedRoute, RouteRead};
+use gtk_widgets::mounted_route::{MountedRoute, route_view};
+use rufin_core::view::Opened;
 
 use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
@@ -87,11 +88,7 @@ fn named_seed(row: &TagRow) -> u32 {
 }
 
 impl CatalogUi {
-    pub fn named_detail_view(
-        self: &Rc<Self>,
-        id: NamedDetailId,
-        mut read: RouteRead,
-    ) -> MountedRoute {
+    pub fn named_detail_view(self: &Rc<Self>, id: NamedDetailId, mut read: Opened) -> MountedRoute {
         let (false, Some(library::Header::Tag(summary))) =
             (read.view.is_missing(), read.header.take())
         else {
@@ -100,7 +97,7 @@ impl CatalogUi {
                 id.missing_body(),
             ));
         };
-        let view = read.route_view();
+        let view = route_view(&read);
         let title = summary.name.clone();
         let artwork = named_artwork(&summary);
         let seed = named_seed(&summary);

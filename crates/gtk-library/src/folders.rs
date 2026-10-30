@@ -9,7 +9,8 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead, RouteView};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
+use rufin_core::view::Opened;
 
 use gtk_widgets::route::{FolderPathItem, Route};
 use gtk_widgets::sparse_model::{SparseSource, connect_sparse_bind};
@@ -34,11 +35,7 @@ fn folder_table_initial_width(route_width: i32) -> i32 {
 }
 
 impl CatalogUi {
-    pub fn folders_route(
-        self: &Rc<Self>,
-        path: Vec<FolderPathItem>,
-        read: RouteRead,
-    ) -> MountedRoute {
+    pub fn folders_route(self: &Rc<Self>, path: Vec<FolderPathItem>, read: Opened) -> MountedRoute {
         let wrapper = FoldersRouteView::new();
         let search = gtk::SearchEntry::new();
         gtk_widgets::controls::configure_search_entry(&search);
@@ -130,7 +127,7 @@ fn folder_page(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
-    read: RouteRead,
+    read: Opened,
 ) -> (
     gtk::Widget,
     FolderResume,
@@ -140,16 +137,14 @@ fn folder_page(
 ) {
     search.set_visible(true);
     let route_width = (shell.route_width)();
-    let view = read.route_view();
+    let view = route_view(&read);
     let folder_sparse = gtk_widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: 0 },
-        48,
         shell.runtime.clone(),
         folder_rows(&view, false),
     );
     let track_sparse = gtk_widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: 0 },
-        48,
         shell.runtime.clone(),
         folder_rows(&view, true),
     );
@@ -158,7 +153,7 @@ fn folder_page(
     let seed = {
         let folder_sparse = Rc::clone(&folder_sparse);
         let track_sparse = Rc::clone(&track_sparse);
-        move |read: RouteRead| {
+        move |read: Opened| {
             let folder_len = read.view.folder_len().unwrap_or(0);
             let track_len = read.view.len() - folder_len;
             let (folders, tracks) = read
@@ -230,7 +225,7 @@ fn folder_page(
 
     let apply = {
         let stack = table_stack.clone();
-        move |read: RouteRead| {
+        move |read: Opened| {
             stack.set_visible_child_name(if read.view.is_empty() {
                 "empty"
             } else {

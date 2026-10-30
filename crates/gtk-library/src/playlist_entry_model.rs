@@ -7,10 +7,9 @@ use library::{PlaylistEntryKey, PlaylistKey, Row, TrackRow};
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::settings::LibraryListSettings;
 
-use gtk_widgets::mounted_route::{RouteRead, RouteView, view_rows};
+use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
-
-const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
+use rufin_core::view::Opened;
 
 /// The read the shown entries came from, and the list settings it read with.
 struct AppliedEntries {
@@ -20,7 +19,7 @@ struct AppliedEntries {
 
 impl AppliedEntries {
     /// None when the read has no entries because the playlist is gone.
-    fn of(read: &RouteRead) -> Option<Self> {
+    fn of(read: &Opened) -> Option<Self> {
         Some(Self {
             query: read.view.members().cloned()?,
             settings: read.view.list_settings(),
@@ -56,24 +55,12 @@ impl PlaylistEntryModel {
         runtime: tokio::runtime::Handle,
         playlist_key: PlaylistKey,
         view: &RouteView,
-        read: RouteRead,
+        mut read: Opened,
     ) -> Self {
         let applied = RefCell::new(
             AppliedEntries::of(&read).expect("an open playlist page reads its entries"),
         );
-        let sparse = SparseRouteModel::new(
-            SparseSource::Query {
-                count: read.view.len(),
-            },
-            PLAYLIST_ENTRY_OVERSCAN,
-            runtime,
-            view_rows(view, entry_row),
-        );
-        sparse.seed_matching_at(
-            read.first,
-            read.rows.into_iter().filter_map(entry_row).collect(),
-            |_| (),
-        );
+        let sparse = view_model(runtime, view, entry_row, &mut read);
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 playlist_key,
@@ -118,7 +105,7 @@ impl PlaylistEntryModel {
     }
 
     /// Shows a reread's entries; false when it has none because the playlist is gone.
-    pub fn replace_prepared(&self, read: RouteRead) -> bool {
+    pub fn replace_prepared(&self, read: Opened) -> bool {
         let Some(applied) = AppliedEntries::of(&read) else {
             return false;
         };

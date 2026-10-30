@@ -18,7 +18,8 @@ use gtk_widgets::favorites::{
 };
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::localization::localized_label;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteRead};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view};
+use rufin_core::view::Opened;
 
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
@@ -64,7 +65,7 @@ fn artist_tracks_route(artist: String, album_artist: bool) -> Route {
 }
 
 /// An artist page's header, when the read has one and the artist is there.
-fn artist_header(read: &mut RouteRead) -> Option<ArtistView> {
+fn artist_header(read: &mut Opened) -> Option<ArtistView> {
     match (read.view.is_missing(), read.header.take()) {
         (false, Some(library::Header::Artist(artist))) => Some(*artist),
         _ => None,
@@ -75,7 +76,7 @@ impl CatalogUi {
     pub fn artist_detail_view(
         self: &Rc<Self>,
         album_artist: bool,
-        mut read: RouteRead,
+        mut read: Opened,
     ) -> MountedRoute {
         let (Some(summary), Some(favorite_rows), Some(favorite_read)) = (
             artist_header(&mut read),
@@ -87,7 +88,7 @@ impl CatalogUi {
                 msgid("No music from this artist yet"),
             ));
         };
-        let view = read.route_view();
+        let view = route_view(&read);
         let artist = summary.row.artist_key;
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
         let favorite_count = read.view.favorites_len().unwrap_or(0);
@@ -158,7 +159,7 @@ impl CatalogUi {
             let favorite_scroller = favorite_scroller.clone();
             let releases = Rc::clone(&releases);
             let header = header.clone();
-            move |mut read: RouteRead| {
+            move |mut read: Opened| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
@@ -290,7 +291,7 @@ impl CatalogUi {
     pub fn artist_tracks_view(
         self: &Rc<Self>,
         album_artist: bool,
-        mut read: RouteRead,
+        mut read: Opened,
     ) -> MountedRoute {
         let Some(summary) = artist_header(&mut read) else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
@@ -304,7 +305,7 @@ impl CatalogUi {
     pub fn artist_favorite_tracks_view(
         self: &Rc<Self>,
         album_artist: bool,
-        mut read: RouteRead,
+        mut read: Opened,
     ) -> MountedRoute {
         let Some(summary) = artist_header(&mut read) else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
@@ -315,14 +316,14 @@ impl CatalogUi {
         self.artist_track_surface_restored(summary, read, album_artist, true)
     }
 
-    pub fn artist_discography_view(self: &Rc<Self>, mut read: RouteRead) -> MountedRoute {
+    pub fn artist_discography_view(self: &Rc<Self>, mut read: Opened) -> MountedRoute {
         let Some(summary) = artist_header(&mut read) else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Discography"),
                 msgid("No albums from this artist yet"),
             ));
         };
-        let view = read.route_view();
+        let view = route_view(&read);
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
             ArtistReleaseRoutePreamble {
@@ -340,7 +341,7 @@ impl CatalogUi {
         let apply = {
             let shell = Rc::downgrade(self);
             let releases = Rc::clone(&releases);
-            move |read: RouteRead| {
+            move |read: Opened| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
@@ -427,12 +428,12 @@ impl CatalogUi {
     fn artist_track_surface_restored(
         self: &Rc<Self>,
         summary: ArtistView,
-        read: RouteRead,
+        read: Opened,
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
         let artist = summary.row.artist_key;
-        let view = read.route_view();
+        let view = route_view(&read);
         let key = LibraryListKey::ArtistTracks;
         let context = if favorites_only && album_artist {
             "album-artist-favorite-tracks"
