@@ -1,8 +1,5 @@
 //! Sidebar pins: keys and totals from the resident Catalog, pictures from one statement.
-use crate::{
-    AlbumRow, ArtistRow, Catalog, Item, LibraryResult, PlaylistFolderRow, PlaylistListRow,
-    PlaylistRow, ReadCancellation, Row, SmartPlaylistRow, SourceId, TagRow,
-};
+use crate::{Catalog, Item, LibraryResult, PlaylistListRow, ReadCancellation, Row, SourceId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -40,17 +37,6 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// A pinned row the Store still holds.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PinRow {
-    Album(Box<AlbumRow>),
-    Artist(ArtistRow),
-    Genre(TagRow),
-    Playlist(PlaylistRow),
-    SmartPlaylist(SmartPlaylistRow),
-    PlaylistFolder(PlaylistFolderRow),
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct SidebarPinRow {
     pub pin: SidebarPin,
@@ -60,23 +46,23 @@ pub struct SidebarPinRow {
     pub artwork: Vec<Vec<u8>>,
 }
 
-impl From<(SidebarPin, PinRow)> for SidebarPinRow {
-    /// The sidebar's reduced row.
-    fn from((pin, row): (SidebarPin, PinRow)) -> Self {
+impl From<(SidebarPin, Row)> for SidebarPinRow {
+    /// The sidebar's reduced row of a row from [`Catalog::pin_rows`].
+    fn from((pin, row): (SidebarPin, Row)) -> Self {
         let (key, name, totals, artwork) = match row {
-            PinRow::Album(album) => (
+            Row::Album(album) => (
                 album.album_key.raw(),
                 album.title,
                 (album.summary.track_count, album.summary.duration_millis),
                 album.artwork_binding.into_iter().collect(),
             ),
-            PinRow::Artist(artist) => (
+            Row::Artist(artist) => (
                 artist.artist_key.raw(),
                 artist.name,
                 (artist.summary.track_count, artist.summary.duration_millis),
                 artist.artwork_binding.into_iter().collect(),
             ),
-            PinRow::Genre(genre) => (
+            Row::Tag(genre) => (
                 genre.key,
                 genre.name,
                 (genre.summary.track_count, genre.summary.duration_millis),
@@ -85,24 +71,27 @@ impl From<(SidebarPin, PinRow)> for SidebarPinRow {
                     None => genre.representative_artwork,
                 },
             ),
-            PinRow::Playlist(playlist) => (
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => (
                 playlist.playlist_key.raw(),
                 playlist.name,
                 (playlist.track_count, playlist.duration_millis),
                 playlist.artwork_binding.into_iter().collect(),
             ),
-            PinRow::SmartPlaylist(smart) => (
+            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => (
                 smart.smart_playlist_key.raw(),
                 smart.name,
                 (smart.track_count, smart.duration_millis),
                 smart.artwork_binding.into_iter().collect(),
             ),
-            PinRow::PlaylistFolder(folder) => (
+            Row::Playlist(PlaylistListRow::Folder(folder)) => (
                 folder.folder_key.raw(),
                 folder.name,
                 (folder.track_count, folder.duration_millis),
                 folder.artwork_binding.into_iter().collect(),
             ),
+            Row::Track(_) | Row::AlbumHeading(_) | Row::AlbumTrack { .. } | Row::Folder(_) => {
+                unreachable!("pin_rows returns pinned collections only")
+            }
         };
         Self {
             pin,
@@ -181,7 +170,7 @@ impl Catalog {
         pins: &[SidebarPin],
         now: i64,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(SidebarPin, PinRow)>> {
+    ) -> LibraryResult<Vec<(SidebarPin, Row)>> {
         tokio::select! {
             () = self.loaded() => {}
             () = cancellation.cancelled() => return Err(crate::LibraryError::ReadCancelled),
@@ -201,37 +190,25 @@ impl Catalog {
             .rows_of_on(&mut connection, &items, &shape, true)
             .await?
         {
-            let (item, row) = match row {
-                Row::Album(row) => (Item::Album(row.album_key), PinRow::Album(Box::new(row))),
-                Row::Artist(row) => (
-                    Item::Artist {
-                        key: row.artist_key,
-                        album_artist: row.album_artist,
-                    },
-                    PinRow::Artist(row),
-                ),
-                Row::Tag(row) => (
-                    Item::Genre(crate::GenreKey::from_raw(row.key)),
-                    PinRow::Genre(row),
-                ),
-                Row::Playlist(PlaylistListRow::Playlist(row)) => {
-                    (Item::Playlist(row.playlist_key), PinRow::Playlist(row))
+            let item = match &row {
+                Row::Album(row) => Item::Album(row.album_key),
+                Row::Artist(row) => Item::Artist {
+                    key: row.artist_key,
+                    album_artist: row.album_artist,
+                },
+                Row::Tag(row) => Item::Genre(crate::GenreKey::from_raw(row.key)),
+                Row::Playlist(PlaylistListRow::Playlist(row)) => Item::Playlist(row.playlist_key),
+                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => {
+                    Item::Smart(row.smart_playlist_key)
                 }
-                Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => (
-                    Item::Smart(row.smart_playlist_key),
-                    PinRow::SmartPlaylist(row),
-                ),
-                Row::Playlist(PlaylistListRow::Folder(row)) => (
-                    Item::PlaylistFolder(row.folder_key),
-                    PinRow::PlaylistFolder(row),
-                ),
+                Row::Playlist(PlaylistListRow::Folder(row)) => Item::PlaylistFolder(row.folder_key),
                 _ => continue,
             };
             built.insert(item, row);
         }
         let rows = pinned
             .into_iter()
-            .filter_map(|(pin, item)| Some((pin.clone(), built.get(&item)?.clone())))
+            .filter_map(|(pin, item)| Some((pin.clone(), built.remove(&item)?)))
             .collect();
         Ok(rows)
     }

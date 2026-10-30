@@ -690,21 +690,7 @@ impl AndroidLibrary {
                     .into_iter()
                     .map(|(pin, row)| AndroidBrowseRow {
                         pin: Some(pin),
-                        ..match row {
-                            library::PinRow::Album(row) => Row::Album(*row),
-                            library::PinRow::Artist(row) => Row::Artist(row),
-                            library::PinRow::Genre(row) => Row::Tag(row),
-                            library::PinRow::Playlist(row) => {
-                                Row::Playlist(library::PlaylistListRow::Playlist(row))
-                            }
-                            library::PinRow::SmartPlaylist(row) => {
-                                Row::Playlist(library::PlaylistListRow::SmartPlaylist(row))
-                            }
-                            library::PinRow::PlaylistFolder(row) => {
-                                Row::Playlist(library::PlaylistListRow::Folder(row))
-                            }
-                        }
-                        .into()
+                        ..row.into()
                     })
                     .collect();
                 Ok(AndroidPinPage {

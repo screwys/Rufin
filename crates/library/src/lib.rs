@@ -55,7 +55,7 @@ mod playlist_links;
 pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
 mod pins;
 mod playlists;
-pub use pins::{PinRow, SidebarPin, SidebarPinRow};
+pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
 pub mod rank;
 mod waveform;
