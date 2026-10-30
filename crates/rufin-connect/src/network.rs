@@ -1,7 +1,5 @@
-use library::profile::{DocumentVersion, ProfileStore, SyncStream};
 use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
+    collections::HashMap,
     sync::{Arc, OnceLock, Weak},
     time::Duration,
 };
@@ -14,12 +12,10 @@ use iroh::{
         AddressLookup, DnsAddressLookup, EndpointData, PkarrPublisher, PkarrResolver,
         memory::MemoryLookup,
     },
-    endpoint::{Connection, ConnectionError, presets},
+    endpoint::{ConnectOptions, Connection, ConnectionError, VarInt, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
-use loro::{ExportMode, LoroDoc, ToJson};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sqlx::{Connection as _, Row, SqliteConnection};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, Notify, RwLock, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -28,16 +24,27 @@ use crate::{
     media::PeerByteResponse,
     nearby::{Discovery, Nearby},
     pairing,
+    store::Store,
+    sync::{SyncProtocol, Values},
 };
 
-pub(crate) const RPC_PROTOCOL: &[u8] = b"rufin/connect/rpc/1";
-pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/3";
-const INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
-const MEDIA_PROTOCOL: &[u8] = b"rufin/connect/media/1";
-const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/3";
-const MAX_FRAME: usize = 16 * 1024 * 1024;
-const SYNC_PAGE: usize = 64;
-const PROFILE_CLOSED: &[u8] = b"profile closed";
+pub(crate) const RPC_PROTOCOL: &[u8] = b"rufin/connect/rpc/2";
+pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/4";
+const INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/2";
+// An older device does not answer a newer protocol at all. Pairing also offers the previous
+// versions, so one that picks them is reported as incompatible.
+const PREVIOUS_PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/3";
+const PREVIOUS_INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
+const MEDIA_PROTOCOL: &[u8] = b"rufin/connect/media/2";
+pub(crate) const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/4";
+pub(crate) const MAX_FRAME: usize = 16 * 1024 * 1024;
+// A device that removed this one closes its connections with this code.
+const REMOVED: VarInt = VarInt::from_u32(2);
+const NEARBY_WINDOW: Duration = Duration::from_secs(180);
+
+pub const INCOMPATIBLE: &str =
+    "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
+pub const REMOVED_FROM_PROFILE: &str = "This device was removed from the profile";
 
 static DNS_RESOLVER: OnceLock<fn() -> iroh::dns::DnsResolver> = OnceLock::new();
 
@@ -157,14 +164,21 @@ impl<T: AddressLookup> AddressLookup for CanonicalRelays<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct NetworkConfig {
-    pub database: PathBuf,
     pub name: String,
     pub nearby: bool,
     pub relay: Option<String>,
-    #[serde(default)]
     pub public_relay: bool,
+}
+
+/// What this device serves while Connect is on.
+pub struct Profile {
+    pub id: String,
+    /// Handed to a joining device; secret fields are sealed to it.
+    pub key: String,
+    pub store: Store,
+    pub values: Arc<dyn Values>,
 }
 
 pub enum NetworkEvent {
@@ -183,45 +197,40 @@ pub enum NetworkEvent {
         session: Option<String>,
         error: String,
     },
+    /// This device joined the host `peer`'s profile.
     Paired {
         session: String,
-        profile_id: String,
+        profile: String,
+        key: String,
         peer: String,
         name: String,
-        enrollment_data: Vec<u8>,
     },
     MemberAdded {
         peer: String,
         name: String,
     },
-    MembershipChanged,
     Request {
-        profile: String,
         peer: String,
         body: Vec<u8>,
         reply: oneshot::Sender<Result<Vec<u8>, String>>,
     },
-    Settings {
-        profile: String,
-        peer: String,
-    },
     StreamRequest {
-        profile: String,
         peer: String,
         body: Vec<u8>,
         reply: oneshot::Sender<Result<PeerByteResponse, String>>,
     },
-    Syncing {
-        profile: String,
+    /// `peer`'s records reached `sequence`. The device that pushed waits until `pulled` is
+    /// answered or dropped.
+    Changed {
         peer: String,
-        active: bool,
+        sequence: i64,
+        pulled: oneshot::Sender<()>,
     },
     Reachable {
-        profile: String,
         peer: String,
     },
-    Unavailable {
-        profile: String,
+    /// `peer` refused this device because it was removed from the profile.
+    Removed {
         peer: String,
     },
     Discovered {
@@ -234,53 +243,22 @@ pub enum NetworkEvent {
     Error(String),
 }
 
-struct Profile {
-    id: String,
-    documents: RwLock<Option<Arc<ProfileStore>>>,
-    stop: CancellationToken,
-}
-
-/// Iroh owns encrypted connections. Loro owns document and trusted-device merges.
-/// The network database remembers addresses and device trust.
+/// Iroh owns encrypted connections. The core owns which devices are trusted.
 pub struct ConnectNetwork {
     pub(crate) endpoint: Endpoint,
     pub(crate) name: RwLock<String>,
-    profile: RwLock<Option<Arc<Profile>>>,
-    pub(crate) enrollment_data: RwLock<Vec<u8>>,
+    pub(crate) profile: RwLock<Option<Arc<Profile>>>,
+    // Device id and whether it is trusted, from Connect's device records.
+    devices: std::sync::RwLock<HashMap<String, bool>>,
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
-    pub(crate) membership_changed: watch::Sender<()>,
-    sync_requested: Arc<Notify>,
-    database: Mutex<SqliteConnection>,
     addresses: MemoryLookup,
-    transfers: Mutex<HashMap<String, Weak<Mutex<()>>>>,
+    nearby: Option<Nearby>,
+    discover: Arc<Notify>,
     stop: CancellationToken,
     relay: RelayMode,
-    nearby: bool,
     router: Mutex<Option<Router>>,
     pairing_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SyncRequest {
-    profile: String,
-    after: i64,
-    stream: SyncStream,
-    roster: Vec<u8>,
-    addresses: Vec<EndpointAddr>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SyncPage {
-    versions: Vec<DocumentVersion>,
-    roster: Vec<u8>,
-    addresses: Vec<EndpointAddr>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SyncAcknowledgement {
-    versions: Vec<DocumentVersion>,
-    roster: Vec<u8>,
 }
 
 impl ConnectNetwork {
@@ -288,27 +266,7 @@ impl ConnectNetwork {
         config: NetworkConfig,
         credentials: SecretKey,
     ) -> Result<(Arc<Self>, mpsc::Receiver<NetworkEvent>)> {
-        if let Some(parent) = config.database.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let mut database = SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&config.database)
-                .create_if_missing(true),
-        )
-        .await?;
-        sqlx::raw_sql("PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS connect_addresses(peer TEXT PRIMARY KEY,address TEXT NOT NULL) STRICT;
-            CREATE TABLE IF NOT EXISTS connect_rosters(profile TEXT PRIMARY KEY,snapshot BLOB NOT NULL) STRICT;")
-            .execute(&mut database).await?;
         let addresses = MemoryLookup::new();
-        for row in sqlx::query("SELECT address FROM connect_addresses")
-            .fetch_all(&mut database)
-            .await?
-        {
-            let addr: EndpointAddr = serde_json::from_str(row.get::<&str, _>(0))?;
-            addresses.add_endpoint_info(canonical_address(addr));
-        }
         let relay = relay_mode(config.relay.as_deref(), config.public_relay)?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(credentials.clone())
@@ -317,20 +275,12 @@ impl ConnectNetwork {
         if let Some(resolver) = DNS_RESOLVER.get() {
             builder = builder.dns_resolver(resolver());
         }
-        let mut discovery_error = None;
-        let discoveries = if config.nearby {
-            match Nearby::new(credentials.public(), addresses.clone()) {
-                Ok((nearby, discoveries)) => {
-                    builder = builder.address_lookup(nearby);
-                    Some(discoveries)
-                }
-                Err(error) => {
-                    discovery_error = Some(format!("Nearby discovery is unavailable: {error}"));
-                    None
-                }
-            }
+        let (nearby, discoveries) = if config.nearby {
+            let (nearby, discoveries) = Nearby::new(credentials.public(), addresses.clone());
+            builder = builder.address_lookup(nearby.clone());
+            (Some(nearby), Some(discoveries))
         } else {
-            None
+            (None, None)
         };
         if let Ok(name) = config.name.parse() {
             builder = builder.user_data_for_address_lookup(name);
@@ -345,27 +295,27 @@ impl ConnectNetwork {
         endpoint.address_lookup()?.add(CanonicalRelays(
             DnsAddressLookup::n0_dns().dns_resolver(dns.clone()).build(),
         ));
-        endpoint.address_lookup()?.add(PublicAddressPublisher(
-            PkarrPublisher::n0_dns()
-                .dns_resolver(dns)
-                .build(credentials.clone(), endpoint.tls_config().clone()),
-        ));
+        // Only public relays publish this device's address to n0's directory.
+        if config.public_relay && config.relay.is_none() {
+            endpoint.address_lookup()?.add(PublicAddressPublisher(
+                PkarrPublisher::n0_dns()
+                    .dns_resolver(dns)
+                    .build(credentials.clone(), endpoint.tls_config().clone()),
+            ));
+        }
         let (events, receiver) = mpsc::channel(64);
         let network = Arc::new(Self {
             endpoint,
             name: RwLock::new(config.name),
             profile: RwLock::new(None),
-            enrollment_data: RwLock::new(Vec::new()),
+            devices: std::sync::RwLock::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             events,
-            membership_changed: watch::channel(()).0,
-            sync_requested: Arc::new(Notify::new()),
-            database: Mutex::new(database),
             addresses,
-            transfers: Mutex::new(HashMap::new()),
+            nearby,
+            discover: Arc::new(Notify::new()),
             stop: CancellationToken::new(),
             relay,
-            nearby: config.nearby,
             router: Mutex::new(None),
             pairing_task: Mutex::new(None),
         });
@@ -378,61 +328,16 @@ impl ConnectNetwork {
             .accept(MEDIA_PROTOCOL, MediaProtocol(weak.clone()))
             .spawn();
         *network.router.lock().await = Some(router);
-        if let Some(error) = discovery_error {
-            let _ = network.events.send(NetworkEvent::Error(error)).await;
-        }
-        if let Some(mut discoveries) = discoveries {
-            let weak = weak.clone();
-            let stop = network.stop.clone();
-            tokio::spawn(async move {
-                loop {
-                    let event = tokio::select! { _ = stop.cancelled() => break, event = discoveries.recv() => event };
-                    let Some(event) = event else {
-                        break;
-                    };
-                    let Some(network) = weak.upgrade() else { break };
-                    if let Discovery::Expired(endpoint_id) = event {
-                        let _ = network
-                            .events
-                            .send(NetworkEvent::DiscoveryExpired {
-                                peer: endpoint_id.to_string(),
-                            })
-                            .await;
-                        continue;
-                    }
-                    let Discovery::Found(info) = event else {
-                        continue;
-                    };
-                    let name = info
-                        .data
-                        .user_data()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| info.endpoint_id.to_string());
-                    let address: EndpointAddr = info.into();
-                    if let Err(error) = network.remember_address(&address).await {
-                        let _ = network
-                            .events
-                            .send(NetworkEvent::Error(error.to_string()))
-                            .await;
-                    }
-                    let _ = network
-                        .events
-                        .send(NetworkEvent::Discovered {
-                            peer: address.id.to_string(),
-                            name,
-                        })
-                        .await;
-                }
-            });
+        if let (Some(nearby), Some(discoveries)) = (network.nearby.clone(), discoveries) {
+            network.run_nearby(nearby, discoveries);
         }
         let mut addresses = network.endpoint.watch_addr().stream();
         let stop = network.stop.clone();
-        let address_owner = weak.clone();
         tokio::spawn(async move {
             loop {
                 let address = tokio::select! { _ = stop.cancelled() => break, address = addresses.next() => address };
                 let Some(address) = address else { break };
-                let Some(network) = address_owner.upgrade() else {
+                let Some(network) = weak.upgrade() else {
                     break;
                 };
                 if let Ok(invitation) = serde_json::to_string(&address) {
@@ -443,447 +348,274 @@ impl ConnectNetwork {
                 }
             }
         });
-        let stop = network.stop.clone();
-        let mut membership = network.membership_changed.subscribe();
-        let sync_requested = network.sync_requested.clone();
+        Ok((network, receiver))
+    }
+
+    // Nearby discovery runs only for a while after each Discover.
+    fn run_nearby(self: &Arc<Self>, nearby: Nearby, mut discoveries: mpsc::Receiver<Discovery>) {
+        let weak = Arc::downgrade(self);
+        let stop = self.stop.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut syncing = HashSet::new();
-            // A refresh requested during a sync runs once that peer finishes.
-            let mut pending = HashSet::new();
-            let mut tasks = tokio::task::JoinSet::new();
             loop {
-                tokio::select! {
-                    _ = stop.cancelled() => break,
-                    Some(completed) = tasks.join_next(), if !tasks.is_empty() => {
-                        if let Ok(peer) = completed { syncing.remove(&peer); }
-                    },
-                    Ok(()) = membership.changed() => interval.reset_immediately(),
-                    _ = sync_requested.notified() => interval.reset_immediately(),
-                    _ = interval.tick() => {
-                        let Some(network) = weak.upgrade() else { break };
-                        pending = network.members().await.unwrap_or_default().into_iter().collect();
-                        pending.remove(&network.identity());
-                    }
-                }
-                let Some(network) = weak.upgrade() else { break };
-                let Some(profile) = network.profile.read().await.clone() else {
-                    continue;
+                let event = tokio::select! { _ = stop.cancelled() => break, event = discoveries.recv() => event };
+                let Some(event) = event else {
+                    break;
                 };
-                if profile.documents.read().await.is_none() {
-                    continue;
-                }
-                for peer in pending.extract_if(|peer| syncing.insert(peer.clone())) {
-                    let network = network.clone();
-                    let profile = profile.clone();
-                    tasks.spawn(async move {
-                        // Each peer retries independently. sync_peer closes
-                        // its connection explicitly when its profile closes.
-                        let _ = network.sync_peer(&profile, &peer).await;
-                        peer
-                    });
-                }
+                let Some(network) = weak.upgrade() else { break };
+                let event = match event {
+                    Discovery::Expired(peer) => NetworkEvent::DiscoveryExpired {
+                        peer: peer.to_string(),
+                    },
+                    Discovery::Found(info) => NetworkEvent::Discovered {
+                        peer: info.endpoint_id.to_string(),
+                        name: info
+                            .data
+                            .user_data()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| info.endpoint_id.to_string()),
+                    },
+                };
+                let _ = network.events.send(event).await;
             }
         });
-        Ok((network, receiver))
+        let weak = Arc::downgrade(self);
+        let discover = self.discover.clone();
+        let stop = self.stop.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! { _ = stop.cancelled() => break, _ = discover.notified() => {} }
+                if let Err(error) = nearby.start() {
+                    let Some(network) = weak.upgrade() else { break };
+                    let _ = network
+                        .events
+                        .send(NetworkEvent::Error(format!(
+                            "Nearby discovery is unavailable: {error}"
+                        )))
+                        .await;
+                    continue;
+                }
+                loop {
+                    tokio::select! {
+                        _ = stop.cancelled() => break,
+                        _ = discover.notified() => {}
+                        _ = tokio::time::sleep(NEARBY_WINDOW) => break,
+                    }
+                }
+                nearby.stop();
+            }
+        });
     }
 
     pub fn identity(&self) -> String {
         self.endpoint.id().to_string()
     }
-    pub fn refresh(&self) {
-        self.sync_requested.notify_one();
+
+    /// Look for nearby devices for the next three minutes.
+    pub fn discover(&self) {
+        if self.nearby.is_some() {
+            self.discover.notify_one();
+        }
     }
-    pub async fn file_transfer(&self, key: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let lock = {
-            let mut transfers = self.transfers.lock().await;
-            transfers.retain(|_, lock| lock.strong_count() != 0);
-            let lock = transfers
-                .get(key)
-                .and_then(Weak::upgrade)
-                .unwrap_or_default();
-            transfers.insert(key.into(), Arc::downgrade(&lock));
-            lock
-        };
-        lock.lock_owned().await
-    }
+
     pub async fn rename(&self, name: String) {
         self.endpoint
             .set_user_data_for_address_lookup(name.parse().ok());
         *self.name.write().await = name;
     }
+
     pub fn matches_configuration(
         &self,
         nearby: bool,
         relay: Option<&str>,
         public: bool,
     ) -> Result<bool> {
-        Ok(self.nearby == nearby && self.relay == relay_mode(relay, public)?)
+        Ok(self.nearby.is_some() == nearby && self.relay == relay_mode(relay, public)?)
     }
-    pub async fn set_enrollment_data(&self, data: Vec<u8>) {
-        *self.enrollment_data.write().await = data;
-    }
+
     pub async fn invitation(&self) -> Result<String> {
         Ok(serde_json::to_string(&self.endpoint.addr())?)
     }
-    async fn remember_address(&self, address: &EndpointAddr) -> Result<()> {
-        let address = canonical_address(address.clone());
-        let mut db = self.database.lock().await;
-        self.addresses.add_endpoint_info(address.clone());
-        let remembered: EndpointAddr = self
-            .addresses
-            .get_endpoint_info(address.id)
-            .expect("the address was just inserted")
-            .into();
-        sqlx::query("INSERT INTO connect_addresses(peer,address) VALUES(?1,?2) ON CONFLICT(peer) DO UPDATE SET address=excluded.address")
-            .bind(address.id.to_string()).bind(serde_json::to_string(&remembered)?).execute(&mut *db).await?;
-        Ok(())
-    }
-    pub async fn remember_peer(&self, invitation: &str) -> Result<String> {
-        if let Ok(id) = invitation.parse::<EndpointId>() {
-            return Ok(id.to_string());
-        }
-        let address: EndpointAddr =
-            serde_json::from_str(invitation).context("Invalid Connect invitation")?;
-        self.remember_address(&address).await?;
-        Ok(address.id.to_string())
-    }
-    pub fn new_profile_id() -> String {
-        SecretKey::generate().public().to_string()
-    }
-    pub(crate) async fn current_profile(&self) -> Result<String> {
-        self.profile
-            .read()
-            .await
-            .as_ref()
-            .map(|p| p.id.clone())
-            .context("No Connect profile is open")
-    }
-    pub async fn open_profile(
-        self: &Arc<Self>,
-        profile: &str,
-        create: bool,
-        data: Vec<u8>,
-    ) -> Result<()> {
-        ensure!(
-            self.profile.read().await.is_none(),
-            "A Connect profile is already open"
-        );
-        let mut db = self.database.lock().await;
-        let existing: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connect_rosters WHERE profile=?1)")
-                .bind(profile)
-                .fetch_one(&mut *db)
-                .await?;
-        if create || !existing {
-            // Existing local profiles retain their identity and Loro state across
-            // the transport migration. Other devices still require verification.
-            let doc = self.load_roster(&mut db, profile).await?;
-            if !existing {
-                doc.get_map("devices").insert(&self.identity(), true)?;
+
+    /// Serve this device's records while Connect is on; `None` once it turns off.
+    pub async fn serve(&self, profile: Option<Profile>) -> Result<()> {
+        if let Some(profile) = &profile {
+            for peer in profile.store.peers().await? {
+                if let Some(address) = &peer.address {
+                    self.addresses
+                        .add_endpoint_info(canonical_address(serde_json::from_str(address)?));
+                }
+                // A joining device reached its host before it had records to keep it in.
+                let known = peer_address(&self.addresses, peer.device.parse()?);
+                if !known.is_empty() {
+                    let known = serde_json::to_string(&known)?;
+                    if peer.address.as_ref() != Some(&known) {
+                        profile.store.set_address(&peer.device, &known).await?;
+                    }
+                }
             }
-            save_roster(&mut db, profile, &doc).await?;
         }
-        drop(db);
-        *self.enrollment_data.write().await = data;
-        *self.profile.write().await = Some(Arc::new(Profile {
-            id: profile.to_owned(),
-            documents: RwLock::new(None),
-            stop: CancellationToken::new(),
-        }));
-        self.membership_changed.send_replace(());
-        Ok(())
-    }
-    pub async fn attach_documents(&self, documents: Arc<ProfileStore>) -> Result<()> {
-        let profile = self
-            .profile
-            .read()
-            .await
-            .clone()
-            .context("No Connect profile is open")?;
-        documents.register_members(&self.members().await?).await?;
-        *profile.documents.write().await = Some(documents);
-        let mut db = self.database.lock().await;
-        let roster = self.load_roster(&mut db, &profile.id).await?;
-        drop(db);
-        self.retire_members(&profile.id, &roster).await?;
-        self.membership_changed.send_replace(());
+        *self.profile.write().await = profile.map(Arc::new);
         Ok(())
     }
 
-    async fn retire_members(&self, profile: &str, roster: &LoroDoc) -> Result<()> {
-        let records = roster
-            .get_map("devices")
-            .get_deep_value()
-            .to_json_value()
-            .as_object()
-            .into_iter()
-            .flat_map(|members| members.iter())
-            .filter(|(_, value)| value.as_bool() == Some(false))
-            .map(|(peer, _)| library::ConnectRecord {
-                kind: "device".into(),
-                key: peer.clone(),
-                value: None,
-            })
-            .collect::<Vec<_>>();
-        if !records.is_empty()
-            && let Some(current) = self.profile.read().await.clone()
-            && current.id == profile
-            && let Some(documents) = current.documents.read().await.clone()
-        {
-            documents.write_records(&records).await?;
+    /// The profile's devices and whether each is trusted, from Connect's device records.
+    pub fn set_devices(&self, devices: HashMap<String, bool>) {
+        *self.devices.write().unwrap() = devices;
+    }
+
+    fn trusted(&self, peer: EndpointId) -> Option<bool> {
+        self.devices.read().unwrap().get(&peer.to_string()).copied()
+    }
+
+    pub(crate) fn trusted_devices(&self) -> Vec<String> {
+        let identity = self.identity();
+        self.devices
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(peer, trusted)| **trusted && **peer != identity)
+            .map(|(peer, _)| peer.clone())
+            .collect()
+    }
+
+    /// Lets a trusted device in. A removed one is told so; an unknown one is closed.
+    pub(crate) async fn admit(&self, connection: &Connection) -> bool {
+        match self.trusted(connection.remote_id()) {
+            Some(true) => {
+                self.reached(connection).await;
+                true
+            }
+            Some(false) => {
+                connection.close(REMOVED, b"device removed");
+                false
+            }
+            None => {
+                connection.close(1u32.into(), b"not a member");
+                false
+            }
         }
-        Ok(())
     }
-    async fn load_roster(&self, db: &mut SqliteConnection, profile: &str) -> Result<LoroDoc> {
-        let doc = LoroDoc::new();
-        doc.set_peer_id(u64::from_le_bytes(
-            self.endpoint.id().as_bytes()[..8].try_into()?,
-        ))?;
-        if let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT snapshot FROM connect_rosters WHERE profile=?1",
-        )
-        .bind(profile)
-        .fetch_optional(db)
-        .await?
-        {
-            doc.import(&bytes)?;
-        }
-        Ok(doc)
-    }
-    pub async fn members(&self) -> Result<Vec<String>> {
-        self.enrolled_members(&self.current_profile().await?).await
-    }
-    pub async fn enrolled_members(&self, profile: &str) -> Result<Vec<String>> {
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
-        if !trusted(&doc, self.endpoint.id()) {
-            return Ok(Vec::new());
-        }
-        Ok(doc
-            .get_map("devices")
-            .get_deep_value()
-            .to_json_value()
-            .as_object()
-            .into_iter()
-            .flat_map(|map| map.iter())
-            .filter(|(_, value)| value.as_bool() == Some(true))
-            .map(|(key, _)| key.clone())
-            .collect())
-    }
-    pub(crate) async fn authorize(&self, peer: EndpointId) -> Result<()> {
-        let profile = self.current_profile().await?;
-        self.authorize_profile(&profile, peer).await
-    }
-    async fn authorize_profile(&self, profile: &str, peer: EndpointId) -> Result<()> {
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
+
+    pub(crate) async fn connect(&self, peer: &str, protocol: &[u8]) -> Result<Connection> {
+        let peer: EndpointId = peer.parse()?;
         ensure!(
-            trusted(&doc, self.endpoint.id()),
-            "This device was removed from the profile"
-        );
-        ensure!(
-            trusted(&doc, peer),
+            self.trusted(peer) == Some(true),
             "Device is not a member of this profile"
         );
-        Ok(())
+        Ok(self
+            .endpoint
+            .connect(peer_address(&self.addresses, peer), protocol)
+            .await?)
     }
-    pub async fn check_membership(&self, peer: &str) -> Result<()> {
-        self.authorize(peer.parse()?).await
-    }
-    pub(crate) async fn enroll(&self, peer: EndpointId, name: &str) -> Result<Vec<u8>> {
-        let profile = self.current_profile().await?;
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, &profile).await?;
-        ensure!(
-            trusted(&doc, self.endpoint.id()),
-            "This device was removed from the profile"
-        );
-        doc.get_map("devices").insert(&peer.to_string(), true)?;
-        save_roster(&mut db, &profile, &doc).await?;
-        self.membership_changed.send_replace(());
-        drop(db);
-        if let Some(profile) = self.profile.read().await.as_ref()
-            && let Some(documents) = profile.documents.read().await.as_ref()
+
+    /// Ends an exchange with a trusted device: a refusal because this device was removed is
+    /// reported, and a device that answered is remembered where it answered from.
+    pub(crate) async fn settle<T>(&self, connection: &Connection, result: Result<T>) -> Result<T> {
+        if let Some(ConnectionError::ApplicationClosed(close)) = connection.close_reason()
+            && close.error_code == REMOVED
         {
-            documents.register_members(&[peer.to_string()]).await?;
-            documents
-                .write_records(&[library::ConnectRecord {
-                    kind: "device".into(),
-                    key: peer.to_string(),
-                    value: Some(serde_json::json!(name)),
-                }])
-                .await?;
+            let _ = self
+                .events
+                .send(NetworkEvent::Removed {
+                    peer: connection.remote_id().to_string(),
+                })
+                .await;
+            bail!(REMOVED_FROM_PROFILE);
         }
-        Ok(doc.export(ExportMode::Snapshot)?)
+        if result.is_ok() {
+            self.reached(connection).await;
+        }
+        result
     }
-    pub(crate) async fn accept_enrollment(
-        &self,
-        profile: &str,
-        bytes: &[u8],
-        host: EndpointId,
-    ) -> Result<()> {
-        let enrollment = LoroDoc::new();
-        enrollment.import(bytes)?;
-        ensure!(
-            trusted(&enrollment, self.endpoint.id()) && trusted(&enrollment, host),
-            "The verified enrollment does not include both devices"
-        );
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
-        doc.import(bytes)?;
-        // Fresh bilateral approval supersedes either device's earlier removal.
-        // Keep the merged history, including removals of unrelated devices.
-        let devices = doc.get_map("devices");
-        devices.insert(&self.identity(), true)?;
-        devices.insert(&host.to_string(), true)?;
-        save_roster(&mut db, profile, &doc).await?;
-        self.membership_changed.send_replace(());
-        Ok(())
-    }
-    pub async fn remove_member(&self, peer: &str) -> Result<()> {
-        let peer: EndpointId = peer.parse()?;
-        let profile = self.current_profile().await?;
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, &profile).await?;
-        ensure!(
-            trusted(&doc, self.endpoint.id()),
-            "This device was removed from the profile"
-        );
-        doc.get_map("devices").insert(&peer.to_string(), false)?;
-        save_roster(&mut db, &profile, &doc).await?;
-        self.membership_changed.send_replace(());
-        drop(db);
-        self.retire_members(&profile, &doc).await?;
-        let _ = self.events.send(NetworkEvent::MembershipChanged).await;
-        Ok(())
-    }
-    pub async fn leave_profile(&self, profile: &str) -> Result<()> {
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
-        let peers = doc
-            .get_map("devices")
-            .get_deep_value()
-            .to_json_value()
-            .as_object()
-            .into_iter()
-            .flat_map(|map| map.iter())
-            .filter(|(_, value)| value.as_bool() == Some(true))
-            .filter_map(|(peer, _)| peer.parse::<EndpointId>().ok())
-            .filter(|peer| *peer != self.endpoint.id())
-            .collect::<Vec<_>>();
-        doc.get_map("devices").insert(&self.identity(), false)?;
-        save_roster(&mut db, profile, &doc).await?;
-        let request = SyncRequest {
-            profile: profile.to_owned(),
-            after: 0,
-            stream: SyncStream::Authored,
-            roster: doc.export(ExportMode::Snapshot)?,
-            addresses: Vec::new(),
-        };
-        drop(db);
-        futures_util::stream::iter(peers)
-            .for_each_concurrent(None, |peer| {
-                let request = &request;
-                async move {
-                    let _ = tokio::time::timeout(Duration::from_secs(15), async {
-                        let conn = self
-                            .endpoint
-                            .connect(peer_address(&self.addresses, peer), SYNC_PROTOCOL)
-                            .await?;
-                        let (mut send, mut recv) = conn.open_bi().await?;
-                        write_frame(&mut send, request).await?;
-                        send.finish()?;
-                        let _: Option<SyncPage> = read_frame(&mut recv).await?;
-                        conn.close(0u32.into(), b"profile left");
-                        Ok::<(), anyhow::Error>(())
-                    })
-                    .await;
-                }
+
+    // A device that restarted listens on another port; its own connections tell where.
+    async fn reached(&self, connection: &Connection) {
+        let peer = connection.remote_id();
+        let _ = self
+            .events
+            .send(NetworkEvent::Reachable {
+                peer: peer.to_string(),
             })
             .await;
-        Ok(())
-    }
-    async fn roster(&self, profile: &str) -> Result<Vec<u8>> {
-        let mut db = self.database.lock().await;
-        Ok(self
-            .load_roster(&mut db, profile)
-            .await?
-            .export(ExportMode::Snapshot)?)
-    }
-    async fn merge_roster(&self, profile: &str, bytes: &[u8]) -> Result<bool> {
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
-        let before = doc.oplog_vv();
-        doc.import(bytes)?;
-        let member = trusted(&doc, self.endpoint.id());
-        if before != doc.oplog_vv() {
-            save_roster(&mut db, profile, &doc).await?;
-            self.membership_changed.send_replace(());
-            drop(db);
-            self.retire_members(profile, &doc).await?;
-            let _ = self.events.send(NetworkEvent::MembershipChanged).await;
+        let Some(address) = connection
+            .paths()
+            .iter()
+            .find(|path| path.is_selected())
+            .map(|path| path.remote_addr().clone())
+        else {
+            return;
+        };
+        let before = self
+            .addresses
+            .get_endpoint_info(peer)
+            .map(EndpointAddr::from);
+        self.addresses
+            .add_endpoint_info(canonical_address(EndpointAddr::from_parts(peer, [address])));
+        let after = peer_address(&self.addresses, peer);
+        if before.as_ref() == Some(&after) {
+            return;
         }
-        Ok(member)
-    }
-    async fn revocation(&self, profile: &str, peer: EndpointId) -> Result<Option<Vec<u8>>> {
-        let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, profile).await?;
-        let removed = doc
-            .get_map("devices")
-            .get(&peer.to_string())
-            .is_some_and(|value| {
-                value
-                    .as_value()
-                    .is_some_and(|value| value.to_json_value().as_bool() == Some(false))
-            });
-        if removed && trusted(&doc, self.endpoint.id()) {
-            return Ok(Some(doc.export(ExportMode::Snapshot)?));
-        }
-        Ok(None)
-    }
-    async fn peer_addresses(&self) -> Result<Vec<EndpointAddr>> {
-        let mut addresses = vec![self.endpoint.addr()];
-        for peer in self.members().await? {
-            let peer = peer.parse()?;
-            if let Some(info) = self.addresses.get_endpoint_info(peer) {
-                addresses.push(info.into());
+        if let Some(profile) = self.profile.read().await.as_ref() {
+            let saved = match serde_json::to_string(&after) {
+                Ok(address) => profile.store.set_address(&peer.to_string(), &address).await,
+                Err(error) => Err(error.into()),
+            };
+            if let Err(error) = saved {
+                tracing::warn!(%error, "Could not save a Connect device address");
             }
         }
-        Ok(addresses)
     }
-    async fn accept_addresses(&self, addresses: Vec<EndpointAddr>) -> Result<()> {
-        let members = self.members().await?;
-        for address in addresses {
-            if address.id != self.endpoint.id() && members.contains(&address.id.to_string()) {
-                self.remember_address(&address).await?;
-            }
+
+    fn remember_invitation(&self, invitation: &str) -> Result<EndpointId> {
+        if let Ok(id) = invitation.parse::<EndpointId>() {
+            return Ok(id);
         }
-        Ok(())
+        let address: EndpointAddr =
+            serde_json::from_str(invitation).context("Invalid Connect invitation")?;
+        self.addresses
+            .add_endpoint_info(canonical_address(address.clone()));
+        Ok(address.id)
     }
+
     pub async fn begin_pairing(self: &Arc<Self>, invitation: &str) -> Result<()> {
         self.start_pairing(invitation, true).await
     }
+
     pub async fn invite(self: &Arc<Self>, peer: &str) -> Result<()> {
-        self.current_profile().await?;
+        ensure!(
+            self.profile.read().await.is_some(),
+            "Rufin Connect is disabled"
+        );
         self.start_pairing(peer, false).await
     }
+
     async fn start_pairing(self: &Arc<Self>, invitation: &str, joining: bool) -> Result<()> {
-        let peer: EndpointId = self.remember_peer(invitation).await?.parse()?;
+        let peer = self.remember_invitation(invitation)?;
         self.cancel_pairing().await;
         let network = self.clone();
         *self.pairing_task.lock().await = Some(tokio::spawn(async move {
-            let protocol = if joining {
-                PAIR_PROTOCOL
+            let (protocol, previous) = if joining {
+                (PAIR_PROTOCOL, PREVIOUS_PAIR_PROTOCOL)
             } else {
-                INVITE_PROTOCOL
+                (INVITE_PROTOCOL, PREVIOUS_INVITE_PROTOCOL)
             };
-            match network
-                .endpoint
-                .connect(peer_address(&network.addresses, peer), protocol)
-                .await
-            {
+            let connected = async {
+                let connection = network
+                    .endpoint
+                    .connect_with_opts(
+                        peer_address(&network.addresses, peer),
+                        protocol,
+                        ConnectOptions::new().with_additional_alpns(vec![previous.to_vec()]),
+                    )
+                    .await?
+                    .await?;
+                if connection.alpn() != protocol {
+                    connection.close(1u32.into(), b"incompatible");
+                    bail!(INCOMPATIBLE);
+                }
+                Ok(connection)
+            };
+            match connected.await {
                 Ok(connection) => {
                     let _ = pairing::run(network, connection, joining, true).await;
                 }
@@ -900,6 +632,7 @@ impl ConnectNetwork {
         }));
         Ok(())
     }
+
     pub async fn cancel_pairing(&self) {
         if let Some(task) = self.pairing_task.lock().await.take() {
             task.abort();
@@ -909,6 +642,7 @@ impl ConnectNetwork {
             let _ = decision.send(Some(false));
         }
     }
+
     pub async fn confirm_pairing(&self, session: &str, approved: bool) -> Result<()> {
         self.approvals
             .lock()
@@ -918,53 +652,35 @@ impl ConnectNetwork {
             .send(Some(approved))
             .map_err(|_| anyhow::anyhow!("Pairing disconnected"))
     }
+
     pub async fn request(&self, peer: &str, body: Vec<u8>) -> Result<Vec<u8>> {
-        let peer = peer.parse()?;
-        let profile = self.current_profile().await?;
-        self.authorize(peer).await?;
-        let conn = tokio::time::timeout(
-            Duration::from_secs(30),
-            self.endpoint
-                .connect(peer_address(&self.addresses, peer), RPC_PROTOCOL),
-        )
-        .await
-        .context("Device is unreachable")??;
-        let (mut send, mut recv) = conn.open_bi().await?;
-        write_frame(&mut send, &body).await?;
-        send.finish()?;
-        let response: Result<Vec<u8>, String> = read_frame(&mut recv).await?;
-        let _ = self
-            .events
-            .send(NetworkEvent::Reachable {
-                profile,
-                peer: peer.to_string(),
-            })
-            .await;
-        conn.close(0u32.into(), b"complete");
+        let connection =
+            tokio::time::timeout(Duration::from_secs(30), self.connect(peer, RPC_PROTOCOL))
+                .await
+                .context("Device is unreachable")??;
+        let answered = async {
+            let (mut send, mut recv) = connection.open_bi().await?;
+            write_frame(&mut send, &body).await?;
+            send.finish()?;
+            read_frame::<Result<Vec<u8>, String>>(&mut recv).await
+        }
+        .await;
+        let response = self.settle(&connection, answered).await?;
+        connection.close(0u32.into(), b"complete");
         response.map_err(anyhow::Error::msg)
     }
-    pub async fn stream_request(&self, peer: &str, body: Vec<u8>) -> Result<PeerByteResponse> {
-        self.stream_request_for_profile(&self.current_profile().await?, peer, body)
-            .await
-    }
 
-    /// Read from a verified enrollment without changing the currently active profile.
-    pub async fn stream_request_for_profile(
-        &self,
-        profile: &str,
-        peer: &str,
-        body: Vec<u8>,
-    ) -> Result<PeerByteResponse> {
-        let peer = peer.parse()?;
-        self.authorize_profile(profile, peer).await?;
-        let connection = self
-            .endpoint
-            .connect(peer_address(&self.addresses, peer), MEDIA_PROTOCOL)
-            .await?;
-        let (mut send, mut recv) = connection.open_bi().await?;
-        write_frame(&mut send, &body).await?;
-        send.finish()?;
-        let metadata: Result<serde_json::Value, String> = read_frame(&mut recv).await?;
+    pub async fn stream_request(&self, peer: &str, body: Vec<u8>) -> Result<PeerByteResponse> {
+        let connection = self.connect(peer, MEDIA_PROTOCOL).await?;
+        let answered = async {
+            let (mut send, mut recv) = connection.open_bi().await?;
+            write_frame(&mut send, &body).await?;
+            send.finish()?;
+            let metadata: Result<serde_json::Value, String> = read_frame(&mut recv).await?;
+            Ok((metadata, recv))
+        }
+        .await;
+        let (metadata, recv) = self.settle(&connection, answered).await?;
         Ok(PeerByteResponse {
             metadata: metadata.map_err(anyhow::Error::msg)?,
             reader: Box::pin(MediaReader {
@@ -975,27 +691,20 @@ impl ConnectNetwork {
     }
 
     pub async fn test_connection(&self, peer: &str, body: Vec<u8>) -> Result<(String, Vec<u8>)> {
-        let peer = peer.parse()?;
-        let profile = self.current_profile().await?;
-        self.authorize(peer).await?;
         tokio::time::timeout(Duration::from_secs(15), async {
-            let conn = self
-                .endpoint
-                .connect(peer_address(&self.addresses, peer), RPC_PROTOCOL)
-                .await?;
-            let (mut send, mut recv) = conn.open_bi().await?;
-            write_frame(&mut send, &body).await?;
-            send.finish()?;
-            let response: Result<Vec<u8>, String> = read_frame(&mut recv).await?;
-            let response = response.map_err(anyhow::Error::msg)?;
-            let _ = self
-                .events
-                .send(NetworkEvent::Reachable {
-                    profile,
-                    peer: peer.to_string(),
-                })
-                .await;
-            let route = conn
+            let connection = self.connect(peer, RPC_PROTOCOL).await?;
+            let answered = async {
+                let (mut send, mut recv) = connection.open_bi().await?;
+                write_frame(&mut send, &body).await?;
+                send.finish()?;
+                read_frame::<Result<Vec<u8>, String>>(&mut recv).await
+            }
+            .await;
+            let response = self
+                .settle(&connection, answered)
+                .await?
+                .map_err(anyhow::Error::msg)?;
+            let route = connection
                 .paths()
                 .iter()
                 .find(|path| path.is_selected())
@@ -1020,186 +729,23 @@ impl ConnectNetwork {
                 })
                 .unwrap_or("Waiting for device")
                 .to_owned();
-            conn.close(0u32.into(), b"connection test complete");
+            connection.close(0u32.into(), b"connection test complete");
             Ok((route, response))
         })
         .await?
     }
-    async fn sync_peer(&self, profile: &Arc<Profile>, peer: &str) -> Result<()> {
-        let peer: EndpointId = peer.parse()?;
-        self.authorize(peer).await?;
-        // Each peer has an independent connection. An offline peer cannot hold up
-        // settings, playback requests, or another peer's collection.
-        let conn = tokio::select! {
-            biased;
-            _ = profile.stop.cancelled() => return Ok(()),
-            result = tokio::time::timeout(Duration::from_secs(30), self.endpoint.connect(peer_address(&self.addresses, peer), SYNC_PROTOCOL)) => result??,
-        };
-        let result = tokio::select! {
-            biased;
-            _ = profile.stop.cancelled() => {
-                conn.close(0u32.into(), PROFILE_CLOSED);
-                Ok(())
-            },
-            result = self.pull(&conn, profile, peer) => result,
-        };
-        let result = if result.as_ref().is_err_and(|error| {
-            error.is::<std::io::Error>()
-                || error.is::<ConnectionError>()
-                || error.is::<iroh::endpoint::ClosedStream>()
-        }) && matches!(conn.close_reason(), Some(ConnectionError::ApplicationClosed(close))
-            if close.error_code == 0u32.into() && close.reason.as_ref() == PROFILE_CLOSED)
-        {
-            Ok(())
-        } else {
-            result
-        };
-        conn.close(
-            if result.is_ok() { 0u32 } else { 1u32 }.into(),
-            b"sync complete",
-        );
-        let _ = self
-            .events
-            .send(NetworkEvent::Syncing {
-                profile: profile.id.clone(),
-                peer: peer.to_string(),
-                active: false,
-            })
-            .await;
-        if let Err(error) = &result {
-            let event = if error.is::<std::io::Error>()
-                || error.is::<ConnectionError>()
-                || error.is::<iroh::endpoint::ClosedStream>()
-            {
-                NetworkEvent::Unavailable {
-                    profile: profile.id.clone(),
-                    peer: peer.to_string(),
-                }
-            } else {
-                NetworkEvent::Error(error.to_string())
-            };
-            let _ = self.events.send(event).await;
-        }
-        result
-    }
-    async fn pull(
-        &self,
-        conn: &Connection,
-        profile: &Arc<Profile>,
-        peer: EndpointId,
-    ) -> Result<()> {
-        let Some(documents) = profile.documents.read().await.clone() else {
-            return Ok(());
-        };
-        let _ = self
-            .events
-            .send(NetworkEvent::Settings {
-                profile: profile.id.clone(),
-                peer: peer.to_string(),
-            })
-            .await;
-        let mut receiving = false;
-        loop {
-            let mut more = false;
-            for stream in [SyncStream::Authored, SyncStream::NativeCache] {
-                self.authorize(peer).await?;
-                let after = documents.sync_cursor_in(&peer.to_string(), stream).await?;
-                let (mut send, mut recv) = conn.open_bi().await?;
-                write_frame(
-                    &mut send,
-                    &SyncRequest {
-                        profile: profile.id.clone(),
-                        after,
-                        stream,
-                        roster: self.roster(&profile.id).await?,
-                        addresses: self.peer_addresses().await?,
-                    },
-                )
-                .await?;
-                let page: Option<SyncPage> = read_frame(&mut recv).await?;
-                let Some(page) = page else {
-                    return Ok(());
-                };
-                if !self.merge_roster(&profile.id, &page.roster).await? {
-                    return Ok(());
-                }
-                self.authorize(peer).await?;
-                self.accept_addresses(page.addresses).await?;
-                let names = page
-                    .versions
-                    .iter()
-                    .map(|v| v.name.clone())
-                    .collect::<Vec<_>>();
-                let versions = documents.versions(&names).await?;
-                write_frame(&mut send, &versions).await?;
-                // Commit the bounded page together instead of fsyncing once
-                // for every catalog row in the initial collection.
-                let mut updates = Vec::with_capacity(names.len());
-                loop {
-                    let length = recv.read_u64().await?;
-                    if length == 0 {
-                        break;
-                    }
-                    let mut update = Vec::new();
-                    let read = (&mut recv).take(length).read_to_end(&mut update).await?;
-                    ensure!(read as u64 == length, "Incomplete profile update");
-                    updates.push(update);
-                }
-                let changed = documents.import_updates(&updates).await?;
-                if changed && !receiving {
-                    receiving = true;
-                    let _ = self
-                        .events
-                        .send(NetworkEvent::Syncing {
-                            profile: profile.id.clone(),
-                            peer: peer.to_string(),
-                            active: true,
-                        })
-                        .await;
-                }
-                documents
-                    .acknowledge_versions(&peer.to_string(), &page.versions, &self.members().await?)
-                    .await?;
-                let versions = documents.versions(&names).await?;
-                let roster = self.roster(&profile.id).await?;
-                write_frame(&mut send, &SyncAcknowledgement { versions, roster }).await?;
-                send.finish()?;
-                // The server sends a final acknowledgement only after it has
-                // consumed ours. Keep the connection alive through that read.
-                let _: bool = read_frame(&mut recv).await?;
-                if let Some(last) = page.versions.last() {
-                    documents
-                        .acknowledge_sync_in(&peer.to_string(), stream, last.revision)
-                        .await?;
-                }
-                let complete = page.versions.len() < SYNC_PAGE
-                    && !page
-                        .versions
-                        .last()
-                        .is_some_and(|version| version.name.starts_with("playlist_artwork:"));
-                more |= !complete;
-            }
-            if !more {
-                return Ok(());
-            }
-            tokio::task::yield_now().await;
-        }
-    }
+
     pub async fn shutdown(&self) -> Result<()> {
         self.stop.cancel();
         self.cancel_pairing().await;
         self.approvals.lock().await.clear();
-        self.close_profile().await?;
+        if let Some(nearby) = &self.nearby {
+            nearby.stop();
+        }
+        *self.profile.write().await = None;
         if let Some(router) = self.router.lock().await.take() {
             router.shutdown().await?;
         }
-        Ok(())
-    }
-    pub async fn close_profile(&self) -> Result<()> {
-        if let Some(profile) = self.profile.write().await.take() {
-            profile.stop.cancel();
-        }
-        self.membership_changed.send_replace(());
         Ok(())
     }
 }
@@ -1207,152 +753,6 @@ impl ConnectNetwork {
 impl Drop for ConnectNetwork {
     fn drop(&mut self) {
         self.stop.cancel();
-    }
-}
-
-fn trusted(doc: &LoroDoc, peer: EndpointId) -> bool {
-    doc.get_map("devices")
-        .get(&peer.to_string())
-        .is_some_and(|v| {
-            v.as_value()
-                .is_some_and(|v| v.to_json_value().as_bool() == Some(true))
-        })
-}
-async fn save_roster(db: &mut SqliteConnection, profile: &str, doc: &LoroDoc) -> Result<()> {
-    sqlx::query("INSERT INTO connect_rosters(profile,snapshot) VALUES(?1,?2) ON CONFLICT(profile) DO UPDATE SET snapshot=excluded.snapshot")
-        .bind(profile).bind(doc.export(ExportMode::Snapshot)?).execute(db).await?;
-    Ok(())
-}
-
-#[derive(Debug)]
-struct SyncProtocol(Weak<ConnectNetwork>);
-impl ProtocolHandler for SyncProtocol {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        let Some(network) = self.0.upgrade() else {
-            return Ok(());
-        };
-        let peer = conn.remote_id();
-        let Some(profile) = network.profile.read().await.clone() else {
-            conn.close(0u32.into(), PROFILE_CLOSED);
-            return Ok(());
-        };
-        loop {
-            let stream = tokio::select! {
-                biased;
-                _ = profile.stop.cancelled() => {
-                    conn.close(0u32.into(), PROFILE_CLOSED);
-                    break;
-                },
-                stream = conn.accept_bi() => stream,
-            };
-            let Ok((mut send, mut recv)) = stream else {
-                break;
-            };
-            let result = async {
-                let request: SyncRequest = read_frame(&mut recv).await?;
-                ensure!(request.profile == profile.id, "The Connect profile changed");
-                // A removed member may receive its removal, but no profile data,
-                // addresses, or opportunity to merge its own membership changes.
-                if let Some(roster) = network.revocation(&profile.id, peer).await? {
-                    write_frame(
-                        &mut send,
-                        &Some(SyncPage {
-                            versions: Vec::new(),
-                            roster,
-                            addresses: Vec::new(),
-                        }),
-                    )
-                    .await?;
-                    send.finish()?;
-                    let _ = send.stopped().await;
-                    return Ok(());
-                }
-                network.authorize(peer).await?;
-                if !network.merge_roster(&profile.id, &request.roster).await? {
-                    return Ok(());
-                }
-                if network.revocation(&profile.id, peer).await?.is_some() {
-                    write_frame(&mut send, &None::<SyncPage>).await?;
-                    send.finish()?;
-                    let _ = send.stopped().await;
-                    return Ok(());
-                }
-                network.authorize(peer).await?;
-                network.accept_addresses(request.addresses).await?;
-                let documents = profile.documents.read().await.clone();
-                let Some(documents) = documents else {
-                    write_frame(&mut send, &None::<SyncPage>).await?;
-                    send.finish()?;
-                    let _ = send.stopped().await;
-                    return Ok(());
-                };
-                let versions = documents
-                    .changes_in_stream(request.after, SYNC_PAGE, request.stream)
-                    .await?;
-                let names = versions.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
-                write_frame(
-                    &mut send,
-                    &Some(SyncPage {
-                        versions,
-                        roster: network.roster(&profile.id).await?,
-                        addresses: network.peer_addresses().await?,
-                    }),
-                )
-                .await?;
-                let versions: Vec<DocumentVersion> = read_frame(&mut recv).await?;
-                ensure!(
-                    versions.len() == names.len()
-                        && versions.iter().zip(&names).all(|(v, n)| &v.name == n),
-                    "Sync response does not match the requested documents"
-                );
-                network.authorize(peer).await?;
-                for version in &versions {
-                    for update in documents.updates(std::slice::from_ref(version)).await? {
-                        send.write_u64(update.len() as u64).await?;
-                        send.write_all(&update).await?;
-                    }
-                }
-                send.write_u64(0).await?;
-                let acknowledged: SyncAcknowledgement = read_frame(&mut recv).await?;
-                {
-                    let SyncAcknowledgement { versions, roster } = acknowledged;
-                    ensure!(
-                        versions
-                            .iter()
-                            .map(|version| &version.name)
-                            .eq(names.iter()),
-                        "Sync acknowledgement does not match the requested documents"
-                    );
-                    if !network.merge_roster(&profile.id, &roster).await? {
-                        return Ok(());
-                    }
-                    documents
-                        .acknowledge_versions(
-                            &peer.to_string(),
-                            &versions,
-                            &network.members().await?,
-                        )
-                        .await?;
-                }
-                write_frame(&mut send, &true).await?;
-                send.finish()?;
-                let _ = send.stopped().await;
-                Ok(())
-            };
-            let result: Result<()> = tokio::select! {
-                biased;
-                _ = profile.stop.cancelled() => {
-                    conn.close(0u32.into(), PROFILE_CLOSED);
-                    break;
-                },
-                result = result => result,
-            };
-            if result.is_err() {
-                conn.close(1u32.into(), b"sync ended");
-                break;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -1378,23 +778,17 @@ impl ProtocolHandler for MediaProtocol {
         let Some(network) = self.0.upgrade() else {
             return Ok(());
         };
+        if !network.admit(&connection).await {
+            return Ok(());
+        }
         let result: Result<()> = async {
-            let peer = connection.remote_id();
-            network.authorize(peer).await?;
-            let profile = network
-                .profile
-                .read()
-                .await
-                .clone()
-                .context("Connect is disabled")?;
             let (mut send, mut recv) = connection.accept_bi().await?;
             let body = read_frame(&mut recv).await?;
             let (reply, response) = oneshot::channel();
             network
                 .events
                 .send(NetworkEvent::StreamRequest {
-                    profile: profile.id.clone(),
-                    peer: peer.to_string(),
+                    peer: connection.remote_id().to_string(),
                     body,
                     reply,
                 })
@@ -1416,7 +810,6 @@ impl ProtocolHandler for MediaProtocol {
             };
             tokio::select! {
                 result = transfer => result,
-                _ = profile.stop.cancelled() => Ok(()),
                 _ = connection.closed() => Ok(()),
             }
         }
@@ -1435,26 +828,17 @@ impl ProtocolHandler for RpcProtocol {
         let Some(network) = self.0.upgrade() else {
             return Ok(());
         };
+        if !network.admit(&conn).await {
+            return Ok(());
+        }
         let result: Result<()> = async {
-            let peer = conn.remote_id();
-            let profile = network.current_profile().await?;
-            network.authorize(peer).await?;
             let (mut send, mut recv) = conn.accept_bi().await?;
             let body = read_frame(&mut recv).await?;
-            network.authorize(peer).await?;
-            let _ = network
-                .events
-                .send(NetworkEvent::Reachable {
-                    profile: profile.clone(),
-                    peer: peer.to_string(),
-                })
-                .await;
             let (reply, answer) = oneshot::channel();
             network
                 .events
                 .send(NetworkEvent::Request {
-                    profile,
-                    peer: peer.to_string(),
+                    peer: conn.remote_id().to_string(),
                     body,
                     reply,
                 })
@@ -1506,14 +890,10 @@ pub(crate) async fn read_frame<T: DeserializeOwned>(
 mod tests {
     use super::*;
 
-    const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
-
     #[tokio::test]
     async fn relay_aliases_share_one_address_and_disabled_transport_stays_direct() {
-        let root = tempfile::tempdir().unwrap();
         let (network, _events) = ConnectNetwork::spawn(
             NetworkConfig {
-                database: root.path().join("network.sqlite"),
                 name: "Direct device".into(),
                 nearby: false,
                 relay: None,
@@ -1533,7 +913,9 @@ mod tests {
             .addr()
             .with_relay_url("https://relay.example./".parse().unwrap())
             .with_relay_url("https://relay.example/".parse().unwrap());
-        network.remember_address(&address).await.unwrap();
+        network
+            .remember_invitation(&serde_json::to_string(&address).unwrap())
+            .unwrap();
         let remembered: EndpointAddr = network
             .addresses
             .get_endpoint_info(peer.id())
@@ -1571,78 +953,5 @@ mod tests {
         .unwrap();
         network.shutdown().await.unwrap();
         peer.close().await;
-    }
-
-    #[tokio::test]
-    async fn closing_a_profile_during_sync_does_not_fail_the_next_pairing() {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            let host_dir = tempfile::tempdir().unwrap();
-            let peer_dir = tempfile::tempdir().unwrap();
-            let config = |directory: &std::path::Path| NetworkConfig {
-                database: directory.join("network.sqlite"),
-                name: "Device".into(),
-                nearby: false,
-                relay: None,
-                public_relay: false,
-            };
-            let (host, mut host_events) = ConnectNetwork::spawn(config(host_dir.path()), SecretKey::generate()).await.unwrap();
-            let (peer, mut peer_events) = ConnectNetwork::spawn(config(peer_dir.path()), SecretKey::generate()).await.unwrap();
-            let profile_id = ConnectNetwork::new_profile_id();
-            host.open_profile(&profile_id, true, Vec::new()).await.unwrap();
-            let roster = host.enroll(peer.endpoint.id(), "peer").await.unwrap();
-            peer.accept_enrollment(&profile_id, &roster, host.endpoint.id()).await.unwrap();
-            peer.open_profile(&profile_id, false, Vec::new()).await.unwrap();
-            peer.remember_peer(&host.invitation().await.unwrap()).await.unwrap();
-            peer.attach_documents(Arc::new(ProfileStore::open(library::Catalog::open(&peer_dir.path().join("profile.sqlite")).await.unwrap(), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
-
-            // Hold the server's document attachment until the request has
-            // arrived. Closing its profile must interrupt this active sync.
-            let serving = host.profile.read().await.clone().unwrap();
-            let documents = serving.documents.write().await;
-            let syncing = peer.clone();
-            let receiving = peer.profile.read().await.clone().unwrap();
-            let host_id = host.identity();
-            let transfer = tokio::spawn(async move { syncing.sync_peer(&receiving, &host_id).await });
-            while host.addresses.get_endpoint_info(peer.endpoint.id()).is_none() {
-                tokio::task::yield_now().await;
-            }
-            host.close_profile().await.unwrap();
-            transfer.await.unwrap().unwrap();
-            drop(documents);
-            peer.close_profile().await.unwrap();
-            host.open_profile(&profile_id, false, Vec::new()).await.unwrap();
-            peer.begin_pairing(&host.invitation().await.unwrap()).await.unwrap();
-
-            let mut host_session = None;
-            let mut peer_session = None;
-            let mut added = false;
-            let mut paired = false;
-            while !added || !paired {
-                tokio::select! {
-                    event = host_events.recv() => match event.unwrap() {
-                        NetworkEvent::Pairing { session, .. } => {
-                            host.confirm_pairing(&session, true).await.unwrap();
-                            host_session = Some(session);
-                        },
-                        NetworkEvent::MemberAdded { .. } => added = true,
-                        NetworkEvent::Error(error) | NetworkEvent::PairingFailed { error, .. } => panic!("host: {error}"),
-                        _ => {},
-                    },
-                    event = peer_events.recv() => match event.unwrap() {
-                        NetworkEvent::Pairing { session, .. } => {
-                            peer.confirm_pairing(&session, true).await.unwrap();
-                            peer_session = Some(session);
-                        },
-                        NetworkEvent::Paired { .. } => paired = true,
-                        NetworkEvent::Error(error) | NetworkEvent::PairingFailed { error, .. } => panic!("peer: {error}"),
-                        _ => {},
-                    },
-                }
-            }
-            assert_eq!(host_session, peer_session);
-            assert!(host_session.is_some());
-            host.shutdown().await.unwrap();
-            peer.shutdown().await.unwrap();
-        }).await.expect("Profile closure blocked sync or pairing");
     }
 }

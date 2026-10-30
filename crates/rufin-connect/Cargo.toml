@@ -17,7 +17,6 @@ data-encoding = "2"
 futures-util.workspace = true
 iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
 library.workspace = true
-loro = "=1.16.2"
 netdev = { version = "0.46.3", default-features = false }
 rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }
@@ -28,8 +27,10 @@ tokio = { workspace = true, features = ["fs", "io-util", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing.workspace = true
 vodozemac = { version = "=0.10.0", default-features = false }
-tempfile.workspace = true
 url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

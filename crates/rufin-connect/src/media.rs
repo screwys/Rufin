@@ -1,4 +1,4 @@
-//! Authenticated byte streams for audio, profile files and ordinary cache files.
+//! Authenticated byte streams for audio and files.
 use std::{path::Path, pin::Pin};
 
 use anyhow::{Result, bail};

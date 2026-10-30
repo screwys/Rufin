@@ -1,5 +1,5 @@
 //! Vodozemac's SAS binds the two Iroh TLS device identities. Both displays must
-//! be approved before trusted-device enrollment is exchanged.
+//! be approved before the host hands over its profile.
 use std::{
     sync::{Arc, Weak},
     time::Duration,
@@ -34,9 +34,15 @@ struct Hello {
 
 #[derive(Serialize, Deserialize)]
 struct Enrollment {
-    profile_id: String,
-    data: Vec<u8>,
-    roster: Vec<u8>,
+    profile: String,
+    key: String,
+    host: Host,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Host {
+    device: String,
+    name: String,
 }
 
 #[derive(Debug)]
@@ -93,7 +99,10 @@ async fn exchange(
     attempt: &mut Option<String>,
 ) -> Result<()> {
     if !joining {
-        network.current_profile().await?;
+        ensure!(
+            network.profile.read().await.is_some(),
+            "Rufin Connect is disabled"
+        );
     }
 
     let peer = connection.remote_id();
@@ -174,19 +183,18 @@ async fn exchange(
             .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
         if joining {
             let enrollment: Enrollment = read_frame(&mut recv).await?;
-            network
-                .accept_enrollment(&enrollment.profile_id, &enrollment.roster, peer)
-                .await?;
-            // Core applies the verified profile data before opening the profile.
-            // Pairing never mutates Rufin's existing library.
+            ensure!(
+                enrollment.host.device == peer.to_string(),
+                "Enrollment identity differs from the connected device"
+            );
             network
                 .events
                 .send(NetworkEvent::Paired {
                     session,
-                    profile_id: enrollment.profile_id,
-                    peer: peer.to_string(),
-                    name: remote.name,
-                    enrollment_data: enrollment.data,
+                    profile: enrollment.profile,
+                    key: enrollment.key,
+                    peer: enrollment.host.device,
+                    name: enrollment.host.name,
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
@@ -198,17 +206,19 @@ async fn exchange(
             // keeps its connection alive until this final acknowledgement arrives.
             connection.close(0u32.into(), b"pairing complete");
         } else {
-            let profile_id = network.current_profile().await?;
-            let roster = network.enroll(peer, &remote.name).await?;
-            write_frame(
-                &mut send,
-                &Enrollment {
-                    profile_id,
-                    data: network.enrollment_data.read().await.clone(),
-                    roster,
-                },
-            )
-            .await?;
+            let enrollment = {
+                let profile = network.profile.read().await;
+                let profile = profile.as_ref().context("Rufin Connect is disabled")?;
+                Enrollment {
+                    profile: profile.id.clone(),
+                    key: profile.key.clone(),
+                    host: Host {
+                        device: network.identity(),
+                        name: network.name.read().await.clone(),
+                    },
+                }
+            };
+            write_frame(&mut send, &enrollment).await?;
             let accepted: bool = read_frame(&mut recv).await?;
             ensure!(accepted, "The other device did not accept enrollment");
             network
