@@ -472,8 +472,8 @@ impl Context<'_> {
 }
 
 /// A row of a member order while it is built: a track slot and, in a playlist, the key of the
-/// entry that holds it, else zero.
-type Member = (u32, u32);
+/// entry that holds it and that entry's index in the playlist, else zeros.
+type Member = (u32, u32, u32);
 
 /// Facts a reader needs from the Store before it orders: they are not resident.
 #[derive(Default)]
@@ -737,7 +737,7 @@ impl Context<'_> {
         inputs: &Inputs,
     ) -> Vec<Member> {
         let snapshot = self.snapshot;
-        let member = |track| (track, 0);
+        let member = |track| (track, 0, 0);
         let tracks = |keep: &dyn Fn(&TrackRec) -> bool| {
             snapshot
                 .tracks
@@ -795,13 +795,14 @@ impl Context<'_> {
                 playlist
                     .entries
                     .iter()
-                    .filter(|entry| {
+                    .zip(0..)
+                    .filter(|(entry, _)| {
                         snapshot
                             .tracks
                             .live(entry.track)
                             .is_some_and(|record| !scoped || self.in_folder(record, folder))
                     })
-                    .map(|entry| (entry.track, entry.key as u32))
+                    .map(|(entry, position)| (entry.track, entry.key as u32, position))
                     .collect()
             }
             Collection::Smart { .. } => inputs
@@ -852,7 +853,7 @@ impl Context<'_> {
         let tracks = &self.snapshot.tracks;
         sections(keys.iter().enumerate().map(
             |(position, key)| match tracks.slot(i64::from(*key)) {
-                Some(slot) => self.track_section(sort, &self.sorted(sort, position, (slot, 0))),
+                Some(slot) => self.track_section(sort, &self.sorted(sort, position, (slot, 0, 0))),
                 None => Some(String::new()),
             },
         ))
@@ -1083,8 +1084,8 @@ impl Context<'_> {
         totals
     }
 
-    /// Totals of a smart playlist's members.
     /// A smart playlist's totals: of the members its open page holds, or evaluated now.
+    /// Without a limit the members' order does not change them, so they are not sorted.
     pub(crate) fn smart_totals(
         &self,
         definition: &SmartPlaylistDefinition,
@@ -1092,15 +1093,19 @@ impl Context<'_> {
         opened: Option<&[i64]>,
     ) -> Totals {
         let mut totals = Totals::default();
-        let slots = match opened {
-            Some(tracks) => self.listed_tracks(tracks),
-            None => self.evaluate(definition, inputs),
-        };
-        for slot in slots {
-            totals.add(
-                &self.snapshot.tracks.records[slot as usize],
-                Played::default(),
-            );
+        let records = &self.snapshot.tracks.records;
+        match opened {
+            Some(tracks) => self
+                .listed_tracks(tracks)
+                .into_iter()
+                .for_each(|slot| totals.add(&records[slot as usize], Played::default())),
+            None if definition.limit.is_some() => self
+                .evaluate(definition, inputs)
+                .into_iter()
+                .for_each(|slot| totals.add(&records[slot as usize], Played::default())),
+            None => self
+                .matching(definition, inputs)
+                .for_each(|(_, record)| totals.add(record, Played::default())),
         }
         totals
     }
@@ -1721,36 +1726,36 @@ impl Context<'_> {
         }
     }
 
-    /// A smart playlist's members in its own order, cut to its limit.
-    pub(crate) fn evaluate(
-        &self,
-        definition: &SmartPlaylistDefinition,
-        inputs: &Inputs,
-    ) -> Vec<u32> {
+    /// The tracks a smart playlist's rules match, in slot order and before its limit.
+    fn matching<'s>(
+        &'s self,
+        definition: &'s SmartPlaylistDefinition,
+        inputs: &'s Inputs,
+    ) -> impl Iterator<Item = (u32, &'s TrackRec)> + 's {
         let snapshot = self.snapshot;
+        // A source the Catalog no longer holds matches nothing.
         let source = match &definition.source_id {
-            Some(id) => match snapshot
+            Some(id) => snapshot
                 .sources
                 .values()
                 .find(|source| source.object == id.as_str())
                 .and_then(|source| snapshot.source_slot(source.key))
-            {
-                Some(slot) => Some(slot),
-                None => return Vec::new(),
-            },
-            None => None,
+                .map(Some),
+            None => Some(None),
         };
         let period = definition
             .activity_period
             .seconds()
             .and_then(|seconds| inputs.periods.get(&Some(seconds)));
-        let mut members = snapshot
+        snapshot
             .tracks
             .iter()
-            .filter(|(_, record)| {
-                record.indexed() && source.is_none_or(|source| record.source == source)
+            .filter(move |(_, record)| {
+                source.is_some_and(|source| {
+                    record.indexed() && source.is_none_or(|source| record.source == source)
+                })
             })
-            .filter(|(slot, record)| {
+            .filter(move |(slot, record)| {
                 definition
                     .match_all
                     .iter()
@@ -1761,6 +1766,21 @@ impl Context<'_> {
                             .iter()
                             .any(|rule| self.smart_rule(*slot, record, rule, period)))
             })
+    }
+
+    /// A smart playlist's members in its own order, cut to its limit.
+    pub(crate) fn evaluate(
+        &self,
+        definition: &SmartPlaylistDefinition,
+        inputs: &Inputs,
+    ) -> Vec<u32> {
+        let snapshot = self.snapshot;
+        let period = definition
+            .activity_period
+            .seconds()
+            .and_then(|seconds| inputs.periods.get(&Some(seconds)));
+        let mut members = self
+            .matching(definition, inputs)
             .map(|(slot, record)| {
                 (
                     self.smart_sort(slot, record, definition, period),
@@ -2035,10 +2055,10 @@ impl Catalog {
         let mut total = views
             .orders
             .iter()
-            .map(|order| order.0.members.bytes())
+            .map(|order| order.0.bytes())
             .sum::<usize>();
         while total > ORDER_BUDGET && views.orders.len() > 1 {
-            total -= views.orders.remove(0).0.members.bytes();
+            total -= views.orders.remove(0).0.bytes();
         }
     }
 
@@ -2062,7 +2082,7 @@ impl Catalog {
             let mut connection = self.acquire_cancellable(cancellation).await?;
             return self.order_on(&mut connection, read).await;
         }
-        Ok(self.build(read, &Inputs::default()))
+        Ok(self.build(read, &Inputs::default(), stamps))
     }
 
     /// An order read on a caller's connection, so a Write's selection sees the rows it staged.
@@ -2077,18 +2097,26 @@ impl Catalog {
             return Ok(order);
         }
         let inputs = self.inputs(connection, read).await?;
-        Ok(self.build(read, &inputs))
+        Ok(self.build(read, &inputs, stamps))
     }
 
-    fn build(&self, read: &Read, inputs: &Inputs) -> Order {
+    /// Builds an order from inputs read at the stamps `read_at`.
+    fn build(&self, read: &Read, inputs: &Inputs, read_at: [u64; 5]) -> Order {
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
-        self.build_in(&context, read, inputs)
+        self.build_in(&context, read, inputs, read_at)
     }
 
     /// Builds an order under one hold of the Catalog. A filtered order is the cached
-    /// unfiltered one less the rows its filters drop.
-    fn build_in(&self, context: &Context<'_>, read: &Read, inputs: &Inputs) -> Order {
+    /// unfiltered one less the rows its filters drop. An order whose inputs were read before
+    /// a commit the Catalog has since applied is returned but not kept.
+    fn build_in(
+        &self,
+        context: &Context<'_>,
+        read: &Read,
+        inputs: &Inputs,
+        read_at: [u64; 5],
+    ) -> Order {
         let snapshot = context.snapshot;
         let stamps = snapshot.stamps();
         if let Some(order) = self.cached(read, stamps) {
@@ -2100,7 +2128,7 @@ impl Catalog {
                 if let Collection::History { .. } = member.collection {
                     Members::History(inputs.history.clone().into())
                 } else if let Some(base) = member.unfiltered() {
-                    let base = self.build_in(context, &Read::Members(base), inputs);
+                    let base = self.build_in(context, &Read::Members(base), inputs, read_at);
                     let filter = filter_text(&member.filter);
                     let keep = |track: &u32| {
                         snapshot
@@ -2112,7 +2140,7 @@ impl Catalog {
                         Members::Entries(entries) => Members::Entries(
                             entries
                                 .iter()
-                                .filter(|(track, _)| keep(track))
+                                .filter(|(track, ..)| keep(track))
                                 .copied()
                                 .collect(),
                         ),
@@ -2127,20 +2155,22 @@ impl Catalog {
                     if matches!(member.collection, Collection::Playlist(_)) {
                         Members::Entries(
                             rows.into_iter()
-                                .map(|(slot, entry)| (records[slot as usize].key, entry))
+                                .map(|(slot, entry, position)| {
+                                    (records[slot as usize].key, entry, position)
+                                })
                                 .collect(),
                         )
                     } else {
                         Members::Tracks(
                             rows.into_iter()
-                                .map(|(slot, _)| records[slot as usize].key)
+                                .map(|(slot, ..)| records[slot as usize].key)
                                 .collect(),
                         )
                     }
                 }
             }
             Read::List(list) => {
-                let keys = self.list_keys(context, list, inputs);
+                let keys = self.list_keys(context, list, inputs, read_at);
                 if let ListKind::ArtistAlbums { .. } = list.kind {
                     let mut classes = [0; 6];
                     for key in &keys {
@@ -2160,7 +2190,7 @@ impl Catalog {
                 }
             }
             Read::AlbumTracks(list) => {
-                let albums = self.build_in(context, &Read::List(list.clone()), inputs);
+                let albums = self.build_in(context, &Read::List(list.clone()), inputs, read_at);
                 let keys = match &albums.0.members {
                     Members::Keys(keys) => keys.clone(),
                     _ => Box::default(),
@@ -2223,24 +2253,33 @@ impl Catalog {
                 )
             }
         };
+        let stamp = masked(stamps, read.depends());
         let order = Order(Arc::new(OrderInner {
             read: read.clone(),
-            stamp: masked(stamps, read.depends()),
+            stamp,
             members,
             counts,
         }));
-        self.cache(&order, stamps);
+        if masked(read_at, read.depends()) == stamp {
+            self.cache(&order, stamps);
+        }
         order
     }
 
     /// The keys of a list read in order, a filtered one taken from its unfiltered order.
-    fn list_keys(&self, context: &Context<'_>, list: &ListRead, inputs: &Inputs) -> Vec<i64> {
+    fn list_keys(
+        &self,
+        context: &Context<'_>,
+        list: &ListRead,
+        inputs: &Inputs,
+        read_at: [u64; 5],
+    ) -> Vec<i64> {
         let folder = context.folder_slot(list.folder).flatten();
         let derived = self.derived(context, folder);
         let Some(base) = list.unfiltered() else {
             return context.list_order(list, &derived, inputs);
         };
-        let base = self.build_in(context, &Read::List(base), inputs);
+        let base = self.build_in(context, &Read::List(base), inputs, read_at);
         let filter = filter_text(&list.filter);
         match &base.0.members {
             Members::Keys(keys) => keys
@@ -2419,7 +2458,7 @@ impl Catalog {
             (Read::Members(read), Members::Tracks(keys)) => context.member_sections(read, keys),
             (Read::Members(read), Members::Entries(entries)) => context.member_sections(
                 read,
-                &entries.iter().map(|(track, _)| *track).collect::<Vec<_>>(),
+                &entries.iter().map(|(track, ..)| *track).collect::<Vec<_>>(),
             ),
             (Read::List(read), Members::Keys(keys)) => {
                 context.list_sections(read, keys.iter().map(|key| i64::from(*key)))
@@ -2610,7 +2649,7 @@ impl Context<'_> {
         inputs: &Inputs,
     ) -> Vec<Member> {
         let snapshot = self.snapshot;
-        let member = |track| (track, 0);
+        let member = |track| (track, 0, 0);
         match kind {
             ListKind::Playlists => {
                 return parents
@@ -2620,8 +2659,9 @@ impl Context<'_> {
                         playlist
                             .entries
                             .iter()
-                            .filter(|entry| snapshot.tracks.live(entry.track).is_some())
-                            .map(|entry| (entry.track, entry.key as u32))
+                            .zip(0..)
+                            .filter(|(entry, _)| snapshot.tracks.live(entry.track).is_some())
+                            .map(|(entry, position)| (entry.track, entry.key as u32, position))
                     })
                     .collect();
             }
@@ -2728,7 +2768,7 @@ impl Catalog {
         Ok(Context::new(&snapshot)
             .parent_members(&read.kind, parents, &inputs)
             .into_iter()
-            .map(|(slot, entry)| {
+            .map(|(slot, entry, _)| {
                 (
                     crate::TrackKey::from_raw(i64::from(
                         snapshot.tracks.records[slot as usize].key,

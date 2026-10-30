@@ -52,8 +52,8 @@ pub(crate) struct OrderInner {
 /// An order's rows. Keys are SQLite rowids, which fit in 32 bits like the records' own.
 pub(crate) enum Members {
     Tracks(Box<[u32]>),
-    /// A playlist's entries: track and entry keys.
-    Entries(Box<[(u32, u32)]>),
+    /// A playlist's entries: track and entry keys and the entry's index in the playlist.
+    Entries(Box<[(u32, u32, u32)]>),
     History(Box<[Listen]>),
     /// Albums, artists, genres, moods or folders.
     Keys(Box<[u32]>),
@@ -81,6 +81,40 @@ pub struct AlbumSpan {
     pub genres: bool,
 }
 
+impl OrderInner {
+    /// Bytes the order cache counts against its budget: the entry, its rows and the read that
+    /// keys it, so empty orders and live folder ids count too.
+    pub(crate) fn bytes(&self) -> usize {
+        let texts = |texts: &[String]| {
+            texts
+                .iter()
+                .map(|text| size_of::<String>() + text.len())
+                .sum::<usize>()
+        };
+        let read = match &self.read {
+            Read::Members(read) => {
+                read.filter.len()
+                    + match &read.collection {
+                        Collection::Objects { ids, .. } => texts(ids),
+                        _ => 0,
+                    }
+            }
+            Read::List(read) | Read::AlbumTracks(read) => {
+                read.filter.len()
+                    + match &read.kind {
+                        ListKind::ArtistAlbums {
+                            filters: Some(filters),
+                            ..
+                        } => texts(filters.as_slice()),
+                        _ => 0,
+                    }
+            }
+            Read::Folders(read) => read.filter.len(),
+        };
+        size_of::<Self>() + read + self.members.bytes()
+    }
+}
+
 impl Members {
     pub(crate) fn len(&self) -> usize {
         match self {
@@ -92,11 +126,11 @@ impl Members {
         }
     }
 
-    /// Bytes the order cache counts against its budget.
-    pub(crate) fn bytes(&self) -> usize {
+    /// Bytes of the rows.
+    fn bytes(&self) -> usize {
         match self {
             Self::Tracks(keys) | Self::Keys(keys) => keys.len() * 4,
-            Self::Entries(entries) => entries.len() * 8,
+            Self::Entries(entries) => entries.len() * 12,
             Self::History(listens) => listens.len() * 512,
             Self::Playlists(keys) => keys.len() * 8,
             Self::AlbumTracks { spans, tracks } => {
@@ -133,7 +167,7 @@ impl Order {
                 .collect(),
             Members::Entries(entries) => entries[range]
                 .iter()
-                .map(|(track, entry)| Item::Track {
+                .map(|(track, entry, _)| Item::Track {
                     key: TrackKey::from_raw(key(track)),
                     entry: Some(PlaylistEntryKey::from_raw(key(entry))),
                 })
@@ -189,6 +223,18 @@ impl Order {
                     }
                 })
                 .collect(),
+        }
+    }
+
+    /// Each entry's index in its playlist, for the entries at these positions.
+    fn positions(&self, range: Range<usize>) -> HashMap<i64, u32> {
+        let range = range.start.min(self.len())..range.end.min(self.len());
+        match &self.0.members {
+            Members::Entries(entries) => entries[range]
+                .iter()
+                .map(|(_, entry, position)| (i64::from(*entry), *position))
+                .collect(),
+            _ => HashMap::new(),
         }
     }
 
@@ -399,14 +445,14 @@ pub struct Fetched {
 const WINDOW: usize = 256;
 
 /// What rows show besides their own record: plays when a list asks for them, the list a
-/// playlist folder's totals come from, the time smart playlists are evaluated at, and the
-/// playlist whose entries the rows are.
+/// playlist folder's totals come from, the time smart playlists are evaluated at, and each
+/// entry row's index in its playlist.
 #[derive(Clone)]
 pub(crate) struct Shape {
     pub(crate) activity: bool,
     pub(crate) now: i64,
     pub(crate) list: Option<ListRead>,
-    pub(crate) playlist: Option<PlaylistKey>,
+    pub(crate) positions: HashMap<i64, u32>,
 }
 
 impl Shape {
@@ -415,7 +461,7 @@ impl Shape {
             activity: false,
             now: chrono::Utc::now().timestamp(),
             list: None,
-            playlist: None,
+            positions: HashMap::new(),
         };
         match read {
             Some(Read::List(read) | Read::AlbumTracks(read)) => {
@@ -425,12 +471,7 @@ impl Shape {
                 }
                 shape.list = Some(read.clone());
             }
-            Some(Read::Members(read)) => {
-                shape.activity = read.activity;
-                if let Collection::Playlist(key) = read.collection {
-                    shape.playlist = Some(key);
-                }
-            }
+            Some(Read::Members(read)) => shape.activity = read.activity,
             _ => {}
         }
         shape
@@ -495,8 +536,6 @@ struct Builder<'a> {
     art: bool,
     /// Listens by smart playlist window.
     inputs: &'a Inputs,
-    /// Entry positions by entry key, read once the first entry row asks.
-    positions: Option<HashMap<i64, u32>>,
 }
 
 impl<'a> Builder<'a> {
@@ -517,31 +556,12 @@ impl<'a> Builder<'a> {
             shape,
             art,
             inputs,
-            positions: None,
         }
     }
 
     fn derived(&self) -> &Derived {
         self.derived
             .get_or_init(|| self.catalog.derived(&self.context, None))
-    }
-
-    /// Each entry's index in its playlist's order: of the rows' playlist, else of every one.
-    fn positions(&mut self) -> &HashMap<i64, u32> {
-        let snapshot = self.snapshot;
-        let playlist = self.shape.playlist;
-        self.positions.get_or_insert_with(|| {
-            let mut positions = HashMap::new();
-            for (_, record) in snapshot.playlists.iter() {
-                if playlist.is_some_and(|key| key.raw() != record.key) {
-                    continue;
-                }
-                for (position, entry) in record.entries.iter().enumerate() {
-                    positions.insert(entry.key, position as u32);
-                }
-            }
-            positions
-        })
     }
 
     fn track_art(&self, key: TrackKey) -> Option<Art> {
@@ -1081,7 +1101,7 @@ impl<'a> Builder<'a> {
 
     /// The row of one item; None when the Catalog no longer holds it.
     fn row(
-        &mut self,
+        &self,
         item: Item,
         listens: &[Listen],
         got: &Got,
@@ -1093,7 +1113,7 @@ impl<'a> Builder<'a> {
                 row.entry = entry.and_then(|entry| {
                     Some(PlaylistEntry {
                         key: entry,
-                        position: *self.positions().get(&entry.raw())?,
+                        position: *self.shape.positions.get(&entry.raw())?,
                     })
                 });
                 Row::Track(row)
@@ -1182,7 +1202,7 @@ impl<'a> Builder<'a> {
     }
 
     fn header(
-        &mut self,
+        &self,
         key: HeaderKey,
         got: &Got,
         galleries: &HashMap<i64, Vec<Vec<u8>>>,
@@ -1328,7 +1348,7 @@ impl Catalog {
             }
         }
         let snapshot = self.snapshot();
-        let mut builder = Builder::new(self, &snapshot, &shape, &inputs, art);
+        let builder = Builder::new(self, &snapshot, &shape, &inputs, art);
         let mut rows = [Vec::new(), Vec::new()];
         for (built, (items, listens)) in rows.iter_mut().zip(windows) {
             for item in items {
@@ -1348,9 +1368,11 @@ impl Catalog {
         fetch: Fetch<'_>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Fetched> {
-        fn window<'a>(order: Option<&(&'a Order, Range<usize>)>) -> (Vec<Item>, &'a [Listen]) {
+        /// A window's items, listens and entry positions.
+        type Window<'a> = (Vec<Item>, &'a [Listen], HashMap<i64, u32>);
+        fn window<'a>(order: Option<&(&'a Order, Range<usize>)>) -> Window<'a> {
             let Some((order, range)) = order else {
-                return (Vec::new(), &[]);
+                return (Vec::new(), &[], HashMap::new());
             };
             let limit = if matches!(
                 order.read(),
@@ -1363,12 +1385,19 @@ impl Catalog {
             } else {
                 WINDOW
             };
-            let end = range.end.min(range.start.saturating_add(limit));
-            (order.items(range.start..end), order.listens())
+            let range = range.start..range.end.min(range.start.saturating_add(limit));
+            (
+                order.items(range.clone()),
+                order.listens(),
+                order.positions(range),
+            )
         }
-        let (rows, listens) = window(fetch.rows.as_ref());
-        let (favorites, favorite_listens) = window(fetch.favorites.as_ref());
-        let shape = Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()));
+        let (rows, listens, positions) = window(fetch.rows.as_ref());
+        let (favorites, favorite_listens, _) = window(fetch.favorites.as_ref());
+        let shape = Shape {
+            positions,
+            ..Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()))
+        };
         let mut connection = self.acquire_loaded(cancellation).await?;
         let (header, [rows, favorites]) = self
             .fetch_on(
