@@ -35,6 +35,12 @@ impl std::fmt::Display for DownloadDirectory {
     }
 }
 
+pub(super) async fn is_folder(path: &Path) -> bool {
+    tokio::fs::symlink_metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir())
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum DownloadAudio {
     Native {
@@ -127,21 +133,10 @@ impl DownloadAudio {
         }
     }
 
-    /// Errs when a folder holds the copy's path, where the finished file could never land.
-    pub async fn check_place(&self) -> Result<(), String> {
-        match self {
-            Self::Native { path, .. }
-                if tokio::fs::symlink_metadata(path)
-                    .await
-                    .is_ok_and(|metadata| metadata.is_dir()) =>
-            {
-                Err(format!(
-                    "A folder is in the download's place: {}",
-                    path.display()
-                ))
-            }
-            _ => Ok(()),
-        }
+    /// The folder that holds the copy's path, where the finished file could never land.
+    pub async fn folder_in_place(&self) -> Option<&Path> {
+        let path = self.native()?;
+        is_folder(path).await.then_some(path)
     }
 
     pub async fn publish(&self, partial: &Path) -> Result<Self, String> {
