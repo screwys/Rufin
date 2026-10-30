@@ -238,6 +238,8 @@ struct NextPlan {
     request: StreamRequest,
     transition: NextTransition,
     resolution: NextResolution,
+    /// The local copy that failed to open or decode; the next run tries the next one only once.
+    failed_local: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1233,14 +1235,29 @@ impl Player {
                 else {
                     return;
                 };
-                if error.kind().skippable() {
+                let failed = match &plan.resolution {
+                    NextResolution::Ready(stream) if plan.failed_local.is_none() => {
+                        retried_local(stream, error.kind())
+                    }
+                    _ => None,
+                };
+                let retry = failed.is_some();
+                if retry {
+                    plan.resolution = NextResolution::Resolving;
+                    plan.failed_local = failed.clone();
+                } else if error.kind().skippable() {
                     plan.resolution = NextResolution::Unplayable;
+                }
+                if retry || error.kind().skippable() {
                     self.send_backend(BackendCommand::PrepareNext {
                         current_run,
                         next: None,
                     });
                 }
-                self.report_error(error.message().to_string());
+                match failed {
+                    Some(failed) => self.resolve_next_plan_candidate(failed),
+                    None => self.report_error(error.message().to_string()),
+                }
             }
             BackendEvent::ProcessingApplied {
                 output,
@@ -1304,16 +1321,13 @@ impl Player {
                 else {
                     return;
                 };
-                let local = current
-                    .resolved_stream
-                    .as_ref()
-                    .map(|stream| stream.uri().to_owned())
-                    .filter(|uri| uri.starts_with("file:") || uri.starts_with("content:"));
                 if current.failed_local.is_none()
-                    && let Some(local) = local
-                    && (error.kind().skippable() || error.kind() == FailureKind::DeniedAccess)
+                    && let Some(failed) = current
+                        .resolved_stream
+                        .as_ref()
+                        .and_then(|stream| retried_local(stream, error.kind()))
                 {
-                    return self.resolve_next_candidate(local);
+                    return self.resolve_next_candidate(failed);
                 }
                 let failed = FailedRun {
                     desired_playing: current.desired_playing,
@@ -2386,12 +2400,16 @@ impl Player {
             };
             Some(stream.clone())
         });
+        let failed_local = self
+            .next_plan
+            .as_ref()
+            .and_then(|plan| plan.failed_local.clone());
         self.dirty = true;
         self.finish_current(RunEndReason::Completed, sample);
         if !self.sequence.activate_backend(position) {
             return;
         }
-        self.install_reserved_run(new_run, position, desired_playing);
+        self.install_reserved_run(new_run, position, desired_playing, failed_local);
         if let Some(current) = self.current_run.as_mut() {
             current.resolved_stream = transitioned_stream;
             current.backend_loaded = true;
@@ -2423,7 +2441,12 @@ impl Player {
             }
             return;
         };
-        self.install_reserved_run(plan.next_run, position, desired_playing);
+        self.install_reserved_run(
+            plan.next_run,
+            position,
+            desired_playing,
+            plan.failed_local.clone(),
+        );
         match plan.resolution {
             NextResolution::Ready(stream) if desired_playing => {
                 if let Some(current) = self.current_run.as_mut() {
@@ -2466,7 +2489,13 @@ impl Player {
         true
     }
 
-    fn install_reserved_run(&mut self, run: RunId, position: usize, desired_playing: bool) {
+    fn install_reserved_run(
+        &mut self,
+        run: RunId,
+        position: usize,
+        desired_playing: bool,
+        failed_local: Option<String>,
+    ) {
         let Some(entry) = self
             .sequence
             .selected()
@@ -2477,6 +2506,7 @@ impl Player {
         };
         let mut current = RunContext::resolving(run, self.play_id(run), &entry);
         current.desired_playing = desired_playing;
+        current.failed_local = failed_local;
         self.current_run = Some(current);
         self.failed_run = None;
         self.current_media_changed = true;
@@ -2571,6 +2601,7 @@ impl Player {
             request: request.clone(),
             transition,
             resolution: NextResolution::Resolving,
+            failed_local: None,
         });
         let mut request = request;
         request.session_identifier = Some(self.play_id(next_run));
@@ -2594,6 +2625,23 @@ impl Player {
         request.failed_local = Some(failed);
         self.dirty = true;
         self.resolve_stream(run, row, request);
+    }
+
+    /// The prepared next stream's local copy failed to open or decode: the next run resolves
+    /// again past it.
+    fn resolve_next_plan_candidate(&mut self, failed: String) {
+        let Some(plan) = self.next_plan.as_ref() else {
+            return;
+        };
+        let (next_run, occurrence) = (plan.next_run, plan.occurrence);
+        let mut request = plan.request.clone();
+        request.session_identifier = Some(self.play_id(next_run));
+        request.failed_local = Some(failed);
+        let Some(row) = self.sequence.at_id(occurrence).cloned() else {
+            self.next_plan = None;
+            return;
+        };
+        self.resolve_stream(next_run, row, request);
     }
 
     fn resolve_current(&mut self, run: RunId, entry: &std::sync::Arc<QueueRow>) {
@@ -2770,6 +2818,14 @@ impl Player {
         self.next_run_number = self.next_run_number.wrapping_add(1).max(1);
         run
     }
+}
+
+/// The local copy a stream opened, when its failure means the next copy may play.
+fn retried_local(stream: &PreparedStream, failure: FailureKind) -> Option<String> {
+    let uri = stream.uri();
+    ((uri.starts_with("file:") || uri.starts_with("content:"))
+        && (failure.skippable() || failure == FailureKind::DeniedAccess))
+        .then(|| uri.to_owned())
 }
 
 fn decided_transition(
