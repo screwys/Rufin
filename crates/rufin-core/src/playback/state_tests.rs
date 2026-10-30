@@ -130,7 +130,11 @@ pub(in crate::playback) async fn seeded(
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
-        move |_| Ok(Box::new(IdleBackend(backend_commands.clone()))),
+        // Like the GStreamer backend, a start spawns on the runtime of the calling thread.
+        move |_| {
+            tokio::runtime::Handle::try_current().map_err(|error| error.to_string())?;
+            Ok(Box::new(IdleBackend(backend_commands.clone())))
+        },
     );
     owner.install_source_owner(&source);
     let (playback, inbox) = actor::channel();

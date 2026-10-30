@@ -110,13 +110,15 @@ impl Playback {
             playback.downgrade(),
         );
         let initial = player.projection();
-        owner
-            .upgrade()
-            .ok_or(PlaybackError::Unavailable)?
-            .publish(initial.clone(), true);
+        let strong = owner.upgrade().ok_or(PlaybackError::Unavailable)?;
+        strong.publish(initial.clone(), true);
+        // The worker starts backends, which run their tasks on Rufin's runtime.
+        let runtime = strong.runtime.clone();
+        drop(strong);
         let thread = thread::Builder::new()
             .name("rufin-playback".into())
             .spawn(move || {
+                let _runtime = runtime.enter();
                 loop {
                     let message = if player.external_clock_running() {
                         receiver.recv_timeout(Duration::from_millis(33))

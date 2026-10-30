@@ -57,6 +57,53 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_starts_the_backend_on_the_runtime() {
+    let (_directory, _catalog, sequence, owner, _commands, _mailbox, _inbox) =
+        seeded(Vec::new()).await;
+    let (playback, receiver) = super::channel();
+    playback
+        .run(
+            receiver,
+            sequence,
+            "backend-start",
+            PlaybackSettings::default(),
+            false,
+            1,
+            PlaybackOutput::Local,
+            None,
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            Arc::downgrade(&owner),
+        )
+        .unwrap();
+    let mut updates = owner.updates.subscribe();
+    playback
+        .downgrade()
+        .post(|player, _| player.start_backend());
+    playback
+        .command(Command::OperationFailed("after start".into()))
+        .unwrap();
+    loop {
+        let projection = tokio::time::timeout(Duration::from_secs(5), updates.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if !projection.notices.is_empty() {
+            assert_eq!(
+                projection.notices,
+                [PlaybackNotice::OperationFailed("after start".into())]
+            );
+            break;
+        }
+    }
+    playback.shutdown().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn repeated_operation_failures_publish_notices_without_a_current_track() {
     let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
