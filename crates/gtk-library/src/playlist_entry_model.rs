@@ -19,15 +19,12 @@ struct AppliedEntries {
 }
 
 impl AppliedEntries {
-    fn of(read: &RouteRead) -> Self {
-        Self {
-            query: read
-                .view
-                .members()
-                .cloned()
-                .expect("a playlist page reads its entries"),
+    /// None when the read has no entries because the playlist is gone.
+    fn of(read: &RouteRead) -> Option<Self> {
+        Some(Self {
+            query: read.view.members().cloned()?,
             settings: read.view.list_settings(),
-        }
+        })
     }
 }
 
@@ -61,7 +58,9 @@ impl PlaylistEntryModel {
         view: &RouteView,
         read: RouteRead,
     ) -> Self {
-        let applied = RefCell::new(AppliedEntries::of(&read));
+        let applied = RefCell::new(
+            AppliedEntries::of(&read).expect("an open playlist page reads its entries"),
+        );
         let sparse = SparseRouteModel::new(
             SparseSource::Query {
                 count: read.view.len(),
@@ -118,9 +117,13 @@ impl PlaylistEntryModel {
         self.inner.sparse.first_live_position().unwrap_or(0)
     }
 
-    pub fn replace_prepared(&self, read: RouteRead) {
+    /// Shows a reread's entries; false when it has none because the playlist is gone.
+    pub fn replace_prepared(&self, read: RouteRead) -> bool {
+        let Some(applied) = AppliedEntries::of(&read) else {
+            return false;
+        };
         let count = read.view.len();
-        self.inner.applied.replace(AppliedEntries::of(&read));
+        self.inner.applied.replace(applied);
         self.inner.sparse.replace_prepared_at(
             SparseSource::Query { count },
             read.first.min(count),
@@ -128,6 +131,7 @@ impl PlaylistEntryModel {
             Vec::new(),
             |_| (),
         );
+        true
     }
 
     pub fn ready(&self, position: u32) -> Option<Arc<TrackRow>> {

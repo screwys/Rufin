@@ -35,11 +35,12 @@ fn release_row(row: library::Row) -> Option<library::AlbumRow> {
     }
 }
 
-/// The read of an artist page's releases, for its selections.
-fn release_read(view: &rufin_core::view::View) -> library::ListRead {
+/// The read of an artist page's releases, for its selections. A page whose artist is gone
+/// has none.
+fn release_read(view: &rufin_core::view::View) -> Option<library::ListRead> {
     match view.selection() {
-        Some(library::MemberSelection::Parents { read, .. }) => read,
-        _ => unreachable!("an artist page reads its releases"),
+        Some(library::MemberSelection::Parents { read, .. }) => Some(read),
+        _ => None,
     }
 }
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
@@ -618,7 +619,9 @@ impl ArtistReleaseProjections {
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        let query = Rc::new(RefCell::new(release_read(&read.view)));
+        let query = Rc::new(RefCell::new(
+            release_read(&read.view).expect("an open artist page reads its releases"),
+        ));
         let counts = Rc::new(Cell::new(counts));
         let sparse = SparseRouteModel::new(
             SparseSource::Query {
@@ -793,9 +796,12 @@ impl ArtistReleaseProjections {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
     }
 
-    pub fn replace_page(&self, read: RouteRead) {
+    /// Shows a reread's releases; false when it has none because the artist is gone.
+    pub fn replace_page(&self, read: RouteRead) -> bool {
+        let Some(query) = release_read(&read.view) else {
+            return false;
+        };
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        let query = release_read(&read.view);
         if *self.query.borrow() != query || self.counts.get() != counts {
             self.selection.unselect_all();
         }
@@ -816,6 +822,7 @@ impl ArtistReleaseProjections {
             start += counts[index];
         }
         self.sync_empty();
+        true
     }
 
     pub fn set_favorite_present(&self, present: bool) {

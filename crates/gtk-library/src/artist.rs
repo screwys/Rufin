@@ -164,7 +164,9 @@ impl CatalogUi {
                 };
                 // A release reread leaves the header and favorite tracks as they are.
                 let Some(favorite_rows) = read.favorites.take() else {
-                    releases.replace_page(read);
+                    if !releases.replace_page(read) {
+                        return false;
+                    }
                     shell.reapply_current_track();
                     return true;
                 };
@@ -185,7 +187,9 @@ impl CatalogUi {
                 favorite_scroller.set_max_content_height(-1);
                 favorite_scroller.set_min_content_height(height);
                 favorite_scroller.set_max_content_height(height);
-                releases.replace_page(read);
+                if !releases.replace_page(read) {
+                    return false;
+                }
                 releases.apply_library_list_settings(
                     &shell
                         .settings
@@ -340,7 +344,9 @@ impl CatalogUi {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
-                releases.replace_page(read);
+                if !releases.replace_page(read) {
+                    return false;
+                }
                 shell.reapply_current_track();
                 true
             }

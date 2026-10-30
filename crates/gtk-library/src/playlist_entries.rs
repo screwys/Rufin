@@ -95,12 +95,15 @@ impl PlaylistEntriesView {
         library::RouteSeedWindow::position(self.model.first_live_position())
     }
 
-    pub fn replace_prepared(&self, read: RouteRead) {
+    pub fn replace_prepared(&self, read: RouteRead) -> bool {
         let empty = read.view.is_empty();
-        self.model.replace_prepared(read);
+        if !self.model.replace_prepared(read) {
+            return false;
+        }
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
+        true
     }
 
     pub fn apply_library_list_settings(&self, key: LibraryListKey, settings: &LibraryListSettings) {

@@ -309,7 +309,9 @@ impl CatalogUi {
                     crate::routes::list_inputs(&reread_search),
                     move |mut read| {
                         let header = read.header.take();
-                        apply_entries.replace_prepared(read);
+                        if !apply_entries.replace_prepared(read) {
+                            return false;
+                        }
                         apply_owner(header);
                         true
                     },
