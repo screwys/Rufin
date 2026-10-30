@@ -3215,7 +3215,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             editable.credentials.trust_invalid_cert = settings.trust_invalid_certificate;
             editable.file_settings = Some(settings);
         }
-        sources::EditableSource::Local { .. } => {}
+        sources::EditableSource::Local { .. } | sources::EditableSource::Peer { .. } => {}
     }
     Ok(editable)
 }

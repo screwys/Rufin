@@ -322,6 +322,7 @@ pub fn source_kind_title(kind: &str) -> Option<&'static str> {
         "local" => localization::msgid("Local"),
         "webdav" => localization::msgid("WebDAV"),
         "smb" => localization::msgid("SMB / Samba"),
+        "peer" => localization::msgid("Rufin Connect"),
         _ => return None,
     })
 }
@@ -336,6 +337,7 @@ pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
         "local" => "io.github.screwys.Rufin-symbolic",
         "webdav" => "io.github.screwys.Rufin.source.webdav",
         "smb" => "io.github.screwys.Rufin.source.smb",
+        "peer" => "rufin-phonelink-symbolic",
         _ => return None,
     })
 }

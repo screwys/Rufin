@@ -1894,7 +1894,7 @@ fn decode<T: DeserializeOwned>(row: &Row) -> Result<T, String> {
     serde_json::from_value(row.value.clone().ok_or("The record value is missing")?).map_err(error)
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

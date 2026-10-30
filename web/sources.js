@@ -65,6 +65,8 @@ function renderSources(configured) {
       "source-edit",
     );
     edit.append(el("span", "", tr("Edit")));
+    // Another device's Local library has nothing to edit here.
+    edit.hidden = item.kind === "peer";
     const actions = el("div", "source-actions");
     actions.append(
       button(

@@ -64,7 +64,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 IconButton(close) { RufinIcon("rufin-window-close-symbolic", translate("Close")) }
             })
     }, bottomBar = {
-        if (setup.ready && form.kind != null && form.kind != "local") {
+        if (setup.ready && form.kind != null && form.kind !in setOf("local", "peer")) {
             Surface {
                 Button({
                     saved = false
@@ -113,12 +113,12 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 }
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic")) item {
+                if (sourceId != null && !form.integration && form.kind in setOf("jellyfin", "emby", "plex", "navidrome", "subsonic", "peer")) item {
                     SettingsGroup { SettingsRow(translate("Local File Mapping"),
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
                 }
-                item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
+                if (form.kind != "peer") item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
                 when (form.kind) {
                     "jellyfin", "emby" -> item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (form.kind == "emby") SourceSwitch("Connect manually", form.manualEmby, {

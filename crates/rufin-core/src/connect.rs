@@ -1,6 +1,7 @@
 //! Rufin Connect: pairing, the records paired devices sync and the sync folder. Connect is on
 //! exactly when `connect.sqlite` holds its profile row.
 mod folder;
+mod peer;
 mod records;
 
 use crate::{
@@ -303,6 +304,29 @@ enum Request {
     Control { command: Control },
 }
 
+/// A request on the media protocol.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "stream", rename_all = "snake_case")]
+enum Stream {
+    /// For the peer source on another device: a read of one of this device's Local sources.
+    Catalog {
+        source: sources::SourceId,
+        read: peer::Read,
+    },
+    Image {
+        source: sources::SourceId,
+        image: String,
+        size: Option<u32>,
+    },
+    Audio {
+        source: sources::SourceId,
+        object: String,
+        encoding: Option<library::AudioEncoding>,
+        range: Option<(u64, Option<u64>)>,
+        window: Option<(u64, Option<u64>)>,
+    },
+}
+
 #[derive(Serialize, Deserialize)]
 struct Presence {
     name: String,
@@ -390,6 +414,7 @@ impl ConnectOwner {
 
     /// Resumes Connect when it was on. With Connect off this is one `stat`.
     pub(crate) fn start(self: &Arc<Self>) {
+        peer::install(self);
         let owner = Arc::clone(self);
         self.runtime.spawn(async move {
             let _action = owner.actions.lock().await;
@@ -1344,8 +1369,11 @@ impl ConnectOwner {
                     let _ = reply.send(owner.answer(&body).await);
                 });
             }
-            NetworkEvent::StreamRequest { reply, .. } => {
-                let _ = reply.send(Err("Unsupported request".into()));
+            NetworkEvent::StreamRequest { body, reply, .. } => {
+                let owner = Arc::clone(self);
+                self.runtime.spawn(async move {
+                    let _ = reply.send(owner.answer_stream(&body).await);
+                });
             }
             NetworkEvent::Changed {
                 peer,
