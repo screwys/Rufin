@@ -136,10 +136,11 @@ pub(crate) async fn import_paths(
         .map(|path| normalize_observed_path(path).to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     let files = super::LocalFiles::importing(local, &paths);
+    let configured = local.configured_file_roots()?;
     walk::walk(
         &files,
         observation,
-        &local.configured_file_roots()?,
+        &configured,
         walk::WalkScope::Paths {
             paths: &paths,
             rename: None,
@@ -150,7 +151,9 @@ pub(crate) async fn import_paths(
     )
     .await?;
     let playlist = observation.create_observed_playlist(&paths, name).await?;
-    observation.record_imported_files(playlist).await?;
+    observation
+        .record_imported_files(playlist, &configured)
+        .await?;
     Ok(playlist)
 }
 
