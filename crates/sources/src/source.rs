@@ -145,6 +145,9 @@ pub(crate) async fn cache_native_lyrics(
 }
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
+/// A catch-up asks for changes from this long before the last sync, so a save the server was
+/// still writing and a small clock skew are covered.
+pub(crate) const SYNC_MARGIN: i64 = 60;
 
 /// What a catalog refresh lists.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -251,11 +254,25 @@ impl SelectedFeed {
         }
     }
 
-    pub async fn apply_pending(
-        &self,
-        catalog: &Catalog,
-        _source_key: library::SourceKey,
-    ) -> SourceResult<bool> {
+    /// Whether the pending change lists the whole source, so it waits for a running listing
+    /// and catches up from that listing's start.
+    pub fn pending_listing(&self) -> bool {
+        matches!(
+            *self
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Some(
+                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)
+                    | SelectedFeedChange::Files(
+                        crate::file::remote::changes::FileChange::FullRefresh
+                    )
+                    | SelectedFeedChange::Local(LocalLiveChange::Rescan)
+            )
+        )
+    }
+
+    pub async fn apply_pending(&self, catalog: &Catalog) -> SourceResult<()> {
         if self.cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
@@ -268,54 +285,54 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match change {
-            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => Ok(false),
-            // The watcher lost events: the walk lists what changed.
-            SelectedFeedChange::Local(LocalLiveChange::Rescan) => self
+            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost) => {
+                self.source.catch_up(catalog, self.cancellation()).await
+            }
+            SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => {
+                match self.source.apply_changes(catalog, items).await {
+                    Err(error) if !matches!(error, SourceError::Cancelled) => {
+                        tracing::warn!(%error, "source change failed; catching up");
+                        self.source.catch_up(catalog, self.cancellation()).await
+                    }
+                    result => result,
+                }
+            }
+            SelectedFeedChange::Files(crate::file::remote::changes::FileChange::FullRefresh)
+            | SelectedFeedChange::Local(LocalLiveChange::Rescan) => self
                 .source
                 .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Changed)
                 .await
-                .map(|_| true),
-            SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => self
-                .source
-                .apply_changes(catalog, items)
-                .await
-                .map(|()| true),
-            SelectedFeedChange::Files(crate::file::remote::changes::FileChange::FullRefresh) => {
-                self.source
-                    .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Changed)
-                    .await
-                    .map(|_| true)
-            }
+                .map(|_| ()),
             SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Paths {
                 paths,
                 rename,
-            }) => self
-                .source
-                .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
-                    self.cancelled.load(Ordering::Acquire)
-                })
-                .await
-                .map(|()| true),
-            SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }) => self
-                .source
-                .apply_file_paths(
-                    catalog,
-                    &paths
-                        .iter()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .collect::<Vec<_>>(),
-                    rename
-                        .map(|(a, b)| {
-                            (
-                                a.to_string_lossy().into_owned(),
-                                b.to_string_lossy().into_owned(),
-                            )
-                        })
-                        .as_ref(),
-                    &|| self.cancelled.load(Ordering::Acquire),
-                )
-                .await
-                .map(|()| true),
+            }) => {
+                self.source
+                    .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
+                        self.cancelled.load(Ordering::Acquire)
+                    })
+                    .await
+            }
+            SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }) => {
+                self.source
+                    .apply_file_paths(
+                        catalog,
+                        &paths
+                            .iter()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>(),
+                        rename
+                            .map(|(a, b)| {
+                                (
+                                    a.to_string_lossy().into_owned(),
+                                    b.to_string_lossy().into_owned(),
+                                )
+                            })
+                            .as_ref(),
+                        &|| self.cancelled.load(Ordering::Acquire),
+                    )
+                    .await
+            }
         }
     }
 }
@@ -1127,9 +1144,15 @@ impl Source {
                 } else {
                     false
                 };
+                // A server without a scan marker lists everything once a day.
+                let daily = catalog
+                    .source_key(&self.source_id)
+                    .and_then(|source| catalog.synced_at(source))
+                    .is_none_or(|at| unix_now() - at >= 24 * 60 * 60);
                 let full = !accepted
                     && (freshness.is_some()
-                        || matches!(&self.implementation, Implementation::OpenSubsonic(_)))
+                        || daily
+                            && matches!(&self.implementation, Implementation::OpenSubsonic(_)))
                     || freshness.is_none()
                         && matches!(&self.implementation, Implementation::Files(_));
                 if !full {
@@ -1214,6 +1237,42 @@ impl Source {
                 )
                 .await?;
             Ok((true, freshness.clone()))
+        })
+        .await
+    }
+
+    /// After a feed gap: what changed since the last sync, through the live apply path, then
+    /// the deletions. A source that never completed a listing lists everything instead.
+    pub async fn catch_up(
+        &self,
+        catalog: &Catalog,
+        cancelled: Arc<AtomicBool>,
+    ) -> SourceResult<()> {
+        catalog.loaded().await;
+        let Some(since) = catalog
+            .source_key(&self.source_id)
+            .and_then(|source| catalog.synced_at(source))
+        else {
+            return self
+                .acquire_catalog(catalog, &|_| {}, cancelled, Refresh::Changed)
+                .await
+                .map(|_| ());
+        };
+        let cancelled = || cancelled.load(Ordering::Acquire) || self.is_retired();
+        self.catalog_operation(catalog, async |changes| {
+            let started = match &self.implementation {
+                Implementation::JellyfinEmby(source) => {
+                    source.catch_up(changes, since, &cancelled).await?
+                }
+                Implementation::Plex(source) => source.catch_up(changes, since, &cancelled).await?,
+                _ => {
+                    return Err(SourceError::InvalidRequest(
+                        "Source has no remote item feed",
+                    ));
+                }
+            };
+            changes.set_synced_at(started).await?;
+            Ok(())
         })
         .await
     }
@@ -2136,12 +2195,15 @@ impl Source {
             Implementation::Plex(_) => {
                 let producer = Arc::clone(&feed);
                 let task = runtime.spawn(async move {
+                    // A connect after the first, or the first when no listing runs, catches up.
+                    let ready = || {
+                        std::mem::take(&mut initial_scan_pending)
+                            || producer
+                                .submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
+                    };
+                    let changed = |change| producer.submit(SelectedFeedChange::Remote(change));
                     if let Implementation::Plex(source) = &producer.source.implementation {
-                        source
-                            .listen_library_changes(|change| {
-                                producer.submit(SelectedFeedChange::Remote(change))
-                            })
-                            .await;
+                        source.listen_library_changes(ready, changed).await;
                     }
                 });
                 *feed.remote_task.lock().unwrap_or_else(|p| p.into_inner()) =

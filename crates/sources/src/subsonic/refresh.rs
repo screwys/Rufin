@@ -105,29 +105,38 @@ impl SubsonicSource {
         playlist_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = observation.source_id;
-
-        let snapshot = self.read_playlist(source_id, playlist_id).await?;
-        let mut batch = library::CatalogBatch::default();
-        batch.playlists.push(snapshot.playlist.header.clone());
+        let snapshot = self
+            .read_playlist(observation.source_id, playlist_id)
+            .await?;
         check_cancelled(cancelled)?;
-        observation.apply_catalog(&batch, true).await?;
+        self.write_playlist_snapshot(observation, &snapshot).await
+    }
+
+    pub(super) async fn write_playlist_snapshot(
+        &self,
+        observation: &mut library::Observation<'_>,
+        snapshot: &PlaylistSnapshot,
+    ) -> SourceResult<()> {
+        let header = &snapshot.playlist.header;
         observation
-            .write_source_playlist_page(
-                &snapshot.playlist.header.object_id,
-                0,
-                &snapshot.entries,
+            .apply_catalog(
+                &library::CatalogBatch {
+                    playlists: vec![header.clone()],
+                    ..Default::default()
+                },
                 true,
             )
             .await?;
         observation
+            .write_source_playlist_page(&header.object_id, 0, &snapshot.entries, true)
+            .await?;
+        observation
             .write_source_playlist_freshness(
-                &snapshot.playlist.header.object_id,
+                &header.object_id,
                 snapshot.playlist.revision.as_deref(),
                 snapshot.playlist.valid_until,
             )
             .await?;
-
         Ok(())
     }
 
@@ -481,8 +490,10 @@ impl SubsonicSource {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64;
+            // A playlist is read again when its revision changed or its validity ended; a
+            // server that sets no validity (gonic) leaves the revision alone to decide.
             let retained = if let Some(revision) = playlist.revision.as_deref()
-                && playlist.valid_until.is_some_and(|deadline| deadline > now)
+                && playlist.valid_until.is_none_or(|deadline| deadline > now)
             {
                 catalog
                     .source_playlist_is_fresh(
@@ -701,7 +712,7 @@ mod tests {
             .unwrap();
 
         let cancellation = library::ReadCancellation::new();
-        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 3), (6, 4), (4, 5), (5, 5)] {
+        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 2), (6, 2), (4, 3), (5, 3)] {
             state.store(next, Ordering::Relaxed);
             let catalog_source_id = ("source").to_string();
             let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();

@@ -54,45 +54,21 @@ impl PlexSource {
                 ("9", SourceReadStage::Albums),
                 ("10", SourceReadStage::Tracks),
             ] {
-                let mut offset = 0;
-                loop {
-                    if cancelled() {
-                        return Err(SourceError::Cancelled);
-                    }
-                    let page = self
-                        .get(
-                            &format!("/library/sections/{section_id}/all"),
-                            &[
-                                ("type", kind.into()),
-                                ("includeGuids", "1".into()),
-                                ("includeStreams", "1".into()),
-                                ("X-Plex-Container-Start", offset.to_string()),
-                                ("X-Plex-Container-Size", PAGE.to_string()),
-                            ],
-                        )
-                        .await?;
-                    let rows = items(&page["MediaContainer"]["Metadata"]);
-                    let finished = page_finished(&page, offset, rows.len())?;
-                    section_record.tracks = if kind == "10" {
-                        rows.iter()
-                            .filter_map(|item| id(&item["ratingKey"]))
-                            .map(|raw| plex_id("track", &raw))
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    self.acquire_metadata_page(observation, rows, Some(&section_record), cancelled)
-                        .await?;
-                    offset += rows.len();
-                    progress(SourceReadProgress {
-                        stage,
-                        completed: offset,
-                        total: field(&page["MediaContainer"], "totalSize"),
-                    });
-                    if finished {
-                        break;
-                    }
-                }
+                self.section_pages(
+                    observation,
+                    &mut section_record,
+                    kind,
+                    None,
+                    &|completed, total| {
+                        progress(SourceReadProgress {
+                            stage,
+                            completed,
+                            total,
+                        })
+                    },
+                    cancelled,
+                )
+                .await?;
             }
             if walk {
                 if cancelled() {
@@ -129,6 +105,182 @@ impl PlexSource {
             total: Some(1),
         });
         Ok(())
+    }
+
+    /// Reads one item type of a section in pages; `updated_after` keeps only the items the
+    /// server changed since then. Returns the server's clock at the first page.
+    async fn section_pages(
+        &self,
+        observation: &mut library::Observation<'_>,
+        section: &mut FolderObservation,
+        kind: &str,
+        updated_after: Option<&str>,
+        progress: &(dyn Fn(usize, Option<usize>) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<Option<i64>> {
+        let path = format!("/library/sections/{}/all", raw_item_id(&section.object_id));
+        let mut offset = 0;
+        let mut started = None;
+        loop {
+            if cancelled() {
+                return Err(SourceError::Cancelled);
+            }
+            let mut query = vec![
+                ("type", kind.to_owned()),
+                ("includeGuids", "1".into()),
+                ("includeStreams", "1".into()),
+                ("X-Plex-Container-Start", offset.to_string()),
+                ("X-Plex-Container-Size", PAGE.to_string()),
+            ];
+            query.extend(updated_after.map(|after| ("updatedAt>>", after.to_owned())));
+            let (page, date) = self.get_dated(&path, &query).await?;
+            started = started.or(date);
+            let rows = items(&page["MediaContainer"]["Metadata"]);
+            let finished = page_finished(&page, offset, rows.len())?;
+            section.tracks = if kind == "10" {
+                rows.iter()
+                    .filter_map(|item| id(&item["ratingKey"]))
+                    .map(|raw| plex_id("track", &raw))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            self.acquire_metadata_page(observation, rows, Some(section), cancelled)
+                .await?;
+            offset += rows.len();
+            progress(offset, field(&page["MediaContainer"], "totalSize"));
+            if finished {
+                return Ok(started);
+            }
+        }
+    }
+
+    /// After a feed gap: what the server updated, played or rated since `since`, the deletions
+    /// a count shows, and the playlists whose revision changed. Returns the server's clock at
+    /// the start.
+    pub(crate) async fn catch_up(
+        &self,
+        observation: &mut library::Observation<'_>,
+        since: i64,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<i64> {
+        let from = since - crate::source::SYNC_MARGIN;
+        let after = from.to_string();
+        let (mut started, mut total) = (None, 0);
+        let mut sections = Vec::new();
+        for folder in observation.catalog.music_folders(observation.source) {
+            if !folder.object_id.starts_with("plex:music-folder:") {
+                continue;
+            }
+            let path = format!("/library/sections/{}/all", raw_item_id(&folder.object_id));
+            let mut record = FolderObservation {
+                metadata: library::FolderMetadata {
+                    name: Some(folder.name),
+                    ..Default::default()
+                },
+                object_id: folder.object_id,
+                ..Default::default()
+            };
+            for kind in ["8", "9", "10"] {
+                let date = self
+                    .section_pages(
+                        observation,
+                        &mut record,
+                        kind,
+                        Some(&after),
+                        &|_, _| {},
+                        cancelled,
+                    )
+                    .await?;
+                started = started.or(date);
+            }
+            // Recent plays come first by date; the same page counts the section's tracks.
+            let mut offset = 0;
+            loop {
+                let page = self
+                    .get(
+                        &path,
+                        &[
+                            ("type", "10".into()),
+                            ("sort", "lastViewedAt:desc".into()),
+                            ("X-Plex-Container-Start", offset.to_string()),
+                            ("X-Plex-Container-Size", "64".into()),
+                        ],
+                    )
+                    .await?;
+                if offset == 0 {
+                    total += field::<usize>(&page["MediaContainer"], "totalSize").unwrap_or(0);
+                }
+                let rows = items(&page["MediaContainer"]["Metadata"]);
+                let finished = page_finished(&page, offset, rows.len())?;
+                let played = rows
+                    .iter()
+                    .take_while(|item| {
+                        field::<i64>(item, "lastViewedAt").is_some_and(|at| at >= from)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                self.acquire_metadata_page(observation, &played, None, cancelled)
+                    .await?;
+                offset += rows.len();
+                if finished || played.len() < rows.len() {
+                    break;
+                }
+            }
+            let rated = self
+                .get(
+                    &path,
+                    &[("type", "10".into()), ("lastRatedAt>>", after.clone())],
+                )
+                .await?;
+            let rated = items(&rated["MediaContainer"]["Metadata"]);
+            self.acquire_metadata_page(observation, rated, None, cancelled)
+                .await?;
+            sections.push(path);
+        }
+        // The count shows deletions; only then are the ids listed.
+        if observation.catalog.indexed_tracks(observation.source) > total {
+            let mut listed = std::collections::HashSet::new();
+            for path in &sections {
+                let mut offset = 0;
+                loop {
+                    if cancelled() {
+                        return Err(SourceError::Cancelled);
+                    }
+                    let page = self
+                        .get(
+                            path,
+                            &[
+                                ("type", "10".into()),
+                                ("X-Plex-Container-Start", offset.to_string()),
+                                ("X-Plex-Container-Size", PAGE.to_string()),
+                            ],
+                        )
+                        .await?;
+                    let rows = items(&page["MediaContainer"]["Metadata"]);
+                    listed.extend(
+                        rows.iter()
+                            .filter_map(|item| id(&item["ratingKey"]))
+                            .map(|raw| plex_id("track", &raw)),
+                    );
+                    let finished = page_finished(&page, offset, rows.len())?;
+                    offset += rows.len();
+                    if finished {
+                        break;
+                    }
+                }
+            }
+            observation.remove_unlisted("track", &listed).await?;
+        }
+        self.acquire_playlists(observation, cancelled).await?;
+        // Home sections change with what the catch-up wrote.
+        if observation.changed() {
+            crate::source::acquire_home(observation, cancelled, |section| {
+                self.home_section(section)
+            })
+            .await?;
+        }
+        Ok(started.unwrap_or_else(crate::source::unix_now))
     }
 
     pub(super) async fn acquire_metadata_page(
@@ -241,15 +393,29 @@ impl PlexSource {
                 }
             };
 
+            // Entries are read again only when the playlist's revision changed.
             for item in playlists {
-                if let Some(raw) = id(&item["ratingKey"]) {
-                    self.acquire_playlist_entries(
-                        observation,
-                        &plex_id("playlist", &raw),
-                        cancelled,
-                    )
-                    .await?;
+                let Some(raw) = id(&item["ratingKey"]) else {
+                    continue;
+                };
+                let playlist = plex_id("playlist", &raw);
+                let revision = format!(
+                    "{}:{}",
+                    field::<i64>(item, "updatedAt").unwrap_or_default(),
+                    field::<i64>(item, "leafCount").unwrap_or_default()
+                );
+                if observation
+                    .catalog
+                    .source_playlist_is_fresh(source_id, &playlist, Some(&revision), 0)
+                    .await?
+                {
+                    continue;
                 }
+                self.acquire_playlist_entries(observation, &playlist, cancelled)
+                    .await?;
+                observation
+                    .write_source_playlist_freshness(&playlist, Some(&revision), None)
+                    .await?;
             }
             offset += rows.len();
             if finished {

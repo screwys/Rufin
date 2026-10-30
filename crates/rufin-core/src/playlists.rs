@@ -415,25 +415,43 @@ pub async fn create_playlist(
                 let tracks = catalog
                     .source_playlist_track_ids(key, None, &songs, false)
                     .await
-                    .map_err(string_error)?;
+                    .map_err(string_error)?
+                    .into_iter()
+                    .map(|(_, id)| id)
+                    .collect::<Vec<_>>();
                 let first = &tracks[..tracks.len().min(256)];
                 let object = match &source.implementation {
-                    Implementation::Plex(provider) => provider.create_playlist(&name, first).await,
-                    Implementation::JellyfinEmby(provider) => {
-                        provider.create_playlist(&name, first, public).await
+                    // Subsonic answers with the new playlist, which is written from it.
+                    Implementation::OpenSubsonic(provider) => provider
+                        .create_playlist(
+                            catalog,
+                            source.source_id().as_str(),
+                            &name,
+                            &tracks,
+                            public,
+                        )
+                        .await
+                        .map_err(string_error)?,
+                    _ => {
+                        let object = match &source.implementation {
+                            Implementation::Plex(provider) => {
+                                provider.create_playlist(&name, first).await
+                            }
+                            Implementation::JellyfinEmby(provider) => {
+                                provider.create_playlist(&name, first, public).await
+                            }
+                            _ => unreachable!(),
+                        }
+                        .map_err(string_error)?;
+                        append_native_tracks(&source, &object, &tracks[first.len()..])
+                            .await
+                            .map_err(string_error)?;
+                        refresh_playlist(&source, catalog, Some(object.clone()), None)
+                            .await
+                            .map_err(string_error)?;
+                        object
                     }
-                    Implementation::OpenSubsonic(provider) => {
-                        provider.create_playlist(&name, first, public).await
-                    }
-                    _ => unreachable!(),
-                }
-                .map_err(string_error)?;
-                append_native_tracks(&source, &object, &tracks[first.len()..])
-                    .await
-                    .map_err(string_error)?;
-                refresh_playlist(&source, catalog, Some(object.clone()), None)
-                    .await
-                    .map_err(string_error)?;
+                };
                 let playlist = match catalog
                     .catalog_keys(
                         library::CatalogKind::Playlist,
@@ -842,16 +860,29 @@ pub async fn add_playlist_tracks(
                             || owner.configuration(source.source_id()).is_some_and(
                                 |configuration| !configuration.playlist_tracks_can_repeat(),
                             );
-                    let tracks = owner
-                        .shared
-                        .catalog
+                    let catalog = &owner.shared.catalog;
+                    let (tracks, ids): (Vec<_>, Vec<_>) = catalog
                         .source_playlist_track_ids(source_key, Some(playlist), &songs, skip)
-                        .await?;
-                    append_native_tracks(&source, &id, &tracks).await?;
-                    if !tracks.is_empty() {
-                        refresh_playlist(&source, &owner.shared.catalog, Some(id), None).await?;
+                        .await?
+                        .into_iter()
+                        .unzip();
+                    append_native_tracks(&source, &id, &ids).await?;
+                    let count = tracks.len();
+                    if count > 0 {
+                        if matches!(source.implementation, Implementation::OpenSubsonic(_)) {
+                            // Subsonic names no entries, so the resident order is the server's.
+                            catalog
+                                .edit_source_playlist(
+                                    playlist,
+                                    library::SourceEntryEdit::Add { tracks },
+                                )
+                                .await?;
+                        } else {
+                            // The server names the new entries, so they are read back.
+                            refresh_playlist(&source, catalog, Some(id), None).await?;
+                        }
                     }
-                    Ok(tracks.len())
+                    Ok(count)
                 }
                 .await
             }
@@ -926,11 +957,21 @@ pub fn remove_playlist_entries(
                 }
             }
             PlaylistOwner::Server(source, _) => {
-                // Later positions go first because Subsonic identifies entries by position.
+                if let Implementation::OpenSubsonic(provider) = &source.implementation {
+                    // Subsonic names entries by position, later ones first.
+                    let positions = entries
+                        .iter()
+                        .rev()
+                        .map(|entry| entry.position)
+                        .collect::<Vec<_>>();
+                    provider
+                        .edit_playlist_entries(&id, &positions, &[])
+                        .await
+                        .map_err(string_error)?;
+                }
                 let ids = entries
-                    .into_iter()
-                    .rev()
-                    .map(|entry| entry.object_id)
+                    .iter()
+                    .map(|entry| entry.object_id.clone())
                     .collect::<Vec<_>>();
                 for ids in ids.chunks(256) {
                     match &source.implementation {
@@ -940,14 +981,20 @@ pub fn remove_playlist_entries(
                         Implementation::JellyfinEmby(provider) => {
                             provider.remove_playlist_entries(&id, ids).await
                         }
-                        Implementation::OpenSubsonic(provider) => {
-                            provider.remove_playlist_entries(&id, ids).await
-                        }
-                        _ => unreachable!(),
+                        _ => Ok(()),
                     }
                     .map_err(string_error)?;
                 }
-                refresh_playlist(&source, catalog, Some(id), None)
+                catalog
+                    .edit_source_playlist(
+                        playlist,
+                        library::SourceEntryEdit::Remove {
+                            entries: entries
+                                .iter()
+                                .map(|entry| entry.playlist_entry_key)
+                                .collect(),
+                        },
+                    )
                     .await
                     .map_err(string_error)?;
             }
@@ -1060,15 +1107,27 @@ pub fn move_playlist_entry(
                                 .await?
                         }
                         Implementation::OpenSubsonic(provider) => {
-                            provider
-                                .move_playlist_entry(&id, &entry.object_id, position)
-                                .await?
+                            // Subsonic appends only: the tail from the lower index goes and
+                            // comes back in its new order.
+                            let low = entry.position.min(position);
+                            let mut tail = catalog.playlist_track_ids_from(playlist, low).await?;
+                            let moved = tail.remove(entry.position - low);
+                            tail.insert((position - low).min(tail.len()), moved);
+                            let remove = (low..low + tail.len()).rev().collect::<Vec<_>>();
+                            provider.edit_playlist_entries(&id, &remove, &tail).await?
                         }
                         _ => unreachable!(),
                     }
-                    refresh_playlist(&source, &catalog, Some(id), None)
-                        .await
-                        .map(|()| true)
+                    catalog
+                        .edit_source_playlist(
+                            playlist,
+                            library::SourceEntryEdit::Move {
+                                entry: entry.playlist_entry_key,
+                                position,
+                            },
+                        )
+                        .await?;
+                    Ok(true)
                 }
             }
         },
@@ -1350,7 +1409,9 @@ async fn append_native_tracks(
                 provider.add_playlist_tracks(playlist, tracks).await?
             }
             Implementation::OpenSubsonic(provider) => {
-                provider.add_playlist_tracks(playlist, tracks).await?
+                provider
+                    .edit_playlist_entries(playlist, &[], tracks)
+                    .await?
             }
             _ => unreachable!(),
         }

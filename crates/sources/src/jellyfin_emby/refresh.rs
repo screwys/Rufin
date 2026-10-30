@@ -298,7 +298,7 @@ impl JellyfinEmbySource {
             if entity == "track" {
                 let folders = self.acquire_music_folders(observation, cancelled).await?;
                 for folder in folders {
-                    self.acquire_music_folder_memberships(observation, &folder, cancelled)
+                    self.acquire_music_folder_memberships(observation, &folder, None, cancelled)
                         .await?;
                 }
                 if walk {
@@ -321,6 +321,203 @@ impl JellyfinEmbySource {
 
         progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
         Ok(())
+    }
+
+    /// After a feed gap: the items the server saved since `since`, recent plays and the
+    /// favorites, the deletions a count shows, and the playlists whose revision changed.
+    /// Returns the server's clock at the start.
+    pub(crate) async fn catch_up(
+        &self,
+        observation: &mut library::Observation<'_>,
+        since: i64,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<i64> {
+        let source_id = observation.source_id;
+        let from = since - crate::source::SYNC_MARGIN;
+        let after = chrono::DateTime::from_timestamp(from, 0)
+            .unwrap_or_default()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        // A page of items; without fields it holds ids and, unless asked for, no user data.
+        let items_url = |offset: usize, limit: usize, types: &str, fields: &str| {
+            let mut url = endpoint(&self.base_url, "Items")?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Recursive", "true")
+                .append_pair("IncludeItemTypes", types)
+                .append_pair("StartIndex", &offset.to_string())
+                .append_pair("Limit", &limit.to_string())
+                .append_pair("Fields", fields);
+            if fields.is_empty() {
+                url.query_pairs_mut().append_pair("EnableImages", "false");
+            }
+            SourceResult::Ok(url)
+        };
+        let (mut started, mut tracks) = (None, false);
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let mut url = items_url(
+                pages.offset(),
+                COLLECTION_PAGE_SIZE,
+                "Audio,MusicAlbum,MusicArtist,MusicGenre",
+                MIXED_ITEM_FIELDS,
+            )?;
+            url.query_pairs_mut()
+                .append_pair("MinDateLastSaved", &after);
+            let (page, date) = self.get_json_dated::<Value>(url).await?;
+            started = started.or(date);
+            let rows = items(&page["Items"]);
+            let finished = pages.advance(rows.len(), field(&page, "TotalRecordCount"))?;
+            let mut batch = library::CatalogBatch::default();
+            for item in rows {
+                match item["Type"].as_str().unwrap_or_default() {
+                    "MusicAlbum" => batch
+                        .albums
+                        .extend(album_from_item(self.kind, source_id, item)?),
+                    "Audio" => batch
+                        .tracks
+                        .extend(track_from_item(self.kind, source_id, item)?),
+                    "MusicArtist" => batch
+                        .artists
+                        .extend(artist_from_item(self.kind, source_id, item)?),
+                    "MusicGenre" => batch
+                        .tags
+                        .extend(genre_from_item(self.kind, source_id, item)?),
+                    _ => {}
+                }
+            }
+            tracks |= !batch.tracks.is_empty();
+            check_cancelled(cancelled)?;
+            observation.apply_catalog(&batch, true).await?;
+            if finished {
+                break;
+            }
+        }
+        if tracks {
+            let folders = observation.catalog.music_folders(observation.source);
+            for folder in folders {
+                self.acquire_music_folder_memberships(
+                    observation,
+                    &folder.object_id,
+                    Some(&after),
+                    cancelled,
+                )
+                .await?;
+            }
+        }
+        // Saves of user data are not dated: favorites are listed whole, plays by date.
+        let mut favorites = std::collections::BTreeMap::<&str, Vec<String>>::new();
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let mut url = items_url(
+                pages.offset(),
+                COLLECTION_PAGE_SIZE,
+                "Audio,MusicAlbum,MusicArtist",
+                "",
+            )?;
+            url.query_pairs_mut()
+                .append_pair("Filters", "IsFavorite")
+                .append_pair("EnableUserData", "false");
+            let page = self.get_json::<Value>(url).await?;
+            let rows = items(&page["Items"]);
+            let finished = pages.advance(rows.len(), field(&page, "TotalRecordCount"))?;
+            for item in rows {
+                let kind = match item["Type"].as_str().unwrap_or_default() {
+                    "Audio" => "track",
+                    "MusicAlbum" => "album",
+                    "MusicArtist" => "artist",
+                    _ => continue,
+                };
+                if let Some(raw) = id(&item["Id"]) {
+                    favorites
+                        .entry(kind)
+                        .or_default()
+                        .push(self.kind.object_id(kind, &raw));
+                }
+            }
+            if finished {
+                break;
+            }
+        }
+        for kind in ["track", "album", "artist"] {
+            observation
+                .replace_source_favorites(kind, favorites.get(kind).map_or(&[], Vec::as_slice))
+                .await?;
+        }
+        // Recent plays come first by date; the same page counts every track.
+        let mut total = 0;
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let mut url = items_url(pages.offset(), 64, "Audio", "")?;
+            url.query_pairs_mut()
+                .append_pair("SortBy", "DatePlayed")
+                .append_pair("SortOrder", "Descending");
+            let page = self.get_json::<Value>(url).await?;
+            let rows = items(&page["Items"]);
+            total = field(&page, "TotalRecordCount").unwrap_or(total);
+            let finished = pages.advance(rows.len(), Some(total))?;
+            let played = rows
+                .iter()
+                .map_while(|item| {
+                    let state = &item["UserData"];
+                    let at = crate::policy::unix_seconds(field(state, "LastPlayedDate"))
+                        .filter(|at| *at >= from)?;
+                    Some((
+                        self.kind.object_id("track", &id(&item["Id"])?),
+                        library::NativeUserState {
+                            last_played: Some(at),
+                            play_count: super::item::play_count(state).map(i64::from),
+                            ..Default::default()
+                        },
+                    ))
+                })
+                .collect::<Vec<_>>();
+            if !played.is_empty() {
+                observation.write_native_user_data("track", &played).await?;
+            }
+            if finished || played.len() < rows.len() {
+                break;
+            }
+        }
+        // The count shows deletions; only then are the ids listed.
+        if observation.catalog.indexed_tracks(observation.source) > total {
+            let mut listed = HashSet::new();
+            let mut pages = PageState::default();
+            loop {
+                check_cancelled(cancelled)?;
+                let mut url = items_url(pages.offset(), COLLECTION_PAGE_SIZE, "Audio", "")?;
+                url.query_pairs_mut().append_pair("EnableUserData", "false");
+                let page = self.get_json::<Value>(url).await?;
+                let rows = items(&page["Items"]);
+                let finished = pages.advance(rows.len(), field(&page, "TotalRecordCount"))?;
+                listed.extend(
+                    rows.iter()
+                        .filter_map(|item| id(&item["Id"]))
+                        .map(|raw| self.kind.object_id("track", &raw)),
+                );
+                if finished {
+                    break;
+                }
+            }
+            observation.remove_unlisted("track", &listed).await?;
+        }
+        observation.start_observation().await?;
+        if let Err(error) = self
+            .acquire_playlists(observation, &|_| {}, cancelled)
+            .await
+        {
+            crate::source::optional_collection_error(error)?;
+        }
+        // Home sections change with what the catch-up wrote.
+        if observation.changed() {
+            crate::source::acquire_home(observation, cancelled, |section| {
+                self.home_section(section)
+            })
+            .await?;
+        }
+        Ok(started.unwrap_or_else(crate::source::unix_now))
     }
 
     async fn acquire_missing_artists(
@@ -392,10 +589,12 @@ impl JellyfinEmbySource {
             .collect())
     }
 
+    /// The track ids of a music view; `saved_after` keeps those saved since then.
     async fn acquire_music_folder_memberships(
         &self,
         observation: &mut library::Observation<'_>,
         folder_id: &str,
+        saved_after: Option<&str>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let walk = observation.is_walk();
@@ -412,8 +611,12 @@ impl JellyfinEmbySource {
                 .append_pair("IncludeItemTypes", "Audio")
                 .append_pair("StartIndex", &pages.offset().to_string())
                 .append_pair("Limit", &COLLECTION_PAGE_SIZE.to_string())
-                .append_pair("SortBy", "SortName")
-                .append_pair("SortOrder", "Ascending");
+                .append_pair("Fields", "")
+                .append_pair("EnableImages", "false")
+                .append_pair("EnableUserData", "false");
+            if let Some(after) = saved_after {
+                url.query_pairs_mut().append_pair("MinDateLastSaved", after);
+            }
             let page = self.get_json::<Value>(url).await?;
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
@@ -484,7 +687,23 @@ impl JellyfinEmbySource {
                 });
                 check_cancelled(cancelled)?;
                 observation.apply_catalog(&batch, true).await?;
+                // Entries are read again only when the playlist's revision changed.
+                if let Some(revision) = &playlist.revision
+                    && observation
+                        .catalog
+                        .source_playlist_is_fresh(source_id, &playlist.id, Some(revision), 0)
+                        .await?
+                {
+                    continue;
+                }
                 self.acquire_playlist_entries(observation, &playlist.id, cancelled)
+                    .await?;
+                observation
+                    .write_source_playlist_freshness(
+                        &playlist.id,
+                        playlist.revision.as_deref(),
+                        None,
+                    )
                     .await?;
             }
             progress(stage(

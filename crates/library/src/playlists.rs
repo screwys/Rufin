@@ -259,6 +259,30 @@ impl Catalog {
         .await?)
     }
 
+    /// The object ids of a playlist's tracks from an index of its order to the end.
+    pub async fn playlist_track_ids_from(
+        &self,
+        playlist: PlaylistKey,
+        position: usize,
+    ) -> LibraryResult<Vec<String>> {
+        let keys = self
+            .snapshot()
+            .playlists
+            .get(playlist.raw())
+            .map(|record| {
+                record.entries[position.min(record.entries.len())..]
+                    .iter()
+                    .map(|entry| entry.key)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT track.object_id FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value JOIN tracks track USING(track_key) ORDER BY CAST(requested.key AS INTEGER)")
+            .bind(serde_json::to_string(&keys)?)
+            .fetch_all(&mut *connection)
+            .await?)
+    }
+
     /// Object ids of a source's named playlists that Rufin owns or the source lists, by name.
     pub async fn source_playlist_object_ids(
         &self,
@@ -297,13 +321,14 @@ impl Catalog {
             .collect())
     }
 
+    /// The selected tracks of a source with their object ids, as the source names them.
     pub async fn source_playlist_track_ids(
         &self,
         source: SourceKey,
         playlist: Option<PlaylistKey>,
         songs: &MemberSelection,
         skip_existing: bool,
-    ) -> LibraryResult<Vec<String>> {
+    ) -> LibraryResult<Vec<(TrackKey, String)>> {
         let mut connection = self.acquire_reader().await?;
         let mut transaction = connection.begin().await?;
         let tracks = playlist_tracks_on(self, &mut transaction, Some(source), songs)
@@ -311,7 +336,7 @@ impl Catalog {
             .ok_or_else(|| {
                 LibraryError::InvalidRequest("Playlist Track is no longer current".into())
             })?;
-        let ids = sqlx::query_scalar("SELECT track.object_id FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value
+        let ids = sqlx::query_as("SELECT track.track_key,track.object_id FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value
             WHERE NOT ?2 OR ?3 IS NULL OR NOT EXISTS(SELECT 1 FROM playlist_entries existing WHERE existing.playlist_key=?3 AND existing.track_key=track.track_key)
             ORDER BY CAST(requested.key AS INTEGER)")
             .bind(serde_json::to_string(&tracks)?).bind(skip_existing).bind(playlist)
@@ -460,23 +485,10 @@ impl Catalog {
         if !self.editable_playlist(playlist) {
             return Ok(0);
         }
-        let mut removed = Vec::new();
-        for batch in entries.chunks(PLAYLIST_DELETE_BATCH) {
-            removed.extend(
-                sqlx::query_scalar::<_, i64>(
-                    "DELETE FROM playlist_entries WHERE playlist_key=?1 AND playlist_entry_key IN(SELECT value FROM json_each(?2)) RETURNING playlist_entry_key",
-                )
-                .bind(playlist)
-                .bind(serde_json::to_string(batch)?)
-                .fetch_all(write.connection().await?)
-                .await?,
-            );
-        }
-        let count = removed.len();
+        let count = remove_entries_on(&mut write, playlist, entries).await?;
         if count > 0 {
             crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
         }
-        write.remove_entries(playlist.raw(), removed);
         write.commit().await?;
         Ok(count)
     }
@@ -493,43 +505,49 @@ impl Catalog {
         if !self.editable_playlist(playlist) {
             return Ok(false);
         }
-        let (rank, track) = {
-            let snapshot = self.snapshot();
-            let Some(record) = snapshot.playlists.get(playlist.raw()) else {
-                return Ok(false);
-            };
-            let mut order = record.entries.iter().collect::<Vec<_>>();
-            let Some(old_position) = order.iter().position(|other| other.key == entry.raw()) else {
-                return Ok(false);
-            };
-            let new_position = new_position.min(order.len() - 1);
-            if old_position == new_position {
-                return Ok(true);
-            }
-            let moved = order.remove(old_position);
-            let low = new_position.checked_sub(1).map(|index| &*order[index].rank);
-            let high = order.get(new_position).map(|other| &*other.rank);
-            let Some(track) = snapshot.tracks.key_of(moved.track) else {
-                return Ok(false);
-            };
-            (crate::rank::between(low, high), TrackKey::from_raw(track))
-        };
-        sqlx::query("UPDATE playlist_entries SET rank=?2 WHERE playlist_entry_key=?1")
-            .bind(entry)
-            .bind(&rank)
-            .execute(write.connection().await?)
-            .await?;
+        if !move_entry_on(self, &mut write, playlist, entry, new_position).await? {
+            return Ok(false);
+        }
         crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
-        write.put_entries(
-            playlist.raw(),
-            vec![Entry {
-                key: entry.raw(),
-                rank: rank.into(),
-                track,
-            }],
-        );
         write.commit().await?;
         Ok(true)
+    }
+
+    /// Writes an entry edit the server has applied, from the resident entries, in one Write.
+    /// The playlist's revision is cleared, so the next sync reads this playlist once.
+    pub async fn edit_source_playlist(
+        &self,
+        playlist: PlaylistKey,
+        edit: SourceEntryEdit,
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        let owned = self
+            .snapshot()
+            .playlists
+            .get(playlist.raw())
+            .is_some_and(|record| record.flags & SOURCE_OWNED != 0);
+        if !owned {
+            return Err(LibraryError::InvalidRequest(
+                "The playlist does not belong to a source".into(),
+            ));
+        }
+        match edit {
+            SourceEntryEdit::Add { tracks } => {
+                insert_playlist_tracks(self, &mut write, playlist, &tracks, false).await?;
+            }
+            SourceEntryEdit::Move { entry, position } => {
+                move_entry_on(self, &mut write, playlist, entry, position).await?;
+            }
+            SourceEntryEdit::Remove { entries } => {
+                remove_entries_on(&mut write, playlist, &entries).await?;
+            }
+        }
+        sqlx::query("UPDATE playlists SET provider_revision=NULL WHERE playlist_key=?1 AND provider_revision IS NOT NULL")
+            .bind(playlist)
+            .execute(write.connection().await?)
+            .await?;
+        write.commit().await?;
+        Ok(())
     }
 
     /// Whether the user can change the playlist's entries: a writable Rufin playlist.
@@ -539,6 +557,91 @@ impl Catalog {
             .get(playlist.raw())
             .is_some_and(|record| record.flags & (SOURCE_OWNED | WRITABLE) == WRITABLE)
     }
+}
+
+/// An entry edit of a server playlist, as the server applied it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SourceEntryEdit {
+    /// Tracks appended at the end.
+    Add {
+        tracks: Vec<TrackKey>,
+    },
+    /// An entry moved to an index of the order.
+    Move {
+        entry: PlaylistEntryKey,
+        position: usize,
+    },
+    Remove {
+        entries: Vec<PlaylistEntryKey>,
+    },
+}
+
+async fn remove_entries_on(
+    write: &mut Write<'_>,
+    playlist: PlaylistKey,
+    entries: &[PlaylistEntryKey],
+) -> LibraryResult<usize> {
+    let mut removed = Vec::new();
+    for batch in entries.chunks(PLAYLIST_DELETE_BATCH) {
+        removed.extend(
+            sqlx::query_scalar::<_, i64>(
+                "DELETE FROM playlist_entries WHERE playlist_key=?1 AND playlist_entry_key IN(SELECT value FROM json_each(?2)) RETURNING playlist_entry_key",
+            )
+            .bind(playlist)
+            .bind(serde_json::to_string(batch)?)
+            .fetch_all(write.connection().await?)
+            .await?,
+        );
+    }
+    let count = removed.len();
+    write.remove_entries(playlist.raw(), removed);
+    Ok(count)
+}
+
+/// Gives the entry a rank between its neighbours at the new index. Returns whether the
+/// playlist holds the entry.
+async fn move_entry_on(
+    catalog: &Catalog,
+    write: &mut Write<'_>,
+    playlist: PlaylistKey,
+    entry: PlaylistEntryKey,
+    new_position: usize,
+) -> LibraryResult<bool> {
+    let (rank, track) = {
+        let snapshot = catalog.snapshot();
+        let Some(record) = snapshot.playlists.get(playlist.raw()) else {
+            return Ok(false);
+        };
+        let mut order = record.entries.iter().collect::<Vec<_>>();
+        let Some(old_position) = order.iter().position(|other| other.key == entry.raw()) else {
+            return Ok(false);
+        };
+        let new_position = new_position.min(order.len() - 1);
+        if old_position == new_position {
+            return Ok(true);
+        }
+        let moved = order.remove(old_position);
+        let low = new_position.checked_sub(1).map(|index| &*order[index].rank);
+        let high = order.get(new_position).map(|other| &*other.rank);
+        let Some(track) = snapshot.tracks.key_of(moved.track) else {
+            return Ok(false);
+        };
+        (crate::rank::between(low, high), TrackKey::from_raw(track))
+    };
+    sqlx::query("UPDATE playlist_entries SET rank=?2 WHERE playlist_entry_key=?1")
+        .bind(entry)
+        .bind(&rank)
+        .execute(write.connection().await?)
+        .await?;
+    write.put_entries(
+        playlist.raw(),
+        vec![Entry {
+            key: entry.raw(),
+            rank: rank.into(),
+            track,
+        }],
+    );
+    Ok(true)
 }
 
 /// Selected URIs no track has yet become reference tracks.
@@ -701,7 +804,8 @@ async fn insert_playlist_tracks(
 /// differs. An entry is kept for a wanted one with its object id, else for the next one with its
 /// track. Kept entries that are already in order keep their ranks; the rest get ranks between
 /// their new neighbours. With `keep_ids`, kept entries keep their object ids, as a playlist file
-/// names tracks rather than entries; a source's ids are the source's.
+/// or a Subsonic server names tracks rather than entries; other sources' ids are the source's.
+/// An empty wanted id names no entry: a new entry gets its own.
 pub(crate) async fn write_entries(
     write: &mut Write<'_>,
     playlist: i64,
@@ -791,7 +895,7 @@ pub(crate) async fn write_entries(
         let rank = rank.expect("every wanted entry has a rank");
         let object = match index {
             Some(index) if keep_ids => Some(existing[*index].1.clone()),
-            _ => taken.insert(object.as_str()).then(|| object.clone()),
+            _ => (!object.is_empty() && taken.insert(object.as_str())).then(|| object.clone()),
         };
         match index {
             Some(index) => {
@@ -807,38 +911,41 @@ pub(crate) async fn write_entries(
         return Ok(false);
     }
     let connection = write.connection().await?;
-    sqlx::query(
-        "DELETE FROM playlist_entries WHERE playlist_entry_key IN(SELECT value FROM json_each(?1))",
-    )
-    .bind(serde_json::to_string(&removed)?)
-    .execute(&mut *connection)
-    .await?;
-    let rows = changed
-        .iter()
-        .map(|(key, object, track, rank)| (key, object, track, crate::rank::hex(rank)))
-        .collect::<Vec<_>>();
-    // Object ids move aside first, since kept entries may trade them.
-    sqlx::query("UPDATE playlist_entries SET object_id='moving:'||playlist_entry_key WHERE playlist_entry_key IN(SELECT value->>0 FROM json_each(?1)) AND object_id IS NOT (SELECT value->>1 FROM json_each(?1) WHERE value->>0=playlist_entry_key)")
-        .bind(serde_json::to_string(&rows)?)
+    if !removed.is_empty() {
+        sqlx::query(
+            "DELETE FROM playlist_entries WHERE playlist_entry_key IN(SELECT value FROM json_each(?1))",
+        )
+        .bind(serde_json::to_string(&removed)?)
         .execute(&mut *connection)
         .await?;
-    sqlx::query("UPDATE playlist_entries SET object_id=coalesce(input.value->>1,'rufin:entry:'||lower(hex(randomblob(16)))),track_key=input.value->>2,rank=unhex(input.value->>3) FROM json_each(?1) input WHERE playlist_entry_key=input.value->>0")
+    }
+    if !changed.is_empty() {
+        let rows = changed
+            .iter()
+            .map(|(key, object, track, rank)| (key, object, track, crate::rank::hex(rank)))
+            .collect::<Vec<_>>();
+        sqlx::query("UPDATE playlist_entries SET object_id=coalesce(input.value->>1,'rufin:entry:'||lower(hex(randomblob(16)))),track_key=input.value->>2,rank=unhex(input.value->>3) FROM json_each(?1) input WHERE playlist_entry_key=input.value->>0")
+            .bind(serde_json::to_string(&rows)?)
+            .execute(&mut *connection)
+            .await?;
+    }
+    let added: Vec<(i64, Vec<u8>, TrackKey)> = if inserted.is_empty() {
+        Vec::new()
+    } else {
+        let rows = inserted
+            .iter()
+            .map(|(object, track, rank)| (object, track, crate::rank::hex(rank)))
+            .collect::<Vec<_>>();
+        sqlx::query_as(
+            "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
+            SELECT ?1,coalesce(value->>0,'rufin:entry:'||lower(hex(randomblob(16)))),value->>1,unhex(value->>2) FROM json_each(?2) WHERE true
+            RETURNING playlist_entry_key,rank,track_key",
+        )
+        .bind(playlist)
         .bind(serde_json::to_string(&rows)?)
-        .execute(&mut *connection)
-        .await?;
-    let rows = inserted
-        .iter()
-        .map(|(object, track, rank)| (object, track, crate::rank::hex(rank)))
-        .collect::<Vec<_>>();
-    let added: Vec<(i64, Vec<u8>, TrackKey)> = sqlx::query_as(
-        "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
-        SELECT ?1,coalesce(value->>0,'rufin:entry:'||lower(hex(randomblob(16)))),value->>1,unhex(value->>2) FROM json_each(?2) WHERE true
-        RETURNING playlist_entry_key,rank,track_key",
-    )
-    .bind(playlist)
-    .bind(serde_json::to_string(&rows)?)
-    .fetch_all(&mut *connection)
-    .await?;
+        .fetch_all(&mut *connection)
+        .await?
+    };
     write.remove_entries(playlist, removed);
     write.put_entries(
         playlist,

@@ -194,7 +194,10 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
                 true
             )
             .await
-            .expect("provider payload"),
+            .expect("provider payload")
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>(),
         ["track-1", "track-1"]
     );
 }
@@ -231,7 +234,10 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
                 false
             )
             .await
-            .unwrap(),
+            .unwrap()
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>(),
         ["destination-track"]
     );
     assert_eq!(

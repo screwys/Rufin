@@ -972,7 +972,6 @@ impl SourceOwner {
         let task = self.shared.runtime.spawn(Self::consume_selected_feed(
             shared,
             selected.source_id,
-            selected.source_key,
             source,
             observer.clone(),
         ));
@@ -983,7 +982,6 @@ impl SourceOwner {
     async fn consume_selected_feed(
         shared: Weak<Shared>,
         source_id: SourceId,
-        source_key: SourceKey,
         source: Arc<Source>,
         observer: Arc<SelectedFeed>,
     ) {
@@ -1003,32 +1001,24 @@ impl SourceOwner {
                 return;
             };
             let owner = Self { shared };
-            if owner.shared.is_refreshing(&source_id) {
-                continue;
-            }
+            // Live changes apply while a listing runs; a check or a whole listing waits for
+            // it, and finishing it wakes this loop.
+            let refreshing = owner.shared.is_refreshing(&source_id);
             if !event {
-                owner.check_remote_freshness(&source_id, &source).await;
+                if !refreshing {
+                    owner.check_remote_freshness(&source_id, &source).await;
+                }
                 continue;
             }
-            match observer
-                .apply_pending(&owner.shared.catalog, source_key)
-                .await
-            {
-                Ok(true) => continue,
-                Ok(false) => {}
-                Err(error) => {
-                    if source_error_is_cancelled(&error) {
-                        return;
-                    }
-                    warn!(%error, "bounded source change failed; refreshing after feed boundary loss");
-                }
+            if refreshing && observer.pending_listing() {
+                continue;
             }
-            let refresh = if source.needs_periodic_refresh() {
-                sources::Refresh::Check
-            } else {
-                sources::Refresh::Changed
-            };
-            let _ = owner.refresh_now(&source_id, &source, true, refresh).await;
+            if let Err(error) = observer.apply_pending(&owner.shared.catalog).await {
+                if source_error_is_cancelled(&error) {
+                    return;
+                }
+                warn!(%error, "source change failed; the next boundary catches up");
+            }
         }
     }
 

@@ -81,6 +81,29 @@ impl Catalog {
 }
 
 impl super::Observation<'_> {
+    /// Removes the source's listed records of a kind that a whole listing of their ids does
+    /// not hold. A catch-up lists the ids only when a count shows deletions.
+    pub async fn remove_unlisted(
+        &mut self,
+        kind: &str,
+        listed: &std::collections::HashSet<String>,
+    ) -> LibraryResult<()> {
+        let (table, _) = super::table(kind);
+        let mut connection = self.catalog.acquire_reader().await?;
+        let held: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT object_id FROM {table} WHERE source_key=?1 AND indexed=1 AND object_id IS NOT NULL"
+        )))
+        .bind(self.source)
+        .fetch_all(&mut *connection)
+        .await?;
+        drop(connection);
+        let gone = held
+            .into_iter()
+            .filter(|object| !listed.contains(object))
+            .collect::<Vec<_>>();
+        self.remove_source_items(kind, &gone).await
+    }
+
     pub async fn write_source_playlist_page(
         &mut self,
         id: &str,
@@ -158,8 +181,10 @@ impl super::Observation<'_> {
             // An entry a page repeats, as when pages shift while they are read, counts once.
             let mut seen = std::collections::HashSet::new();
             let mut entries = std::mem::take(&mut self.playlist_entries);
-            entries.retain(|(object, _)| seen.insert(object.clone()));
-            crate::playlists::write_entries(&mut write, playlist, &entries, false).await?;
+            entries.retain(|(object, _)| object.is_empty() || seen.insert(object.clone()));
+            // A source that names no entries (Subsonic) sends empty ids: entries keep theirs.
+            let keep_ids = entries.iter().any(|(object, _)| object.is_empty());
+            crate::playlists::write_entries(&mut write, playlist, &entries, keep_ids).await?;
         }
         self.commit(write).await?;
         Ok(())
