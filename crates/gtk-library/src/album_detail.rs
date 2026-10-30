@@ -209,25 +209,20 @@ impl AlbumCollectionModels {
             _ => false,
         }
     }
-    pub fn update_favorite(&self, uri: &str, favorite: bool) -> bool {
+    pub fn update_favorite(&self, uri: &str, favorite: bool) {
         match self {
-            Self::Rows(rows) => {
-                let Some(position) = rows.ready_position(|row| row.media_uri == uri) else {
-                    return false;
-                };
-                rows.update_ready(position as usize, |row| row.state.favorite = favorite)
-            }
-            Self::Detail(detail) => {
-                detail.inner.rows.update_matching(
-                    |row| matches!(row, Row::AlbumHeading(album) if album.media_uri == uri),
-                    |row| {
-                        if let Row::AlbumHeading(album) = row {
-                            album.state.favorite = favorite;
-                        }
-                    },
-                );
-                true
-            }
+            Self::Rows(rows) => rows.update_matching(
+                |row| row.media_uri == uri,
+                |row| row.state.favorite = favorite,
+            ),
+            Self::Detail(detail) => detail.inner.rows.update_matching(
+                |row| matches!(row, Row::AlbumHeading(album) if album.media_uri == uri),
+                |row| {
+                    if let Row::AlbumHeading(album) = row {
+                        album.state.favorite = favorite;
+                    }
+                },
+            ),
         }
     }
 }
