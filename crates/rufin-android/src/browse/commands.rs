@@ -33,16 +33,15 @@ impl AndroidLibrary {
         &self,
         path: Vec<rufin_core::route::FolderPathItem>,
     ) -> Result<library::DownloadStatus, AndroidError> {
-        let query = self.target_query(Route::Folders { path })?;
+        let selection = self
+            .target_query(Route::Folders { path })?
+            .selection()
+            .await?;
+        let MemberSelection::Members { mut read, .. } = Arc::unwrap_or_clone(selection) else {
+            unreachable!("A folder lists its tracks")
+        };
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
-            let mut read = query
-                .view(&cancel)
-                .await
-                .map_err(error)?
-                .members()
-                .expect("Folder query has members")
-                .clone();
             let count = |read: library::MemberRead| {
                 let catalog = &catalog;
                 let cancel = &cancel;

@@ -148,13 +148,109 @@ impl SourceOwner {
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
         let settings = self.shared.settings.load().ui;
+        let (header, plan) = self
+            .plan(&route, selected.as_ref(), &options, &settings, cancel)
+            .await?;
+        let mut opened = read(
+            View {
+                owner: self.clone(),
+                route,
+                selected,
+                options: options.clone(),
+                settings,
+                art,
+                body: Body::Missing,
+            },
+            plan,
+            header,
+            seed,
+            cancel,
+        )
+        .await?;
+        // A gone or empty collection reads as missing.
+        let found = match &opened.header {
+            Some(Header::Tag(tag)) => tag.summary.track_count > 0,
+            Some(_) => true,
+            None => header.is_none(),
+        };
+        if !found {
+            opened.view.body = Body::Missing;
+            opened.rows.clear();
+            opened.first = 0;
+        }
+        // Smart Playlists keep the members they opened with when the page reads again.
+        let smart = match &opened.view.body {
+            Body::Rows {
+                read:
+                    Read::List(ListRead {
+                        kind: ListKind::SmartPlaylists { now },
+                        ..
+                    })
+                    | Read::Members(MemberRead {
+                        collection: Collection::Smart { now, .. },
+                        ..
+                    }),
+                ..
+            } => Some(*now),
+            _ => None,
+        };
+        options.smart_opened = smart.or(options.smart_opened);
+        opened.view.options = options;
+        Ok(opened)
+    }
+
+    /// Everything `route` lists, for playing, queueing or downloading it whole, without
+    /// reading its rows or header. None when the route lists nothing or its collection is
+    /// gone or empty.
+    pub async fn selection(
+        &self,
+        route: &Route,
+        selected: Option<&SelectedLibrary>,
+        options: &OpenOptions,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<MemberSelection>> {
+        let settings = self.shared.settings.load().ui;
+        let (header, plan) = self
+            .plan(route, selected, options, &settings, cancel)
+            .await?;
+        Ok(Some(match plan {
+            Plan::Rows(Read::Members(read)) | Plan::Folders { tracks: read, .. } => {
+                let read = whole(route, read);
+                // A tag page with no tracks reads as missing.
+                if matches!(header, Some(HeaderKey::Genre(_) | HeaderKey::Mood(_)))
+                    && self
+                        .shared
+                        .catalog
+                        .order(&Read::Members(read.clone()), cancel)
+                        .await?
+                        .is_empty()
+                {
+                    return Ok(None);
+                }
+                read.selection()
+            }
+            Plan::Rows(Read::List(read) | Read::AlbumTracks(read))
+            | Plan::Releases { read, .. } => read.selection(),
+            _ => return Ok(None),
+        }))
+    }
+
+    /// What `route` reads and the header it shows, from the resident Catalog: no rows.
+    async fn plan(
+        &self,
+        route: &Route,
+        selected: Option<&SelectedLibrary>,
+        options: &OpenOptions,
+        settings: &Settings,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<(Option<HeaderKey>, Plan)> {
         let catalog = &self.shared.catalog;
         tokio::select! {
             () = catalog.loaded() => {}
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
-        let (sort, descending, activity) = read_order(&route, &options, &settings);
-        let source = selected.as_ref().map(|selected| selected.source_key);
+        let (sort, descending, activity) = read_order(route, options, settings);
+        let source = selected.map(|selected| selected.source_key);
         let require_source =
             || source.ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()));
         let now = options.smart_opened.unwrap_or_else(|| {
@@ -162,29 +258,26 @@ impl SourceOwner {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64)
         });
-        let member =
-            |collection| member_read(&route, selected.as_ref(), &options, &settings, collection);
+        let member = |collection| member_read(route, selected, options, settings, collection);
         let list = |kind| {
             let mut read = ListRead::new(kind, source, sort);
-            read.folder = selected
-                .as_ref()
-                .and_then(|selected| selected.music_folder_key);
+            read.folder = selected.and_then(|selected| selected.music_folder_key);
             read.filter.clone_from(&options.filter);
             read.descending = descending;
-            read.favorites_only = favorites_only(&route, &options);
+            read.favorites_only = favorites_only(route, options);
             read.activity = activity;
             read
         };
         let playlists = |kind| {
             let mut read = list(kind);
-            read.playlist_scope = match &route {
+            read.playlist_scope = match route {
                 Route::PlaylistFolder { key, .. } => library::PlaylistScope::Folder { key: *key },
                 _ => library::PlaylistScope::Root,
             };
             Plan::Rows(Read::List(read))
         };
         // Favorites lists the category it shows.
-        let shown = match (&route, options.category) {
+        let shown = match (route, options.category) {
             (Route::Favorites, CollectionCategory::Tracks) => Route::Tracks,
             (Route::Favorites, CollectionCategory::Albums) => Route::Albums,
             (Route::Favorites, CollectionCategory::Artists) => Route::Artists,
@@ -331,7 +424,6 @@ impl SourceOwner {
             }
             Route::Folders { path } => {
                 let selected = selected
-                    .as_ref()
                     .ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()))?;
                 let projection = crate::source::folders::resolve_folder(
                     self,
@@ -341,7 +433,7 @@ impl SourceOwner {
                     cancel,
                 )
                 .await?;
-                let tracks = folder_tracks(&route, selected, &projection, &options, &settings);
+                let tracks = folder_tracks(route, selected, &projection, options, settings);
                 (None, Plan::Folders { projection, tracks })
             }
             Route::Home => {
@@ -349,9 +441,7 @@ impl SourceOwner {
                 let home = catalog
                     .home_page(
                         require_source()?,
-                        selected
-                            .as_ref()
-                            .and_then(|selected| selected.music_folder_key),
+                        selected.and_then(|selected| selected.music_folder_key),
                         showcase,
                         explore,
                         &settings.application.home_blocks,
@@ -363,52 +453,7 @@ impl SourceOwner {
             // Search reads its results itself.
             Route::Search => (None, Plan::Missing),
         };
-        let mut opened = read(
-            View {
-                owner: self.clone(),
-                route,
-                selected,
-                options: options.clone(),
-                settings,
-                art,
-                body: Body::Missing,
-            },
-            plan,
-            header,
-            seed,
-            cancel,
-        )
-        .await?;
-        // A gone or empty collection reads as missing.
-        let found = match &opened.header {
-            Some(Header::Tag(tag)) => tag.summary.track_count > 0,
-            Some(_) => true,
-            None => header.is_none(),
-        };
-        if !found {
-            opened.view.body = Body::Missing;
-            opened.rows.clear();
-            opened.first = 0;
-        }
-        // Smart Playlists keep the members they opened with when the page reads again.
-        let smart = match &opened.view.body {
-            Body::Rows {
-                read:
-                    Read::List(ListRead {
-                        kind: ListKind::SmartPlaylists { now },
-                        ..
-                    })
-                    | Read::Members(MemberRead {
-                        collection: Collection::Smart { now, .. },
-                        ..
-                    }),
-                ..
-            } => Some(*now),
-            _ => None,
-        };
-        options.smart_opened = smart.or(options.smart_opened);
-        opened.view.options = options;
-        Ok(opened)
+        Ok((header, plan))
     }
 }
 
@@ -871,20 +916,10 @@ impl View {
         }
     }
 
-    /// Everything the page lists, for playing or queueing it whole. Pages other than folders
-    /// play in their collection's own order, and in every music folder unless they are a Smart
-    /// Playlist.
+    /// Everything the page lists, for playing or queueing it whole.
     pub fn selection(&self) -> Option<MemberSelection> {
         if let Some(read) = self.members() {
-            let mut read = read.clone();
-            if !matches!(self.route, Route::Folders { .. }) {
-                if !matches!(read.collection, Collection::Smart { .. }) {
-                    read.folder = None;
-                }
-                read.sort = None;
-                read.descending = false;
-            }
-            return Some(read.selection());
+            return Some(whole(&self.route, read.clone()).selection());
         }
         match &self.body {
             Body::Rows {
@@ -1327,6 +1362,19 @@ fn favorites_only(route: &Route, options: &OpenOptions) -> bool {
             route,
             Route::Favorites | Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
         )
+}
+
+/// `read` as the whole page plays: in its collection's own order and, unless it is a Smart
+/// Playlist, in every music folder. Folders play as they list.
+fn whole(route: &Route, mut read: MemberRead) -> MemberRead {
+    if !matches!(route, Route::Folders { .. }) {
+        if !matches!(read.collection, Collection::Smart { .. }) {
+            read.folder = None;
+        }
+        read.sort = None;
+        read.descending = false;
+    }
+    read
 }
 
 /// How `route` reads the members of `collection`.
