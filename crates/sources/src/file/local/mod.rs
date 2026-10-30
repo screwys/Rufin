@@ -7,7 +7,6 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::file::check_cancelled;
 use crate::file::walk::{self, Entry, Root, WalkScope};
 use crate::source::SourceReadProgress;
 use crate::{
@@ -200,7 +199,8 @@ impl LocalSource {
         Ok(roots)
     }
 
-    /// Walks the folders, then each document folder.
+    /// Walks the folders, then each document folder. One that could not be listed fails the
+    /// walk once the others are walked.
     pub(crate) async fn walk(
         &self,
         observation: &mut library::Observation<'_>,
@@ -209,18 +209,9 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let configured = self.configured_file_roots()?;
-        let (paths, rename) = match &scope {
-            WalkScope::Paths { paths, rename } => (Some(*paths), *rename),
+        let (paths, rename) = match scope {
+            WalkScope::Paths { paths, rename } => (Some(paths), rename),
             WalkScope::All { .. } => (None, None),
-        };
-        let documents = |source: &crate::file::remote::FileSource| {
-            paths.map(|paths| {
-                paths
-                    .iter()
-                    .filter(|path| source.relative(path).is_ok())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
         };
         let native = paths.map(|paths| {
             paths
@@ -229,7 +220,7 @@ impl LocalSource {
                 .cloned()
                 .collect::<Vec<_>>()
         });
-        let mut walked = walk::walk(
+        let mut failure = walk::walk(
             &LocalFiles::importing(self, &[]),
             observation,
             &configured,
@@ -238,18 +229,29 @@ impl LocalSource {
                     paths,
                     rename: rename.filter(|(old, _)| self.document_source(old).is_none()),
                 },
-                None => scope_of(&scope),
+                None => scope,
             },
+            &self.artwork,
             progress,
             cancelled,
         )
-        .await?;
+        .await
+        .err();
         for source in &self.documents {
-            let paths = documents(source);
+            if matches!(failure, Some(SourceError::Cancelled)) {
+                break;
+            }
+            let paths = paths.map(|paths| {
+                paths
+                    .iter()
+                    .filter(|path| source.relative(path).is_ok())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            });
             if paths.as_ref().is_some_and(Vec::is_empty) {
                 continue;
             }
-            let documents = walk::walk(
+            let walked = walk::walk(
                 source,
                 observation,
                 &configured,
@@ -258,23 +260,16 @@ impl LocalSource {
                         paths,
                         rename: rename.filter(|(old, _)| source.relative(old).is_ok()),
                     },
-                    None => scope_of(&scope),
+                    None => scope,
                 },
+                &self.artwork,
                 progress,
                 cancelled,
             )
-            .await?;
-            walked.directories.extend(documents.directories);
+            .await;
+            failure = failure.or(walked.err());
         }
-        check_cancelled(cancelled)?;
-        walk::artwork(
-            crate::file::artwork::ArtworkFiles::Local,
-            observation,
-            &walked,
-            &self.artwork,
-            cancelled,
-        )
-        .await
+        failure.map_or(Ok(()), Err)
     }
 
     /// A playlist's local entries: each file outside the folders is an import root, and every
@@ -315,7 +310,7 @@ impl LocalSource {
                 .any(|root| std::path::Path::new(path).starts_with(root))
         });
         if !paths.is_empty() {
-            let walked = walk::walk(
+            walk::walk(
                 &LocalFiles::importing(self, &paths),
                 observation,
                 &configured,
@@ -323,15 +318,8 @@ impl LocalSource {
                     paths: &paths,
                     rename: None,
                 },
-                &|_| {},
-                cancelled,
-            )
-            .await?;
-            walk::artwork(
-                crate::file::artwork::ArtworkFiles::Local,
-                observation,
-                &walked,
                 &self.artwork,
+                &|_| {},
                 cancelled,
             )
             .await?;
@@ -536,16 +524,6 @@ fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
     Ok(normalized)
 }
 
-fn scope_of<'a>(scope: &WalkScope<'a>) -> WalkScope<'a> {
-    match scope {
-        WalkScope::All { resync } => WalkScope::All { resync: *resync },
-        WalkScope::Paths { paths, rename } => WalkScope::Paths {
-            paths,
-            rename: *rename,
-        },
-    }
-}
-
 /// The facts of a listed or opened file.
 pub(crate) fn entry(name: String, metadata: &fs::Metadata) -> Entry {
     #[cfg(unix)]
@@ -660,6 +638,10 @@ impl walk::FileSource for LocalFiles<'_> {
 
     fn excluded(&self, root: &str, relative: &str) -> bool {
         !relative.is_empty() && self.local.excludes(&local_path(root, relative))
+    }
+
+    fn artwork(&self) -> crate::file::artwork::ArtworkFiles<'_> {
+        crate::file::artwork::ArtworkFiles::Local
     }
 
     fn row(

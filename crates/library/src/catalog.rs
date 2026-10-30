@@ -106,6 +106,8 @@ pub struct CachedSource {
 
 #[derive(Clone, Debug, FromRow)]
 pub struct LocalArtworkCandidate {
+    /// The album or artist the track was read for.
+    pub owner: String,
     pub object_id: String,
     pub path: String,
     pub root: Option<String>,

@@ -32,7 +32,27 @@ impl FileSource {
         input: &FileInputServer,
         relative: &str,
     ) -> SourceResult<LocalFileWrite> {
-        match input.input() {
+        match self.stat_entry(input, relative).await? {
+            (_, Some((path, document))) => self.document_observation(&path, document),
+            (entry, None) => self.observation(
+                relative,
+                entry.directory,
+                entry.size.and_then(|size| u64::try_from(size).ok()),
+                entry.revision,
+                entry.native_id,
+            ),
+        }
+    }
+
+    /// The facts the protocol reports for one path, named by its last segment. A document
+    /// also gives its resolved path and entry.
+    async fn stat_entry(
+        &self,
+        input: &FileInputServer,
+        relative: &str,
+    ) -> SourceResult<(Entry, Option<(String, crate::DocumentEntry)>)> {
+        let name = |path: &str| path.rsplit('/').next().unwrap_or_default().to_owned();
+        let entry = match input.input() {
             FileInput::Peer { .. } => {
                 return Err(SourceError::InvalidRequest(
                     "Peer access provides audio bytes",
@@ -41,35 +61,66 @@ impl FileSource {
             FileInput::Documents(access) => {
                 let access = Arc::clone(access);
                 let path = relative.to_owned();
-                let (path, entry) = tokio::task::spawn_blocking(move || access.resolve_path(&path))
-                    .await
-                    .map_err(|error| SourceError::Other(error.to_string()))??;
-                self.document_observation(&path, entry)
+                let (path, document) =
+                    tokio::task::spawn_blocking(move || access.resolve_path(&path))
+                        .await
+                        .map_err(|error| SourceError::Other(error.to_string()))??;
+                let entry = Entry {
+                    name: name(&crate::file::documents::display_path(&path)),
+                    directory: document.directory,
+                    size: document.size.and_then(|size| i64::try_from(size).ok()),
+                    native_id: Some(document.native_id.clone()),
+                    revision: document.revision.clone(),
+                    ..Entry::default()
+                };
+                return Ok((entry, Some((path, document))));
             }
             FileInput::Smb(client) => {
                 let entry = client.stat(relative).await?;
-                self.observation(
-                    relative,
-                    entry.directory,
-                    Some(entry.size),
-                    Some(entry.revision),
-                    entry.native_id,
-                )
+                Entry {
+                    name: name(relative),
+                    directory: entry.directory,
+                    size: i64::try_from(entry.size).ok(),
+                    native_id: entry.native_id,
+                    revision: Some(entry.revision),
+                    ..Entry::default()
+                }
             }
             FileInput::WebDav(client) => {
                 let url = url::Url::parse(&self.input_path(input.input(), relative)?)
                     .map_err(|_| SourceError::NotFound)?;
                 let entry = client.stat(&url).await?;
-                let revision = entry.revision();
-                self.observation(
-                    relative,
-                    entry.directory,
-                    entry.size,
-                    revision,
-                    entry.native_id,
-                )
+                Entry {
+                    name: name(relative),
+                    directory: entry.directory,
+                    size: entry.size.and_then(|size| i64::try_from(size).ok()),
+                    revision: entry.revision(),
+                    native_id: entry.native_id,
+                    ..Entry::default()
+                }
             }
-        }
+        };
+        Ok((entry, None))
+    }
+
+    /// Walks the source, then reads the folder artwork of what changed.
+    pub(crate) async fn walk(
+        &self,
+        observation: &mut library::Observation<'_>,
+        scope: walk::WalkScope<'_>,
+        progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        walk::walk(
+            self,
+            observation,
+            &[self.location("")?],
+            scope,
+            &self.artwork,
+            progress,
+            cancelled,
+        )
+        .await
     }
 
     pub(crate) async fn read_saved_file(
@@ -275,9 +326,61 @@ impl FileSource {
             state: LocalFileState::Accepted,
         })
     }
+}
+
+impl walk::FileSource for FileSource {
+    fn roots(&self) -> SourceResult<Vec<Root>> {
+        Ok(vec![Root {
+            root: self.location("")?,
+            starts: self
+                .folders()
+                .into_iter()
+                .filter(|folder| !self.excludes(folder))
+                .map(|folder| (folder.clone(), folder))
+                .collect(),
+        }])
+    }
+
+    fn excluded(&self, _root: &str, relative: &str) -> bool {
+        self.excludes(relative) || super::metadata::is_write_temporary(relative)
+    }
+
+    fn artwork(&self) -> crate::file::artwork::ArtworkFiles<'_> {
+        crate::file::artwork::ArtworkFiles::Remote(self)
+    }
+
+    fn row(
+        &self,
+        _root: &str,
+        relative: &str,
+        native: &str,
+        entry: &Entry,
+    ) -> SourceResult<LocalFileWrite> {
+        let mut file = self.observation(
+            native,
+            entry.directory,
+            entry.size.and_then(|size| u64::try_from(size).ok()),
+            entry.revision.clone(),
+            entry.native_id.clone(),
+        )?;
+        relative.clone_into(&mut file.relative_path);
+        Ok(file)
+    }
+
+    fn place(&self, path: &str) -> Option<(String, String, String)> {
+        let native = match self.relative(path) {
+            Ok(native) => native,
+            Err(_) if !path.contains("://") => path.trim_matches('/').to_owned(),
+            Err(_) => return None,
+        };
+        let relative = crate::file::documents::display_path(&native);
+        self.includes(&relative)
+            .then(|| Some((self.location("").ok()?, relative, native)))
+            .flatten()
+    }
 
     /// One directory's entries, as the walk orders and locates them.
-    async fn list_entries(&self, native: &str) -> SourceResult<Vec<Entry>> {
+    async fn list(&self, _root: &str, native: &str) -> SourceResult<Vec<Entry>> {
         let input = self.input().await?;
         let mut entries = Vec::new();
         match input.input() {
@@ -409,9 +512,10 @@ impl FileSource {
     }
 
     /// A CUE sheet and the media files it plays.
-    async fn read_cue_sheet(
+    async fn read_cue(
         &self,
         file: &mut LocalFileWrite,
+        _native: &str,
         worker: Arc<Mutex<media::Worker>>,
         siblings: Option<&BTreeSet<String>>,
     ) -> SourceResult<walk::CueRead> {
@@ -484,77 +588,12 @@ impl FileSource {
         }
         Ok(walk::CueRead::Accepted { inputs, tracks })
     }
-}
-
-impl walk::FileSource for FileSource {
-    fn roots(&self) -> SourceResult<Vec<Root>> {
-        Ok(vec![Root {
-            root: self.location("")?,
-            starts: self
-                .folders()
-                .into_iter()
-                .filter(|folder| !self.excludes(folder))
-                .map(|folder| (folder.clone(), folder))
-                .collect(),
-        }])
-    }
-
-    fn excluded(&self, _root: &str, relative: &str) -> bool {
-        self.excludes(relative) || super::metadata::is_write_temporary(relative)
-    }
-
-    fn row(
-        &self,
-        _root: &str,
-        relative: &str,
-        native: &str,
-        entry: &Entry,
-    ) -> SourceResult<LocalFileWrite> {
-        let mut file = self.observation(
-            native,
-            entry.directory,
-            entry.size.and_then(|size| u64::try_from(size).ok()),
-            entry.revision.clone(),
-            entry.native_id.clone(),
-        )?;
-        relative.clone_into(&mut file.relative_path);
-        Ok(file)
-    }
-
-    fn place(&self, path: &str) -> Option<(String, String, String)> {
-        let native = match self.relative(path) {
-            Ok(native) => native,
-            Err(_) if !path.contains("://") => path.trim_matches('/').to_owned(),
-            Err(_) => return None,
-        };
-        let relative = crate::file::documents::display_path(&native);
-        self.includes(&relative)
-            .then(|| Some((self.location("").ok()?, relative, native)))
-            .flatten()
-    }
-
-    async fn list(&self, _root: &str, native: &str) -> SourceResult<Vec<Entry>> {
-        self.list_entries(native).await
-    }
 
     async fn stat(&self, _root: &str, native: &str) -> SourceResult<Entry> {
         let input = self.input().await?;
-        let file = FileSource::stat(self, &input, native).await?;
-        let name = file
-            .relative_path
-            .rsplit('/')
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        Ok(Entry {
-            native: native.rsplit('/').next().unwrap_or_default().to_owned(),
-            name,
-            directory: file.kind == LocalFileKind::Directory,
-            size: file.size_bytes,
-            native_id: file.native_id,
-            revision: file.revision,
-            ..Entry::default()
-        })
+        let (mut entry, _) = self.stat_entry(&input, native).await?;
+        entry.native = native.rsplit('/').next().unwrap_or_default().to_owned();
+        Ok(entry)
     }
 
     async fn read_media(
@@ -573,16 +612,6 @@ impl walk::FileSource for FileSource {
             self.locate_track(track, file);
         }
         Ok(read)
-    }
-
-    async fn read_cue(
-        &self,
-        file: &mut LocalFileWrite,
-        _native: &str,
-        worker: Arc<Mutex<media::Worker>>,
-        siblings: Option<&BTreeSet<String>>,
-    ) -> SourceResult<walk::CueRead> {
-        self.read_cue_sheet(file, worker, siblings).await
     }
 
     fn unchanged_subtree(&self, stored: &LocalFileWrite, listed: &LocalFileWrite) -> bool {

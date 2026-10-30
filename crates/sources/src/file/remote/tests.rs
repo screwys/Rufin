@@ -463,20 +463,18 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
             let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
             observation.start_observation().await.unwrap();
             let cancelled = std::sync::atomic::AtomicBool::new(false);
-            let configured = [source.location("").unwrap()];
-            let interrupted = walk::walk(
-                source,
-                &mut observation,
-                &configured,
-                walk::WalkScope::All { resync: false },
-                &|progress| {
-                    if progress.stage == crate::SourceReadStage::Tracks {
-                        cancelled.store(true, Ordering::Relaxed);
-                    }
-                },
-                &|| cancelled.load(Ordering::Relaxed),
-            )
-            .await;
+            let interrupted = source
+                .walk(
+                    &mut observation,
+                    walk::WalkScope::All { resync: false },
+                    &|progress| {
+                        if progress.stage == crate::SourceReadStage::Tracks {
+                            cancelled.store(true, Ordering::Relaxed);
+                        }
+                    },
+                    &|| cancelled.load(Ordering::Relaxed),
+                )
+                .await;
             assert!(
                 matches!(interrupted, Err(crate::SourceError::Cancelled)),
                 "interrupted after native listing, before metadata"
@@ -494,17 +492,15 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
         let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         let catalog_source = observation.source;
-        let configured = [source.location("").unwrap()];
-        walk::walk(
-            source,
-            &mut observation,
-            &configured,
-            walk::WalkScope::All { resync: false },
-            &|_| {},
-            &|| false,
-        )
-        .await
-        .unwrap();
+        source
+            .walk(
+                &mut observation,
+                walk::WalkScope::All { resync: false },
+                &|_| {},
+                &|| false,
+            )
+            .await
+            .unwrap();
         let publication = crate::published(&mut emit);
         if let Some((published_source, _)) = publication {
             assert_eq!(published_source, catalog_source);
@@ -698,16 +694,15 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         let mut observation = catalog.observe(&catalog_source_id).await.unwrap();
         observation.start_observation().await.unwrap();
         let catalog_source = observation.source;
-        walk::walk(
-            source,
-            &mut observation,
-            &[source.location("").unwrap()],
-            walk::WalkScope::All { resync: false },
-            &|_| {},
-            &|| false,
-        )
-        .await
-        .unwrap();
+        source
+            .walk(
+                &mut observation,
+                walk::WalkScope::All { resync: false },
+                &|_| {},
+                &|| false,
+            )
+            .await
+            .unwrap();
         let publication = crate::published(&mut emit);
         if let Some((published_source, _)) = publication {
             assert_eq!(published_source, catalog_source);

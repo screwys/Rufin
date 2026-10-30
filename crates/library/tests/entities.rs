@@ -272,11 +272,14 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
             .await
             .unwrap()
             .set_source_artwork(
-                "album",
-                &objects
-                    .into_iter()
-                    .map(|id| (id, Some(covers[index].to_vec())))
-                    .collect::<Vec<_>>(),
+                &[],
+                &[(
+                    "album",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, Some(covers[index].to_vec())))
+                        .collect::<Vec<_>>(),
+                )],
             )
             .await
             .unwrap();
@@ -1444,11 +1447,14 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
             .await
             .unwrap()
             .set_source_artwork(
-                "album",
-                &objects
-                    .into_iter()
-                    .map(|id| (id, Some((&cover).to_vec())))
-                    .collect::<Vec<_>>(),
+                &[],
+                &[(
+                    "album",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, Some((&cover).to_vec())))
+                        .collect::<Vec<_>>(),
+                )],
             )
             .await
             .unwrap();

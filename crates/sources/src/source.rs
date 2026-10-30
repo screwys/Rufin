@@ -1180,23 +1180,14 @@ impl Source {
                     true
                 }
                 Implementation::Files(source) => {
-                    let walked = crate::file::walk::walk(
-                        source,
-                        changes,
-                        &[source.location("")?],
-                        crate::file::walk::WalkScope::All { resync },
-                        &report,
-                        &cancelled_fn,
-                    )
-                    .await?;
-                    crate::file::walk::artwork(
-                        crate::file::artwork::ArtworkFiles::Remote(source),
-                        changes,
-                        &walked,
-                        &source.artwork,
-                        &cancelled_fn,
-                    )
-                    .await?;
+                    source
+                        .walk(
+                            changes,
+                            crate::file::walk::WalkScope::All { resync },
+                            &report,
+                            &cancelled_fn,
+                        )
+                        .await?;
                     true
                 }
                 Implementation::Local(source) => {
@@ -1959,23 +1950,7 @@ impl Source {
                 local.walk(changes, scope, &|_| {}, &cancelled).await?;
             }
             Implementation::Files(files) => {
-                let walked = crate::file::walk::walk(
-                    files,
-                    changes,
-                    &[files.location("")?],
-                    scope,
-                    &|_| {},
-                    &cancelled,
-                )
-                .await?;
-                crate::file::walk::artwork(
-                    crate::file::artwork::ArtworkFiles::Remote(files),
-                    changes,
-                    &walked,
-                    &files.artwork,
-                    &cancelled,
-                )
-                .await?;
+                files.walk(changes, scope, &|_| {}, &cancelled).await?;
             }
             _ => {
                 return Err(SourceError::InvalidRequest(

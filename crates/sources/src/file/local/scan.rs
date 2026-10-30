@@ -136,7 +136,7 @@ pub(crate) async fn import_paths(
         .map(|path| normalize_observed_path(path).to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     let files = super::LocalFiles::importing(local, &paths);
-    let walked = walk::walk(
+    walk::walk(
         &files,
         observation,
         &local.configured_file_roots()?,
@@ -144,15 +144,8 @@ pub(crate) async fn import_paths(
             paths: &paths,
             rename: None,
         },
-        progress,
-        cancelled,
-    )
-    .await?;
-    walk::artwork(
-        crate::file::artwork::ArtworkFiles::Local,
-        observation,
-        &walked,
         &local.artwork,
+        progress,
         cancelled,
     )
     .await?;
@@ -247,52 +240,37 @@ fn read_cue_tracks(
 
 /// A CUE sheet and the media it plays.
 pub(crate) fn read_local_cue(worker: &mut media::Worker, path: &Path) -> walk::CueRead {
-    match read_cue(path) {
-        CueRead::Accepted(sheet) => {
-            let inputs = sheet
-                .files
-                .iter()
-                .map(|file| {
-                    normalize_observed_path(&resolve_cue_file_path(path, &file.path))
-                        .to_string_lossy()
-                        .into_owned()
-                })
-                .collect();
-            match read_cue_tracks(worker, path, sheet) {
-                Some(tracks) => walk::CueRead::Accepted {
-                    inputs,
-                    tracks: tracks
-                        .into_iter()
-                        .map(|track| track.into_observation(media::accepted_at()))
-                        .collect(),
-                },
-                None => walk::CueRead::Unreadable,
-            }
-        }
-        CueRead::Rejected => walk::CueRead::Rejected,
-        CueRead::Unreadable => walk::CueRead::Unreadable,
-    }
-}
-
-enum CueRead {
-    Accepted(CueSheet),
-    Rejected,
-    Unreadable,
-}
-
-fn read_cue(path: &Path) -> CueRead {
     let Ok(metadata) = fs::metadata(path) else {
-        return CueRead::Unreadable;
+        return walk::CueRead::Unreadable;
     };
     if metadata.len() > LOCAL_CUE_MAX_BYTES {
-        return CueRead::Rejected;
+        return walk::CueRead::Rejected;
     }
     let Ok(text) = fs::read_to_string(path) else {
-        return CueRead::Unreadable;
+        return walk::CueRead::Unreadable;
     };
-    parse_cue_sheet(&text)
-        .map(CueRead::Accepted)
-        .unwrap_or(CueRead::Rejected)
+    let Some(sheet) = parse_cue_sheet(&text) else {
+        return walk::CueRead::Rejected;
+    };
+    let inputs = sheet
+        .files
+        .iter()
+        .map(|file| {
+            normalize_observed_path(&resolve_cue_file_path(path, &file.path))
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    match read_cue_tracks(worker, path, sheet) {
+        Some(tracks) => walk::CueRead::Accepted {
+            inputs,
+            tracks: tracks
+                .into_iter()
+                .map(|track| track.into_observation(media::accepted_at()))
+                .collect(),
+        },
+        None => walk::CueRead::Unreadable,
+    }
 }
 
 pub(crate) fn is_cue(path: &Path) -> bool {

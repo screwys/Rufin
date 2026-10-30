@@ -203,11 +203,14 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
             .await
             .unwrap()
             .set_source_artwork(
-                "track",
-                &objects
-                    .into_iter()
-                    .map(|id| (id, Some((&local_binding).to_vec())))
-                    .collect::<Vec<_>>(),
+                &[],
+                &[(
+                    "track",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, Some((&local_binding).to_vec())))
+                        .collect::<Vec<_>>(),
+                )],
             )
             .await
             .unwrap();
@@ -300,7 +303,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
                 .fetch_all(&mut raw)
                 .await
                 .unwrap();
-        fixture.catalog.observe("source").await.unwrap().set_source_artwork("track", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+        fixture.catalog.observe("source").await.unwrap().set_source_artwork(&[], &[("track", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>())]).await.unwrap();
     };
     let mut unavailable = media[1].clone();
     unavailable.media_uri = "https://example.invalid/offline.flac".to_string();

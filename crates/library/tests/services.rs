@@ -253,15 +253,18 @@ async fn source_artwork_pages_distinct_bindings() {
         .await
         .unwrap()
         .set_source_artwork(
-            "track",
-            &(0..260)
-                .map(|n| {
-                    (
-                        format!("artwork-{n}"),
-                        Some(binding(&format!("binding-{n:04}"))),
-                    )
-                })
-                .collect::<Vec<_>>(),
+            &[],
+            &[(
+                "track",
+                &(0..260)
+                    .map(|n| {
+                        (
+                            format!("artwork-{n}"),
+                            Some(binding(&format!("binding-{n:04}"))),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )],
         )
         .await
         .unwrap();

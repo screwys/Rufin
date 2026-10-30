@@ -220,7 +220,7 @@ pub struct FileSource {
     backend: FileBackend,
     directory_version: i64,
     input: Mutex<Option<Arc<FileInputServer>>>,
-    pub(crate) artwork: crate::file::walk::ArtworkState,
+    artwork: crate::file::walk::ArtworkState,
 }
 
 #[expect(

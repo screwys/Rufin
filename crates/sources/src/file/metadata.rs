@@ -2185,6 +2185,63 @@ mod tests {
         );
     }
 
+    /// A sidecar added beside an unchanged CUE sheet reads the sheet again, and the walk
+    /// replaces the sheet's inputs instead of failing on them at every launch.
+    #[tokio::test]
+    async fn a_sidecar_beside_an_unchanged_cue_sheet_keeps_walks_writing() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("Album.wav"), silent_wav()).unwrap();
+        fs::write(
+            root.join("Album.cue"),
+            "FILE \"Album.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 00:00:40\n",
+        )
+        .unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(store.path().join("store.sqlite"))
+            .await
+            .unwrap();
+        let (configuration, source, _) = crate::Source::connect(
+            crate::SourceId::new("cue-sidecar"),
+            crate::SourceSetup::Local {
+                roots: vec![root.clone()],
+            },
+            "",
+        )
+        .await
+        .unwrap()
+        .into_parts();
+        catalog
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        let walk = || {
+            source.acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
+        };
+        walk().await.unwrap();
+        fs::write(root.join("01.lrc"), "[00:00.00]First line").unwrap();
+        walk().await.unwrap();
+        walk().await.unwrap();
+        assert_eq!(
+            crate::stored_files(&catalog, "cue-sidecar")
+                .await
+                .iter()
+                .filter(|file| file.path.ends_with("01.lrc"))
+                .count(),
+            1
+        );
+    }
+
     fn silent_wav() -> Vec<u8> {
         let data_len = 16_000_u32;
         let mut bytes = Vec::with_capacity(44 + data_len as usize);

@@ -2096,13 +2096,25 @@ impl Observation<'_> {
         Ok(())
     }
 
+    /// One Write: the pictures found in files (path, cover index, artist pictures) and the
+    /// artwork of albums, tracks or artists.
     pub async fn set_source_artwork(
         &mut self,
-        kind: &str,
-        rows: &[(String, Option<Vec<u8>>)],
+        images: &[(String, Option<i64>, String)],
+        bindings: &[(&str, &[(String, Option<Vec<u8>>)])],
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        pictures(&mut write, self.source, kind, rows).await?;
+        if !images.is_empty() {
+            let recorded = sqlx::query("UPDATE files SET picture_index=json_extract(item.value,'$[1]'),artist_pictures=json_extract(item.value,'$[2]') FROM json_each(?2) item WHERE files.source_key=?1 AND files.path=json_extract(item.value,'$[0]') AND(files.picture_index,files.artist_pictures) IS NOT(json_extract(item.value,'$[1]'),json_extract(item.value,'$[2]'))")
+                .bind(self.source).bind(serde_json::to_string(images)?).execute(write.connection().await?).await?.rows_affected();
+            // File rows are not resident and no client shows them.
+            if recorded != 0 {
+                write.keep();
+            }
+        }
+        for (kind, rows) in bindings {
+            pictures(&mut write, self.source, kind, rows).await?;
+        }
         self.commit(write).await?;
         Ok(())
     }

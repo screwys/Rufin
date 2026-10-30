@@ -88,12 +88,15 @@ pub(crate) trait FileSource: Sync {
         worker: Arc<Mutex<Worker>>,
         siblings: Option<&BTreeSet<String>>,
     ) -> impl Future<Output = SourceResult<CueRead>> + Send;
+    /// Who reads the folder artwork of the walked files.
+    fn artwork(&self) -> crate::file::artwork::ArtworkFiles<'_>;
     /// Nextcloud: a directory whose recursive ETag is unchanged needs no listing below it.
     fn unchanged_subtree(&self, _stored: &LocalFileWrite, _listed: &LocalFileWrite) -> bool {
         false
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum WalkScope<'a> {
     /// Every root. `resync` also reads rejected files again (manual Resync Library).
     All { resync: bool },
@@ -104,36 +107,18 @@ pub(crate) enum WalkScope<'a> {
     },
 }
 
-pub(crate) struct Walked {
-    /// A manual resync, which reads every album's artwork again when the covers setting changed.
-    resync: bool,
-    /// Directories with a staged or vanished file, for the artwork pass.
-    pub directories: BTreeSet<String>,
-}
-
-impl Walked {
-    /// The directories the artwork pass reads, or every one.
-    fn artwork(&self) -> Option<Option<Vec<String>>> {
-        if self.directories.is_empty() {
-            None
-        } else if self.directories.len() > ARTWORK_DIRECTORIES {
-            Some(None)
-        } else {
-            Some(Some(self.directories.iter().cloned().collect()))
-        }
-    }
-}
-
-/// Walks `files` and writes what changed; `configured` are every root of the source, so rows
-/// of roots another walker of the same source lists stay untouched.
+/// Walks `files` and writes what changed, then reads the folder artwork of the directories
+/// it changed. `configured` are every root of the source, so rows of roots another walker of
+/// the same source lists stay untouched.
 pub(crate) async fn walk<F: FileSource>(
     files: &F,
     observation: &mut library::Observation<'_>,
     configured: &[String],
     scope: WalkScope<'_>,
+    artwork: &ArtworkState,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<Walked> {
+) -> SourceResult<()> {
     let roots = files.roots()?;
     let workers = (0..std::thread::available_parallelism()
         .map(usize::from)
@@ -167,19 +152,31 @@ pub(crate) async fn walk<F: FileSource>(
         progress,
         cancelled,
     };
-    match scope {
-        WalkScope::All { .. } => walker.all(roots).await?,
-        WalkScope::Paths { paths, rename } => walker.paths(paths, rename).await?,
+    let walked = match scope {
+        WalkScope::All { .. } => walker.all(roots).await,
+        WalkScope::Paths { paths, rename } => walker.paths(paths, rename).await,
+    };
+    let walked = match walked {
+        Ok(()) => walker.finish().await,
+        failed => failed,
+    };
+    let (directories, resync, failure) = (walker.directories, walker.resync, walker.failure);
+    // What was written gets its folder artwork whether or not the walk listed everything; a
+    // cancelled walk leaves its directories to the next pass.
+    if matches!(walked, Err(SourceError::Cancelled)) {
+        artwork.defer(directories);
+        return walked;
     }
-    walker.finish().await?;
-    // What the walk listed is written. A root or directory it could not list keeps its rows,
-    // and the walk fails, so it completes nothing and expires nothing.
-    match walker.failure {
+    let pass = artwork
+        .pass(files.artwork(), observation, directories, resync, cancelled)
+        .await;
+    walked?;
+    pass?;
+    // A root or directory the walk could not list keeps its rows, and the walk fails, so it
+    // completes nothing and expires nothing.
+    match failure {
         Some(failure) => Err(SourceError::Other(failure)),
-        None => Ok(Walked {
-            resync: walker.resync,
-            directories: walker.directories,
-        }),
+        None => Ok(()),
     }
 }
 
@@ -345,6 +342,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
             }
             let row = self.stored.pop_front().expect("peeked row");
             lyrics |= self.vanish(row);
+            self.write_removed().await?;
         }
         Ok(lyrics)
     }
@@ -357,8 +355,30 @@ impl<F: FileSource> Walker<'_, '_, F> {
             }
             let row = self.stored.pop_front().expect("peeked row");
             lyrics |= self.vanish(row);
+            self.write_removed().await?;
         }
         Ok(lyrics)
+    }
+
+    /// A deleted subtree's rows go in batches, apart from the files staged around them: those
+    /// wait for their directory's CUE sheets. Renames wait for the file they name.
+    async fn write_removed(&mut self) -> SourceResult<()> {
+        if self.batch.removed.len() < BATCH {
+            return Ok(());
+        }
+        self.report(true);
+        self.check()?;
+        let renames = std::mem::take(&mut self.batch.renames);
+        let batch = std::mem::replace(
+            &mut self.batch,
+            FileBatch {
+                renames,
+                ..FileBatch::default()
+            },
+        );
+        let released = self.observation.write_files(batch).await?;
+        self.forced.extend(released);
+        Ok(())
     }
 
     /// A subtree the walk could not list keeps its rows.
@@ -672,6 +692,10 @@ impl<F: FileSource> Walker<'_, '_, F> {
                     .collect::<BTreeSet<_>>(),
             );
             let mut lyrics = false;
+            // Unchanged files are kept for a read only when a listed sidecar can change.
+            let sidecars = siblings
+                .iter()
+                .any(|name| crate::file::lyrics::is_sidecar(name));
             let mut kept = Vec::new();
             for entry in entries {
                 let child = join(relative, &entry.name);
@@ -693,7 +717,9 @@ impl<F: FileSource> Walker<'_, '_, F> {
                         {
                             self.accepted += 1;
                         }
-                        kept.push((stored, row, child_native));
+                        if sidecars {
+                            kept.push((stored, row, child_native));
+                        }
                     }
                     continue;
                 }
@@ -710,17 +736,22 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 self.stage(stored, row, child_native, Some(Arc::clone(&siblings)), true);
             }
             lyrics |= self.vanish_subtree(root, &key).await?;
-            // A changed lyrics sidecar reads its directory's media again.
-            if lyrics {
+            // A changed lyrics sidecar reads its directory's media again. Without a listed
+            // sidecar the last one went, and the directory is listed again at the end.
+            if lyrics && sidecars {
                 for (stored, row, native) in kept {
                     self.stage(stored, row, native, Some(Arc::clone(&siblings)), false);
                 }
+            } else if lyrics {
+                self.lyrics
+                    .insert((root.to_owned(), relative.to_owned(), native.to_owned()));
             }
             self.flush(false).await
         })
     }
 
-    /// Parses and writes what is staged, at a directory's end once a batch is full.
+    /// Parses and writes what is staged, at a directory's end once a batch is full: the CUE
+    /// sheets first, then the media files in batches, one Write each.
     async fn flush(&mut self, now: bool) -> SourceResult<()> {
         if !now && self.staged.len() + self.batch.files.len() + self.batch.removed.len() < BATCH {
             return Ok(());
@@ -732,8 +763,6 @@ impl<F: FileSource> Walker<'_, '_, F> {
         // cancellation from it stops the walk before this write.
         self.report(true);
         self.check()?;
-        let catalog = self.observation.catalog;
-        let source = self.observation.source;
         let staged = std::mem::take(&mut self.staged);
         let (cues, media): (Vec<_>, Vec<_>) = staged
             .into_iter()
@@ -774,6 +803,24 @@ impl<F: FileSource> Walker<'_, '_, F> {
         for staged in inputs {
             self.push_read(staged);
         }
+        let mut media = media.into_iter().peekable();
+        loop {
+            let chunk = media.by_ref().take(BATCH).collect();
+            self.write_chunk(chunk, std::mem::take(&mut sheets)).await?;
+            if media.peek().is_none() {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Parses a batch of media files and writes them with the rest of the batch.
+    async fn write_chunk(
+        &mut self,
+        media: Vec<Staged>,
+        sheets: Vec<(String, Vec<String>, Vec<library::TrackObservation>)>,
+    ) -> SourceResult<()> {
+        let catalog = self.observation.catalog;
+        let source = self.observation.source;
         let files = self.files;
         let workers = self.workers.clone();
         let mut reads = stream::iter(media.into_iter().enumerate().map(|(index, mut staged)| {
@@ -988,38 +1035,47 @@ impl<F: FileSource> Walker<'_, '_, F> {
     }
 }
 
-/// The distinct-covers setting the source's last full artwork pass ran with: a resync reads
-/// every album's artwork again only when it changed.
+/// The folder artwork a source's walks owe: the distinct-covers setting its last full pass ran
+/// with, since a resync reads every album's artwork again only when it changed, and the
+/// directories of a cancelled walk.
 #[derive(Default)]
-pub(crate) struct ArtworkState(Mutex<Option<bool>>);
+pub(crate) struct ArtworkState(Mutex<(Option<bool>, BTreeSet<String>)>);
 
-/// The folder-artwork pass for the directories a walk changed.
-pub(crate) async fn artwork(
-    files: crate::file::artwork::ArtworkFiles<'_>,
-    observation: &mut library::Observation<'_>,
-    walked: &Walked,
-    state: &ArtworkState,
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
-    let distinct = observation.catalog.distinct_track_covers();
-    let directories = {
-        let mut last = state.0.lock().unwrap_or_else(|error| error.into_inner());
-        let directories = if walked.resync && *last != Some(distinct) {
-            Some(None)
-        } else {
-            walked.artwork()
+impl ArtworkState {
+    fn defer(&self, mut directories: BTreeSet<String>) {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        state.1.append(&mut directories);
+    }
+
+    /// The folder-artwork pass for the directories a walk changed and those still owed.
+    async fn pass(
+        &self,
+        files: crate::file::artwork::ArtworkFiles<'_>,
+        observation: &mut library::Observation<'_>,
+        mut directories: BTreeSet<String>,
+        resync: bool,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let distinct = observation.catalog.distinct_track_covers();
+        let every = {
+            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+            directories.append(&mut state.1);
+            resync && state.0 != Some(distinct) || directories.len() > ARTWORK_DIRECTORIES
         };
-        if matches!(directories, Some(None)) {
-            *last = Some(distinct);
+        if !every && directories.is_empty() {
+            return Ok(());
         }
-        directories
-    };
-    match directories {
-        None => Ok(()),
-        Some(directories) => {
-            files
-                .acquire(observation, directories.as_deref(), cancelled)
-                .await
+        let scope = (!every).then(|| directories.iter().cloned().collect::<Vec<_>>());
+        let read = files
+            .acquire(observation, scope.as_deref(), cancelled)
+            .await;
+        match &read {
+            Ok(()) if every => {
+                self.0.lock().unwrap_or_else(|error| error.into_inner()).0 = Some(distinct);
+            }
+            Err(SourceError::Cancelled) => self.defer(directories),
+            _ => {}
         }
+        read
     }
 }

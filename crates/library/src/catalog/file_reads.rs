@@ -33,11 +33,12 @@ impl Catalog {
         after: &str,
         directories: Option<&[String]>,
     ) -> LibraryResult<Vec<String>> {
+        let held = match directories {
+            None => "EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.album_key=album.album_key AND track.indexed AND details.source_path IS NOT NULL)".to_owned(),
+            Some(_) => format!("album.album_key IN(SELECT track.album_key FROM scope CROSS JOIN track_details details ON details.source_path>=scope.prefix AND details.source_path<scope.prefix||char(1114111) CROSS JOIN tracks track USING(track_key) WHERE track.indexed AND {TWO_LEVELS})"),
+        };
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?3)),members(album_key) AS(
-            SELECT track.album_key FROM scope CROSS JOIN track_details details ON details.source_path>=scope.prefix AND details.source_path<scope.prefix||char(1114111) CROSS JOIN tracks track USING(track_key) WHERE track.indexed AND {TWO_LEVELS}
-            UNION SELECT track.album_key FROM tracks track JOIN track_details details USING(track_key) WHERE ?3 IS NULL AND track.indexed AND details.source_path IS NOT NULL)
-            SELECT album.object_id FROM albums album JOIN sources source USING(source_key) WHERE source.object_id=?1 AND album.object_id>?2 AND album.album_key IN(SELECT album_key FROM members) ORDER BY album.object_id LIMIT 128")))
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?3)) SELECT album.object_id FROM albums album JOIN sources source USING(source_key) WHERE source.object_id=?1 AND album.object_id>?2 AND {held} ORDER BY album.object_id LIMIT 128")))
             .bind(source_id).bind(after).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
     }
 
@@ -49,11 +50,16 @@ impl Catalog {
         after: &str,
         directories: Option<&[String]>,
     ) -> LibraryResult<Vec<(String, String)>> {
+        let held = match directories {
+            None => {
+                "EXISTS(SELECT 1 FROM track_links credit JOIN tracks track USING(track_key) JOIN track_details details USING(track_key) WHERE credit.role IN(0,1) AND credit.target=artist.artist_key AND track.indexed AND details.source_path IS NOT NULL)"
+            }
+            Some(_) => {
+                "artist.artist_key IN(SELECT credit.target FROM scope CROSS JOIN track_details details ON details.source_path>=scope.prefix AND details.source_path<scope.prefix||char(1114111) CROSS JOIN tracks track USING(track_key) CROSS JOIN track_links credit ON credit.track_key=track.track_key AND credit.role IN(0,1) WHERE track.indexed)"
+            }
+        };
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("WITH scope(prefix) AS(SELECT value FROM json_each(?3)),members(track_key) AS(
-            SELECT details.track_key FROM scope CROSS JOIN track_details details ON details.source_path>=scope.prefix AND details.source_path<scope.prefix||char(1114111)
-            UNION SELECT track_key FROM track_details WHERE ?3 IS NULL AND source_path IS NOT NULL)
-            SELECT artist.object_id,artist.name FROM artists artist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND artist.object_id>?2 AND EXISTS(SELECT 1 FROM track_links credit JOIN tracks track USING(track_key) WHERE credit.role IN(0,1) AND credit.target=artist.artist_key AND track.indexed AND track.track_key IN(SELECT track_key FROM members)) ORDER BY artist.object_id LIMIT 128")
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?3)) SELECT artist.object_id,artist.name FROM artists artist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND artist.object_id>?2 AND {held} ORDER BY artist.object_id LIMIT 128")))
             .bind(source_id).bind(after).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
     }
 
@@ -68,26 +74,34 @@ impl Catalog {
             .bind(source_id).bind(prefix).bind(after).fetch_all(&mut *connection).await?)
     }
 
-    pub async fn source_artwork_track_page(
+    /// The indexed file tracks of `albums`, by album, in album order.
+    pub async fn source_artwork_album_tracks(
         &self,
         source_id: &str,
-        album: &str,
-        after: Option<&LocalArtworkCandidate>,
+        albums: &[String],
     ) -> LibraryResult<Vec<LocalArtworkCandidate>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT track.object_id,file.path,track.disc_number,track.track_number,track.sort_text,0 primary_artist,file.root,file.picture_index,file.artist_pictures,coalesce(file.revision,CAST(file.size_bytes AS TEXT)||'-'||CAST(file.mtime_ns AS TEXT)) revision FROM tracks track JOIN albums album USING(album_key) JOIN sources source ON source.source_key=album.source_key JOIN track_details details ON details.track_key=track.track_key JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE source.object_id=?1 AND album.object_id=?2 AND track.indexed AND(?3 IS NULL OR(track.disc_number,track.track_number,track.sort_text,track.object_id)>(?4,?5,?6,?3)) ORDER BY track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT 128")
-            .bind(source_id).bind(album).bind(after.map(|row|&row.object_id)).bind(after.map(|row|row.disc_number)).bind(after.map(|row|row.track_number)).bind(after.map(|row|&row.sort_text)).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_as("SELECT album.object_id owner,track.object_id,file.path,track.disc_number,track.track_number,track.sort_text,0 primary_artist,file.root,file.picture_index,file.artist_pictures,coalesce(file.revision,CAST(file.size_bytes AS TEXT)||'-'||CAST(file.mtime_ns AS TEXT)) revision
+            FROM json_each(?2) requested CROSS JOIN albums album ON album.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND album.object_id=requested.value
+            CROSS JOIN tracks track ON track.album_key=album.album_key CROSS JOIN track_details details ON details.track_key=track.track_key CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
+            WHERE track.indexed ORDER BY album.object_id,track.disc_number,track.track_number,track.sort_text,track.object_id")
+            .bind(source_id).bind(serde_json::to_string(albums)?).fetch_all(&mut *connection).await?)
     }
 
-    pub async fn source_artwork_artist_track_page(
+    /// The indexed file tracks crediting `artists`, by artist, in object id order; a track
+    /// whose first credited artist it is is primary.
+    pub async fn source_artwork_artist_tracks(
         &self,
         source_id: &str,
-        artist: &str,
-        after: &str,
+        artists: &[&str],
     ) -> LibraryResult<Vec<LocalArtworkCandidate>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT track.object_id,file.path,track.disc_number,track.track_number,track.sort_text,coalesce((SELECT artist.object_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role=1 ORDER BY credit.position LIMIT 1)=?2,0) primary_artist,file.root,file.picture_index,file.artist_pictures,coalesce(file.revision,CAST(file.size_bytes AS TEXT)||'-'||CAST(file.mtime_ns AS TEXT)) revision FROM tracks track JOIN sources source USING(source_key) JOIN track_details details ON details.track_key=track.track_key JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE source.object_id=?1 AND track.indexed AND track.object_id>?3 AND track.track_key IN(SELECT credit.track_key FROM artists artist JOIN track_links credit ON credit.target=artist.artist_key AND credit.role IN(0,1) WHERE artist.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND artist.object_id=?2) ORDER BY track.object_id LIMIT 128")
-            .bind(source_id).bind(artist).bind(after).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_as("SELECT artist.object_id owner,track.object_id,file.path,track.disc_number,track.track_number,track.sort_text,coalesce((SELECT first.object_id FROM track_links credit JOIN artists first ON first.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role=1 ORDER BY credit.position LIMIT 1)=artist.object_id,0) primary_artist,file.root,file.picture_index,file.artist_pictures,coalesce(file.revision,CAST(file.size_bytes AS TEXT)||'-'||CAST(file.mtime_ns AS TEXT)) revision
+            FROM json_each(?2) requested CROSS JOIN artists artist ON artist.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND artist.object_id=requested.value
+            CROSS JOIN tracks track ON track.source_key=artist.source_key AND track.indexed AND track.track_key IN(SELECT credit.track_key FROM track_links credit WHERE credit.role IN(0,1) AND credit.target=artist.artist_key)
+            CROSS JOIN track_details details ON details.track_key=track.track_key CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
+            ORDER BY artist.object_id,track.object_id")
+            .bind(source_id).bind(serde_json::to_string(artists)?).fetch_all(&mut *connection).await?)
     }
 
     pub async fn source_artwork_directory_is_single_album(
@@ -119,18 +133,6 @@ impl super::Observation<'_> {
         let cleared = sqlx::query("UPDATE files SET artist_pictures=NULL WHERE source_key=?1 AND kind='media' AND picture_index IS NULL AND artist_pictures IS NOT NULL AND path NOT LIKE 'rufin-document://%' AND path NOT LIKE 'content://%'")
             .bind(self.source).execute(write.connection().await?).await?.rows_affected();
         keep_file_rows(write, cleared).await
-    }
-
-    pub async fn record_source_file_images(
-        &mut self,
-        rows: &[(String, Option<i64>, String)],
-    ) -> LibraryResult<()> {
-        if rows.is_empty() {
-            return Ok(());
-        }
-        let mut write = self.write().await?;
-        let recorded = sqlx::query("UPDATE files SET picture_index=json_extract(item.value,'$[1]'),artist_pictures=json_extract(item.value,'$[2]') FROM json_each(?2) item WHERE files.source_key=?1 AND files.path=json_extract(item.value,'$[0]') AND(files.picture_index,files.artist_pictures) IS NOT(json_extract(item.value,'$[1]'),json_extract(item.value,'$[2]'))").bind(self.source).bind(serde_json::to_string(rows)?).execute(write.connection().await?).await?.rows_affected();
-        keep_file_rows(write, recorded).await
     }
 }
 

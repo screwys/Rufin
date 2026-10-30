@@ -74,11 +74,14 @@ async fn playlist_mosaics_pick_distinct_covers_and_keep_them() {
         .await
         .unwrap()
         .set_source_artwork(
-            "album",
-            &[
-                ("album-a".into(), Some(first.clone())),
-                ("album-b".into(), Some(second.clone())),
-            ],
+            &[],
+            &[(
+                "album",
+                &[
+                    ("album-a".into(), Some(first.clone())),
+                    ("album-b".into(), Some(second.clone())),
+                ],
+            )],
         )
         .await
         .unwrap();

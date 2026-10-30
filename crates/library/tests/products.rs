@@ -1981,11 +1981,14 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .await
             .unwrap()
             .set_source_artwork(
-                "track",
-                &objects
-                    .into_iter()
-                    .map(|id| (id, binding.clone()))
-                    .collect::<Vec<_>>(),
+                &[],
+                &[(
+                    "track",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, binding.clone()))
+                        .collect::<Vec<_>>(),
+                )],
             )
             .await
             .unwrap();
@@ -2420,11 +2423,14 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
             .await
             .unwrap()
             .set_source_artwork(
-                "album",
-                &objects
-                    .into_iter()
-                    .map(|id| (id, Some(covers[index].clone())))
-                    .collect::<Vec<_>>(),
+                &[],
+                &[(
+                    "album",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, Some(covers[index].clone())))
+                        .collect::<Vec<_>>(),
+                )],
             )
             .await
             .unwrap();
@@ -2542,7 +2548,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             .fetch_all(&mut raw)
             .await
             .unwrap();
-    fixture.catalog.observe("source").await.unwrap().set_source_artwork("album", &album_objects.iter().cloned().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+    fixture.catalog.observe("source").await.unwrap().set_source_artwork(&[], &[("album", &album_objects.iter().cloned().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>())]).await.unwrap();
 
     let track_artist = fixture
         .catalog
@@ -2660,11 +2666,14 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
         .await
         .unwrap()
         .set_source_artwork(
-            "album",
-            &album_objects
-                .into_iter()
-                .map(|id| (id, None))
-                .collect::<Vec<_>>(),
+            &[],
+            &[(
+                "album",
+                &album_objects
+                    .into_iter()
+                    .map(|id| (id, None))
+                    .collect::<Vec<_>>(),
+            )],
         )
         .await
         .unwrap();
