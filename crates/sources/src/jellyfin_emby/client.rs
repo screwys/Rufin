@@ -1087,7 +1087,7 @@ impl JellyfinEmbySource {
                                 )
                             })
                             .collect();
-                        fields.push("UserDataLastPlayedDate");
+                        fields.extend(["UserDataPlayCount", "UserDataLastPlayedDate"]);
                         fields.join(",")
                     } else {
                         value.into_owned()
