@@ -186,6 +186,8 @@ pub enum EditableSource {
         excluded_folders: Vec<PathBuf>,
         document_roots: Vec<crate::DocumentRoot>,
     },
+    /// Another device's Local source: nothing of it is edited here.
+    Peer { source_id: SourceId },
 }
 
 impl SourceConfiguration {
@@ -398,6 +400,9 @@ impl SourceConfiguration {
                     document_roots: config.document_roots,
                 })
             }
+            "peer" => Ok(EditableSource::Peer {
+                source_id: self.source_id.clone(),
+            }),
             kind => Err(SourceError::InvalidConfig(format!(
                 "unknown source kind {kind}"
             ))),

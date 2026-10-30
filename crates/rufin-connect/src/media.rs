@@ -7,19 +7,10 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PeerMediaRequest {
-    pub uri: String,
-    pub encoding: Option<library::AudioEncoding>,
-    pub range: Option<(u64, Option<u64>)>,
-    pub window: Option<(u64, Option<u64>)>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PeerByteMetadata {
     pub length: Option<u64>,
     pub offset: u64,
     pub content_type: Option<String>,
-    pub revision: String,
     #[serde(default)]
     pub validator: Option<String>,
 }

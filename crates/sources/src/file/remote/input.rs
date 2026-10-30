@@ -22,7 +22,7 @@ pub(crate) enum FileInput {
     WebDav(Arc<WebDavClient>),
     Documents(Arc<crate::file::documents::DocumentAccess>),
     Link {
-        link: Arc<dyn crate::PeerMedia>,
+        peer: crate::peer::PeerSource,
         encoding: Option<library::AudioEncoding>,
     },
 }
@@ -194,7 +194,7 @@ async fn serve(
         FileInput::Smb(client) => smb_response(client, &path, &request).await,
         FileInput::WebDav(client) => dav_response(client, &path, &request).await,
         FileInput::Documents(access) => document_response(access, &path, &request).await,
-        FileInput::Link { link, encoding } => link_response(link, *encoding, &path, &request).await,
+        FileInput::Link { peer, encoding } => link_response(peer, *encoding, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
         tracing::warn!(%error, "file input request failed");
@@ -213,9 +213,9 @@ async fn serve(
 }
 
 async fn link_response(
-    link: &Arc<dyn crate::PeerMedia>,
+    peer: &crate::peer::PeerSource,
     encoding: Option<library::AudioEncoding>,
-    uri: &str,
+    object: &str,
     request: &Request<hyper::body::Incoming>,
 ) -> SourceResult<Response<Body>> {
     if request.method() == Method::HEAD
@@ -256,7 +256,7 @@ async fn link_response(
         })
     };
     let window = time("start_ms").map(|start| (start, time("end_ms")));
-    let mut audio = link.open(uri, encoding, range, window).await?;
+    let mut audio = peer.audio(object, encoding, range, window).await?;
     let etag = |audio: &crate::PeerAudio| {
         audio
             .validator
@@ -270,10 +270,9 @@ async fn link_response(
             .is_some_and(|value| etag(&audio).is_none_or(|etag| value != etag.as_str()))
     {
         range = None;
-        audio = link.open(uri, encoding, None, window).await?;
+        audio = peer.audio(object, encoding, None, window).await?;
     }
     let etag = etag(&audio);
-    let revision = crate::peer::encode_peer_revision(&audio.revision);
     if let Some(length) = audio.length
         && range.is_some_and(|(start, _)| start >= length)
     {
@@ -282,9 +281,6 @@ async fn link_response(
             header::CONTENT_RANGE,
             format!("bytes */{length}").parse().unwrap(),
         );
-        response
-            .headers_mut()
-            .insert(crate::PEER_REVISION_HEADER, revision.parse().unwrap());
         if let Some(etag) = etag {
             response
                 .headers_mut()
@@ -326,7 +322,6 @@ async fn link_response(
     if let Some(content_type) = audio.content_type.and_then(|value| value.parse().ok()) {
         headers.insert(header::CONTENT_TYPE, content_type);
     }
-    headers.insert(crate::PEER_REVISION_HEADER, revision.parse().unwrap());
     if let Some(etag) = etag {
         headers.insert(header::ETAG, etag.parse().unwrap());
     }

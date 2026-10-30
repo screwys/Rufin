@@ -16,7 +16,6 @@ blake3.workspace = true
 data-encoding = "2"
 futures-util.workspace = true
 iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
-library.workspace = true
 netdev = { version = "0.46.3", default-features = false }
 rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }

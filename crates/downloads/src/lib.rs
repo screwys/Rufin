@@ -578,7 +578,6 @@ struct ActiveDownload {
     quality: DownloadQuality,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<Result<(), DownloadFailure>>,
-    revision: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -1968,12 +1967,10 @@ impl Actor {
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
-            let revision = Arc::new(Mutex::new(None));
             let uri = media_uri.clone();
             let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
             let task_source_id = source_id.clone();
-            let task_revision = Arc::clone(&revision);
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;
                 match resolved.map_err(download_source_failure)? {
@@ -1994,11 +1991,7 @@ impl Actor {
                         )
                         .await
                         {
-                            Ok(revision) => {
-                                if let Some(revision) = revision {
-                                    *task_revision.lock().unwrap_or_else(|p| p.into_inner()) =
-                                        Some(revision);
-                                }
+                            Ok(()) => {
                                 if let Some(codec) = codec {
                                     let path = task_paths.audio_part.clone();
                                     tokio::task::spawn_blocking(move || {
@@ -2068,7 +2061,6 @@ impl Actor {
                 quality,
                 cancellation: Some(cancellation),
                 task,
-                revision,
             });
         }
     }
@@ -2134,16 +2126,13 @@ impl Actor {
             subject,
             paths,
             quality,
-            revision,
             ..
         } = active;
         let result = match joined {
-            Ok(Ok(())) => {
-                let revision = revision.lock().unwrap_or_else(|p| p.into_inner()).take();
-                self.commit_transfer(&source_id, &media_uri, &subject, &paths, quality, revision)
-                    .await
-                    .map(|_| ())
-            }
+            Ok(Ok(())) => self
+                .commit_transfer(&source_id, &media_uri, &subject, &paths, quality)
+                .await
+                .map(|_| ()),
             Ok(Err(error)) => Err(error),
             Err(error) => Err(DownloadFailure::NeedsAttention(format!(
                 "download task failed: {error}"
@@ -2198,12 +2187,10 @@ impl Actor {
         subject: &DownloadSubject,
         paths: &DownloadPaths,
         quality: DownloadQuality,
-        revision: Option<String>,
     ) -> Result<DownloadPaths, DownloadFailure> {
         let mut file = library::DownloadFile {
             media_uri: media_uri.into(),
             encoding: library::media_encoding_key(quality.encoding()),
-            revision: revision.unwrap_or_default(),
             managed: true,
             ..Default::default()
         };
@@ -2350,11 +2337,6 @@ impl Actor {
             let joined = download.task.await;
             let completed = matches!(joined, Ok(Ok(())));
             if completed && commit_completed {
-                let receipt = download
-                    .revision
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take();
                 match self
                     .commit_transfer(
                         &download.source_id,
@@ -2362,7 +2344,6 @@ impl Actor {
                         &download.subject,
                         &download.paths,
                         download.quality,
-                        receipt,
                     )
                     .await
                 {
@@ -3398,7 +3379,6 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            revision: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
@@ -3482,7 +3462,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_representation_is_recorded_only_after_download_commit() {
+    async fn representation_is_recorded_only_after_download_commit() {
         let (_library, catalog, source_key, track) =
             download_fixture("connect-copy", "track").await;
         let root = tempfile::tempdir().unwrap();
@@ -3512,7 +3492,6 @@ mod tests {
             quality: DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
             cancellation: None,
             task: tokio::spawn(async { Ok(()) }),
-            revision: Arc::new(Mutex::new(Some("original-revision-2".into()))),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
         assert_eq!(
@@ -3521,7 +3500,6 @@ mod tests {
         );
         assert!(!paths.audio_part.exists());
         let saved = catalog.download_file(&uri).await.unwrap().unwrap();
-        assert_eq!(saved.revision, "original-revision-2");
         assert_eq!(
             library::file_media_path(&saved.path),
             paths.audio.native().map(Path::to_owned)
@@ -3584,7 +3562,6 @@ mod tests {
                     paths,
                     quality: DownloadQuality::Original,
                     cancellation: None,
-                    revision: Arc::new(Mutex::new(None)),
                     task: tokio::spawn(async { Ok(()) }),
                 };
                 let result = if index == 0 && fail_first {
@@ -3863,7 +3840,6 @@ mod tests {
             paths,
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3905,7 +3881,6 @@ mod tests {
             paths,
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3972,7 +3947,6 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -4006,7 +3980,6 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            revision: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
 

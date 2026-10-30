@@ -137,7 +137,7 @@ impl TransferClients {
         representation: &str,
         paths: &DownloadPaths,
         cancellation: &mut oneshot::Receiver<()>,
-    ) -> SourceResult<Option<String>> {
+    ) -> SourceResult<()> {
         let clients = if stream.trust_invalid_certificate() {
             &self.insecure
         } else {
@@ -156,36 +156,28 @@ impl TransferClients {
             .await?;
         let resume = read_checkpoint(paths, Some(representation)).await?;
         let response = send_request(client, stream.uri(), resume.as_ref(), cancellation).await?;
-        let revision = peer_response_revision(&response)?;
         let status = response.status();
         if status == reqwest::StatusCode::OK {
-            return download_full(response, paths, representation, cancellation)
-                .await
-                .map(|()| revision);
+            return download_full(response, paths, representation, cancellation).await;
         }
         if status == reqwest::StatusCode::PARTIAL_CONTENT
             && let Some((checkpoint, offset)) = resume.as_ref()
             && valid_partial(&response, checkpoint, *offset)
         {
-            return download_partial(response, paths, checkpoint, *offset, cancellation)
-                .await
-                .map(|()| revision);
+            return download_partial(response, paths, checkpoint, *offset, cancellation).await;
         }
         if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
             && let Some((checkpoint, offset)) = resume.as_ref()
             && *offset == checkpoint.length
             && unsatisfied_total(&response) == Some(checkpoint.length)
         {
-            return Ok(revision);
+            return Ok(());
         }
         if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && resume.is_some() {
             discard_staging(paths).await?;
             let response = send_request(client, stream.uri(), None, cancellation).await?;
-            let revision = peer_response_revision(&response)?;
             if response.status() == reqwest::StatusCode::OK {
-                return download_full(response, paths, representation, cancellation)
-                    .await
-                    .map(|()| revision);
+                return download_full(response, paths, representation, cancellation).await;
             }
             if !response.status().is_success() {
                 return response_error(response.status(), paths).await;
@@ -201,14 +193,6 @@ impl TransferClients {
             "the download server returned an unsupported successful response".to_string(),
         ))
     }
-}
-
-fn peer_response_revision(response: &reqwest::Response) -> SourceResult<Option<String>> {
-    response
-        .headers()
-        .get(sources::PEER_REVISION_HEADER)
-        .map(|value| sources::peer_revision(value.as_bytes()))
-        .transpose()
 }
 
 fn representation_key(
@@ -649,12 +633,12 @@ pub(super) async fn run_transfer(
     paths: &DownloadPaths,
     transfers: &TransferClients,
     cancellation: &mut oneshot::Receiver<()>,
-) -> SourceResult<Option<String>> {
+) -> SourceResult<()> {
     prepare_download_directories(paths).await?;
     let representation = representation_key(source_id, media_uri, quality, stream.redacted_uri());
     if let Some(path) = library::file_media_path(stream.uri()) {
         tokio::select! {
-            result = tokio::fs::copy(path, &paths.audio_part) => result.map(|_| None).map_err(|error| SourceError::Other(error.to_string())),
+            result = tokio::fs::copy(path, &paths.audio_part) => result.map(|_| ()).map_err(|error| SourceError::Other(error.to_string())),
             _ = &mut *cancellation => Err(SourceError::Cancelled),
         }
     } else {
@@ -1493,7 +1477,7 @@ mod tests {
                 channels: library::AudioChannels::Preserve,
             }),
         ] {
-            for kind in ["smb", "webdav", "connect"] {
+            for kind in ["smb", "webdav"] {
                 for unchanged in [true, false] {
                     let server = MockServer::start().await;
                     let body = b"complete audio bytes";
@@ -1510,11 +1494,6 @@ mod tests {
                         ResponseTemplate::new(200)
                             .insert_header("ETag", "\"changed\"")
                             .set_body_bytes(body.to_vec())
-                    };
-                    let response = if kind == "connect" {
-                        response.insert_header(sources::PEER_REVISION_HEADER, "InYyIg")
-                    } else {
-                        response
                     };
                     Mock::given(method("GET"))
                         .and(path("/new-private-endpoint"))
@@ -1584,11 +1563,10 @@ mod tests {
                     )
                     .unwrap();
                     let (_cancel, mut cancellation) = oneshot::channel();
-                    let revision = TransferClients::default()
+                    TransferClients::default()
                         .download_cancellable(&current, &representation, &paths, &mut cancellation)
                         .await
                         .unwrap();
-                    assert_eq!(revision.as_deref(), (kind == "connect").then_some("\"v2\""));
                     assert_eq!(std::fs::read(&paths.audio_part).unwrap(), body);
                 }
             }

@@ -671,7 +671,10 @@ impl ConnectNetwork {
     }
 
     pub async fn stream_request(&self, peer: &str, body: Vec<u8>) -> Result<PeerByteResponse> {
-        let connection = self.connect(peer, MEDIA_PROTOCOL).await?;
+        let connection =
+            tokio::time::timeout(Duration::from_secs(30), self.connect(peer, MEDIA_PROTOCOL))
+                .await
+                .context("Device is unreachable")??;
         let answered = async {
             let (mut send, mut recv) = connection.open_bi().await?;
             write_frame(&mut send, &body).await?;
