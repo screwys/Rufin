@@ -552,24 +552,30 @@ async fn export_playlist_as_on(
         let entry = PlaylistEntryWrite::from_row(&row)?;
         let locator: Option<String> = row.try_get("document_locator")?;
         let locator = locator.filter(|_| crate::cue_media_parts(&entry.track.media_uri).is_none());
-        let locator = locator.and_then(|locator| {
-            crate::document_access_uri(&locator)
-                .or_else(|| locator.starts_with("content:").then(|| locator.clone()))
-                .or_else(|| {
-                    // A mapped document: the server's path under the mapped document tree.
-                    let source: Option<String> = row.try_get("mapping_source").ok()?;
-                    let size: Option<i64> = row.try_get("mapping_size").ok()?;
-                    let mapped = mapped(
-                        &source?,
-                        &locator,
-                        size.and_then(|size| u64::try_from(size).ok()),
-                    )?;
-                    match mapped.locate()? {
-                        LocalMediaLocation::Document(uri) => Some(uri),
-                        LocalMediaLocation::File(_) => None,
-                    }
-                })
+        let direct = locator.as_deref().and_then(|locator| {
+            crate::document_access_uri(locator)
+                .or_else(|| locator.starts_with("content:").then(|| locator.to_owned()))
         });
+        // A mapped document: the server's path under the mapped document tree.
+        let mapped = locator.filter(|_| direct.is_none()).and_then(|path| {
+            let source: Option<String> = row.try_get("mapping_source").ok()?;
+            let size: Option<i64> = row.try_get("mapping_size").ok()?;
+            mapped(
+                &source?,
+                &path,
+                size.and_then(|size| u64::try_from(size).ok()),
+            )
+        });
+        let locator = match mapped {
+            Some(mapped) => tokio::task::spawn_blocking(move || mapped.locate())
+                .await
+                .map_err(|error| invalid(error.to_string()))?
+                .and_then(|location| match location {
+                    LocalMediaLocation::Document(uri) => Some(uri),
+                    LocalMediaLocation::File(_) => None,
+                }),
+            None => direct,
+        };
         writer.entry_with_locator(&entry, locator.as_deref().unwrap_or(&entry.track.media_uri))?;
     }
     writer.finish()
