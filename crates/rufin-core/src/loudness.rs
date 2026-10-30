@@ -1,6 +1,6 @@
 //! Sequential bounded loudness analysis for one missing Track or Album. While normalization
-//! is EBU R128 it follows the change feed: tracks added to the selected source start a pass
-//! over what is missing.
+//! is EBU R128 it follows the change feed: tracks added to the selected source, or a listing
+//! of it that changed something, start a pass over what is missing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex, Weak};
 use audio_processing::{
     AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
-use library::{Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, TrackKey};
+use library::{
+    Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, SourcePhase, TrackKey,
+};
 use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{debug, info, warn};
@@ -58,8 +60,8 @@ impl AnalysisFailureBlock {
     }
 }
 
-/// While normalization is EBU R128, tracks added to the selected source start a pass over what
-/// is missing.
+/// While normalization is EBU R128, tracks added to the selected source, or a listing of it that
+/// changed something, start a pass over what is missing.
 pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc<Change>>>) {
     if !playback.ebu_r128() {
         return;
@@ -73,7 +75,7 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
         .as_ref()
         .and_then(|source| source.selected_library())
         .map(|selected| selected.source_key);
-    let added = changes
+    let missing = changes
         .iter()
         .flat_map(|change| &change.scopes)
         .any(|scope| match scope {
@@ -83,9 +85,14 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
                 added,
                 ..
             } => !added.is_empty() && Some(*source) == selected,
+            // A listing that changed tracks may have given them new audio hashes.
+            Scope::Source {
+                key,
+                phase: SourcePhase::Completed,
+            } => Some(*key) == selected,
             _ => false,
         });
-    if added {
+    if missing {
         playback.loudness.library_changed(source);
     }
 }
