@@ -181,14 +181,92 @@ impl Catalog {
         Ok(changed)
     }
 
-    /// The historical aggregates released installations recorded.
-    pub async fn legacy_activity(&self) -> LibraryResult<Vec<LegacyActivityRecord>> {
+    /// The play ids of the listens that have one, with their keys.
+    pub async fn listen_ids(&self) -> LibraryResult<Vec<(String, i64)>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
-            "SELECT * FROM legacy_activity ORDER BY source_id,period,item_kind,track_object_id",
+            "SELECT external_id,listen_key FROM listens WHERE external_id IS NOT NULL ORDER BY external_id",
         )
         .fetch_all(&mut *connection)
         .await?)
+    }
+
+    /// The listens with these play ids.
+    pub async fn listens_by_id(&self, ids: &[String]) -> LibraryResult<Vec<ActivityRecord>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<ActivityExportRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "{ACTIVITY_EXPORT_SELECT} WHERE external_id IN(SELECT value FROM json_each(?1)) ORDER BY listen_key"
+        )))
+        .bind(serde_json::to_string(ids)?)
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows.into_iter().map(ActivityRecord::from).collect())
+    }
+
+    /// Deletes the listens with these play ids, in one Write.
+    pub async fn delete_listens(&self, ids: &[String]) -> LibraryResult<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut write = self.write().await?;
+        let uris: Vec<String> = sqlx::query_scalar(
+            "DELETE FROM listens WHERE external_id IN(SELECT value FROM json_each(?1)) RETURNING media_uri",
+        )
+        .bind(serde_json::to_string(ids)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        write.keep();
+        write
+            .recount(&uris.iter().map(String::as_str).collect::<Vec<_>>())
+            .await?;
+        write.commit().await?;
+        Ok(())
+    }
+
+    /// The historical aggregates released installations recorded, all of them or those of
+    /// `keys`.
+    pub async fn legacy_activity(
+        &self,
+        keys: Option<&[LegacyActivityKey]>,
+    ) -> LibraryResult<Vec<LegacyActivityRecord>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT * FROM legacy_activity WHERE ?1 IS NULL OR (source_id,period,item_kind,track_object_id) IN
+                 (SELECT value->>0,value->>1,value->>2,value->>3 FROM json_each(?1))
+             ORDER BY source_id,period,item_kind,track_object_id",
+        )
+        .bind(keys.map(serde_json::to_string).transpose()?)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
+    /// Deletes historical aggregates by key, in one Write.
+    pub async fn delete_legacy_activity(&self, keys: &[LegacyActivityKey]) -> LibraryResult<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let mut write = self.write().await?;
+        let removed: Vec<(String, String)> = sqlx::query_as(
+            "DELETE FROM legacy_activity WHERE (source_id,period,item_kind,track_object_id) IN
+                 (SELECT value->>0,value->>1,value->>2,value->>3 FROM json_each(?1))
+             RETURNING source_id,track_object_id",
+        )
+        .bind(serde_json::to_string(keys)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        write.keep();
+        let uris: Vec<String> = sqlx::query_scalar(
+            "SELECT track.media_uri FROM json_each(?1) removed JOIN sources source ON source.object_id=removed.value->>0
+             JOIN tracks track ON track.source_key=source.source_key AND track.object_id=removed.value->>1",
+        )
+        .bind(serde_json::to_string(&removed)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        write
+            .recount(&uris.iter().map(String::as_str).collect::<Vec<_>>())
+            .await?;
+        write.commit().await?;
+        Ok(())
     }
 
     /// Writes historical aggregates in one Write, as a restore does.
@@ -592,6 +670,9 @@ pub struct LegacyActivityRecord {
     #[serde(default)]
     pub album: String,
 }
+
+/// A historical aggregate's key: source id, period, item kind and object id.
+pub type LegacyActivityKey = (String, String, String, String);
 
 impl LegacyActivityRecord {
     fn valid(&self) -> bool {

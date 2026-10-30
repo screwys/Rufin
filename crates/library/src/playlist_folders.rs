@@ -240,6 +240,95 @@ impl Catalog {
     }
 }
 
+/// A playlist folder by object id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistFolderCopy {
+    pub object_id: String,
+    pub name: String,
+    pub smart: bool,
+}
+
+impl Catalog {
+    /// Every playlist folder by object id.
+    pub async fn playlist_folder_copies(&self) -> Vec<PlaylistFolderCopy> {
+        self.loaded().await;
+        self.snapshot()
+            .playlist_folders
+            .values()
+            .map(|folder| PlaylistFolderCopy {
+                object_id: folder.object.clone(),
+                name: folder.name.clone(),
+                smart: folder.smart,
+            })
+            .collect()
+    }
+
+    /// Creates or renames playlist folders by object id, in one Write.
+    pub async fn put_playlist_folders(&self, folders: &[PlaylistFolderCopy]) -> LibraryResult<()> {
+        let folders = folders
+            .iter()
+            .map(|folder| Ok((&folder.object_id, folder_name(&folder.name)?, folder.smart)))
+            .collect::<LibraryResult<Vec<_>>>()?;
+        if folders.is_empty() {
+            return Ok(());
+        }
+        let mut write = self.write().await?;
+        let rows: Vec<FolderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO playlist_folders(object_id,name,smart)
+             SELECT value->>0,value->>1,value->>2 FROM json_each(?1) WHERE true
+             ON CONFLICT(object_id) DO UPDATE SET name=excluded.name WHERE name IS NOT excluded.name
+             RETURNING {FOLDER_COLUMNS}"
+        )))
+        .bind(serde_json::to_string(&folders)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        for row in rows {
+            write.put_folder(row);
+        }
+        write.commit().await?;
+        Ok(())
+    }
+
+    /// Deletes playlist folders by object id, in one Write. Their members leave them.
+    pub async fn delete_playlist_folders_by_object(&self, objects: &[String]) -> LibraryResult<()> {
+        if objects.is_empty() {
+            return Ok(());
+        }
+        let objects = serde_json::to_string(objects)?;
+        let folders = "(SELECT folder_key FROM playlist_folders WHERE object_id IN(SELECT value FROM json_each(?1)))";
+        let mut write = self.write().await?;
+        let playlists: Vec<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {PLAYLIST_COLUMNS}"
+        )))
+        .bind(&objects)
+        .fetch_all(write.connection().await?)
+        .await?;
+        let smart: Vec<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {SMART_COLUMNS}"
+        )))
+        .bind(&objects)
+        .fetch_all(write.connection().await?)
+        .await?;
+        let deleted: Vec<i64> = sqlx::query_scalar(
+            "DELETE FROM playlist_folders WHERE object_id IN(SELECT value FROM json_each(?1)) RETURNING folder_key",
+        )
+        .bind(&objects)
+        .fetch_all(write.connection().await?)
+        .await?;
+        for playlist in playlists {
+            write.put_playlist(playlist);
+        }
+        for smart in smart {
+            write.put_smart(smart);
+        }
+        for key in deleted {
+            write.remove_folder(key);
+        }
+        write.commit().await?;
+        Ok(())
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 enum FolderRecord {
     Folder {

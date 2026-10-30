@@ -48,7 +48,9 @@ mod mosaics;
 mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
-pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
+pub use playlist_folders::{
+    PlaylistFolderCopy, PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow,
+};
 mod local_access;
 mod pins;
 pub use local_access::{
@@ -80,8 +82,8 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityRecord,
-    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityKey,
+    LegacyActivityRecord, ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
@@ -117,7 +119,7 @@ pub use local::{
     DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState,
     LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
 };
-pub use loudness::{LoudnessMeasurement, R128TagWrite};
+pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
@@ -126,8 +128,8 @@ pub use playlist_format::{
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistAccess, PlaylistArtworkRecord, PlaylistEditEntry, PlaylistEntryCopy,
-    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, SourceEntryEdit,
+    PlaylistAccess, PlaylistCopy, PlaylistEditEntry, PlaylistEntryCopy, PlaylistEntryWrite,
+    PlaylistGenreLink, PlaylistIdentity, PlaylistImage, PlaylistRow, SourceEntryEdit,
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,
@@ -137,8 +139,8 @@ pub use queue::{
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use search::{LyricsSnippet, LyricsSnippetPart, SearchMode, SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRow, SmartPlaylistRule,
-    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistActivityPeriod, SmartPlaylistCopy, SmartPlaylistDefinition, SmartPlaylistRow,
+    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
     SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
     SmartPlaylistWrite,
 };

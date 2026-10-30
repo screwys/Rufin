@@ -129,12 +129,9 @@ impl Catalog {
             Ok(BufReader::new(File::open(directory.join(name))?))
         };
         let mut write = self.write().await?;
-        write.reload();
+        clear_groups(&mut write, contents).await?;
         let mut report = BackupRestoreReport::default();
         if contents.playlists {
-            sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
-                .execute(write.connection().await?)
-                .await?;
             report.playlists = crate::playlists::import_playlists_jsonl_on(
                 &mut write,
                 open("playlist-order.jsonl")?,
@@ -169,9 +166,6 @@ impl Catalog {
         }
 
         if contents.favorites {
-            sqlx::raw_sql("DELETE FROM user_state;DELETE FROM outbox;")
-                .execute(write.connection().await?)
-                .await?;
             report.user_states = crate::favorites::import_user_media_state_jsonl_on(
                 &mut write,
                 open("user-state.jsonl")?,
@@ -179,17 +173,9 @@ impl Catalog {
             .await?;
         }
         if contents.queue {
-            sqlx::raw_sql(
-                "DELETE FROM queue_state;DELETE FROM queue_entries;DELETE FROM queue_contexts;",
-            )
-            .execute(write.connection().await?)
-            .await?;
             crate::queue::import_queue_jsonl_on(&mut write, open("queue.jsonl")?).await?;
         }
         if contents.activity {
-            sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
-                .execute(write.connection().await?)
-                .await?;
             let activity =
                 crate::activity::import_activity_jsonl_on(&mut write, open("activity.jsonl")?)
                     .await?;
@@ -202,9 +188,6 @@ impl Catalog {
             .await?;
         }
         if contents.local_imports {
-            sqlx::query("DELETE FROM main.local_locators")
-                .execute(write.connection().await?)
-                .await?;
             report.local_locators = crate::local::import_local_locators_jsonl_on(
                 &mut write,
                 open("local-locators.jsonl")?,
@@ -214,6 +197,50 @@ impl Catalog {
         write.commit().await?;
         Ok(report)
     }
+
+    /// Empties selected groups in one transaction, as restoring them from nothing would.
+    pub async fn clear_state(&self, contents: StateGroups) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        clear_groups(&mut write, contents).await?;
+        write.commit().await?;
+        Ok(())
+    }
+}
+
+async fn clear_groups(
+    write: &mut crate::catalog::write::Write<'_>,
+    contents: StateGroups,
+) -> LibraryResult<()> {
+    write.reload();
+    let connection = write.connection().await?;
+    if contents.playlists {
+        sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
+            .execute(&mut *connection)
+            .await?;
+    }
+    if contents.favorites {
+        sqlx::raw_sql("DELETE FROM user_state;DELETE FROM outbox;")
+            .execute(&mut *connection)
+            .await?;
+    }
+    if contents.queue {
+        sqlx::raw_sql(
+            "DELETE FROM queue_state;DELETE FROM queue_entries;DELETE FROM queue_contexts;",
+        )
+        .execute(&mut *connection)
+        .await?;
+    }
+    if contents.activity {
+        sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
+            .execute(&mut *connection)
+            .await?;
+    }
+    if contents.local_imports {
+        sqlx::query("DELETE FROM main.local_locators")
+            .execute(&mut *connection)
+            .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

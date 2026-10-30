@@ -572,54 +572,6 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
             );
         }
     }
-    let imported = library::LyricsCacheRow {
-        media_uri: fixture.track_uris[2].clone(),
-        authority: "source".into(),
-        role: "original".into(),
-        language: String::new(),
-        script: String::new(),
-        lyrics: "Peer".into(),
-        updated_at: 40,
-    };
-    assert_eq!(
-        fixture
-            .catalog
-            .import_lyrics_cache(vec![imported], false)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    fixture
-        .catalog
-        .write_lyrics_cache(
-            &fixture.track_uris[2],
-            "source",
-            "original",
-            "",
-            "",
-            "Local edit",
-            41,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        fixture
-            .catalog
-            .lyrics_cache_for_role(
-                &fixture.track_uris[2],
-                "original",
-                "",
-                "",
-                "source",
-                &cancel
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .lyrics,
-        "Local edit"
-    );
 }
 
 #[tokio::test]

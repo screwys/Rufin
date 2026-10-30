@@ -625,6 +625,100 @@ impl Catalog {
     }
 }
 
+/// A smart playlist by object id: its folder by object id, its definition as JSON and the
+/// mosaic's track URIs as a JSON list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SmartPlaylistCopy {
+    pub object_id: String,
+    pub name: String,
+    pub folder: Option<String>,
+    pub definition: String,
+    pub mosaic: Option<String>,
+}
+
+impl Catalog {
+    /// Every smart playlist by object id.
+    pub async fn smart_playlist_copies(&self) -> LibraryResult<Vec<SmartPlaylistCopy>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, Option<String>, String, Option<String>)> = sqlx::query_as(
+            "SELECT smart.object_id,smart.name,folder.object_id,smart.definition_json,smart.mosaic FROM smart_playlists smart
+             LEFT JOIN playlist_folders folder ON folder.folder_key=smart.playlist_folder_key ORDER BY smart.object_id",
+        )
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(object_id, name, folder, definition, mosaic)| SmartPlaylistCopy {
+                    object_id,
+                    name,
+                    folder,
+                    definition,
+                    mosaic,
+                },
+            )
+            .collect())
+    }
+
+    /// Writes smart playlists by object id, in one Write. A new one is placed last; a folder
+    /// that is not here leaves it outside folders; a missing mosaic keeps the stored one.
+    pub async fn put_smart_playlist_copies(
+        &self,
+        playlists: &[SmartPlaylistCopy],
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for playlist in playlists {
+            let name = require_name(&playlist.name)?;
+            let mut definition: SmartPlaylistDefinition =
+                serde_json::from_str(&playlist.definition)?;
+            normalize_definition(&mut definition)?;
+            let row: Option<crate::catalog::write::SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,playlist_folder_key,mosaic)
+                 VALUES(?1,?2,lower(?2),?3,(SELECT COALESCE(max(position)+1,0) FROM smart_playlists),
+                     (SELECT folder_key FROM playlist_folders WHERE object_id=?4 AND smart),?5)
+                 ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
+                     definition_json=excluded.definition_json,playlist_folder_key=excluded.playlist_folder_key,
+                     mosaic=coalesce(excluded.mosaic,mosaic)
+                 WHERE (name,definition_json,playlist_folder_key,mosaic) IS NOT
+                     (excluded.name,excluded.definition_json,excluded.playlist_folder_key,coalesce(excluded.mosaic,mosaic))
+                 RETURNING {}",
+                crate::catalog::write::SMART_COLUMNS
+            )))
+            .bind(&playlist.object_id)
+            .bind(name)
+            .bind(&playlist.definition)
+            .bind(&playlist.folder)
+            .bind(&playlist.mosaic)
+            .fetch_optional(write.connection().await?)
+            .await?;
+            if let Some(row) = row {
+                write.put_smart(row);
+            }
+        }
+        write.commit().await?;
+        Ok(())
+    }
+
+    /// Deletes smart playlists by object id, in one Write.
+    pub async fn delete_smart_playlists_by_object(&self, objects: &[String]) -> LibraryResult<()> {
+        if objects.is_empty() {
+            return Ok(());
+        }
+        let mut write = self.write().await?;
+        let deleted: Vec<i64> = sqlx::query_scalar(
+            "DELETE FROM smart_playlists WHERE object_id IN(SELECT value FROM json_each(?1)) RETURNING smart_playlist_key",
+        )
+        .bind(serde_json::to_string(objects)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        for key in deleted {
+            write.remove_smart(key);
+        }
+        write.commit().await?;
+        Ok(())
+    }
+}
+
 fn require_name(name: &str) -> LibraryResult<&str> {
     let name = name.trim();
     if name.is_empty() {
