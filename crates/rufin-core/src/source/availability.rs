@@ -78,9 +78,10 @@ impl SourceOwner {
                 continue;
             }
             let Some(file) = catalog
-                .observed_media_file(uri)
+                .playable_by_uri(uri)
                 .await
                 .map_err(string_error)?
+                .and_then(|playable| playable.file)
             else {
                 continue;
             };

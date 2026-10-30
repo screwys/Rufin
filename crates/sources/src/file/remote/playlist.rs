@@ -114,10 +114,11 @@ impl FileSource {
             let uri = &entry.locator;
             if library::source_entity_parts(uri)
                 .is_some_and(|(source, kind, _)| source == self.source_id && kind == "track")
-                && let Some(observation) = catalog.observed_media_file(uri).await?
-                && observation.cue_start_millis.is_none()
+                && let Some(playable) = catalog.playable_by_uri(uri).await?
+                && playable.cue_path.is_none()
+                && let Some(file) = &playable.file
             {
-                let file = self.relative(&observation.path)?;
+                let file = self.relative(&file.path)?;
                 let file = if self.document_access().is_some() {
                     crate::file::documents::display_path(&file)
                 } else {

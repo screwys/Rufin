@@ -530,10 +530,7 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
         self.runtime.spawn(async move {
-            let playable = match catalog
-                .playable(occurrence.track.track_key, "original")
-                .await
-            {
+            let playable = match catalog.playable(occurrence.track.track_key).await {
                 Ok(Some(playable)) => Arc::new(playable),
                 Ok(None) => {
                     let kind = playback::FailureKind::UnavailableMedia;
@@ -1510,7 +1507,7 @@ mod tests {
             )
             .await
             .unwrap()[0];
-        let playable = catalog.playable(key, "original").await.unwrap().unwrap();
+        let playable = catalog.playable(key).await.unwrap().unwrap();
         let stream = super::prepare_stream(
             &catalog,
             &playable,

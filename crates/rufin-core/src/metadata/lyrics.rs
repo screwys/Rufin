@@ -70,7 +70,7 @@ impl MetadataEditor {
                                     .await
                                     .ok()?
                                     .pop()?;
-                                let playable = catalog.playable(key, "original").await.ok()??;
+                                let playable = catalog.playable(key).await.ok()??;
                                 Some(source.lyrics_storage(&playable))
                             })
                             .await

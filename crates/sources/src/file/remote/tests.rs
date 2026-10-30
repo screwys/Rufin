@@ -556,12 +556,15 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
         }
         if round == 3 {
             assert!(gets.load(Ordering::Relaxed) > reads_after_first);
-            let observation = catalog
-                .observed_media_file(&first_uri)
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(observation.path.ends_with("/renamed.wav"));
+            let playable = crate::playable(&catalog, &first_uri).await;
+            assert!(
+                playable
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .path
+                    .ends_with("/renamed.wav")
+            );
             assert!(
                 crate::stored_files(&catalog, configuration.source_id.as_str())
                     .await
@@ -569,7 +572,6 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
                     .all(|file| !file.path.ends_with("/first.wav")),
                 "a listing interrupted before completion must not retain the absent old path"
             );
-            let playable = crate::playable(&catalog, &first_uri).await;
             let stream = source
                 .stream(playable.file.as_ref().unwrap(), &first_uri, playable.window)
                 .await
@@ -755,13 +757,8 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         if pass == 2 {
             let mut windows = Vec::new();
             for row in rows {
-                let file = catalog
-                    .observed_media_file(&row.media_uri)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert!(file.path.ends_with("/audio.wav"));
                 let playable = crate::playable(&catalog, &row.media_uri).await;
+                assert!(playable.file.as_ref().unwrap().path.ends_with("/audio.wav"));
                 let stream = source
                     .stream(
                         playable.file.as_ref().unwrap(),

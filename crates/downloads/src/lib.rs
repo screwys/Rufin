@@ -3238,13 +3238,8 @@ impl Actor {
 
 /// The playable of a track by its URI.
 async fn playable(catalog: &Catalog, media_uri: &str) -> Result<library::Playable, SourceError> {
-    let key = catalog
-        .track_keys(&[media_uri.to_owned()], &library::ReadCancellation::new())
-        .await?
-        .pop()
-        .ok_or(SourceError::NotFound)?;
     catalog
-        .playable(key, "original")
+        .playable_by_uri(media_uri)
         .await?
         .ok_or(SourceError::NotFound)
 }

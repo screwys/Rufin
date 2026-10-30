@@ -471,7 +471,7 @@ pub(crate) async fn hashed_playable(
     track: TrackKey,
 ) -> Result<Option<Playable>, String> {
     let playable = catalog
-        .playable(track, "original")
+        .playable(track)
         .await
         .map_err(|error| error.to_string())?;
     let Some((revision, path, window)) = playable.as_ref().and_then(|playable| {
@@ -505,7 +505,7 @@ pub(crate) async fn hashed_playable(
         .await
         .map_err(|error| error.to_string())?;
     catalog
-        .playable(track, "original")
+        .playable(track)
         .await
         .map_err(|error| error.to_string())
 }

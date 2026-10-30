@@ -19,7 +19,7 @@ pub struct Playable {
     pub format: Option<String>,
     pub source_path: Option<String>,
     pub cue_path: Option<String>,
-    /// A downloaded copy, the asked quality first.
+    /// A downloaded copy, the first one recorded.
     pub download: Option<String>,
     /// A local locator, the mapping first.
     pub locator: Option<LocalLocatorWrite>,
@@ -97,11 +97,19 @@ fn measurement(gain: &NativeGain) -> LoudnessMeasurement {
 
 impl Catalog {
     /// One reader statement by key.
-    pub async fn playable(
-        &self,
-        track: TrackKey,
-        quality: &str,
-    ) -> LibraryResult<Option<Playable>> {
+    pub async fn playable(&self, track: TrackKey) -> LibraryResult<Option<Playable>> {
+        self.read_playable("track.track_key=?1", track).await
+    }
+
+    /// The same statement by media URI, for reads that start from one.
+    pub async fn playable_by_uri(&self, media_uri: &str) -> LibraryResult<Option<Playable>> {
+        self.read_playable("track.media_uri=?1", media_uri).await
+    }
+
+    async fn read_playable<'q, T>(&self, condition: &str, key: T) -> LibraryResult<Option<Playable>>
+    where
+        T: 'q + Send + sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
+    {
         let whole_file = crate::local::whole_file_cue_sql("track", "details");
         let gained = |details: &str| {
             format!(
@@ -115,7 +123,7 @@ impl Catalog {
             "SELECT track.source_key,track.object_id,track.media_uri,track.source_format,details.source_path,details.cue_path,details.cue_start_millis,
                 CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END,
                 file.path,file.root,file.relative_path,json_array(file.size_bytes,file.revision),
-                (SELECT path FROM downloads WHERE media_uri=track.media_uri ORDER BY quality=?2 DESC,rowid LIMIT 1),
+                (SELECT path FROM downloads WHERE media_uri=track.media_uri ORDER BY rowid LIMIT 1),
                 (SELECT json_array(origin,path,root,relative_path,access_uri) FROM local_locators WHERE media_uri=track.media_uri
                     ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1),
                 details.audio_hash,
@@ -125,17 +133,16 @@ impl Catalog {
                     SELECT json(json_extract(member_details.metadata,'$.album_loudness')) FROM tracks member JOIN track_details member_details USING(track_key)
                     WHERE member.album_key=track.album_key AND member.indexed=1 AND {member}
                     ORDER BY coalesce(member_details.cue_path,member_details.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,
-                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision
+                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision,track.track_key
              FROM tracks track LEFT JOIN track_details details USING(track_key)
              LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
              LEFT JOIN loudness measured ON measured.audio_hash=details.audio_hash
              LEFT JOIN album_loudness album ON album.members={members}
-             WHERE track.track_key=?1"
+             WHERE {condition}"
         );
         let mut connection = self.acquire_reader().await?;
         let row = sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(track)
-            .bind(quality)
+            .bind(key)
             .fetch_optional(&mut *connection)
             .await?;
         drop(connection);
@@ -165,6 +172,7 @@ impl Catalog {
         let album_lufs: Option<f64> = row.try_get(20)?;
         let album_peak: Option<f64> = row.try_get(21)?;
         let audio_revision: Option<Vec<u8>> = row.try_get(22)?;
+        let track: TrackKey = row.try_get(23)?;
         let source = source.map(SourceKey::from_raw);
         let (source_id, source_kind) = source
             .and_then(|source| {

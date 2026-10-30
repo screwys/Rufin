@@ -246,7 +246,7 @@ impl LyricsService {
         }
         let playable = Arc::new(
             self.catalog
-                .playable(context.media.row.track.track_key, "original")
+                .playable(context.media.row.track.track_key)
                 .await
                 .ok()??,
         );

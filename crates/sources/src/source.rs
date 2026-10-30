@@ -1573,18 +1573,24 @@ impl Source {
         };
         match &self.implementation {
             Implementation::Plex(source) => source.lyrics(&self.track_object_id(media_uri)?).await,
-            Implementation::Files(source) => source
-                .lyrics(catalog, media_uri)
-                .await
-                .map(|text| text.and_then(native_text)),
+            Implementation::Files(source) => {
+                let playable = catalog
+                    .playable_by_uri(media_uri)
+                    .await?
+                    .ok_or(SourceError::NotFound)?;
+                source
+                    .lyrics(catalog, &playable)
+                    .await
+                    .map(|text| text.and_then(native_text))
+            }
             Implementation::Local(_) => {
-                let file = catalog.observed_media_file(media_uri).await?;
-                if let Some(source) = file
-                    .as_ref()
-                    .and_then(|file| self.file_source(Some(&file.path)))
-                {
+                let playable = catalog.playable_by_uri(media_uri).await?;
+                if let Some((source, playable)) = playable.as_ref().and_then(|playable| {
+                    let file = playable.file.as_ref()?;
+                    Some((self.file_source(Some(&file.path))?, playable))
+                }) {
                     return source
-                        .lyrics(catalog, media_uri)
+                        .lyrics(catalog, playable)
                         .await
                         .map(|text| text.and_then(native_text));
                 }

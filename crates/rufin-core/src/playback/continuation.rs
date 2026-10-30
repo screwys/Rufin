@@ -137,7 +137,7 @@ impl PlaybackOwner {
         let local = self.settings.local_configuration();
         let playable = self
             .catalog
-            .playable(occurrence.track.track_key, "original")
+            .playable(occurrence.track.track_key)
             .await
             .map_err(string_error)?
             .ok_or("The current track is unavailable")?;

@@ -612,7 +612,7 @@ async fn file_size(
     catalog: &library::Catalog,
     track: library::TrackKey,
 ) -> LibraryResult<Option<i64>> {
-    let Some(playable) = catalog.playable(track, "original").await? else {
+    let Some(playable) = catalog.playable(track).await? else {
         return Ok(None);
     };
     if let Some(size) = playable.file.as_ref().and_then(|file| file.size_bytes) {

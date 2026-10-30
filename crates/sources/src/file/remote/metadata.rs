@@ -255,32 +255,27 @@ impl FileSource {
     pub(crate) async fn lyrics(
         &self,
         catalog: &library::Catalog,
-        media_uri: &str,
+        playable: &library::Playable,
     ) -> SourceResult<Option<String>> {
+        let media_uri = playable.media_uri.as_str();
         if library::source_entity_parts(media_uri)
             .is_none_or(|(source, kind, _)| source != self.source_id || kind != "track")
         {
             return Err(SourceError::NotFound);
         }
+        let file = playable.file.as_ref().ok_or(SourceError::NotFound)?;
         let track = catalog
-            .track(&(media_uri), &library::ReadCancellation::new())
-            .await?
-            .ok_or(SourceError::NotFound)?;
-        let file = catalog
-            .observed_media_file(media_uri)
+            .track(media_uri, &library::ReadCancellation::new())
             .await?
             .ok_or(SourceError::NotFound)?;
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
-        let candidates = self.lyrics_candidates(
-            &relative,
-            &track.metadata.title,
-            track.access.cue_path.is_some(),
-        );
+        let cue = playable.cue_path.is_some();
+        let candidates = self.lyrics_candidates(&relative, &track.metadata.title, cue);
         if let Some(text) = self.sidecar_lyrics(&input, &candidates).await? {
             return Ok(Some(text));
         }
-        if track.access.cue_path.is_some() {
+        if cue {
             return Ok(None);
         }
         let reader = crate::file::remote::reader::FileReader::open(

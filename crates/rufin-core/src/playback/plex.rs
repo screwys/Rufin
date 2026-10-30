@@ -1539,7 +1539,7 @@ impl PlaybackOwner {
             let local = self.settings.local_configuration();
             let playable = self
                 .catalog
-                .playable(row.track.track_key, "original")
+                .playable(row.track.track_key)
                 .await
                 .map_err(string_error)?
                 .ok_or("The current Plex track is not available locally")?;

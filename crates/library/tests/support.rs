@@ -690,7 +690,7 @@ impl PlaybackLoudness for Catalog {
             return Ok((None, None));
         };
         Ok(self
-            .playable(key, "original")
+            .playable(key)
             .await?
             .map(|playable| {
                 (

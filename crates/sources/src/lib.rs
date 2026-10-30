@@ -139,11 +139,7 @@ pub(crate) async fn listed_playlists(
 /// The playable of a track by its URI.
 #[cfg(test)]
 pub(crate) async fn playable(catalog: &library::Catalog, uri: &str) -> library::Playable {
-    let key = catalog
-        .track_keys(&[uri.to_owned()], &library::ReadCancellation::new())
-        .await
-        .unwrap()[0];
-    catalog.playable(key, "original").await.unwrap().unwrap()
+    catalog.playable_by_uri(uri).await.unwrap().unwrap()
 }
 
 /// Every stored file row of a source, in walk order.

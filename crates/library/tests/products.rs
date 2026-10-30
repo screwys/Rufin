@@ -416,7 +416,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     assert_eq!(
         fixture
             .catalog
-            .playable(key, "original")
+            .playable(key)
             .await
             .expect("resolve direct download access")
             .and_then(|playable| playable.download)

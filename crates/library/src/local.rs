@@ -57,14 +57,6 @@ pub enum LocalMediaLocation {
 }
 
 #[derive(Debug, FromRow)]
-pub struct ObservedMediaFile {
-    pub path: String,
-    pub revision: Option<String>,
-    pub cue_start_millis: Option<i64>,
-    pub cue_end_millis: Option<i64>,
-}
-
-#[derive(Debug, FromRow)]
 pub struct DownloadMetadata {
     pub channels: Option<u32>,
     pub title: String,
@@ -581,25 +573,6 @@ impl Catalog {
         .bind(media_uri)
         .bind(received_from_connect)
         .fetch_one(&mut *connection)
-        .await?)
-    }
-
-    /// The file of a file source's track, for reads that are not playback.
-    pub async fn observed_media_file(
-        &self,
-        media_uri: &str,
-    ) -> LibraryResult<Option<ObservedMediaFile>> {
-        let mut connection = self.acquire_reader().await?;
-        let whole_file = whole_file_cue_sql("track", "details");
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT file.path,file.revision,details.cue_start_millis,
-                    CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END cue_end_millis
-             FROM tracks track JOIN track_details details USING(track_key)
-             JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
-             WHERE track.media_uri=?1"
-        )))
-        .bind(media_uri)
-        .fetch_optional(&mut *connection)
         .await?)
     }
 

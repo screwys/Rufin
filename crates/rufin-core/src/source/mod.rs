@@ -4044,7 +4044,7 @@ mod source_tests {
                 .remember_media_uris(std::slice::from_ref(&local_uri))
                 .await
                 .unwrap()[0];
-            let playable = catalog.playable(key, "original").await.unwrap().unwrap();
+            let playable = catalog.playable(key).await.unwrap().unwrap();
             let local_stream = tokio::time::timeout(
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(

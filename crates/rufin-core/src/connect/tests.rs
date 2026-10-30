@@ -117,7 +117,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .unwrap();
                 let playable = b
                     .catalog
-                    .playable(rows[0].track.track_key, "original")
+                    .playable(rows[0].track.track_key)
                     .await
                     .unwrap()
                     .unwrap();
