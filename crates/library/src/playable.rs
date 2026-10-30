@@ -42,6 +42,8 @@ pub struct PlayableDownload {
     pub size: Option<u64>,
     /// Rufin owns the file, so a broken one is forgotten.
     pub managed: bool,
+    /// The download folder the file was saved under.
+    pub root: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,7 +135,7 @@ impl Catalog {
             "SELECT track.source_key,track.object_id,track.media_uri,track.source_format,details.source_path,details.cue_path,details.cue_start_millis,
                 CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END,
                 file.path,file.root,file.relative_path,json_array(file.size_bytes,file.revision),
-                (SELECT json_array(path,size,managed) FROM downloads WHERE media_uri=track.media_uri),
+                (SELECT json_array(path,size,managed,root) FROM downloads WHERE media_uri=track.media_uri),
                 (SELECT json_array(origin,path,root,relative_path,access_uri) FROM local_locators WHERE media_uri=track.media_uri
                     ORDER BY local_access_file_key LIMIT 1),
                 details.audio_hash,
@@ -210,12 +212,13 @@ impl Catalog {
                 },
             );
         let download = download
-            .map(|download| serde_json::from_str::<(String, Option<i64>, i64)>(&download))
+            .map(|download| serde_json::from_str::<(String, Option<i64>, i64, String)>(&download))
             .transpose()?
-            .map(|(uri, size, managed)| PlayableDownload {
+            .map(|(uri, size, managed, root)| PlayableDownload {
                 uri,
                 size: size.and_then(|size| u64::try_from(size).ok()),
                 managed: managed != 0,
+                root: (!root.is_empty()).then_some(root),
             });
         let mapped = source_id
             .as_ref()

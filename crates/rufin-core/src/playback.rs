@@ -1116,8 +1116,9 @@ impl PlaybackOwner {
 /// Opens a playable from the first usable of its download, its mapped file and its own local
 /// file, then the Connect peer while Connect is on, then its source's remote file or server
 /// stream. A local copy is usable when it is a regular file with the size it should have; one
-/// that cannot be looked at is skipped. A managed download that is gone or the wrong size is
-/// forgotten, so its rules download it again. A local track with no usable copy is unavailable.
+/// that cannot be looked at is skipped. A managed download gone from its folder or the wrong
+/// size is forgotten, so its rules download it again. A local track with no usable copy is
+/// unavailable.
 pub(crate) async fn prepare_stream<F>(
     catalog: &Catalog,
     playable: &library::Playable,
@@ -1300,8 +1301,8 @@ struct Candidates {
 }
 
 impl Candidates {
-    /// The first usable copy, and the path of a managed download that is gone or the wrong
-    /// size. This blocks on the file system or the document provider.
+    /// The first usable copy, and the path of a managed download that is gone from its folder
+    /// or the wrong size. This blocks on the file system or the document provider.
     fn choose(self) -> (Option<String>, Option<String>) {
         let mut passed = self.failed.is_some();
         let mut broken = None;
@@ -1317,7 +1318,10 @@ impl Candidates {
         {
             match look(&download.uri, download.size) {
                 Found::Usable => return (Some(download.uri.clone()), None),
-                Found::Missing if download.managed => broken = Some(download.uri.clone()),
+                // A folder that is gone (an unmounted drive) keeps its downloads.
+                Found::Missing if download.managed && folder_present(download) => {
+                    broken = Some(download.uri.clone());
+                }
                 Found::Missing | Found::Unusable => {}
             }
         }
@@ -1352,6 +1356,19 @@ enum Found {
     Missing,
     /// Not a regular file, or it could not be looked at.
     Unusable,
+}
+
+/// Whether the folder a download was saved under is there.
+fn folder_present(download: &library::PlayableDownload) -> bool {
+    match download.root.as_deref() {
+        Some(root) if root.starts_with("content:") => {
+            sources::stat_document(root).is_ok_and(|entry| entry.directory)
+        }
+        Some(root) => std::path::Path::new(root).is_dir(),
+        None => library::file_media_path(&download.uri)
+            .and_then(|path| path.parent().map(std::path::Path::is_dir))
+            .unwrap_or(false),
+    }
 }
 
 fn look(uri: &str, size: Option<u64>) -> Found {
@@ -1641,6 +1658,31 @@ mod tests {
             Some("audio/ogg; codecs=opus")
         );
         assert_eq!(prepared.row.as_ref().unwrap().track.media_uri, canonical);
+    }
+
+    #[test]
+    fn a_download_is_forgotten_only_when_its_folder_is_there() {
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("downloads");
+        std::fs::create_dir(&root).unwrap();
+        let uri = url::Url::from_file_path(root.join("track.flac"))
+            .unwrap()
+            .to_string();
+        let candidates = || super::Candidates {
+            download: Some(library::PlayableDownload {
+                uri: uri.clone(),
+                size: Some(16),
+                managed: true,
+                root: Some(root.to_string_lossy().into_owned()),
+            }),
+            mapped: None,
+            own: None,
+            failed: None,
+        };
+        assert_eq!(candidates().choose(), (None, Some(uri.clone())));
+        // An unmounted drive: the folder is gone, and so is no download.
+        std::fs::rename(&root, folder.path().join("unmounted")).unwrap();
+        assert_eq!(candidates().choose(), (None, None));
     }
 }
 
