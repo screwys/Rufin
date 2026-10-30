@@ -80,8 +80,8 @@ mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, ListenDeliveryTarget, ListenWrite,
-    PendingListenDelivery,
+    ActivityCsvFormat, ActivityRecord, CalendarActivityPeriod, LegacyActivityRecord,
+    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
 pub use artwork::{
     AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, RepresentativeArtworkScope,
@@ -126,8 +126,8 @@ pub use playlist_format::{
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistAccess, PlaylistEditEntry, PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity,
-    PlaylistRow, SourceEntryEdit,
+    PlaylistAccess, PlaylistArtworkRecord, PlaylistEditEntry, PlaylistEntryCopy,
+    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, SourceEntryEdit,
 };
 pub use queue::{
     QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueuePlacement,

@@ -1019,17 +1019,172 @@ enum PlaylistRecord {
     Artwork(PlaylistArtworkRecord),
 }
 
-#[derive(serde::Serialize, serde::Deserialize, sqlx::FromRow)]
-pub(crate) struct PlaylistArtworkRecord {
-    source_id: Option<String>,
-    object_id: String,
+/// A playlist's chosen image and its set-once mosaic, by the playlist's object id.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct PlaylistArtworkRecord {
+    pub source_id: Option<String>,
+    pub object_id: String,
     #[serde(default)]
-    bytes: Option<Vec<u8>>,
-    content_type: Option<String>,
+    pub bytes: Option<Vec<u8>>,
+    pub content_type: Option<String>,
     #[serde(default)]
-    artwork_binding: Option<Vec<u8>>,
+    pub artwork_binding: Option<Vec<u8>>,
+    /// The mosaic's track URIs as a JSON list; None keeps the stored one.
     #[serde(default)]
-    mosaic: Option<String>,
+    pub mosaic: Option<String>,
+}
+
+/// An entry of a Rufin playlist by object ids, with its track's URI and copy.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistEntryCopy {
+    pub playlist: String,
+    pub object_id: String,
+    pub rank: Vec<u8>,
+    pub track: crate::TrackReference,
+}
+
+impl Catalog {
+    /// The entries of these Rufin playlists, or of all of them, in rank order.
+    pub async fn playlist_entry_copies(
+        &self,
+        playlists: Option<&[PlaylistKey]>,
+    ) -> LibraryResult<Vec<PlaylistEntryCopy>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, String, Vec<u8>, String, String, String, String, i64)> =
+            sqlx::query_as(
+                "SELECT playlist.object_id,entry.object_id,entry.rank,track.media_uri,track.title,track.display_artist,track.display_album,track.duration_millis
+                 FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key)
+                 WHERE playlist.owner='rufin' AND (?1 IS NULL OR playlist.playlist_key IN(SELECT value FROM json_each(?1)))
+                 ORDER BY entry.playlist_key,entry.rank,entry.playlist_entry_key",
+            )
+            .bind(playlists.map(serde_json::to_string).transpose()?)
+            .fetch_all(&mut *connection)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(playlist, object_id, rank, uri, title, artist, album, duration)| {
+                    PlaylistEntryCopy {
+                        playlist,
+                        object_id,
+                        rank,
+                        track: crate::TrackReference::direct(uri, title, artist, album, duration),
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// Writes Rufin playlist entries by object id with their ranks and tracks, in one Write.
+    /// A track the Store does not know is remembered from the entry's copy; an entry whose
+    /// playlist is not here is left out. Returns how many entries changed.
+    pub async fn put_playlist_entries(&self, entries: &[PlaylistEntryCopy]) -> LibraryResult<u64> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+        let mut write = self.write().await?;
+        let references = entries
+            .iter()
+            .map(|entry| entry.track.clone())
+            .collect::<Vec<_>>();
+        let tracks = write.put_references(&references).await?;
+        let rows = entries
+            .iter()
+            .zip(tracks)
+            .map(|(entry, track)| {
+                (
+                    &entry.playlist,
+                    &entry.object_id,
+                    track,
+                    crate::rank::hex(&entry.rank),
+                )
+            })
+            .collect::<Vec<_>>();
+        let written: Vec<(PlaylistKey, i64, Vec<u8>, TrackKey)> = sqlx::query_as(
+            "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)
+             SELECT playlist.playlist_key,input.value->>1,input.value->>2,unhex(input.value->>3)
+             FROM json_each(?1) input JOIN playlists playlist ON playlist.object_id=input.value->>0 AND playlist.source_key IS NULL AND playlist.owner='rufin'
+             WHERE true
+             ON CONFLICT(playlist_key,object_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank
+             WHERE (track_key,rank) IS NOT (excluded.track_key,excluded.rank)
+             RETURNING playlist_key,playlist_entry_key,rank,track_key",
+        )
+        .bind(serde_json::to_string(&rows)?)
+        .fetch_all(write.connection().await?)
+        .await?;
+        let count = written.len() as u64;
+        let mut by_playlist = std::collections::BTreeMap::<PlaylistKey, Vec<_>>::new();
+        for (playlist, key, rank, track) in written {
+            by_playlist.entry(playlist).or_default().push(Entry {
+                key,
+                rank: rank.into(),
+                track,
+            });
+        }
+        for (playlist, entries) in by_playlist {
+            write.put_entries(playlist.raw(), entries);
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
+        }
+        write.commit().await?;
+        Ok(count)
+    }
+
+    /// Removes Rufin playlist entries by object id, in one Write.
+    pub async fn remove_playlist_entries_by_object(&self, ids: &[String]) -> LibraryResult<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut write = self.write().await?;
+        let mut by_playlist = std::collections::BTreeMap::<PlaylistKey, Vec<i64>>::new();
+        for batch in ids.chunks(PLAYLIST_DELETE_BATCH) {
+            let removed: Vec<(PlaylistKey, i64)> = sqlx::query_as(
+                "DELETE FROM playlist_entries WHERE object_id IN(SELECT value FROM json_each(?1))
+                 AND playlist_key IN(SELECT playlist_key FROM playlists WHERE owner='rufin')
+                 RETURNING playlist_key,playlist_entry_key",
+            )
+            .bind(serde_json::to_string(batch)?)
+            .fetch_all(write.connection().await?)
+            .await?;
+            for (playlist, key) in removed {
+                by_playlist.entry(playlist).or_default().push(key);
+            }
+        }
+        let mut count = 0;
+        for (playlist, keys) in by_playlist {
+            count += keys.len() as u64;
+            write.remove_entries(playlist.raw(), keys);
+            crate::playlist_links::mark_dirty_on(self, write.connection().await?, playlist).await?;
+        }
+        write.commit().await?;
+        Ok(count)
+    }
+
+    /// Writes playlist identities by object id, as a restore does, in one Write.
+    pub async fn put_playlists(
+        &self,
+        playlists: &[PlaylistIdentity],
+    ) -> LibraryResult<Vec<PlaylistKey>> {
+        let mut write = self.write().await?;
+        let mut keys = Vec::with_capacity(playlists.len());
+        for identity in playlists {
+            keys.push(write_playlist_identity(&mut write, identity).await?);
+        }
+        write.commit().await?;
+        Ok(keys)
+    }
+
+    /// Writes playlist images and mosaics by object id, as a restore does, in one Write.
+    pub async fn put_playlist_artwork(
+        &self,
+        images: &[PlaylistArtworkRecord],
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for image in images {
+            write_playlist_artwork(&mut write, image).await?;
+        }
+        write.commit().await?;
+        Ok(())
+    }
 }
 
 pub(crate) async fn write_playlist_identity(
@@ -1140,8 +1295,7 @@ pub(crate) async fn import_playlists_jsonl_on(
                 count += 1;
             }
             PlaylistRecord::Artwork(image) => {
-                write_playlist_artwork(write.connection().await?, &image).await?;
-                write.keep();
+                write_playlist_artwork(write, &image).await?;
             }
             PlaylistRecord::File(record) => {
                 crate::playlist_links::restore_record_on(write.connection().await?, record).await?;
@@ -1152,10 +1306,10 @@ pub(crate) async fn import_playlists_jsonl_on(
     Ok(count)
 }
 
-pub(crate) async fn write_playlist_artwork(
-    connection: &mut SqliteConnection,
+async fn write_playlist_artwork(
+    write: &mut Write<'_>,
     image: &PlaylistArtworkRecord,
-) -> LibraryResult<bool> {
+) -> LibraryResult<()> {
     let matched = "object_id=?1 AND (owner='rufin' OR source_key IS (SELECT source_key FROM sources WHERE object_id=?2))";
     let revision = image
         .bytes
@@ -1176,6 +1330,16 @@ pub(crate) async fn write_playlist_artwork(
                 )
             })
         });
-    Ok(sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5,artwork_binding=?6,mosaic=coalesce(?7,mosaic) WHERE {matched} AND (artwork_bytes,artwork_mime,artwork_revision,artwork_binding,mosaic) IS NOT (?3,?4,?5,?6,coalesce(?7,mosaic))")))
-        .bind(&image.object_id).bind(&image.source_id).bind(&image.bytes).bind(&image.content_type).bind(revision).bind(binding).bind(&image.mosaic).execute(&mut *connection).await?.rows_affected()>0)
+    let row: Option<crate::catalog::write::PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!("UPDATE main.playlists SET artwork_bytes=?3,artwork_mime=?4,artwork_revision=?5,artwork_binding=?6,mosaic=coalesce(?7,mosaic) WHERE {matched} AND (artwork_bytes,artwork_mime,artwork_revision,artwork_binding,mosaic) IS NOT (?3,?4,?5,?6,coalesce(?7,mosaic)) RETURNING {}", crate::catalog::write::PLAYLIST_COLUMNS)))
+        .bind(&image.object_id).bind(&image.source_id).bind(&image.bytes).bind(&image.content_type).bind(revision).bind(binding).bind(&image.mosaic).fetch_optional(write.connection().await?).await?;
+    if let Some(row) = row {
+        let key = PlaylistKey::from_raw(row.0);
+        write.put_playlist(row);
+        // The image itself is read by key.
+        write.changed(Scope::Playlist {
+            key,
+            entries: false,
+        });
+    }
+    Ok(())
 }

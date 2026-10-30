@@ -13,6 +13,7 @@ pub(crate) mod image;
 pub(crate) mod load;
 pub(crate) mod merge;
 mod observations;
+mod observe;
 pub(crate) mod records;
 mod rows;
 pub(crate) mod snapshot;

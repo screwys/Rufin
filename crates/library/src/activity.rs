@@ -44,7 +44,7 @@ pub struct ListenWrite {
 }
 
 /// A semantic accepted listen. Delivery work is deliberately outside this record.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ActivityRecord {
     pub version: u32,
     pub listen_key: i64,
@@ -140,6 +140,65 @@ impl Catalog {
         }
         write.commit().await?;
         Ok(key)
+    }
+
+    /// Listens after `after` in key order, at most `limit`.
+    pub async fn listens_after(
+        &self,
+        after: ListenKey,
+        limit: usize,
+    ) -> LibraryResult<Vec<ActivityRecord>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<ActivityExportRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "{ACTIVITY_EXPORT_SELECT} WHERE listen_key>?1 ORDER BY listen_key LIMIT ?2"
+        )))
+        .bind(after)
+        .bind(limit as i64)
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows.into_iter().map(ActivityRecord::from).collect())
+    }
+
+    /// Writes listens another installation accepted, in one Write and with no scrobble. Each
+    /// takes a key of this Store; a listen already here keeps the longer listening.
+    pub async fn import_listens(&self, listens: &[ActivityRecord]) -> LibraryResult<u64> {
+        let mut write = self.write().await?;
+        let mut changed = 0;
+        for record in listens {
+            let uri = record
+                .current_media_uri
+                .as_deref()
+                .unwrap_or(&record.listen.media_uri);
+            let source = record.source_id.as_deref();
+            if write_listen(&mut write, &record.listen, source, None, uri, None)
+                .await?
+                .1
+            {
+                changed += 1;
+            }
+        }
+        write.commit().await?;
+        Ok(changed)
+    }
+
+    /// The historical aggregates released installations recorded.
+    pub async fn legacy_activity(&self) -> LibraryResult<Vec<LegacyActivityRecord>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT * FROM legacy_activity ORDER BY source_id,period,item_kind,track_object_id",
+        )
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
+    /// Writes historical aggregates in one Write, as a restore does.
+    pub async fn put_legacy_activity(&self, records: &[LegacyActivityRecord]) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for record in records.iter().filter(|record| record.valid()) {
+            write_legacy_activity(&mut write, record).await?;
+        }
+        write.commit().await?;
+        Ok(())
     }
 
     /// Streams a consistent snapshot without collecting the Activity history in memory.
@@ -469,6 +528,18 @@ struct ActivityExportRow {
     listen: ListenWrite,
 }
 
+impl From<ActivityExportRow> for ActivityRecord {
+    fn from(row: ActivityExportRow) -> Self {
+        Self {
+            version: 1,
+            listen_key: row.listen_key,
+            source_id: row.source_id,
+            current_media_uri: row.current_media_uri,
+            listen: row.listen,
+        }
+    }
+}
+
 /// Shared accepted-Activity import inside an owner transaction.
 pub(crate) async fn import_activity_jsonl_on(
     write: &mut crate::catalog::write::Write<'_>,
@@ -504,22 +575,31 @@ pub(crate) async fn import_activity_jsonl_on(
 }
 
 /// Historical aggregate facts from released installations; these are not invented listens.
-#[derive(Serialize, Deserialize, FromRow)]
-pub(crate) struct LegacyActivityRecord {
-    pub(crate) source_id: String,
-    pub(crate) period: String,
-    pub(crate) item_kind: String,
-    pub(crate) track_object_id: String,
-    pub(crate) play_count: i64,
-    pub(crate) skip_count: i64,
-    pub(crate) last_played_at: Option<i64>,
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct LegacyActivityRecord {
+    pub source_id: String,
+    pub period: String,
+    pub item_kind: String,
+    pub track_object_id: String,
+    pub play_count: i64,
+    pub skip_count: i64,
+    pub last_played_at: Option<i64>,
     /// The display copy; backups made before it existed restore with the track's names.
     #[serde(default)]
-    pub(crate) title: String,
+    pub title: String,
     #[serde(default)]
-    pub(crate) artist: String,
+    pub artist: String,
     #[serde(default)]
-    pub(crate) album: String,
+    pub album: String,
+}
+
+impl LegacyActivityRecord {
+    fn valid(&self) -> bool {
+        !self.source_id.is_empty()
+            && !self.track_object_id.is_empty()
+            && self.play_count >= 0
+            && self.skip_count >= 0
+    }
 }
 
 pub(crate) async fn import_legacy_activity_jsonl_on(
@@ -545,11 +625,7 @@ pub(crate) async fn import_legacy_activity_jsonl_on(
                 continue;
             }
         };
-        if record.source_id.is_empty()
-            || record.track_object_id.is_empty()
-            || record.play_count < 0
-            || record.skip_count < 0
-        {
+        if !record.valid() {
             report.skipped += 1;
             continue;
         }
@@ -582,16 +658,7 @@ pub(crate) async fn export_activity_jsonl_on(
         .fetch(&mut *connection);
     let mut count = 0;
     while let Some(row) = rows.try_next().await? {
-        serde_json::to_writer(
-            &mut output,
-            &ActivityRecord {
-                version: 1,
-                listen_key: row.listen_key,
-                source_id: row.source_id,
-                current_media_uri: row.current_media_uri,
-                listen: row.listen,
-            },
-        )?;
+        serde_json::to_writer(&mut output, &ActivityRecord::from(row))?;
         output.write_all(b"\n")?;
         count += 1;
     }

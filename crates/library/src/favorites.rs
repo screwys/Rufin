@@ -363,12 +363,65 @@ async fn drop_copy(
     Ok(())
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct UserMediaStateWrite {
     pub media_uri: String,
     pub favorite: Option<bool>,
     /// Rufin precision, independent of a provider's coarser rating scale.
     pub rating: Option<i64>,
+    /// When the value was set. Backups do not carry it; a restored value is set when restored.
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub changed_at: Option<i64>,
+}
+
+impl Catalog {
+    /// Rufin's favorites and ratings, all of them or those of `uris`, each with whether a
+    /// server delivery still waits for it.
+    pub async fn user_states(
+        &self,
+        uris: Option<&[String]>,
+    ) -> LibraryResult<Vec<(UserMediaStateWrite, bool)>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows: Vec<(String, Option<bool>, Option<i64>, i64, bool)> = sqlx::query_as(
+            "SELECT state.media_uri,state.favorite,state.rating,state.changed_at,
+                EXISTS(SELECT 1 FROM outbox WHERE outbox.media_uri=state.media_uri)
+             FROM user_state state
+             WHERE ?1 IS NULL OR state.media_uri IN(SELECT value FROM json_each(?1))
+             ORDER BY state.media_uri",
+        )
+        .bind(uris.map(serde_json::to_string).transpose()?)
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(media_uri, favorite, rating, changed_at, delivering)| {
+                (
+                    UserMediaStateWrite {
+                        media_uri,
+                        favorite,
+                        rating,
+                        changed_at: Some(changed_at),
+                    },
+                    delivering,
+                )
+            })
+            .collect())
+    }
+
+    /// Writes favorites and ratings as they are, in one Write, with no server delivery. A
+    /// state with neither value removes the row.
+    pub async fn put_user_states(&self, states: &[UserMediaStateWrite]) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for state in states {
+            // A URI the Catalog holds no track for stages nothing resident, so keep its row.
+            if write_user_media_state(&mut write, state).await? {
+                write.keep();
+            }
+        }
+        write.commit().await?;
+        Ok(())
+    }
 }
 
 pub(crate) async fn export_user_media_state_jsonl_on(
@@ -410,10 +463,11 @@ pub(crate) async fn import_user_media_state_jsonl_on(
     Ok(count)
 }
 
+/// Returns whether the row changed.
 pub(crate) async fn write_user_media_state(
     write: &mut Write<'_>,
     state: &UserMediaStateWrite,
-) -> LibraryResult<()> {
+) -> LibraryResult<bool> {
     if state.media_uri.is_empty()
         || state
             .rating
@@ -433,16 +487,18 @@ pub(crate) async fn write_user_media_state(
         .await?
     } else {
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,?2,?3,unixepoch())
+            "INSERT INTO user_state(media_uri,favorite,rating,changed_at) VALUES(?1,?2,?3,coalesce(?4,unixepoch()))
             ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating,changed_at=excluded.changed_at
             WHERE (favorite,rating) IS NOT (excluded.favorite,excluded.rating){STATE_RETURNING}"
         )))
         .bind(&state.media_uri)
         .bind(state.favorite)
         .bind(state.rating)
+        .bind(state.changed_at)
         .fetch_all(&mut *connection)
         .await?
     };
+    let changed = !states.is_empty();
     write.set_states(states);
-    Ok(())
+    Ok(changed)
 }
