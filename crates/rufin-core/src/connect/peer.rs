@@ -245,6 +245,7 @@ impl ConnectOwner {
                 self.answer_audio(&source, &object, encoding, range, window)
                     .await
             }
+            Stream::Observe => self.observed(),
         }
     }
 

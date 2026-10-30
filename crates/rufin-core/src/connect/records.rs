@@ -14,14 +14,14 @@ use rufin_connect::store::{self, Cursor, Row, Select, Store};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-use super::{ConnectOwner, error};
+use super::{ConnectOwner, error, session::SessionValue};
 use crate::settings::{
     ConfiguredSource, load_provider_secret, read_scrobbling, seal_credential, store_scrobbling,
 };
 
 const PAGE: usize = 512;
 /// Received rows apply kind by kind in this order, so parents come before their children.
-const ORDER: [&str; 13] = [
+const ORDER: [&str; 15] = [
     "device",
     "setting",
     "folder",
@@ -35,6 +35,8 @@ const ORDER: [&str; 13] = [
     "lyrics",
     "analysis",
     "album-loudness",
+    "session",
+    "queue",
 ];
 /// Kinds a full pass compares item by item, and whether an item that is gone leaves a
 /// tombstone. Listens and analysis results are compared by id: their values do not change
@@ -52,7 +54,7 @@ const COMPARED: [(&str, bool); 9] = [
     ("album-loudness", false),
 ];
 /// Kinds whose rows hold their value.
-const BODIES: [&str; 1] = ["device"];
+const BODIES: [&str; 3] = ["device", "session", "queue"];
 const PREFERENCES: [&str; 5] = [
     "prefer_distinct_track_covers",
     "use_sort_tags",
@@ -70,7 +72,7 @@ pub(super) struct DeviceValue {
 
 /// One encoded item: its record id and parent, the digest the diff compares and the value
 /// that leaves the device.
-struct Item {
+pub(super) struct Item {
     id: String,
     parent: Option<String>,
     digest: String,
@@ -83,7 +85,7 @@ impl Item {
     }
 
     /// An item whose digest covers only what must be equal on every device.
-    fn digested(
+    pub(super) fn digested(
         id: String,
         parent: Option<String>,
         value: &impl Serialize,
@@ -131,12 +133,13 @@ struct EntryValue {
     copy: Copy,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Copy {
-    title: String,
-    artist: String,
-    album: String,
-    duration_ms: i64,
+/// What a track shows where it is not in the Store.
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct Copy {
+    pub(super) title: String,
+    pub(super) artist: String,
+    pub(super) album: String,
+    pub(super) duration_ms: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -226,10 +229,12 @@ pub(super) struct Records {
     pub(super) store: Store,
     pub(super) device: String,
     key: age::x25519::Identity,
-    catalog: Arc<library::Catalog>,
+    pub(super) catalog: Arc<library::Catalog>,
     /// Diff passes and applies run one at a time, so the pass after an apply finds its rows.
     work: tokio::sync::Mutex<()>,
     devices: Mutex<BTreeMap<String, DeviceValue>>,
+    /// The stored session records by device, this one included.
+    pub(super) sessions: tokio::sync::watch::Sender<BTreeMap<String, SessionValue>>,
 }
 
 impl Records {
@@ -247,10 +252,11 @@ impl Records {
             catalog: Arc::clone(&owner.catalog),
             work: tokio::sync::Mutex::new(()),
             devices: Mutex::new(BTreeMap::new()),
+            sessions: tokio::sync::watch::channel(BTreeMap::new()).0,
         })
     }
 
-    fn owner(&self) -> Result<Arc<ConnectOwner>, String> {
+    pub(super) fn owner(&self) -> Result<Arc<ConnectOwner>, String> {
         self.owner
             .upgrade()
             .ok_or_else(|| "Connect stopped".to_owned())
@@ -348,6 +354,12 @@ impl Records {
 
     /// Records what this device knows of `device`.
     pub(super) async fn write_device(&self, device: &str) -> Result<Option<i64>, String> {
+        let _work = self.work.lock().await;
+        let changes = self.device_changes(device).await?;
+        self.write(changes, None).await
+    }
+
+    async fn device_changes(&self, device: &str) -> Result<Vec<store::Change>, String> {
         let value = self
             .devices
             .lock()
@@ -355,13 +367,10 @@ impl Records {
             .get(device)
             .cloned()
             .ok_or("The device is not paired")?;
-        let _work = self.work.lock().await;
         let id = format!("device:{device}");
         let item = Item::new(id.clone(), None, &value)?;
-        let changes = self
-            .diff(vec![item], Select::Ids(std::slice::from_ref(&id)), false)
-            .await?;
-        self.write(changes, None).await
+        self.diff(vec![item], Select::Ids(std::slice::from_ref(&id)), false)
+            .await
     }
 
     /// Takes a device's access away: its record says it is no longer trusted.
@@ -376,7 +385,7 @@ impl Records {
         self.write_device(device).await
     }
 
-    /// This device leaves the profile.
+    /// This device leaves the profile, and its session and queue with it.
     pub(super) async fn leave(&self) -> Result<Option<i64>, String> {
         let name = self.owner()?.device_config().name;
         self.add_device(
@@ -386,7 +395,14 @@ impl Records {
                 trusted: false,
             },
         );
-        self.write_device(&self.device).await
+        let _work = self.work.lock().await;
+        let mut changes = self.device_changes(&self.device).await?;
+        let playback = [
+            format!("session:{}", self.device),
+            format!("queue:{}", self.device),
+        ];
+        changes.extend(self.diff(Vec::new(), Select::Ids(&playback), true).await?);
+        self.write(changes, None).await
     }
 
     async fn write(
@@ -397,12 +413,19 @@ impl Records {
         if changes.is_empty() && listened.is_none() {
             return Ok(None);
         }
-        self.store.write(changes, listened).await.map_err(error)
+        let sessions = changes
+            .iter()
+            .filter(|change| kind(&change.id) == "session")
+            .map(|change| (change.id.clone(), change.value.clone()))
+            .collect::<Vec<_>>();
+        let sequence = self.store.write(changes, listened).await.map_err(error)?;
+        self.remember_sessions(sessions);
+        Ok(sequence)
     }
 
     /// Compares encoded items with the stored records. A stored live record without an item
     /// becomes a tombstone when `tombstones` is set.
-    async fn diff(
+    pub(super) async fn diff(
         &self,
         items: Vec<Item>,
         select: Select<'_>,
@@ -482,6 +505,7 @@ impl Records {
             let (listens, listened) = self.unrecorded_listens().await?;
             written.extend(listens);
             written.extend(self.unrecorded_analysis().await?);
+            written.extend(self.session_changes().await?);
             return self.write(written, listened).await;
         };
         let mut kinds = Vec::new();
@@ -490,6 +514,7 @@ impl Records {
         let mut lyrics = Vec::new();
         let mut hashes = Vec::new();
         let mut heard = false;
+        let mut queue = false;
         for scope in scopes {
             match scope {
                 Scope::State { items } => {
@@ -515,6 +540,7 @@ impl Records {
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Lyrics { uri } => lyrics.push(uri.clone()),
                 Scope::Analysis { hash } => hashes.push(*hash),
+                Scope::Queue => queue = true,
                 _ => {}
             }
         }
@@ -550,6 +576,9 @@ impl Records {
             let (listens, last) = self.heard_listens().await?;
             written.extend(listens);
             listened = last;
+        }
+        if queue {
+            written.extend(self.session_changes().await?);
         }
         self.write(written, listened).await
     }
@@ -750,7 +779,10 @@ impl Records {
 
     /// Track URIs by their portable form: a track of one of this device's Local sources is
     /// named as the peer source names it on other devices.
-    async fn portable(&self, uris: &[String]) -> Result<HashMap<String, String>, String> {
+    pub(super) async fn portable(
+        &self,
+        uris: &[String],
+    ) -> Result<HashMap<String, String>, String> {
         let local = self.local_sources()?;
         if local.is_empty() || uris.is_empty() {
             return Ok(HashMap::new());
@@ -796,7 +828,7 @@ impl Records {
         Ok(found)
     }
 
-    async fn local_all(&self, uris: &[String]) -> Result<Vec<String>, String> {
+    pub(super) async fn local_all(&self, uris: &[String]) -> Result<Vec<String>, String> {
         let local = self.local(uris).await?;
         Ok(uris
             .iter()
@@ -1244,6 +1276,13 @@ impl Records {
                 .receive(&applied, cursor(from, target))
                 .await
                 .map_err(error)?;
+            self.remember_sessions(
+                applied
+                    .into_iter()
+                    .filter(|row| kind(&row.id) == "session")
+                    .map(|row| (row.id, row.value.filter(|_| !row.deleted)))
+                    .collect(),
+            );
         }
         Ok(count)
     }

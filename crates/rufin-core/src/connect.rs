@@ -3,6 +3,7 @@
 mod folder;
 mod peer;
 mod records;
+mod session;
 
 use crate::{
     playback::PlaybackOwner,
@@ -19,6 +20,8 @@ use rufin_connect::{
 };
 use secrets::{SecretKey, SecretStore, SwitchableSecretStore};
 use serde::{Deserialize, Serialize};
+pub use session::Continuation;
+pub(crate) use session::{Observed, Observing};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -138,15 +141,10 @@ pub struct Status {
     pub profile_status: String,
     #[serde(default)]
     pub collection_progress: Option<CollectionProgress>,
+    /// Another device's playback that this device can continue.
+    #[serde(default)]
+    pub continuation: Option<Continuation>,
     pub error: Option<String>,
-}
-
-impl Status {
-    pub fn continuation_device(&self) -> Option<&Device> {
-        self.devices.iter().find(|device| {
-            self.settings.enabled && device.enrolled && device.reachable && device.has_playback
-        })
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -301,7 +299,15 @@ pub enum Control {
 #[serde(tag = "request", rename_all = "snake_case")]
 enum Request {
     Presence,
-    Control { command: Control },
+    Control {
+        command: Control,
+    },
+    Cast(session::Cast),
+    QueuePage {
+        offset: u64,
+        limit: u32,
+        filter: String,
+    },
 }
 
 /// A request on the media protocol.
@@ -325,6 +331,8 @@ enum Stream {
         range: Option<(u64, Option<u64>)>,
         window: Option<(u64, Option<u64>)>,
     },
+    /// This device's playback state, for a device that casts here.
+    Observe,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -402,6 +410,7 @@ impl ConnectOwner {
                 completed_pairings: 0,
                 profile_status: localization::tr("Connect is not enabled"),
                 collection_progress: None,
+                continuation: None,
                 error,
             })
             .0,
@@ -611,6 +620,7 @@ impl ConnectOwner {
         let network = self.network().await?;
         let records = Records::new(self, store, network.identity(), key);
         records.load_devices().await?;
+        records.load_sessions().await?;
         network
             .serve(Some(rufin_connect::Profile {
                 id: profile.clone(),
@@ -692,6 +702,7 @@ impl ConnectOwner {
                 }
             }));
         folder::watch(self, session);
+        self.follow_sessions(session);
     }
 
     /// Records the settings records and this device's record after a settings change.
@@ -967,6 +978,7 @@ impl ConnectOwner {
             status.connecting = false;
             status.receiving_collection = false;
             status.collection_progress = None;
+            status.continuation = None;
             status.invitation = None;
             status.identity = None;
             status.profile_status = localization::tr("Connect is not enabled");
@@ -1124,6 +1136,7 @@ impl ConnectOwner {
             status.devices = devices;
             true
         });
+        self.offer();
     }
 
     /// Device records changed: trust follows them, and a record that removed this device
@@ -1263,6 +1276,16 @@ impl ConnectOwner {
                 .map_err(error)?;
                 serde_json::Value::Null
             }
+            Request::Cast(cast) => {
+                self.receive_cast(cast).await?;
+                serde_json::Value::Null
+            }
+            Request::QueuePage {
+                offset,
+                limit,
+                filter,
+            } => serde_json::to_value(self.answer_queue_page(offset, limit, filter).await?)
+                .map_err(error)?,
         };
         serde_json::to_vec(&answer).map_err(error)
     }
@@ -1658,7 +1681,11 @@ impl ConnectOwner {
                 folder::watch(self, &session);
                 folder::sync(self, &session).await;
             }
-            Action::Continue { peer } => self.continue_from(&peer).await?,
+            Action::Continue { peer } => {
+                if !self.continue_from(&peer, true).await? {
+                    return Err("There is no playback to continue".into());
+                }
+            }
             Action::Control { peer, command } => {
                 self.request(&peer, Request::Control { command }).await?;
             }

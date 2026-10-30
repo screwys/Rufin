@@ -1,11 +1,11 @@
-//! A Rufin receiver owns playback and its queue; this device observes and controls it.
+//! A Rufin receiver owns playback and its queue; this device mirrors and controls it.
 use super::*;
-use crate::connect::{ConnectOwner, Control, casting::ReceiverState};
+use crate::connect::{ConnectOwner, Control, Observed, Observing};
 use crate::playback::{
     actor::Playback,
     state::{Command, ExternalPlayback},
 };
-use playback::{PlaybackOutput, RemoteOutputProtocol};
+use playback::{PlaybackOutput, RemoteOutputProtocol, TransportStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Default)]
@@ -22,8 +22,12 @@ pub(super) struct RufinPlayback {
     output: PlaybackOutput,
     commands: tokio::sync::Mutex<()>,
     volume: Mutex<VolumeRequests>,
-    volume_changed: Arc<tokio::sync::Notify>,
-    revision: Mutex<Option<u64>>,
+    /// The receiver's queue revision and current position the mirrored window was read at,
+    /// and the window's offset.
+    window: Mutex<Option<(u64, Option<usize>, usize)>>,
+    /// Whether the receiver played at its last frame.
+    playing: AtomicBool,
+    auto_dj_refill_threshold: usize,
     cancelled: AtomicBool,
     observer: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -47,92 +51,144 @@ impl RufinPlayback {
         }
     }
 
-    async fn refresh(&self) -> Result<(), String> {
-        let state = self.connection()?.receiver_state(&self.peer).await?;
+    /// Shows a frame of the receiver's state here. The queue window around its current entry
+    /// is read again when its queue or current entry changed.
+    async fn mirror(&self, frame: Observed) -> Result<(), String> {
+        let shown = *self.window.lock().unwrap_or_else(|p| p.into_inner());
+        let (queue, offset) = match shown {
+            Some((revision, current, offset))
+                if revision == frame.revision && current == frame.current =>
+            {
+                (None, offset)
+            }
+            _ => {
+                let (entries, _, offset) = self
+                    .connection()?
+                    .queue_page(
+                        &self.peer,
+                        frame.current.unwrap_or_default().saturating_sub(16) as u64,
+                        library::QUEUE_CONTEXT_LIMIT as u32,
+                        String::new(),
+                    )
+                    .await?;
+                let offset = offset as usize;
+                let entries = entries
+                    .into_iter()
+                    .map(|(_, entry)| entry)
+                    .collect::<Vec<_>>();
+                let rows = self
+                    .catalog
+                    .queue_rows_for_entries(
+                        &entries.iter().cloned().enumerate().collect::<Vec<_>>(),
+                        &ReadCancellation::new(),
+                    )
+                    .await
+                    .map_err(string_error)?;
+                let queue = library::QueueRestore {
+                    order: (0..entries.len() as u32).collect(),
+                    entries: entries.into(),
+                    current_index: frame
+                        .current
+                        .and_then(|position| position.checked_sub(offset)),
+                    rows,
+                    progress_millis: frame.position_ms.min(i64::MAX as u64) as i64,
+                    repeat_mode: frame.repeat,
+                    shuffled: frame.shuffle,
+                    ..Default::default()
+                };
+                (Some(queue), offset)
+            }
+        };
         if self.cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
-        let previous = self.playback.projection().map_err(string_error)?.view;
-        let changed = *self.revision.lock().unwrap_or_else(|p| p.into_inner())
-            != Some(state.revision)
-            || previous.queue.current_index != state.current
-            || previous
-                .queue_window
-                .iter()
-                .map(|row| (&row.track.media_uri, row.position))
-                .ne(state
-                    .rows
-                    .iter()
-                    .map(|row| (&row.item.media_uri, row.position)));
-        let restore = if changed {
-            let mut page = self
-                .catalog
-                .queue_entries(
-                    library::QueueLoad::items(
-                        state
-                            .rows
-                            .iter()
-                            .map(|row| (row.item.clone(), row.provenance.clone()))
-                            .collect(),
-                    ),
-                    None,
-                )
-                .await
-                .map_err(string_error)?;
-            let rows = self
-                .catalog
-                .queue_rows_for_entries(
-                    &page.entries.iter().cloned().enumerate().collect::<Vec<_>>(),
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map_err(string_error)?;
-            Some(library::QueueRestore {
-                ids: Arc::from([]),
-                ranks: Arc::from([]),
-                entries: page.entries.into(),
-                order: (0..state.rows.len() as u32).collect(),
-                current_index: state
-                    .current
-                    .and_then(|position| position.checked_sub(state.offset)),
-                rows,
-                progress_millis: state.position.min(i64::MAX as u64) as i64,
-                repeat_mode: state.repeat,
-                shuffled: state.shuffle,
-            })
-        } else {
-            None
-        };
         self.playback
             .observe_external(
                 self.output.clone(),
                 ExternalPlayback {
-                    queue: restore,
-                    queue_total: state.total,
-                    queue_offset: state.offset,
-                    status: state.state,
-                    position_millis: Some(state.position),
-                    duration_millis: state.duration,
-                    volume: state.volume,
-                    muted: state.muted,
-                    repeat: state.repeat,
-                    shuffle: state.shuffle,
+                    queue,
+                    queue_total: frame.total,
+                    queue_offset: offset,
+                    status: frame.state,
+                    position_millis: Some(frame.position_ms),
+                    duration_millis: frame.duration_ms,
+                    volume: frame.volume,
+                    muted: frame.muted,
+                    repeat: frame.repeat,
+                    shuffle: frame.shuffle,
                 },
             )
             .map_err(string_error)?;
         self.playback
             .command(Command::SetAutoDj {
-                enabled: state.auto_dj,
-                refill_threshold: state.auto_dj_threshold,
+                enabled: frame.auto_dj,
+                refill_threshold: self.auto_dj_refill_threshold,
             })
             .map_err(string_error)?;
-        *self.revision.lock().unwrap_or_else(|p| p.into_inner()) = Some(state.revision);
+        *self.window.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((frame.revision, frame.current, offset));
+        self.playing
+            .store(frame.state == TransportStatus::Playing, Ordering::Release);
         Ok(())
     }
 
-    pub(super) async fn snapshot(&self) -> Result<Option<playback::Continuation>, String> {
-        let _command = self.commands.lock().await;
-        self.connection()?.receiver_queue(&self.peer).await
+    /// Mirrors the receiver's frames until it ends the stream.
+    fn follow(self: &Arc<Self>, runtime: &tokio::runtime::Handle, mut observing: Observing) {
+        let weak = Arc::downgrade(self);
+        let task = runtime.spawn(async move {
+            loop {
+                let frame = observing.next().await;
+                let Some(receiver) = weak.upgrade() else {
+                    break;
+                };
+                let (error, ended) = match frame {
+                    Ok(Some(frame)) => match receiver.mirror(frame).await {
+                        Ok(()) => continue,
+                        Err(error) => (error, false),
+                    },
+                    Ok(None) => ("Device is unreachable".into(), true),
+                    Err(error) => (error, true),
+                };
+                if receiver.cancelled.load(Ordering::Acquire) {
+                    break;
+                }
+                let _ = receiver.playback.command(Command::OperationFailed(error));
+                if ended {
+                    break;
+                }
+            }
+        });
+        *self.observer.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+    }
+
+    /// Sends a command to the receiver, after the volume requests that wait.
+    fn control(self: &Arc<Self>, runtime: &tokio::runtime::Handle, control: Option<Control>) {
+        let receiver = Arc::clone(self);
+        runtime.spawn(async move {
+            let _command = receiver.commands.lock().await;
+            let pending =
+                std::mem::take(&mut *receiver.volume.lock().unwrap_or_else(|p| p.into_inner()));
+            let controls = pending
+                .value
+                .map(|value| Control::Volume { value })
+                .into_iter()
+                .chain(
+                    pending
+                        .persist
+                        .map(|value| Control::PersistVolume { value }),
+                )
+                .chain(control);
+            for control in controls {
+                let result = match receiver.connection() {
+                    Ok(connect) => connect.control(&receiver.peer, control).await,
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
+                    let _ = receiver.playback.command(Command::OperationFailed(error));
+                    return;
+                }
+            }
+        });
     }
 
     async fn input(
@@ -152,19 +208,20 @@ impl RufinPlayback {
         if page.entries.is_empty() {
             return Ok(());
         }
-        let current_index = page.current_index;
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).collect(),
+            current_index: Some(page.current_index),
             entries: page.entries.into(),
-            current_index: Some(current_index),
             ..Default::default()
         };
-        let result = self
-            .connection()?
-            .send_cast_input(&self.peer, queue, placement, target)
-            .await;
-        result?;
-        self.refresh().await
+        self.connection()?
+            .cast(&self.peer, &queue, true, Some((placement, target)))
+            .await
+    }
+
+    /// The receiver's whole queue, as it recorded it.
+    pub(super) async fn queue(&self) -> Result<library::QueueRestore, String> {
+        self.connection()?.queue_from(&self.peer).await
     }
 }
 
@@ -184,49 +241,39 @@ impl PlaybackOwner {
         });
     }
 
-    pub(crate) async fn receiver_state(&self) -> Result<ReceiverState, String> {
-        let active = self.active().ok_or("Playback is unavailable")?;
-        let view = active.projection().map_err(string_error)?.view;
-        let offset = view
-            .queue
-            .current_index
-            .unwrap_or_default()
-            .saturating_sub(16);
-        let page = self
-            .receiver_queue_page(
-                offset as u64,
-                library::QUEUE_CONTEXT_LIMIT as u32,
-                String::new(),
-            )
-            .await?;
-        let rows = page
-            .rows
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| {
-                let mut row = library::QueueTransferRow::from(row.as_ref());
-                row.position = offset + index;
-                row
-            })
-            .collect();
-        Ok(ReceiverState {
-            revision: view.queue.revision,
-            total: view.queue.total,
-            offset,
+    /// This device's playback state for a device that casts here, with the position at this
+    /// moment.
+    pub(crate) fn observed(&self, projection: Option<&PlaybackProjection>) -> Observed {
+        let Some(projection) = projection else {
+            return Observed::default();
+        };
+        let view = &projection.view;
+        let transport = projection.reporting_transport();
+        let seeked = transport.position_millis != view.transport.position_millis;
+        let mut position = transport.position_millis;
+        if transport.state == TransportStatus::Playing && !seeked {
+            let elapsed = self
+                .clock_sample()
+                .monotonic_millis
+                .saturating_sub(transport.position_observed_at_millis);
+            position += (elapsed as f64 * transport.playback_rate) as u64;
+            if transport.duration_millis > 0 {
+                position = position.min(transport.duration_millis);
+            }
+        }
+        Observed {
             current: view.queue.current_index,
-            rows,
-            state: view.transport.effective_state(),
-            position: view.transport.position_millis,
-            duration: view.transport.duration_millis,
+            state: transport.state,
+            position_ms: position,
+            duration_ms: transport.duration_millis,
             volume: view.controls.volume,
             muted: view.controls.muted,
             repeat: view.controls.repeat_mode,
             shuffle: view.controls.shuffle_enabled,
             auto_dj: view.controls.auto_dj_enabled,
-            auto_dj_threshold: usize::from(
-                self.settings.load().ui.application.auto_dj_refill_threshold,
-            ),
-        })
+            revision: view.queue.revision,
+            total: view.queue.total,
+        }
     }
 
     pub(crate) async fn receiver_queue_page(
@@ -238,30 +285,10 @@ impl PlaybackOwner {
         let limit = limit.min(library::QUEUE_CONTEXT_LIMIT as u32);
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
-            let _command = receiver.commands.lock().await;
-            let page = receiver
+            let (entries, total, window_offset) = receiver
                 .connection()?
-                .receiver_queue_page(&receiver.peer, offset, limit, filter)
+                .queue_page(&receiver.peer, offset, limit, filter)
                 .await?;
-            let page_entries = self
-                .catalog
-                .queue_entries(
-                    library::QueueLoad::items(
-                        page.rows
-                            .iter()
-                            .map(|row| (row.item.clone(), row.provenance.clone()))
-                            .collect(),
-                    ),
-                    None,
-                )
-                .await
-                .map_err(string_error)?;
-            let entries = page_entries
-                .entries
-                .into_iter()
-                .zip(&page.rows)
-                .map(|(entry, row)| (row.position, entry))
-                .collect::<Vec<_>>();
             let rows = self
                 .catalog
                 .queue_rows_for_entries(&entries, &ReadCancellation::new())
@@ -269,8 +296,8 @@ impl PlaybackOwner {
                 .map_err(string_error)?;
             return Ok(crate::playback::QueuePage {
                 rows,
-                total: page.total,
-                window_offset: page.window_offset,
+                total,
+                window_offset,
             });
         }
         let Some(active) = self.active() else {
@@ -330,48 +357,6 @@ impl PlaybackOwner {
         })
     }
 
-    pub(crate) async fn cast_queue_snapshot(
-        &self,
-    ) -> Result<Option<playback::Continuation>, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return receiver.snapshot().await;
-        }
-        let plex = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(plex) = plex {
-            return plex.cast_queue_snapshot().await;
-        }
-        let active = self.active().ok_or("Playback is unavailable")?;
-        if let Some(snapshot) = active.continuation().map_err(string_error)? {
-            return Ok(Some(snapshot));
-        }
-        let queue = active.handoff_snapshot().map_err(string_error)?.0;
-        let Some(current) = queue
-            .current_index
-            .or_else(|| (!queue.entries.is_empty()).then_some(0))
-        else {
-            return Ok(None);
-        };
-        let settings = self.settings.load().ui;
-        Ok(Some(playback::Continuation {
-            header: playback::ContinuationHeader {
-                total: queue.entries.len(),
-                current,
-                position_millis: queue.progress_millis.max(0) as u64,
-                repeat: queue.repeat_mode,
-                shuffled: queue.shuffled,
-                auto_dj: settings.auto_dj_enabled,
-                auto_dj_refill_threshold: usize::from(
-                    settings.application.auto_dj_refill_threshold,
-                ),
-                playback_rate: settings.playback.playback_rate,
-                desired_playing: false,
-                listen: None,
-            },
-            queue,
-        }))
-    }
-
     pub(super) fn discover_rufin(&self) -> Vec<playback::RemoteOutput> {
         let Some(connect) = self.source_owner().and_then(|source| source.connect()) else {
             return Vec::new();
@@ -392,6 +377,7 @@ impl PlaybackOwner {
             .collect()
     }
 
+    /// Casts this device's queue to a Rufin device, then mirrors that device's playback.
     pub(super) fn select_rufin(
         &self,
         output: PlaybackOutput,
@@ -408,8 +394,6 @@ impl PlaybackOwner {
             .and_then(|source| source.connect())
             .ok_or("Connect is unavailable")?;
         let active = self.active().ok_or("Playback is unavailable")?;
-        let volume_changed = Arc::new(tokio::sync::Notify::new());
-        let volume_wake = Arc::clone(&volume_changed);
         let receiver = Arc::new(RufinPlayback {
             peer: remote.id.clone(),
             connect: Arc::downgrade(&connect),
@@ -418,89 +402,38 @@ impl PlaybackOwner {
             output: output.clone(),
             commands: tokio::sync::Mutex::new(()),
             volume: Mutex::new(VolumeRequests::default()),
-            volume_changed,
-            revision: Mutex::new(None),
+            window: Mutex::new(None),
+            playing: AtomicBool::new(false),
+            auto_dj_refill_threshold: usize::from(
+                self.settings.load().ui.application.auto_dj_refill_threshold,
+            ),
             cancelled: AtomicBool::new(false),
             observer: Mutex::new(None),
         });
-        let previous = self.runtime.block_on(async {
-            connect
-                .select_receiver(
-                    &receiver.peer,
-                    active.projection().map_err(string_error)?.view.queue.total > 0,
-                )
-                .await?;
+        let playing = self.current_projection().is_some_and(|projection| {
+            projection.view.transport.effective_state() == TransportStatus::Playing
+        });
+        let observing = self.runtime.block_on(async {
+            let queue = active.handoff_snapshot().map_err(string_error)?.0;
+            if !queue.entries.is_empty() {
+                connect.cast(&receiver.peer, &queue, playing, None).await?;
+            }
             if cancelled.load(Ordering::Acquire) {
                 return Err("Output selection cancelled".into());
             }
-            let previous = self
-                .rufin
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .replace(receiver.clone());
-            if let Err(error) = receiver.refresh().await {
-                *self.rufin.lock().unwrap_or_else(|p| p.into_inner()) = previous;
-                return Err(error);
-            }
-            Ok(previous)
+            let mut observing = connect.observe(&receiver.peer).await?;
+            let frame = observing.next().await?.ok_or("Device is unreachable")?;
+            receiver.mirror(frame).await?;
+            Ok::<_, String>(observing)
         })?;
-        if let Some(previous) = previous {
-            previous.cancel();
-        }
-        if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
-            plex.cancel();
-        }
+        receiver.follow(&self.runtime, observing);
+        *self.rufin.lock().unwrap_or_else(|p| p.into_inner()) = Some(receiver);
         *self.output.lock().unwrap_or_else(|p| p.into_inner()) = output;
-        let weak = Arc::downgrade(&receiver);
-        let task = self.runtime.spawn(async move {
-            loop {
-                let volume_changed = tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => false,
-                    _ = volume_wake.notified() => true,
-                };
-                let Some(receiver) = weak.upgrade() else {
-                    break;
-                };
-                if receiver.cancelled.load(Ordering::Acquire) {
-                    break;
-                }
-                let _command = if volume_changed {
-                    receiver.commands.lock().await
-                } else {
-                    let Ok(command) = receiver.commands.try_lock() else {
-                        continue;
-                    };
-                    command
-                };
-                let result = async {
-                    if volume_changed {
-                        let pending = std::mem::take(
-                            &mut *receiver.volume.lock().unwrap_or_else(|p| p.into_inner()),
-                        );
-                        let connect = receiver.connection()?;
-                        if let Some(value) = pending.value {
-                            connect
-                                .receiver_control(&receiver.peer, Control::Volume { value })
-                                .await?;
-                        }
-                        if let Some(value) = pending.persist {
-                            connect
-                                .receiver_control(&receiver.peer, Control::PersistVolume { value })
-                                .await?;
-                        }
-                    }
-                    receiver.refresh().await
-                }
-                .await;
-                if let Err(error) = result {
-                    let _ = receiver.playback.command(Command::OperationFailed(error));
-                }
-            }
-        });
-        *receiver.observer.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
         Ok(())
     }
 
+    /// Leaving a Rufin device continues its queue here, playing as it played there; a device
+    /// with nothing to continue leaves this device's queue empty.
     pub(super) fn leave_rufin(&self, cancelled: Arc<AtomicBool>) -> Result<(), String> {
         if cancelled.load(Ordering::Acquire) {
             return Err("Output selection cancelled".into());
@@ -511,17 +444,18 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
             .ok_or("The Rufin device is not selected")?;
+        let playing = receiver.playing.load(Ordering::Acquire);
         self.runtime.block_on(async {
             let _command = receiver.commands.lock().await;
-            receiver
+            let continued = receiver
                 .connection()?
-                .continue_from_with_state(&receiver.peer, None)
-                .await
-        })?;
-        receiver.cancel();
-        self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take();
-        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = PlaybackOutput::Local;
-        Ok(())
+                .continue_from(&receiver.peer, playing)
+                .await?;
+            if !continued {
+                self.return_empty_local().await?;
+            }
+            Ok(())
+        })
     }
 
     pub(super) fn play_rufin(&self, request: &PlayRequest) -> bool {
@@ -663,7 +597,7 @@ impl PlaybackOwner {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .value = Some(value);
-                receiver.volume_changed.notify_one();
+                receiver.control(&self.runtime, None);
                 return None;
             }
             Command::PersistVolume(value) => {
@@ -672,7 +606,7 @@ impl PlaybackOwner {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .persist = Some(value);
-                receiver.volume_changed.notify_one();
+                receiver.control(&self.runtime, None);
                 return None;
             }
             Command::SetMuted(muted) => Control::Mute { muted },
@@ -694,20 +628,7 @@ impl PlaybackOwner {
             Command::Clear { include_current } => Control::Clear { include_current },
             command => return Some(command),
         };
-        self.runtime.spawn(async move {
-            let _command = receiver.commands.lock().await;
-            let result = async {
-                receiver
-                    .connection()?
-                    .receiver_control(&receiver.peer, control)
-                    .await?;
-                receiver.refresh().await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = receiver.playback.command(Command::OperationFailed(error));
-            }
-        });
+        receiver.control(&self.runtime, Some(control));
         None
     }
 }

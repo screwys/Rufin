@@ -327,19 +327,6 @@ impl Sequence {
     pub(super) fn set_progress_millis(&mut self, value: u64) {
         self.progress_millis = value;
     }
-    pub(super) fn set_selected_duration(&mut self, millis: u64) {
-        let selected = self
-            .selected_index
-            .and_then(|i| self.id_at(i))
-            .map(|id| id.0);
-        if let Some(row) = self
-            .rows
-            .iter_mut()
-            .find(|row| row.occurrence_id == selected)
-        {
-            Arc::make_mut(row).track.metadata.duration_millis = millis.min(i64::MAX as u64) as i64;
-        }
-    }
     pub(super) fn set_repeat_mode(&mut self, value: RepeatMode) {
         if self.repeat_mode != value {
             self.repeat_mode = value;

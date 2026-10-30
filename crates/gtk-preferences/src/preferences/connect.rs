@@ -269,7 +269,16 @@ pub fn bind_controller(
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             loop {
                 let state = updates.borrow_and_update().clone();
-                let device = state.continuation_device().cloned();
+                let device = state
+                    .continuation
+                    .as_ref()
+                    .and_then(|continuation| {
+                        state
+                            .devices
+                            .iter()
+                            .find(|device| device.id == continuation.device)
+                    })
+                    .cloned();
                 let Some(row) = row.upgrade() else { return };
                 row.set_active(state.settings.enabled);
                 if let Some(button) = button.upgrade() {

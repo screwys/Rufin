@@ -192,9 +192,6 @@ impl Playback {
         self.request(move |player, _| Ok(player.page_entries(offset, limit)))
     }
 
-    pub(crate) fn continuation(&self) -> PlaybackResult<Option<playback::Continuation>> {
-        self.request(|player, sample| Ok(player.continuation(sample)))
-    }
     pub(crate) fn handoff_snapshot(
         &self,
     ) -> PlaybackResult<(

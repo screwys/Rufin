@@ -31,69 +31,6 @@ pub(super) struct PlexPlayback {
 }
 
 impl PlexPlayback {
-    pub(super) async fn cast_queue_snapshot(
-        &self,
-    ) -> Result<Option<playback::Continuation>, String> {
-        let _guard = self.commands.lock().await;
-        let timeline = self.current().await?;
-        self.observe(timeline.clone(), false).await?;
-        let mut snapshot = match self.playback.continuation().map_err(string_error)? {
-            Some(snapshot) => snapshot,
-            None => {
-                let queue = self.playback.handoff_snapshot().map_err(string_error)?.0;
-                let Some(current) = queue.current_index else {
-                    return Ok(None);
-                };
-                let stored = self.settings.load().ui;
-                playback::Continuation {
-                    header: playback::ContinuationHeader {
-                        total: queue.entries.len(),
-                        current,
-                        position_millis: queue.progress_millis.max(0) as u64,
-                        repeat: queue.repeat_mode,
-                        shuffled: queue.shuffled,
-                        auto_dj: stored.auto_dj_enabled,
-                        auto_dj_refill_threshold: usize::from(
-                            stored.application.auto_dj_refill_threshold,
-                        ),
-                        playback_rate: 1.0,
-                        desired_playing: false,
-                        listen: None,
-                    },
-                    queue,
-                }
-            }
-        };
-        let items = self.all_items(&timeline, &self.cancelled).await?;
-        snapshot.queue.entries = self
-            .catalog
-            .queue_entries(
-                library::QueueLoad::media_uris(
-                    items.iter().map(|item| item.media_uri.clone()),
-                    playback::Provenance::Manual,
-                ),
-                None,
-            )
-            .await
-            .map_err(string_error)?
-            .entries
-            .into();
-        snapshot.queue.ids = Arc::from([]);
-        snapshot.queue.order = (0..items.len() as u32).collect();
-        let current = items
-            .iter()
-            .position(|item| Some(item.occurrence_id) == timeline.play_queue_item_id)
-            .ok_or("The Plex player has no current queue item")?;
-        let offset = current.saturating_sub(snapshot.header.current);
-        for row in &mut snapshot.queue.rows {
-            Arc::make_mut(row).position += offset;
-        }
-        snapshot.queue.current_index = Some(current);
-        snapshot.header.current = current;
-        snapshot.header.total = items.len();
-        Ok(Some(snapshot))
-    }
-
     pub(super) async fn stop_for_continuation(&self) -> Result<(), String> {
         let _guard = self.commands.lock().await;
         self.control(|client| client.stop()).await?;

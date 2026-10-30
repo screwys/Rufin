@@ -383,41 +383,6 @@ impl Player {
         (rows, self.sequence.total())
     }
 
-    pub(super) fn continuation(&mut self, sample: &ClockSample) -> Option<playback::Continuation> {
-        if self.status() == TransportStatus::Stopped {
-            return None;
-        }
-        self.advance_external_clock(sample);
-        if let Some(current) = self.current_run.as_mut() {
-            current.advance_clock(sample.monotonic_millis);
-        }
-        let current = self.sequence.selected_index()?;
-        Some(playback::Continuation {
-            header: playback::ContinuationHeader {
-                total: self.sequence.total(),
-                current,
-                position_millis: self.sequence.progress_millis(),
-                repeat: self.sequence.repeat_mode(),
-                shuffled: self.sequence.shuffle_enabled(),
-                auto_dj: self.auto_dj_enabled,
-                auto_dj_refill_threshold: self.auto_dj_refill_threshold,
-                playback_rate: self.settings.playback_rate,
-                desired_playing: self.desired_playing(),
-                listen: self
-                    .current_run
-                    .as_ref()
-                    .map(|run| playback::ContinuedListen {
-                        play_id: run.play_id.clone(),
-                        started_at_unix_seconds: run.started_at_unix_seconds,
-                        local_period: run.local_period.clone(),
-                        audible_millis: run.audible_millis,
-                        qualified: run.qualified,
-                    }),
-            },
-            queue: self.sequence.snapshot(),
-        })
-    }
-
     pub(super) fn external_queue_extent(&self) -> Option<(usize, usize)> {
         self.external
             .as_ref()

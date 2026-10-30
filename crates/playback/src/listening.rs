@@ -29,43 +29,6 @@ pub struct SourceReportFact {
     pub failed: bool,
 }
 
-/// The existing listen moves with playback; delivery jobs do not.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ContinuedListen {
-    pub play_id: String,
-    pub started_at_unix_seconds: Option<i64>,
-    pub local_period: Option<String>,
-    pub audible_millis: u64,
-    pub qualified: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ContinuationHeader {
-    pub total: usize,
-    pub current: usize,
-    pub position_millis: u64,
-    pub repeat: crate::RepeatMode,
-    pub shuffled: bool,
-    pub auto_dj: bool,
-    pub auto_dj_refill_threshold: usize,
-    pub playback_rate: f64,
-    #[serde(default = "continuation_playing")]
-    pub desired_playing: bool,
-    pub listen: Option<ContinuedListen>,
-}
-
-fn continuation_playing() -> bool {
-    true
-}
-
-/// Membership and resolved order share the player's compact, immutable arrays.
-/// Transport reads metadata from the Store in bounded pages.
-#[derive(Clone, Debug)]
-pub struct Continuation {
-    pub header: ContinuationHeader,
-    pub queue: library::QueueRestore,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunEndReason {
     Completed,

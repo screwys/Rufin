@@ -734,12 +734,6 @@ impl PlaybackOwner {
         if *self.output.lock().unwrap_or_else(|p| p.into_inner()) == selected {
             return Ok(());
         }
-        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
-        {
-            self.select_rufin(selected, cancelled)?;
-            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
-            return Ok(());
-        }
         if self
             .rufin
             .lock()
@@ -753,6 +747,21 @@ impl PlaybackOwner {
                 );
                 return Ok(());
             }
+        }
+        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
+        {
+            // The Plex player's queue comes back here first, and goes on from here.
+            if self
+                .plex
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_some()
+            {
+                self.leave_plex(cancelled.clone())?;
+            }
+            self.select_rufin(selected, cancelled)?;
+            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
+            return Ok(());
         }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::PlexCompanion)
         {
@@ -804,10 +813,7 @@ impl PlaybackOwner {
     pub fn snapshot(&self) -> Result<library::QueueRestore, String> {
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
-            return self
-                .runtime
-                .block_on(receiver.snapshot())
-                .map(|snapshot| snapshot.map(|snapshot| snapshot.queue).unwrap_or_default());
+            return self.runtime.block_on(receiver.queue());
         }
         let Some(active) = self.active() else {
             return Ok(library::QueueRestore::default());

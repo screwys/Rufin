@@ -10,7 +10,13 @@ pub(super) fn routes() -> Router<ProductHandles> {
 async fn continuation(
     State(products): State<ProductHandles>,
 ) -> axum::Json<Option<rufin_core::connect::Device>> {
-    axum::Json(products.connect.status().continuation_device().cloned())
+    let status = products.connect.status();
+    axum::Json(status.continuation.and_then(|continuation| {
+        status
+            .devices
+            .into_iter()
+            .find(|device| device.id == continuation.device)
+    }))
 }
 
 async fn status(State(products): State<ProductHandles>) -> axum::Json<rufin_core::connect::Status> {
