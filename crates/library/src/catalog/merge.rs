@@ -740,10 +740,13 @@ async fn native_states(
         rows: &[(&str, &NativeUserState)],
         state: fn(&mut R) -> &mut NativeState,
     ) -> LibraryResult<()> {
+        let rows = rows
+            .iter()
+            .filter(|(_, incoming)| **incoming != NativeUserState::default())
+            .collect::<Vec<_>>();
+        let objects = rows.iter().map(|(object, _)| *object).collect::<Vec<_>>();
+        write.read_objects::<R>(source, None, &objects).await?;
         for (object, incoming) in rows {
-            if **incoming == NativeUserState::default() {
-                continue;
-            }
             let Some(mut record) = find::<R>(write, source, None, object).await? else {
                 continue;
             };

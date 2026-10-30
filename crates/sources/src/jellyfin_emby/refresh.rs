@@ -408,7 +408,7 @@ impl JellyfinEmbySource {
         // User data: Emby dates its saves, so it lists what changed since. Jellyfin does not,
         // so it lists every item's user data, which also names every track the server holds.
         let emby = self.kind == ServerKind::Emby;
-        let mut tracks = HashSet::new();
+        let mut listed = (!emby).then(HashSet::new);
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
@@ -436,8 +436,8 @@ impl JellyfinEmbySource {
                 };
                 let Some(raw) = id(&item["Id"]) else { continue };
                 let object = self.kind.object_id(kind, &raw);
-                if kind == "track" && !emby {
-                    tracks.insert(object.clone());
+                if let Some(listed) = listed.as_mut().filter(|_| kind == "track") {
+                    listed.insert(object.clone());
                 }
                 states.entry(kind).or_default().push((
                     object,
@@ -453,7 +453,6 @@ impl JellyfinEmbySource {
         }
         // On Emby the count shows deletions; only then are the ids listed.
         let indexed = observation.catalog.indexed_tracks(observation.source);
-        let mut listed = (!emby).then_some(tracks);
         if emby {
             let page = self
                 .get_json::<Value>(items_url(0, 0, "Audio", "")?)
