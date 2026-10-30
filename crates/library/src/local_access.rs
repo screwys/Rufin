@@ -58,22 +58,31 @@ impl LocalAccess {
 }
 
 impl MappedFile {
-    /// The file when it is a regular file inside the mapped folder with the size the server
-    /// reports. A path that cannot be looked at is not there. This blocks on the file system.
+    /// The file when it is a regular file inside the mapped folder. A path that cannot be
+    /// looked at is not there. This blocks on the file system.
     pub fn locate(&self) -> Option<LocalMediaLocation> {
-        let sized = |actual: Option<u64>| {
-            self.size
-                .is_none_or(|size| actual.is_none_or(|actual| actual == size))
-        };
+        self.find().map(|(location, _)| location)
+    }
+
+    /// The file when playback may use it: located, and the size the server reports, so a
+    /// different file under the same name streams instead. This blocks on the file system.
+    pub fn locate_playable(&self) -> Option<LocalMediaLocation> {
+        let (location, actual) = self.find()?;
+        self.size
+            .is_none_or(|size| actual.is_none_or(|actual| actual == size))
+            .then_some(location)
+    }
+
+    fn find(&self) -> Option<(LocalMediaLocation, Option<u64>)> {
         if self.root.starts_with("content:") {
             let components = self.path.split('/').map(str::to_owned).collect::<Vec<_>>();
             let (uri, size) = DOCUMENTS.get()?(&self.root, &components)?;
-            return sized(size).then_some(LocalMediaLocation::Document(uri));
+            return Some((LocalMediaLocation::Document(uri), size));
         }
         let path = std::fs::canonicalize(&self.path).ok()?;
         let metadata = std::fs::metadata(&path).ok()?;
-        (path.starts_with(&self.root) && metadata.is_file() && sized(Some(metadata.len())))
-            .then_some(LocalMediaLocation::File(path))
+        (path.starts_with(&self.root) && metadata.is_file())
+            .then(|| (LocalMediaLocation::File(path), Some(metadata.len())))
     }
 }
 

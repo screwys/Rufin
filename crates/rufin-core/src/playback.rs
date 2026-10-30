@@ -1328,7 +1328,7 @@ impl Candidates {
         if let Some(uri) = self
             .mapped
             .as_ref()
-            .and_then(library::MappedFile::locate)
+            .and_then(library::MappedFile::locate_playable)
             .map(|location| match location {
                 library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
                     .map(String::from)
