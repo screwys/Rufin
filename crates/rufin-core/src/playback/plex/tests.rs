@@ -171,7 +171,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,
-        root.path().join("playback"),
+        &root.path().join("playback"),
         false,
     );
     let stored = settings.load();

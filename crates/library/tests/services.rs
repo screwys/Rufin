@@ -5,621 +5,191 @@ use library::{
 
 use super::support::{PlaybackLoudness, connection, fixture, persist_queue};
 
-#[tokio::test]
-async fn loudness_selects_one_unit_and_source_facts_win() {
-    let fixture = fixture().await;
-    let cancel = ReadCancellation::new();
-    let work = fixture
-        .catalog
-        .next_missing_track_loudness(fixture.source, None, &cancel)
-        .await
-        .expect("missing Track loudness")
-        .unwrap();
-    assert_eq!(work.track_key, fixture.tracks[0]);
-    let below_gate = LoudnessMeasurement {
-        analysis_key: work.expected_analysis_key,
-        integrated_lufs: None,
-        true_peak: Some(1.04),
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    assert!(
-        fixture
-            .catalog
-            .write_track_analyzed_loudness(fixture.source, work.track_key, &below_gate)
-            .await
-            .expect("store completed analysis below the loudness gate")
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .playback_loudness(&work.media_uri, &cancel)
-            .await
-            .unwrap()
-            .0,
-        Some(below_gate.clone())
-    );
-    assert!(
-        fixture
-            .catalog
-            .r128_tag_write_page(fixture.source, None, 64, &cancel)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_ne!(
-        fixture
-            .catalog
-            .next_missing_track_loudness(fixture.source, None, &cancel)
-            .await
-            .unwrap()
-            .unwrap()
-            .track_key,
-        work.track_key
-    );
-    let analyzed = LoudnessMeasurement {
-        analysis_key: work.expected_analysis_key,
-        integrated_lufs: Some(-14.0),
-        true_peak: Some(0.8),
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    assert!(
-        fixture
-            .catalog
-            .write_track_analyzed_loudness(fixture.source, work.track_key, &analyzed)
-            .await
-            .expect("write analyzed loudness")
-    );
-    let tag_page = fixture
-        .catalog
-        .r128_tag_write_page(fixture.source, None, 64, &cancel)
-        .await
-        .expect("read Rufin-owned R128 tag page");
-    assert_eq!(tag_page.len(), 1);
-    assert_eq!(tag_page[0].track_key, work.track_key);
-    assert_eq!(tag_page[0].track_lufs, Some(-14.0));
-    assert!(
-        !fixture
-            .catalog
-            .write_track_analyzed_loudness(
-                fixture.source,
-                work.track_key,
-                &LoudnessMeasurement {
-                    analysis_key: [2; 32],
-                    integrated_lufs: Some(-8.0),
-                    true_peak: Some(1.0),
-                    replay_gain_db: None,
-                    replay_gain_peak: None
-                }
-            )
-            .await
-            .expect("reject a stale work identity")
-    );
-    let source_fact = LoudnessMeasurement {
-        analysis_key: work.expected_analysis_key,
-        integrated_lufs: Some(-11.0),
-        true_peak: None,
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    let mut input = library::TrackObservation {
-        user_data: library::NativeUserState {
-            favorite: Some(false),
-            rating: (Some(Some(5))).map(|rating| rating.map(|value| value * 10)),
-            ..Default::default()
-        },
-        metadata: library::TrackMetadata {
-            title: "Alpha".into(),
-            album: "Album A".into(),
-            artist: "Artist A".into(),
-            sort_text: "alpha".into(),
-            duration_millis: 180_000,
-            disc_number: 1,
-            track_number: 1,
-            year: Some(2020),
-            date_added: Some("2024-01-02".into()),
-            source_format: Some("FLAC".into()),
-            comment: Some("Note".into()),
-            bpm: Some(100),
-            source_loudness: Some(library::NativeGain {
-                integrated_lufs: Some(-11.0),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-        object_id: "track-0".into(),
-        album_object_id: Some("album-a".into()),
-        audio_revision: Some(work.expected_analysis_key),
-        ..Default::default()
-    };
-
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
-    {
-        let write = library::CatalogBatch {
-            tracks: vec![input.clone()],
-            ..Default::default()
-        };
-
-        scan_observation.apply_catalog(&write, true).await.unwrap();
-    };
-    assert!(
-        fixture
-            .catalog
-            .r128_tag_write_page(fixture.source, None, 64, &cancel)
-            .await
-            .expect("source R128 tag is not Rufin-owned")
-            .is_empty()
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[0], &cancel)
-            .await
-            .expect("read Track loudness")
-            .0,
-        Some(source_fact.clone())
-    );
-
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
-    input.cue_path = Some("/music/changed.cue".into());
-    input.cue_start_millis = Some(1_000);
-    input.cue_end_millis = Some(181_000);
-    input.audio_revision = Some([99; 32]);
-    input.metadata.source_loudness = None;
-    input.metadata.artists = vec![library::ArtistCredit {
-        object_id: "artist-a".into(),
-        name: "Artist A".into(),
-        ..Default::default()
-    }];
-    input.metadata.genres = vec![library::TagReference {
-        object_id: "genre".into(),
-        name: "Rock".into(),
-        ..Default::default()
-    }];
-    input.metadata.moods = vec![library::TagReference {
-        object_id: "mood".into(),
-        name: "Energetic".into(),
-        sort_text: Some("energetic".into()),
-    }];
-    {
-        let write = library::CatalogBatch {
-            tracks: vec![input.clone()],
-            ..Default::default()
-        };
-
-        scan_observation.apply_catalog(&write, true).await.unwrap();
-    };
-    assert!(scan_observation.changed());
-    let changed = fixture
-        .catalog
-        .next_missing_track_loudness(fixture.source, None, &cancel)
-        .await
-        .expect("changed Track loudness work")
-        .unwrap();
-    assert_eq!(changed.track_key, work.track_key);
-    assert_ne!(changed.expected_analysis_key, work.expected_analysis_key);
-
-    assert!(
-        !fixture
-            .catalog
-            .write_track_analyzed_loudness(
-                fixture.source,
-                changed.track_key,
-                &LoudnessMeasurement {
-                    analysis_key: work.expected_analysis_key,
-                    integrated_lufs: Some(-9.0),
-                    true_peak: Some(0.7),
-                    replay_gain_db: None,
-                    replay_gain_peak: None
-                }
-            )
-            .await
-            .expect("reject stale analyzer completion")
-    );
-    let current_source = LoudnessMeasurement {
-        analysis_key: changed.expected_analysis_key,
-        integrated_lufs: Some(-10.0),
-        true_peak: None,
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    input.metadata.source_loudness = Some(library::NativeGain {
-        integrated_lufs: Some(-10.0),
-        ..Default::default()
-    });
-
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
-    {
-        let write = library::CatalogBatch {
-            tracks: vec![input.clone()],
-            ..Default::default()
-        };
-
-        scan_observation.apply_catalog(&write, true).await.unwrap();
-    };
-    assert!(
-        !fixture
-            .catalog
-            .write_track_analyzed_loudness(
-                fixture.source,
-                changed.track_key,
-                &LoudnessMeasurement {
-                    analysis_key: changed.expected_analysis_key,
-                    integrated_lufs: Some(-9.0),
-                    true_peak: Some(0.7),
-                    replay_gain_db: None,
-                    replay_gain_peak: None
-                }
-            )
-            .await
-            .expect("do not replace newer source fact")
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[0], &cancel)
-            .await
-            .unwrap()
-            .0,
-        Some(current_source)
-    );
-
-    let album = fixture
-        .catalog
-        .next_missing_album_loudness(fixture.source, None, &cancel)
-        .await
-        .expect("missing Album loudness")
-        .unwrap();
-    assert_eq!(album.tracks.len(), 2);
-    assert!(
-        fixture
-            .catalog
-            .write_album_analyzed_loudness(
-                fixture.source,
-                album.album_key,
-                &LoudnessMeasurement {
-                    analysis_key: album.expected_analysis_key,
-                    integrated_lufs: None,
-                    true_peak: Some(0.0),
-                    replay_gain_db: None,
-                    replay_gain_peak: None,
-                }
-            )
-            .await
-            .expect("store an album below the loudness gate")
-    );
-    assert_ne!(
-        fixture
-            .catalog
-            .next_missing_album_loudness(fixture.source, None, &cancel)
-            .await
-            .unwrap()
-            .unwrap()
-            .album_key,
-        album.album_key
-    );
-    let album_measurement = LoudnessMeasurement {
-        analysis_key: album.expected_analysis_key,
-        integrated_lufs: Some(-13.0),
-        true_peak: Some(0.85),
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    assert!(
-        fixture
-            .catalog
-            .write_album_analyzed_loudness(fixture.source, album.album_key, &album_measurement)
-            .await
-            .expect("write Album loudness")
-    );
-    let old_album_key = album.expected_analysis_key;
-    let quiet_track = album
-        .tracks
-        .iter()
-        .find(|track| track.track_key == fixture.tracks[1])
-        .unwrap();
-    assert!(
-        fixture
-            .catalog
-            .write_track_analyzed_loudness(
-                fixture.source,
-                quiet_track.track_key,
-                &LoudnessMeasurement {
-                    analysis_key: quiet_track.expected_analysis_key,
-                    ..below_gate
-                }
-            )
-            .await
-            .unwrap()
-    );
-    let tag_page = fixture
-        .catalog
-        .r128_tag_write_page(fixture.source, None, 64, &cancel)
-        .await
-        .unwrap();
-    let quiet_tags = tag_page
-        .iter()
-        .find(|row| row.track_key == quiet_track.track_key)
-        .unwrap();
-    assert_eq!(quiet_tags.track_lufs, None);
-    assert_eq!(quiet_tags.album_lufs, Some(-13.0));
-    fixture
-        .catalog
-        .write_local_locators(&[library::LocalLocatorWrite {
-            source_id: Some("source".into()),
-            media_uri: fixture.track_uris[1].clone(),
-            origin: "mapping".into(),
-            path: "/generic/local-track.flac".to_string(),
-            root: "/generic".to_string(),
-            relative_path: "local-track.flac".to_string(),
-            access_uri: "file:///generic/local-track.flac".to_string(),
-        }])
-        .await
-        .expect("install exact Local audio identity");
-    let local_analysis = LoudnessMeasurement {
-        analysis_key: [77; 32],
-        integrated_lufs: Some(-18.0),
-        true_peak: Some(0.6),
-        replay_gain_db: None,
-        replay_gain_peak: None,
-    };
-    assert!(
-        fixture
-            .catalog
-            .write_track_analyzed_loudness(fixture.source, fixture.tracks[1], &local_analysis)
-            .await
-            .unwrap()
-    );
-
-    let mut scan_observation = async {
-        if {
-            (&fixture.catalog).loaded().await;
-            (&fixture.catalog).source_key(&library::SourceId::new("source"))
-        }
-        .is_none()
-        {
-            (&fixture.catalog)
-                .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
-                .await?;
-        }
-        fixture.catalog.observe("source", None).await
-    }
-    .await
-    .expect("begin membership-changing Inventory");
-    scan_observation.start_observation().await.unwrap();
-    for (id, title, artist, sort, date) in [
-        ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
-        ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
-    ] {
-        {
-            let write = library::CatalogBatch {
-                albums: vec![library::AlbumObservation {
-                    user_data: library::NativeUserState {
-                        favorite: Some(false),
-                        ..Default::default()
-                    },
-                    metadata: library::AlbumMetadata {
-                        title: title.to_owned(),
-                        artist: artist.to_owned(),
-                        sort_text: sort.to_owned(),
-                        year: Some(2024),
-                        release_date: Some(date.to_owned()),
-                        date_added: Some(date.to_owned()),
-                        is_compilation: Some(id == "album-a"),
-                        ..Default::default()
-                    },
-                    object_id: id.to_owned(),
+/// Observes one fixture track again with this album, audio revision and source gain.
+async fn observe_track(
+    catalog: &library::Catalog,
+    index: i64,
+    album: &str,
+    revision: [u8; 32],
+    gain: Option<f64>,
+) {
+    let mut observation = catalog.observe("source", None).await.unwrap();
+    let batch = library::CatalogBatch {
+        tracks: vec![library::TrackObservation {
+            metadata: library::TrackMetadata {
+                title: format!("Track {index}"),
+                sort_text: format!("track {index}"),
+                duration_millis: 180_000,
+                disc_number: 1,
+                track_number: index + 1,
+                source_loudness: gain.map(|lufs| library::NativeGain {
+                    integrated_lufs: Some(lufs),
                     ..Default::default()
-                }],
+                }),
                 ..Default::default()
-            };
-
-            scan_observation.apply_catalog(&write, true).await.unwrap();
-        };
-    }
-    for (index, album_id, artist, title) in [
-        (0, "album-a", "Artist A", "Alpha"),
-        (1, "album-a", "Artist A", "Beta"),
-        (2, "album-a", "Artist B", "Gamma"),
-        (3, "album-b", "Artist B", "Delta"),
-    ] {
-        {
-            let write = library::CatalogBatch {
-                tracks: vec![library::TrackObservation {
-                    user_data: library::NativeUserState {
-                        favorite: Some(false),
-                        ..Default::default()
-                    },
-                    metadata: library::TrackMetadata {
-                        title: title.to_owned(),
-                        album: (if album_id == "album-a" {
-                            "Album A"
-                        } else {
-                            "Album B"
-                        })
-                        .to_owned(),
-                        artist: artist.to_owned(),
-                        sort_text: title.to_lowercase(),
-                        duration_millis: 180_000 + index * 1_000,
-                        disc_number: 1,
-                        track_number: index + 1,
-                        year: Some(2020 + index),
-                        date_added: Some("2024-01-02".into()),
-                        source_format: Some("FLAC".into()),
-                        comment: Some("Note".into()),
-                        bpm: Some(100 + index),
-                        source_loudness: match index {
-                            1 => Some(library::NativeGain {
-                                integrated_lufs: Some(-15.0),
-                                ..Default::default()
-                            }),
-                            2 => Some(library::NativeGain {
-                                integrated_lufs: Some(-16.0),
-                                true_peak: Some(0.75),
-                                replay_gain_db: Some(-4.5),
-                                replay_gain_peak: Some(0.9),
-                            }),
-                            _ => None,
-                        },
-                        album_loudness: (index == 3).then_some(library::NativeGain {
-                            integrated_lufs: Some(-13.0),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                    object_id: format!("track-{index}"),
-                    album_object_id: Some(album_id.to_owned()),
-                    audio_revision: Some([index as u8 + 10; 32]),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
-
-            scan_observation.apply_catalog(&write, true).await.unwrap();
-        };
-    }
-    scan_observation
-        .complete_source_observation(
-            &[
-                "track", "album", "artist", "genre", "mood", "folder", "playlist",
-            ],
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    scan_observation
-        .complete_source_observation(&[], None, None)
-        .await
-        .unwrap();
-    assert!(scan_observation.changed());
-    assert!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[0], &cancel)
-            .await
-            .unwrap()
-            .0
-            .is_none(),
-        "unstaged old source fact is removed"
-    );
-    assert_eq!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[1], &cancel)
-            .await
-            .unwrap()
-            .0,
-        Some(local_analysis),
-        "a source fact cannot replace analysis of current local audio"
-    );
-    let next = fixture
-        .catalog
-        .next_missing_track_loudness(fixture.source, Some(fixture.tracks[0]), &cancel)
-        .await
-        .unwrap();
-    assert!(next.is_none_or(|work| work.track_key != fixture.tracks[1]));
-    let staged_track = fixture
-        .catalog
-        .playback_loudness(&fixture.track_uris[2], &cancel)
-        .await
-        .unwrap()
-        .0
-        .unwrap();
-    assert_eq!(staged_track.integrated_lufs, Some(-16.0));
-    assert_eq!(staged_track.true_peak, Some(0.75));
-    assert_eq!(staged_track.replay_gain_db, Some(-4.5));
-    assert_eq!(staged_track.replay_gain_peak, Some(0.9));
-    assert_eq!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[3], &cancel)
-            .await
-            .unwrap()
-            .1
-            .unwrap()
-            .integrated_lufs,
-        Some(-13.0)
-    );
-    let changed_album = fixture
-        .catalog
-        .next_missing_album_loudness(fixture.source, None, &cancel)
-        .await
-        .expect("changed Album membership work")
-        .unwrap();
-    assert_eq!(changed_album.album_key, album.album_key);
-    assert_ne!(changed_album.expected_analysis_key, old_album_key);
-    assert!(
-        fixture
-            .catalog
-            .write_album_analyzed_loudness(
-                fixture.source,
-                changed_album.album_key,
-                &LoudnessMeasurement {
-                    analysis_key: changed_album.expected_analysis_key,
-                    integrated_lufs: Some(-12.5),
-                    true_peak: Some(0.82),
-                    replay_gain_db: None,
-                    replay_gain_peak: None
-                }
-            )
-            .await
-            .expect("replace stale analyzed Album value")
-    );
-
-    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
-    {
-        let write = library::CatalogBatch {
-            tracks: vec![library::TrackObservation {
-                metadata: library::TrackMetadata {
-                    title: "Delta".into(),
-                    sort_text: "delta".into(),
-                    ..Default::default()
-                },
-                object_id: "track-3".into(),
-                album_object_id: Some("album-b".into()),
-                audio_revision: Some([43; 32]),
-                ..Default::default()
-            }],
+            },
+            object_id: format!("track-{index}"),
+            album_object_id: Some(album.into()),
+            audio_revision: Some(revision),
             ..Default::default()
-        };
-
-        scan_observation.apply_catalog(&write, true).await.unwrap();
+        }],
+        ..Default::default()
     };
-    assert!(
-        fixture
-            .catalog
-            .playback_loudness(&fixture.track_uris[3], &cancel)
-            .await
-            .unwrap()
-            .1
-            .is_none(),
-        "unsupplied album gain must not acquire a new audio identity"
-    );
+    observation.apply_catalog(&batch, true).await.unwrap();
 }
 
 #[tokio::test]
-async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
+async fn loudness_is_keyed_by_audio_hash_and_source_facts_win() {
     let fixture = fixture().await;
+    let catalog = &fixture.catalog;
+    let source = fixture.source;
+    let tracks = &fixture.tracks;
+    let uris = &fixture.track_uris;
     let cancel = ReadCancellation::new();
-    let track = fixture
-        .catalog
-        .next_missing_track_loudness(fixture.source, None, &cancel)
-        .await
-        .expect("select provider-resolved Track loudness")
-        .expect("provider Track loudness work");
-    assert_eq!(track.track_key, fixture.tracks[0]);
-    assert_eq!(track.media_uri, fixture.track_uris[0]);
+    let measured = |lufs: Option<f64>, peak: f64| LoudnessMeasurement {
+        analysis_key: [0; 32],
+        integrated_lufs: lufs,
+        true_peak: Some(peak),
+        replay_gain_db: None,
+        replay_gain_peak: None,
+    };
+    let lufs = async |uri: &str| {
+        let (track, album) = catalog.playback_loudness(uri, &cancel).await.unwrap();
+        (
+            track.and_then(|value| value.integrated_lufs),
+            album.and_then(|value| value.integrated_lufs),
+        )
+    };
 
-    let album = fixture
-        .catalog
-        .next_missing_album_loudness(fixture.source, None, &cancel)
+    // No hash is known yet, so every track is work.
+    assert_eq!(
+        catalog.loudness_work(source, None, 64).await.unwrap(),
+        *tracks
+    );
+    // A hash is recorded only against the revision that was hashed.
+    assert!(
+        !catalog
+            .put_audio_hash(tracks[0], [9; 32], [50; 32])
+            .await
+            .unwrap()
+    );
+    assert!(
+        catalog
+            .put_audio_hash(tracks[0], [1; 32], [50; 32])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !catalog
+            .put_audio_hash(tracks[0], [1; 32], [50; 32])
+            .await
+            .unwrap()
+    );
+
+    // A measurement below the gate is stored; it is no tag to write.
+    assert!(
+        catalog
+            .put_loudness([50; 32], &measured(None, 1.04))
+            .await
+            .unwrap()
+    );
+    let (track, _) = catalog.playback_loudness(&uris[0], &cancel).await.unwrap();
+    assert_eq!(track.and_then(|value| value.true_peak), Some(1.04));
+    assert_eq!(
+        catalog.loudness_work(source, None, 64).await.unwrap(),
+        tracks[1..]
+    );
+    assert!(
+        catalog
+            .r128_tag_write_page(source, None, 64, &cancel)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        catalog
+            .put_loudness([50; 32], &measured(Some(-14.0), 0.8))
+            .await
+            .unwrap()
+    );
+    let page = catalog
+        .r128_tag_write_page(source, None, 64, &cancel)
         .await
-        .expect("select provider-resolved Album loudness")
-        .expect("provider Album loudness work");
-    assert_eq!(album.tracks.len(), 2);
-    assert_eq!(album.tracks[0].media_uri, fixture.track_uris[0]);
+        .unwrap();
+    assert_eq!(
+        page.iter()
+            .map(|row| (row.track_key, row.track_lufs))
+            .collect::<Vec<_>>(),
+        [(tracks[0], Some(-14.0))]
+    );
+    // Another track of the same audio shares the result.
+    assert!(
+        catalog
+            .put_audio_hash(tracks[2], [3; 32], [50; 32])
+            .await
+            .unwrap()
+    );
+    assert_eq!(lufs(&uris[2]).await.0, Some(-14.0));
+
+    // A source gain wins over analysis, and an unchanged revision keeps the hash.
+    observe_track(catalog, 0, "album-a", [1; 32], Some(-11.0)).await;
+    assert_eq!(lufs(&uris[0]).await.0, Some(-11.0));
+    let page = catalog
+        .r128_tag_write_page(source, None, 64, &cancel)
+        .await
+        .unwrap();
+    assert!(page.iter().all(|row| row.track_key != tracks[0]));
+    observe_track(catalog, 0, "album-a", [1; 32], None).await;
+    assert_eq!(lufs(&uris[0]).await.0, Some(-14.0));
+    // A new revision forgets the hash, so the audio is hashed again.
+    observe_track(catalog, 0, "album-a", [99; 32], None).await;
+    assert_eq!(lufs(&uris[0]).await.0, None);
+    assert!(
+        catalog
+            .loudness_work(source, None, 64)
+            .await
+            .unwrap()
+            .contains(&tracks[0])
+    );
+
+    // An album result needs every indexed member's hash.
+    let work = catalog.album_loudness_work(source, None, 16).await.unwrap();
+    let (album, members) = work[0].clone();
+    assert_eq!(members, tracks[..2]);
+    assert!(
+        !catalog
+            .put_album_loudness(album, &measured(Some(-13.0), 0.85))
+            .await
+            .unwrap()
+    );
+    assert!(
+        catalog
+            .put_audio_hash(tracks[0], [99; 32], [60; 32])
+            .await
+            .unwrap()
+    );
+    assert!(
+        catalog
+            .put_audio_hash(tracks[1], [2; 32], [61; 32])
+            .await
+            .unwrap()
+    );
+    assert!(
+        catalog
+            .put_album_loudness(album, &measured(Some(-13.0), 0.85))
+            .await
+            .unwrap()
+    );
+    assert_eq!(lufs(&uris[1]).await.1, Some(-13.0));
+    let work = catalog.album_loudness_work(source, None, 16).await.unwrap();
+    assert!(work.iter().all(|(key, _)| *key != album));
+
+    // A membership change misses the stored album result.
+    observe_track(catalog, 2, "album-a", [3; 32], None).await;
+    assert_eq!(lufs(&uris[1]).await.1, None);
+    assert_eq!(lufs(&uris[2]).await.0, Some(-14.0));
+    let work = catalog.album_loudness_work(source, None, 16).await.unwrap();
+    assert_eq!(work[0], (album, vec![tracks[0], tracks[1], tracks[2]]));
 }
 
 #[tokio::test]

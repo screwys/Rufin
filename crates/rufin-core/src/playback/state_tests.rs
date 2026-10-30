@@ -93,7 +93,7 @@ pub(in crate::playback) async fn seeded(
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,
-        directory.path().join("playback"),
+        &directory.path().join("playback"),
         false,
     );
     let stored = settings.load();

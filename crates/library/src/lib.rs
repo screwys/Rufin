@@ -101,6 +101,7 @@ pub use collections::{
 pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
+pub use fingerprint::FingerprintRow;
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
     HomeSectionKind, HomeSectionRows, HomeTrackRow,
@@ -117,7 +118,7 @@ pub use local::{
     DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState,
     LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
 };
-pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
+pub use loudness::{LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;
 pub use mosaics::MosaicOwner;
 pub use playlist_format::{
@@ -143,7 +144,6 @@ pub use smart_playlists::{
     SmartPlaylistWrite,
 };
 pub use tracks::{TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView};
-pub use waveform::WaveformCacheRow;
 
 use thiserror::Error;
 

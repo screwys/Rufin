@@ -40,7 +40,7 @@ impl Catalog {
     pub async fn link_fingerprint_lookup(&self, uri: &str, key: &str) -> LibraryResult<()> {
         let mut write = self.write().await?;
         if sqlx::query(
-            "UPDATE fingerprint_cache SET lookup_key=?2 WHERE media_uri=?1 AND lookup_key<>?2",
+            "UPDATE fingerprint SET lookup_key=?2 WHERE audio_hash=(SELECT details.audio_hash FROM tracks JOIN track_details details USING(track_key) WHERE media_uri=?1) AND lookup_key<>?2",
         )
         .bind(uri)
         .bind(key)
@@ -61,7 +61,7 @@ impl Catalog {
         now: i64,
     ) -> LibraryResult<Vec<String>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT fingerprint.media_uri FROM fingerprint_cache fingerprint JOIN metadata_lookup_cache lookup ON lookup.key=fingerprint.lookup_key WHERE lookup.expires_at>?2 AND fingerprint.media_uri IN (SELECT value FROM json_each(?1))")
+        Ok(sqlx::query_scalar("SELECT track.media_uri FROM tracks track JOIN track_details details USING(track_key) JOIN fingerprint ON fingerprint.audio_hash=details.audio_hash JOIN metadata_lookup_cache lookup ON lookup.key=fingerprint.lookup_key WHERE lookup.expires_at>?2 AND track.media_uri IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(uris)?).bind(now).fetch_all(&mut *reader).await?)
     }
 }
