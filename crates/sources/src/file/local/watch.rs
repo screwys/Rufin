@@ -72,6 +72,17 @@ impl LocalChangeFeed {
         let listener = std::thread::current();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = match event {
+                // A deleted or moved root takes its watch along; the feed reconnects to watch
+                // what returns at its path.
+                Ok(event)
+                    if matches!(
+                        event.kind,
+                        EventKind::Remove(_)
+                            | EventKind::Modify(ModifyKind::Name(RenameMode::From))
+                    ) && event.paths.iter().any(|path| roots.contains(path)) =>
+                {
+                    FeedMessage::Failed("A Local music folder was removed.".to_string())
+                }
                 Ok(mut event) if !matches!(event.kind, EventKind::Access(_)) => {
                     if !event.paths.is_empty() {
                         event.paths.retain(|path| {
