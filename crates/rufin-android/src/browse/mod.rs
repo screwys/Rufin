@@ -439,11 +439,25 @@ impl AndroidBrowseQuery {
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
+    /// The tracks the page plays whole, under its filters. An artist page plays its tracks.
     pub async fn selection(self: Arc<Self>) -> Result<Arc<MemberSelection>, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
+            let route = match self.route.clone() {
+                Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
+                    Route::ArtistTracks(uri)
+                }
+                Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
+                    Route::AlbumArtistTracks(uri)
+                }
+                route => route,
+            };
+            let options = OpenOptions {
+                category: CollectionCategory::Tracks,
+                ..self.options.clone()
+            };
             self.source
-                .selection(&self.route, self.selected.as_ref(), &self.options, &cancel)
+                .selection(&route, self.selected.as_ref(), &options, &cancel)
                 .await
                 .map_err(error)?
                 .map(Arc::new)

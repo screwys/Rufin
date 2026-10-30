@@ -1,7 +1,7 @@
 use super::*;
 use library::{Item, MemberRead};
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::playback::PlayRequest;
+use rufin_core::playback::{PlayRequest, QueuePlacement};
 use rufin_core::source::feed::Changed;
 use rufin_core::view::Refresh;
 
@@ -197,11 +197,10 @@ impl AndroidBrowseQuery {
     pub async fn play(
         self: Arc<Self>,
         index: u64,
-        placement: String,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let placement = queue_placement(&placement)?;
+        let placement = QueuePlacement::Now;
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
@@ -310,5 +309,23 @@ impl AndroidBrowseQuery {
             })
             .await
             .map_err(error)?
+    }
+
+    /// Plays or queues the page whole, as its header does.
+    pub async fn play_all(
+        self: Arc<Self>,
+        placement: String,
+        shuffled: bool,
+        context_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let placement = queue_placement(&placement)?;
+        let selection = self.clone().selection().await?;
+        self.playback.play_selection(
+            PlayRequest::ordered(Arc::unwrap_or_clone(selection), 0, placement, true)
+                .with_context(self.context_id().into())
+                .with_context_title(context_caption(&self.route, context_title))
+                .shuffled(shuffled),
+        );
+        Ok(())
     }
 }

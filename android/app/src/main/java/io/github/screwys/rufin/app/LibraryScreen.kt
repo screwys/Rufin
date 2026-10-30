@@ -625,7 +625,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         if (summary != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
             DetailContent(summary, page, rows, player, page.favoritesPage, page.releaseGroups,
-                browse::open, onMenu, { item, placement, shuffled -> browse.play(item, placement, shuffled) }, browse::favorite,
+                browse::open, onMenu, { item, placement, shuffled -> page.play(placement, shuffled, item.row.title) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
                 onLink = { link -> model.runAction {
                     openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)

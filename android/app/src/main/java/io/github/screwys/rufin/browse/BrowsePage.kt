@@ -124,6 +124,11 @@ internal class BrowsePage(
         else options.displaySettings = display
     }
 
+    fun play(placement: String, shuffled: Boolean, title: String) = connection.runAction {
+        val query = currentQuery ?: return@runAction
+        connection.connectedService().playRequest { query.playAll(placement, shuffled, title) }
+    }
+
     fun playSection(id: String, shuffled: Boolean = false) = connection.runAction {
         val query = homeRows.firstOrNull { it.row.sectionId == id }?.query ?: return@runAction
         connection.connectedService().playRequest { query.playSection(id, "now", shuffled,

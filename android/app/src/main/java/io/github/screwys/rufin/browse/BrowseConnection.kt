@@ -277,16 +277,16 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val service = connection.connectedService()
         service.playRequest {
         if (item.row.kind != "track") {
-            item.row.detailRoute?.let { library?.playTarget(it, placement, shuffled, item.row.title) }
+            item.row.detailRoute?.let { route -> library?.targetQuery(route)?.use { it.playAll(placement, shuffled, item.row.title) } }
             return@playRequest
         }
         if (item.fromPins) {
             library?.playRows("pin:${item.row.key}", listOf(item.row.mediaUri), 0UL, placement, shuffled, translate("Pins"))
             return@playRequest
         }
-        if (item.query != null) item.query.play(item.index, placement, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
+        if (item.query != null && placement == "now") item.query.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
         else {
-            val order = item.searchOrder ?: listOf(item.row.mediaUri)
+            val order = item.searchOrder?.takeIf { placement == "now" } ?: listOf(item.row.mediaUri)
             library?.playRows(item.searchContext ?: "track:${item.row.mediaUri}", order,
                 order.indexOf(item.row.mediaUri).toULong(), placement, shuffled, item.contextTitle ?: item.row.title)
         }

@@ -241,31 +241,6 @@ impl AndroidLibrary {
         Ok(())
     }
 
-    pub async fn play_target(
-        &self,
-        route: Route,
-        placement: String,
-        shuffled: bool,
-        context_title: Option<String>,
-    ) -> Result<(), AndroidError> {
-        let query = self.target_query(route)?;
-        let context_title = context_caption(&query.route, context_title);
-        let placement = queue_placement(&placement)?;
-        let selection = query.clone().selection().await?;
-        self.playback.play_selection(
-            rufin_core::playback::PlayRequest::ordered(
-                selection.as_ref().clone(),
-                0,
-                placement,
-                true,
-            )
-            .with_context(query.context_id().into())
-            .with_context_title(context_title)
-            .shuffled(shuffled),
-        );
-        Ok(())
-    }
-
     pub async fn play_radio(
         &self,
         kind: String,
@@ -707,15 +682,7 @@ impl AndroidLibrary {
 impl AndroidLibrary {
     pub fn target_query(&self, route: Route) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         self.browse_query(
-            match route {
-                Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
-                    Route::ArtistTracks(uri)
-                }
-                Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
-                    Route::AlbumArtistTracks(uri)
-                }
-                route => route,
-            },
+            route,
             "tracks".into(),
             String::new(),
             None,
