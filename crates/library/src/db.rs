@@ -474,8 +474,13 @@ impl Catalog {
         released: &Path,
         catalog: &Path,
     ) -> LibraryResult<Self> {
+        // A Store without a version is new, or holds an import that stopped and rolled back.
+        let current = path.exists()
+            && Self::version(path)
+                .await
+                .map_or(true, |version| version != 0);
         let mut imported = false;
-        if !path.exists() && released.exists() {
+        if !current && released.exists() {
             match Self::import_released(released, path, catalog).await {
                 Ok(()) => imported = true,
                 Err(error) if error.is_store_unavailable() => return Err(error),
@@ -485,11 +490,7 @@ impl Catalog {
             }
         }
         // The release's catalog file is a cache it rebuilds after a downgrade.
-        for suffix in ["", "-wal", "-shm"] {
-            let mut file = catalog.as_os_str().to_os_string();
-            file.push(suffix);
-            let _ = std::fs::remove_file(file);
-        }
+        let _ = remove_store(catalog);
         let opened = async {
             if path.exists() {
                 Self::check_version(path).await?;
@@ -499,12 +500,14 @@ impl Catalog {
         .await;
         let (opened, imported) = match opened {
             Err(error) if path.exists() && !error.is_store_unavailable() => {
-                tracing::warn!(%error, "could not open the Store; trying compatible columns");
+                tracing::warn!(%error, "could not open the Store; keeping its compatible columns");
                 image::remove(path);
                 if let Err(error) = crate::migration::current::recover_columns(path).await {
-                    // Nothing could be copied: start with a new Store and keep the old file beside it.
-                    tracing::warn!(%error, "could not recover the Store; starting a new one");
-                    preserve_store(path)?;
+                    if error.is_store_unavailable() {
+                        return Err(error);
+                    }
+                    tracing::warn!(%error, "could not read the Store; starting a new one");
+                    remove_store(path)?;
                 }
                 (Self::open(path).await?, true)
             }
@@ -959,21 +962,14 @@ async fn open_readers(
     }
 }
 
-pub(crate) fn preserve_store(path: &Path) -> std::io::Result<()> {
-    let destination = path.with_extension(format!(
-        "before-migration-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+/// Deletes a Store file with its journal files.
+pub(crate) fn remove_store(path: &Path) -> std::io::Result<()> {
     for suffix in ["", "-wal", "-shm"] {
-        let mut from = path.as_os_str().to_os_string();
-        from.push(suffix);
-        let mut to = destination.as_os_str().to_os_string();
-        to.push(suffix);
-        if Path::new(&from).exists() {
-            std::fs::rename(from, to)?;
+        let mut file = path.as_os_str().to_os_string();
+        file.push(suffix);
+        match std::fs::remove_file(file) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
         }
     }
     Ok(())

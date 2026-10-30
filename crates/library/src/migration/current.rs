@@ -158,36 +158,39 @@ async fn drop_dangling(connection: &mut SqliteConnection) -> LibraryResult<()> {
     }
 }
 
-/// Copies the columns a damaged or newer Store shares with this schema into a new Store, and
-/// installs it in place of the old file.
+/// Rebuilds a damaged or newer Store in place, in one transaction: every table takes this
+/// schema's shape and keeps the columns it shares with it.
 pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let stage = tempfile::Builder::new()
-        .prefix("rufin-migration-")
-        .tempdir_in(parent)?;
-    let pending = stage.path().join("library.sqlite");
-    let mut connection = crate::db::open_writer(&pending).await?;
-    let copied = async {
-        crate::schema::initialize_durable(&mut connection).await?;
-        attach(&mut connection, path, "old_store").await?;
+    let mut connection = crate::db::open_writer(path).await?;
+    let recovered = async {
+        crate::lyrics_tokenizer::register(&mut connection).await?;
         sqlx::query("PRAGMA foreign_keys=OFF").execute(&mut connection).await?;
         let mut transaction = connection.begin().await?;
-        // The lyrics search rows are indexed from the copied lyrics.
-        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'lyrics_fts*'")
+        // Views, triggers and indexes come from the schema; the lyrics search rows are indexed
+        // again from the copied lyrics.
+        let derived: Vec<(String, String)> = sqlx::query_as("SELECT type,name FROM sqlite_schema WHERE type IN ('view','trigger') OR (type='index' AND sql IS NOT NULL)")
             .fetch_all(&mut *transaction).await?;
-        let mut copied = 0;
-        for table in tables {
-            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM main.\"{table}\"")))
+        for (kind, name) in derived {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DROP {kind} IF EXISTS \"{name}\"")))
                 .execute(&mut *transaction).await?;
-            if !has_table(&mut transaction, "old_store", &table).await? {
-                continue;
-            }
-            copy_table(&mut transaction, "old_store", &table, &table, &[], "true").await?;
-            copied += 1;
         }
-        if copied == 0 {
-            return Err(LibraryError::Migration("no compatible Store tables were found".into()));
+        sqlx::query("DROP TABLE IF EXISTS lyrics_fts").execute(&mut *transaction).await?;
+        let old: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            .fetch_all(&mut *transaction).await?;
+        for table in &old {
+            sqlx::query(sqlx::AssertSqlSafe(format!("ALTER TABLE \"{table}\" RENAME TO \"recovered_{table}\"")))
+                .execute(&mut *transaction).await?;
+        }
+        sqlx::query("PRAGMA user_version=0").execute(&mut *transaction).await?;
+        crate::schema::initialize_durable(&mut transaction).await?;
+        for table in &old {
+            if has_table(&mut transaction, "main", table).await? {
+                sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM main.\"{table}\"")))
+                    .execute(&mut *transaction).await?;
+                copy_table(&mut transaction, "main", &format!("recovered_{table}"), table, &[], "true").await?;
+            }
+            sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE \"recovered_{table}\"")))
+                .execute(&mut *transaction).await?;
         }
         drop_dangling(&mut transaction).await?;
         crate::lyrics::index_all_lyrics(&mut transaction).await?;
@@ -195,9 +198,7 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
         LibraryResult::Ok(())
     }.await;
     connection.close().await?;
-    copied?;
-    super::install(&pending, path)?;
-    Ok(())
+    recovered
 }
 
 /// One released entity row with the credits and tags its edges name.
@@ -1215,23 +1216,20 @@ async fn restore_saved_queue(connection: &mut SqliteConnection) -> LibraryResult
     crate::queue::save_queue_on(connection, &state).await
 }
 
-/// Builds a new Store at `path` from the released files, which it only reads, and installs it
-/// only when it is complete, so an upgrade that stops early starts over.
+/// Builds the Store at `path` from the released files, which it only reads, in one
+/// transaction, so an upgrade that stops early leaves a Store without a version and starts over.
 pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> LibraryResult<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let stage = tempfile::Builder::new()
-        .prefix("rufin-migration-")
-        .tempdir_in(parent)?;
-    let pending = stage.path().join("library.sqlite");
-    let mut connection = crate::db::open_writer(&pending).await?;
-    crate::schema::initialize_durable(&mut connection).await?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut connection = crate::db::open_writer(path).await?;
     attach(&mut connection, released, "old_store").await?;
     let has_catalog = catalog.exists();
     if has_catalog {
         attach(&mut connection, catalog, "old_catalog").await?;
     }
     let mut transaction = connection.begin().await?;
+    crate::schema::initialize_durable(&mut transaction).await?;
     sqlx::query("DELETE FROM smart_playlists")
         .execute(&mut *transaction)
         .await?;
@@ -1324,6 +1322,5 @@ pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> Libr
         .execute(&mut connection)
         .await?;
     connection.close().await?;
-    super::install(&pending, path)?;
     Ok(())
 }

@@ -74,11 +74,4 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
         })
         .unwrap();
     }
-    // The unreadable Store did not stop startup; it waits beside the new one.
-    let kept = std::fs::read_dir(paths.store_file().parent().unwrap())
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .find(|path| path.to_string_lossy().contains("before-migration"))
-        .expect("the unreadable Store is kept");
-    assert_eq!(std::fs::read(kept).unwrap(), b"unreadable database");
 }

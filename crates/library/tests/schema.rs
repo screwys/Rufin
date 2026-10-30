@@ -261,7 +261,7 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
 }
 
 #[tokio::test]
-async fn unsupported_version_preserves_library_data() {
+async fn newer_store_keeps_its_compatible_columns() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     Catalog::open(&path).await.unwrap().close().await.unwrap();
@@ -297,8 +297,8 @@ async fn unsupported_version_preserves_library_data() {
         &path.with_extension("released.sqlite"),
         &path.with_extension("catalog.sqlite"),
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     recovered.close().await.unwrap();
     // The entry and queue row that name no track go; the track loses the album it named.
     let mut expected = supported;
@@ -308,18 +308,6 @@ async fn unsupported_version_preserves_library_data() {
         }
     }
     assert_eq!(durable_rows(&path).await, expected);
-    let preserved = std::fs::read_dir(path.parent().unwrap())
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.extension().is_some_and(|extension| {
-                extension.to_string_lossy().starts_with("before-migration-")
-            }) && !path.to_string_lossy().ends_with("-wal")
-                && !path.to_string_lossy().ends_with("-shm")
-        })
-        .unwrap();
-    assert_eq!(durable_rows(&preserved).await, before);
 }
 
 #[tokio::test]

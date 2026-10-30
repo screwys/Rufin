@@ -3,27 +3,12 @@ pub(crate) mod current;
 use crate::LibraryResult;
 pub(crate) use current::import as import_current;
 use sqlx::{Row, sqlite::SqliteRow};
-use std::path::Path;
 
 fn string(row: &SqliteRow, name: &str) -> Option<String> {
     row.try_get::<Option<String>, _>(name).ok().flatten()
 }
 fn integer(row: &SqliteRow, name: &str) -> Option<i64> {
     row.try_get::<Option<i64>, _>(name).ok().flatten()
-}
-
-fn install(pending: &Path, path: &Path) -> LibraryResult<()> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(pending)?
-        .sync_all()?;
-    crate::db::preserve_store(path)?;
-    std::fs::rename(pending, path)?;
-    #[cfg(unix)]
-    if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)?.sync_all()?;
-    }
-    Ok(())
 }
 
 async fn normalize_stored_artwork(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
