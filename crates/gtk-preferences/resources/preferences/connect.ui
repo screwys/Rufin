@@ -145,23 +145,6 @@
                         </child>
                         <child>
                           <object class="GtkBox" id="join_section">
-                            <child>
-                              <object class="AdwPreferencesGroup">
-                                <child>
-                                  <object class="AdwComboRow" id="join_method">
-                                    <property name="title" translatable="yes">Join using</property>
-                                    <property name="model">
-                                      <object class="GtkStringList">
-                                        <items>
-                                          <item translatable="yes">Another device</item>
-                                          <item translatable="yes">Existing profile file</item>
-                                        </items>
-                                      </object>
-                                    </property>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
                             <property name="visible">false</property>
@@ -304,69 +287,6 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkBox" id="file_section">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">12</property>
-                            <property name="visible">false</property>
-                            <child>
-                              <object class="GtkBox">
-                                <property name="spacing">6</property>
-                                <child>
-                                  <object class="GtkLabel">
-                                    <property name="label" translatable="yes">Import</property>
-                                    <style>
-                                      <class name="heading" />
-                                    </style>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="AdwPreferencesGroup" id="storage_group">
-                                <child>
-                                  <object class="AdwComboRow" id="storage">
-                                    <property name="title" translatable="yes">Storage</property>
-                                    <property name="model">
-                                      <object class="GtkStringList">
-                                        <items>
-                                          <item translatable="yes">This device</item>
-                                          <item translatable="yes">WebDAV / Nextcloud</item>
-                                          <item translatable="yes">SMB / Samba</item>
-                                        </items>
-                                      </object>
-                                    </property>
-                                    <child type="suffix">
-                                      <object class="GtkButton" id="choose_connection">
-                                        <property name="tooltip-text" translatable="yes">Choose connection</property>
-                                        <property name="icon-name">rufin-document-edit-symbolic</property>
-                                        <property name="valign">center</property>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="AdwEntryRow" id="file">
-                                    <property name="title" translatable="yes">Connect file</property>
-                                    <child type="suffix">
-                                      <object class="GtkButton" id="browse_file">
-                                        <property name="tooltip-text" translatable="yes">Connect file</property>
-                                        <property name="icon-name">rufin-document-open-symbolic</property>
-                                        <property name="valign">center</property>
-                                      </object>
-                                    </child>
-                                    <child type="suffix">
-                                      <object class="GtkButton" id="import">
-                                        <property name="label" translatable="yes">Import</property>
-                                        <property name="valign">center</property>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
                           <object class="GtkBox" id="network_section">
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
@@ -433,6 +353,52 @@
                                 <property name="title" translatable="yes">Connection settings</property>
                               </object>
                             </child>
+                            <child>
+                              <object class="AdwPreferencesGroup" id="sync_folder">
+                                <property name="title" translatable="yes">Sync folder</property>
+                                <child>
+                                  <object class="AdwComboRow" id="storage">
+                                    <property name="title" translatable="yes">Storage</property>
+                                    <property name="model">
+                                      <object class="GtkStringList">
+                                        <items>
+                                          <item translatable="yes">This device</item>
+                                          <item translatable="yes">WebDAV / Nextcloud</item>
+                                          <item translatable="yes">SMB / Samba</item>
+                                        </items>
+                                      </object>
+                                    </property>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="choose_connection">
+                                        <property name="tooltip-text" translatable="yes">Choose connection</property>
+                                        <property name="icon-name">rufin-document-edit-symbolic</property>
+                                        <property name="valign">center</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwEntryRow" id="folder">
+                                    <property name="title" translatable="yes">Folder</property>
+                                    <property name="show-apply-button">true</property>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="browse_folder">
+                                        <property name="tooltip-text" translatable="yes">Choose folder</property>
+                                        <property name="icon-name">rufin-document-open-symbolic</property>
+                                        <property name="valign">center</property>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="clear_folder">
+                                        <property name="tooltip-text" translatable="yes">Clear</property>
+                                        <property name="icon-name">rufin-edit-clear-symbolic</property>
+                                        <property name="valign">center</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>
@@ -460,9 +426,8 @@
       </object>
     </child>
   </object>
-  <object class="GtkFileDialog" id="file_chooser">
-    <property name="title" translatable="yes">Connect file</property>
-    <property name="initial-name">profile.rufin-connect</property>
+  <object class="GtkFileDialog" id="folder_chooser">
+    <property name="title" translatable="yes">Choose folder</property>
   </object>
   <object class="GtkLabel" id="membership_status_text">
     <property name="label" translatable="yes">Connecting devices</property>

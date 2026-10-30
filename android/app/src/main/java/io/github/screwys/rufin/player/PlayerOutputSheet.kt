@@ -119,9 +119,9 @@ internal fun PlayerOutputSheet(player: PlayerConnection, onDismiss: () -> Unit) 
             if (connectOutputs.isNotEmpty()) item {
                 Text(translate("Rufin Connect"), Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
             }
-            val continuation = devices.firstOrNull { connect?.settings?.enabled == true && it.enrolled && it.reachable && it.hasPlayback }
+            val continuation = connect?.continuation
             if (continuation != null) item(key = "connect-continue") {
-                TextButton({ player.model.connect.action(ConnectAction.Continue(continuation.id)); onDismiss() }, Modifier.fillMaxWidth()) {
+                TextButton({ player.model.connect.action(ConnectAction.Continue(continuation.device)); onDismiss() }, Modifier.fillMaxWidth()) {
                     RufinIcon("rufin-media-playback-start-symbolic", null)
                     Spacer(Modifier.width(8.dp))
                     Text(translate("Continue from {device}").replace("{device}", continuation.name), maxLines = 1, overflow = TextOverflow.Ellipsis)

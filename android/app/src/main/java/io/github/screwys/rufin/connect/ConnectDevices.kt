@@ -32,8 +32,8 @@ internal fun ConnectDeviceRow(device: Device, connect: ConnectConnection, contro
             TextButton({ connect.action(ConnectAction.Invite(device.id)) }, enabled = !connect.pending) { Text(translate("Invite")) }
         }
         else {
-            if (device.hasPlayback) TextButton({ connect.action(ConnectAction.Continue(device.id)) },
-                enabled = device.reachable && !connect.pending) { Text(translate("Continue")) }
+            if (connect.state?.continuation?.device == device.id) TextButton({ connect.action(ConnectAction.Continue(device.id)) },
+                enabled = !connect.pending) { Text(translate("Continue")) }
         Box {
             IconButton({ menu = true }) { RufinIcon("rufin-view-more-symbolic", translate("More actions")) }
             DropdownMenu(menu, { menu = false }) {
@@ -70,8 +70,8 @@ internal fun ConnectDeviceControls(device: Device, connect: ConnectConnection, d
                 IconButton(dismiss) { RufinIcon("rufin-go-down-symbolic", translate("Close")) }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (current?.hasPlayback == true) FilledTonalButton({ connect.action(ConnectAction.Continue(device.id)) },
-                Modifier.fillMaxWidth(), enabled = enabled) { Text(translate("Continue")) }
+            if (connect.state?.continuation?.device == device.id) FilledTonalButton({ connect.action(ConnectAction.Continue(device.id)) },
+                Modifier.fillMaxWidth(), enabled = !connect.pending) { Text(translate("Continue")) }
             val controls = listOf(
                 Triple("rufin-media-skip-backward-symbolic", "Previous Track", ConnectControl.Previous),
                 Triple("rufin-media-playback-start-symbolic", "Play", ConnectControl.Play),

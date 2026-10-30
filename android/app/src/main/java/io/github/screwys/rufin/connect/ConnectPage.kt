@@ -1,8 +1,5 @@
 package io.github.screwys.rufin.connect
 
-import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -54,17 +51,11 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
     var leave by remember { mutableStateOf(false) }
     var disable by remember { mutableStateOf(false) }
     var relayEdit by remember { mutableStateOf(false) }
-    var remoteFile by remember { mutableStateOf<Boolean?>(null) }
+    var syncFolder by remember { mutableStateOf(false) }
     var controlDevice by remember { mutableStateOf<Device?>(null) }
     var removeDevice by remember { mutableStateOf<Device?>(null) }
     LaunchedEffect(connect, state != null) {
         if (state?.settings?.nearby == true && state.identity == null) connect.action(ConnectAction.Discover)
-    }
-    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { connect.importDocument(it.toString()) }
-    }
-    val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        uri?.let { connect.exportDocument(it.toString()) }
     }
     if (state == null) {
         Box(if (embedded) Modifier.fillMaxWidth().padding(24.dp) else Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -107,7 +98,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
             if (connect.pending) LinearProgressIndicator(Modifier.fillMaxWidth())
             failure?.let { message ->
                 Text(message, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.error)
-                if ((state.settings.profile != null || state.settings.pendingImport != null) && !state.connecting) TextButton({ connect.action(ConnectAction.Retry) }, enabled = enabled) {
+                if (state.settings.profile != null && !state.connecting) TextButton({ connect.action(ConnectAction.Retry) }, enabled = enabled) {
                     Text(translate("Retry"))
                 }
             }
@@ -158,14 +149,10 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
                 trailing = { Switch(state.settings.publicRelay, { connect.action(ConnectAction.Network(state.settings.nearby, state.settings.relay, it)) }, enabled = enabled) })
         }
         }
-        if (!progressOnly) {
+        if (!progressOnly && state.settings.profile != null) {
         SettingsGroup {
-            SettingsRow(translate("Import"),
-                modifier = Modifier.clickable(enabled) { importFile.launch(arrayOf("*/*")) })
-            SettingsRow(translate("Export"),
-                modifier = Modifier.clickable(enabled && state.settings.profile != null) { exportFile.launch("Rufin.rufin-connect") })
-            SettingsRow(translate("Import from connection"), modifier = Modifier.clickable(enabled) { remoteFile = true })
-            SettingsRow(translate("Export to connection"), modifier = Modifier.clickable(enabled && state.settings.profile != null) { remoteFile = false })
+            SettingsRow(translate("Sync folder"), summary = syncFolderSummary(state.settings.folder, connect.fileSources),
+                modifier = Modifier.clickable(enabled) { syncFolder = true })
         }
         }
     }
@@ -184,7 +171,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
     removeDevice?.let { device -> AlertDialog(onDismissRequest = { removeDevice = null }, title = { Text(translate("Remove device")) }, text = { Text(device.name) },
         confirmButton = { TextButton({ connect.action(ConnectAction.Remove(device.id)); removeDevice = null }) { Text(translate("Remove")) } },
         dismissButton = { TextButton({ removeDevice = null }) { Text(translate("Cancel")) } }) }
-    remoteFile?.let { importing -> ConnectRemoteFileDialog(connect, importing, { remoteFile = null }) }
+    if (syncFolder) ConnectFolderDialog(connect, state.settings.folder) { syncFolder = false }
     controlDevice?.let { device -> ConnectDeviceControls(device, connect) { controlDevice = null } }
     ConnectConfirmationDialog(connect)
 }
@@ -195,19 +182,12 @@ private fun ConnectProgress(state: ConnectStatus) {
     val total = progress?.total?.takeIf { it > 0uL }
     val fraction = if (progress != null && total != null) (progress.completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0) else null
     val integer = remember { NumberFormat.getIntegerInstance() }
-    val decimal = remember { NumberFormat.getNumberInstance().apply { minimumFractionDigits = 1; maximumFractionDigits = 1 } }
-    val bytes = progress?.stage == CollectionStage.RECEIVING
     val counter = progress?.let {
-        val current = if (bytes) decimal.format(it.completed.toDouble() / 1_048_576) else integer.format(it.completed.toLong())
+        val current = integer.format(it.completed.toLong())
         if (total != null && fraction != null) {
-            val maximum = if (bytes) decimal.format(total.toDouble() / 1_048_576) else integer.format(total.toLong())
             val percent = integer.format((it.completed.coerceAtMost(total).toDouble() * 100 / total.toDouble()).toInt())
-            if (bytes) translate("{current} / {total} MiB ({percent}%)")
-                .replace("{current}", current).replace("{total}", maximum).replace("{percent}", percent)
-            else "$current / $maximum ($percent%)"
-        } else if (it.completed > 0uL) {
-            if (bytes) translate("{current} MiB").replace("{current}", current) else current
-        } else null
+            "$current / ${integer.format(total.toLong())} ($percent%)"
+        } else if (it.completed > 0uL) current else null
     }
     Text(state.profileStatus, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -216,4 +196,12 @@ private fun ConnectProgress(state: ConnectStatus) {
         counter?.let { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
+}
+
+private fun syncFolderSummary(folder: SyncFolder?, connections: List<FileIntegration>): String? = when (folder) {
+    is SyncFolder.Connection -> listOfNotNull(connections.firstOrNull { it.id == folder.connection }?.name,
+        folder.path.takeIf(String::isNotEmpty)).joinToString(" · ")
+    is SyncFolder.Document -> android.net.Uri.parse(folder.document).lastPathSegment ?: folder.document
+    is SyncFolder.Path -> folder.path
+    null -> null
 }

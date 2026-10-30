@@ -36,12 +36,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Choose where this device stores local music received through Connect. "
-"Matching files already in the folder are reused; missing files are "
-"downloaded here."
-msgstr ""
-
-msgid ""
 "Connecting an existing profile will remove all data in this device, do you "
 "really want to continue?"
 msgstr ""
@@ -418,9 +412,6 @@ msgstr ""
 msgid "Anonymous"
 msgstr ""
 
-msgid "Another device"
-msgstr ""
-
 msgid "Any genre"
 msgstr ""
 
@@ -439,9 +430,6 @@ msgstr ""
 msgid "Application name"
 msgstr ""
 
-msgid "Applied"
-msgstr ""
-
 msgid "Applies to sidebar and fullscreen separately"
 msgstr ""
 
@@ -449,9 +437,6 @@ msgid "Apply Template"
 msgstr ""
 
 msgid "Apply"
-msgstr ""
-
-msgid "Applying profile"
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -641,9 +626,6 @@ msgstr ""
 msgid "Brightness (%)"
 msgstr ""
 
-msgid "Browse"
-msgstr ""
-
 msgid "By Lyrics"
 msgstr ""
 
@@ -729,9 +711,6 @@ msgid "Channels"
 msgstr ""
 
 msgid "Check for updates"
-msgstr ""
-
-msgid "Checking profile"
 msgstr ""
 
 msgid "Choose Folder"
@@ -918,9 +897,6 @@ msgstr ""
 msgid "Connect a device"
 msgstr ""
 
-msgid "Connect file"
-msgstr ""
-
 msgid "Connect is not enabled"
 msgstr ""
 
@@ -1071,9 +1047,6 @@ msgid "Couldn't connect to {service}"
 msgstr ""
 
 msgid "Couldn't decode this track"
-msgstr ""
-
-msgid "Couldn't load this folder"
 msgstr ""
 
 msgid "Couldn't search for lyrics"
@@ -1492,9 +1465,6 @@ msgstr ""
 msgid "Excluded folders"
 msgstr ""
 
-msgid "Existing profile file"
-msgstr ""
-
 msgid "Expand lyrics and visualizer"
 msgstr ""
 
@@ -1523,9 +1493,6 @@ msgid "Export playlist"
 msgstr ""
 
 msgid "Export preset"
-msgstr ""
-
-msgid "Export to connection"
 msgstr ""
 
 msgid "Export your listening history in Rufin"
@@ -1644,9 +1611,6 @@ msgid "Find your ListenBrainz user token"
 msgstr ""
 
 msgid "Finding lyrics..."
-msgstr ""
-
-msgid "Finishing setup"
 msgstr ""
 
 msgid "Fit to height"
@@ -1882,9 +1846,6 @@ msgstr ""
 msgid "Import Playlist"
 msgstr ""
 
-msgid "Import from connection"
-msgstr ""
-
 msgid "Import preset"
 msgstr ""
 
@@ -1938,9 +1899,6 @@ msgid "Jellyfin"
 msgstr ""
 
 msgid "Join profile"
-msgstr ""
-
-msgid "Join using"
 msgstr ""
 
 msgid "Join"
@@ -2110,9 +2068,6 @@ msgstr[1] ""
 msgid "Local files and folders"
 msgstr ""
 
-msgid "Local folder"
-msgstr ""
-
 msgid "Local imports and access"
 msgstr ""
 
@@ -2123,9 +2078,6 @@ msgid "Local music folder is unavailable"
 msgstr ""
 
 msgid "Local music folder"
-msgstr ""
-
-msgid "Local music folders"
 msgstr ""
 
 msgid "Local network permission is required for remote connections"
@@ -2488,9 +2440,6 @@ msgid "No favorite artists yet"
 msgstr ""
 
 msgid "No favorites yet"
-msgstr ""
-
-msgid "No file connections"
 msgstr ""
 
 msgid "No file linked"
@@ -2961,9 +2910,6 @@ msgstr ""
 msgid "Preferences"
 msgstr ""
 
-msgid "Preparing collection"
-msgstr ""
-
 msgid "Preparing library..."
 msgstr ""
 
@@ -3021,9 +2967,6 @@ msgstr ""
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
-
 msgid "Profile up to date"
 msgstr ""
 
@@ -3079,9 +3022,6 @@ msgid "Reading tags..."
 msgstr ""
 
 msgid "Ready"
-msgstr ""
-
-msgid "Receiving collection"
 msgstr ""
 
 msgid "Receiving profile"
@@ -3443,9 +3383,6 @@ msgid "Saved..."
 msgstr ""
 
 msgid "Saves lyrics to your source"
-msgstr ""
-
-msgid "Saving changes"
 msgstr ""
 
 msgid "Saving..."
@@ -3941,6 +3878,9 @@ msgstr ""
 msgid "Switching library..."
 msgstr ""
 
+msgid "Sync folder"
+msgstr ""
+
 msgid "Synced lyrics"
 msgstr ""
 
@@ -3996,6 +3936,9 @@ msgid "These emoji match"
 msgstr ""
 
 msgid "This can be turned off after pairing if you want"
+msgstr ""
+
+msgid "This device was removed from the profile"
 msgstr ""
 
 msgid "This device"
@@ -4212,9 +4155,6 @@ msgstr ""
 msgid "Use existing"
 msgstr ""
 
-msgid "Use folder"
-msgstr ""
-
 msgid "Use for this output"
 msgstr ""
 
@@ -4294,9 +4234,6 @@ msgid "Volume scale"
 msgstr ""
 
 msgid "Volume"
-msgstr ""
-
-msgid "Waiting for a peer"
 msgstr ""
 
 msgid "Waiting for connection"
@@ -4497,14 +4434,6 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
-
-#, rust-format
-msgid "{current} / {total} MiB ({percent}%)"
-msgstr ""
-
-#, rust-format
-msgid "{current} MiB"
-msgstr ""
 
 #, rust-format
 msgid "{field} \302\267 Different across {count} track"

@@ -2,7 +2,8 @@ use crate::Preferences;
 use adw::prelude::*;
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use rufin_core::connect::{
-    Action, ActionError, CollectionProgress, CollectionStage, Confirmation, Control, Status,
+    Action, ActionError, CollectionProgress, Confirmation, Continuation, Control, Status,
+    SyncFolder,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -15,6 +16,7 @@ pub fn install(shell: &Rc<Preferences>) {
     let pairing = gtk::glib::spawn_future_local(async move {
         let mut previous = None;
         let mut working = updates.borrow().connecting;
+        let mut offered = None;
         loop {
             let state = updates.borrow_and_update().clone();
             let session = state
@@ -28,12 +30,41 @@ pub fn install(shell: &Rc<Preferences>) {
             }
             previous = session;
             working = active;
+            let offer = state
+                .continuation
+                .as_ref()
+                .map(|continuation| (continuation.device.clone(), continuation.at));
+            if let Some(continuation) = &state.continuation
+                && offer != offered
+            {
+                let Some(shell) = weak.upgrade() else { return };
+                offer_continuation(&shell, continuation);
+            }
+            offered = offer;
             if updates.changed().await.is_err() {
                 return;
             }
         }
     });
     shell.window.connect_destroy(move |_| pairing.abort());
+}
+
+fn offer_continuation(shell: &Rc<Preferences>, continuation: &Continuation) {
+    let toast = adw::Toast::builder()
+        .title(localization::tr_with(
+            "Continue from {device}",
+            &[("device", &continuation.name)],
+        ))
+        .button_label(localization::tr("Continue"))
+        .build();
+    let weak = Rc::downgrade(shell);
+    let peer = continuation.device.clone();
+    toast.connect_button_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            run(&shell, Action::Continue { peer: peer.clone() });
+        }
+    });
+    shell.toast_overlay.add_toast(toast);
 }
 
 fn show_feedback(shell: &Preferences, message: String) {
@@ -101,12 +132,11 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
     let testing_connection = matches!(action, Action::TestConnection { .. });
     let pending_replace = matches!(
         action,
-        Action::Import { replace: false, .. }
-            | Action::Pair {
-                replace: false,
-                approve: true,
-                ..
-            }
+        Action::Pair {
+            replace: false,
+            approve: true,
+            ..
+        }
     )
     .then(|| action.clone());
     let owner = shell.products.connect.clone();
@@ -148,9 +178,7 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
                     .map(|dialog| dialog.upcast::<gtk::Widget>())
                     .unwrap_or_else(|| shell.window.clone().upcast());
                 if dialog.choose_future(Some(&parent)).await == "join" {
-                    if let Action::Import { replace, .. } | Action::Pair { replace, .. } =
-                        &mut action
-                    {
+                    if let Action::Pair { replace, .. } = &mut action {
                         *replace = true;
                     }
                     run(&shell, action);
@@ -229,13 +257,13 @@ pub fn bind_controller(
             present(&shell);
         }
     });
-    let offered_device = Rc::new(RefCell::new(None::<rufin_core::connect::Device>));
-    let offered = offered_device.clone();
+    let offered_continuation = Rc::new(RefCell::new(None::<Continuation>));
+    let offered = offered_continuation.clone();
     let weak = Rc::downgrade(shell);
     let popup = popover.downgrade();
     continue_connect.connect_clicked(move |_| {
         if let Some(shell) = weak.upgrade()
-            && let Some(device) = offered.borrow().as_ref()
+            && let Some(continuation) = offered.borrow().as_ref()
         {
             if let Some(popup) = popup.upgrade() {
                 popup.popdown();
@@ -243,7 +271,7 @@ pub fn bind_controller(
             run(
                 &shell,
                 Action::Continue {
-                    peer: device.id.clone(),
+                    peer: continuation.device.clone(),
                 },
             );
         }
@@ -261,7 +289,7 @@ pub fn bind_controller(
             row.set_active(updates.borrow().settings.enabled);
         }
         let button = continue_button.clone();
-        let offered = offered_device.clone();
+        let offered = offered_continuation.clone();
         let label = continue_label.clone();
         if let Some(button) = button.upgrade() {
             button.set_visible(false);
@@ -269,24 +297,15 @@ pub fn bind_controller(
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             loop {
                 let state = updates.borrow_and_update().clone();
-                let device = state
-                    .continuation
-                    .as_ref()
-                    .and_then(|continuation| {
-                        state
-                            .devices
-                            .iter()
-                            .find(|device| device.id == continuation.device)
-                    })
-                    .cloned();
+                let continuation = state.continuation.clone();
                 let Some(row) = row.upgrade() else { return };
                 row.set_active(state.settings.enabled);
                 if let Some(button) = button.upgrade() {
-                    button.set_visible(device.is_some());
-                    if let Some(device) = &device {
+                    button.set_visible(continuation.is_some());
+                    if let Some(continuation) = &continuation {
                         let title = localization::tr_with(
                             "Continue from {device}",
-                            &[("device", &device.name)],
+                            &[("device", &continuation.name)],
                         );
                         if let Some(label) = label.upgrade() {
                             label.set_label(&title);
@@ -294,7 +313,7 @@ pub fn bind_controller(
                         button.update_property(&[gtk::accessible::Property::Label(&title)]);
                     }
                 }
-                *offered.borrow_mut() = device;
+                *offered.borrow_mut() = continuation;
                 drop(row);
                 if updates.changed().await.is_err() {
                     return;
@@ -329,8 +348,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         connect_content: gtk::Overlay, page_title: gtk::Label,
         choose_join: gtk::ToggleButton, choose_invite: gtk::ToggleButton,
         connection_choices: gtk::Box,
-        join_method: adw::ComboRow, pairing: adw::PreferencesGroup,
-        start_section: gtk::Box, join_section: gtk::Box, invite_section: adw::ActionRow, file_section: gtk::Box,
+        start_section: gtk::Box, join_section: gtk::Box, invite_section: adw::ActionRow,
         verify_section: gtk::Box, connecting_section: gtk::Box, devices_section: gtk::Box,
         network_section: gtk::Box, approval_status: gtk::Label,
         membership_status_text: gtk::Label, connecting_status: gtk::Label,
@@ -343,14 +361,14 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         pair_name: gtk::Label, emoji: gtk::Label,
         peer: adw::EntryRow, nearby: adw::SwitchRow, relay: adw::EntryRow,
         relay_enabled: gtk::Switch,
-        storage: adw::ComboRow,
+        sync_folder: adw::PreferencesGroup, storage: adw::ComboRow,
         choose_connection: gtk::Button,
-        file: adw::EntryRow,
+        folder: adw::EntryRow,
         create: gtk::Button, copy_invitation: gtk::Button, join: gtk::Button,
         approve: gtk::Button, reject: gtk::Button, refresh: gtk::Button, discover: gtk::Button,
         cancel_pairing: gtk::Button,
-        import: gtk::Button, browse_file: gtk::Button,
-        leave: gtk::Button, file_chooser: gtk::FileDialog,
+        browse_folder: gtk::Button, clear_folder: gtk::Button,
+        leave: gtk::Button, folder_chooser: gtk::FileDialog,
     });
     *shell.state.connect_feedback.borrow_mut() = Some(
         gtk_widgets::feedback::ControlFeedbackState::new(&feedback_label, shell.settings.clone()),
@@ -375,22 +393,27 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
     let updating_network = Rc::new(Cell::new(false));
     let accounts = Rc::new(RefCell::new(shell.products.source.file_integrations()));
     let storage_draft = Rc::new(RefCell::new(StorageDraft::default()));
+    show_folder(
+        &storage,
+        &folder,
+        &storage_draft,
+        &accounts.borrow(),
+        initial.settings.folder.as_ref(),
+    );
     let update_view: Rc<dyn Fn()> = {
         let weak = Rc::downgrade(shell);
         let choose_join = choose_join.downgrade();
         let connection_choices = connection_choices.downgrade();
         let cancel_pairing = cancel_pairing.downgrade();
         let start_section = start_section.downgrade();
-        let join_method = join_method.downgrade();
         let join_section = join_section.downgrade();
         let invite_section = invite_section.downgrade();
-        let file_section = file_section.downgrade();
         let verify_section = verify_section.downgrade();
         let connecting_section = connecting_section.downgrade();
         let devices_section = devices_section.downgrade();
         let network_section = network_section.downgrade();
+        let sync_folder = sync_folder.downgrade();
         let leave = leave.downgrade();
-        let pairing = pairing.downgrade();
         let nearby_devices = nearby_devices.downgrade();
         let no_nearby_devices = no_nearby_devices.downgrade();
         let access_description = verification.description();
@@ -402,9 +425,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let title = page_title.downgrade();
         let dialog = connect_dialog.downgrade();
         Rc::new(move || {
-            let (Some(shell), Some(choice), Some(method)) =
-                (weak.upgrade(), choose_join.upgrade(), join_method.upgrade())
-            else {
+            let (Some(shell), Some(choice)) = (weak.upgrade(), choose_join.upgrade()) else {
                 return;
             };
             let state = shell.products.connect.status();
@@ -413,7 +434,6 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             let progress_visible = working && state.pairing.is_none() && state.error.is_none();
             let has_profile = state.settings.profile.is_some();
             let joining = choice.is_active() && !has_profile;
-            let importing = joining && method.selected() == 1;
             if let Some(dialog) = dialog.upgrade() {
                 dialog.set_can_close(!state.connecting);
             }
@@ -435,10 +455,9 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             for (section, visible) in [
                 (&start_section, !busy),
                 (&join_section, joining && !busy),
-                (&file_section, importing && !busy),
                 (&verify_section, state.pairing.is_some()),
                 (&connecting_section, progress_visible),
-                (&network_section, !busy && !importing),
+                (&network_section, !busy),
                 (
                     &devices_section,
                     !busy && state.devices.iter().any(|device| device.enrolled),
@@ -448,11 +467,11 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                     section.set_visible(visible);
                 }
             }
-            if let Some(group) = pairing.upgrade() {
-                group.set_visible(!importing);
+            if let Some(group) = sync_folder.upgrade() {
+                group.set_visible(profile_controls);
             }
             if let Some(group) = nearby_devices.upgrade() {
-                group.set_visible(!busy && !importing && state.settings.nearby);
+                group.set_visible(!busy && state.settings.nearby);
             }
             if let Some(row) = no_nearby_devices.upgrade() {
                 row.set_visible(!state.devices.iter().any(|device| !device.enrolled));
@@ -498,17 +517,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             }
         })
     };
-    let select_method: Rc<dyn Fn()> = {
-        let file = file.downgrade();
-        let update_view = update_view.clone();
-        Rc::new(move || {
-            if let Some(file) = file.upgrade() {
-                file.set_text("");
-            }
-            update_view();
-        })
-    };
-    let select = select_method.clone();
+    let select = update_view.clone();
     let weak = Rc::downgrade(shell);
     choose_join.connect_toggled(move |button| {
         select();
@@ -518,7 +527,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             run(&shell, Action::Discover);
         }
     });
-    let select = select_method.clone();
+    let select = update_view.clone();
     let weak = Rc::downgrade(shell);
     choose_invite.connect_toggled(move |button| {
         if button.is_active() {
@@ -531,11 +540,10 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             }
         }
     });
-    join_method.connect_selected_notify(move |_| select_method());
     update_view();
-    browse_file.set_visible(storage.selected() == 0);
-    let browse = browse_file.downgrade();
-    let file_weak = file.downgrade();
+    browse_folder.set_visible(storage.selected() == 0);
+    let browse = browse_folder.downgrade();
+    let folder_weak = folder.downgrade();
     let weak = Rc::downgrade(shell);
     let storage_accounts = accounts.clone();
     let draft = storage_draft.clone();
@@ -553,8 +561,8 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             return;
         }
         let selected = row.selected();
-        let (Some(file), Some(shell), Some(parent)) =
-            (file_weak.upgrade(), weak.upgrade(), parent.upgrade())
+        let (Some(folder), Some(shell), Some(parent)) =
+            (folder_weak.upgrade(), weak.upgrade(), parent.upgrade())
         else {
             return;
         };
@@ -562,7 +570,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             draft.borrow_mut().source = None;
             draft.borrow_mut().selected = 0;
             row.set_subtitle("");
-            file.set_text("");
+            folder.set_text("");
             return;
         }
         let previous = draft.borrow().selected;
@@ -572,7 +580,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let kind = if selected == 2 { "smb" } else { "webdav" };
         let draft = draft.clone();
         let accounts = storage_accounts.clone();
-        let file = file.downgrade();
+        let folder = folder.downgrade();
         let weak = Rc::downgrade(&shell);
         let row = row.downgrade();
         super::source::login::choose_integration(
@@ -580,8 +588,8 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             &parent,
             kind,
             Rc::new(move |id| {
-                let (Some(shell), Some(file), Some(row)) =
-                    (weak.upgrade(), file.upgrade(), row.upgrade())
+                let (Some(shell), Some(folder), Some(row)) =
+                    (weak.upgrade(), folder.upgrade(), row.upgrade())
                 else {
                     return;
                 };
@@ -602,7 +610,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                         .map(|a| a.name.as_str())
                         .unwrap_or(""),
                 );
-                file.set_text("");
+                folder.set_text("");
             }),
         );
     });
@@ -750,64 +758,39 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             );
         }
     });
+    let weak = Rc::downgrade(shell);
+    let draft = storage_draft.clone();
+    folder.connect_apply(move |row| {
+        let Some(shell) = weak.upgrade() else { return };
+        let path = row.text().trim().to_owned();
+        let folder = match draft.borrow().source.clone() {
+            _ if path.is_empty() => None,
+            Some(connection) => Some(SyncFolder::Connection { connection, path }),
+            None => Some(SyncFolder::Path { path: path.into() }),
+        };
+        run(&shell, Action::Folder { folder });
+    });
     let parent = shell.window.downgrade();
-    let entry = file.downgrade();
-    let chooser = file_chooser.clone();
-    browse_file.connect_clicked(move |_| {
+    let entry = folder.downgrade();
+    browse_folder.connect_clicked(move |_| {
         let (Some(parent), Some(entry)) = (parent.upgrade(), entry.upgrade()) else {
             return;
         };
-        let chooser = chooser.clone();
+        let chooser = folder_chooser.clone();
         gtk::glib::spawn_future_local(async move {
-            if let Ok(file) = chooser.open_future(Some(&parent)).await
+            if let Ok(file) = chooser.select_folder_future(Some(&parent)).await
                 && let Some(path) = file.path()
             {
                 entry.set_text(&path.to_string_lossy());
+                entry.emit_by_name::<()>("apply", &[]);
             }
         });
     });
     let weak = Rc::downgrade(shell);
-    let parent = shell.window.downgrade();
-    let entry = file.downgrade();
-    let storage = storage.downgrade();
-    let chooser = file_chooser.clone();
-    import.connect_clicked(move |_| {
-        let (Some(shell), Some(parent), Some(entry), Some(storage)) = (
-            weak.upgrade(),
-            parent.upgrade(),
-            entry.upgrade(),
-            storage.upgrade(),
-        ) else {
-            return;
-        };
-        let remote = storage.selected() > 0;
-        let source_id = storage_draft.borrow().source.clone();
-        if remote && source_id.is_none() {
-            show_feedback(&shell, localization::tr("Choose connection"));
-            return;
+    clear_folder.connect_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            run(&shell, Action::Folder { folder: None });
         }
-        let chooser = chooser.clone();
-        gtk::glib::spawn_future_local(async move {
-            let path = if remote || !entry.text().is_empty() {
-                entry.text().as_str().into()
-            } else {
-                let Ok(file) = chooser.open_future(Some(&parent)).await else {
-                    return;
-                };
-                let Some(path) = file.path() else { return };
-                entry.set_text(&path.to_string_lossy());
-                path
-            };
-            run(
-                &shell,
-                Action::Import {
-                    path,
-                    source_id,
-                    replace: false,
-                    key: None,
-                },
-            );
-        });
     });
 
     let weak = Rc::downgrade(shell);
@@ -829,6 +812,10 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         let nearby = nearby.clone();
         let relay = relay.clone();
         let relay_enabled = relay_enabled.clone();
+        let storage = storage.clone();
+        let folder = folder.clone();
+        let accounts = accounts.clone();
+        let storage_draft = storage_draft.clone();
         let connecting_status = connecting_status.clone();
         let collection_progress = collection_progress.clone();
         let collection_spinner = collection_spinner.clone();
@@ -849,6 +836,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                 initial.settings.relay,
                 initial.settings.public_relay,
             );
+            let mut previous_folder = initial.settings.folder;
             loop {
                 let state = updates.borrow_and_update().clone();
                 let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
@@ -878,6 +866,16 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                     updating_network.set(false);
                     previous_network = network;
                 }
+                if previous_folder != state.settings.folder {
+                    show_folder(
+                        &storage,
+                        &folder,
+                        &storage_draft,
+                        &accounts.borrow(),
+                        state.settings.folder.as_ref(),
+                    );
+                    previous_folder = state.settings.folder.clone();
+                }
                 connecting_status.set_text(&state.profile_status);
                 let progress = state.collection_progress.as_ref();
                 let fraction = progress.and_then(|progress| {
@@ -895,9 +893,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
                 connection_error.set_title(state.error.as_deref().unwrap_or_default());
                 connection_error.set_revealed(state.error.is_some());
                 connection_error.set_button_label(
-                    if (state.settings.profile.is_some() || state.settings.pending_import.is_some())
-                        && !state.connecting
-                    {
+                    if state.settings.profile.is_some() && !state.connecting {
                         retry_label.as_deref()
                     } else {
                         None
@@ -997,37 +993,14 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
 }
 
 fn collection_progress_text(progress: &CollectionProgress) -> String {
-    let bytes = progress.stage == CollectionStage::Receiving;
-    let count = |count: u64| {
-        if bytes {
-            format!("{:.1}", count as f64 / 1_048_576.0)
-        } else {
-            count.to_string()
-        }
-    };
-    let current = count(progress.completed);
+    let current = progress.completed;
     if let Some(total) = progress.total.filter(|total| *total > 0) {
-        let percent =
-            (u128::from(progress.completed.min(total)) * 100 / u128::from(total)).to_string();
-        let total = count(total);
-        if bytes {
-            localization::tr_with(
-                "{current} / {total} MiB ({percent}%)",
-                &[
-                    ("current", &current),
-                    ("total", &total),
-                    ("percent", &percent),
-                ],
-            )
-        } else {
-            format!("{current} / {total} ({percent}%)")
-        }
-    } else if progress.completed == 0 {
+        let percent = u128::from(current.min(total)) * 100 / u128::from(total);
+        format!("{current} / {total} ({percent}%)")
+    } else if current == 0 {
         String::new()
-    } else if bytes {
-        localization::tr_with("{current} MiB", &[("current", &current)])
     } else {
-        current
+        current.to_string()
     }
 }
 
@@ -1036,6 +1009,36 @@ struct StorageDraft {
     source: Option<sources::SourceId>,
     selected: u32,
     updating: bool,
+}
+
+fn show_folder(
+    storage: &adw::ComboRow,
+    row: &adw::EntryRow,
+    draft: &RefCell<StorageDraft>,
+    accounts: &[rufin_core::source::FileIntegration],
+    folder: Option<&SyncFolder>,
+) {
+    let (source, path) = match folder {
+        Some(SyncFolder::Connection { connection, path }) => (Some(connection), path.clone()),
+        Some(SyncFolder::Path { path }) => (None, path.to_string_lossy().into_owned()),
+        Some(SyncFolder::Document { .. }) | None => (None, String::new()),
+    };
+    let account = source.and_then(|id| accounts.iter().find(|account| &account.id == id));
+    let selected = match account.map(|account| account.kind.as_str()) {
+        Some("smb") => 2,
+        Some(_) => 1,
+        None => 0,
+    };
+    {
+        let mut draft = draft.borrow_mut();
+        draft.source = source.cloned();
+        draft.selected = selected;
+        draft.updating = true;
+    }
+    storage.set_selected(selected);
+    draft.borrow_mut().updating = false;
+    storage.set_subtitle(account.map_or("", |account| account.name.as_str()));
+    row.set_text(&path);
 }
 
 fn join_profile(shell: &Rc<Preferences>, parent: &adw::Dialog, invitation: String) {

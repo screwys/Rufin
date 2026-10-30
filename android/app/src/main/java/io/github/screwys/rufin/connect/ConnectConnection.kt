@@ -31,6 +31,7 @@ internal class ConnectConnection(private val model: RufinConnection) {
         private set
     private var bridge: ConnectOwner? = null
     private var dismissedStatusError: String? = null
+    private var offered: Pair<String, Long>? = null
     val visibleError get() = error ?: state?.error?.takeUnless { it == dismissedStatusError }
 
     suspend fun observe() {
@@ -55,6 +56,10 @@ internal class ConnectConnection(private val model: RufinConnection) {
                             val next = withContext(Dispatchers.Default) { subscription.next() }
                             if (next.connecting && state?.connecting != true) operationActive = true
                             if (!next.connecting && next.error == null) operationActive = false
+                            val offer = next.continuation?.let { it.device to it.at }
+                            if (offer != null && offer != offered) model.showFeedback(
+                                translate("Continue from {device}").replace("{device}", next.continuation!!.name))
+                            offered = offer
                             state = next
                         }
                     }
@@ -73,16 +78,16 @@ internal class ConnectConnection(private val model: RufinConnection) {
     }
 
     private fun request(operation: suspend (ConnectOwner) -> ConnectStatus,
-        confirmed: (suspend (ConnectOwner) -> ConnectStatus)? = null, success: String? = null, blocking: Boolean = true) {
+        confirmed: (suspend (ConnectOwner) -> ConnectStatus)? = null, blocking: Boolean = true) {
         val owner = bridge ?: return
         model.runAction {
             if (blocking) pending = true
             error = null
             dismissedStatusError = null
-            try { operation(owner).let { if (bridge === owner) { state = it; success?.let { message -> model.showFeedback(message) } } } }
+            try { operation(owner).let { if (bridge === owner) state = it } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: ActionException.ConfirmationRequired) {
-                if (confirmed != null) confirmation = ConnectConfirmation(failure.confirmation, failure.reason) { request(confirmed, success = success) }
+                if (confirmed != null) confirmation = ConnectConfirmation(failure.confirmation, failure.reason) { request(confirmed) }
                 else error = failure.reason
             }
             catch (failure: ActionException.Failed) { error = failure.v1 }
@@ -109,19 +114,10 @@ internal class ConnectConnection(private val model: RufinConnection) {
                 throw IllegalStateException(translate("Local network permission was denied"))
             }
             owner.execute(action)
-        }, confirmed = confirmed, success = if (action is ConnectAction.Export) translate("Saved") else null,
-            blocking = action != ConnectAction.Refresh)
+        }, confirmed = confirmed, blocking = action != ConnectAction.Refresh)
     }
     fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
         { it.execute(ConnectAction.Join(invitation, true)) })
-    fun importDocument(uri: String) = request({ it.importDocument(uri, false, null) },
-        { it.importDocument(uri, true, null) }, success = translate("Applied"))
-    fun exportDocument(uri: String) = request({ it.exportDocument(uri) }, success = translate("Saved"))
-    fun importRemote(source: String, path: String) = request({
-        it.execute(ConnectAction.Import(path, source, false, null))
-    }, { it.execute(ConnectAction.Import(path, source, true, null)) }, success = translate("Applied"))
-    fun exportRemote(source: String, path: String) = action(ConnectAction.Export(path, source))
-    suspend fun profileFiles(source: String, folder: String): List<String> = bridge?.listProfileFiles(source, folder).orEmpty()
     fun confirm() { confirmation?.let { choice -> confirmation = null; choice.retry() } }
     fun cancelConfirmation() { confirmation = null }
     fun dismissOperation() { operationActive = false }

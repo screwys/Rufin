@@ -4,7 +4,6 @@ import { tr, notice } from "./ui.js";
 
 const element = (id) => document.getElementById(`connect-${id}`);
 const progressInteger = new Intl.NumberFormat();
-const progressDecimal = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const confirmation = () =>
   window.confirm(
     tr(
@@ -12,7 +11,8 @@ const confirmation = () =>
     ),
   );
 let state;
-let offeredDevice;
+let offered;
+let offeredContinuation;
 let previousDevices;
 let mode = "invite";
 let storageConnection = null;
@@ -25,18 +25,17 @@ function updateView() {
   const progressVisible = working && !state.pairing && !state.error;
   const hasProfile = !!state.settings.profile;
   const joining = mode === "join" && !hasProfile;
-  const importing = joining && element("join-method").value === "file";
   const profileControls = hasProfile && !busy;
   const visible = {
     start: !progressVisible,
     join: joining && !busy,
     invite: !joining && !busy,
-    file: importing && !busy,
     verify: !!state.pairing,
     connecting: progressVisible,
     devices: !busy && state.devices.some(device => device.enrolled),
-    nearby: !busy && !importing && state.devices.some(device => !device.enrolled),
-    network: !busy && (profileControls || (joining && !importing)),
+    nearby: !busy && state.devices.some(device => !device.enrolled),
+    network: !busy && (profileControls || joining),
+    folder: profileControls,
   };
   for (const section of document.querySelectorAll("[data-connect-section]")) {
     if (section.dataset.connectSection in visible)
@@ -46,9 +45,8 @@ function updateView() {
     button.setAttribute("aria-pressed", String(button.dataset.connectMode === mode));
   element("dialog").classList.toggle("connect-working", progressVisible);
   element("cancel-pairing").hidden = !state.connecting;
-  element("peer-controls").hidden = importing;
   element("choices").hidden = hasProfile || busy;
-  element("retry").hidden = !state.error || (!state.settings.profile && !state.settings.pending_import) || state.connecting || !!state.pairing;
+  element("retry").hidden = !state.error || !state.settings.profile || state.connecting || !!state.pairing;
   element("leave").hidden = !profileControls || !state.devices.some((device) => device.enrolled);
   element("approve").hidden = !!state.pairing?.approved;
   element("approval-status").hidden = !state.pairing?.approved;
@@ -64,50 +62,40 @@ function showCollectionProgress(value) {
   const fraction = total === null ? null : Math.min(1, Math.max(0, progress.completed / total));
   if (fraction === null) bar.removeAttribute("value");
   else bar.value = fraction;
-  const bytes = progress?.stage === "receiving" || progress?.stage === "validating";
-  const count = value => bytes ? progressDecimal.format(value / 1_048_576) : progressInteger.format(value);
   let counter = "";
   if (progress && total !== null) {
-    const current = count(progress.completed);
-    const maximum = count(total);
+    const current = progressInteger.format(progress.completed);
+    const maximum = progressInteger.format(total);
     const percent = progressInteger.format(Math.floor(Math.min(progress.completed, total) * 100 / total));
-    counter = bytes
-      ? tr("{current} / {total} MiB ({percent}%)", { current, total: maximum, percent })
-      : `${current} / ${maximum} (${percent}%)`;
+    counter = `${current} / ${maximum} (${percent}%)`;
   } else if (progress?.completed > 0) {
-    const current = count(progress.completed);
-    counter = bytes ? tr("{current} MiB", { current }) : current;
+    counter = progressInteger.format(progress.completed);
   }
   element("collection-counter").textContent = counter;
   element("collection-counter").hidden = !counter;
   return counter;
 }
 
-function selectMethod() {
-  if (mode === "join" && element("join-method").value === "file") element("file").value = "";
-  updateView();
-}
-
 export async function refreshContinuation() {
-  const device = state?.settings.enabled ? state.devices.find(device => device.enrolled && device.reachable && device.has_playback) : null;
-  offeredDevice = device;
+  const continuation = state?.continuation;
+  offeredContinuation = continuation;
   const control = element("continue");
-  control.hidden = !device;
-  if (device) {
-    control.textContent = tr("Continue from {device}", { device: device.name });
+  control.hidden = !continuation;
+  const offer = continuation && `${continuation.device}:${continuation.at}`;
+  if (continuation) {
+    const title = tr("Continue from {device}", { device: continuation.name });
+    control.textContent = title;
+    if (offer !== offered) notice(title);
   }
-  return device;
+  offered = offer;
+  return continuation;
 }
 
 async function action(value) {
   try {
     show(await api("/connect", "POST", value));
   } catch (error) {
-    if (
-      (value.action === "import" || value.action === "pair") &&
-      !value.replace &&
-      error.confirmation === "replace_profile"
-    ) {
+    if (value.action === "pair" && !value.replace && error.confirmation === "replace_profile") {
       if (confirmation()) await action({ ...value, replace: true });
       return;
     }
@@ -144,7 +132,9 @@ function show(value) {
   const pairingChanged = value.pairing?.session !== state?.pairing?.session;
   const networkChanged = state && (state.settings.nearby !== value.settings.nearby || state.settings.relay !== value.settings.relay || state.settings.public_relay !== value.settings.public_relay);
   const completed = state && state.completed_pairings !== value.completed_pairings;
+  const folderChanged = JSON.stringify(state?.settings.folder) !== JSON.stringify(value.settings.folder);
   state = value;
+  if (folderChanged) run(() => showFolder(value.settings.folder));
   const counter = showCollectionProgress(value);
   if (networkChanged) {
     element("nearby").checked = value.settings.nearby;
@@ -275,18 +265,23 @@ function chooseStorageConnection(kind = storageKind) {
     storageKind = kind;
     element("storage").value = kind;
     storageConnection = id;
-    element("file").value = "";
+    element("folder").value = "";
     await showStorageConnection();
   });
+}
+
+async function showFolder(folder) {
+  storageConnection = folder?.connection ?? null;
+  element("folder").value = folder?.path ?? "";
+  const connections = storageConnection ? await api("/integrations/files") : [];
+  storageKind = connections.find((item) => item.id === storageConnection)?.kind ?? "";
+  element("storage").value = storageKind;
+  await showStorageConnection(connections);
 }
 
 function showRelay() {
   const enabled = element("relay-enabled").checked;
   element("relay").hidden = !enabled;
-}
-
-function fileSource() {
-  return storageConnection;
 }
 
 function showDisableConfirmation() {
@@ -302,10 +297,7 @@ function present(value) {
   showRelay();
   updateView();
   element("dialog").showModal();
-  if (!value.pairing && !value.connecting) {
-    run(showStorageConnection);
-    run(refreshContinuation);
-  }
+  if (!value.pairing && !value.connecting) run(refreshContinuation);
 }
 
 export function watch(signal) {
@@ -315,18 +307,21 @@ export function watch(signal) {
     void refreshContinuation();
   });
   signal.addEventListener("abort", () => events.close(), { once: true });
+  run(async () => {
+    show(await api("/connect"));
+    await refreshContinuation();
+  });
 }
 
 export function init() {
   for (const button of document.querySelectorAll("[data-connect-mode]")) {
     button.addEventListener("click", () => {
       mode = button.dataset.connectMode;
-      selectMethod();
+      updateView();
       if (mode === "join") run(() => action({ action: "discover" }));
       else if (!state.settings.enabled) run(() => action({ action: "enable", enabled: true }));
     });
   }
-  element("join-method").addEventListener("change", selectMethod);
   element("storage").addEventListener("change", () => {
     const kind = element("storage").value;
     if (kind) {
@@ -335,16 +330,16 @@ export function init() {
     } else {
       storageKind = "";
       storageConnection = null;
-      element("file").value = "";
+      element("folder").value = "";
       element("storage-connection").hidden = true;
     }
   });
   click("storage-connection", () => chooseStorageConnection());
-  const continuePlayback = async (device) => {
-    if (device) await action({ action: "continue", peer: device.id });
+  const continuePlayback = async (continuation) => {
+    if (continuation) await action({ action: "continue", peer: continuation.device });
     await refreshContinuation();
   };
-  click("continue", () => continuePlayback(offeredDevice));
+  click("continue", () => continuePlayback(offeredContinuation));
   click("progress-open", () => document.getElementById("open-connect").click());
   click("progress-dismiss", () => {
     element("progress").hidden = true;
@@ -406,9 +401,12 @@ export function init() {
     relay: element("relay-enabled").checked ? element("relay").value.trim() : null,
     public_relay: false,
   }));
-  click("import", () => action({
-    action: "import", path: element("file").value, source_id: fileSource(), replace: false, key: null,
-  }));
+  click("folder-save", () => {
+    const path = element("folder").value.trim();
+    const folder = !path ? null : storageConnection ? { connection: storageConnection, path } : { path };
+    return action({ action: "folder", folder });
+  });
+  click("folder-clear", () => action({ action: "folder", folder: null }));
   click("leave", async () => {
     if (!window.confirm(tr("Disconnect this device?"))) return;
     await action({ action: "leave" });
