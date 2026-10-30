@@ -230,17 +230,11 @@ impl TrackCollectionModel {
         self.0.sparse.resume_initial_demand();
     }
 
-    pub fn update_favorite(&self, media_uri: &str, favorite: bool) -> bool {
-        let Some(position) = self
-            .0
-            .sparse
-            .ready_position(|row| row.media_uri() == media_uri)
-        else {
-            return false;
-        };
-        self.0
-            .sparse
-            .update_ready(position as usize, |row| row.set_favorite(favorite))
+    pub fn update_favorite(&self, media_uri: &str, favorite: bool) {
+        self.0.sparse.update_matching(
+            |row| row.media_uri() == media_uri,
+            |row| row.set_favorite(favorite),
+        );
     }
 
     pub fn update_downloaded(&self, media_uri: &str, downloaded: bool) {

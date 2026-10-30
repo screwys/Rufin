@@ -2631,7 +2631,9 @@ impl SourceOwner {
     pub fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
-            let _ = owner.set_favorite_with_result(target, favorite).await;
+            if let Err(error) = owner.apply_favorite(target, favorite).await {
+                owner.shared.warn_nonfatal(&error);
+            }
         });
     }
 }
@@ -2643,7 +2645,6 @@ impl SourceOwner {
         target: FavoriteTarget,
         favorite: bool,
     ) -> sources::SourceResult<bool> {
-        info!(kind = target.kind(), favorite, "Favorite requested");
         let owner = self.clone();
         self.shared
             .runtime
@@ -2831,6 +2832,7 @@ impl SourceOwner {
     /// Writes the favorite. A server that takes favorites gets it from the outbox; a server
     /// item's URI names its source, so no read comes first.
     async fn apply_favorite(&self, target: FavoriteTarget, favorite: bool) -> Result<(), String> {
+        info!(kind = target.kind(), favorite, "Favorite requested");
         let deliver = library::source_entity_parts(target.media_uri())
             .filter(|(_, kind, _)| kind == target.kind())
             .and_then(|(source_id, _, _)| self.configuration(&source_id))
