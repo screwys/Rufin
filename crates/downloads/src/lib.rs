@@ -2059,6 +2059,11 @@ impl Actor {
             let task_revision = Arc::clone(&revision);
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;
+                task_paths
+                    .audio
+                    .check_place()
+                    .await
+                    .map_err(DownloadFailure::Item)?;
                 match resolved.map_err(download_source_failure)? {
                     ResolvedDownload::Encode { stream, encoding } => {
                         encode_download(stream, encoding, &task_paths, &mut cancelled)
