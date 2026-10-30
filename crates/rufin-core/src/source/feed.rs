@@ -67,8 +67,9 @@ impl Changes {
 pub(crate) enum Notice {
     /// Connect data was applied outside a Write.
     All,
-    /// A source's rows show something new, such as an invalidated cover. Goes out at once.
-    Source(SourceKey),
+    /// A source's pages must read again after this instant, such as after an invalidated
+    /// cover. Goes out at once unless the source went out since.
+    Source(SourceKey, Instant),
     Playlist(PlaylistKey),
     /// The Home Explore shuffle.
     Home(SourceKey),
@@ -150,11 +151,15 @@ impl Pending {
                     self.changed.playlist_lists = true
                 }
                 Scope::Home { source } => self.changed.home.push(*source),
-                Scope::Tracks { source: None, .. }
-                | Scope::Source {
+                // The source's held rows, from this Write or an earlier one, are gone with it.
+                Scope::Source {
+                    key,
                     phase: SourcePhase::Removed,
-                    ..
+                } => {
+                    self.held.remove(key);
+                    self.now.remove(key);
                 }
+                Scope::Tracks { source: None, .. }
                 | Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Downloads { .. }
@@ -163,12 +168,14 @@ impl Pending {
         }
     }
 
-    fn notice(&mut self, notice: Notice) {
+    fn notice(&mut self, notice: Notice, published: &HashMap<SourceKey, Instant>) {
         match notice {
             Notice::All => self.changed.all = true,
-            Notice::Source(source) => {
-                self.held.insert(source);
-                self.now.insert(source);
+            Notice::Source(source, since) => {
+                if published.get(&source).is_none_or(|last| *last < since) {
+                    self.held.insert(source);
+                    self.now.insert(source);
+                }
             }
             Notice::Playlist(key) => self.changed.playlists.push(key),
             Notice::Home(source) => self.changed.home.push(source),
@@ -234,7 +241,7 @@ pub(super) async fn run(
             }
         }
         while let Ok(notice) = notices.try_recv() {
-            pending.notice(notice);
+            pending.notice(notice, &published);
         }
         let now = Instant::now();
         let ready = pending.take_ready(&published, now);
@@ -256,7 +263,7 @@ pub(super) async fn run(
                 Err(RecvError::Closed) => return,
             },
             notice = notices.recv() => match notice {
-                Some(notice) => pending.notice(notice),
+                Some(notice) => pending.notice(notice, &published),
                 None => return,
             },
             () = async { sleep_until(deadline.unwrap_or_else(Instant::now)).await },
@@ -270,9 +277,6 @@ impl SourceOwner {
     /// then sends the change.
     async fn flush(&self, mut changed: Changed) {
         let shared = &self.shared;
-        changed
-            .sources
-            .retain(|source| shared.catalog.source_id(*source).is_some());
         changed.playlists.sort_unstable();
         changed.playlists.dedup();
         changed.home.sort_unstable();

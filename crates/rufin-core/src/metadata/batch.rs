@@ -532,7 +532,20 @@ impl MetadataBatch {
             .as_ref()
             .is_some_and(|edit| edit.kind == SourceEntityKind::Artist);
         let followups = Mutex::new(Vec::new());
-        let (pending, changed) = (&followups, &changed);
+        let since = tokio::time::Instant::now();
+        let mut invalidated = false;
+        if artwork_changed
+            && let Some(previous) = self
+                .scope
+                .as_ref()
+                .and_then(|scope| scope.session.previous_artwork.as_deref())
+        {
+            invalidated = super::EditSession::invalidate_artwork(&self.source, previous)
+                .await
+                .map_err(Error::Write)?;
+        }
+        let invalidated = std::sync::atomic::AtomicBool::new(invalidated);
+        let (pending, changed, invalidated) = (&followups, &changed, &invalidated);
         let result = files
             .save_tracks(
                 &self.source.shared.catalog,
@@ -540,6 +553,14 @@ impl MetadataBatch {
                 uris,
                 |position| async move {
                     let record = self.read(changed[position]).await?;
+                    if (record.state.artwork.is_some() || record.scope_artwork)
+                        && let Some(binding) = record.draft.artwork.binding.as_deref()
+                        && super::EditSession::invalidate_artwork(&self.source, binding)
+                            .await
+                            .map_err(Error::Write)?
+                    {
+                        invalidated.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     Ok((
                         record
                             .state
@@ -588,23 +609,13 @@ impl MetadataBatch {
                 },
             )
             .await;
-        if source.is_none()
-            && matches!(result, Ok(()) | Err(Error::PartiallySaved { .. }))
-            && let Some(selected) = self.source.shared.selected()
-        {
-            self.source
-                .notice(crate::source::feed::Notice::Source(selected.source_key));
-        }
-        if artwork_changed {
-            super::EditSession::invalidate_artwork(
-                &self.source,
-                source,
-                self.scope
-                    .as_ref()
-                    .and_then(|scope| scope.session.previous_artwork.as_deref()),
-                &result,
-            )
-            .await?;
+        if matches!(result, Ok(()) | Err(Error::PartiallySaved { .. })) {
+            if source.is_none() {
+                super::EditSession::direct_files_saved(&self.source);
+            }
+            if invalidated.load(std::sync::atomic::Ordering::Relaxed) {
+                super::EditSession::artwork_saved(&self.source, source, since);
+            }
         }
         let mut failures = Vec::new();
         for (index, artwork_changed) in followups.into_inner().unwrap_or_else(|e| e.into_inner()) {
@@ -612,13 +623,6 @@ impl MetadataBatch {
             match self.session(index).await {
                 Ok((session, draft)) => {
                     if artwork_changed {
-                        super::EditSession::invalidate_artwork(
-                            &self.source,
-                            source,
-                            record.draft.artwork.binding.as_deref(),
-                            &result,
-                        )
-                        .await?;
                         record.draft.artwork = draft.artwork;
                         record.state.storage = record.draft.artwork.storage;
                     }

@@ -5,6 +5,7 @@ mod editor;
 mod lyrics;
 mod review;
 mod scan;
+use crate::source::feed::Notice;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
@@ -26,6 +27,7 @@ pub use review::{
 pub use sources::MetadataDraft;
 use sources::{Implementation, Source, SourceEntityKind, SourceMetadataError};
 use std::sync::Arc;
+use tokio::time::Instant;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
 struct RuntimeFuture<F> {
@@ -196,35 +198,37 @@ impl EditSession {
             draft,
         ))
     }
-    async fn invalidate_artwork(
+    /// Drops the cached image of a binding a save replaces. A save does this before its
+    /// catalog Write, so that the Write's own Changed rereads the new image.
+    pub(super) async fn invalidate_artwork(
         owner: &SourceOwner,
-        source: Option<&Arc<Source>>,
-        binding: Option<&[u8]>,
-        result: &Result<(), SourceMetadataError>,
-    ) -> Result<(), SourceMetadataError> {
-        if matches!(
-            result,
-            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
-        ) {
-            if let Some(binding) = binding {
-                let artwork = owner.shared.artwork.clone();
-                let binding = binding.to_vec();
-                let invalidated = tokio::task::spawn_blocking(move || {
-                    artwork.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
-                })
-                .await
-                .map_err(string_error)
-                .and_then(|result| result.map_err(string_error))
-                .map_err(SourceMetadataError::SavedRefreshFailed)?;
-                if invalidated
-                    && let Some(source) = source
-                        .and_then(|source| owner.shared.catalog.source_key(source.source_id()))
-                {
-                    owner.notice(crate::source::feed::Notice::Source(source));
-                }
-            }
+        binding: &[u8],
+    ) -> Result<bool, String> {
+        let artwork = owner.shared.artwork.clone();
+        let binding = artwork::ArtworkBinding::opaque(binding);
+        tokio::task::spawn_blocking(move || artwork.invalidate_image(&binding))
+            .await
+            .map_err(string_error)?
+            .map_err(string_error)
+    }
+
+    /// The source's pages read the invalidated image again, unless the save's Write already
+    /// made them read after `since`.
+    pub(super) fn artwork_saved(owner: &SourceOwner, source: Option<&Arc<Source>>, since: Instant) {
+        if let Some(source) =
+            source.and_then(|source| owner.shared.catalog.source_key(source.source_id()))
+        {
+            owner.notice(Notice::Source(source, since));
         }
-        Ok(())
+    }
+
+    /// A file outside every source changed. Its Write names no source, so the selected
+    /// source's pages read again, or every page when none is selected.
+    pub(super) fn direct_files_saved(owner: &SourceOwner) {
+        owner.notice(match owner.shared.selected() {
+            Some(selected) => Notice::Source(selected.source_key, Instant::now()),
+            None => Notice::All,
+        });
     }
 
     async fn save(
@@ -237,10 +241,22 @@ impl EditSession {
             return Ok(());
         }
         let metadata_changed = !edit.changes.is_empty() || edit.artwork.is_some();
-        let artwork_changed = edit.artwork.is_some();
+        let previous_artwork = self
+            .previous_artwork
+            .as_deref()
+            .filter(|_| edit.artwork.is_some());
+        let since = Instant::now();
+        let mut invalidated = false;
         let result = async {
             match &self.destination {
-                EditDestination::Files(target) => target.save(&owner.shared.catalog, edit).await,
+                EditDestination::Files(target) => {
+                    if let Some(previous) = previous_artwork {
+                        invalidated = Self::invalidate_artwork(owner, previous)
+                            .await
+                            .map_err(SourceMetadataError::Write)?;
+                    }
+                    target.save(&owner.shared.catalog, edit).await
+                }
                 EditDestination::Server { object, revision } => {
                     let source = self
                         .source
@@ -267,31 +283,32 @@ impl EditSession {
                         }
                         _ => unreachable!(),
                     };
+                    let invalidation = match previous_artwork.filter(|_| artwork.is_ok()) {
+                        Some(previous) => Self::invalidate_artwork(owner, previous)
+                            .await
+                            .map(|done| invalidated = done),
+                        None => Ok(()),
+                    };
                     let refresh = source
                         .apply_items(&owner.shared.catalog, vec![object], Vec::new())
                         .await
-                        .map_err(|error| {
-                            SourceMetadataError::SavedRefreshFailed(error.to_string())
-                        });
+                        .map_err(|error| error.to_string())
+                        .and(invalidation)
+                        .map_err(SourceMetadataError::SavedRefreshFailed);
                     sources::finish_metadata_save(artwork, refresh, saved)
                 }
             }
         }
         .await;
-        if artwork_changed {
-            Self::invalidate_artwork(
-                owner,
-                self.source.as_ref(),
-                self.previous_artwork.as_deref(),
-                &result,
-            )
-            .await?;
+        let saved = matches!(
+            &result,
+            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
+        );
+        if saved && invalidated {
+            Self::artwork_saved(owner, self.source.as_ref(), since);
         }
-        if self.source.is_none()
-            && matches!(
-                &result,
-                Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
-            )
+        if saved
+            && self.source.is_none()
             && let EditDestination::Files(target) = &self.destination
             && owner
                 .shared
@@ -300,9 +317,8 @@ impl EditSession {
                 .await
                 .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
                 .is_none()
-            && let Some(selected) = owner.shared.selected()
         {
-            owner.notice(crate::source::feed::Notice::Source(selected.source_key));
+            Self::direct_files_saved(owner);
         }
         result?;
         if let Some(lyrics) = lyrics {
