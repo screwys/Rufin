@@ -155,7 +155,11 @@ impl PeerAccess {
         let Some(location) = self.mapped_file(catalog, uri).await? else {
             return Ok(None);
         };
-        if let Some(previous) = catalog.download_file(uri, "original").await? {
+        if let Some(previous) = catalog
+            .download_file(uri)
+            .await?
+            .filter(|file| file.encoding == "original")
+        {
             let previous_location = if previous.path.starts_with("content://") {
                 Some(LocalMediaLocation::Document(previous.path.clone()))
             } else {

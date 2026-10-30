@@ -160,8 +160,6 @@ struct DownloadJob {
     #[serde(deserialize_with = "quality::deserialize")]
     quality: DownloadQuality,
     #[serde(default)]
-    replace_unknown: bool,
-    #[serde(default)]
     completed: Vec<String>,
     #[serde(default)]
     failed: bool,
@@ -326,7 +324,6 @@ async fn load_queue(
                     id: job.id,
                     subject,
                     quality: job.quality,
-                    replace_unknown: false,
                     completed,
                     failed: false,
                     remaining: remaining.into(),
@@ -1171,7 +1168,7 @@ impl Actor {
                             self.settings_for(source_id).quality
                         });
                     if let Some(feedback) = self
-                        .enqueue(source_id, subject.clone(), quality, media_uris, false)
+                        .enqueue(source_id, subject.clone(), quality, media_uris)
                         .await
                     {
                         let _ = self.events.send(DownloadEvent::Feedback(feedback)).await;
@@ -1315,57 +1312,9 @@ impl Actor {
             }
         }
         for (source_id, quality) in changed_quality {
-            self.abort_matching(active, true, |download| {
-                download.source_id.as_ref() == Some(&source_id) && download.quality != quality
-            })
-            .await;
-            if let Some(jobs) = self.jobs.get_mut(&Some(source_id.clone())) {
+            if let Some(jobs) = self.jobs.get_mut(&Some(source_id)) {
                 for job in jobs {
                     job.quality = quality;
-                    job.replace_unknown = true;
-                    job.remaining.extend(job.completed.drain(..));
-                    job.failed = false;
-                    job.state = DownloadQueueState::Queued;
-                }
-            }
-            let mut after = (String::new(), String::new());
-            loop {
-                let records = match self
-                    .catalog
-                    .download_files_page(Some(source_id.as_str()), &after, None)
-                    .await
-                {
-                    Ok(records) if records.is_empty() => break,
-                    Ok(records) => records,
-                    Err(error) => {
-                        warn!(%error, "could not read downloads for a quality change");
-                        break;
-                    }
-                };
-                let last = records.last().unwrap();
-                after = (last.media_uri.clone(), last.encoding.clone());
-                let mut replacements: HashMap<DownloadSubject, Vec<String>> = HashMap::new();
-                for record in records {
-                    let Ok(owners) = download_owners(&record) else {
-                        continue;
-                    };
-                    for owner in owners {
-                        let subject = match owner {
-                            DownloadOwner::Subject(subject) => subject,
-                            DownloadOwner::Retained => DownloadSubject::Prepared {
-                                context_id: "retained-downloads".into(),
-                                title: None,
-                            },
-                        };
-                        replacements
-                            .entry(subject)
-                            .or_default()
-                            .push(record.media_uri.clone());
-                    }
-                }
-                for (subject, uris) in replacements {
-                    self.enqueue(Some(source_id.clone()), subject, quality, uris, true)
-                        .await;
                 }
             }
         }
@@ -1565,11 +1514,7 @@ impl Actor {
         };
         let quality = self.settings_for(&source_id).quality;
         jobs.retain_mut(|job| {
-            if job.quality != quality {
-                job.quality = quality;
-                job.replace_unknown = true;
-                job.remaining.extend(job.completed.drain(..));
-            }
+            job.quality = quality;
             job.state = if source_available {
                 DownloadQueueState::Queued
             } else {
@@ -1602,7 +1547,6 @@ impl Actor {
         media_uri: &str,
         owner: &DownloadOwner,
         quality: DownloadQuality,
-        replace_unknown: bool,
     ) -> Result<bool, String> {
         let automatic = matches!(owner, DownloadOwner::Subject(DownloadSubject::Rule(_)));
         let revision = self
@@ -1614,7 +1558,7 @@ impl Actor {
         let encoding = library::media_encoding_key(quality.encoding());
         let previous = self
             .catalog
-            .download_file(media_uri, &encoding)
+            .download_file(media_uri)
             .await
             .map_err(|error| error.to_string())?;
         let mut saved = previous
@@ -1630,14 +1574,7 @@ impl Actor {
         {
             saved = self
                 .catalog
-                .shared_download_file(media_uri, &encoding, revision)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        if saved.is_none() && revision.is_none() && !replace_unknown {
-            saved = self
-                .catalog
-                .download_file(media_uri, "unknown")
+                .shared_download_file(media_uri, revision)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -1743,7 +1680,6 @@ impl Actor {
         subject: DownloadSubject,
         quality: DownloadQuality,
         media_uris: Vec<String>,
-        replace_unknown: bool,
     ) -> Option<DownloadFeedback> {
         let attached = source_id
             .as_ref()
@@ -1769,13 +1705,7 @@ impl Actor {
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(
-                    source_id.as_ref(),
-                    media_uri,
-                    &owner,
-                    quality,
-                    replace_unknown,
-                )
+                .add_download_owner(source_id.as_ref(), media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1796,7 +1726,6 @@ impl Actor {
             {
                 let existing = &mut jobs[existing_index];
                 existing.failed = false;
-                existing.replace_unknown |= replace_unknown;
                 let completed_now = completed.iter().collect::<HashSet<_>>();
                 existing
                     .remaining
@@ -1835,7 +1764,6 @@ impl Actor {
                     id: job_id(source_id.as_ref(), &subject, self.next_job),
                     subject: subject.clone(),
                     quality,
-                    replace_unknown,
                     completed,
                     failed: false,
                     remaining: remaining.into(),
@@ -1884,14 +1812,10 @@ impl Actor {
         let desired = media_uris.iter().cloned().collect::<HashSet<_>>();
         let subject = DownloadSubject::Rule(rule);
         let group = Some(source_id.clone());
-        let quality_changed = self.jobs.get(&group).is_some_and(|jobs| {
-            jobs.iter()
-                .any(|job| job.subject == subject && job.quality != quality)
-        });
         self.abort_matching(active, true, |download| {
             download.source_id.as_ref() == Some(&source_id)
                 && download.subject == subject
-                && (quality_changed || !desired.contains(&download.media_uri))
+                && !desired.contains(&download.media_uri)
         })
         .await;
         let active_job_id = active
@@ -1903,7 +1827,7 @@ impl Actor {
         let owner = DownloadOwner::Subject(subject.clone());
 
         let owner_key = serde_json::to_string(&owner).expect("download ownership can be stored");
-        let mut after = (String::new(), String::new());
+        let mut after = String::new();
         loop {
             let records = match self
                 .catalog
@@ -1918,7 +1842,7 @@ impl Actor {
                 }
             };
             let last = records.last().unwrap();
-            after = (last.media_uri.clone(), last.encoding.clone());
+            after = last.media_uri.clone();
             for mut record in records {
                 if desired.contains(&record.media_uri) {
                     continue;
@@ -1938,21 +1862,11 @@ impl Actor {
             }
         }
 
-        let replace_unknown = self.jobs.get(&Some(source_id.clone())).is_some_and(|jobs| {
-            jobs.iter()
-                .any(|job| job.subject == subject && job.replace_unknown)
-        });
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(
-                    Some(&source_id),
-                    media_uri,
-                    &owner,
-                    quality,
-                    replace_unknown,
-                )
+                .add_download_owner(Some(&source_id), media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1976,7 +1890,7 @@ impl Actor {
 
         let scheduled_tracks = remaining
             .iter()
-            .filter(|media_uri| quality_changed || !old_remaining.contains(*media_uri))
+            .filter(|media_uri| !old_remaining.contains(*media_uri))
             .count();
         if !remaining.is_empty() {
             let id = existing_id.unwrap_or_else(|| {
@@ -1994,7 +1908,6 @@ impl Actor {
                 id,
                 subject: subject.clone(),
                 quality,
-                replace_unknown,
                 completed,
                 failed: false,
                 remaining: remaining.into(),
@@ -2052,21 +1965,12 @@ impl Actor {
                 self.publish(source_id.as_ref()).await;
                 continue;
             }
-            let replace_unknown = self
-                .find_job_mut(&source_id, &job_id)
-                .is_some_and(|job| job.replace_unknown);
             let custom_directory = attached
                 .as_ref()
                 .and_then(|attached| attached.directory.as_ref());
             let owner = DownloadOwner::Subject(subject.clone());
             match self
-                .add_download_owner(
-                    source_id.as_ref(),
-                    &media_uri,
-                    &owner,
-                    quality,
-                    replace_unknown,
-                )
+                .add_download_owner(source_id.as_ref(), &media_uri, &owner, quality)
                 .await
             {
                 Ok(true) => {
@@ -2142,12 +2046,7 @@ impl Actor {
                     && let Ok(Some((root, mut relative))) =
                         self.peer.destination(&self.catalog, &media_uri).await
                 {
-                    let previous = self
-                        .catalog
-                        .download_file(&media_uri, &library::media_encoding_key(quality.encoding()))
-                        .await
-                        .ok()
-                        .flatten();
+                    let previous = self.catalog.download_file(&media_uri).await.ok().flatten();
                     if (quality != DownloadQuality::Original
                         || previous.is_some_and(|file| file.revision != revision))
                         && let Some(name) = relative.last_mut()
@@ -2425,7 +2324,7 @@ impl Actor {
         };
         let previous = self
             .catalog
-            .download_file(media_uri, &file.encoding)
+            .download_file(media_uri)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
         let finished = finalize_download(paths, previous.as_ref())
@@ -2839,9 +2738,9 @@ impl Actor {
         let mut removed = 0;
         let mut failed = 0;
         for uri in media_uris {
-            match self.catalog.download_files(&uri).await {
-                Ok(files) => {
-                    for file in files {
+            match self.catalog.download_file(&uri).await {
+                Ok(file) => {
+                    if let Some(file) = file {
                         match self.retire_receipt(&file).await {
                             Ok(count) => removed += count,
                             Err(error) => {
@@ -2884,12 +2783,6 @@ impl Actor {
             .forget_download(&file)
             .await
             .map_err(|error| error.to_string())?;
-        let downloaded = !self
-            .catalog
-            .download_files(&file.media_uri)
-            .await
-            .map_err(|error| error.to_string())?
-            .is_empty();
         self.events
             .counts_dirty
             .lock()
@@ -2899,7 +2792,7 @@ impl Actor {
             .events
             .send(DownloadEvent::Changed {
                 media_uri: file.media_uri.clone(),
-                downloaded,
+                downloaded: false,
             })
             .await;
         for owner in download_owners(&file)? {
@@ -3016,7 +2909,7 @@ impl Actor {
         }
         let owner = DownloadOwner::Subject(subject.clone());
         let owner_key = serde_json::to_string(&owner).expect("download ownership can be stored");
-        let mut after = (String::new(), String::new());
+        let mut after = String::new();
         loop {
             let records = match self
                 .catalog
@@ -3031,7 +2924,7 @@ impl Actor {
                 }
             };
             let last = records.last().unwrap();
-            after = (last.media_uri.clone(), last.encoding.clone());
+            after = last.media_uri.clone();
             for mut record in records {
                 if media_ids.is_some_and(|ids| !ids.contains(&record.media_uri)) {
                     continue;
@@ -3122,7 +3015,7 @@ impl Actor {
             )
             .await
             .map_err(|error| error.to_string())?;
-            let mut after = (String::new(), String::new());
+            let mut after = String::new();
             loop {
                 let records = self
                     .catalog
@@ -3132,7 +3025,7 @@ impl Actor {
                 let Some(last) = records.last() else {
                     break;
                 };
-                after = (last.media_uri.clone(), last.encoding.clone());
+                after = last.media_uri.clone();
                 for record in records {
                     self.retire_receipt(&record).await?;
                 }
@@ -3437,7 +3330,6 @@ mod tests {
                     std::slice::from_ref(&media_uri),
                 ),
                 quality: DownloadQuality::Original,
-                replace_unknown: false,
                 completed: Vec::new(),
                 failed: false,
                 remaining: vec![media_uri.clone(), direct.clone()].into(),
@@ -3516,7 +3408,7 @@ mod tests {
             .unwrap();
         let receipt = actor
             .catalog
-            .download_file(&media_uri, "original")
+            .download_file(&media_uri)
             .await
             .unwrap()
             .unwrap();
@@ -3616,10 +3508,9 @@ mod tests {
         );
         let access = actor
             .catalog
-            .download_files(&media_uri)
+            .download_file(&media_uri)
             .await
             .unwrap()
-            .pop()
             .map(|download| download.path);
         assert_eq!(
             reqwest::Url::parse(access.as_deref().unwrap())
@@ -3667,10 +3558,9 @@ mod tests {
         );
         let access = actor
             .catalog
-            .download_files(&media_uri)
+            .download_file(&media_uri)
             .await
             .unwrap()
-            .pop()
             .map(|download| download.path);
         assert!(access.is_none());
         assert!(!paths.audio.native().unwrap().exists());
@@ -3703,13 +3593,12 @@ mod tests {
                 subject.clone(),
                 DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
                 vec![uri.clone()],
-                false,
             )
             .await;
         let paths = download_paths(root.path(), Some(&source), &uri);
         std::fs::create_dir_all(paths.audio_part.parent().unwrap()).unwrap();
         std::fs::write(&paths.audio_part, b"verified peer bytes").unwrap();
-        assert!(catalog.download_file(&uri, "mp3").await.unwrap().is_none());
+        assert!(catalog.download_file(&uri).await.unwrap().is_none());
         let active = ActiveDownload {
             source_id: Some(source.clone()),
             job_id: actor.jobs[&Some(source.clone())][0].id.clone(),
@@ -3727,7 +3616,7 @@ mod tests {
             b"verified peer bytes"
         );
         assert!(!paths.audio_part.exists());
-        let saved = catalog.download_file(&uri, "mp3").await.unwrap().unwrap();
+        let saved = catalog.download_file(&uri).await.unwrap().unwrap();
         assert_eq!(saved.revision, "original-revision-2");
         assert_eq!(
             library::file_media_path(&saved.path),
@@ -3883,11 +3772,7 @@ mod tests {
         .await
         .expect("attach released download");
         let records = catalog
-            .download_files_page(
-                Some(source_id.as_str()),
-                &(String::new(), String::new()),
-                None,
-            )
+            .download_files_page(Some(source_id.as_str()), "", None)
             .await
             .expect("load migrated records");
         let migrated = records.first().expect("migrated record");
@@ -3966,11 +3851,7 @@ mod tests {
         .await
         .expect("attach released custom download");
         let records = catalog
-            .download_files_page(
-                Some(source_id.as_str()),
-                &(String::new(), String::new()),
-                None,
-            )
+            .download_files_page(Some(source_id.as_str()), "", None)
             .await
             .expect("load migrated custom record");
         let migrated = records.first().expect("migrated custom record");
@@ -4043,7 +3924,6 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             quality: DownloadQuality::Original,
-            replace_unknown: false,
             completed: Vec::new(),
             failed: false,
             remaining: vec![media_uri].into(),

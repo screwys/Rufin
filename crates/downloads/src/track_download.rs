@@ -813,11 +813,10 @@ async fn import_download_record(
     }
     let path = paths.audio.access_uri()?;
     let mut file = catalog
-        .download_files(&record.media_uri)
+        .download_file(&record.media_uri)
         .await
         .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|file| file.path == path)
+        .filter(|file| file.path == path)
         .unwrap_or(library::DownloadFile {
             media_uri: record.media_uri,
             encoding: record
@@ -1747,7 +1746,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(catalog.download_files(&identity).await.unwrap().is_empty());
+        assert!(catalog.download_file(&identity).await.unwrap().is_none());
         assert!(audio.is_file());
         assert!(
             record_path

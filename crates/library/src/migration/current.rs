@@ -1107,7 +1107,8 @@ async fn user_data(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
                 coalesce((SELECT object_id FROM sources WHERE source_key={source}),(SELECT source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=receipt.media_uri)),
                 coalesce({root},''),coalesce({relative},''),receipt.managed
             FROM old_store.connect_media_files receipt
-            LEFT JOIN old_store.local_locators locator ON locator.media_uri=receipt.media_uri AND locator.origin='download' AND locator.access_uri=receipt.path", size("receipt.path"))))
+            LEFT JOIN old_store.local_locators locator ON locator.media_uri=receipt.media_uri AND locator.origin='download' AND locator.access_uri=receipt.path
+            ORDER BY receipt.rowid ON CONFLICT DO NOTHING", size("receipt.path"))))
             .execute(&mut *connection).await?;
     }
     sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,revision,size,path,source_id,root,relative_path,managed)

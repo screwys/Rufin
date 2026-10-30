@@ -255,9 +255,10 @@ impl ConnectOwner {
         let encoding_key = library::media_encoding_key(request.encoding);
         let mut receipt = self
             .catalog
-            .download_file(uri, &encoding_key)
+            .download_file(uri)
             .await
             .map_err(error)?
+            .filter(|file| file.encoding == encoding_key)
             .filter(|file| {
                 (file.source_id.is_some() && file.revision.is_empty())
                     || reference
@@ -269,9 +270,10 @@ impl ConnectOwner {
         {
             receipt = self
                 .catalog
-                .shared_download_file(uri, &encoding_key, &revision(reference))
+                .shared_download_file(uri, &revision(reference))
                 .await
-                .map_err(error)?;
+                .map_err(error)?
+                .filter(|file| file.encoding == encoding_key);
         }
         let cached = receipt
             .as_ref()
@@ -301,11 +303,10 @@ impl ConnectOwner {
             };
             if self
                 .catalog
-                .download_files(uri)
+                .download_file(uri)
                 .await
                 .map_err(error)?
-                .iter()
-                .any(|file| file.path == access_uri)
+                .is_some_and(|file| file.path == access_uri)
             {
                 return Err("This device does not have the requested original audio".into());
             }

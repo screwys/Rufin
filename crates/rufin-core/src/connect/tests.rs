@@ -144,13 +144,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                         .unwrap()
                         .is_none()
                 );
-                assert!(
-                    b.catalog
-                        .download_file(&uri, "original")
-                        .await
-                        .unwrap()
-                        .is_none()
-                );
+                assert!(b.catalog.download_file(&uri).await.unwrap().is_none());
                 assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
                 assert_eq!(
                     stream.window().unwrap().end_millis,

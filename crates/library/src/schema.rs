@@ -428,8 +428,8 @@ CREATE TABLE queue_state (
     shuffled INTEGER NOT NULL DEFAULT 0 CHECK (shuffled IN (0, 1))
 ) STRICT;
 
--- A downloaded copy per track and quality, written after its file lands. A quality change
--- keeps the old copy until the new one lands. The reason names the requests and rules that
+-- A track's downloaded copy, written after its file lands, at the quality it was downloaded
+-- with; a later quality setting applies only to new downloads. The reason names the requests and rules that
 -- keep it; root and relative_path place a copy in its storage; a copy that is not managed is
 -- the track's own local file, which removal leaves alone; retired lists replaced documents
 -- that still wait for deletion.
@@ -445,10 +445,10 @@ CREATE TABLE downloads (
     relative_path TEXT NOT NULL DEFAULT '',
     managed INTEGER NOT NULL,
     retired TEXT NOT NULL DEFAULT '[]',
-    PRIMARY KEY (media_uri, quality)
+    PRIMARY KEY (media_uri)
 ) STRICT;
 CREATE INDEX downloads_path_idx ON downloads(path);
-CREATE INDEX downloads_source_idx ON downloads(source_id, media_uri, quality);
+CREATE INDEX downloads_source_idx ON downloads(source_id, media_uri);
 
 CREATE TABLE local_locators (
     local_access_file_key INTEGER PRIMARY KEY,
