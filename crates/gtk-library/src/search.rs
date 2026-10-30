@@ -178,7 +178,8 @@ impl SearchItem {
             Self::Track(row, _) => match field {
                 LibraryField::Year => row.year,
                 LibraryField::Duration => Some(row.duration_millis),
-                LibraryField::DateAdded => row.date_added,
+                // By the UTC day shown, so a day's tracks fall back to title order.
+                LibraryField::DateAdded => row.date_added.map(|seconds| seconds.div_euclid(86_400)),
                 LibraryField::PlayCount => Some(row.state.play_count),
                 LibraryField::UserRating => row.state.rating,
                 LibraryField::Favorite => Some(i64::from(row.state.favorite)),
