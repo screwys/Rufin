@@ -73,6 +73,10 @@ fn failure_kind(error: &glib::Error, element: Option<&gst::Element>) -> FailureK
             _ => FailureKind::Unclassified,
         };
     }
+    // A network source stops its stream when the connection fails.
+    if has_class("Network") {
+        return FailureKind::Connection;
+    }
     if let Some(error) = error.kind::<gst::StreamError>() {
         return match error {
             gst::StreamError::CodecNotFound
@@ -104,6 +108,7 @@ mod tests {
         let element = |factory| gst::ElementFactory::make(factory).build().unwrap();
         let file = element("filesrc");
         let sink = element("fakesink");
+        let http = element("souphttpsrc");
         let cases = [
             (
                 glib::Error::new(gst::ResourceError::NotFound, "missing"),
@@ -129,6 +134,11 @@ mod tests {
                 glib::Error::new(gst::StreamError::Decode, "corrupt"),
                 None,
                 FailureKind::Decode,
+            ),
+            (
+                glib::Error::new(gst::StreamError::Failed, "connection refused"),
+                Some(&http),
+                FailureKind::Connection,
             ),
             (
                 glib::Error::new(gst::CoreError::StateChange, "state"),

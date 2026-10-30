@@ -134,6 +134,7 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
         let source = self.source_owner();
+        let downloads = source.as_ref().map(|owner| owner.downloads().clone());
         let local = self.settings.local_configuration();
         let playable = self
             .catalog
@@ -149,6 +150,7 @@ impl PlaybackOwner {
             connect
                 .as_deref()
                 .map(|connect| (connect, occurrence.as_ref())),
+            downloads.as_ref(),
             move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     source
@@ -159,7 +161,8 @@ impl PlaybackOwner {
                 .map_err(string_error)?
             },
         )
-        .await?;
+        .await
+        .map_err(string_error)?;
         let stream = prepare_media_stream(stream, super::track_loudness(&playable), occurrence);
         let backend =
             (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;

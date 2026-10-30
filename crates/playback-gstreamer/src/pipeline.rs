@@ -453,8 +453,10 @@ impl PlayerPipeline {
         let (slot, inputs) = (self.slot, self.inputs.clone());
         let (session, last_error) = (Arc::clone(&self.session), Arc::clone(&self.last_error));
         bus.set_sync_handler(move |_, message| {
+            // The first error names the cause: an element that fails to start posts its own,
+            // then the base class posts a generic one.
             if message.type_() == gst::MessageType::Error {
-                *lock_recover(&last_error) = Some(message.clone());
+                lock_recover(&last_error).get_or_insert_with(|| message.clone());
             }
             let id = session.load(Ordering::Acquire);
             if id != 0 {

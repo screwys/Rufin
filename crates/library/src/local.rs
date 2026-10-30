@@ -315,7 +315,7 @@ impl Catalog {
         media_uris: &[String],
     ) -> LibraryResult<Vec<LocalLocatorWrite>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("WITH ranked AS(SELECT source.object_id source_id,locator.*,row_number() OVER(PARTITION BY media_uri ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key) choice FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE media_uri IN(SELECT value FROM json_each(?1))) SELECT source_id,media_uri,origin,path,root,relative_path,access_uri FROM ranked WHERE choice=1")
+        Ok(sqlx::query_as("WITH ranked AS(SELECT source.object_id source_id,locator.*,row_number() OVER(PARTITION BY media_uri ORDER BY local_access_file_key) choice FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE media_uri IN(SELECT value FROM json_each(?1))) SELECT source_id,media_uri,origin,path,root,relative_path,access_uri FROM ranked WHERE choice=1")
             .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
     }
 
@@ -489,7 +489,7 @@ impl Catalog {
             })
             .collect::<Vec<_>>();
         let mut connection = self.acquire_reader().await?;
-        let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
+        let rows: Vec<(String, String, bool, bool, Option<String>)> = sqlx::query_as(
             "SELECT requested.value,
                 (SELECT json_group_array(path) FROM (
                     SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
@@ -498,14 +498,36 @@ impl Catalog {
                       WHERE media_uri=requested.value AND source.kind='local')),
                 EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
                 EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value)
-                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value AND NOT entry.received_from_connect)
+                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value AND NOT entry.received_from_connect),
+                (SELECT json_array(source.object_id,details.source_path,json_extract(details.metadata,'$.audio_properties.size_bytes'))
+                    FROM tracks track JOIN sources source USING(source_key) JOIN track_details details USING(track_key)
+                    WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL)
              FROM json_each(?1) requested",
         )
         .bind(serde_json::to_string(uris)?)
         .bind(serde_json::to_string(&backings)?)
         .fetch_all(&mut *connection).await?;
+        drop(connection);
+        let mapped = rows
+            .iter()
+            .map(|row| {
+                let (source, path, size) =
+                    serde_json::from_str::<(String, String, Option<u64>)>(row.4.as_deref()?)
+                        .ok()?;
+                self.mapped_file(&source, &path, size)
+            })
+            .collect::<Vec<_>>();
+        let mapped = tokio::task::spawn_blocking(move || {
+            mapped
+                .into_iter()
+                .map(|mapped| mapped.and_then(|mapped| mapped.locate()))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|error| LibraryError::InvalidRequest(error.to_string()))?;
         rows.into_iter()
-            .map(|(uri, paths, shared, direct)| {
+            .zip(mapped)
+            .map(|((uri, paths, shared, direct, _), mapped)| {
                 let paths: Vec<String> = serde_json::from_str(&paths)?;
                 let mut paths = paths
                     .into_iter()
@@ -529,6 +551,7 @@ impl Catalog {
                         }
                     })
                     .collect::<LibraryResult<Vec<_>>>()?;
+                paths.extend(mapped);
                 // A direct import can be checked before its metadata has been read.
                 if direct && !shared {
                     let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
@@ -663,21 +686,6 @@ impl Catalog {
         Ok(usize::try_from(count).unwrap_or_default())
     }
 
-    pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
-        let mut write = self.write().await?;
-        let removed =
-            sqlx::query("DELETE FROM main.local_locators WHERE source_key=?1 AND origin='mapping'")
-                .bind(source)
-                .execute(write.connection().await?)
-                .await?
-                .rows_affected();
-        if removed != 0 {
-            write.keep();
-        }
-        write.commit().await?;
-        Ok(removed)
-    }
-
     pub async fn mapping_track_page(
         &self,
         source: SourceKey,
@@ -701,23 +709,38 @@ impl Catalog {
         .await?)
     }
 
-    /// Writes locators in one Write; a locator replaces the one of its track and origin.
-    pub async fn write_local_locators(&self, locators: &[LocalLocatorWrite]) -> LibraryResult<()> {
-        if locators.is_empty() {
-            return Ok(());
-        }
-        let mut write = self.write().await?;
-        for locator in locators {
-            write_local_locator(&mut write, locator).await?;
-        }
-        write.commit().await?;
-        Ok(())
-    }
-
+    /// The track's own file on this device: its locator, else its mapped file while it is there.
     pub async fn original_file(&self, media_uri: &str) -> LibraryResult<Option<LocalLocatorWrite>> {
         let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1")
-            .bind(media_uri).fetch_optional(&mut *connection).await?)
+        let locator = sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY local_access_file_key LIMIT 1")
+            .bind(media_uri).fetch_optional(&mut *connection).await?;
+        drop(connection);
+        if locator.is_some() {
+            return Ok(locator);
+        }
+        let Some(playable) = self.playable_by_uri(media_uri).await? else {
+            return Ok(None);
+        };
+        tokio::task::spawn_blocking(move || playable.mapped_locator())
+            .await
+            .map_err(|error| LibraryError::InvalidRequest(error.to_string()))
+    }
+
+    /// The track's mapped file while it is there.
+    pub(crate) async fn located_mapped_file(
+        &self,
+        media_uri: &str,
+    ) -> LibraryResult<Option<LocalMediaLocation>> {
+        let Some(mapped) = self
+            .playable_by_uri(media_uri)
+            .await?
+            .and_then(|playable| playable.mapped)
+        else {
+            return Ok(None);
+        };
+        tokio::task::spawn_blocking(move || mapped.locate())
+            .await
+            .map_err(|error| LibraryError::InvalidRequest(error.to_string()))
     }
 }
 
@@ -813,7 +836,8 @@ pub(crate) async fn import_local_locators_jsonl_on(
     let mut count = 0;
     for line in lines {
         let locator = serde_json::from_str::<LocalLocatorWrite>(&line?)?;
-        if locator.origin == "download" {
+        // Downloads and folder mappings are not locators any more.
+        if matches!(locator.origin.as_str(), "download" | "mapping") {
             continue;
         }
         write_local_locator(write, &locator).await?;

@@ -30,7 +30,6 @@ pub struct LocalAccessEditor {
     server_prefix: glib::WeakRef<adw::EntryRow>,
     local_prefix: Option<glib::WeakRef<adw::EntryRow>>,
     sample_source_path: RefCell<Option<String>>,
-    wait_until_mapped: bool,
     operation: RefCell<LocalAccessOperation>,
     on_success: Rc<dyn Fn()>,
 }
@@ -43,7 +42,6 @@ impl LocalAccessEditor {
         server_prefix: &adw::EntryRow,
         local_prefix: Option<&adw::EntryRow>,
         sample_source_path: Option<String>,
-        wait_until_mapped: bool,
         on_success: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         Rc::new(Self {
@@ -53,7 +51,6 @@ impl LocalAccessEditor {
             server_prefix: server_prefix.downgrade(),
             local_prefix: local_prefix.map(|row| row.downgrade()),
             sample_source_path: RefCell::new(sample_source_path),
-            wait_until_mapped,
             operation: RefCell::new(LocalAccessOperation::Editing),
             on_success,
         })
@@ -197,13 +194,12 @@ impl LocalAccessEditor {
             return;
         };
         let source = self.source.clone();
-        let wait_until_mapped = self.wait_until_mapped;
         self.operation.replace(LocalAccessOperation::Pending);
         update();
         let editor = Rc::downgrade(self);
         let update = Rc::downgrade(&update);
         glib::spawn_future_local(async move {
-            let response = source.save_local_access(input, wait_until_mapped).await;
+            let response = source.save_local_access(input).await;
             let (Some(editor), Some(update)) = (editor.upgrade(), update.upgrade()) else {
                 return;
             };
@@ -280,7 +276,6 @@ pub fn mount_metadata_local_access_mapping(
         &server_prefix,
         Some(&local_prefix),
         Some(source_path.to_string()),
-        true,
         on_success,
     );
     let update: Rc<dyn Fn()> = Rc::new({
@@ -424,7 +419,7 @@ pub fn preview_local_path_text(
     let Some(folder) = folder else {
         return tr("Choose a local music folder");
     };
-    let projected = sources::project_local_access_path(
+    let projected = library::project_local_access_path(
         folder,
         (!server_prefix.is_empty()).then_some(server_prefix),
         (!local_prefix.is_empty()).then_some(local_prefix),
@@ -439,7 +434,7 @@ pub fn preview_local_path_text(
     }
 
     let sample_path = Path::new(sample);
-    if !sources::reported_path_is_absolute(sample) {
+    if !library::reported_path_is_absolute(sample) {
         let path = projected.unwrap_or_else(|| folder.join(sample_path));
         return desktop_integration::display_path(&path);
     }

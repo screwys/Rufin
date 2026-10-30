@@ -123,6 +123,8 @@ struct CatalogInner {
     views: std::sync::Mutex<crate::catalog::views::Views>,
     /// Held while totals are built, so readers that need the same ones wait for one build.
     deriving: std::sync::Mutex<()>,
+    /// The saved folder mappings by source id.
+    local_access: RwLock<HashMap<String, crate::LocalAccess>>,
 }
 
 /// The one public handle: the Store's connections and the resident catalog loaded from it.
@@ -425,6 +427,30 @@ impl Catalog {
 }
 
 impl Catalog {
+    /// The saved folder mappings by source id; reads resolve tracks through them.
+    pub fn set_local_access(&self, rules: HashMap<String, crate::LocalAccess>) {
+        *self
+            .inner
+            .local_access
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = rules;
+    }
+
+    /// Where a source's track would be under the source's mapping.
+    pub(crate) fn mapped_file(
+        &self,
+        source_id: &str,
+        source_path: &str,
+        size: Option<u64>,
+    ) -> Option<crate::MappedFile> {
+        self.inner
+            .local_access
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(source_id)?
+            .mapped(source_path, size)
+    }
+
     /// Read when artwork falls back to a track picture; nothing stored depends on it. Clients
     /// redraw every cover when it changes.
     pub fn set_distinct_track_covers(&self, enabled: bool) {
@@ -582,6 +608,7 @@ impl Catalog {
             image: Arc::new((std::sync::Mutex::new(ImageState::default()), Condvar::new())),
             views: Default::default(),
             deriving: std::sync::Mutex::new(()),
+            local_access: RwLock::new(HashMap::new()),
         });
         // The load reads on connections and threads of its own, beside the clients' first
         // frames. Writes wait for it, so nothing it reads changes under it.

@@ -16,6 +16,9 @@ pub struct StreamRequest {
     pub quality: StreamQuality,
     #[serde(default)]
     pub session_identifier: Option<String>,
+    /// A local copy that failed to open or decode; the stream comes from the next candidate.
+    #[serde(skip)]
+    pub failed_local: Option<String>,
 }
 
 impl StreamRequest {
@@ -28,6 +31,7 @@ impl StreamRequest {
             media_uri: media_uri.into(),
             quality,
             session_identifier: None,
+            failed_local: None,
         }
     }
 }

@@ -9,7 +9,7 @@ impl Catalog {
     ) -> LibraryResult<Option<LocalMediaLocation>> {
         let mut reader = self.acquire_reader().await?;
         let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
-        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri IN (?1,?2) AND origin IN ('local','import','mapping') ORDER BY media_uri=?1 DESC LIMIT 1")
+        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri IN (?1,?2) AND origin IN ('local','import') ORDER BY media_uri=?1 DESC LIMIT 1")
             .bind(uri).bind(backing.as_deref()).fetch_optional(&mut *reader).await?;
         if let Some(uri) = access.as_ref().filter(|uri| uri.starts_with("content://")) {
             return Ok(Some(LocalMediaLocation::Document(uri.clone())));
@@ -27,13 +27,17 @@ impl Catalog {
         .bind(uri)
         .fetch_optional(&mut *reader)
         .await?;
+        drop(reader);
         if let Some(uri) = path.as_deref().and_then(crate::document_access_uri) {
             return Ok(Some(LocalMediaLocation::Document(uri)));
         }
-        Ok(path
+        if let Some(path) = path
             .map(std::path::PathBuf::from)
             .map(resolve)
             .filter(|path| path.is_file())
-            .map(LocalMediaLocation::File))
+        {
+            return Ok(Some(LocalMediaLocation::File(path)));
+        }
+        Ok(self.located_mapped_file(uri).await?)
     }
 }

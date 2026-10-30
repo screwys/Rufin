@@ -527,7 +527,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
     sqlx::query("INSERT INTO downloads(media_uri,quality,revision,path,managed) VALUES(?1,'original','',?1,1)")
         .bind(&fixture.track_uris[0])
         .execute(&mut raw).await.unwrap();
-    sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'mapping',?1,'','',?1)")
+    sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'import',?1,'','',?1)")
         .bind(&fixture.track_uris[2])
         .execute(&mut raw).await.unwrap();
     for index in [1, 2] {

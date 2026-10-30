@@ -213,6 +213,7 @@ pub(super) fn track_from_json(
                 sample_rate_hz: json::field(song, "samplingRate"),
                 bit_depth: json::field(song, "bitDepth"),
                 channels: json::field(song, "channelCount"),
+                size_bytes: json::field(song, "size"),
             },
             sort_text: clean_optional(json::field(song, "sortName"))
                 .unwrap_or_else(|| title.clone())

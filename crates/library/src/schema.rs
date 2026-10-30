@@ -454,14 +454,13 @@ CREATE TABLE local_locators (
     local_access_file_key INTEGER PRIMARY KEY,
     source_key INTEGER REFERENCES sources ON DELETE CASCADE,
     media_uri TEXT NOT NULL CHECK(media_uri<>''),
-    origin TEXT NOT NULL CHECK(origin IN ('local','mapping','import')),
+    origin TEXT NOT NULL CHECK(origin IN ('local','import')),
     path TEXT NOT NULL CHECK(path<>''), root TEXT NOT NULL, relative_path TEXT NOT NULL,
     access_uri TEXT NOT NULL CHECK(access_uri<>''),
     UNIQUE(media_uri,origin)
 ) STRICT;
 CREATE INDEX local_locators_source_idx ON local_locators(source_key,origin);
 CREATE INDEX local_locators_path_idx ON local_locators(source_key,path);
-CREATE INDEX local_locators_precedence_idx ON local_locators(media_uri,CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key);
 
 CREATE TABLE lyrics_cache (
     lyrics_key INTEGER PRIMARY KEY,

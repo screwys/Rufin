@@ -1072,7 +1072,8 @@ async fn user_data(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
         "local_locators",
         "local_locators",
         &[],
-        "old.origin<>'download'",
+        // Folder mapping locators are resolved from the saved mapping now.
+        "old.origin NOT IN ('download','mapping')",
     )
     .await?;
     let present = columns(connection, "old_store", "local_locators").await?;

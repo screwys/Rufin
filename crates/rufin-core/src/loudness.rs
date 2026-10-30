@@ -447,6 +447,7 @@ impl Analysis<'_> {
             StreamRequest::new(&playable.media_uri, StreamQuality::Original),
             Some(self.configuration),
             None,
+            Some(self.source_owner.downloads()),
             move |source_id| async move {
                 tokio::task::spawn_blocking(move || owner.client(&source_id))
                     .await
@@ -457,7 +458,9 @@ impl Analysis<'_> {
         let cancelled = Arc::clone(self.cancelled);
         let analysis = async {
             tokio::task::spawn_blocking(move || {
-                analyze_loudness_cancellable(&stream?, || cancelled.load(Ordering::Acquire))
+                analyze_loudness_cancellable(&stream.map_err(|error| error.to_string())?, || {
+                    cancelled.load(Ordering::Acquire)
+                })
             })
             .await
             .map_err(|_| "the worker stopped".to_string())?

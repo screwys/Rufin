@@ -62,7 +62,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             ),
             (
                 "local-locators.jsonl",
-                format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n", serde_json::to_string(uri).unwrap())
+                format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"import\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n", serde_json::to_string(uri).unwrap())
                 .as_bytes(),
             ),
         ],

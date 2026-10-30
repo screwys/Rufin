@@ -148,6 +148,7 @@ pub(super) fn track_from_item(
                 sample_rate_hz: stream.and_then(|stream| field(stream, "SampleRate")),
                 bit_depth: stream.and_then(|stream| field(stream, "BitDepth")),
                 channels: stream.and_then(|stream| field(stream, "Channels")),
+                size_bytes: None,
             },
             artists: artists,
             album_artists: artist_credits_from_pairs(server, &item["AlbumArtists"]),

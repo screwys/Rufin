@@ -363,6 +363,7 @@ fn lofty_track(
             sample_rate_hz: properties.sample_rate(),
             bit_depth: properties.bit_depth().map(u32::from),
             channels: properties.channels().map(u32::from),
+            size_bytes: None,
         },
         artists,
         album_artists,

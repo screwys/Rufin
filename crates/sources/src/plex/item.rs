@@ -145,6 +145,7 @@ pub(super) fn read_items<'a>(
                         channels: stream
                             .and_then(|stream| field(stream, "channels"))
                             .or_else(|| field(media, "audioChannels")),
+                        size_bytes: field(part, "size"),
                     };
                     let duration = field::<i64>(item, "duration").unwrap_or_default().max(0);
                     let source_path = part["file"].as_str();
