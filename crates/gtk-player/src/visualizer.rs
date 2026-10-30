@@ -48,12 +48,6 @@ mod imp {
             let appearance = self.appearance.get().unwrap().borrow();
             let (main_height, shadow_height) =
                 visualizer_shadow_geometry(f64::from(widget.height().max(1)), &appearance);
-            let effects = shadow_height > 0.0;
-            let frame = if effects {
-                gtk::Snapshot::new()
-            } else {
-                snapshot.clone()
-            };
             // The device pixel grid, which the coverage geometry aligns with.
             let native = widget.native();
             let scale = native
@@ -69,48 +63,63 @@ mod imp {
                         .map(|point| (f64::from(point.x()) + x, f64::from(point.y()) + y))
                 })
                 .unwrap_or_default();
-            draw_visualizer(
-                &frame,
-                widget.width(),
-                main_height,
-                &self.levels.get().unwrap().borrow(),
-                &self.peaks.get().unwrap().borrow(),
-                &appearance,
-                widget.color(),
-                1.0 / scale,
-                origin,
+            let columns = Axis {
+                scale,
+                offset: origin.0 * scale,
+            };
+            let draw = |snapshot: &gtk::Snapshot, rows: Axis| {
+                draw_visualizer(
+                    snapshot,
+                    widget.width(),
+                    main_height,
+                    &self.levels.get().unwrap().borrow(),
+                    &self.peaks.get().unwrap().borrow(),
+                    &appearance,
+                    widget.color(),
+                    (columns, rows),
+                );
+            };
+            draw(
+                snapshot,
+                Axis {
+                    scale,
+                    offset: origin.1 * scale,
+                },
             );
-            if !effects {
+            if shadow_height == 0.0 {
                 return;
             }
-            let Some(node) = frame.to_node() else {
-                return;
-            };
+            // The reflection is drawn again for the squashed grid it lands on, so its edges
+            // get the same antialiasing as the visualizer's.
+            let squash = shadow_height / main_height;
             snapshot.push_clip(&rect(
                 0.0,
                 0.0,
                 widget.width().into(),
                 widget.height().into(),
             ));
-            snapshot.append_node(&node);
-            if shadow_height > 0.0 {
-                snapshot.save();
-                snapshot.translate(&gtk::graphene::Point::new(
-                    0.0,
-                    (main_height + shadow_height) as f32,
-                ));
-                snapshot.scale(1.0, -(shadow_height / main_height) as f32);
-                let brightness = appearance.shadow_brightness as f32;
-                snapshot.push_opacity(appearance.shadow_opacity);
-                snapshot.push_color_matrix(
-                    &gtk::graphene::Matrix::new_scale(brightness, brightness, brightness),
-                    &gtk::graphene::Vec4::zero(),
-                );
-                snapshot.append_node(&node);
-                snapshot.pop();
-                snapshot.pop();
-                snapshot.restore();
-            }
+            snapshot.save();
+            snapshot.translate(&gtk::graphene::Point::new(
+                0.0,
+                (main_height + shadow_height) as f32,
+            ));
+            snapshot.scale(1.0, -squash as f32);
+            let brightness = appearance.shadow_brightness as f32;
+            snapshot.push_opacity(appearance.shadow_opacity);
+            snapshot.push_color_matrix(
+                &gtk::graphene::Matrix::new_scale(brightness, brightness, brightness),
+                &gtk::graphene::Vec4::zero(),
+            );
+            draw(
+                snapshot,
+                Axis {
+                    scale: -squash * scale,
+                    offset: (origin.1 + main_height + shadow_height) * scale,
+                },
+            );
+            snapshot.pop();
+            snapshot.pop();
+            snapshot.restore();
             snapshot.pop();
         }
     }
@@ -177,8 +186,7 @@ fn draw_visualizer(
     peaks: &[Peak],
     appearance: &VisualizerAppearance,
     accent: gtk::gdk::RGBA,
-    pixel: f64,
-    origin: (f64, f64),
+    grid: (Axis, Axis),
 ) {
     if levels.len() < 2 {
         return;
@@ -276,17 +284,18 @@ fn draw_visualizer(
                 .collect::<Vec<_>>()
         };
         let outline = points(false);
+        let pixels = (grid.0.pixel(), grid.1.pixel());
+        let pixel = pixels.0.min(pixels.1);
         let closed_curve = |controls: &[(f64, f64)]| {
             let start = midpoint(controls[controls.len() - 1], controls[0]);
             let mut curve = thin(smooth_curve(start, controls, start, pixel), pixel);
             curve.pop();
             curve
         };
-        let snap = |value: f64, origin: f64| ((value + origin) / pixel).round() * pixel - origin;
-        let snap_x = |x| snap(x, origin.0);
+        let snap_x = |value| grid.0.snap(value);
         snapshot.push_mask(gtk::gsk::MaskMode::Alpha);
         match appearance.style {
-            VisualizerStyle::Filled => fill(snapshot, &[(&outline, bottom, true)], pixel, snap_x),
+            VisualizerStyle::Filled => fill(snapshot, &[(&outline, bottom, true)], pixels, snap_x),
             VisualizerStyle::Ribbon => {
                 let middle = height / 2.0;
                 let top = smooth_curve(
@@ -299,23 +308,23 @@ fn draw_visualizer(
                     .iter()
                     .map(|&(x, y)| (x, height - y))
                     .collect::<Vec<_>>();
-                let base = snap(middle, origin.1);
+                let base = grid.1.snap(middle);
                 fill(
                     snapshot,
                     &[(&top, base, true), (&mirrored, base, false)],
-                    pixel,
+                    pixels,
                     snap_x,
                 );
             }
-            _ if halo => stroke(snapshot, &closed_curve(&outline), true, pixel),
-            _ => stroke(snapshot, &outline, false, pixel),
+            _ if halo => stroke(snapshot, &closed_curve(&outline), true, pixels),
+            _ => stroke(snapshot, &outline, false, pixels),
         }
         snapshot.pop();
         gradient(&bounds);
         snapshot.pop();
         if halo && shadow_limit > 0.0 {
             snapshot.push_mask(gtk::gsk::MaskMode::Alpha);
-            stroke(snapshot, &closed_curve(&points(true)), true, pixel);
+            stroke(snapshot, &closed_curve(&points(true)), true, pixels);
             snapshot.pop();
             snapshot.append_color(
                 &color(shadow_colors, 0.5, appearance.shadow_opacity),
@@ -534,7 +543,7 @@ fn thin(points: Vec<(f64, f64)>, pixel: f64) -> Vec<(f64, f64)> {
 fn fill(
     snapshot: &gtk::Snapshot,
     edges: &[(&[(f64, f64)], f64, bool)],
-    pixel: f64,
+    pixel: (f64, f64),
     snap: impl Fn(f64) -> f64,
 ) {
     for &(edge, base, below) in edges {
@@ -565,11 +574,11 @@ fn fill(
     }
 }
 
-/// Half the width of the antialiasing ramp across an edge with normal (nx, ny). GSK samples
-/// gradients four times per pixel, a quarter pixel apart, which widens the ramp to about the
-/// one-pixel footprint Cairo gives the same edge.
-fn ramp(nx: f64, ny: f64, pixel: f64) -> f64 {
-    (nx.abs() + ny.abs()) * pixel / 4.0
+/// Half the width of the antialiasing ramp across an edge with normal (nx, ny), for device
+/// pixels of size `pixel`. GSK samples gradients four times per pixel, a quarter pixel apart,
+/// which widens the ramp to about the one-pixel footprint Cairo gives the same edge.
+fn ramp(nx: f64, ny: f64, pixel: (f64, f64)) -> f64 {
+    (nx.abs() * pixel.0 + ny.abs() * pixel.1) / 4.0
 }
 
 /// White coverage of a 2 px wide stroke along `points` as Cairo strokes it: butt ends, miter
@@ -578,8 +587,10 @@ fn ramp(nx: f64, ny: f64, pixel: f64) -> f64 {
 /// than the width, and half a device pixel into the next segment so their antialiased ends
 /// leave no seam. A longer miter tip is one more rect, cut by the outer side of the next
 /// segment.
-fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: f64) {
+fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: (f64, f64)) {
     const HALF: f64 = 1.0;
+    // The length of one device pixel along a unit direction.
+    let along = |dx: f64, dy: f64| (dx / pixel.0).hypot(dy / pixel.1).recip();
     let count = points.len();
     let direction = |index: usize| {
         let (a, b) = (points[index % count], points[(index + 1) % count]);
@@ -596,14 +607,20 @@ fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: 
         let (bx, by, _) = direction(vertex);
         let (sin, cos) = (ax * by - ay * bx, ax * bx + ay * by);
         let turn = sin.abs().atan2(cos);
-        if (turn / 2.0).cos() < 0.1 {
+        // Cairo applies the miter limit to the turn on device pixels, which differs from the
+        // local turn in the squashed reflection.
+        let device = |x: f64, y: f64| (x / pixel.0, y / pixel.1);
+        let ((dax, day), (dbx, dby)) = (device(ax, ay), device(bx, by));
+        let device_cos = (dax * dbx + day * dby) / (dax.hypot(day) * dbx.hypot(dby));
+        if (1.0 + device_cos) / 2.0 < 0.1 * 0.1 {
             return (0.0, 0.0, None);
         }
         let miter = HALF * (turn / 2.0).tan();
+        let overlap = along(ax, ay) / 2.0;
         if turn <= std::f64::consts::FRAC_PI_2 {
-            (miter.max(pixel / 2.0), miter, None)
+            (miter.max(overlap), miter, None)
         } else {
-            (pixel / 2.0, 0.0, Some((miter, sin, cos)))
+            (overlap, 0.0, Some((miter, sin, cos)))
         }
     };
     let segments = if closed { count } else { count - 1 };
@@ -612,21 +629,23 @@ fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: 
         let (start, end) = (joint(index).1, joint(index + 1).0);
         // GSK antialiases a rect edge just past a whole local pixel, so the open ends sit
         // there, and the last segment is placed from its end.
+        let step = along(tx, ty) * 1e-3;
         let (anchor, from, to) = if !closed && index + 1 == segments {
-            (points[index + 1], -length - start, pixel * 1e-3)
+            (points[index + 1], -length - start, step)
         } else if !closed && index == 0 {
-            (points[index], -pixel * 1e-3, length + end)
+            (points[index], -step, length + end)
         } else {
             (points[index], -start, length + end)
         };
-        let ramp = ramp(tx, ty, pixel);
+        let ramp = ramp(-ty, tx, pixel);
         let reach = HALF + ramp;
         let edge = (ramp / reach) as f32;
+        let margin = along(-ty, tx);
         snapshot.save();
         snapshot.translate(&point(anchor.0, anchor.1));
         snapshot.rotate(ty.atan2(tx).to_degrees() as f32);
         snapshot.append_linear_gradient(
-            &rect(from, -reach - pixel, to - from, 2.0 * (reach + pixel)),
+            &rect(from, -reach - margin, to - from, 2.0 * (reach + margin)),
             &point(0.0, -reach),
             &point(0.0, reach),
             &[
@@ -648,22 +667,42 @@ fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: 
         // from, and the next segment's outer side has this normal.
         let outer = -sin.signum();
         let (nx, ny) = (outer * -sin, outer * cos);
-        let ramp = ramp(bx, by, pixel);
+        let ramp = ramp(-by, bx, pixel);
+        let step = along(-ay, ax) * 1e-3;
         let (low, high) = if outer > 0.0 {
-            (-HALF, HALF + pixel * 1e-3)
+            (-HALF, HALF + step)
         } else {
-            (-HALF - pixel * 1e-3, HALF)
+            (-HALF - step, HALF)
         };
         snapshot.save();
         snapshot.translate(&point(points[vertex].0, points[vertex].1));
         snapshot.rotate(ay.atan2(ax).to_degrees() as f32);
         snapshot.append_linear_gradient(
-            &rect(0.0, low, miter + 2.0 * pixel, high - low),
+            &rect(0.0, low, miter + 2.0 * along(ax, ay), high - low),
             &point(nx * (HALF - ramp), ny * (HALF - ramp)),
             &point(nx * (HALF + ramp), ny * (HALF + ramp)),
             &[stop(0.0, 1.0), stop(1.0, 0.0)],
         );
         snapshot.restore();
+    }
+}
+
+/// How local coordinates on one axis map to device pixels: `local * scale + offset`.
+#[derive(Clone, Copy)]
+struct Axis {
+    scale: f64,
+    offset: f64,
+}
+
+impl Axis {
+    /// The local length of one device pixel.
+    fn pixel(self) -> f64 {
+        self.scale.abs().recip()
+    }
+
+    /// The device pixel edge nearest to `value`.
+    fn snap(self, value: f64) -> f64 {
+        ((value * self.scale + self.offset).round() - self.offset) / self.scale
     }
 }
 
