@@ -8,6 +8,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             "/api/sources",
             get(list).post(add).patch(update).delete(forget),
         )
+        .route("/api/downloads", post(download))
         .route("/api/downloads/quality", post(download_quality))
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
@@ -43,6 +44,25 @@ pub(super) fn routes() -> Router<ProductHandles> {
                 .patch(update_file_integration),
         )
         .route("/api/integrations/files/edit", get(edit_file_integration))
+}
+
+async fn download(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        uris: Vec<String>,
+    }
+    let input: Input = body(request).await?;
+    products.source.download_media(
+        downloads::DownloadSubject::Prepared {
+            context_id: "api".into(),
+            title: None,
+        },
+        input.uris,
+    );
+    Ok(accepted())
 }
 
 async fn download_quality(
