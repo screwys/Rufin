@@ -1750,9 +1750,12 @@ mod tests {
             library::MemberRead::new(library::Collection::Source(key)),
         )
         .await;
-        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks.len(), 1);
         assert!(tracks.iter().any(|track| track.media_uri == new_uri));
-        assert!(tracks.iter().any(|track| track.media_uri == imported_uri));
+        assert!(
+            tracks.iter().all(|track| track.media_uri != imported_uri),
+            "a dropped file inside a removed folder hides with it"
+        );
         assert!(tracks.iter().all(|track| track.media_uri != uri));
         let entries = catalog.playlist_entry_uri_page(playlist, 0).await.unwrap();
         assert_eq!(entries.len(), 1);
@@ -1819,7 +1822,7 @@ mod tests {
             library::MemberRead::new(library::Collection::Source(key)),
         )
         .await;
-        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks.len(), 2);
         assert!(tracks.iter().any(|track| track.media_uri == file_uri));
         let inventory = crate::stored_files(&catalog, source.source_id().as_str()).await;
         assert!(
@@ -1877,7 +1880,7 @@ mod tests {
             )
             .await
             .len(),
-            1
+            0
         );
         let cached = catalog
             .tracks_by_uris(
@@ -1919,17 +1922,8 @@ mod tests {
             )
             .await
             .len(),
-            1,
+            0,
             "the excluded descendant must not be re-admitted with its parent root"
-        );
-        let members = crate::listed_tracks(
-            &catalog,
-            library::MemberRead::new(library::Collection::Source(key)),
-        )
-        .await;
-        assert_eq!(
-            members[0].media_uri, imported_uri,
-            "the explicit import overrides the excluded folder"
         );
         let after_edit = catalog
             .tracks_by_uris(

@@ -1297,9 +1297,10 @@ pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> Libr
         copy_table(&mut transaction, "old_store", table, table, &[], "true").await?;
     }
     user_data(&mut transaction, has_catalog).await?;
-    // A walk that found a file renamed wrote an import locator with no root for its new path,
-    // which kept the file listed when its folder went. Imports name their root; these go.
-    sqlx::query("DELETE FROM local_locators WHERE origin='import' AND root=''")
+    // Import locators of files inside a music folder go, so those files hide and return with
+    // their folder. A released walk hid a track outside the folders unless an import locator
+    // named it, so a root holding a listed track without one is a music folder.
+    sqlx::query("DELETE FROM local_locators WHERE origin='import' AND path IN(SELECT path FROM files WHERE root IN(SELECT file.root FROM tracks track CROSS JOIN track_details details USING(track_key) CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE track.indexed=1 AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import')))")
         .execute(&mut *transaction)
         .await?;
     legacy_copies(&mut transaction).await?;

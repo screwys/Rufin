@@ -1,6 +1,6 @@
 //! Sequential bounded loudness analysis for one missing Track or Album. While normalization
-//! is EBU R128 it follows the change feed: tracks added to the selected source start a pass
-//! over what is missing.
+//! is EBU R128 it follows the change feed: tracks added to the selected source, or a listing
+//! of it that changed something, start a pass over what is missing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex, Weak};
 use audio_processing::{
     AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
-use library::{Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, TrackKey};
+use library::{
+    Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, SourcePhase, TrackKey,
+};
 use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{debug, info, warn};
@@ -58,8 +60,8 @@ impl AnalysisFailureBlock {
     }
 }
 
-/// While normalization is EBU R128, tracks added to the selected source start a pass over what
-/// is missing.
+/// While normalization is EBU R128, tracks added to the selected source, or a listing of it that
+/// changed something, start a pass over what is missing.
 pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc<Change>>>) {
     if !playback.ebu_r128() {
         return;
@@ -73,20 +75,27 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
         .as_ref()
         .and_then(|source| source.selected_library())
         .map(|selected| selected.source_key);
-    let added = changes
-        .iter()
-        .flat_map(|change| &change.scopes)
-        .any(|scope| match scope {
-            Scope::Reload => true,
+    let (mut added, mut listed) = (false, false);
+    for scope in changes.iter().flat_map(|change| &change.scopes) {
+        match scope {
+            Scope::Reload => added = true,
             Scope::Tracks {
                 source: Some(source),
-                added,
+                added: tracks,
                 ..
-            } => !added.is_empty() && Some(*source) == selected,
-            _ => false,
-        });
+            } if !tracks.is_empty() && Some(*source) == selected => added = true,
+            // A listing that changed tracks may have given them new audio hashes.
+            Scope::Source {
+                key,
+                phase: SourcePhase::Completed,
+            } if Some(*key) == selected => listed = true,
+            _ => {}
+        }
+    }
     if added {
         playback.loudness.library_changed(source);
+    } else if listed {
+        playback.loudness.listing_changed(source);
     }
 }
 
@@ -177,8 +186,20 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    /// The selected source or its tracks changed: what it misses is analyzed again.
+    /// A source was selected or tracks were added to it: what it misses is analyzed again,
+    /// after a pass that failed too.
     pub(crate) fn library_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
+        self.blocked
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        self.listing_changed(source_owner);
+    }
+
+    /// A listing changed the selected source: a pass starts, or the running one runs again
+    /// when it ends. After a failed pass it waits for added tracks, so a track that cannot be
+    /// decoded is not decoded again after every listing.
+    pub(crate) fn listing_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
         let Some(selected) = source_owner
             .as_ref()
             .and_then(|source_owner| source_owner.selected_library())
@@ -186,10 +207,6 @@ impl LoudnessAnalysisOwner {
             self.cancel();
             return;
         };
-        self.blocked
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(current) = active
             .as_mut()

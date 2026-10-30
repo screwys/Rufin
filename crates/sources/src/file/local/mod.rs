@@ -272,8 +272,8 @@ impl LocalSource {
         failure.map_or(Ok(()), Err)
     }
 
-    /// A playlist's local entries: each file outside the folders is an import root, and every
-    /// entry's file stays listed when its folder is removed.
+    /// A playlist's local entries: each file outside the folders is an import root and stays
+    /// listed.
     pub(crate) async fn import_playlist_files(
         &self,
         observation: &mut library::Observation<'_>,
@@ -324,7 +324,9 @@ impl LocalSource {
             )
             .await?;
         }
-        observation.record_imported_files(playlist).await?;
+        observation
+            .record_imported_files(playlist, &configured)
+            .await?;
         Ok(())
     }
 
