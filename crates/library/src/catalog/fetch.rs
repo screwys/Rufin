@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use super::rows::{Handle, Rows};
 use super::views::{Art, Picture};
-use crate::artwork::{ArtworkCandidate, ArtworkImage};
+use crate::artwork::{AlbumCover, ArtworkCandidate, ArtworkImage};
 use crate::{AlbumMetadata, LibraryResult, TrackAccess, TrackMetadata};
 
 /// Columns after the part and the key; a part with fewer pads with NULL.
@@ -23,6 +23,7 @@ pub(crate) enum Part {
     TrackArt,
     AlbumArt,
     ArtistArt,
+    AlbumCover,
     TagArt,
     TagMosaic,
     FolderArt,
@@ -30,7 +31,7 @@ pub(crate) enum Part {
     SmartArt,
 }
 
-const PARTS: [Part; 13] = [
+const PARTS: [Part; 14] = [
     Part::Track,
     Part::View,
     Part::AlbumText,
@@ -39,6 +40,7 @@ const PARTS: [Part; 13] = [
     Part::TrackArt,
     Part::AlbumArt,
     Part::ArtistArt,
+    Part::AlbumCover,
     Part::TagArt,
     Part::TagMosaic,
     Part::FolderArt,
@@ -115,6 +117,15 @@ impl Part {
             Self::TrackArt => art("track_details", "track_key", "native_artwork"),
             Self::AlbumArt => art("albums", "album_key", "native_artwork"),
             Self::ArtistArt => art("artists", "artist_key", "native_artwork"),
+            Self::AlbumCover => (
+                vec![
+                    "album.title".into(),
+                    "album.display_artist".into(),
+                    "json_extract(album.metadata,'$.musicbrainz_release_group_id')".into(),
+                    "json_extract(album.metadata,'$.musicbrainz_release_id')".into(),
+                ],
+                "JOIN albums album ON album.album_key=requested.value".into(),
+            ),
             Self::TagArt => art("tags", "tag_key", "native_artwork"),
             Self::FolderArt => art("folders", "folder_key", "native_artwork"),
             Self::TagMosaic => (
@@ -175,6 +186,12 @@ impl Want {
                     None => {}
                 }
             }
+            Art::Release(key, artist) => {
+                self.add(Part::AlbumCover, key);
+                if let Some((key, borrowed)) = artist {
+                    self.art(Art::Artist(key, borrowed));
+                }
+            }
         }
     }
 }
@@ -211,12 +228,14 @@ pub(crate) struct Got {
     playlists: HashMap<(bool, i64), PlaylistArt>,
     /// The track keys of each tag's mosaic picks; a pick the Store lacks has none.
     pub(crate) mosaics: HashMap<i64, Vec<Option<i64>>>,
+    /// The cover lookup of each album that has usable text or a MusicBrainz id.
+    covers: HashMap<i64, AlbumCover>,
     previews: HashMap<String, String>,
 }
 
 impl Got {
     /// A row's picture as the Catalog chose it. An artist lists its own pictures, then the one
-    /// it borrows, then its name lookups.
+    /// it borrows, then its name lookups. An album's cover lookup comes before its artist's.
     fn candidates(&self, art: Art) -> Option<Vec<ArtworkCandidate>> {
         let stored = |part, key| self.art.get(&(part, key));
         let picture = |picture: Picture| match picture {
@@ -243,6 +262,23 @@ impl Got {
                     .chain(borrowed.and_then(picture).into_iter().flatten())
                     .chain(own.iter().filter(lookup))
                     .cloned()
+                    .collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    return None;
+                }
+                candidates
+            }
+            Art::Release(key, artist) => {
+                let cover = self.covers.get(&key).cloned();
+                let candidates = cover
+                    .map(|cover| ArtworkCandidate::new(ArtworkImage::Album(cover), None))
+                    .into_iter()
+                    .chain(
+                        artist
+                            .and_then(|(key, borrowed)| self.candidates(Art::Artist(key, borrowed)))
+                            .into_iter()
+                            .flatten(),
+                    )
                     .collect::<Vec<_>>();
                 if candidates.is_empty() {
                     return None;
@@ -420,6 +456,17 @@ pub(crate) async fn run(
                 previews(&rows, &mut got, 3)?;
                 if let Some(stored) = candidates(&rows, 2)? {
                     got.art.insert((part, key), stored);
+                }
+            }
+            Part::AlbumCover => {
+                let text = |column| rows.optional_text(column).unwrap_or_default();
+                if let Some(cover) = AlbumCover::new(
+                    text(3),
+                    text(2),
+                    rows.optional_text(4),
+                    rows.optional_text(5),
+                ) {
+                    got.covers.insert(key, cover);
                 }
             }
             Part::TagMosaic => {

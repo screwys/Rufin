@@ -144,14 +144,22 @@ impl JellyfinEmbySource {
             Err(SourceError::NotFound) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let lines = items(&dto["TrackEvents"])
+        // Emby sends zero ticks for every line of untimed lyrics, and a zero end for an open one.
+        let events = items(&dto["TrackEvents"]);
+        let ticks =
+            |event: &Value, name: &str| field::<i64>(event, name).filter(|ticks| *ticks > 0);
+        let timed = events
+            .iter()
+            .any(|event| ticks(event, "StartPositionTicks").is_some());
+        let lines = events
             .iter()
             .filter_map(|event| {
                 let text: String = field(event, "Text")?;
                 (!text.trim().is_empty()).then(|| LyricsLine {
                     text,
-                    start_millis: ticks_to_millis(field(event, "StartPositionTicks")),
-                    end_millis: ticks_to_millis(field(event, "EndPositionTicks")),
+                    start_millis: ticks_to_millis(field(event, "StartPositionTicks"))
+                        .filter(|_| timed),
+                    end_millis: ticks_to_millis(ticks(event, "EndPositionTicks")),
                     cue_lines: Vec::new(),
                 })
             })
@@ -471,14 +479,26 @@ mod tests {
             .await
             .unwrap();
         Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[null,{"Id":"without-lyrics"},{"Id":"media-source","DefaultSubtitleStreamIndex":"2","MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":{}},{"Type":"Subtitle","Index":1},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;
-        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Untimed"},{"Text":" "}]}))).mount(&server).await;
+        Mock::given(path("/emby/Users/listener/Items/12")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"12","MediaSources":[{"Id":"untimed","MediaStreams":[{"Type":"Subtitle","Index":0}]}]}))).mount(&server).await;
+        Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Open","StartPositionTicks":3000000,"EndPositionTicks":0},{"Text":" "}]}))).mount(&server).await;
+        // Emby sends untimed lyrics with zero ticks on every line.
+        Mock::given(path("/emby/Items/12/untimed/Subtitles/0/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"First","StartPositionTicks":0,"EndPositionTicks":0},{"Text":"Second","StartPositionTicks":0,"EndPositionTicks":0}]}))).mount(&server).await;
         let lyrics = source.lyrics("emby:track:11").await.unwrap().unwrap();
         let document = &lyrics.documents()[0];
         assert_eq!(document.language.as_deref(), Some("eng"));
         assert_eq!(document.lines.len(), 2);
         assert_eq!(document.lines[0].start_millis, Some(125));
         assert_eq!(document.lines[0].end_millis, Some(225));
-        assert_eq!(document.lines[1].start_millis, None);
+        assert_eq!(document.lines[1].start_millis, Some(300));
+        assert_eq!(document.lines[1].end_millis, None);
+        let untimed = source.lyrics("emby:track:12").await.unwrap().unwrap();
+        let lines = &untimed.documents()[0].lines;
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.start_millis.is_none() && line.end_millis.is_none())
+        );
         server.verify().await;
     }
 }

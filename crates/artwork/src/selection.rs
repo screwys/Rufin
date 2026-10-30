@@ -12,9 +12,15 @@ pub struct ArtworkBinding {
 impl ArtworkBinding {
     pub fn opaque(binding: &[u8]) -> Self {
         let candidates: Vec<Candidate> = serde_json::from_slice(binding).unwrap_or_default();
+        // An album's cover lookup names its own asset; an artist's binding keeps its name's.
         let asset_identity = candidates
-            .iter()
-            .find(|candidate| matches!(candidate.image, library::ArtworkImage::Artist { .. }))
+            .first()
+            .filter(|candidate| matches!(candidate.image, library::ArtworkImage::Album(_)))
+            .or_else(|| {
+                candidates.iter().find(|candidate| {
+                    matches!(candidate.image, library::ArtworkImage::Artist { .. })
+                })
+            })
             .or_else(|| candidates.first())
             .map(Candidate::asset_identity)
             .unwrap_or_default();

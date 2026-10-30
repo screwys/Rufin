@@ -38,6 +38,7 @@ roxmltree.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
+unicode-normalization = "0.1.25"
 url.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
