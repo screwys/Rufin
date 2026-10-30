@@ -219,6 +219,7 @@ impl Order {
                     let index = position - span.first - 1;
                     Item::AlbumTrack {
                         key: TrackKey::from_raw(key(&tracks[span.first - at + index])),
+                        album: span.album,
                         index: index as u32,
                     }
                 })
@@ -259,6 +260,7 @@ pub enum Item {
     },
     AlbumTrack {
         key: TrackKey,
+        album: AlbumKey,
         index: u32,
     },
     AlbumHeading(AlbumKey),
@@ -1118,7 +1120,7 @@ impl<'a> Builder<'a> {
                 });
                 Row::Track(row)
             }),
-            Item::AlbumTrack { key, index } => self
+            Item::AlbumTrack { key, index, .. } => self
                 .track(key, got)?
                 .map(|track| Row::AlbumTrack { track, index }),
             Item::Listen(index) => {
