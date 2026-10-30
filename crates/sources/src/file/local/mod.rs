@@ -682,6 +682,10 @@ impl walk::FileSource for LocalFiles<'_> {
                 fs::read_dir(&directory).map_err(|error| SourceError::Other(error.to_string()))?
             {
                 let entry = entry.map_err(|error| SourceError::Other(error.to_string()))?;
+                // A name that is not UTF-8 cannot be stored as a path the source opens.
+                let Ok(name) = entry.file_name().into_string() else {
+                    continue;
+                };
                 let kind = entry
                     .file_type()
                     .map_err(|error| SourceError::Other(error.to_string()))?;
@@ -692,10 +696,7 @@ impl walk::FileSource for LocalFiles<'_> {
                 let Ok(metadata) = entry.metadata() else {
                     continue;
                 };
-                entries.push(self::entry(
-                    entry.file_name().to_string_lossy().into_owned(),
-                    &metadata,
-                ));
+                entries.push(self::entry(name, &metadata));
             }
             Ok(entries)
         })
