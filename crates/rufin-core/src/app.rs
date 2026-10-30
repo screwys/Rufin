@@ -63,6 +63,7 @@ where
     let store_path = paths.store_file();
     let (catalog, temporary_store) = match library::Catalog::open_installation(
         &store_path,
+        &paths.released_store_file(),
         &paths.catalog_file(),
     )
     .await

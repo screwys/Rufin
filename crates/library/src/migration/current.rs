@@ -1215,9 +1215,9 @@ async fn restore_saved_queue(connection: &mut SqliteConnection) -> LibraryResult
     crate::queue::save_queue_on(connection, &state).await
 }
 
-/// Builds the new Store beside the released files and installs it only when it is complete,
-/// so an upgrade that stops early starts over.
-pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
+/// Builds a new Store at `path` from the released files, which it only reads, and installs it
+/// only when it is complete, so an upgrade that stops early starts over.
+pub(crate) async fn import(released: &Path, path: &Path, catalog: &Path) -> LibraryResult<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let stage = tempfile::Builder::new()
@@ -1226,7 +1226,7 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
     let pending = stage.path().join("library.sqlite");
     let mut connection = crate::db::open_writer(&pending).await?;
     crate::schema::initialize_durable(&mut connection).await?;
-    attach(&mut connection, path, "old_store").await?;
+    attach(&mut connection, released, "old_store").await?;
     let has_catalog = catalog.exists();
     if has_catalog {
         attach(&mut connection, catalog, "old_catalog").await?;

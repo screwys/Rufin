@@ -44,7 +44,9 @@ pub fn roots() -> Paths {
 }
 
 const STORE_DIRECTORY: &str = "store";
-const STORE_FILE: &str = "rufin-store.sqlite";
+const STORE_FILE: &str = "rufin-library.sqlite";
+// Releases up to 0.16 kept their Store here; it is imported once and left for a downgrade.
+const RELEASED_STORE_FILE: &str = "rufin-store.sqlite";
 const SETTINGS_FILE: &str = "settings.json";
 const ARTWORK_DIRECTORY: &str = "covers";
 const PLAYBACK_DIRECTORY: &str = "playback";
@@ -77,6 +79,12 @@ impl Paths {
 
     pub fn store_file(&self) -> PathBuf {
         self.data_dir().join(STORE_DIRECTORY).join(STORE_FILE)
+    }
+
+    pub fn released_store_file(&self) -> PathBuf {
+        self.data_dir()
+            .join(STORE_DIRECTORY)
+            .join(RELEASED_STORE_FILE)
     }
 
     pub fn catalog_file(&self) -> PathBuf {

@@ -465,12 +465,36 @@ impl Catalog {
         }
     }
 
-    /// Opens the installed Store. A Store imported from a released one gets its albums resolved
-    /// once, since the import copies only the facts albums are resolved from.
-    pub async fn open_installation(path: &Path, catalog: &Path) -> LibraryResult<Self> {
+    /// Opens the installed Store. Without one, it imports the Store a release wrote at
+    /// `released` and leaves that file as it was, so the release still opens it after a
+    /// downgrade. A Store imported from a released one gets its albums resolved once, since the
+    /// import copies only the facts albums are resolved from.
+    pub async fn open_installation(
+        path: &Path,
+        released: &Path,
+        catalog: &Path,
+    ) -> LibraryResult<Self> {
+        let mut imported = false;
+        if !path.exists() && released.exists() {
+            match Self::import_released(released, path, catalog).await {
+                Ok(()) => imported = true,
+                Err(error) if error.is_store_unavailable() => return Err(error),
+                Err(error) => {
+                    tracing::warn!(%error, "could not import the released Store; starting a new one");
+                }
+            }
+        }
+        // The release's catalog file is a cache it rebuilds after a downgrade.
+        for suffix in ["", "-wal", "-shm"] {
+            let mut file = catalog.as_os_str().to_os_string();
+            file.push(suffix);
+            let _ = std::fs::remove_file(file);
+        }
         let opened = async {
-            let imported = path.exists() && Self::migrate_released(path, catalog).await?;
-            LibraryResult::Ok((Self::open(path).await?, imported))
+            if path.exists() {
+                Self::check_version(path).await?;
+            }
+            Self::open(path).await
         }
         .await;
         let (opened, imported) = match opened {
@@ -484,7 +508,7 @@ impl Catalog {
                 }
                 (Self::open(path).await?, true)
             }
-            opened => opened?,
+            opened => (opened?, imported),
         };
         if imported {
             crate::catalog::albums::resolve_all(&opened).await?;
@@ -492,19 +516,30 @@ impl Catalog {
         Ok(opened)
     }
 
-    /// Imports a released Store. Returns whether it did.
-    async fn migrate_released(path: &Path, catalog: &Path) -> LibraryResult<bool> {
+    async fn version(path: &Path) -> LibraryResult<i64> {
         let mut reader =
             SqliteConnection::connect_with(&base_options(path).read_only(true)).await?;
         let version = schema::pragma(&mut reader, "user_version").await;
         reader.close().await?;
-        match version? {
+        version
+    }
+
+    async fn import_released(released: &Path, path: &Path, catalog: &Path) -> LibraryResult<()> {
+        match Self::version(released).await? {
             44..=46 => {
                 image::remove(path);
-                crate::migration::import_current(path, catalog).await?;
-                Ok(true)
+                crate::migration::import_current(released, path, catalog).await
             }
-            0 | schema::STORE_VERSION => Ok(false),
+            version => Err(LibraryError::Migration(format!(
+                "unsupported released library schema {version}"
+            ))),
+        }
+    }
+
+    /// Fails for a Store another version wrote, which is then recovered.
+    async fn check_version(path: &Path) -> LibraryResult<()> {
+        match Self::version(path).await? {
+            0 | schema::STORE_VERSION => Ok(()),
             version => Err(LibraryError::Migration(format!(
                 "unsupported library schema {version}"
             ))),

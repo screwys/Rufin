@@ -292,7 +292,11 @@ async fn unsupported_version_preserves_library_data() {
     let before = durable_rows(&path).await;
     assert!(Catalog::open(&path).await.is_err());
     assert_eq!(durable_rows(&path).await, before);
-    let recovered = Catalog::open_installation(&path, &path.with_extension("catalog.sqlite"))
+    let recovered = Catalog::open_installation(
+        &path,
+        &path.with_extension("released.sqlite"),
+        &path.with_extension("catalog.sqlite"),
+    )
         .await
         .unwrap();
     recovered.close().await.unwrap();
@@ -321,9 +325,10 @@ async fn unsupported_version_preserves_library_data() {
 #[tokio::test]
 async fn released_store_imports_old_playlist_artwork_and_files() {
     let directory = tempfile::tempdir().unwrap();
-    let store = directory.path().join("rufin-store.sqlite");
+    let released = directory.path().join("rufin-store.sqlite");
+    let store = directory.path().join("rufin-library.sqlite");
     let catalog = directory.path().join("rufin-catalog.sqlite");
-    let mut raw = connection(&store, true).await;
+    let mut raw = connection(&released, true).await;
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE TABLE source_ids(source_key INTEGER PRIMARY KEY,object_id TEXT NOT NULL);
         INSERT INTO source_ids VALUES(1,'source');
         CREATE TABLE legacy_activity(source_id TEXT NOT NULL,period TEXT NOT NULL,item_kind TEXT NOT NULL,track_object_id TEXT NOT NULL,play_count INTEGER NOT NULL,skip_count INTEGER NOT NULL,last_played_at INTEGER);
@@ -359,7 +364,7 @@ async fn released_store_imports_old_playlist_artwork_and_files() {
         PRAGMA user_version=51;"))).execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
 
-    Catalog::open_installation(&store, &catalog)
+    Catalog::open_installation(&store, &released, &catalog)
         .await
         .unwrap()
         .close()
@@ -395,9 +400,10 @@ async fn released_store_imports_old_playlist_artwork_and_files() {
 async fn released_stores_upgrade_with_their_user_data() {
     for version in ["0.15.0", "0.16.6"] {
         let directory = tempfile::tempdir().unwrap();
-        let store = directory.path().join("rufin-store.sqlite");
+        let released = directory.path().join("rufin-store.sqlite");
+        let store = directory.path().join("rufin-library.sqlite");
         let catalog = directory.path().join("rufin-catalog.sqlite");
-        for (path, name) in [(&store, "store"), (&catalog, "catalog")] {
+        for (path, name) in [(&released, "store"), (&catalog, "catalog")] {
             let fixture = std::fs::read_to_string(format!(
                 "{}/tests/fixtures/{name}-{version}.sql",
                 env!("CARGO_MANIFEST_DIR")
@@ -410,12 +416,16 @@ async fn released_stores_upgrade_with_their_user_data() {
                 .unwrap();
             raw.close().await.unwrap();
         }
-        Catalog::open_installation(&store, &catalog)
+        let before = std::fs::read(&released).unwrap();
+        Catalog::open_installation(&store, &released, &catalog)
             .await
             .unwrap()
             .close()
             .await
             .unwrap();
+        // The release still opens its own Store after a downgrade.
+        assert_eq!(std::fs::read(&released).unwrap(), before);
+        assert!(!catalog.exists());
         let mut raw = connection(&store, false).await;
         let all = |sql: &'static str| sqlx::query_as::<_, (String,)>(sql);
         let values = async |raw: &mut SqliteConnection, sql: &'static str| -> Vec<String> {
