@@ -54,6 +54,21 @@ mod imp {
             } else {
                 snapshot.clone()
             };
+            // The device pixel grid, which the coverage geometry aligns with.
+            let native = widget.native();
+            let scale = native
+                .as_ref()
+                .and_then(|native| native.surface())
+                .map_or(f64::from(widget.scale_factor()), |surface| surface.scale());
+            let origin = native
+                .as_ref()
+                .and_then(|native| {
+                    let (x, y) = native.surface_transform();
+                    widget
+                        .compute_point(native, &gtk::graphene::Point::zero())
+                        .map(|point| (f64::from(point.x()) + x, f64::from(point.y()) + y))
+                })
+                .unwrap_or_default();
             draw_visualizer(
                 &frame,
                 widget.width(),
@@ -62,6 +77,8 @@ mod imp {
                 &self.peaks.get().unwrap().borrow(),
                 &appearance,
                 widget.color(),
+                1.0 / scale,
+                origin,
             );
             if !effects {
                 return;
@@ -160,6 +177,8 @@ fn draw_visualizer(
     peaks: &[Peak],
     appearance: &VisualizerAppearance,
     accent: gtk::gdk::RGBA,
+    pixel: f64,
+    origin: (f64, f64),
 ) {
     if levels.len() < 2 {
         return;
@@ -225,14 +244,9 @@ fn draw_visualizer(
             | VisualizerStyle::Ribbon
             | VisualizerStyle::Halo
     ) {
-        // These styles need one joined path. GTK also rasterizes GSK paths,
-        // but caches each new animated path, so keep this single Cairo node.
-        let context = snapshot.append_cairo(&bounds);
-        let gradient = gtk::cairo::LinearGradient::new(0.0, bottom, 0.0, bottom - graph_height);
-        for (offset, color) in [(0.0, colors[0]), (1.0, colors[1])] {
-            gradient.add_color_stop_rgb(offset, color[0].into(), color[1].into(), color[2].into());
-        }
-        let _ = context.set_source(&gradient);
+        // These styles draw the color source through a coverage mask of gradient nodes,
+        // which the GPU renders. A Cairo node or a GSK path is rasterized on the CPU every
+        // frame, and GTK caches each new animated path.
         let ribbon = appearance.style == VisualizerStyle::Ribbon;
         let halo = appearance.style == VisualizerStyle::Halo;
         let points = |inward: bool| {
@@ -261,48 +275,53 @@ fn draw_visualizer(
                 })
                 .collect::<Vec<_>>()
         };
-        let mut outline = points(false);
-        if ribbon {
-            for index in (0..outline.len()).rev() {
-                let (x, y) = outline[index];
-                outline.push((x, height - y));
-            }
-        }
-        if ribbon || halo {
-            smooth_closed_path(&context, &outline);
-        } else {
-            for (index, (x, y)) in outline.into_iter().enumerate() {
-                if index == 0 {
-                    context.move_to(x, y);
-                } else {
-                    context.line_to(x, y);
-                }
-            }
-        }
-        if appearance.style == VisualizerStyle::Filled {
-            context.line_to(
-                left + cell / 2.0 + (columns - 1) as f64 * (cell + column_gap),
-                bottom,
-            );
-            context.line_to(left + cell / 2.0, bottom);
-            context.close_path();
-            let _ = context.fill();
-        } else if ribbon {
-            let _ = context.fill();
-        } else {
-            context.set_line_width(2.0);
-            let _ = context.stroke();
-            if halo && shadow_limit > 0.0 {
-                smooth_closed_path(&context, &points(true));
-                let color = color(shadow_colors, 0.5, appearance.shadow_opacity);
-                context.set_source_rgba(
-                    color.red().into(),
-                    color.green().into(),
-                    color.blue().into(),
-                    color.alpha().into(),
+        let outline = points(false);
+        let closed_curve = |controls: &[(f64, f64)]| {
+            let start = midpoint(controls[controls.len() - 1], controls[0]);
+            let mut curve = thin(smooth_curve(start, controls, start, pixel), pixel);
+            curve.pop();
+            curve
+        };
+        let snap = |value: f64, origin: f64| ((value + origin) / pixel).round() * pixel - origin;
+        let snap_x = |x| snap(x, origin.0);
+        snapshot.push_mask(gtk::gsk::MaskMode::Alpha);
+        match appearance.style {
+            VisualizerStyle::Filled => fill(snapshot, &[(&outline, bottom, true)], pixel, snap_x),
+            VisualizerStyle::Ribbon => {
+                let middle = height / 2.0;
+                let top = smooth_curve(
+                    (outline[0].0, middle),
+                    &outline,
+                    (outline[outline.len() - 1].0, middle),
+                    pixel,
                 );
-                let _ = context.stroke();
+                let mirrored = top
+                    .iter()
+                    .map(|&(x, y)| (x, height - y))
+                    .collect::<Vec<_>>();
+                let base = snap(middle, origin.1);
+                fill(
+                    snapshot,
+                    &[(&top, base, true), (&mirrored, base, false)],
+                    pixel,
+                    snap_x,
+                );
             }
+            _ if halo => stroke(snapshot, &closed_curve(&outline), true, pixel),
+            _ => stroke(snapshot, &outline, false, pixel),
+        }
+        snapshot.pop();
+        gradient(&bounds);
+        snapshot.pop();
+        if halo && shadow_limit > 0.0 {
+            snapshot.push_mask(gtk::gsk::MaskMode::Alpha);
+            stroke(snapshot, &closed_curve(&points(true)), true, pixel);
+            snapshot.pop();
+            snapshot.append_color(
+                &color(shadow_colors, 0.5, appearance.shadow_opacity),
+                &bounds,
+            );
+            snapshot.pop();
         }
     }
     for (column, level) in bars.iter().copied().enumerate() {
@@ -457,23 +476,203 @@ fn draw_visualizer(
     snapshot.pop();
 }
 
-fn smooth_closed_path(context: &gtk::cairo::Context, points: &[(f64, f64)]) {
-    let midpoint = |a: (f64, f64), b: (f64, f64)| ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
-    let mut start = midpoint(points[points.len() - 1], points[0]);
-    context.move_to(start.0, start.1);
-    for (index, point) in points.iter().enumerate() {
-        let end = midpoint(*point, points[(index + 1) % points.len()]);
-        context.curve_to(
-            start.0 + (point.0 - start.0) * 2.0 / 3.0,
-            start.1 + (point.1 - start.1) * 2.0 / 3.0,
-            end.0 + (point.0 - end.0) * 2.0 / 3.0,
-            end.1 + (point.1 - end.1) * 2.0 / 3.0,
-            end.0,
-            end.1,
-        );
-        start = end;
+fn midpoint(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0)
+}
+
+/// Points along the quadratic B-spline that runs from `start` through the midpoints between
+/// `controls` to `end`, within a quarter device pixel of it.
+fn smooth_curve(
+    start: (f64, f64),
+    controls: &[(f64, f64)],
+    end: (f64, f64),
+    pixel: f64,
+) -> Vec<(f64, f64)> {
+    let mut curve = vec![start];
+    let mut from = start;
+    for (index, &control) in controls.iter().enumerate() {
+        let to = controls
+            .get(index + 1)
+            .map_or(end, |&next| midpoint(control, next));
+        let bend = (from.0 - 2.0 * control.0 + to.0).hypot(from.1 - 2.0 * control.1 + to.1);
+        let steps = (bend / pixel).sqrt().ceil().max(1.0);
+        for step in 1..=steps as usize {
+            let t = step as f64 / steps;
+            let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+            curve.push((
+                a * from.0 + b * control.0 + c * to.0,
+                a * from.1 + b * control.1 + c * to.1,
+            ));
+        }
+        from = to;
     }
-    context.close_path();
+    curve
+}
+
+/// Drops points closer than a device pixel to the previous one, keeping both ends.
+fn thin(points: Vec<(f64, f64)>, pixel: f64) -> Vec<(f64, f64)> {
+    let mut kept: Vec<(f64, f64)> = Vec::with_capacity(points.len());
+    for (index, &(x, y)) in points.iter().enumerate() {
+        let replaces_end = index + 1 == points.len() && kept.len() > 1;
+        match kept.last_mut() {
+            Some(last) if (x - last.0).hypot(y - last.1) < pixel => {
+                if replaces_end {
+                    *last = (x, y);
+                }
+            }
+            _ => kept.push((x, y)),
+        }
+    }
+    kept
+}
+
+/// White coverage between each x-monotone edge and the line y = base, below the edge when
+/// the flag is set. Each edge segment is a strip whose slanted side is a gradient ramp. Strips
+/// meet on device pixel edges (`snap`), so each pixel takes its coverage from the segment
+/// above its center and neighbouring strips leave no seam; a segment narrower than a pixel
+/// may get no strip.
+fn fill(
+    snapshot: &gtk::Snapshot,
+    edges: &[(&[(f64, f64)], f64, bool)],
+    pixel: f64,
+    snap: impl Fn(f64) -> f64,
+) {
+    for &(edge, base, below) in edges {
+        let (first, last) = (edge[0].0, edge[edge.len() - 1].0);
+        for pair in edge.windows(2) {
+            let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+            let left = if x0 == first { x0 } else { snap(x0).max(first) };
+            let right = if x1 == last { x1 } else { snap(x1).min(last) };
+            if right <= left {
+                continue;
+            }
+            let side = if below { 1.0 } else { -1.0 };
+            let length = (x1 - x0).hypot(y1 - y0);
+            let (nx, ny) = (side * (y0 - y1) / length, side * (x1 - x0) / length);
+            let ramp = ramp(nx, ny, pixel);
+            let (top, bottom) = if below {
+                (y0.min(y1) - ramp, base)
+            } else {
+                (base, y0.max(y1) + ramp)
+            };
+            snapshot.append_linear_gradient(
+                &rect(left, top, right - left, bottom - top),
+                &point(x0 - nx * ramp, y0 - ny * ramp),
+                &point(x0 + nx * ramp, y0 + ny * ramp),
+                &[stop(0.0, 0.0), stop(1.0, 1.0)],
+            );
+        }
+    }
+}
+
+/// Half the width of the antialiasing ramp across an edge with normal (nx, ny). GSK samples
+/// gradients four times per pixel, a quarter pixel apart, which widens the ramp to about the
+/// one-pixel footprint Cairo gives the same edge.
+fn ramp(nx: f64, ny: f64, pixel: f64) -> f64 {
+    (nx.abs() + ny.abs()) * pixel / 4.0
+}
+
+/// White coverage of a 2 px wide stroke along `points` as Cairo strokes it: butt ends, miter
+/// joins up to a miter length of 10 widths and bevels beyond. Each segment is a rotated rect
+/// whose sides are gradient ramps. Segments reach as far as the miter where it is shorter
+/// than the width, and half a device pixel into the next segment so their antialiased ends
+/// leave no seam. A longer miter tip is one more rect, cut by the outer side of the next
+/// segment.
+fn stroke(snapshot: &gtk::Snapshot, points: &[(f64, f64)], closed: bool, pixel: f64) {
+    const HALF: f64 = 1.0;
+    let count = points.len();
+    let direction = |index: usize| {
+        let (a, b) = (points[index % count], points[(index + 1) % count]);
+        let length = (b.0 - a.0).hypot(b.1 - a.1);
+        ((b.0 - a.0) / length, (b.1 - a.1) / length, length)
+    };
+    // How far the segments before and after a vertex reach past it, and the miter tip they
+    // leave. The one before overlaps the one after by half a device pixel.
+    let joint = |vertex: usize| {
+        if !closed && (vertex == 0 || vertex == count - 1) {
+            return (0.0, 0.0, None);
+        }
+        let (ax, ay, _) = direction(vertex + count - 1);
+        let (bx, by, _) = direction(vertex);
+        let (sin, cos) = (ax * by - ay * bx, ax * bx + ay * by);
+        let turn = sin.abs().atan2(cos);
+        if (turn / 2.0).cos() < 0.1 {
+            return (0.0, 0.0, None);
+        }
+        let miter = HALF * (turn / 2.0).tan();
+        if turn <= std::f64::consts::FRAC_PI_2 {
+            (miter.max(pixel / 2.0), miter, None)
+        } else {
+            (pixel / 2.0, 0.0, Some((miter, sin, cos)))
+        }
+    };
+    let segments = if closed { count } else { count - 1 };
+    for index in 0..segments {
+        let (tx, ty, length) = direction(index);
+        let (start, end) = (joint(index).1, joint(index + 1).0);
+        // GSK antialiases a rect edge just past a whole local pixel, so the open ends sit
+        // there, and the last segment is placed from its end.
+        let (anchor, from, to) = if !closed && index + 1 == segments {
+            (points[index + 1], -length - start, pixel * 1e-3)
+        } else if !closed && index == 0 {
+            (points[index], -pixel * 1e-3, length + end)
+        } else {
+            (points[index], -start, length + end)
+        };
+        let ramp = ramp(tx, ty, pixel);
+        let reach = HALF + ramp;
+        let edge = (ramp / reach) as f32;
+        snapshot.save();
+        snapshot.translate(&point(anchor.0, anchor.1));
+        snapshot.rotate(ty.atan2(tx).to_degrees() as f32);
+        snapshot.append_linear_gradient(
+            &rect(from, -reach - pixel, to - from, 2.0 * (reach + pixel)),
+            &point(0.0, -reach),
+            &point(0.0, reach),
+            &[
+                stop(0.0, 0.0),
+                stop(edge, 1.0),
+                stop(1.0 - edge, 1.0),
+                stop(1.0, 0.0),
+            ],
+        );
+        snapshot.restore();
+    }
+    for vertex in 0..count {
+        let Some((miter, sin, cos)) = joint(vertex).2 else {
+            continue;
+        };
+        let (ax, ay, _) = direction(vertex + count - 1);
+        let (bx, by, _) = direction(vertex);
+        // In the incoming segment's frame, the outer side is the one the path turns away
+        // from, and the next segment's outer side has this normal.
+        let outer = -sin.signum();
+        let (nx, ny) = (outer * -sin, outer * cos);
+        let ramp = ramp(bx, by, pixel);
+        let (low, high) = if outer > 0.0 {
+            (-HALF, HALF + pixel * 1e-3)
+        } else {
+            (-HALF - pixel * 1e-3, HALF)
+        };
+        snapshot.save();
+        snapshot.translate(&point(points[vertex].0, points[vertex].1));
+        snapshot.rotate(ay.atan2(ax).to_degrees() as f32);
+        snapshot.append_linear_gradient(
+            &rect(0.0, low, miter + 2.0 * pixel, high - low),
+            &point(nx * (HALF - ramp), ny * (HALF - ramp)),
+            &point(nx * (HALF + ramp), ny * (HALF + ramp)),
+            &[stop(0.0, 1.0), stop(1.0, 0.0)],
+        );
+        snapshot.restore();
+    }
+}
+
+fn point(x: f64, y: f64) -> gtk::graphene::Point {
+    gtk::graphene::Point::new(x as f32, y as f32)
+}
+
+fn stop(offset: f32, alpha: f32) -> gtk::gsk::ColorStop {
+    gtk::gsk::ColorStop::new(offset, gtk::gdk::RGBA::new(1.0, 1.0, 1.0, alpha))
 }
 
 fn rect(x: f64, y: f64, width: f64, height: f64) -> gtk::graphene::Rect {
