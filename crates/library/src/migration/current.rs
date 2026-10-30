@@ -1298,8 +1298,9 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
         copy_table(&mut transaction, "old_store", table, table, &[], "true").await?;
     }
     user_data(&mut transaction, has_catalog).await?;
-    // Files under a directory root are walked; their import locators go.
-    sqlx::query("DELETE FROM local_locators WHERE origin='import' AND EXISTS(SELECT 1 FROM files file WHERE file.path=local_locators.path AND file.root<>file.path AND (local_locators.source_key IS NULL OR file.source_key=local_locators.source_key))")
+    // A walk that found a file renamed wrote an import locator with no root for its new path,
+    // which kept the file listed when its folder went. Imports name their root; these go.
+    sqlx::query("DELETE FROM local_locators WHERE origin='import' AND root=''")
         .execute(&mut *transaction)
         .await?;
     legacy_copies(&mut transaction).await?;

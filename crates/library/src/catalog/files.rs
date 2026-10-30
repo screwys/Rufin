@@ -53,7 +53,8 @@ impl FileBatch {
 impl super::Observation<'_> {
     /// Stored rows in walk order, from `start` on (`inclusive`) or after it. `walked` are
     /// the roots this walk lists; rows of the source's other `configured` roots are left out,
-    /// and rows of roots no longer configured are included for the walk to vanish.
+    /// and rows of roots no longer configured are included for the walk to vanish. A row is
+    /// imported when an import locator names it or, for a CUE sheet, one of its inputs.
     pub async fn file_rows(
         &self,
         walked: &[String],
@@ -63,23 +64,33 @@ impl super::Observation<'_> {
         limit: usize,
     ) -> LibraryResult<Vec<StoredFile>> {
         let mut connection = self.catalog.acquire_reader().await?;
-        let (root, key) = start.map_or((None, None), |(root, relative)| {
-            (Some(root), Some(walk_key(relative)))
+        let (root, key) = start.map_or((String::new(), String::new()), |(root, relative)| {
+            (root.to_owned(), walk_key(relative))
         });
+        let import = "locator.origin='import' AND(locator.source_key IS NULL OR locator.source_key=file.source_key)";
+        // Two arms, each a range of the walk index: the rest of the cursor's root, then the
+        // roots after it. One OR'd cursor would scan the source from its first row.
+        let arm = |cursor: &str| {
+            format!(
+                "SELECT * FROM(SELECT {FILE_COLUMNS},EXISTS(SELECT 1 FROM local_locators locator WHERE locator.path=file.path AND {import})
+                    OR file.kind='cue' AND EXISTS(SELECT 1 FROM file_inputs input JOIN local_locators locator ON locator.path=input.path WHERE input.file_key=file.file_key AND {import}) imported
+                 FROM files file WHERE source_key=?1
+                   AND(root IN(SELECT value FROM json_each(?2)) OR root NOT IN(SELECT value FROM json_each(?3))) AND {cursor}
+                 ORDER BY root,replace(relative_path,'/',char(1)) LIMIT ?6)"
+            )
+        };
         Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {FILE_COLUMNS},EXISTS(SELECT 1 FROM local_locators locator WHERE locator.path=file.path AND locator.origin='import' AND(locator.source_key IS NULL OR locator.source_key=file.source_key)) imported
-             FROM files file WHERE source_key=?1
-               AND(root IN(SELECT value FROM json_each(?2)) OR root NOT IN(SELECT value FROM json_each(?3)))
-               AND(?4 IS NULL OR root>?4 OR(root=?4 AND(replace(relative_path,'/',char(1))>?5 OR(?6 AND replace(relative_path,'/',char(1))=?5))))
-             ORDER BY root,replace(relative_path,'/',char(1)) LIMIT ?7"
+            "{} UNION ALL {} LIMIT ?6",
+            arm("root=?4 AND replace(relative_path,'/',char(1))>=?5 AND(?7 OR replace(relative_path,'/',char(1))>?5)"),
+            arm("root>?4")
         )))
         .bind(self.source)
         .bind(serde_json::to_string(walked)?)
         .bind(serde_json::to_string(configured)?)
         .bind(root)
         .bind(key)
-        .bind(inclusive)
         .bind(limit as i64)
+        .bind(inclusive)
         .fetch_all(&mut *connection)
         .await?)
     }
@@ -95,21 +106,26 @@ impl super::Observation<'_> {
         let mut write = self.write().await?;
         let mut touched = Touched::default();
         let cue = |file: &LocalFileWrite| file.kind == LocalFileKind::Cue;
-        // CUE sheets that are read again or gone give up their inputs; a gone row is matched
-        // as the walk read it.
-        let replaced = batch
+        // CUE sheets that are read again or gone give up their inputs: a read sheet by its
+        // path, whichever root it was stored under, and a gone row as the walk read it.
+        let read = batch
             .files
             .iter()
             .filter(|file| cue(file) && file.state != LocalFileState::Unreadable)
-            .chain(batch.removed.iter().filter(|file| cue(file)))
+            .map(|file| file.path.as_str())
+            .chain(batch.inputs.iter().map(|(path, _)| path.as_str()))
+            .collect::<Vec<_>>();
+        let gone = batch
+            .removed
+            .iter()
+            .filter(|file| cue(file))
             .map(|file| (&file.path, &file.root, &file.relative_path))
             .collect::<Vec<_>>();
         let mut released: Vec<String> = Vec::new();
-        if !replaced.is_empty() {
-            let keys: Vec<i64> = sqlx::query_scalar("SELECT cue.file_key FROM json_each(?2) requested JOIN files cue ON cue.source_key=?1 AND cue.path=json_extract(requested.value,'$[0]') AND cue.root=json_extract(requested.value,'$[1]') AND cue.relative_path=json_extract(requested.value,'$[2]')")
-                .bind(source).bind(serde_json::to_string(&replaced)?).fetch_all(write.connection().await?).await?;
-            released = sqlx::query_scalar("DELETE FROM file_inputs WHERE file_key IN(SELECT value FROM json_each(?1)) RETURNING path")
-                .bind(serde_json::to_string(&keys)?).fetch_all(write.connection().await?).await?;
+        if !read.is_empty() || !gone.is_empty() {
+            released = sqlx::query_scalar("DELETE FROM file_inputs WHERE file_key IN(SELECT file_key FROM files WHERE source_key=?1 AND path IN(SELECT value FROM json_each(?2))
+                UNION ALL SELECT cue.file_key FROM json_each(?3) requested JOIN files cue ON cue.source_key=?1 AND cue.path=json_extract(requested.value,'$[0]') AND cue.root=json_extract(requested.value,'$[1]') AND cue.relative_path=json_extract(requested.value,'$[2]')) RETURNING path")
+                .bind(source).bind(serde_json::to_string(&read)?).bind(serde_json::to_string(&gone)?).fetch_all(write.connection().await?).await?;
             released.sort_unstable();
             released.dedup();
         }
@@ -620,22 +636,24 @@ pub(super) async fn merge_local_file_uris_on(
         }
         if let Some(path) = crate::file_media_path(current) {
             let path = path.to_string_lossy().into_owned();
+            // An imported file's locator follows it. A file a walk found renamed needs none:
+            // its row backs the track, and a locator would keep it listed when its folder goes.
             let existing:Option<(Option<String>,String,String)>=sqlx::query_as("SELECT source.object_id,locator.root,locator.relative_path FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE locator.media_uri=?1 AND locator.origin='import'").bind(previous).fetch_optional(write.connection().await?).await?;
-            let (source_id, root, relative_path) =
-                existing.unwrap_or((None, String::new(), String::new()));
-            crate::local::write_local_locator(
-                write,
-                &LocalLocatorWrite {
-                    source_id,
-                    media_uri: previous.clone(),
-                    origin: "import".into(),
-                    path,
-                    root,
-                    relative_path,
-                    access_uri: current.clone(),
-                },
-            )
-            .await?;
+            if let Some((source_id, root, relative_path)) = existing {
+                crate::local::write_local_locator(
+                    write,
+                    &LocalLocatorWrite {
+                        source_id,
+                        media_uri: previous.clone(),
+                        origin: "import".into(),
+                        path,
+                        root,
+                        relative_path,
+                        access_uri: current.clone(),
+                    },
+                )
+                .await?;
+            }
             sqlx::query("UPDATE local_locators SET access_uri=?2,path=?3 WHERE media_uri=?1 AND access_uri=?1 AND origin='local'")
                 .bind(previous).bind(current).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(write.connection().await?).await?;
         }
