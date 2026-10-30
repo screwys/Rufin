@@ -75,25 +75,27 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
         .as_ref()
         .and_then(|source| source.selected_library())
         .map(|selected| selected.source_key);
-    let missing = changes
-        .iter()
-        .flat_map(|change| &change.scopes)
-        .any(|scope| match scope {
-            Scope::Reload => true,
+    let (mut added, mut listed) = (false, false);
+    for scope in changes.iter().flat_map(|change| &change.scopes) {
+        match scope {
+            Scope::Reload => added = true,
             Scope::Tracks {
                 source: Some(source),
-                added,
+                added: tracks,
                 ..
-            } => !added.is_empty() && Some(*source) == selected,
+            } if !tracks.is_empty() && Some(*source) == selected => added = true,
             // A listing that changed tracks may have given them new audio hashes.
             Scope::Source {
                 key,
                 phase: SourcePhase::Completed,
-            } => Some(*key) == selected,
-            _ => false,
-        });
-    if missing {
+            } if Some(*key) == selected => listed = true,
+            _ => {}
+        }
+    }
+    if added {
         playback.loudness.library_changed(source);
+    } else if listed {
+        playback.loudness.listing_changed(source);
     }
 }
 
@@ -184,8 +186,20 @@ impl LoudnessAnalysisOwner {
         }
     }
 
-    /// The selected source or its tracks changed: what it misses is analyzed again.
+    /// A source was selected or tracks were added to it: what it misses is analyzed again,
+    /// after a pass that failed too.
     pub(crate) fn library_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
+        self.blocked
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        self.listing_changed(source_owner);
+    }
+
+    /// A listing changed the selected source: a pass starts, or the running one runs again
+    /// when it ends. After a failed pass it waits for added tracks, so a track that cannot be
+    /// decoded is not decoded again after every listing.
+    pub(crate) fn listing_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
         let Some(selected) = source_owner
             .as_ref()
             .and_then(|source_owner| source_owner.selected_library())
@@ -193,10 +207,6 @@ impl LoudnessAnalysisOwner {
             self.cancel();
             return;
         };
-        self.blocked
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(current) = active
             .as_mut()
