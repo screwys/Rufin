@@ -492,6 +492,8 @@ pub(crate) struct Snapshot {
     pub(crate) sort_tags: bool,
     /// Tracks with their own picture show it, not their album's.
     pub(crate) distinct_track_covers: bool,
+    /// Albums without a picture look their cover up before they borrow an artist's.
+    pub(crate) cover_lookup: bool,
 }
 
 /// Leading articles a name sorts past without sort tags, Navidrome's default list.
@@ -543,6 +545,7 @@ impl Default for Snapshot {
             playlist_folders: BTreeMap::new(),
             sort_tags: false,
             distinct_track_covers: false,
+            cover_lookup: false,
         }
     }
 }

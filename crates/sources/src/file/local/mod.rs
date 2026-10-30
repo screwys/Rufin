@@ -293,37 +293,6 @@ impl LocalSource {
         Ok(())
     }
 
-    pub(crate) async fn catch_up(
-        &self,
-        observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let catalog = observation.catalog;
-        let expected = self
-            .configured_file_roots()?
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-        let stored = catalog
-            .local_file_roots(observation.source)
-            .await?
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-        if !expected.is_subset(&stored) || !self.documents.is_empty() {
-            observation.start_observation().await?;
-            let result = self
-                .acquire_catalog(observation, progress, cancelled, true)
-                .await;
-            return result;
-        }
-        observation
-            .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
-            .await?;
-        scan::catch_up(observation, self, progress, cancelled).await?;
-        check_cancelled(cancelled)?;
-        Ok(())
-    }
-
     pub(crate) fn image_bytes(&self, artwork: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
         let reference = match artwork {
             crate::LocalImageRef::File { path, .. } => {

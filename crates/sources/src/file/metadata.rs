@@ -1182,7 +1182,12 @@ mod tests {
             .await
             .unwrap();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let cancellation = library::ReadCancellation::new();
@@ -1218,7 +1223,12 @@ mod tests {
         );
         fs::remove_file(path.with_extension("lrc")).unwrap();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert!(
@@ -1231,7 +1241,12 @@ mod tests {
         );
         fs::write(path.with_extension("lrc"), "[00:03.000]Returned").unwrap();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -1303,7 +1318,7 @@ mod tests {
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -1487,7 +1502,7 @@ mod tests {
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -1576,7 +1591,12 @@ mod tests {
             .await
             .unwrap();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let key = {
@@ -1608,10 +1628,11 @@ mod tests {
             .unwrap();
         let progress = std::sync::Mutex::new(Vec::new());
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|update| progress.lock().unwrap().push(update),
                 Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -1715,7 +1736,7 @@ mod tests {
         tokio::select! {
             biased;
             () = first_tracks.notified() => {}
-            result = source.acquire_catalog(&catalog, &progress, Arc::new(AtomicBool::new(false)), true) => panic!("refresh completed before interruption: {result:?}"),
+            result = source.acquire_catalog(&catalog, &progress, Arc::new(AtomicBool::new(false)), crate::Refresh::Changed) => panic!("refresh completed before interruption: {result:?}"),
         }
         assert!(
             {
@@ -1731,7 +1752,12 @@ mod tests {
         let catalog = library::Catalog::open(&database_path).await.unwrap();
         let source = crate::Source::open(configuration.clone(), None, None).unwrap();
         source
-            .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .expect("catch up the edited roots after an interrupted refresh");
         let tracks = crate::listed_tracks(
@@ -1766,7 +1792,12 @@ mod tests {
         let mut updates = catalog.changes();
         crate::published(&mut updates);
         source
-            .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert!(crate::published(&mut updates).is_none());
@@ -1792,7 +1823,12 @@ mod tests {
         let catalog = library::Catalog::open(&database_path).await.unwrap();
         let source = crate::Source::open(configuration.clone(), None, None).unwrap();
         source
-            .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let file_uri = url::Url::from_file_path(&file_root).unwrap().to_string();
@@ -1814,7 +1850,12 @@ mod tests {
         );
         crate::published(&mut updates);
         source
-            .catch_up_local(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert!(crate::published(&mut updates).is_none());
@@ -1837,7 +1878,12 @@ mod tests {
         };
         let (configuration, source, _) = (*connected).into_parts();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         let key = {
@@ -1891,7 +1937,12 @@ mod tests {
         };
         let (_, source, _) = (*connected).into_parts();
         source
-            .acquire_catalog(&catalog, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(AtomicBool::new(false)),
+                crate::Refresh::Changed,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2028,7 +2079,7 @@ mod tests {
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -2110,10 +2161,11 @@ mod tests {
             .await
             .unwrap();
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -2128,10 +2180,11 @@ mod tests {
         );
         fs::remove_file(&audio).unwrap();
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -2146,10 +2199,11 @@ mod tests {
         );
         fs::write(&audio, silent_wav()).unwrap();
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                crate::Refresh::Changed,
             )
             .await
             .unwrap();

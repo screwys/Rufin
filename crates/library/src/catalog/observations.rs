@@ -16,9 +16,11 @@ pub struct TrackObservation {
     pub cue_start_millis: Option<i64>,
     pub cue_end_millis: Option<i64>,
     pub first_seen_at: Option<i64>,
-    pub loudness_analysis_key: [u8; 32],
+    /// When the audio may have changed: the file or server revision plus the CUE window.
+    pub audio_revision: Option<[u8; 32]>,
+    /// A hash of the audio stream, when the source knows it without decoding.
+    pub audio_hash: Option<[u8; 32]>,
     pub source_lyrics: Option<String>,
-    pub source_lyrics_input: [u8; 32],
     pub artwork_binding: Option<Vec<u8>>,
     pub user_data: NativeUserState,
     pub folders: Option<Vec<String>>,

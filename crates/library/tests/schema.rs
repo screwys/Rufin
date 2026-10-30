@@ -113,7 +113,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             4
         );
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT access_uri FROM local_access_files")
+            sqlx::query_scalar::<_, String>("SELECT access_uri FROM local_locators")
                 .fetch_one(&mut raw)
                 .await
                 .unwrap(),
@@ -163,7 +163,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             .await
             .unwrap();
         observation
-            .complete_source_observation(&["track"], None)
+            .complete_source_observation(&["track"], None, None)
             .await
             .unwrap();
         drop(observation);
@@ -300,7 +300,7 @@ async fn unsupported_version_preserves_library_data() {
     let mut expected = supported;
     for (table, rows) in &mut expected {
         if table == "tracks" {
-            rows.push(r#"[2,1,"two","file:///two.flac",null,null,0,null,0,"","","","",0,0,0,null,null,null,0,null,null,null,null,null,0,null,null,null,null]"#.into());
+            rows.push(r#"[2,1,"two","file:///two.flac",null,0,null,0,"","","","",0,0,0,null,null,null,0,null,null,null,null,null,0,null,null,null,null]"#.into());
         }
     }
     assert_eq!(durable_rows(&path).await, expected);
@@ -319,16 +319,13 @@ async fn unsupported_version_preserves_library_data() {
 }
 
 #[tokio::test]
-async fn released_store_imports_old_playlist_artwork_and_known_roots() {
+async fn released_store_imports_old_playlist_artwork_and_files() {
     let directory = tempfile::tempdir().unwrap();
     let store = directory.path().join("rufin-store.sqlite");
     let catalog = directory.path().join("rufin-catalog.sqlite");
-    let root_id = blake3::hash(b"/music").to_hex().to_string();
     let mut raw = connection(&store, true).await;
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE TABLE source_ids(source_key INTEGER PRIMARY KEY,object_id TEXT NOT NULL);
         INSERT INTO source_ids VALUES(1,'source');
-        CREATE TABLE connect_roots(source_id TEXT NOT NULL,id TEXT NOT NULL,label TEXT NOT NULL,PRIMARY KEY(source_id,id)) STRICT;
-        INSERT INTO connect_roots VALUES('source','{root_id}','Music');
         CREATE TABLE legacy_activity(source_id TEXT NOT NULL,period TEXT NOT NULL,item_kind TEXT NOT NULL,track_object_id TEXT NOT NULL,play_count INTEGER NOT NULL,skip_count INTEGER NOT NULL,last_played_at INTEGER);
         INSERT INTO legacy_activity VALUES('source','lifetime','track','played',3,0,90);
         CREATE TABLE local_locators(local_access_file_key INTEGER PRIMARY KEY,media_uri TEXT NOT NULL,origin TEXT NOT NULL,access_uri TEXT NOT NULL);
@@ -369,12 +366,15 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
         .await
         .unwrap();
     let mut raw = connection(&store, false).await;
+    // A file waiting for a parse is read again on the next walk.
     assert_eq!(
-        sqlx::query_as::<_, (String, String)>("SELECT id,label FROM connect_roots")
-            .fetch_all(&mut raw)
-            .await
-            .unwrap(),
-        vec![(root_id, String::new())]
+        sqlx::query_as::<_, (String, String, bool)>(
+            "SELECT path,state,parse_version IS NULL FROM files"
+        )
+        .fetch_all(&mut raw)
+        .await
+        .unwrap(),
+        vec![("/music/a.flac".into(), "accepted".into(), true)]
     );
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
     assert_eq!(
@@ -603,10 +603,16 @@ async fn released_stores_upgrade_with_their_user_data() {
             [r#"["recent","album","Server Album"]"#],
             "{version}"
         );
+        // The file index keeps its rows and the inputs of its accepted CUE sheet.
+        assert_eq!(
+            values(&mut raw, "SELECT json_array((SELECT json_group_array(json_array(file_key,kind,relative_path,state)) FROM files),(SELECT json_group_array(json_array(file_key,position,path)) FROM file_inputs))").await,
+            [r#"[[[1,"directory","Album","accepted"],[2,"media","Album/01.flac","accepted"],[3,"cue","Album/album.cue","accepted"],[4,"media","Album/album.flac","accepted"]],[[3,0,"/music/Album/album.flac"]]]"#],
+            "{version}"
+        );
         // Analysis results are measured again; nothing derived is stored.
         assert_eq!(
-            values(&mut raw, "SELECT json_array((SELECT count(*) FROM loudness_measurements),(SELECT count(*) FROM waveform_cache),(SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name NOT GLOB 'lyrics_*' AND tbl_name<>'documents'))").await,
-            ["[0,0,0]"],
+            values(&mut raw, "SELECT json_array((SELECT count(*) FROM loudness),(SELECT count(*) FROM album_loudness),(SELECT count(*) FROM waveform),(SELECT count(*) FROM fingerprint),(SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name<>'documents'))").await,
+            ["[0,0,0,0,0]"],
             "{version}"
         );
         assert_eq!(

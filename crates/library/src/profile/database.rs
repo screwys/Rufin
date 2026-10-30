@@ -333,7 +333,7 @@ async fn validate_database(connection: &mut SqliteConnection) -> Result<()> {
 }
 
 async fn validate_base_database(connection: &mut SqliteConnection) -> Result<()> {
-    let complete: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('sources','tracks','playlists','listens','local_files')")
+    let complete: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('sources','tracks','playlists','listens','files')")
         .fetch_one(connection).await?;
     if complete != 5 {
         bail!("Import the profile's base file first");

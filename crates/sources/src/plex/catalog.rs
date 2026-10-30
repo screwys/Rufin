@@ -16,7 +16,7 @@ impl PlexSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         let sections = self.get("/library/sections", &[]).await?;
         let home_prefixes = items(&sections["MediaContainer"]["Directory"])
@@ -94,7 +94,7 @@ impl PlexSource {
                     }
                 }
             }
-            if stamp.is_some() {
+            if walk {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
@@ -105,12 +105,12 @@ impl PlexSource {
             self.acquire_hubs(observation, &section_id, cancelled)
                 .await?;
         }
-        if stamp.is_some() {
+        if walk {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
             observation
-                .complete_source_observation(&["track", "album", "artist", "folder"], None)
+                .complete_source_observation(&["track", "album", "artist", "folder"], None, None)
                 .await?;
         }
         if cancelled() {
@@ -935,12 +935,11 @@ pub(super) mod tests {
         assert_eq!(moods.len(), 1);
         assert_eq!(moods[0].name, "Calm");
         assert_eq!(moods[0].summary.track_count, 1);
+        let playable = crate::playable(&catalog, &uri).await;
         assert_eq!(
-            catalog
-                .playback_loudness(&uri, &cancellation)
-                .await
-                .unwrap()
-                .0
+            playable
+                .gains
+                .track_loudness(playable.audio_hash)
                 .unwrap()
                 .replay_gain_db,
             Some(-4.25)

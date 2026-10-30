@@ -446,9 +446,6 @@ impl ConnectOwner {
                 tracing::warn!(%error, "Could not prepare transferred artwork");
             }
         }
-        let input = library::source_entity_parts(uri).map_or([0; 32], |(source, _, _)| {
-            self.source.source_input_digest(&source)
-        });
         let cached = self
             .catalog
             .lyrics_cache_for_role(
@@ -456,7 +453,6 @@ impl ConnectOwner {
                 "original",
                 "",
                 "",
-                input,
                 "source",
                 &library::ReadCancellation::new(),
             )
@@ -473,12 +469,13 @@ impl ConnectOwner {
             Some(bundle) => Some(bundle),
             None => match self.source.media_client(uri).await {
                 Ok(source) => source
-                    .cached_lyrics(&self.catalog, uri, input)
+                    .cached_lyrics(&self.catalog, uri)
                     .await
                     .map_err(error)?,
                 Err(_) => sources::read_local_lyrics(
                     &self.catalog,
                     uri,
+                    None,
                     Some(&track.metadata.title),
                     &lyrics::UserPreferences::default(),
                 )
@@ -504,7 +501,6 @@ impl ConnectOwner {
             role: "original".into(),
             language: String::new(),
             script: String::new(),
-            cache_input_digest: input,
             lyrics: payload,
             updated_at: now,
         }))

@@ -79,24 +79,12 @@ impl Catalog {
             track.writes.metadata = Some(crate::metadata::track_details_value(
                 reference["metadata"].clone(),
             ));
-            track.writes.source_loudness = hex_bytes(&reference["source_loudness"]);
-            track.writes.loudness = hex_bytes(&reference["loudness"]);
             write.put(track);
             write.keep();
             write.read_downloads(&[uri]).await?;
             let connection = write.connection().await?;
             sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT (SELECT source_key FROM sources WHERE object_id=locator.value->>'$.source_id'),?1,locator.value->>'$.origin',locator.value->>'$.path',locator.value->>'$.root',locator.value->>'$.relative_path',locator.value->>'$.access_uri' FROM json_each(?2) locator")
                 .bind(uri).bind(reference["locators"].to_string()).execute(&mut *connection).await?;
-            sqlx::query("INSERT OR IGNORE INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key) SELECT access.value->>'$.access_uri',access.value->>'$.size_bytes',access.value->>'$.mtime_ns',access.value->>'$.device_id',access.value->>'$.inode',access.value->>'$.parser_version',unhex(access.value->>'$.loudness_analysis_key') FROM json_each(?1) access")
-                .bind(reference["access"].to_string()).execute(&mut *connection).await?;
-            if let Some(peaks) = reference["waveform"].as_str() {
-                sqlx::query("INSERT OR IGNORE INTO waveform_cache(media_uri,analysis_key,peaks) VALUES(?1,unhex(?2),?3)")
-                    .bind(uri).bind(reference["loudness"].as_str()).bind(peaks).execute(&mut *connection).await?;
-            }
-            if let Some(measurement) = reference["measurement"].as_array() {
-                sqlx::query("INSERT OR IGNORE INTO loudness_measurements SELECT track.source_key,'track',track.track_key,details.loudness_analysis_key,?2,?3 FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key=?1")
-                    .bind(key).bind(measurement.first().and_then(Value::as_f64)).bind(measurement.get(1).and_then(Value::as_f64)).execute(&mut *connection).await?;
-            }
         }
         Ok(())
     }

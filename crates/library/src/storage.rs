@@ -19,15 +19,15 @@ impl Catalog {
     }
 
     pub async fn fingerprint_cache_usage(&self) -> LibraryResult<CacheUsage> {
-        self.cached_table_usage("fingerprint_cache").await
+        self.cached_table_usage("fingerprint").await
     }
 
     pub async fn waveform_cache_usage(&self) -> LibraryResult<CacheUsage> {
-        self.cached_table_usage("waveform_cache").await
+        self.cached_table_usage("waveform").await
     }
 
     pub async fn loudness_cache_usage(&self) -> LibraryResult<CacheUsage> {
-        self.cached_table_usage("loudness_measurements").await
+        self.cached_table_usage("loudness").await
     }
 
     pub async fn lyrics_cache_usage(&self) -> LibraryResult<CacheUsage> {
@@ -46,15 +46,16 @@ impl Catalog {
     }
 
     pub async fn clear_fingerprint_cache(&self) -> LibraryResult<()> {
-        self.clear_cached_table("fingerprint_cache").await
+        self.clear_cached_table("fingerprint").await
     }
 
     pub async fn clear_waveform_cache(&self) -> LibraryResult<()> {
-        self.clear_cached_table("waveform_cache").await
+        self.clear_cached_table("waveform").await
     }
 
     pub async fn clear_loudness_cache(&self) -> LibraryResult<()> {
-        self.clear_cached_table("loudness_measurements").await
+        self.clear_cached_table("loudness").await?;
+        self.clear_cached_table("album_loudness").await
     }
 
     async fn clear_cached_table(&self, table: &str) -> LibraryResult<()> {

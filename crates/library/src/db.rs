@@ -96,6 +96,8 @@ struct Walks {
     last: u64,
     /// The next file observation stamp of each source this process started one for.
     stamps: HashMap<SourceKey, i64>,
+    /// When this process last forgot each source's expired tracks.
+    expired: HashMap<SourceKey, i64>,
 }
 
 /// When the Catalog image is written.
@@ -196,6 +198,29 @@ impl Catalog {
             .map(|source| source.key)
     }
 
+    /// The server time of the source's last completed listing or catch-up.
+    pub fn synced_at(&self, source: SourceKey) -> Option<i64> {
+        self.snapshot()
+            .source(source)
+            .and_then(|source| source.synced_at)
+    }
+
+    /// How many of the source's tracks are listed.
+    pub fn indexed_tracks(&self, source: SourceKey) -> usize {
+        use crate::catalog::snapshot::Packed;
+        let snapshot = self.snapshot();
+        let Some(slot) = snapshot.source_slot(source) else {
+            return 0;
+        };
+        snapshot
+            .tracks
+            .iter()
+            .filter(|(_, record)| {
+                record.source() == slot && record.flags() & crate::catalog::snapshot::INDEXED != 0
+            })
+            .count()
+    }
+
     /// Whether the Catalog holds each of these tracks with a source.
     pub fn tracks_with_source(&self, keys: &[crate::TrackKey]) -> Vec<bool> {
         use crate::catalog::snapshot::Packed;
@@ -228,6 +253,21 @@ impl Catalog {
 
     pub(crate) fn close_walk(&self, walk: u64) {
         self.walks().open.remove(&walk);
+    }
+
+    /// Whether a completed listing forgets expired tracks now: once a day per source, and on
+    /// the first completion after launch.
+    pub(crate) fn expiry_due(&self, source: SourceKey, now: i64) -> bool {
+        let mut walks = self.walks();
+        if walks
+            .expired
+            .get(&source)
+            .is_some_and(|at| now - at < 24 * 60 * 60)
+        {
+            return false;
+        }
+        walks.expired.insert(source, now);
+        true
     }
 
     fn walks(&self) -> std::sync::MutexGuard<'_, Walks> {
@@ -281,24 +321,12 @@ impl Catalog {
         }
     }
 
-    /// The next file observation stamp of a source. It exceeds every stamp the Store's file
-    /// rows hold and every stamp this process handed out.
-    pub(crate) async fn next_stamp(&self, source: SourceKey) -> LibraryResult<i64> {
-        let known = self.walks().stamps.get(&source).copied();
-        let next = match known {
-            Some(next) => next,
-            None => {
-                let mut connection = self.acquire_reader().await?;
-                sqlx::query_scalar::<_, i64>("SELECT max(coalesce((SELECT max(observed_stamp) FROM local_files WHERE source_key=?1),0),coalesce((SELECT max(observation.observed_stamp) FROM local_file_observations observation JOIN local_files file USING(local_file_key) WHERE file.source_key=?1),0))+1")
-                    .bind(source)
-                    .fetch_one(&mut *connection)
-                    .await?
-            }
-        };
+    /// The next file observation stamp of a source this process hands out.
+    pub(crate) fn next_stamp(&self, source: SourceKey) -> i64 {
         let mut walks = self.walks();
-        let stamp = walks.stamps.get(&source).copied().unwrap_or(next).max(next);
+        let stamp = walks.stamps.get(&source).copied().unwrap_or(1);
         walks.stamps.insert(source, stamp + 1);
-        Ok(stamp)
+        stamp
     }
 }
 
@@ -395,6 +423,7 @@ impl Catalog {
         snapshot.stamp_all();
         snapshot.sort_tags = state.sort_tags;
         snapshot.distinct_track_covers = state.distinct_track_covers;
+        snapshot.cover_lookup = state.cover_lookup;
         let previous = std::mem::replace(&mut *state, snapshot);
         let revision = state.revision;
         drop(state);
@@ -414,6 +443,12 @@ impl Catalog {
 
     pub fn distinct_track_covers(&self) -> bool {
         self.snapshot().distinct_track_covers
+    }
+
+    /// Whether albums without a picture look their cover up, from the external metadata
+    /// setting. Nothing stored depends on it; clients redraw every cover when it changes.
+    pub fn set_cover_lookup(&self, enabled: bool) {
+        self.set_display(|snapshot| &mut snapshot.cover_lookup, enabled);
     }
 
     /// Whether artists and albums sort by their sort tags. Nothing stored depends on it; the
@@ -621,6 +656,7 @@ impl CatalogInner {
                     .unwrap_or_else(PoisonError::into_inner);
                 snapshot.sort_tags = state.sort_tags;
                 snapshot.distinct_track_covers = state.distinct_track_covers;
+                snapshot.cover_lookup = state.cover_lookup;
                 let previous = std::mem::replace(&mut *state, snapshot);
                 drop(state);
                 drop(previous);

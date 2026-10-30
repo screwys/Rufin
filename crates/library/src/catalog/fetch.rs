@@ -71,7 +71,7 @@ impl Part {
                 ),
             )
         };
-        let source_path = "CASE WHEN source.kind='local' THEN (SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END";
+        let source_path = "CASE WHEN source.kind='local' THEN (SELECT file.path FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) ELSE details.source_path END";
         match self {
             Self::Track => (
                 vec![
@@ -91,7 +91,7 @@ impl Part {
                     'musicbrainz_album_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_id'),json_extract(details.metadata,'$.musicbrainz_album_id')),
                     'musicbrainz_release_group_id',coalesce(json_extract(album.metadata,'$.musicbrainz_release_group_id'),json_extract(details.metadata,'$.musicbrainz_release_group_id')),
                     'primary_artist_musicbrainz_id',coalesce((SELECT artist.musicbrainz_artist_id FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role={LINK_ARTIST} ORDER BY credit.position LIMIT 1),json_extract(details.metadata,'$.primary_artist_musicbrainz_id'))))"),
-                    "coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path)".into(),
+                    "details.cue_path".into(),
                     "details.cue_start_millis".into(),
                     "details.cue_end_millis".into(),
                 ],

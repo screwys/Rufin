@@ -64,9 +64,18 @@ impl MetadataEditor {
                         self.source
                             .shared
                             .runtime
-                            .spawn(async move { source.lyrics_storage(&catalog, &uri).await })
+                            .spawn(async move {
+                                let key = catalog
+                                    .track_keys(&[uri], &library::ReadCancellation::new())
+                                    .await
+                                    .ok()?
+                                    .pop()?;
+                                let playable = catalog.playable(key, "original").await.ok()??;
+                                Some(source.lyrics_storage(&playable))
+                            })
                             .await
                             .map_err(|error| Error::Write(error.to_string()))?
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     }

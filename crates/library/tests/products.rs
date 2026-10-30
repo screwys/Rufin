@@ -1,8 +1,7 @@
 use library::{
-    LibraryField, LocalAccessOrigin, LocalAccessWrite, PlayedFilter, RadioSeed, RandomCriteria,
-    ReadCancellation, SearchRequest, SmartPlaylistActivityPeriod, SmartPlaylistDefinition,
-    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistSort,
+    LibraryField, PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRule,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
 };
 
 use super::support::{Views, connection, fixture, items, tracks, uris};
@@ -409,13 +408,18 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         })
         .await
         .expect("record completed direct download");
+    let key = fixture
+        .catalog
+        .track_keys(std::slice::from_ref(&direct), &ReadCancellation::new())
+        .await
+        .unwrap()[0];
     assert_eq!(
         fixture
             .catalog
-            .playback_access(&direct)
+            .playable(key, "original")
             .await
             .expect("resolve direct download access")
-            .map(|(uri, _)| uri)
+            .and_then(|playable| playable.download)
             .as_deref(),
         Some("file:///downloads/direct.flac")
     );
@@ -2163,23 +2167,15 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     let object = |index: usize| rows[index].object_id.clone().expect("indexed track object");
     fixture
         .catalog
-        .write_local_access(
-            Some(fixture.source),
-            &[&LocalAccessWrite {
-                media_uri: rows[0].media_uri.clone(),
-                origin: LocalAccessOrigin::Mapping,
-                path: format!("/validated/{}.flac", object(0)),
-                root: "/validated".to_string(),
-                relative_path: format!("{}.flac", object(0)),
-                size_bytes: 10,
-                mtime_ns: 1,
-                device_id: Some(1),
-                inode: Some(1),
-                parser_version: 1,
-                access_uri: format!("file:///validated/{}.flac", object(0)),
-                loudness_analysis_key: Some([1; 32]),
-            }],
-        )
+        .write_local_locators(&[library::LocalLocatorWrite {
+            source_id: Some("source".into()),
+            media_uri: rows[0].media_uri.clone(),
+            origin: "mapping".into(),
+            path: format!("/validated/{}.flac", object(0)),
+            root: "/validated".to_string(),
+            relative_path: format!("{}.flac", object(0)),
+            access_uri: format!("file:///validated/{}.flac", object(0)),
+        }])
         .await
         .expect("write accepted Local access provenance");
     fixture

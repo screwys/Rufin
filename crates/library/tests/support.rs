@@ -229,7 +229,7 @@ pub async fn fixture() -> Fixture {
                 rating: (Some(Some(5 + index))).map(|rating| rating.map(|value| value * 10)),
                 ..Default::default()
             },
-            loudness_analysis_key: [index as u8 + 1; 32],
+            audio_revision: Some([index as u8 + 1; 32]),
             folders: Some(vec!["folder".into()]),
             ..Default::default()
         });
@@ -254,6 +254,7 @@ pub async fn fixture() -> Fixture {
     observation
         .complete_source_observation(
             &["track", "album", "artist", "genre", "mood", "folder"],
+            None,
             None,
         )
         .await
@@ -657,5 +658,46 @@ impl From<library::ListRead> for ReadOf {
 impl From<library::Read> for ReadOf {
     fn from(read: library::Read) -> Self {
         Self(read)
+    }
+}
+
+/// The gains playback reads for a track, as the source reported them, else as analysed.
+pub(crate) trait PlaybackLoudness {
+    async fn playback_loudness(
+        &self,
+        uri: &str,
+        cancellation: &library::ReadCancellation,
+    ) -> library::LibraryResult<(
+        Option<library::LoudnessMeasurement>,
+        Option<library::LoudnessMeasurement>,
+    )>;
+}
+
+impl PlaybackLoudness for Catalog {
+    async fn playback_loudness(
+        &self,
+        uri: &str,
+        cancellation: &library::ReadCancellation,
+    ) -> library::LibraryResult<(
+        Option<library::LoudnessMeasurement>,
+        Option<library::LoudnessMeasurement>,
+    )> {
+        let Some(key) = self
+            .track_keys(&[uri.to_owned()], cancellation)
+            .await?
+            .pop()
+        else {
+            return Ok((None, None));
+        };
+        Ok(self
+            .playable(key, "original")
+            .await?
+            .map(|playable| {
+                (
+                    playable.gains.track_loudness(playable.audio_hash),
+                    playable.gains.album_loudness(playable.audio_hash),
+                )
+            })
+            .unwrap_or_default())
     }
 }

@@ -1537,21 +1537,22 @@ impl PlaybackOwner {
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
             let source = plex.connection().0.clone();
             let local = self.settings.local_configuration();
+            let playable = self
+                .catalog
+                .playable(row.track.track_key, "original")
+                .await
+                .map_err(string_error)?
+                .ok_or("The current Plex track is not available locally")?;
             let stream = prepare_stream(
                 &self.catalog,
+                &playable,
                 request,
                 local.as_ref(),
                 None,
                 move |_| async { Ok(source) },
             )
             .await?;
-            let loudness = super::cached_loudness(
-                &self.catalog,
-                &row.track.media_uri,
-                self.settings.load().ui.playback.loudness_normalization,
-            )
-            .await;
-            let prepared = prepare_media_stream(stream, loudness, row);
+            let prepared = prepare_media_stream(stream, super::track_loudness(&playable), row);
             check_cancelled(&cancelled)?;
             queue.progress_millis = plex
                 .playback

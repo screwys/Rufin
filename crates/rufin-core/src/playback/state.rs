@@ -1099,12 +1099,6 @@ impl Player {
 
     pub(super) fn stream_resolved(&mut self, run: RunId, stream: impl Into<PreparedStream>) {
         let mut stream = stream.into();
-        if stream.loudness.is_none()
-            && self.settings.loudness_normalization != playback::LoudnessNormalization::Off
-        {
-            self.resolve_loudness(run, stream);
-            return;
-        }
         self.stream_tasks.remove(&run);
         if self.current_run.as_ref().is_some_and(|current| {
             current.id == run && current.status == TransportStatus::Resolving
@@ -1134,33 +1128,6 @@ impl Player {
                 next: Some(PreparedNext::new(plan.next_run, stream, plan.transition)),
             };
             self.send_backend(command);
-        }
-    }
-
-    pub(super) fn loudness_resolved(&mut self, run: RunId, stream: PreparedStream) {
-        self.stream_tasks.remove(&run);
-        if let Some(current) = self
-            .current_run
-            .as_mut()
-            .filter(|current| current.id == run)
-            && let Some(prepared) = current.resolved_stream.as_mut()
-        {
-            prepared.loudness = stream.loudness.clone();
-            self.send_backend(BackendCommand::UpdateLoudness {
-                run,
-                loudness: stream.loudness.unwrap_or_default(),
-            });
-        } else {
-            self.stream_resolved(run, stream);
-        }
-    }
-
-    fn resolve_loudness(&mut self, run: RunId, stream: PreparedStream) {
-        let task = self
-            .owner()
-            .resolve_loudness(self.playback.clone(), run, stream);
-        if let Some(previous) = self.stream_tasks.insert(run, task) {
-            previous.abort();
         }
     }
 
@@ -2165,16 +2132,6 @@ impl Player {
         if self.playback_output.is_local() {
             self.output_volume = settings.volume;
             self.output_muted = settings.muted;
-            if settings.loudness_normalization != playback::LoudnessNormalization::Off
-                && let Some(current) = self.current_run.as_ref()
-                && let Some(stream) = current
-                    .resolved_stream
-                    .as_ref()
-                    .filter(|stream| stream.loudness.is_none())
-                && !self.stream_tasks.contains_key(&current.id)
-            {
-                self.resolve_loudness(current.id, stream.clone());
-            }
         }
         if visualizer_fft_changed
             || (self.playback_output.is_local() && audio_configuration_changed)
@@ -2926,13 +2883,9 @@ impl Player {
     }
 
     fn resolve_stream(&mut self, run: RunId, row: Arc<QueueRow>, request: StreamRequest) {
-        let task = self.owner().resolve_stream(
-            self.playback.clone(),
-            run,
-            row,
-            request,
-            self.settings.loudness_normalization,
-        );
+        let task = self
+            .owner()
+            .resolve_stream(self.playback.clone(), run, row, request);
         if let Some(previous) = self.stream_tasks.insert(run, task) {
             previous.abort();
         }

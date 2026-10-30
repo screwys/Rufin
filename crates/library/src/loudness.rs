@@ -61,63 +61,7 @@ impl TryFrom<TrackWorkScalar> for TrackLoudnessWork {
     }
 }
 
-#[derive(FromRow)]
-struct MeasurementScalar {
-    entity_kind: String,
-    analysis_key: Vec<u8>,
-    integrated_lufs: Option<f64>,
-    true_peak: Option<f64>,
-    replay_gain_db: Option<f64>,
-    replay_gain_peak: Option<f64>,
-}
-
-impl TryFrom<MeasurementScalar> for LoudnessMeasurement {
-    type Error = LibraryError;
-    fn try_from(value: MeasurementScalar) -> Result<Self, Self::Error> {
-        Ok(Self {
-            analysis_key: value.analysis_key.try_into().map_err(|_| {
-                LibraryError::InvalidStore("loudness analysis key is not 32 bytes".to_string())
-            })?,
-            integrated_lufs: value.integrated_lufs,
-            true_peak: value.true_peak,
-            replay_gain_db: value.replay_gain_db,
-            replay_gain_peak: value.replay_gain_peak,
-        })
-    }
-}
-
 impl Catalog {
-    pub async fn playback_loudness(
-        &self,
-        media_uri: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Option<LoudnessMeasurement>, Option<LoudnessMeasurement>)> {
-        let mut connection = tokio::select! {
-            connection = self.acquire_reader() => connection?,
-            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
-        };
-        let rows = sqlx::query_as::<_, MeasurementScalar>(sqlx::AssertSqlSafe(format!(
-            "WITH owner AS(SELECT track.track_key,track.source_key,track.album_key,details.metadata,details.source_loudness_analysis_key,details.loudness_analysis_key,album.source_loudness_analysis_key album_source_token,album.loudness_analysis_key album_token,album.accepted_audio FROM tracks track JOIN track_details details USING(track_key) LEFT JOIN albums album ON album.album_key=track.album_key WHERE track.media_uri=?1),
-             native AS(SELECT 'track' entity_kind,track_key entity_key,source_key,loudness_analysis_key analysis_key,CASE WHEN source_loudness_analysis_key=loudness_analysis_key THEN json_extract(metadata,'$.source_loudness') END gain FROM owner
-             UNION ALL SELECT 'album',album_key,source_key,album_token,{} FROM owner),
-             chosen AS(SELECT native.entity_kind,native.analysis_key,json_extract(native.gain,'$.integrated_lufs') integrated_lufs,json_extract(native.gain,'$.true_peak') true_peak,json_extract(native.gain,'$.replay_gain_db') replay_gain_db,json_extract(native.gain,'$.replay_gain_peak') replay_gain_peak,0 priority FROM native WHERE native.gain IS NOT NULL AND native.gain<>'null'
-             UNION ALL SELECT native.entity_kind,native.analysis_key,measurement.integrated_lufs,measurement.true_peak,NULL,NULL,1 FROM native JOIN loudness_measurements measurement ON measurement.source_key=native.source_key AND measurement.entity_kind=native.entity_kind AND measurement.entity_key=native.entity_key AND measurement.analysis_key=native.analysis_key)
-             SELECT entity_kind,analysis_key,integrated_lufs,true_peak,replay_gain_db,replay_gain_peak FROM chosen ORDER BY priority",native_album_sql("owner"))))
-            .bind(media_uri).fetch_all(&mut *connection).await?;
-        let (mut track, mut album) = (None, None);
-        for row in rows {
-            let selected = if row.entity_kind == "track" {
-                &mut track
-            } else {
-                &mut album
-            };
-            if selected.is_none() {
-                *selected = Some(row.try_into()?);
-            }
-        }
-        Ok((track, album))
-    }
-
     pub async fn r128_tag_write_page(
         &self,
         source: SourceKey,
@@ -296,21 +240,6 @@ pub(crate) fn valid_measurement(input: NativeGain) -> bool {
         && input
             .replay_gain_peak
             .is_none_or(|value| value.is_finite() && value >= 0.0)
-}
-
-pub(crate) async fn invalidate_album_audio(
-    connection: &mut SqliteConnection,
-    albums: &[AlbumKey],
-    update_source: bool,
-) -> LibraryResult<bool> {
-    if albums.is_empty() {
-        return Ok(false);
-    }
-    let input = serde_json::to_string(albums)?;
-    if update_source {
-        sqlx::query("UPDATE albums SET source_loudness_analysis_key=randomblob(32),accepted_audio=NULL WHERE album_key IN(SELECT value FROM json_each(?1))").bind(&input).execute(&mut *connection).await?;
-    }
-    Ok(sqlx::query("UPDATE albums SET loudness_analysis_key=CASE WHEN EXISTS(SELECT 1 FROM tracks JOIN track_details details USING(track_key) WHERE tracks.album_key=albums.album_key AND indexed=1 AND details.source_loudness_analysis_key<>details.loudness_analysis_key) THEN randomblob(32) ELSE source_loudness_analysis_key END WHERE album_key IN(SELECT value FROM json_each(?1))").bind(input).execute(connection).await?.rows_affected()>0)
 }
 
 fn native_album_sql(owner: &str) -> String {

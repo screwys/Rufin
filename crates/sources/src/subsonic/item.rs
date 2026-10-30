@@ -200,7 +200,7 @@ pub(super) fn track_from_json(
     let object_id = source.id("track", &raw_id);
     let title = json::field(song, "title").unwrap_or_else(|| "Untitled Track".to_string());
     let duration_seconds = json::field::<u32>(song, "duration").unwrap_or_default();
-    let loudness_analysis_key = audio_key(
+    let audio_revision = audio_key(
         &object_id,
         path.as_deref(),
         source_format.as_deref(),
@@ -268,7 +268,8 @@ pub(super) fn track_from_json(
         },
         object_id,
         album_object_id: json::id(&song["albumId"]).map(|id| String::from(source.id("album", &id))),
-        loudness_analysis_key,
+        audio_revision: Some(audio_revision),
+        audio_hash: Some(audio_revision),
         artwork_binding: image_ref(source, json::id(&song["coverArt"]))
             .as_ref()
             .map(|image| crate::native_artwork_binding(source_id, image))

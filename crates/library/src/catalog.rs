@@ -77,6 +77,11 @@ impl<'a> Observation<'a> {
         Ok(write)
     }
 
+    /// Whether this observation is a listing that `start_observation` opened.
+    pub fn is_walk(&self) -> bool {
+        self.walk.is_some()
+    }
+
     /// The open walk. Completion needs one, so it hides only what a listing missed.
     pub(crate) fn walk(&self) -> LibraryResult<u64> {
         self.walk

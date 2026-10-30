@@ -234,7 +234,7 @@ impl SubsonicSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         use crate::SourceEntityKind::{Album, Artist, Track};
         for (kind, endpoint, stage) in [
@@ -288,12 +288,12 @@ impl SubsonicSource {
                     break;
                 }
             }
-            if stamp.is_some() {
+            if walk {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
                 observation
-                    .complete_source_observation(&[kind.as_str()], None)
+                    .complete_source_observation(&[kind.as_str()], None, None)
                     .await?;
             }
         }
@@ -630,7 +630,7 @@ fn track_from_navidrome(
     );
     let source_format = clean_optional(field(track, "suffix"));
     let duration_seconds = duration_seconds(field(track, "duration").unwrap_or_default());
-    let loudness_analysis_key = super::audio_key(
+    let audio_revision = super::audio_key(
         &object_id,
         source_path.as_deref(),
         source_format.as_deref(),
@@ -695,7 +695,8 @@ fn track_from_navidrome(
         },
         object_id,
         album_object_id: album_id,
-        loudness_analysis_key,
+        audio_revision: Some(audio_revision),
+        audio_hash: Some(audio_revision),
         source_path,
         folders: Some(
             field::<i64>(track, "libraryId")

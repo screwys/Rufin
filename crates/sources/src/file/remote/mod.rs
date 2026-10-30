@@ -220,7 +220,6 @@ pub struct FileSource {
     namespace_url: String,
     backend: FileBackend,
     directory_version: i64,
-    lyrics_input: [u8; 32],
     input: Mutex<Option<Arc<FileInputServer>>>,
 }
 
@@ -303,10 +302,6 @@ impl FileSourceSettings {
 }
 
 impl FileSource {
-    pub(crate) fn lyrics_input(&self) -> [u8; 32] {
-        self.lyrics_input
-    }
-
     pub(crate) fn documents(
         configuration: &SourceConfiguration,
         root: crate::DocumentRoot,
@@ -315,9 +310,6 @@ impl FileSource {
         source.source_id = configuration.source_id.clone();
         source.kind = configuration.kind.clone();
         source.name = configuration.name.clone();
-        source.lyrics_input = configuration
-            .input_identity()
-            .map_or([0; 32], |input| input.digest);
         source
     }
 
@@ -332,7 +324,6 @@ impl FileSource {
                 root,
             ))),
             directory_version: DIRECTORY_VERSION,
-            lyrics_input: [0; 32],
             input: Mutex::new(None),
         }
     }
@@ -431,7 +422,6 @@ impl FileSource {
                 credentials,
             },
             directory_version,
-            lyrics_input: configuration.input_identity()?.digest,
             input: Mutex::new(None),
         })
     }
@@ -664,31 +654,23 @@ impl FileSource {
 
     pub(crate) async fn stream(
         &self,
-        catalog: &library::Catalog,
+        file: &library::PlayableFile,
         media_uri: &str,
+        window: Option<(u64, u64)>,
     ) -> SourceResult<audio_processing::ResolvedStream> {
-        let (source, kind, _) =
-            library::source_entity_parts(media_uri).ok_or(SourceError::NotFound)?;
-        if source != self.source_id || kind != "track" {
-            return Err(SourceError::NotFound);
-        }
-        let file = catalog
-            .observed_media_file(media_uri)
-            .await?
-            .ok_or(SourceError::NotFound)?;
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
-        let mut stream = input
+        let stream = input
             .playback_stream(
                 &self.input_path(input.input(), &relative)?,
                 file.revision.as_deref().unwrap_or_default(),
                 media_uri,
             )
             .await?;
-        if let Some((start, end)) = file.cue_start_millis.zip(file.cue_end_millis) {
-            stream = stream.with_window(start.max(0) as u64, end.max(0) as u64);
-        }
-        Ok(stream)
+        Ok(match window {
+            Some((start, end)) => stream.with_window(start, end),
+            None => stream,
+        })
     }
 
     pub(crate) async fn small_file(

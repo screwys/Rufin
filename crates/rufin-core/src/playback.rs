@@ -81,6 +81,24 @@ pub struct PlaybackOwner {
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
     rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
+    /// The playables resolved last, current and next among them, for the lyrics of the track
+    /// that becomes current.
+    playables: Arc<Mutex<std::collections::VecDeque<Arc<library::Playable>>>>,
+}
+
+/// How many resolved playables the owner keeps.
+const KEPT_PLAYABLES: usize = 4;
+
+fn keep_playable(
+    kept: &Mutex<std::collections::VecDeque<Arc<library::Playable>>>,
+    playable: &Arc<library::Playable>,
+) {
+    let mut kept = kept.lock().unwrap_or_else(|p| p.into_inner());
+    kept.retain(|kept| kept.track != playable.track);
+    if kept.len() == KEPT_PLAYABLES {
+        kept.pop_front();
+    }
+    kept.push_back(Arc::clone(playable));
 }
 
 enum PlaybackStoreWork {
@@ -213,6 +231,7 @@ impl PlaybackOwner {
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
+            playables: Arc::default(),
         });
         let weak = Arc::downgrade(&owner);
         // The queue restores after the Catalog loaded, so the first full pass has nothing to
@@ -356,12 +375,6 @@ impl PlaybackOwner {
             .clear_waveform_cache()
             .await
             .map_err(string_error)
-    }
-
-    pub(crate) fn remove_waveform_cache(&self, source: &sources::SourceId) -> Result<(), String> {
-        self.waveform
-            .remove_source_cache(source)
-            .map_err(|error| error.to_string())
     }
 
     fn take_active(&self) -> Option<Playback> {
@@ -522,9 +535,10 @@ impl PlaybackOwner {
         run: RunId,
         occurrence: Arc<playback::QueueRow>,
         request: StreamRequest,
-        normalization: playback::LoudnessNormalization,
     ) -> tokio::task::JoinHandle<()> {
         let catalog = Arc::clone(&self.catalog);
+        let playables = Arc::clone(&self.playables);
+        let lyrics = Arc::clone(&self.lyrics);
         let source_owner = self.source_owner();
         let local = self.settings.local_configuration();
         let connect = self
@@ -533,10 +547,28 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .upgrade();
         self.runtime.spawn(async move {
-            let loudness =
-                cached_loudness(&catalog, &occurrence.track.media_uri, normalization).await;
+            let playable = match catalog
+                .playable(occurrence.track.track_key, "original")
+                .await
+            {
+                Ok(Some(playable)) => Arc::new(playable),
+                Ok(None) => {
+                    let kind = playback::FailureKind::UnavailableMedia;
+                    let error = playback::BackendFailure::with_kind(kind, kind.summary());
+                    playback.post(move |player, sample| player.stream_failed(run, error, sample));
+                    return;
+                }
+                Err(error) => {
+                    let error = playback::BackendFailure::new(error.to_string());
+                    playback.post(move |player, sample| player.stream_failed(run, error, sample));
+                    return;
+                }
+            };
+            keep_playable(&playables, &playable);
+            lyrics.playable_resolved(Arc::clone(&playable));
             let result = prepare_stream(
                 &catalog,
+                &playable,
                 request,
                 local.as_ref(),
                 // A track's file comes through Connect only while Connect is on.
@@ -560,7 +592,11 @@ impl PlaybackOwner {
                     let kind = playback::FailureKind::UnavailableMedia;
                     Err(playback::BackendFailure::with_kind(kind, kind.summary()))
                 }
-                Ok(stream) => Ok(prepare_media_stream(stream, loudness, occurrence)),
+                Ok(stream) => Ok(prepare_media_stream(
+                    stream,
+                    track_loudness(&playable),
+                    occurrence,
+                )),
                 Err(error) => Err(playback::BackendFailure::new(error)),
             };
             playback.post(move |player, sample| match result {
@@ -570,27 +606,13 @@ impl PlaybackOwner {
         })
     }
 
-    fn resolve_loudness(
-        &self,
-        playback: WeakPlayback,
-        run: RunId,
-        mut stream: PreparedStream,
-    ) -> tokio::task::JoinHandle<()> {
-        let catalog = self.catalog.clone();
-        self.runtime.spawn(async move {
-            stream.loudness = cached_loudness(
-                &catalog,
-                &stream
-                    .row
-                    .as_ref()
-                    .expect("prepared queue entry")
-                    .track
-                    .media_uri,
-                playback::LoudnessNormalization::ReplayGain,
-            )
-            .await;
-            playback.post(move |player, _| player.loudness_resolved(run, stream));
-        })
+    fn kept_playable(&self, track: library::TrackKey) -> Option<Arc<library::Playable>> {
+        self.playables
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|kept| kept.track == track)
+            .cloned()
     }
 
     pub(crate) fn waveform_setting_changed(&self, enabled: bool) {
@@ -694,15 +716,9 @@ impl PlaybackOwner {
             self.lyrics.set_current(None);
             return;
         };
-        let source_owner = self.source_owner();
-        let input_digest = library::source_entity_parts(&media.row.track.media_uri)
-            .and_then(|(source_id, _, _)| source_owner.as_ref()?.configuration(&source_id))
-            .and_then(|configuration| configuration.input_identity().ok())
-            .map_or([0; 32], |input| input.digest);
-        self.lyrics.set_current(Some(LyricsContext {
-            media,
-            input_digest,
-        }));
+        let playable = self.kept_playable(media.row.track.track_key);
+        self.lyrics
+            .set_current(Some(LyricsContext { media, playable }));
     }
 
     fn waveform_media(&self, media: Arc<playback::CurrentMedia>) -> WaveformMedia {
@@ -1126,8 +1142,11 @@ impl PlaybackOwner {
     }
 }
 
+/// Opens a playable: its download, its local locator or Local file, the Connect peer while
+/// Connect is on, then its source's remote file or server stream.
 pub(crate) async fn prepare_stream<F>(
     catalog: &Catalog,
+    playable: &library::Playable,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
     file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
@@ -1136,33 +1155,28 @@ pub(crate) async fn prepare_stream<F>(
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
-    let mut access = catalog
-        .playback_access(&request.media_uri)
-        .await
-        .ok()
-        .flatten();
-    let cue = library::cue_media_parts(&request.media_uri);
-    let file_uri = cue
-        .as_ref()
-        .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
-    if access.is_none() && cue.is_some() && library::document_media_id(file_uri).is_some() {
-        access = catalog
-            .playback_access(file_uri)
-            .await
-            .map_err(string_error)?;
-    }
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;
         url::Url::from_file_path(access).ok().map(String::from)
     };
-    if let Some((uri, _)) = access.as_mut()
-        && let Some(granted) = granted_uri(uri)
-    {
-        *uri = granted;
-    }
+    let granted = |uri: String| granted_uri(&uri).unwrap_or(uri);
+    let cue = library::cue_media_parts(&request.media_uri);
+    let file_uri = cue
+        .as_ref()
+        .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
     let granted_file = granted_uri(file_uri);
     let file_uri = granted_file.as_deref().unwrap_or(file_uri);
+    // A download plays first while its file is there.
+    let mut download = playable.download.clone().map(granted);
+    if let Some(uri) = &download
+        && !local_access_available(uri).await?
+    {
+        download = None;
+    }
+    let mut access = download
+        .clone()
+        .or_else(|| playable.local_uri().map(granted));
     let mut fetched_uri = None;
     if let Some((connect, occurrence)) = file_transfer
         && connect.is_local_media(&request.media_uri).await?
@@ -1173,7 +1187,7 @@ where
         let received_document = url::Url::parse(file_uri)
             .is_ok_and(|uri| uri.scheme() == "content")
             && occurrence.received_from_connect;
-        if received_document && !matches!(access, Some((_, library::LocalAccessOrigin::Download))) {
+        if received_document && download.is_none() {
             access = None;
         }
         let remote = received_document
@@ -1182,7 +1196,7 @@ where
                 .await
                 .map_err(string_error)?;
         let local_access = match access.as_ref() {
-            Some((uri, _)) => local_access_available(uri).await.unwrap_or(false),
+            Some(uri) => local_access_available(uri).await.unwrap_or(false),
             None => false,
         };
         // A content URI received from another device is not a grant to this device's provider.
@@ -1203,52 +1217,43 @@ where
                 });
             } else {
                 let mut stream = peer.stream(request.clone()).await.map_err(string_error)?;
-                if let Some((start, end)) = catalog
-                    .playback_window(&request.media_uri)
-                    .await
-                    .map_err(string_error)?
-                {
+                if let Some((start, end)) = playable.window {
                     stream = stream.with_window(start, end);
                 }
                 return Ok(stream);
             }
         }
     }
-    if let Some((uri, library::LocalAccessOrigin::Download)) = access.as_ref()
-        && !local_access_available(uri).await?
-    {
-        access = None;
-    }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
-    let content_type = if let Some((uri, library::LocalAccessOrigin::Download)) = &access {
-        let path = if uri.starts_with("content:") {
-            let uri = uri.clone();
-            Some(
-                tokio::task::spawn_blocking(move || sources::stat_document(&uri))
-                    .await
-                    .map_err(string_error)?
-                    .map_err(string_error)?
-                    .name
-                    .into(),
-            )
-        } else {
-            library::file_media_path(uri)
-        };
-        path.and_then(|path: std::path::PathBuf| {
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .and_then(audio_mime)
-        })
-    } else {
-        None
+    let content_type = match &download {
+        Some(uri) if access.as_ref() == Some(uri) => {
+            let path = if uri.starts_with("content:") {
+                let uri = uri.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || sources::stat_document(&uri))
+                        .await
+                        .map_err(string_error)?
+                        .map_err(string_error)?
+                        .name
+                        .into(),
+                )
+            } else {
+                library::file_media_path(uri)
+            };
+            path.and_then(|path: std::path::PathBuf| {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .and_then(audio_mime)
+            })
+        }
+        _ => None,
     };
-    let access_uri = access.map(|(uri, _)| uri).or(fetched_uri);
-    let window = catalog
-        .playback_window(&request.media_uri)
-        .await
-        .map_err(string_error)?;
-    if let Some((start, end)) = window.filter(|_| access_uri.is_some() || cue.is_some()) {
+    let access_uri = access.or(fetched_uri);
+    if let Some((start, end)) = playable
+        .window
+        .filter(|_| access_uri.is_some() || cue.is_some())
+    {
         return Ok(
             direct_stream(access_uri.unwrap_or_else(|| file_uri.to_owned()))
                 .await?
@@ -1259,13 +1264,12 @@ where
     if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
         return Ok(direct_stream(uri).await?.with_content_type(content_type));
     }
-    let (source_id, kind, _) = library::source_entity_parts(&request.media_uri)
+    let source_id = playable
+        .source_id
+        .clone()
         .ok_or_else(crate::source::source_access_unavailable)?;
-    if kind != "track" {
-        return Err(crate::source::source_access_unavailable());
-    }
     let source = source(source_id).await?;
-    source.stream(catalog, request).await.map_err(string_error)
+    source.stream(playable, request).await.map_err(string_error)
 }
 
 // Catches a removed local file before it reaches playback, where a failed
@@ -1302,27 +1306,23 @@ async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, 
     }
 }
 
-async fn cached_loudness(
-    catalog: &Catalog,
-    uri: &str,
-    mode: playback::LoudnessNormalization,
-) -> Option<playback::TrackLoudness> {
-    if mode == playback::LoudnessNormalization::Off {
-        return None;
+/// The gains a playable carries, as the backend takes them.
+pub(crate) fn track_loudness(playable: &library::Playable) -> playback::TrackLoudness {
+    playback::TrackLoudness {
+        track: playable
+            .gains
+            .track_loudness(playable.audio_hash)
+            .map(Box::new),
+        album: playable
+            .gains
+            .album_loudness(playable.audio_hash)
+            .map(Box::new),
     }
-    let (track, album) = catalog
-        .playback_loudness(uri, &ReadCancellation::new())
-        .await
-        .unwrap_or_default();
-    Some(playback::TrackLoudness {
-        track: track.map(Box::new),
-        album: album.map(Box::new),
-    })
 }
 
 fn prepare_media_stream(
     stream: audio_processing::ResolvedStream,
-    loudness: Option<playback::TrackLoudness>,
+    loudness: playback::TrackLoudness,
     occurrence: Arc<playback::QueueRow>,
 ) -> PreparedStream {
     let content_type = occurrence
@@ -1331,7 +1331,7 @@ fn prepare_media_stream(
         .source_format
         .as_deref()
         .and_then(audio_mime);
-    PreparedStream::new(stream, loudness).with_row(occurrence, content_type)
+    PreparedStream::new(stream, Some(loudness)).with_row(occurrence, content_type)
 }
 
 fn cached_cast_artwork(
@@ -1475,7 +1475,7 @@ mod tests {
     fn prepared_original_stream_keeps_cast_format() {
         let prepared = prepare_media_stream(
             audio_processing::ResolvedStream::new("https://provider.example/stream?id=track"),
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
         );
 
@@ -1487,7 +1487,7 @@ mod tests {
         let prepared = prepare_media_stream(
             audio_processing::ResolvedStream::new("https://provider.example/stream?id=track")
                 .with_content_type(Some("audio/mpeg".to_string())),
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
         );
 
@@ -1526,8 +1526,17 @@ mod tests {
             })
             .await
             .unwrap();
+        let key = catalog
+            .track_keys(
+                std::slice::from_ref(&occurrence.track.media_uri),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()[0];
+        let playable = catalog.playable(key, "original").await.unwrap().unwrap();
         let stream = super::prepare_stream(
             &catalog,
+            &playable,
             playback::StreamRequest::new(
                 occurrence.track.media_uri.clone(),
                 playback::StreamQuality::Original,
@@ -1541,7 +1550,7 @@ mod tests {
         let canonical = occurrence.track.media_uri.clone();
         let prepared = prepare_media_stream(
             stream,
-            Some(playback::TrackLoudness::default()),
+            playback::TrackLoudness::default(),
             occurrence.into(),
         );
         assert_eq!(prepared.uri(), uri);

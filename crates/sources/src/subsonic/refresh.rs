@@ -71,12 +71,9 @@ impl SubsonicSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let stamp = observation.observed;
-
-        let stamp = Some(match stamp {
-            Some(stamp) => stamp,
-            None => observation.start_observation().await?,
-        });
+        if !observation.is_walk() {
+            observation.start_observation().await?;
+        }
         if let Err(error) = self.acquire_favorites(observation, cancelled).await {
             crate::source::optional_collection_error(error)?;
         }
@@ -87,12 +84,10 @@ impl SubsonicSource {
             .await
         {
             Ok(()) => {
-                if stamp.is_some() {
-                    check_cancelled(cancelled)?;
-                    observation
-                        .complete_source_observation(&["playlist"], None)
-                        .await?;
-                }
+                check_cancelled(cancelled)?;
+                observation
+                    .complete_source_observation(&["playlist"], None, None)
+                    .await?;
             }
             Err(error) => {
                 crate::source::optional_collection_error(error)?;
@@ -187,7 +182,7 @@ impl SubsonicSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<bool> {
         let source_id = observation.source_id;
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         check_cancelled(cancelled)?;
         let mut complete = true;
@@ -282,10 +277,10 @@ impl SubsonicSource {
                             break;
                         }
                     }
-                    if stamp.is_some() {
+                    if walk {
                         check_cancelled(cancelled)?;
                         observation
-                            .complete_source_observation(&[entity], None)
+                            .complete_source_observation(&[entity], None, None)
                             .await?;
                     }
                     Ok(())
@@ -312,10 +307,10 @@ impl SubsonicSource {
                         true,
                     )
                     .await?;
-                if stamp.is_some() {
+                if walk {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(&["genre"], None)
+                        .complete_source_observation(&["genre"], None, None)
                         .await?;
                 }
             }
@@ -340,7 +335,7 @@ impl SubsonicSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         let scopes = if music_folders.is_empty() {
             vec![None]
@@ -400,7 +395,7 @@ impl SubsonicSource {
                 progress(stage(SourceReadStage::Tracks, emitted));
             }
             if let Some(folder) = folder
-                && stamp.is_some()
+                && walk
             {
                 check_cancelled(cancelled)?;
                 observation
@@ -408,10 +403,10 @@ impl SubsonicSource {
                     .await?;
             }
         }
-        if stamp.is_some() {
+        if walk {
             check_cancelled(cancelled)?;
             observation
-                .complete_source_observation(&["track"], None)
+                .complete_source_observation(&["track"], None, None)
                 .await?;
         }
         Ok(())
@@ -900,13 +895,14 @@ mod tests {
                             "track", "album", "artist", "genre", "mood", "folder", "playlist",
                         ],
                         (Some(marker.clone())).as_ref(),
+                        None,
                     )
                     .await
                     .unwrap();
             }
             if stamp.is_some() {
                 observation
-                    .complete_source_observation(&[], Some(&marker))
+                    .complete_source_observation(&[], Some(&marker), None)
                     .await
                     .unwrap();
             }
@@ -1153,7 +1149,7 @@ mod tests {
             (async {
                 if stamp.is_some() {
                     observation
-                        .complete_source_observation(&[], Some(&marker).filter(|_| complete))
+                        .complete_source_observation(&[], Some(&marker).filter(|_| complete), None)
                         .await?;
                 }
                 Ok::<_, library::LibraryError>(())
@@ -1329,7 +1325,7 @@ mod tests {
                     &catalog,
                     &|value| progress.lock().unwrap().push(value),
                     std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    false,
+                    crate::Refresh::Check,
                 )
                 .await
                 .unwrap();

@@ -15,18 +15,16 @@ pub(crate) struct LyricsCacheQuery {
     pub role: String,
     pub language: String,
     pub script: String,
-    pub input: [u8; 32],
 }
 
 impl LyricsCacheQuery {
     fn accepts(&self, row: &library::LyricsCacheRow) -> bool {
         row.media_uri == self.media_uri
             && row.authority == self.authority
-            && if self.authority == "source" {
-                row.cache_input_digest == self.input
-            } else {
-                row.role == self.role && row.language == self.language && row.script == self.script
-            }
+            && (self.authority == "source"
+                || row.role == self.role
+                    && row.language == self.language
+                    && row.script == self.script)
     }
 }
 
@@ -74,7 +72,6 @@ impl ConnectOwner {
                         &query.role,
                         &query.language,
                         &query.script,
-                        query.input,
                         &query.authority,
                         &library::ReadCancellation::new(),
                     )

@@ -116,9 +116,9 @@ impl FileSource {
     pub(crate) fn locate_track(&self, track: &mut media::ScannedTrack, file: &LocalFileWrite) {
         track.track.source_path = Some(file.path.clone());
         track.track.media_uri = None;
-        track.track.source_lyrics_input = self.lyrics_input;
         track.audio_revision =
             audio_revision(&file.path, file.revision.as_deref(), file.size_bytes);
+        track.revision_hashes_audio = true;
         if let Some(artwork) = &mut track.local_artwork {
             match artwork {
                 LocalImageRef::File {

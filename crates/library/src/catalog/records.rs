@@ -4,8 +4,8 @@
 
 use crate::tags::TagKind;
 use crate::{
-    AlbumKey, AlbumMetadata, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, LocalFileKey,
-    NativeUserState, SourceKey, TagMetadata, TrackKey, TrackMetadata,
+    AlbumKey, AlbumMetadata, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, NativeUserState,
+    SourceKey, TagMetadata, TrackKey, TrackMetadata,
 };
 
 /// Whether an artwork binding names a picture: it is neither missing nor an empty list.
@@ -115,6 +115,8 @@ pub(crate) struct Source {
     pub(crate) name: String,
     pub(crate) complete: bool,
     pub(crate) freshness: Option<Vec<u8>>,
+    /// Server time at the start of the last completed listing or catch-up.
+    pub(crate) synced_at: Option<i64>,
 }
 
 impl Source {
@@ -167,8 +169,6 @@ impl TrackFacts {
 pub(crate) struct TrackWrites {
     /// The details JSON.
     pub(crate) metadata: Option<serde_json::Value>,
-    pub(crate) source_loudness: Option<Vec<u8>>,
-    pub(crate) loudness: Option<Vec<u8>>,
 }
 
 /// A `tracks` row with its links and the `track_details` columns the merge compares.
@@ -179,7 +179,6 @@ pub(crate) struct Track {
     pub(crate) object: Option<String>,
     pub(crate) uri: String,
     pub(crate) album: Option<AlbumKey>,
-    pub(crate) local_file: Option<LocalFileKey>,
     pub(crate) indexed: bool,
     /// Set by the Write when a track stops being listed, cleared when it is listed again.
     pub(crate) hidden_since: Option<i64>,
@@ -192,6 +191,9 @@ pub(crate) struct Track {
     pub(crate) cue_path: Option<String>,
     pub(crate) cue_start: Option<i64>,
     pub(crate) cue_end: Option<i64>,
+    /// When the audio may have changed, and the hash of the audio analysis is keyed by.
+    pub(crate) audio_revision: Option<Vec<u8>>,
+    pub(crate) audio_hash: Option<Vec<u8>>,
     pub(crate) artists: Vec<ArtistKey>,
     pub(crate) album_artists: Vec<ArtistKey>,
     pub(crate) tags: Vec<(TagKind, i64)>,
@@ -207,7 +209,6 @@ impl Track {
             object,
             uri,
             album: None,
-            local_file: None,
             indexed: false,
             hidden_since: None,
             native: false,
@@ -219,6 +220,8 @@ impl Track {
             cue_path: None,
             cue_start: None,
             cue_end: None,
+            audio_revision: None,
+            audio_hash: None,
             artists: Vec::new(),
             album_artists: Vec::new(),
             tags: Vec::new(),
@@ -272,7 +275,6 @@ pub(crate) struct AlbumWrites {
     pub(crate) header: Option<Option<serde_json::Value>>,
     /// The rest of the resolved metadata.
     pub(crate) metadata: Option<serde_json::Value>,
-    pub(crate) clear_accepted_audio: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

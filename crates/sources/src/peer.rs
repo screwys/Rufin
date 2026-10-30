@@ -66,12 +66,7 @@ pub struct PeerAccess {
 }
 
 impl PeerAccess {
-    pub async fn cache_assets(
-        &self,
-        catalog: &Catalog,
-        uri: &str,
-        input: [u8; 32],
-    ) -> SourceResult<()> {
+    pub async fn cache_assets(&self, catalog: &Catalog, uri: &str) -> SourceResult<()> {
         let Some(row) = self.peer()?.assets(uri).await? else {
             return Ok(());
         };
@@ -94,7 +89,7 @@ impl PeerAccess {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
         catalog
-            .write_lyrics_cache(uri, "source", "original", "", "", input, &row.lyrics, now)
+            .write_lyrics_cache(uri, "source", "original", "", "", &row.lyrics, now)
             .await?;
         Ok(())
     }

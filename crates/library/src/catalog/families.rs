@@ -18,7 +18,7 @@ use crate::schema::{LINK_ALBUM_ARTIST, LINK_ARTIST, LINK_FOLDER, LINK_GENRE, LIN
 use crate::tags::TagKind;
 use crate::{
     AlbumKey, AlbumMetadata, ArtistKey, ArtistMetadata, FolderKey, FolderMetadata, LibraryError,
-    LibraryResult, LocalFileKey, SourceKey, TagMetadata, TrackKey, TrackMetadata,
+    LibraryResult, SourceKey, TagMetadata, TrackKey, TrackMetadata,
 };
 
 /// One column value, bound to a statement.
@@ -36,8 +36,6 @@ pub(crate) enum Kind {
     Held,
     /// Read by key with the row.
     Read,
-    /// Written when a row sets it, never read back.
-    Written,
     /// Written as JSON text and stored as JSONB.
     Json,
 }
@@ -85,6 +83,7 @@ pub(crate) static SOURCES: Table = Table {
     natural: "object_id",
     columns: columns![
         Held object_id, Held kind, Held display_name, Held catalog_complete, Held freshness,
+        Held synced_at,
     ],
     details: None,
     tagged: false,
@@ -97,8 +96,7 @@ pub(crate) static TRACK_DETAILS: Table = Table {
     natural: "track_key",
     columns: columns![
         Read native_artwork, Read source_path, Read cue_path, Read cue_start_millis,
-        Read cue_end_millis, Json metadata, Written source_loudness_analysis_key,
-        Written loudness_analysis_key,
+        Read cue_end_millis, Json metadata, Read audio_revision, Read audio_hash,
     ],
     details: None,
     tagged: false,
@@ -110,8 +108,7 @@ pub(crate) static TRACKS: Table = Table {
     key: "track_key",
     natural: "media_uri",
     columns: columns![
-        Held source_key, Read object_id, Read media_uri, Held album_key, Read local_file_key,
-        Held indexed, Read hidden_since, Held native_metadata, Held title, Held display_artist,
+        Held source_key, Read object_id, Read media_uri, Held album_key, Held indexed, Read hidden_since, Held native_metadata, Held title, Held display_artist,
         Held display_album, Held sort_text, Read duration_millis, Read disc_number,
         Read track_number, Read year, Read release_date, Read date_added, Held released,
         Held added_at, Read first_seen_at, Read bpm, Held comment, Held source_format, Held flags, Read native_favorite,
@@ -138,7 +135,7 @@ pub(crate) static ALBUMS: Table = Table {
         Read release_date, Read date_added, Held released, Held added_at, Read is_compilation,
         Read first_seen_at, Read release_identity, Read release_lookup_identity,
         Read native_favorite, Read native_rating, Read native_play_count,
-        Read native_last_played, Read native_artwork, Held flags, Json input_metadata, Json metadata, Written accepted_audio,
+        Read native_last_played, Read native_artwork, Held flags, Json input_metadata, Json metadata,
     ],
     details: None,
     tagged: false,
@@ -430,7 +427,7 @@ pub(crate) trait Row: Clone + PartialEq + Sized {
     fn natural(&self) -> &str;
     fn object(&self) -> Option<(SourceKey, Option<TagKind>, &str)>;
     fn source(&self) -> Option<SourceKey>;
-    /// The cells of the row's columns, then its details columns. A Written column the row does
+    /// The cells of the row's columns, then its details columns. A JSON column the row does
     /// not set is None.
     fn cells(&self) -> Vec<Option<Cell>>;
     /// The link targets of each of the table's runs.
@@ -576,6 +573,7 @@ impl Row for Source {
             string(&self.name),
             flag(self.complete),
             blob(self.freshness.as_deref()),
+            int(self.synced_at),
         ]
     }
 
@@ -624,7 +622,6 @@ impl Row for Track {
             text(self.object.as_deref()),
             string(&self.uri),
             int(self.album.map(AlbumKey::raw)),
-            int(self.local_file.map(LocalFileKey::raw)),
             flag(self.indexed),
             int(self.hidden_since),
             flag(self.native),
@@ -654,14 +651,8 @@ impl Row for Track {
             int(self.cue_start),
             int(self.cue_end),
             json_cell(self.writes.metadata.as_ref().map(Some)),
-            self.writes
-                .source_loudness
-                .as_ref()
-                .map(|key| Cell::Blob(key.clone())),
-            self.writes
-                .loudness
-                .as_ref()
-                .map(|key| Cell::Blob(key.clone())),
+            blob(self.audio_revision.as_deref()),
+            blob(self.audio_hash.as_deref()),
         ]);
         cells
     }
@@ -704,9 +695,6 @@ impl Row for Track {
             object: row.try_get("object_id")?,
             uri: row.try_get("media_uri")?,
             album: snapshot.albums.key_of(record.album).map(AlbumKey::from_raw),
-            local_file: row
-                .try_get::<Option<i64>, _>("local_file_key")?
-                .map(LocalFileKey::from_raw),
             indexed: record.flags & INDEXED != 0,
             hidden_since: row.try_get("hidden_since")?,
             native: record.flags & NATIVE != 0,
@@ -732,6 +720,8 @@ impl Row for Track {
             cue_path: row.try_get("cue_path")?,
             cue_start: row.try_get("cue_start_millis")?,
             cue_end: row.try_get("cue_end_millis")?,
+            audio_revision: row.try_get("audio_revision")?,
+            audio_hash: row.try_get("audio_hash")?,
             artists: links.artists,
             album_artists: links.album_artists,
             tags: links.tags,
@@ -840,7 +830,6 @@ impl Row for Album {
                 | i64::from(self.class.code()) << crate::schema::ALBUM_RELEASE_SHIFT),
             json_cell(self.writes.header.as_ref().map(Option::as_ref)),
             json_cell(self.writes.metadata.as_ref().map(Some)),
-            self.writes.clear_accepted_audio.then_some(Cell::Null),
         ]);
         cells
     }

@@ -240,7 +240,7 @@ pub async fn media_details(
                     msgid("File path"),
                     track.access.source_path.clone(),
                 );
-                if let Some(size) = catalog.media_file_size(uri).await? {
+                if let Some(size) = file_size(catalog, track.track_key).await? {
                     add(
                         &mut origin,
                         if track.access.cue_path.is_some() {
@@ -605,4 +605,28 @@ fn add_summary(section: &mut MediaDetailSection, summary: &library::CollectionSu
             (summary.duration_millis.max(0) / 1000) as u32,
         )),
     );
+}
+
+/// The size of a track's file: its file row's, else a stat of its local locator.
+async fn file_size(
+    catalog: &library::Catalog,
+    track: library::TrackKey,
+) -> LibraryResult<Option<i64>> {
+    let Some(playable) = catalog.playable(track, "original").await? else {
+        return Ok(None);
+    };
+    if let Some(size) = playable.file.as_ref().and_then(|file| file.size_bytes) {
+        return Ok(Some(size));
+    }
+    let Some(path) = playable
+        .locator
+        .as_ref()
+        .and_then(|locator| library::file_media_path(&locator.access_uri))
+    else {
+        return Ok(None);
+    };
+    Ok(tokio::fs::metadata(path)
+        .await
+        .ok()
+        .and_then(|metadata| i64::try_from(metadata.len()).ok()))
 }

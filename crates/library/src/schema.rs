@@ -39,7 +39,9 @@ CREATE TABLE sources (
     kind TEXT,
     display_name TEXT NOT NULL DEFAULT '',
     freshness BLOB,
-    catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1))
+    catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1)),
+    -- Server time (unix seconds) at the start of the last completed listing or catch-up.
+    synced_at INTEGER
 ) STRICT;
 
 CREATE TABLE albums (
@@ -74,9 +76,6 @@ CREATE TABLE albums (
     input_metadata BLOB,
     native_artwork BLOB,
     flags INTEGER NOT NULL DEFAULT 0,
-    source_loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
-    loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
-    accepted_audio BLOB,
     UNIQUE(source_key,object_id)
 ) STRICT;
 
@@ -86,7 +85,6 @@ CREATE TABLE tracks (
     object_id TEXT,
     media_uri TEXT NOT NULL UNIQUE,
     album_key INTEGER REFERENCES albums ON DELETE SET NULL,
-    local_file_key INTEGER REFERENCES local_files ON DELETE SET NULL,
     indexed INTEGER NOT NULL DEFAULT 0,
     hidden_since INTEGER,
     native_metadata INTEGER NOT NULL DEFAULT 0,
@@ -114,18 +112,19 @@ CREATE TABLE tracks (
     UNIQUE(source_key,object_id)
 ) STRICT;
 CREATE INDEX tracks_album_idx ON tracks(album_key) WHERE album_key IS NOT NULL;
-CREATE INDEX tracks_local_file_idx ON tracks(local_file_key) WHERE local_file_key IS NOT NULL;
 
 -- Read by key only: the rest of TrackMetadata, the picture binding, paths, the CUE window and
--- the loudness keys. A track without a row has none of them.
+-- the audio keys. A track without a row has none of them.
 CREATE TABLE track_details (
     track_key INTEGER PRIMARY KEY REFERENCES tracks ON DELETE CASCADE,
     metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
     native_artwork BLOB,
     source_path TEXT,
     cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
-    source_loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
-    loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32))
+    -- When the audio may have changed: the file or server revision plus the CUE window.
+    audio_revision BLOB,
+    -- A hash of the audio stream; NULL until known. Analysis is keyed by it.
+    audio_hash BLOB
 ) STRICT;
 CREATE INDEX track_details_path_idx ON track_details(source_path) WHERE source_path IS NOT NULL;
 CREATE INDEX track_details_cue_idx ON track_details(cue_path) WHERE cue_path IS NOT NULL;
@@ -220,93 +219,36 @@ CREATE TABLE home_entries (
 
 CREATE TABLE artwork_previews(family TEXT PRIMARY KEY,hash TEXT NOT NULL) WITHOUT ROWID;
 
-CREATE TABLE local_files (
-    local_file_key INTEGER PRIMARY KEY,
+CREATE TABLE files (
+    file_key INTEGER PRIMARY KEY,
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     path TEXT NOT NULL CHECK (path <> ''),
     root TEXT NOT NULL CHECK (root <> ''),
-    root_id TEXT NOT NULL DEFAULT '',
+    -- '/'-separated on every platform; the walk order key.
     relative_path TEXT NOT NULL,
-    playlist_identity TEXT,
     kind TEXT NOT NULL CHECK (kind IN ('media', 'cue', 'image', 'directory')),
-    size_bytes INTEGER,
-    mtime_ns INTEGER NOT NULL,
-    device_id INTEGER,
-    inode INTEGER,
-    native_id TEXT,
-    picture_index INTEGER,
-    artist_pictures TEXT,
-    revision TEXT,
-    parse_version INTEGER,
-    observed_stamp INTEGER NOT NULL DEFAULT 0,
-    parent_path TEXT NOT NULL DEFAULT '',
-    parsed_stamp TEXT,
-    state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable', 'observed')),
+    size_bytes INTEGER, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER,
+    native_id TEXT, revision TEXT, parse_version INTEGER,
+    picture_index INTEGER, artist_pictures TEXT, playlist_identity TEXT,
+    state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable')),
     UNIQUE (source_key, path)
 ) STRICT;
-CREATE INDEX local_files_identity_idx ON local_files(source_key, device_id, inode);
-CREATE INDEX local_files_native_id_idx ON local_files(source_key, native_id) WHERE native_id IS NOT NULL;
-CREATE INDEX local_files_kind_path_idx ON local_files(source_key, kind, path);
-CREATE INDEX local_files_parent_idx ON local_files(source_key,parent_path,observed_stamp,path);
-CREATE INDEX local_files_root_path_idx ON local_files(source_key,root,relative_path);
-CREATE INDEX local_files_root_identity_idx ON local_files(source_key,root_id,relative_path);
-CREATE INDEX local_files_playlist_idx ON local_files(source_key, local_file_key)
+-- Component order: 'a' < 'a/b' < 'a.flac', the order a depth-first walk of name-sorted
+-- listings produces.
+CREATE INDEX files_walk_idx ON files(source_key, root, replace(relative_path, '/', char(1)));
+CREATE INDEX files_identity_idx ON files(source_key, device_id, inode) WHERE inode IS NOT NULL;
+CREATE INDEX files_native_id_idx ON files(source_key, native_id) WHERE native_id IS NOT NULL;
+CREATE INDEX files_playlist_idx ON files(source_key, file_key)
     WHERE lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf';
 
-CREATE TABLE local_file_access_roots (
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    root TEXT NOT NULL,
-    root_id TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(source_key,root_id,root)
-) STRICT, WITHOUT ROWID;
-
-CREATE TABLE local_file_observations (
-    local_file_key INTEGER PRIMARY KEY REFERENCES local_files ON DELETE CASCADE,
-    path TEXT NOT NULL, root TEXT NOT NULL, relative_path TEXT NOT NULL,
-    size_bytes INTEGER, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER, native_id TEXT,
-    revision TEXT, observed_stamp INTEGER NOT NULL DEFAULT 0, parent_path TEXT NOT NULL DEFAULT '',
-    parsed_stamp TEXT, accepted_facts TEXT, state TEXT NOT NULL
-) STRICT;
-CREATE INDEX local_file_observations_path ON local_file_observations(path,local_file_key);
-CREATE INDEX local_file_observations_identity ON local_file_observations(device_id,inode,local_file_key);
-CREATE INDEX local_file_observations_native ON local_file_observations(native_id,local_file_key) WHERE native_id IS NOT NULL;
-CREATE INDEX local_file_observations_parent ON local_file_observations(root,parent_path,observed_stamp,path);
-CREATE VIEW observed_local_files AS
-    SELECT file.local_file_key,file.source_key,access.path,access.root,access.relative_path,file.root_id,
-        file.kind,access.size_bytes,access.mtime_ns,access.device_id,access.inode,access.native_id,
-        file.picture_index,file.artist_pictures,access.revision,file.parse_version,
-        access.observed_stamp,access.parent_path,
-        CASE WHEN access.accepted_facts IS file.parsed_stamp THEN access.parsed_stamp END parsed_stamp,
-        CASE WHEN access.state IN('accepted','rejected') AND access.accepted_facts IS NOT file.parsed_stamp THEN 'observed' ELSE access.state END state
-    FROM local_files file JOIN local_file_observations access USING(local_file_key);
-CREATE VIEW local_track_access AS
-    SELECT track.track_key,track.source_key,backing.path source_path,owner.path cue_path,
-        CASE WHEN details.cue_path IS NULL THEN backing.local_file_key ELSE owner.local_file_key END local_file_key
-    FROM tracks track
-    JOIN track_details details USING(track_key)
-    JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=details.source_path
-    JOIN local_file_observations backing ON backing.local_file_key=canonical.local_file_key
-    LEFT JOIN local_files cue ON cue.source_key=track.source_key AND cue.path=details.cue_path
-    LEFT JOIN local_file_observations owner ON owner.local_file_key=cue.local_file_key;
-
-CREATE TABLE local_file_dependencies (
-    local_file_key INTEGER NOT NULL REFERENCES local_files ON DELETE CASCADE,
-    dependency_path TEXT NOT NULL CHECK (dependency_path <> ''),
+-- The input files of an accepted CUE sheet, in sheet order.
+CREATE TABLE file_inputs (
+    file_key INTEGER NOT NULL REFERENCES files ON DELETE CASCADE,
     position INTEGER NOT NULL CHECK (position >= 0),
-    accepted_inputs TEXT,
-    PRIMARY KEY (local_file_key, position),
-    UNIQUE (local_file_key, dependency_path)
-) STRICT;
-CREATE INDEX local_file_dependencies_path_idx ON local_file_dependencies(dependency_path, local_file_key);
-CREATE VIEW observed_file_dependencies AS
-    SELECT edge.local_file_key,coalesce(access.path,edge.dependency_path) dependency_path,edge.position,
-        CASE WHEN edge.accepted_inputs=json_array(backing.size_bytes,backing.mtime_ns,backing.revision)
-            AND access.accepted_facts IS backing.parsed_stamp AND access.parsed_stamp IS NOT NULL
-            THEN json_array(json_extract(access.parsed_stamp,'$[0]'),json_extract(access.parsed_stamp,'$[1]'),json_extract(access.parsed_stamp,'$[2]'))
-            ELSE edge.accepted_inputs END accepted_inputs
-    FROM local_file_dependencies edge JOIN local_files owner USING(local_file_key)
-    LEFT JOIN local_files backing ON backing.source_key=owner.source_key AND backing.path=edge.dependency_path
-    LEFT JOIN local_file_observations access ON access.local_file_key=backing.local_file_key;
+    path TEXT NOT NULL CHECK (path <> ''),
+    PRIMARY KEY (file_key, position)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX file_inputs_path_idx ON file_inputs(path);
 
 -- The user's own favorite and rating. They override the source's values until a delivery the
 -- source accepted drops them.
@@ -521,53 +463,27 @@ CREATE INDEX local_locators_source_idx ON local_locators(source_key,origin);
 CREATE INDEX local_locators_path_idx ON local_locators(source_key,path);
 CREATE INDEX local_locators_precedence_idx ON local_locators(media_uri,CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key);
 
-CREATE TABLE local_access_metadata (
-    access_uri TEXT PRIMARY KEY,
-    size_bytes INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER,
-    parser_version INTEGER NOT NULL, loudness_analysis_key BLOB
-) STRICT;
-CREATE VIEW local_access_files AS
-    SELECT locator.local_access_file_key,locator.source_key,locator.media_uri,
-        locator.origin,locator.path,locator.root,locator.relative_path,
-        COALESCE(metadata.size_bytes,0) size_bytes,COALESCE(metadata.mtime_ns,0) mtime_ns,
-        metadata.device_id,metadata.inode,COALESCE(metadata.parser_version,1) parser_version,
-        locator.access_uri,
-        metadata.loudness_analysis_key
-    FROM local_locators locator
-    LEFT JOIN local_access_metadata metadata USING(access_uri);
-
 CREATE TABLE lyrics_cache (
+    lyrics_key INTEGER PRIMARY KEY,
     media_uri TEXT NOT NULL CHECK (media_uri <> ''),
     authority TEXT NOT NULL CHECK (authority <> ''),
     role TEXT NOT NULL CHECK (role <> ''),
     language TEXT NOT NULL DEFAULT '',
     script TEXT NOT NULL DEFAULT '',
-    cache_input_digest BLOB NOT NULL CHECK (length(cache_input_digest) = 32),
     lyrics TEXT NOT NULL,
     updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
-    PRIMARY KEY (media_uri, authority, role, language, script)
+    UNIQUE (media_uri, authority, role, language, script)
 ) STRICT;
 
-CREATE TABLE fingerprint_cache (
-    media_uri TEXT PRIMARY KEY REFERENCES tracks(media_uri) ON DELETE CASCADE,
-    analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
-    version TEXT NOT NULL, fingerprint TEXT NOT NULL, duration_seconds INTEGER NOT NULL,
-    lookup_key TEXT NOT NULL DEFAULT ''
-) STRICT;
-
-CREATE TABLE waveform_cache (
-    media_uri TEXT PRIMARY KEY REFERENCES tracks(media_uri) ON DELETE CASCADE,
-    analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
-    peaks TEXT NOT NULL
-) STRICT;
-
-CREATE TABLE loudness_measurements (
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    entity_kind TEXT NOT NULL, entity_key INTEGER NOT NULL,
-    analysis_key BLOB NOT NULL,
-    integrated_lufs REAL, true_peak REAL,
-    PRIMARY KEY(source_key,entity_kind,entity_key)
-) STRICT;
+-- Analysis results by audio hash. Expiry and Forget leave them.
+CREATE TABLE loudness (audio_hash BLOB PRIMARY KEY, integrated_lufs REAL, true_peak REAL) STRICT, WITHOUT ROWID;
+-- members: the 16-hex-character prefixes of the album's indexed members' audio hashes, in hash order.
+CREATE TABLE album_loudness (members TEXT PRIMARY KEY, integrated_lufs REAL, true_peak REAL) STRICT, WITHOUT ROWID;
+CREATE TABLE waveform (audio_hash BLOB PRIMARY KEY, peaks TEXT NOT NULL) STRICT, WITHOUT ROWID;
+CREATE TABLE fingerprint (
+    audio_hash BLOB PRIMARY KEY, version TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL, lookup_key TEXT NOT NULL DEFAULT ''
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE metadata_lookup_cache (
     key TEXT PRIMARY KEY, payload BLOB NOT NULL,
@@ -594,10 +510,6 @@ CREATE TABLE connect_profile (
     enabled INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 INSERT INTO connect_profile(singleton) VALUES (1);
-CREATE TABLE connect_roots (
-    source_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, root TEXT,
-    PRIMARY KEY(source_id, id)
-) STRICT;
 CREATE TABLE queue_transfer_pages (
     transfer TEXT NOT NULL, page_offset INTEGER NOT NULL, payload TEXT NOT NULL,
     PRIMARY KEY(transfer, page_offset)

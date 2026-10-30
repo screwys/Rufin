@@ -48,13 +48,13 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     fs::rename(&root, &offline).unwrap();
     assert!(matches!(
         source
-            .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), true)
+            .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), sources::Refresh::Changed)
             .await,
         Err(sources::SourceError::Other(_))
     ));
     fs::rename(&offline, &root).unwrap();
     source
-        .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), true)
+        .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), sources::Refresh::Changed)
         .await
         .unwrap();
     let initial = sources::published(&mut updates).expect("catalog update");
@@ -84,14 +84,14 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     fs::rename(&root, &offline).unwrap();
     assert!(
         source
-            .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), true)
+            .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), sources::Refresh::Changed)
             .await
             .is_err()
     );
     assert_eq!(track_count(&catalog, &initial).await, 1);
     assert!(
         source
-            .catch_up_local(&catalog, &|_| {}, cancelled.clone())
+            .acquire_catalog(&catalog, &|_| {}, cancelled.clone(), sources::Refresh::Changed)
             .await
             .is_err()
     );
@@ -111,7 +111,7 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     assert_eq!(track_count(&catalog, &initial).await, 1);
     fs::rename(&offline, &root).unwrap();
     source
-        .acquire_catalog(&catalog, &|_| {}, cancelled, true)
+        .acquire_catalog(&catalog, &|_| {}, cancelled, sources::Refresh::Changed)
         .await
         .unwrap();
     assert_eq!(track_count(&catalog, &initial).await, 1);
@@ -151,7 +151,7 @@ async fn one_local_path_republishes_only_its_component() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("initial scan");
@@ -226,7 +226,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -264,7 +264,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
                 }
             },
             cancelled,
-            true,
+            sources::Refresh::Changed,
         )
         .await;
     assert!(matches!(interrupted, Err(sources::SourceError::Cancelled)));
@@ -338,7 +338,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -378,10 +378,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     for _ in 0..2 {
         let catalog = Catalog::open(&database_path).await.unwrap();
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|progress| panic!("unchanged catch-up started parsing: {progress:?}"),
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sources::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -445,10 +446,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     catalog.close().await.unwrap();
     let catalog = Catalog::open(&database_path).await.unwrap();
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|progress| panic!("received index started parsing: {progress:?}"),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -460,10 +462,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let mut updates = catalog.changes();
     let progress = Mutex::new(Vec::new());
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|update| progress.lock().unwrap().push(update),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .expect("restart catch-up");
@@ -493,10 +496,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .expect("reopen after removal");
     let mut updates = catalog.changes();
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .expect("remove missing file during catch-up");
@@ -519,10 +523,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     bytes.extend_from_slice(&[1, 2]);
     fs::write(&malformed, bytes).unwrap();
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -543,10 +548,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     for _ in 0..2 {
         let catalog = Catalog::open(&database_path).await.unwrap();
         source
-            .catch_up_local(
+            .acquire_catalog(
                 &catalog,
                 &|progress| panic!("cached rejection started parsing: {progress:?}"),
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sources::Refresh::Changed,
             )
             .await
             .unwrap();
@@ -563,10 +569,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     write_silent_wav(&malformed, 1).expect("replace malformed input with audio");
     let catalog = Catalog::open(&database_path).await.unwrap();
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -612,7 +619,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -620,10 +627,11 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
 
     fs::create_dir(root.path().join("empty")).expect("change only Local inventory bookkeeping");
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .expect("restart catch-up");
@@ -659,7 +667,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
                     }
                 },
                 cancelled,
-                true
+                sources::Refresh::Changed
             )
             .await,
         Err(sources::SourceError::Cancelled)
@@ -673,10 +681,11 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
     let catalog = Catalog::open(&database_path).await.unwrap();
     let mut updates = catalog.changes();
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -710,10 +719,11 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
     );
     let progress = Mutex::new(Vec::new());
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|update| progress.lock().unwrap().push(update),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -768,7 +778,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -823,19 +833,21 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     let mut updates = catalog.changes();
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .expect("first catch-up");
     sources::published(&mut updates).expect("catalog update");
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .expect("second catch-up");
@@ -891,7 +903,7 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -923,7 +935,7 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1010,7 +1022,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1025,7 +1037,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
         catalog.set_distinct_track_covers(distinct);
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         source
-            .acquire_catalog(&catalog, &|_| {}, cancelled, true)
+            .acquire_catalog(&catalog, &|_| {}, cancelled, sources::Refresh::Changed)
             .await
             .unwrap();
         for (index, path) in paths.iter().enumerate() {
@@ -1072,10 +1084,11 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
     );
     sources::published(&mut updates);
     source
-        .catch_up_local(
+        .acquire_catalog(
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1132,7 +1145,7 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1229,7 +1242,7 @@ async fn local_refresh_after_a_deleted_album_track_removes_it() {
                 &catalog,
                 &|_| {},
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                true,
+                sources::Refresh::Changed,
             )
             .await
     };
@@ -1285,7 +1298,7 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1420,7 +1433,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .unwrap();
@@ -1693,7 +1706,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -1771,7 +1784,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -1818,7 +1831,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("refresh the changed album and its old cached sibling");
@@ -1877,7 +1890,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             &catalog,
             &|_| {},
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
+            sources::Refresh::Changed,
         )
         .await
         .expect("scan");
@@ -2059,7 +2072,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
                     &catalog,
                     &|update| progress.lock().unwrap().push(update),
                     Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    true,
+                    sources::Refresh::Changed,
                 )
                 .await
                 .unwrap();

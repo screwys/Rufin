@@ -102,6 +102,10 @@ pub enum Scope {
         old: TrackKey,
         new: TrackKey,
     },
+    /// An analysis result or an audio hash was written.
+    Analysis {
+        hash: [u8; 32],
+    },
 }
 
 /// A track, album or artist whose shown favorite or rating changed.
@@ -792,6 +796,7 @@ impl<'a> Write<'a> {
             name: String::new(),
             complete: false,
             freshness: None,
+            synced_at: None,
         };
         Ok(self.insert(vec![source]).await?.remove(0).key)
     }
@@ -1905,6 +1910,7 @@ mod tests {
                 kind: Some("local".into()),
                 name: "Local".into(),
                 complete: false,
+                synced_at: None,
                 freshness: None,
             }])
             .await

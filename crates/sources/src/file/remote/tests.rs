@@ -112,7 +112,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
                     &catalog,
                     &|value| progress.lock().unwrap().push(value),
                     Arc::new(false.into()),
-                    true,
+                    crate::Refresh::Changed,
                 )
                 .await
                 .unwrap();
@@ -223,7 +223,12 @@ async fn dav_refresh_reads_collections_whose_hrefs_escape_names_differently() {
         .await
         .unwrap();
     source
-        .acquire_catalog(&catalog, &|_| {}, Arc::new(false.into()), true)
+        .acquire_catalog(
+            &catalog,
+            &|_| {},
+            Arc::new(false.into()),
+            crate::Refresh::Changed,
+        )
         .await
         .unwrap();
     let publication = {
@@ -320,7 +325,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
                 &catalog,
                 &|_| panic!("automatic inventory must not replace artwork progress"),
                 Arc::new(false.into()),
-                false,
+                crate::Refresh::Check,
             )
             .await
             .unwrap();
@@ -595,7 +600,11 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                     .all(|file| !file.path.ends_with("/first.wav")),
                 "a listing interrupted before completion must not retain the absent old path"
             );
-            let stream = source.stream(&catalog, &first_uri).await.unwrap();
+            let playable = crate::playable(&catalog, &first_uri).await;
+            let stream = source
+                .stream(playable.file.as_ref().unwrap(), &first_uri, playable.window)
+                .await
+                .unwrap();
             let response = reqwest::get(stream.uri()).await.unwrap();
             assert_eq!(response.bytes().await.unwrap().as_ref(), wave());
         }
@@ -778,7 +787,15 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
                     .unwrap()
                     .unwrap();
                 assert!(file.path.ends_with("/audio.wav"));
-                let stream = source.stream(&catalog, &row.media_uri).await.unwrap();
+                let playable = crate::playable(&catalog, &row.media_uri).await;
+                let stream = source
+                    .stream(
+                        playable.file.as_ref().unwrap(),
+                        &row.media_uri,
+                        playable.window,
+                    )
+                    .await
+                    .unwrap();
                 windows.push(stream.window().unwrap().clone());
             }
             windows.sort_by_key(|window| window.start_millis);

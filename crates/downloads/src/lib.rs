@@ -74,7 +74,6 @@ enum Command {
         source_key: SourceKey,
         source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
-        input_digest: [u8; 32],
         response: Sender<Result<(), String>>,
     },
     Download {
@@ -121,7 +120,6 @@ enum Command {
 #[derive(Clone)]
 struct AttachedSource {
     source_key: SourceKey,
-    input_digest: [u8; 32],
     source: Option<Weak<Source>>,
     folder: Option<FolderKey>,
     directory: Option<DownloadDirectory>,
@@ -875,7 +873,6 @@ impl Downloads {
         source_key: SourceKey,
         source: Option<Arc<Source>>,
         folder: Option<FolderKey>,
-        input_digest: [u8; 32],
     ) -> Result<(), String> {
         let (response, result) = async_channel::bounded(1);
         self.commands
@@ -884,7 +881,6 @@ impl Downloads {
                 source_key,
                 source: source.as_ref().map(Arc::downgrade),
                 folder,
-                input_digest,
                 response,
             })
             .await
@@ -1122,7 +1118,6 @@ impl Actor {
                 source_key,
                 source,
                 folder,
-                input_digest,
                 response,
             } => {
                 let directory = self.settings_for(&source_id).directory;
@@ -1140,14 +1135,7 @@ impl Actor {
                 })
                 .await;
                 let result = self
-                    .attach(
-                        source_id.clone(),
-                        source_key,
-                        source,
-                        folder,
-                        directory,
-                        input_digest,
-                    )
+                    .attach(source_id.clone(), source_key, source, folder, directory)
                     .await;
                 let ready = result.is_ok();
                 self.pending_rules = None;
@@ -1516,7 +1504,6 @@ impl Actor {
         source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
         directory: Option<DownloadDirectory>,
-        input_digest: [u8; 32],
     ) -> Result<(), String> {
         let unchanged = self.attached.get(&source_id).is_some_and(|attached| {
             attached.directory == directory
@@ -1529,7 +1516,6 @@ impl Actor {
             source_id.clone(),
             AttachedSource {
                 source_key,
-                input_digest,
                 source: source.clone(),
                 folder,
                 directory: directory.clone(),
@@ -2099,12 +2085,17 @@ impl Actor {
                 }
             }
             let file = self.catalog.file_track(&media_uri).await.ok().flatten();
+            let playable = match source {
+                Some(_) => playable(&self.catalog, &media_uri).await,
+                None => Err(SourceError::NotFound),
+            };
             let resolved = if file.is_some() {
                 self.peer.download(&self.catalog, &media_uri, quality).await
             } else if let Some(source) = source.as_ref() {
-                source
-                    .resolve_download(&self.catalog, &media_uri, quality)
-                    .await
+                match &playable {
+                    Ok(playable) => source.resolve_download(playable, quality).await,
+                    Err(_) => Err(SourceError::NotFound),
+                }
             } else {
                 Some(media_uri.as_str())
                     .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
@@ -2196,9 +2187,6 @@ impl Actor {
             let uri = media_uri.clone();
             let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
-            let input = attached
-                .as_ref()
-                .map_or([0; 32], |source| source.input_digest);
             let task_source_id = source_id.clone();
             let peer_assets = file.is_some().then(|| self.peer.clone());
             let task_revision = Arc::clone(&revision);
@@ -2258,7 +2246,12 @@ impl Actor {
                             | ResolvedDownload::Encode {
                                 stream: original, ..
                             }) = source
-                                .resolve_download(&catalog, &uri, DownloadQuality::Original)
+                                .resolve_download(
+                                    playable.as_ref().map_err(|_| {
+                                        download_source_failure(SourceError::NotFound)
+                                    })?,
+                                    DownloadQuality::Original,
+                                )
                                 .await
                                 .map_err(download_source_failure)?;
                             let encoding = quality
@@ -2278,7 +2271,7 @@ impl Actor {
                 // Companion failures do not discard successfully downloaded audio.
                 tokio::select! {
                     _ = &mut cancelled => {},
-                    _ = cache_track_assets(&catalog, &artwork, source.as_deref(), peer_assets.as_ref(), &uri, input) => {},
+                    _ = cache_track_assets(&catalog, &artwork, source.as_deref(), peer_assets.as_ref(), &uri) => {},
                 }
                 Ok(())
             });
@@ -3243,16 +3236,28 @@ impl Actor {
     }
 }
 
+/// The playable of a track by its URI.
+async fn playable(catalog: &Catalog, media_uri: &str) -> Result<library::Playable, SourceError> {
+    let key = catalog
+        .track_keys(&[media_uri.to_owned()], &library::ReadCancellation::new())
+        .await?
+        .pop()
+        .ok_or(SourceError::NotFound)?;
+    catalog
+        .playable(key, "original")
+        .await?
+        .ok_or(SourceError::NotFound)
+}
+
 async fn cache_track_assets(
     catalog: &Catalog,
     artwork: &artwork::Artwork,
     source: Option<&Source>,
     peer: Option<&sources::PeerAccess>,
     media_uri: &str,
-    input_digest: [u8; 32],
 ) {
     if let Some(peer) = peer
-        && let Err(error) = peer.cache_assets(catalog, media_uri, input_digest).await
+        && let Err(error) = peer.cache_assets(catalog, media_uri).await
     {
         warn!(%error, %media_uri, "could not download accompanying media");
     }
@@ -3271,13 +3276,8 @@ async fn cache_track_assets(
     };
     let lyrics = async {
         if let Some(source) = source {
-            let input = if library::source_entity_parts(media_uri).is_some() {
-                input_digest
-            } else {
-                [0; 32]
-            };
             source
-                .cached_lyrics(catalog, media_uri, input)
+                .cached_lyrics(catalog, media_uri)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -3379,7 +3379,7 @@ mod tests {
                             source_format: Some("FLAC".into()),
                             ..Default::default()
                         },
-                        loudness_analysis_key: [7; 32],
+                        audio_revision: Some([7; 32]),
                         artwork_binding: None,
                         ..Default::default()
                     }],
@@ -3492,7 +3492,7 @@ mod tests {
         });
         actor.settings.insert(source_id.clone(), settings.clone());
         actor
-            .attach(source_id.clone(), source, None, None, None, [0; 32])
+            .attach(source_id.clone(), source, None, None, None)
             .await
             .unwrap();
         assert_eq!(
@@ -3621,10 +3621,11 @@ mod tests {
         );
         let access = actor
             .catalog
-            .playback_access(&media_uri)
+            .download_files(&media_uri)
             .await
             .unwrap()
-            .map(|(uri, _)| uri);
+            .pop()
+            .map(|download| download.path);
         assert_eq!(
             reqwest::Url::parse(access.as_deref().unwrap())
                 .unwrap()
@@ -3671,10 +3672,11 @@ mod tests {
         );
         let access = actor
             .catalog
-            .playback_access(&media_uri)
+            .download_files(&media_uri)
             .await
             .unwrap()
-            .map(|(uri, _)| uri);
+            .pop()
+            .map(|download| download.path);
         assert!(access.is_none());
         assert!(!paths.audio.native().unwrap().exists());
         assert_eq!(
@@ -4019,7 +4021,6 @@ mod tests {
                 source_id.clone(),
                 AttachedSource {
                     source_key,
-                    input_digest: [0; 32],
                     source: None,
                     folder: None,
                     directory: None,

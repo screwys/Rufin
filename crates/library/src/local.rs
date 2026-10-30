@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 
-use crate::catalog::records::{Source, Track};
 use crate::catalog::snapshot::Packed;
 use crate::catalog::write::Write;
 use crate::{
@@ -183,47 +182,11 @@ pub struct LocalLocatorWrite {
     pub access_uri: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct LocalAccessWrite {
-    pub media_uri: String,
-    pub origin: LocalAccessOrigin,
-    pub path: String,
-    pub root: String,
-    pub relative_path: String,
-    pub size_bytes: i64,
-    pub mtime_ns: i64,
-    pub device_id: Option<i64>,
-    pub inode: Option<i64>,
-    pub parser_version: i64,
-    pub access_uri: String,
-    pub loudness_analysis_key: Option<[u8; 32]>,
-}
-
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct MappingTrackRow {
     pub track_key: TrackKey,
     pub media_uri: String,
     pub source_path: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, sqlx::Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum LocalAccessOrigin {
-    Local,
-    Mapping,
-    Download,
-    Import,
-}
-
-impl LocalAccessOrigin {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Mapping => "mapping",
-            Self::Download => "download",
-            Self::Import => "import",
-        }
-    }
 }
 
 impl Catalog {
@@ -319,7 +282,7 @@ impl Catalog {
             .collection_members(&mut connection, media_uri, Some(album_artist), folder)
             .await?;
         let (first, last): (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT min(path),max(path) FROM (SELECT CASE WHEN source.kind='local' THEN (SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END path
+            "SELECT min(path),max(path) FROM (SELECT CASE WHEN source.kind='local' THEN (SELECT file.path FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) ELSE details.source_path END path
              FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value
              LEFT JOIN sources source ON source.source_key=track.source_key LEFT JOIN track_details details ON details.track_key=track.track_key) WHERE path<>''",
         )
@@ -398,7 +361,7 @@ impl Catalog {
             .await?;
         members.retain(|key| after.is_none_or(|after| *key > after.raw()));
         members.truncate(128);
-        Ok(sqlx::query_as("SELECT track.track_key,track.object_id,track.media_uri,CASE WHEN (SELECT kind FROM sources WHERE source_key=track.source_key)='local' THEN(SELECT access.source_path FROM local_track_access access WHERE access.track_key=track.track_key) ELSE details.source_path END source_path,track.source_format,coalesce((SELECT access.cue_path FROM local_track_access access WHERE access.track_key=track.track_key),details.cue_path) cue_path FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details USING(track_key) ORDER BY track.track_key")
+        Ok(sqlx::query_as("SELECT track.track_key,track.object_id,track.media_uri,CASE WHEN (SELECT kind FROM sources WHERE source_key=track.source_key)='local' THEN(SELECT file.path FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) ELSE details.source_path END source_path,track.source_format,details.cue_path cue_path FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details USING(track_key) ORDER BY track.track_key")
             .bind(serde_json::to_string(&members)?).fetch_all(&mut *connection).await?)
     }
 
@@ -569,40 +532,6 @@ impl Catalog {
         .await?)
     }
 
-    pub async fn playback_access(
-        &self,
-        media_uri: &str,
-    ) -> LibraryResult<Option<(String, LocalAccessOrigin)>> {
-        let mut connection = self.acquire_reader().await?;
-        let access = sqlx::query_as::<_, (String, LocalAccessOrigin, bool)>(
-            "SELECT location,origin,is_path FROM (
-                SELECT path location,'download' origin,0 is_path,0 priority,rowid key
-                FROM downloads WHERE media_uri=?1
-                UNION ALL
-                SELECT access_uri location,origin,0 is_path,
-                    CASE origin WHEN 'mapping' THEN 1 ELSE 2 END priority,
-                    local_access_file_key key
-                FROM local_access_files WHERE media_uri=?1
-                UNION ALL
-                SELECT location.source_path,'local',1,3,track.track_key FROM tracks track JOIN sources source USING(source_key) JOIN local_track_access location USING(track_key)
-                WHERE media_uri=?1 AND source.kind='local'
-             ) ORDER BY priority,key LIMIT 1",
-        )
-        .bind(media_uri)
-        .fetch_optional(&mut *connection)
-        .await?;
-        Ok(access.and_then(|(location, origin, is_path)| {
-            if is_path {
-                crate::document_access_uri(&location)
-                    .or_else(|| location.starts_with("content:").then(|| location.clone()))
-                    .or_else(|| url::Url::from_file_path(location).ok().map(String::from))
-                    .map(|uri| (uri, origin))
-            } else {
-                Some((location, origin))
-            }
-        }))
-    }
-
     /// Paths admitted on this device, including downloaded and mapped copies.
     pub async fn local_media_locations(
         &self,
@@ -622,9 +551,9 @@ impl Catalog {
                 (SELECT json_group_array(path) FROM (
                     SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
                     UNION SELECT path FROM main.downloads WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
-                    UNION SELECT location.source_path FROM main.tracks track JOIN sources source USING(source_key) JOIN local_track_access location USING(track_key)
+                    UNION SELECT file.path FROM main.tracks track JOIN sources source USING(source_key) JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
                       WHERE media_uri=requested.value AND source.kind='local')),
-                EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=track.track_key) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
+                EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
                 EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value)
                     OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value AND NOT entry.received_from_connect)
              FROM json_each(?1) requested",
@@ -695,7 +624,7 @@ impl Catalog {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_scalar(
             "SELECT
-            NOT EXISTS(SELECT 1 FROM tracks track JOIN local_track_access access USING(track_key) WHERE media_uri=?1)
+            NOT EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE media_uri=?1)
             AND (EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=?1 AND details.source_path IS NOT NULL) OR ?2)",
         )
         .bind(media_uri)
@@ -704,22 +633,7 @@ impl Catalog {
         .await?)
     }
 
-    pub async fn playback_window(&self, uri: &str) -> LibraryResult<Option<(u64, u64)>> {
-        let mut connection = self.acquire_reader().await?;
-        let whole_file = whole_file_cue_sql("track", "details");
-        let window: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT details.cue_start_millis,CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END FROM tracks track JOIN track_details details USING(track_key) WHERE media_uri=?1")))
-            .bind(uri).fetch_optional(&mut *connection).await?;
-        if let Some((Some(start), end)) = window {
-            if start == 0 && end.is_none() {
-                return Ok(None);
-            }
-            if let Some(end) = end.filter(|end| start >= 0 && *end > start) {
-                return Ok(Some((start as u64, end as u64)));
-            }
-        }
-        Ok(crate::cue_media_parts(uri).map(|(_, _, start, end)| (start as u64, end as u64)))
-    }
-
+    /// The file of a file source's track, for reads that are not playback.
     pub async fn observed_media_file(
         &self,
         media_uri: &str,
@@ -727,13 +641,11 @@ impl Catalog {
         let mut connection = self.acquire_reader().await?;
         let whole_file = whole_file_cue_sql("track", "details");
         Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT coalesce(file.path,canonical.path) path,
-                    CASE WHEN file.path IS NOT NULL THEN file.revision ELSE canonical.revision END revision,details.cue_start_millis,
+            "SELECT file.path,file.revision,details.cue_start_millis,
                     CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END cue_end_millis
-             FROM tracks track JOIN track_details details USING(track_key) JOIN sources source USING(source_key)
-             LEFT JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=details.source_path
-             LEFT JOIN local_file_observations file ON file.local_file_key=canonical.local_file_key
-             WHERE track.media_uri=?1 AND(file.path IS NOT NULL OR(source.kind IN('webdav','smb') AND canonical.path IS NOT NULL))"
+             FROM tracks track JOIN track_details details USING(track_key)
+             JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
+             WHERE track.media_uri=?1"
         )))
         .bind(media_uri)
         .fetch_optional(&mut *connection)
@@ -746,7 +658,7 @@ impl Catalog {
         path: &str,
     ) -> LibraryResult<Option<String>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT track.media_uri FROM tracks track JOIN sources USING(source_key) JOIN local_track_access access USING(track_key) JOIN track_details details USING(track_key) WHERE sources.object_id=?1 AND access.source_path=?2 AND details.cue_path IS NULL LIMIT 1")
+        Ok(sqlx::query_scalar("SELECT track.media_uri FROM tracks track JOIN sources USING(source_key) JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE sources.object_id=?1 AND details.source_path=?2 AND details.cue_path IS NULL LIMIT 1")
             .bind(source).bind(path).fetch_optional(&mut *connection).await?)
     }
 
@@ -829,27 +741,16 @@ impl Catalog {
 
     pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
         let mut write = self.write().await?;
-        let connection = write.connection().await?;
-        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping') AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.source_key IS NOT ?1 OR other.origin<>'mapping'))").bind(source).execute(&mut *connection).await?;
         let removed =
-            sqlx::query("DELETE FROM main.local_locators WHERE local_access_file_key IN (SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND origin='mapping')")
+            sqlx::query("DELETE FROM main.local_locators WHERE source_key=?1 AND origin='mapping'")
                 .bind(source)
-                .execute(&mut *connection)
+                .execute(write.connection().await?)
                 .await?
                 .rows_affected();
         if removed != 0 {
             write.keep();
         }
         write.commit().await?;
-        let tracks = {
-            let snapshot = self.snapshot();
-            snapshot.source_keys(&snapshot.tracks, source)
-        };
-        for page in tracks.chunks(crate::catalog::merge::COMPLETION_PAGE) {
-            let mut write = self.write().await?;
-            refresh_access_audio(&mut write, page).await?;
-            write.commit().await?;
-        }
         Ok(removed)
     }
 
@@ -904,16 +805,15 @@ impl Catalog {
         Ok(rows)
     }
 
-    pub async fn write_local_access(
-        &self,
-        source: Option<SourceKey>,
-        records: &[&LocalAccessWrite],
-    ) -> LibraryResult<()> {
-        if records.is_empty() {
+    /// Writes locators in one Write; a locator replaces the one of its track and origin.
+    pub async fn write_local_locators(&self, locators: &[LocalLocatorWrite]) -> LibraryResult<()> {
+        if locators.is_empty() {
             return Ok(());
         }
         let mut write = self.write().await?;
-        write_local_access_on(&mut write, source, records).await?;
+        for locator in locators {
+            write_local_locator(&mut write, locator).await?;
+        }
         write.commit().await?;
         Ok(())
     }
@@ -923,61 +823,6 @@ impl Catalog {
         Ok(sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1")
             .bind(media_uri).fetch_optional(&mut *connection).await?)
     }
-
-    pub async fn media_file_size(&self, media_uri: &str) -> LibraryResult<Option<i64>> {
-        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
-        Ok(sqlx::query_scalar("SELECT size_bytes FROM (
-            SELECT observed.size_bytes FROM tracks track JOIN track_details details USING(track_key)
-            JOIN local_files file ON file.source_key=track.source_key AND file.path=details.source_path
-            JOIN local_file_observations observed ON observed.local_file_key=file.local_file_key WHERE track.media_uri=?1
-            UNION ALL
-            SELECT metadata.size_bytes FROM local_locators locator
-            JOIN local_access_metadata metadata USING(access_uri)
-            WHERE locator.media_uri=?1
-        ) WHERE size_bytes IS NOT NULL LIMIT 1")
-            .bind(media_uri).fetch_optional(&mut *connection).await?)
-    }
-}
-
-/// Stages each track's loudness key from its best local access file, mapping first, else the
-/// key its source reported. Returns the albums of the tracks that changed.
-async fn refresh_access_audio(
-    write: &mut Write<'_>,
-    tracks: &[i64],
-) -> LibraryResult<Vec<crate::AlbumKey>> {
-    let mut albums = Vec::new();
-    for page in tracks.chunks(128) {
-        let changed: Vec<(i64, Vec<u8>, Vec<u8>, Option<i64>, Option<i64>)> = sqlx::query_as("SELECT track_key,chosen,source_loudness_analysis_key,cue_start_millis,cue_end_millis FROM(SELECT track.track_key,details.source_loudness_analysis_key,details.loudness_analysis_key,details.cue_start_millis,details.cue_end_millis,coalesce((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1),details.source_loudness_analysis_key) chosen FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))) WHERE loudness_analysis_key IS NOT chosen")
-            .bind(serde_json::to_string(page)?).fetch_all(write.connection().await?).await?;
-        write
-            .read_keys::<Track>(&changed.iter().map(|row| row.0).collect::<Vec<_>>())
-            .await?;
-        for (key, chosen, _, _, _) in changed {
-            let Some(mut track) = write.get::<Track>(key).await? else {
-                continue;
-            };
-            albums.extend(track.album);
-            track.writes.loudness = Some(chosen);
-            write.put(track);
-        }
-    }
-    albums.sort_unstable();
-    albums.dedup();
-    Ok(albums)
-}
-
-/// Refreshes the loudness keys of the tracks with these URIs and has their albums analysed again.
-async fn refresh_uri_audio(write: &mut Write<'_>, uris: &[&str]) -> LibraryResult<()> {
-    let mut tracks = Vec::new();
-    write.read_naturals::<Track>(uris).await?;
-    for uri in uris {
-        if let Some(track) = write.by_natural::<Track>(uri).await? {
-            tracks.push(track.key.raw());
-        }
-    }
-    let albums = refresh_access_audio(write, &tracks).await?;
-    crate::loudness::invalidate_album_audio(write.connection().await?, &albums, false).await?;
-    Ok(())
 }
 
 fn folder_path_name(path: &str) -> String {
@@ -1093,21 +938,6 @@ async fn load_local_file_rows(
             }
         })
         .collect())
-}
-
-fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {
-    if access.path.is_empty()
-        || access.root.is_empty()
-        || access.media_uri.is_empty()
-        || access.access_uri.is_empty()
-        || access.size_bytes < 0
-        || access.parser_version < 1
-    {
-        return Err(LibraryError::InvalidRequest(
-            "invalid Local access file".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 impl Catalog {
@@ -1292,61 +1122,4 @@ impl crate::Observation<'_> {
         }
         Ok(())
     }
-}
-
-pub(crate) async fn write_local_access_on(
-    write: &mut Write<'_>,
-    source: Option<SourceKey>,
-    records: &[&LocalAccessWrite],
-) -> LibraryResult<()> {
-    for access in records {
-        validate_local_access(access)?;
-    }
-    let source_id = match source {
-        Some(source) => write
-            .get::<Source>(source.raw())
-            .await?
-            .map(|source| source.object),
-        None => None,
-    };
-    for access in records {
-        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators WHERE media_uri=?1 AND origin=?2 AND path<>?3) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.media_uri<>?1 OR other.origin<>?2 OR other.path=?3))").bind(&access.media_uri).bind(access.origin.as_str()).bind(&access.path).execute(write.connection().await?).await?;
-        sqlx::query(
-            "DELETE FROM main.local_locators WHERE media_uri=?1 AND origin=?2 AND path<>?3",
-        )
-        .bind(&access.media_uri)
-        .bind(access.origin.as_str())
-        .bind(&access.path)
-        .execute(write.connection().await?)
-        .await?;
-        write_local_locator(
-            write,
-            &LocalLocatorWrite {
-                source_id: source_id.clone(),
-                media_uri: access.media_uri.clone(),
-                origin: access.origin.as_str().to_owned(),
-                path: access.path.clone(),
-                root: access.root.clone(),
-                relative_path: access.relative_path.clone(),
-                access_uri: access.access_uri.clone(),
-            },
-        )
-        .await?;
-        sqlx::query("INSERT INTO main.local_access_metadata(access_uri,size_bytes,mtime_ns,
-            device_id,inode,parser_version,loudness_analysis_key) VALUES(?1,?2,?3,?4,?5,?6,?7)
-            ON CONFLICT(access_uri) DO UPDATE SET size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,
-            device_id=excluded.device_id,inode=excluded.inode,parser_version=excluded.parser_version,
-            loudness_analysis_key=excluded.loudness_analysis_key")
-            .bind(&access.access_uri).bind(access.size_bytes).bind(access.mtime_ns).bind(access.device_id).bind(access.inode)
-            .bind(access.parser_version).bind(access.loudness_analysis_key.as_ref().map(|key|key.as_slice()))
-            .execute(write.connection().await?).await?;
-    }
-    refresh_uri_audio(
-        write,
-        &records
-            .iter()
-            .map(|row| row.media_uri.as_str())
-            .collect::<Vec<_>>(),
-    )
-    .await
 }

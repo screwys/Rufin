@@ -220,7 +220,6 @@ async fn resolve_album(
         album.cached_local = false;
         album.input = false;
         album.writes.header = Some(None);
-        album.writes.clear_accepted_audio = true;
     }
     // Observed file tags own the album even when its header is derived.
     if !album.native && !album.cached_local && indexed.iter().any(tagged) {

@@ -135,8 +135,15 @@ impl PlaybackOwner {
             .upgrade();
         let source = self.source_owner();
         let local = self.settings.local_configuration();
+        let playable = self
+            .catalog
+            .playable(occurrence.track.track_key, "original")
+            .await
+            .map_err(string_error)?
+            .ok_or("The current track is unavailable")?;
         let stream = prepare_stream(
             &self.catalog,
+            &playable,
             request,
             local.as_ref(),
             connect
@@ -153,13 +160,7 @@ impl PlaybackOwner {
             },
         )
         .await?;
-        let loudness = super::cached_loudness(
-            &self.catalog,
-            &occurrence.track.media_uri,
-            self.settings.load().ui.playback.loudness_normalization,
-        )
-        .await;
-        let stream = prepare_media_stream(stream, loudness, occurrence);
+        let stream = prepare_media_stream(stream, super::track_loudness(&playable), occurrence);
         let backend =
             (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         Ok(PreparedContinuation {

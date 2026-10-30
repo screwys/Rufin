@@ -128,6 +128,7 @@ pub(crate) async fn read_saved_document(
         entry.revision.as_deref(),
         entry.size.and_then(|size| i64::try_from(size).ok()),
     );
+    track.revision_hashes_audio = true;
     track.local_artwork = track
         .picture_index
         .and_then(|index| u32::try_from(index).ok())
@@ -139,128 +140,6 @@ pub(crate) async fn read_saved_document(
         });
     let file = file.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
     Ok((file, track.into_observation(media::accepted_at())))
-}
-
-pub(crate) async fn catch_up(
-    observation: &mut library::Observation<'_>,
-    local: &LocalSource,
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
-    let catalog = observation.catalog;
-    let source_id = observation.source_id;
-    require_roots(catalog, source_id, local, local.roots()).await?;
-    let stamp = Some(observation.start_observation().await?);
-    let mut after = None;
-    let mut tracks = 0;
-    loop {
-        check_cancelled(cancelled)?;
-        let page = catalog
-            .local_file_page(
-                observation.source,
-                after,
-                LOCAL_BATCH_SIZE,
-                &library::ReadCancellation::new(),
-            )
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-        after = page.last().map(|file| file.local_file_key);
-        let single_files = page
-            .iter()
-            .filter(|file| {
-                local
-                    .roots()
-                    .iter()
-                    .any(|root| root == Path::new(&file.path))
-            })
-            .collect::<Vec<_>>();
-        observe_lyrics_dependencies(
-            observation,
-            &local.roots().iter().map(PathBuf::as_path).collect(),
-            &single_files
-                .iter()
-                .flat_map(|file| file.dependencies.iter().cloned())
-                .collect::<Vec<_>>(),
-        )
-        .await?;
-        let changed = catalog
-            .source_changed_file_dependencies(
-                source_id,
-                &single_files
-                    .iter()
-                    .map(|file| file.path.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .await?;
-        let paths = page
-            .iter()
-            .filter(|file| {
-                local
-                    .roots()
-                    .iter()
-                    .any(|root| Path::new(&file.path).starts_with(root))
-            })
-            .filter(|file| cached_observation_changed(file) || changed.contains(&file.path))
-            .map(|file| PathBuf::from(&file.path))
-            .collect::<Vec<_>>();
-        if !paths.is_empty() {
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Tracks,
-                completed: tracks,
-                total: None,
-            });
-            tracks += acquire_paths(
-                observation,
-                local,
-                &paths,
-                None,
-                &|mut update| {
-                    if update.stage == SourceReadStage::Tracks {
-                        update.completed += tracks;
-                    }
-                    progress(update);
-                },
-                cancelled,
-            )
-            .await?;
-        }
-    }
-    acquire_imported_paths(observation, local, None, &|_| {}, cancelled).await?;
-    if observation.changed() {
-        observation.record_imported_files(None).await?;
-    }
-    check_cancelled(cancelled)?;
-    observation
-        .purge_source_file_absences(stamp.expect("file observation"))
-        .await?;
-    Ok(())
-}
-
-fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
-    let Ok(metadata) = fs::metadata(&file.path) else {
-        return true;
-    };
-    let size = i64::try_from(metadata.len()).ok();
-    let mtime_ns = metadata
-        .modified()
-        .ok()
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
-        .unwrap_or_default();
-    file.state == library::LocalFileState::Rejected
-        && file.parse_version != Some(i64::from(LOCAL_PARSER_VERSION))
-        || file.state == library::LocalFileState::Unreadable
-        || file.state == library::LocalFileState::Observed
-        || file.size_bytes != size
-        || file.mtime_ns != mtime_ns
-        || file.kind == library::LocalFileKind::Directory
-            && file.state != library::LocalFileState::Accepted
-        || matches!(
-            file.kind,
-            library::LocalFileKind::Media | library::LocalFileKind::Cue
-        ) && !reusable_parser_version(file.parse_version)
 }
 
 pub(crate) async fn acquire_paths(
@@ -1613,9 +1492,9 @@ pub(crate) async fn acquire_imported_paths(
                     Some(uri.clone())
                 } else {
                     catalog
-                        .playback_access(&uri)
+                        .original_file(&uri)
                         .await?
-                        .map(|(access, _)| access)
+                        .map(|locator| locator.access_uri)
                 };
                 if let Some(access) = access.filter(|access| access.starts_with("content:")) {
                     documents.push((uri, access));
@@ -1647,9 +1526,9 @@ pub(crate) async fn acquire_imported_paths(
                     Some(access)
                 } else {
                     catalog
-                        .playback_access(&uri)
+                        .original_file(&uri)
                         .await?
-                        .and_then(|(uri, _)| library::file_media_path(&uri))
+                        .and_then(|locator| library::file_media_path(&locator.access_uri))
                         .or(Some(path))
                 }
             } else {
@@ -1871,6 +1750,7 @@ async fn acquire_imported_documents(
                         file.revision.as_deref(),
                         file.size_bytes,
                     );
+                    track.revision_hashes_audio = true;
                     track.observe_images(&mut file)?;
                     file.state = library::LocalFileState::Accepted;
                     tracks.push(track.into_observation(media::accepted_at()));

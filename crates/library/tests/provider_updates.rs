@@ -34,7 +34,7 @@ async fn track(
                     },
                     object_id: "track".into(),
                     album_object_id: Some("album".into()),
-                    loudness_analysis_key: [1; 32],
+                    audio_revision: Some([1; 32]),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -134,6 +134,7 @@ async fn fixture() -> (tempfile::TempDir, Catalog) {
                 "track", "album", "artist", "genre", "mood", "folder", "playlist",
             ],
             None,
+            None,
         )
         .await
         .unwrap();
@@ -141,6 +142,7 @@ async fn fixture() -> (tempfile::TempDir, Catalog) {
         .complete_source_observation(
             &[],
             Some(Freshness::new(b"catalog".to_vec()).unwrap()).as_ref(),
+            None,
         )
         .await
         .unwrap();

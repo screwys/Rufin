@@ -136,6 +136,16 @@ pub(crate) async fn listed_playlists(
         .collect()
 }
 
+/// The playable of a track by its URI.
+#[cfg(test)]
+pub(crate) async fn playable(catalog: &library::Catalog, uri: &str) -> library::Playable {
+    let key = catalog
+        .track_keys(&[uri.to_owned()], &library::ReadCancellation::new())
+        .await
+        .unwrap()[0];
+    catalog.playable(key, "original").await.unwrap().unwrap()
+}
+
 /// The key of a source playlist by its object id.
 #[cfg(test)]
 pub(crate) async fn playlist_key(

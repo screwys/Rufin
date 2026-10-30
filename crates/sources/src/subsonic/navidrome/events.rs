@@ -316,13 +316,14 @@ mod tests {
                             "track", "album", "artist", "genre", "mood", "folder", "playlist",
                         ],
                         (Some(marker.clone())).as_ref(),
+                        None,
                     )
                     .await
                     .unwrap();
             }
             if stamp.is_some() {
                 observation
-                    .complete_source_observation(&[], Some(&marker))
+                    .complete_source_observation(&[], Some(&marker), None)
                     .await
                     .unwrap();
             }

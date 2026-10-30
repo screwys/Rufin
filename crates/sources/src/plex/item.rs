@@ -239,7 +239,8 @@ pub(super) fn read_items<'a>(
                         artwork_binding: artwork,
                         first_seen_at: added,
                         source_path: source_path.map(str::to_owned),
-                        loudness_analysis_key: *hash.finalize().as_bytes(),
+                        audio_revision: Some(*hash.finalize().as_bytes()),
+                        audio_hash: Some(*hash.finalize().as_bytes()),
                         folders,
                         ..Default::default()
                     };

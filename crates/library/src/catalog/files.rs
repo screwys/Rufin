@@ -341,12 +341,11 @@ fn descendant_prefix(path: &str) -> (char, String) {
     )
 }
 
-/// Admits or withdraws file tracks, and drops their file links when the files went away.
+/// Admits or withdraws file tracks.
 async fn write_track_membership(
     write: &mut Write<'_>,
     tracks: &[i64],
     indexed: bool,
-    files_removed: bool,
     touched: &mut Touched,
 ) -> LibraryResult<()> {
     if tracks.is_empty() {
@@ -363,11 +362,8 @@ async fn write_track_membership(
         if indexed {
             write.see(&track);
         }
-        if track.indexed != indexed || (files_removed && track.local_file.is_some()) {
+        if track.indexed != indexed {
             track.indexed = indexed;
-            if files_removed {
-                track.local_file = None;
-            }
             touched.tracks.insert(*key);
             changed = true;
             write.put(track);
@@ -375,7 +371,6 @@ async fn write_track_membership(
     }
     albums.sort_unstable();
     albums.dedup();
-    crate::loudness::invalidate_album_audio(write.connection().await?, &albums, true).await?;
     if changed {
         touched
             .albums
@@ -391,20 +386,6 @@ pub(crate) async fn delete_physical_files(
     bound: i64,
 ) -> LibraryResult<()> {
     let input = serde_json::to_string(keys)?;
-    // Tracks keep no link to a file that is gone.
-    let linked: Vec<i64> = sqlx::query_scalar(
-        "SELECT track_key FROM tracks WHERE local_file_key IN(SELECT value FROM json_each(?1))",
-    )
-    .bind(&input)
-    .fetch_all(write.connection().await?)
-    .await?;
-    write.read_keys::<Track>(&linked).await?;
-    for key in linked {
-        if let Some(mut track) = write.get::<Track>(key).await? {
-            track.local_file = None;
-            write.put(track);
-        }
-    }
     let connection = write.connection().await?;
     sqlx::query("UPDATE local_files SET state='observed' WHERE source_key=?1 AND local_file_key IN(SELECT dependency.local_file_key FROM local_file_dependencies dependency JOIN local_files missing ON missing.path=dependency.dependency_path AND missing.source_key=?1 WHERE missing.local_file_key IN(SELECT value FROM json_each(?2))) AND observed_stamp<=?3 AND state<>'observed'")
         .bind(source).bind(&input).bind(bound).execute(&mut *connection).await?;
@@ -433,7 +414,7 @@ pub(crate) async fn remove_files_page_on(
     if songs.is_empty() && files.is_empty() {
         return Ok(true);
     }
-    write_track_membership(write, &songs, false, true, touched).await?;
+    write_track_membership(write, &songs, false, touched).await?;
     if !files.is_empty() {
         write.keep();
         delete_physical_files(
@@ -505,7 +486,7 @@ pub(crate) async fn write_file_observations_on(
     let source = source_key.raw();
     let observed = Some(match observed {
         Some(observed) => observed,
-        None => catalog.next_stamp(source_key).await?,
+        None => catalog.next_stamp(source_key),
     });
     let physical_files = files
         .iter()
@@ -570,7 +551,7 @@ pub(crate) async fn write_file_observations_on(
             write.changed(Scope::Collections { source: source_key });
         }
     }
-    write_track_membership(write, &withdrawn, false, true, touched).await?;
+    write_track_membership(write, &withdrawn, false, touched).await?;
     if admit && accessible {
         let admitted: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM tracks track JOIN local_track_access location USING(track_key) WHERE track.source_key=?1 AND track.object_id IS NOT NULL AND indexed=0 AND location.local_file_key IN(SELECT local_file_key FROM observed_local_files WHERE source_key=?1 AND path IN(SELECT json_extract(value,'$[0]') FROM json_each(?2)))")
                 .bind(source).bind(serde_json::to_string(&files.iter().filter(|(file,_)|file.state==LocalFileState::Accepted).map(|(file,_)|(&file.path,)).collect::<Vec<_>>())?).fetch_all(write.connection().await?).await?;
@@ -578,7 +559,7 @@ pub(crate) async fn write_file_observations_on(
             .into_iter()
             .filter(|key| !write.newer(Family::Track, *key))
             .collect::<Vec<_>>();
-        write_track_membership(write, &admitted, true, false, touched).await?;
+        write_track_membership(write, &admitted, true, touched).await?;
     }
     let observed_paths = songs
         .iter()
@@ -601,39 +582,6 @@ pub(crate) async fn write_file_observations_on(
         }
     }
     super::merge::tracks(write, source_key, source_id, &songs, admit, true, touched).await?;
-    if accessible && !files.is_empty() {
-        // Each observed file links the tracks it carries; only links that differ are read.
-        let expected: Vec<(i64, crate::LocalFileKey)> = sqlx::query_as("WITH paths AS MATERIALIZED(
-                SELECT DISTINCT file.local_file_key,file.path FROM json_each(?2) input
-                JOIN local_file_observations access ON access.path=json_extract(input.value,'$[0].path')
-                JOIN local_files file USING(local_file_key) WHERE file.source_key=?1)
-              SELECT track.track_key,file.local_file_key FROM paths file
-                JOIN track_details details ON details.source_path=file.path AND details.cue_path IS NULL
-                JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1
-                    AND track.local_file_key IS NOT file.local_file_key
-              UNION ALL SELECT track.track_key,file.local_file_key FROM paths file
-                JOIN track_details details ON details.cue_path=file.path
-                JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1
-                    AND track.local_file_key IS NOT file.local_file_key")
-                .bind(source)
-                .bind(serde_json::to_string(files)?)
-                .fetch_all(write.connection().await?)
-                .await?;
-        write
-            .read_keys::<Track>(&expected.iter().map(|(key, _)| *key).collect::<Vec<_>>())
-            .await?;
-        for (key, file) in expected {
-            if write.newer(Family::Track, key) {
-                continue;
-            }
-            if let Some(mut track) = write.get::<Track>(key).await?
-                && track.local_file != Some(file)
-            {
-                track.local_file = Some(file);
-                write.put(track);
-            }
-        }
-    }
     merge_local_file_uris_on(write, &aliases, touched).await?;
     let accepted_cues = files
         .iter()
@@ -760,7 +708,7 @@ impl super::Observation<'_> {
                 };
                 after = *last;
                 let mut touched = Touched::default();
-                write_track_membership(&mut write, &tracks, indexed, false, &mut touched).await?;
+                write_track_membership(&mut write, &tracks, indexed, &mut touched).await?;
                 super::merge::resolve(&mut write, &mut touched).await?;
                 self.commit(write).await?;
             }
@@ -874,9 +822,10 @@ async fn merge_local_file_uris_on(
             && target.as_ref().is_some_and(|target| target.cue_path.is_some())
             && track.object.is_none()
             && !track.indexed
-            && track.local_file.is_none()
-            && !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM playlist_entries WHERE track_key=?1) OR EXISTS(SELECT 1 FROM queue_entries WHERE track_key=?1) OR EXISTS(SELECT 1 FROM home_entries WHERE entity_kind='track' AND entity_key=?1)")
+            && !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM playlist_entries WHERE track_key=?1) OR EXISTS(SELECT 1 FROM queue_entries WHERE track_key=?1) OR EXISTS(SELECT 1 FROM home_entries WHERE entity_kind='track' AND entity_key=?1) OR EXISTS(SELECT 1 FROM files WHERE source_key=?2 AND path=?3)")
                 .bind(track.key)
+                .bind(track.source)
+                .bind(track.member_path())
                 .fetch_one(write.connection().await?)
                 .await?
         {
@@ -913,7 +862,7 @@ async fn merge_local_file_uris_on(
         if let Some(previous_track) = old.filter(|track| track.key != current_key) {
             let old_key = previous_track.key;
             // The canonical row keeps what it has and takes the rest from the old row.
-            let (details, source_loudness, loudness, same_details): (Option<String>, Vec<u8>, Vec<u8>, bool) = sqlx::query_as("SELECT json(previous.metadata),coalesce(previous.source_loudness_analysis_key,zeroblob(32)),coalesce(previous.loudness_analysis_key,zeroblob(32)),canonical.metadata IS previous.metadata FROM tracks old LEFT JOIN track_details previous ON previous.track_key=old.track_key,tracks new LEFT JOIN track_details canonical ON canonical.track_key=new.track_key WHERE old.track_key=?1 AND new.track_key=?2")
+            let (details, same_details): (Option<String>, bool) = sqlx::query_as("SELECT json(previous.metadata),canonical.metadata IS previous.metadata FROM tracks old LEFT JOIN track_details previous ON previous.track_key=old.track_key,tracks new LEFT JOIN track_details canonical ON canonical.track_key=new.track_key WHERE old.track_key=?1 AND new.track_key=?2")
                 .bind(old_key)
                 .bind(current_key)
                 .fetch_one(write.connection().await?)
@@ -928,7 +877,6 @@ async fn merge_local_file_uris_on(
             write.put(Track {
                 object: None,
                 indexed: false,
-                local_file: None,
                 ..previous_track.clone()
             });
             // The old row gives up its identity first, so the canonical row can take it.
@@ -946,8 +894,10 @@ async fn merge_local_file_uris_on(
                 }
             }
             if canonical.source.is_none() {
-                canonical.writes.source_loudness = Some(source_loudness);
-                canonical.writes.loudness = Some(loudness);
+                canonical
+                    .audio_revision
+                    .clone_from(&previous_track.audio_revision);
+                canonical.audio_hash.clone_from(&previous_track.audio_hash);
             }
             if previous_track.source.is_some() {
                 canonical.object = canonical.object.or_else(|| Some(object_id.clone()));
@@ -1103,18 +1053,7 @@ async fn merge_local_file_uris_on(
             sqlx::query("UPDATE local_locators SET access_uri=?2,path=?3 WHERE media_uri=?1 AND access_uri=?1 AND origin='local'")
                 .bind(previous).bind(current).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(write.connection().await?).await?;
         }
-        sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) SELECT ?2,authority,role,language,script,cache_input_digest,lyrics,updated_at FROM lyrics_cache WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(write.connection().await?).await?;
-        if sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1")
-            .bind(previous)
-            .execute(write.connection().await?)
-            .await?
-            .rows_affected()
-            > 0
-        {
-            write.changed(Scope::Lyrics {
-                uri: current.clone(),
-            });
-        }
+        crate::lyrics::move_lyrics_on(write, previous, current).await?;
         sqlx::query("INSERT INTO outbox(media_uri,kind,value,next_attempt_at) SELECT ?2,kind,value,next_attempt_at FROM outbox WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(write.connection().await?).await?;
         sqlx::query("DELETE FROM outbox WHERE media_uri=?1")
             .bind(previous)

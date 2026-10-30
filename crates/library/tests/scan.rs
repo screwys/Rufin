@@ -96,11 +96,12 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
                 "track", "album", "artist", "genre", "mood", "folder", "playlist",
             ],
             None,
+            None,
         )
         .await
         .unwrap();
     scan_observation
-        .complete_source_observation(&[], None)
+        .complete_source_observation(&[], None, None)
         .await
         .unwrap();
     assert!(scan_observation.changed());
@@ -197,7 +198,7 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
                     },
                     object_id: "stable-track".into(),
                     source_path: Some(observation.path.to_owned()),
-                    loudness_analysis_key: [1; 32],
+                    audio_revision: Some([1; 32]),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -215,11 +216,12 @@ async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
                     "track", "album", "artist", "genre", "mood", "folder", "playlist",
                 ],
                 None,
+                None,
             )
             .await
             .unwrap();
         scan_observation
-            .complete_source_observation(&[], None)
+            .complete_source_observation(&[], None, None)
             .await
             .unwrap();
         assert!(scan_observation.changed());
@@ -781,6 +783,7 @@ async fn write_small_catalog(
                 "track", "album", "artist", "genre", "mood", "folder", "playlist",
             ],
             None,
+            None,
         )
         .await
         .unwrap();
@@ -788,6 +791,7 @@ async fn write_small_catalog(
         .complete_source_observation(
             &[],
             Some(Freshness::new(freshness.as_bytes()).expect("bounded freshness")).as_ref(),
+            None,
         )
         .await
         .unwrap();
@@ -866,7 +870,7 @@ async fn write_track(
                         .unwrap(),
                     ),
                     first_seen_at: Some(10 + position),
-                    loudness_analysis_key: [position as u8 + 1; 32],
+                    audio_revision: Some([position as u8 + 1; 32]),
                     folders: Some(vec!["folder-one".into(), "folder-one".into()]),
                     ..Default::default()
                 }],
@@ -1411,11 +1415,12 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
                         "track", "album", "artist", "genre", "mood", "folder", "playlist",
                     ],
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
             scan_observation
-                .complete_source_observation(&[], None)
+                .complete_source_observation(&[], None, None)
                 .await
                 .unwrap();
         }
@@ -1498,11 +1503,12 @@ async fn complete_scans_remove_unseen_items_after_partial_updates() {
                 "track", "album", "artist", "genre", "mood", "folder", "playlist",
             ],
             None,
+            None,
         )
         .await
         .unwrap();
     complete_observation
-        .complete_source_observation(&[], None)
+        .complete_source_observation(&[], None, None)
         .await
         .unwrap();
     assert!(changes.facts().intersects(super::support::Shown::CATALOG));
@@ -1598,11 +1604,12 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
                         "track", "album", "artist", "genre", "mood", "folder", "playlist",
                     ],
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
             scan_observation
-                .complete_source_observation(&[], None)
+                .complete_source_observation(&[], None, None)
                 .await
                 .unwrap();
         }
@@ -1836,12 +1843,13 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
                     "track", "album", "artist", "genre", "mood", "folder", "playlist",
                 ],
                 None,
+                None,
             )
             .await
             .unwrap();
 
         third_observation
-            .complete_source_observation(&[], None)
+            .complete_source_observation(&[], None, None)
             .await
             .unwrap();
     };

@@ -17,7 +17,7 @@ use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
 /// Raised when the meaning of a record's fields or flags changes, or its fields are reordered.
-const REVISION: u8 = 5;
+const REVISION: u8 = 6;
 /// Records are written as they are in memory, so their sizes are part of the format.
 const FORMAT: [u8; 8] = [
     REVISION,
@@ -230,6 +230,7 @@ pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
         out.text(&source.name);
         out.u8(u8::from(source.complete));
         out.optional_text(source.freshness.as_deref());
+        out.optional_i64(source.synced_at);
     }
     out.slice(
         &snapshot
@@ -333,6 +334,7 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
                 name: input.text()?,
                 complete: input.u8()? != 0,
                 freshness: input.optional_text()?,
+                synced_at: input.optional_i64()?,
             },
         );
     }

@@ -465,8 +465,20 @@ async fn analyze_uri(
 ) -> Result<LoudnessAnalysis, String> {
     let request = StreamRequest::new(media_uri, StreamQuality::Original);
     let owner = Arc::clone(source_owner);
+    let key = catalog
+        .track_keys(&[media_uri.to_owned()], &library::ReadCancellation::new())
+        .await
+        .map_err(|error| error.to_string())?
+        .pop()
+        .ok_or("The track is not in the library")?;
+    let playable = catalog
+        .playable(key, "original")
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or("The track is not in the library")?;
     let stream = prepare_stream(
         catalog,
+        &playable,
         request,
         Some(configuration),
         None,

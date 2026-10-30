@@ -49,7 +49,7 @@ impl Catalog {
             return Ok(Some(LocalMediaLocation::File(path)));
         }
         let path: Option<String> = sqlx::query_scalar(
-            "SELECT access.source_path FROM tracks t JOIN sources source USING(source_key) JOIN local_track_access access USING(track_key) WHERE media_uri=?1 AND source.kind='local'",
+            "SELECT file.path FROM tracks t JOIN sources source USING(source_key) JOIN track_details details USING(track_key) JOIN files file ON file.source_key=t.source_key AND file.path=details.source_path WHERE media_uri=?1 AND source.kind='local'",
         )
         .bind(uri)
         .fetch_optional(&mut *reader)

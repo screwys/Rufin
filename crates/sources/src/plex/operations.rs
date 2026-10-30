@@ -247,7 +247,7 @@ impl PlexSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
-        if complete_membership && observation.observed.is_none() {
+        if complete_membership && !observation.is_walk() {
             observation.start_observation().await?;
         }
         let object = match collection {

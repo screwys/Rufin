@@ -178,7 +178,8 @@ pub(super) fn track_from_item(
             .map(|image| crate::native_artwork_binding(source, image))
             .transpose()?,
         source_path,
-        loudness_analysis_key: *audio.finalize().as_bytes(),
+        audio_revision: Some(*audio.finalize().as_bytes()),
+        audio_hash: Some(*audio.finalize().as_bytes()),
         ..Default::default()
     }))
 }

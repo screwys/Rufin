@@ -163,7 +163,8 @@ impl Pending {
                 | Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Downloads { .. }
-                | Scope::Lyrics { .. } => {}
+                | Scope::Lyrics { .. }
+                | Scope::Analysis { .. } => {}
             }
         }
     }

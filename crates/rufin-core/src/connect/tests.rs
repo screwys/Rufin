@@ -115,8 +115,15 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     )
                     .await
                     .unwrap();
+                let playable = b
+                    .catalog
+                    .playable(rows[0].track.track_key, "original")
+                    .await
+                    .unwrap()
+                    .unwrap();
                 let stream = crate::playback::prepare_stream(
                     &b.catalog,
+                    &playable,
                     playback::StreamRequest::original(&uri),
                     None,
                     Some((b.as_ref(), rows[0].as_ref())),
@@ -189,23 +196,15 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .await
                     .unwrap();
                 a.catalog
-                    .write_local_access(
-                        None,
-                        &[&library::LocalAccessWrite {
-                            media_uri: uri.clone(),
-                            origin: library::LocalAccessOrigin::Import,
-                            path: path.to_string_lossy().into_owned(),
-                            root: root.path().to_string_lossy().into_owned(),
-                            relative_path: format!("outside-{index}.flac"),
-                            access_uri: uri.clone(),
-                            size_bytes: bytes.len() as i64,
-                            mtime_ns: 1,
-                            device_id: None,
-                            inode: None,
-                            parser_version: 18,
-                            loudness_analysis_key: None,
-                        }],
-                    )
+                    .write_local_locators(&[library::LocalLocatorWrite {
+                        source_id: None,
+                        media_uri: uri.clone(),
+                        origin: "import".into(),
+                        path: path.to_string_lossy().into_owned(),
+                        root: root.path().to_string_lossy().into_owned(),
+                        relative_path: format!("outside-{index}.flac"),
+                        access_uri: uri.clone(),
+                    }])
                     .await
                     .unwrap();
                 shared.push((uri, bytes));
@@ -601,7 +600,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 .await
                 .unwrap();
             observation
-                .complete_source_observation(&[], None)
+                .complete_source_observation(&[], None, None)
                 .await
                 .unwrap();
             drop(observation);
@@ -769,14 +768,13 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     role: "original".into(),
                     language: String::new(),
                     script: String::new(),
-                    input: [0; 32],
                 })
                 .await
                 .is_none(),
                 "cache reads do not acquire the available sidecar"
             );
             b.peer_access()
-                .cache_assets(&b.catalog, &uri, [0; 32])
+                .cache_assets(&b.catalog, &uri)
                 .await
                 .unwrap();
             let cached = b
@@ -786,7 +784,6 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     "original",
                     "",
                     "",
-                    [0; 32],
                     "source",
                     &library::ReadCancellation::new(),
                 )
@@ -809,7 +806,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 let payload = bundle.cache_payload().unwrap();
                 a.catalog
                     .write_lyrics_cache(
-                        cached_uri, authority, "original", "", "", [7; 32], &payload, 42,
+                        cached_uri, authority, "original", "", "", &payload, 42,
                     )
                     .await
                     .unwrap();
@@ -819,11 +816,9 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     role: "original".into(),
                     language: String::new(),
                     script: String::new(),
-                    input: [7; 32],
                 };
                 let shared = b.fetch_cached_lyrics(query.clone()).await.unwrap();
                 assert_eq!(shared.lyrics, payload);
-                assert_eq!(shared.cache_input_digest, [7; 32]);
                 assert_eq!(shared.updated_at, 42);
                 assert_eq!(
                     lyrics::LyricsBundle::from_cache_payload(&shared.lyrics)
@@ -831,16 +826,6 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                         .origin,
                     origin
                 );
-                if authority == "source" {
-                    assert!(
-                        b.fetch_cached_lyrics(LyricsCacheQuery {
-                            input: [8; 32],
-                            ..query
-                        })
-                        .await
-                        .is_none()
-                    );
-                }
             }
             let documents = a.active().await.unwrap().documents.clone();
             let mut after = 0;
@@ -1104,7 +1089,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             observation.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
             observation.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
             observation.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
-            observation.complete_source_observation(&[], Some(&freshness)).await.unwrap();
+            observation.complete_source_observation(&[], Some(&freshness), None).await.unwrap();
             drop(observation);
             let shared_uris = vec![library::source_entity_uri(&music, "track", "track-0"), library::source_entity_uri(&music, "track", "track-1")];
             let (shared_playlist, shared_id) = owner.catalog.create_playlist("Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();

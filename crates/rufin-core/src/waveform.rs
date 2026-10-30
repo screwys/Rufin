@@ -236,27 +236,6 @@ impl WaveformOwner {
         Ok(())
     }
 
-    pub(crate) fn remove_source_cache(&self, source: &sources::SourceId) -> std::io::Result<()> {
-        if self
-            .current
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .as_ref()
-            .is_some_and(|current| current.key.source_id.as_ref() == Some(source))
-        {
-            self.clear();
-        }
-        let directory = self
-            .cache_root
-            .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", Md5::digest(source.as_str())));
-        match fs::remove_dir_all(directory) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
-    }
-
     fn clear(&self) {
         self.next_request.fetch_add(1, Ordering::AcqRel);
         self.current
@@ -293,7 +272,19 @@ impl WaveformOwner {
             }
             let catalog = Arc::clone(&input.catalog);
             let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
-            let stream = match prepare_stream(&input.catalog, input.request, local.as_ref(), None, move |source_id| async move {
+            let playable = match input.catalog.playable(input.media.row.track.track_key, "original").await {
+                Ok(Some(playable)) => playable,
+                result => {
+                    if let Err(error) = result {
+                        warn!(%error, media_uri = %task_key.media_uri, "failed to read the waveform's track");
+                    }
+                    if let Some(owner) = owner.upgrade() {
+                        owner.finish_failed(request, &task_key);
+                    }
+                    return;
+                }
+            };
+            let stream = match prepare_stream(&input.catalog, &playable, input.request, local.as_ref(), None, move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
                 }).await.map_err(|error| error.to_string())?
@@ -558,38 +549,5 @@ mod tests {
         .expect("cached waveform publication");
         assert_eq!(projection.media_id, Some(media_id));
         assert_eq!(projection.peaks.as_deref(), Some(&peaks));
-    }
-
-    #[tokio::test]
-    async fn removing_one_source_cache_preserves_other_waveforms() {
-        let directory = tempfile::tempdir().expect("Waveform cache directory");
-        let first_source = sources::SourceId::new("first");
-        let second_source = sources::SourceId::new("second");
-        let first = directory
-            .path()
-            .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", Md5::digest(first_source.as_str())));
-        let second = directory
-            .path()
-            .join(CACHE_DIRECTORY)
-            .join(format!("{:x}", Md5::digest(second_source.as_str())));
-        fs::create_dir_all(&first).expect("first source cache");
-        fs::create_dir_all(&second).expect("second source cache");
-        fs::write(first.join("track.json"), b"waveform").expect("first waveform");
-        fs::write(second.join("track.json"), b"waveform").expect("second waveform");
-        let (events, _) = async_channel::unbounded();
-        let owner = WaveformOwner::new(
-            tokio::runtime::Handle::current(),
-            events,
-            directory.path().to_path_buf(),
-            true,
-        );
-
-        owner
-            .remove_source_cache(&first_source)
-            .expect("remove first source Waveforms");
-
-        assert!(!first.exists());
-        assert!(second.exists());
     }
 }

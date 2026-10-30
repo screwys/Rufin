@@ -16,9 +16,8 @@ use super::*;
 use crate::metadata::{track_details_value, track_metadata_sql};
 use crate::tags::{TAG_TABLES, TagKind};
 use crate::{
-    AlbumKey, ArtistCredit, ArtistKey, ArtistMetadata, HomeEntryInput, LocalFileKey,
-    NativeUserState, TagMetadata, TagReference, TrackKey, TrackMetadata, TrackObservation,
-    TrackReference,
+    AlbumKey, ArtistCredit, ArtistKey, ArtistMetadata, HomeEntryInput, NativeUserState,
+    TagMetadata, TagReference, TrackKey, TrackMetadata, TrackObservation, TrackReference,
 };
 
 const PAGE: usize = 128;
@@ -103,12 +102,11 @@ pub(super) async fn stored_json(
     Ok(stored)
 }
 
-/// What the Store holds of tracks beside their rows: the whole metadata JSON, the details JSON
-/// and the reported loudness key.
+/// What the Store holds of tracks beside their rows: the whole metadata JSON and the details
+/// JSON.
 struct StoredTrack {
     metadata: Value,
     details: Value,
-    loudness: Vec<u8>,
 }
 
 async fn stored_tracks(
@@ -117,15 +115,15 @@ async fn stored_tracks(
 ) -> LibraryResult<HashMap<i64, StoredTrack>> {
     let mut stored = HashMap::new();
     for page in keys.chunks(PAGE) {
-        let rows: Vec<(i64, String, Option<String>, Option<Vec<u8>>)> =
+        let rows: Vec<(i64, String, Option<String>)> =
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "SELECT track.track_key,{},json(details.metadata),details.source_loudness_analysis_key FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))",
+                "SELECT track.track_key,{},json(details.metadata) FROM tracks track LEFT JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))",
                 track_metadata_sql("track", "details")
             )))
             .bind(serde_json::to_string(page)?)
             .fetch_all(write.connection().await?)
             .await?;
-        for (key, metadata, details, loudness) in rows {
+        for (key, metadata, details) in rows {
             stored.insert(
                 key,
                 StoredTrack {
@@ -134,7 +132,6 @@ async fn stored_tracks(
                         .map(|details| serde_json::from_str(&details))
                         .transpose()?
                         .unwrap_or_else(|| Value::Object(Map::new())),
-                    loudness: loudness.unwrap_or_else(|| vec![0; 32]),
                 },
             );
         }
@@ -150,15 +147,13 @@ pub(super) fn dedupe<T: Eq + std::hash::Hash + Copy>(items: impl IntoIterator<It
         .collect()
 }
 
-/// What a batch staged, for album resolution and loudness.
+/// What a batch staged, for album resolution.
 #[derive(Default)]
 pub(crate) struct Touched {
     /// Records whose facts changed: their albums are resolved again.
     pub(crate) tracks: BTreeSet<i64>,
     pub(crate) albums: BTreeSet<i64>,
     pub(crate) artists: BTreeSet<i64>,
-    /// Albums whose member audio changed, so their loudness is analysed again.
-    pub(crate) audio: BTreeSet<i64>,
 }
 
 /// The kinds providers name in completion and removal.
@@ -414,38 +409,12 @@ async fn index_track_credits(
     Ok(())
 }
 
-/// The best local access loudness key of each URI, mapping first.
-async fn access_loudness(
-    write: &mut Write<'_>,
-    uris: &[String],
-) -> LibraryResult<HashMap<String, Vec<u8>>> {
-    let rows: Vec<(String, Option<Vec<u8>>)> = sqlx::query_as("SELECT input.value,(SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=input.value ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1) FROM json_each(?1) input")
-        .bind(serde_json::to_string(uris)?).fetch_all(write.connection().await?).await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|(uri, key)| Some((uri, key?)))
-        .collect())
-}
-
-async fn local_files(
-    write: &mut Write<'_>,
-    source: SourceKey,
-    paths: &[&str],
-) -> LibraryResult<HashMap<String, LocalFileKey>> {
-    if paths.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let rows: Vec<(String, LocalFileKey)> = sqlx::query_as("SELECT path,local_file_key FROM local_files WHERE source_key=?1 AND path IN(SELECT value FROM json_each(?2))")
-        .bind(source).bind(serde_json::to_string(paths)?).fetch_all(write.connection().await?).await?;
-    Ok(rows.into_iter().collect())
-}
-
 /// Tracks whose observed file keeps its picture when an observation names none.
 async fn keeps_file_pictures(write: &mut Write<'_>, tracks: &[i64]) -> LibraryResult<HashSet<i64>> {
     if tracks.is_empty() {
         return Ok(HashSet::new());
     }
-    let keys: Vec<i64> = sqlx::query_scalar("SELECT DISTINCT location.track_key FROM local_track_access location JOIN observed_local_files physical ON physical.source_key=location.source_key AND physical.path=location.source_path WHERE location.track_key IN(SELECT value FROM json_each(?1)) AND(physical.artist_pictures IS NULL OR physical.picture_index>=0)")
+    let keys: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM tracks track JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path WHERE track.track_key IN(SELECT value FROM json_each(?1)) AND(file.artist_pictures IS NULL OR file.picture_index>=0)")
         .bind(serde_json::to_string(tracks)?).fetch_all(write.connection().await?).await?;
     Ok(keys.into_iter().collect())
 }
@@ -484,7 +453,6 @@ struct Candidate<'r> {
     metadata: TrackMetadata,
     /// The details JSON, when it differs from the stored one.
     details: Option<Value>,
-    loudness: Vec<u8>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -523,7 +491,6 @@ async fn track_page(
         }
     }
     write.insert(stubs).await?;
-    let access = access_loudness(write, &uris).await?;
 
     // A known identity that moved to another URI gives it up first, so the new URI can take it.
     let mut moved = false;
@@ -590,20 +557,23 @@ async fn track_page(
         track.cue_path.clone_from(&row.cue_path);
         track.cue_start = row.cue_start_millis;
         track.cue_end = row.cue_end_millis;
+        // The audio hash stays while the audio revision does, unless the row knows it.
+        let revision = row.audio_revision.map(|revision| revision.to_vec());
+        track.audio_hash = match row.audio_hash {
+            Some(hash) => Some(hash.to_vec()),
+            None if track.audio_revision == revision => track.audio_hash.take(),
+            None => None,
+        };
+        track.audio_revision = revision;
         track.first_seen = track.first_seen.or(row.first_seen_at);
         track.indexed |= admit;
         track.native |= authoritative;
-        let loudness = access
-            .get(uri)
-            .cloned()
-            .unwrap_or_else(|| row.loudness_analysis_key.to_vec());
         candidates.push(Candidate {
             row,
             before,
             track,
             metadata: TrackMetadata::default(),
             details: None,
-            loudness,
         });
     }
 
@@ -691,23 +661,6 @@ async fn track_page(
             artwork_only.push(candidate);
         }
     }
-    for candidate in &accepted {
-        let audio = candidate.before.as_ref().is_none_or(|before| {
-            before.album != candidate.track.album
-                || (admit && !before.indexed)
-                || (before.cue_start, before.cue_end)
-                    != (candidate.track.cue_start, candidate.track.cue_end)
-                || stored
-                    .get(&before.key.raw())
-                    .is_none_or(|stored| stored.loudness != candidate.row.loudness_analysis_key)
-        });
-        if audio {
-            let old = candidate.before.as_ref().and_then(|before| before.album);
-            for album in old.into_iter().chain(candidate.track.album) {
-                touched.audio.insert(album.raw());
-            }
-        }
-    }
     let mut credited = accepted
         .iter()
         .map(|candidate| (candidate.track.clone(), candidate.metadata.clone()))
@@ -715,8 +668,6 @@ async fn track_page(
     index_track_credits(write, source, source_id, &mut credited).await?;
     let mut inserted = Vec::new();
     for (candidate, (mut track, _)) in accepted.into_iter().zip(credited) {
-        track.writes.source_loudness = Some(candidate.row.loudness_analysis_key.to_vec());
-        track.writes.loudness = Some(candidate.loudness);
         track.writes.metadata = candidate.details;
         for album in candidate
             .before
@@ -745,12 +696,7 @@ async fn track_page(
         write.see(&track);
     }
 
-    // Every current track of the page: its file, folders, native state and lyrics.
-    let paths = page
-        .iter()
-        .filter_map(|row| row.cue_path.as_deref().or(row.source_path.as_deref()))
-        .collect::<Vec<_>>();
-    let files = local_files(write, source, &paths).await?;
+    // Every current track of the page: its folders, native state and lyrics.
     let mut lyrics = Vec::new();
     for (row, uri) in page.iter().zip(&uris) {
         let Some(mut track) = find::<Track>(write, source, None, &row.object_id).await? else {
@@ -759,9 +705,6 @@ async fn track_page(
         if write.newer(Family::Track, track.key.raw()) {
             continue;
         }
-        track.local_file = track
-            .member_path()
-            .and_then(|path| files.get(path).copied());
         if let Some(folders) = &row.folders {
             let mut keys = Vec::new();
             for folder in folders {
@@ -775,45 +718,13 @@ async fn track_page(
             && authoritative
             && let Some(payload) = &row.source_lyrics
         {
-            lyrics.push((uri.clone(), row.source_lyrics_input, payload.clone()));
+            lyrics.push((uri.as_str(), payload.as_str()));
         }
         track.state.merge(&row.user_data);
         write.see(&track);
         write.put(track);
     }
-    let audio = touched
-        .audio
-        .iter()
-        .copied()
-        .map(AlbumKey::from_raw)
-        .collect::<Vec<_>>();
-    crate::loudness::invalidate_album_audio(write.connection().await?, &audio, true).await?;
-    touched.audio.clear();
-    source_lyrics(write, &lyrics).await
-}
-
-/// Source lyrics replace the stored source lyrics of the same track.
-async fn source_lyrics(
-    write: &mut Write<'_>,
-    rows: &[(String, [u8; 32], String)],
-) -> LibraryResult<()> {
-    for (uri, input, payload) in rows {
-        let connection = write.connection().await?;
-        let removed = sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority='source' AND (role<>'original' OR language<>'' OR script<>'' OR json_array_length(?2,'$.bundle.content.Documents')=0)")
-            .bind(uri).bind(payload).execute(&mut *connection).await?.rows_affected();
-        let written = sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at)
-            SELECT ?1,'source','original','','',?2,?3,CAST(strftime('%s','now') AS INTEGER)
-            WHERE json_array_length(?3,'$.bundle.content.Documents') IS NOT 0
-            ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET
-                cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at
-            WHERE lyrics_cache.lyrics IS NOT excluded.lyrics OR lyrics_cache.cache_input_digest IS NOT excluded.cache_input_digest")
-            .bind(uri).bind(input.as_slice()).bind(payload)
-            .execute(&mut *connection).await?.rows_affected();
-        if removed != 0 || written != 0 {
-            write.changed(Scope::Lyrics { uri: uri.clone() });
-        }
-    }
-    Ok(())
+    crate::lyrics::put_source_lyrics_on(write, &lyrics).await
 }
 
 /// Merges the favorites, ratings and play counts a source reports into its own rows.
@@ -1226,7 +1137,7 @@ pub(crate) async fn remove_items(
         }
         Kind::Track => {
             let tracks = withdraw::<Track>(write, source, None, ids).await?;
-            withdrawn_tracks(write, &tracks, touched).await?;
+            withdrawn_tracks(&tracks, touched).await?;
         }
         Kind::Album => {
             let albums = withdraw::<Album>(write, source, None, ids).await?;
@@ -1260,17 +1171,12 @@ async fn withdraw_playlists(write: &mut Write<'_>, keys: &[i64]) -> LibraryResul
     Ok(())
 }
 
-/// The albums of withdrawn tracks are resolved and analysed again.
-async fn withdrawn_tracks(
-    write: &mut Write<'_>,
-    tracks: &[Track],
-    touched: &mut Touched,
-) -> LibraryResult<()> {
+/// The albums of withdrawn tracks are resolved again.
+async fn withdrawn_tracks(tracks: &[Track], touched: &mut Touched) -> LibraryResult<()> {
     let albums = tracks
         .iter()
         .filter_map(|track| track.album)
         .collect::<Vec<_>>();
-    crate::loudness::invalidate_album_audio(write.connection().await?, &albums, true).await?;
     touched
         .albums
         .extend(albums.iter().map(|album| album.raw()));
@@ -1309,7 +1215,7 @@ async fn complete_kind(
     match kind {
         Kind::Track => {
             let tracks = withdraw_unseen::<Track>(write, keys).await?;
-            withdrawn_tracks(write, &tracks, touched).await?;
+            withdrawn_tracks(&tracks, touched).await?;
         }
         Kind::Album => touched.albums.extend(
             withdraw_unseen::<Album>(write, keys)
@@ -1579,16 +1485,21 @@ impl Catalog {
         .fetch_all(write.connection().await?)
         .await?;
         write.set_states(states);
-        for table in ["lyrics_cache", "outbox"] {
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE {owned}"
-            )))
-            .bind(&prefixes)
-            .bind(key)
-            .execute(write.connection().await?)
-            .await?;
-        }
-        sqlx::query("DELETE FROM local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN sources identity USING(source_key) WHERE identity.object_id=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.source_key IS NOT ?2)").bind(source_id.as_str()).bind(key).execute(write.connection().await?).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM outbox WHERE {owned}"
+        )))
+        .bind(&prefixes)
+        .bind(key)
+        .execute(write.connection().await?)
+        .await?;
+        let lyrics: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM lyrics_cache WHERE {owned} RETURNING lyrics_key"
+        )))
+        .bind(&prefixes)
+        .bind(key)
+        .fetch_all(write.connection().await?)
+        .await?;
+        crate::lyrics::unindex_lyrics(write.connection().await?, &lyrics).await?;
         sqlx::query("DELETE FROM downloads WHERE source_id=?1")
             .bind(source_id.as_str())
             .execute(write.connection().await?)
@@ -1631,7 +1542,7 @@ impl Catalog {
             .bind(source)
             .execute(&mut *connection)
             .await?;
-        let kept: Vec<(i64, String)> = sqlx::query_as("UPDATE tracks SET source_key=NULL,object_id=NULL,album_key=NULL,local_file_key=NULL,indexed=0,hidden_since=CASE WHEN indexed THEN unixepoch() ELSE hidden_since END
+        let kept: Vec<(i64, String)> = sqlx::query_as("UPDATE tracks SET source_key=NULL,object_id=NULL,album_key=NULL,indexed=0,hidden_since=CASE WHEN indexed THEN unixepoch() ELSE hidden_since END
             WHERE source_key=?1 AND EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=tracks.track_key)
             RETURNING track_key,media_uri")
             .bind(source)
@@ -1822,7 +1733,7 @@ impl Observation<'_> {
             self.catalog.close_walk(walk);
         }
         self.memberships.clear();
-        let stamp = self.catalog.next_stamp(self.source).await?;
+        let stamp = self.catalog.next_stamp(self.source);
         self.observed = Some(stamp);
         self.walk = Some(self.catalog.open_walk(self.source));
         Ok(stamp)
@@ -1866,12 +1777,13 @@ impl Observation<'_> {
     }
 
     /// Completes the walk for these kinds: what it did not see is hidden. With no kinds the
-    /// whole listing completed: the source is marked complete and its tracks hidden longer
-    /// than the expiry are forgotten.
+    /// whole listing completed: the source is marked complete with its freshness and sync time,
+    /// and once a day its tracks hidden longer than the expiry are forgotten.
     pub async fn complete_source_observation(
         &mut self,
         kinds: &[&str],
         freshness: Option<&Freshness>,
+        synced_at: Option<i64>,
     ) -> LibraryResult<()> {
         let walk = self.walk()?;
         for name in kinds {
@@ -1886,17 +1798,23 @@ impl Observation<'_> {
             }
         }
         if kinds.is_empty() {
-            loop {
-                let mut write = self.write().await?;
-                if !expire(&mut write, self.source).await? {
-                    break;
+            if self
+                .catalog
+                .expiry_due(self.source, chrono::Utc::now().timestamp())
+            {
+                loop {
+                    let mut write = self.write().await?;
+                    if !expire(&mut write, self.source).await? {
+                        break;
+                    }
+                    self.commit(write).await?;
                 }
-                self.commit(write).await?;
             }
             let mut write = self.write().await?;
             if let Some(mut source) = write.get::<Source>(self.source.raw()).await? {
                 source.complete = true;
                 source.freshness = freshness.map(|marker| marker.as_bytes().to_vec());
+                source.synced_at = synced_at.or(source.synced_at);
                 write.put(source);
             }
             // Clients hear of a completion only when the walk changed something.
@@ -1908,6 +1826,17 @@ impl Observation<'_> {
             }
             write.commit().await?;
         }
+        Ok(())
+    }
+
+    /// A catch-up that is not a listing advances the sync time.
+    pub async fn set_synced_at(&mut self, at: i64) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        if let Some(mut source) = write.get::<Source>(self.source.raw()).await? {
+            source.synced_at = Some(at);
+            write.put(source);
+        }
+        write.commit().await?;
         Ok(())
     }
 
@@ -1985,8 +1914,6 @@ impl Observation<'_> {
                 write.put(track);
             }
             touched.albums.insert(album.key.raw());
-            crate::loudness::invalidate_album_audio(write.connection().await?, &[album.key], true)
-                .await?;
             resolve(&mut write, &mut touched).await?;
             self.commit(write).await?;
         }
@@ -2535,10 +2462,13 @@ mod tests {
             .await
             .unwrap();
         later
-            .complete_source_observation(&["track", "artist", "genre", "mood", "folder"], None)
+            .complete_source_observation(
+                &["track", "artist", "genre", "mood", "folder"],
+                None,
+                None,
+            )
             .await
             .unwrap();
-        later.complete_source_observation(&[], None).await.unwrap();
         assert_reloads(&catalog).await;
         assert_eq!(
             scalar::<String>(
@@ -2564,7 +2494,10 @@ mod tests {
             .execute(&mut *catalog.writer().await.unwrap())
             .await
             .unwrap();
-        later.complete_source_observation(&[], None).await.unwrap();
+        later
+            .complete_source_observation(&[], None, None)
+            .await
+            .unwrap();
         assert_reloads(&catalog).await;
         assert_eq!(
             scalar::<String>(
@@ -2616,33 +2549,6 @@ mod tests {
             .await,
             folded
         );
-
-        // A mapped file's loudness key replaces the reported one until the mapping goes.
-        let access = crate::LocalAccessWrite {
-            media_uri: "file:///music/y.flac".into(),
-            origin: crate::LocalAccessOrigin::Mapping,
-            path: "/mnt/music/y.flac".into(),
-            root: "/mnt/music".into(),
-            relative_path: "y.flac".into(),
-            size_bytes: 1,
-            mtime_ns: 1,
-            device_id: None,
-            inode: None,
-            parser_version: 1,
-            access_uri: "file:///mnt/music/y.flac".into(),
-            loudness_analysis_key: Some([7; 32]),
-        };
-        let source = SourceKey::from_raw(source);
-        catalog
-            .write_local_access(Some(source), &[&access])
-            .await
-            .unwrap();
-        assert_reloads(&catalog).await;
-        let loudness = "SELECT loudness_analysis_key FROM track_details JOIN tracks USING(track_key) WHERE media_uri='file:///music/y.flac'";
-        assert_eq!(scalar::<Vec<u8>>(&catalog, loudness).await, vec![7; 32]);
-        catalog.clear_mapping_access(source).await.unwrap();
-        assert_reloads(&catalog).await;
-        assert_ne!(scalar::<Vec<u8>>(&catalog, loudness).await, vec![7; 32]);
 
         // A track that moves to another URI leaves its old row without a source, still naming
         // the source's album, artists, tags and folders.
@@ -2703,7 +2609,7 @@ mod tests {
             format!("{moved},{held}")
         );
         let snapshot = catalog.snapshot();
-        assert!(snapshot.source(source).is_none());
+        assert!(snapshot.source(SourceKey::from_raw(source)).is_none());
         assert_eq!(snapshot.albums.iter().count(), 0);
         assert_eq!(snapshot.artists.iter().count(), 0);
         assert_eq!(snapshot.tags.iter().count(), 0);

@@ -86,6 +86,7 @@ where
     };
     let library = Arc::new(catalog);
     library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
+    library.set_cover_lookup(stored.ui.application.external_metadata_enabled);
     library.set_use_sort_tags(stored.ui.application.use_sort_tags);
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
@@ -244,6 +245,7 @@ where
         move |previous, current, credentials_changed| {
             settings_library
                 .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
+            settings_library.set_cover_lookup(current.ui.application.external_metadata_enabled);
             settings_library.set_use_sort_tags(current.ui.application.use_sort_tags);
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode

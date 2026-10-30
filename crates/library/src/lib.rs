@@ -54,6 +54,8 @@ mod playlist_format;
 mod playlist_links;
 pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
 mod pins;
+mod playable;
+pub use playable::{Gains, Playable, PlayableFile};
 mod playlists;
 pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
@@ -111,9 +113,9 @@ pub use keys::{
     source_entity_uri, source_id_for_uri,
 };
 pub use local::{
-    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalAccessOrigin,
-    LocalAccessWrite, LocalFileKind, LocalFileRow, LocalFileState, LocalFileWrite,
-    LocalLocatorWrite, LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
+    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileRow,
+    LocalFileState, LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
+    ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;

@@ -10,67 +10,11 @@ use crate::{
     SearchResults, TrackKey,
 };
 
-const LYRICS_SEARCH_SCHEMA: &str = r#"
-CREATE TABLE lyrics_documents (
-    document_key INTEGER PRIMARY KEY,
-    media_uri TEXT NOT NULL,
-    authority TEXT NOT NULL,
-    role TEXT NOT NULL,
-    language TEXT NOT NULL,
-    script TEXT NOT NULL,
-    ordinal INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    UNIQUE(media_uri, authority, role, language, script, ordinal),
-    FOREIGN KEY(media_uri, authority, role, language, script)
-        REFERENCES lyrics_cache(media_uri, authority, role, language, script)
-        ON DELETE CASCADE ON UPDATE CASCADE
-) STRICT;
-
--- Only the display text of each version-4 lyric document is searchable.
-CREATE VIEW lyrics_search_input AS
-SELECT cache.rowid cache_rowid, cache.media_uri, cache.authority, cache.role,
-    cache.language, cache.script, CAST(document.key AS INTEGER) ordinal,
-    (SELECT group_concat(text, char(10)) FROM (
-        SELECT replace(replace(json_extract(line.value, '$.text'), char(1), ''), char(2), '') text
-        FROM json_each(document.value, '$.lines') line
-        ORDER BY CAST(line.key AS INTEGER)
-    )) text
-FROM lyrics_cache cache,
-    json_each(CASE WHEN json_valid(cache.lyrics) THEN
-        CASE WHEN json_extract(cache.lyrics, '$.version') = 4
-            THEN json_extract(cache.lyrics, '$.bundle.content.Documents') END
-        END) document;
-
-CREATE VIRTUAL TABLE lyrics_fts USING fts5(
-    text, content='lyrics_documents', content_rowid='document_key',
-    tokenize='rufin_lyrics', prefix='3'
-);
-
-CREATE TRIGGER lyrics_documents_insert AFTER INSERT ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
-END;
-CREATE TRIGGER lyrics_documents_delete AFTER DELETE ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
-END;
-CREATE TRIGGER lyrics_documents_update AFTER UPDATE OF text ON lyrics_documents BEGIN
-    INSERT INTO lyrics_fts(lyrics_fts, rowid, text) VALUES('delete', old.document_key, old.text);
-    INSERT INTO lyrics_fts(rowid, text) VALUES(new.document_key, new.text);
-END;
-
-CREATE TRIGGER lyrics_search_insert AFTER INSERT ON lyrics_cache BEGIN
-    INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text)
-        SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input
-        WHERE cache_rowid=new.rowid AND length(trim(text))>0;
-END;
-CREATE TRIGGER lyrics_search_update AFTER UPDATE OF lyrics ON lyrics_cache
-WHEN old.lyrics IS NOT new.lyrics BEGIN
-    DELETE FROM lyrics_documents WHERE media_uri=new.media_uri AND authority=new.authority
-        AND role=new.role AND language=new.language AND script=new.script;
-    INSERT INTO lyrics_documents(media_uri,authority,role,language,script,ordinal,text)
-        SELECT media_uri,authority,role,language,script,ordinal,text FROM lyrics_search_input
-        WHERE cache_rowid=new.rowid AND length(trim(text))>0;
-END;
-"#;
+/// One row per display document of a lyrics row, written by the lyrics Write. It needs the
+/// `rufin_lyrics` tokenizer, so it stays outside the Store schema.
+const LYRICS_SEARCH_SCHEMA: &str = "CREATE VIRTUAL TABLE lyrics_fts USING fts5(
+    text, content='', contentless_delete=1, tokenize='rufin_lyrics', prefix='3'
+)";
 
 pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql(LYRICS_SEARCH_SCHEMA)
@@ -96,10 +40,10 @@ impl Catalog {
         for expression in expressions {
             // Read in index order, stopping after a page of distinct tracks.
             let mut rows = sqlx::query_as::<_, (i64, String)>(
-                "SELECT track.track_key,snippet(lyrics_fts,0,char(1),char(2),'…',32)
+                "SELECT track.track_key,''
                      FROM lyrics_fts
-                     JOIN lyrics_documents document ON document.document_key=lyrics_fts.rowid
-                     JOIN tracks track ON track.media_uri=document.media_uri
+                     JOIN lyrics_cache lyrics ON lyrics.lyrics_key=lyrics_fts.rowid>>2
+                     JOIN tracks track ON track.media_uri=lyrics.media_uri
                      WHERE lyrics_fts MATCH ?1
                        AND track.track_key NOT IN(SELECT value FROM json_each(?2))
                      ORDER BY lyrics_fts.rowid",

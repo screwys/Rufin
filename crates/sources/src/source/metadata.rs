@@ -278,13 +278,6 @@ impl NativeFile {
         }
     }
 
-    fn analysis_key(&self, revision: Option<&str>) -> [u8; 32] {
-        let mut hash = blake3::Hasher::new();
-        hash.update(self.media_uri.as_bytes());
-        hash.update(revision.unwrap_or_default().as_bytes());
-        *hash.finalize().as_bytes()
-    }
-
     pub(crate) async fn prepare(&self, expected: Option<&str>) -> Result<PreparedFile, Error> {
         if self.cue {
             return Err(Error::Unavailable);
@@ -415,28 +408,11 @@ impl PreparedFile {
         Ok(self)
     }
 
-    pub(crate) async fn preserve_fingerprint(&self, catalog: &Catalog) -> Result<(), Error> {
-        let previous = self.target.analysis_key(self.revision.as_deref());
-        let current = self
-            .target
-            .analysis_key(self.target.revision().await?.as_deref());
-        catalog
-            .preserve_fingerprint(&self.target.media_uri, &previous, &current)
-            .await
-            .map_err(failure)
-    }
-
     async fn read_catalog(
         &self,
         source: &Source,
         observation: &library::Observation<'_>,
     ) -> Result<SavedFile, Error> {
-        self.preserve_fingerprint(observation.catalog).await?;
-        let previous = observation
-            .catalog
-            .audio_analysis_key(&self.target.media_uri)
-            .await
-            .map_err(failure)?;
         let result = async {
             let (observation, facts) = match &self.target.location {
                 FileLocation::Remote { source, path } => {
@@ -475,12 +451,7 @@ impl PreparedFile {
             if source.is_retired() {
                 return Err(crate::SourceError::Cancelled.into());
             }
-            Ok::<_, Error>(SavedFile {
-                uri: self.target.media_uri.clone(),
-                observation,
-                previous,
-                facts,
-            })
+            Ok::<_, Error>(SavedFile { observation, facts })
         }
         .await;
         result.map_err(|error| Error::SavedRefreshFailed(error.to_string()))
@@ -497,10 +468,8 @@ impl PreparedFile {
 }
 
 struct SavedFile {
-    uri: String,
     observation: Option<(library::LocalFileWrite, Vec<String>)>,
     facts: library::TrackObservation,
-    previous: Option<[u8; 32]>,
 }
 
 async fn publish_saved_files(
@@ -512,13 +481,9 @@ async fn publish_saved_files(
     }
     let mut files = Vec::new();
     let mut tracks = Vec::new();
-    let mut analysis = Vec::new();
     for saved in pending.drain(..) {
         if let Some(file) = saved.observation {
             files.push(file);
-        }
-        if let Some(previous) = saved.previous {
-            analysis.push((saved.uri, previous));
         }
         tracks.push(saved.facts);
     }
@@ -526,13 +491,6 @@ async fn publish_saved_files(
         .write_file_observations(&files, tracks, true)
         .await
         .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
-    for (uri, previous) in analysis {
-        observation
-            .catalog
-            .preserve_audio_analysis(&uri, &previous)
-            .await
-            .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
-    }
     Ok(())
 }
 
@@ -600,14 +558,6 @@ impl FileEditSession {
         }
     }
 
-    pub async fn audio_revision(&self) -> Result<Option<[u8; 32]>, Error> {
-        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
-        Ok(file
-            .revision()
-            .await?
-            .map(|revision| file.analysis_key(Some(&revision))))
-    }
-
     pub fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
         self.single
             .as_ref()
@@ -634,9 +584,7 @@ impl FileEditSession {
                 .await;
         }
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
-        if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
-            saved.preserve_fingerprint(catalog).await?;
-        }
+        file.save_lyrics(text, sidecar, || false).await?;
         file.publish_direct(catalog).await?;
         file.revision().await
     }
@@ -998,9 +946,6 @@ impl FileEditSession {
                                 Err(error) => return Err(error),
                             };
                             saved = true;
-                            if mapped || self.source.is_none() {
-                                committed.preserve_fingerprint(catalog).await?;
-                            }
                             if !mapped && let Some(source) = &self.source {
                                 pending.push(
                                     committed
@@ -1271,60 +1216,46 @@ impl Source {
         .await
     }
 
-    pub async fn lyrics_storage(
+    /// Where the lyrics of a playable can be saved, from its row. Reads no SQL.
+    pub fn lyrics_storage(
         self: &Arc<Self>,
-        catalog: &Catalog,
-        uri: &str,
+        playable: &library::Playable,
     ) -> Vec<crate::LyricsStorage> {
-        let Ok(Some(row)) = catalog.track(&(uri), &ReadCancellation::new()).await else {
-            return Vec::new();
-        };
-        if row.access.cue_path.is_some() {
+        if playable.cue_path.is_some() {
             return Vec::new();
         }
         if let Implementation::JellyfinEmby(provider) = &self.implementation
             && provider.kind == crate::ServerKind::Jellyfin
         {
-            return if row.object_id.is_some() {
+            return if playable.object_id.is_some() {
                 vec![crate::LyricsStorage::Server]
             } else {
                 Vec::new()
             };
         }
-        let Ok(original) = catalog.original_file(uri).await else {
-            return Vec::new();
-        };
         let Ok(file) = NativeFile::resolve(
             self,
-            &row.media_uri,
-            row.access.source_path.as_deref(),
-            row.metadata.source_format.as_deref(),
-            row.access.cue_path.is_some(),
-            original,
+            &playable.media_uri,
+            playable.source_path.as_deref(),
+            playable.format.as_deref(),
+            false,
+            playable.locator.clone(),
         ) else {
             return Vec::new();
         };
         file.lyrics_storage()
     }
 
-    pub async fn lyrics_writable(
-        self: &Arc<Self>,
-        catalog: &Catalog,
-        uri: &str,
-        sidecar: bool,
-    ) -> bool {
-        self.lyrics_storage(catalog, uri)
-            .await
-            .into_iter()
-            .any(|storage| {
-                storage == crate::LyricsStorage::Server
-                    || storage
-                        == if sidecar {
-                            crate::LyricsStorage::Sidecar
-                        } else {
-                            crate::LyricsStorage::Embedded
-                        }
-            })
+    pub fn lyrics_writable(self: &Arc<Self>, playable: &library::Playable, sidecar: bool) -> bool {
+        self.lyrics_storage(playable).into_iter().any(|storage| {
+            storage == crate::LyricsStorage::Server
+                || storage
+                    == if sidecar {
+                        crate::LyricsStorage::Sidecar
+                    } else {
+                        crate::LyricsStorage::Embedded
+                    }
+        })
     }
 
     pub async fn write_lyrics(
@@ -1366,7 +1297,6 @@ impl Source {
                     .save_lyrics(lyrics, sidecar, || self.is_retired())
                     .await?
                 {
-                    committed.preserve_fingerprint(catalog).await?;
                     if matches!(
                         self.implementation,
                         Implementation::Local(_) | Implementation::Files(_)
@@ -1385,11 +1315,8 @@ impl Source {
                 self.implementation,
                 Implementation::Local(_) | Implementation::Files(_)
             ) {
-                let input = self
-                    .file_source(row.access.source_path.as_deref())
-                    .map_or([0; 32], |source| source.lyrics_input());
                 let mut bundle = self.read_lyrics(catalog, uri).await.map_err(failure)?;
-                super::cache_native_lyrics(catalog, uri, input, &mut bundle)
+                super::cache_native_lyrics(catalog, uri, &mut bundle)
                     .await
                     .map_err(failure)?;
             } else {
@@ -1609,7 +1536,7 @@ impl NativeFile {
                 .write_direct_track_metadata(&self.media_uri, &track.track.metadata)
                 .await
                 .map_err(failure)?;
-            super::cache_native_lyrics(catalog, &self.media_uri, [0; 32], &mut track.lyrics)
+            super::cache_native_lyrics(catalog, &self.media_uri, &mut track.lyrics)
                 .await
                 .map_err(failure)?;
         }

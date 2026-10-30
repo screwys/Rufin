@@ -647,19 +647,6 @@ impl SourceOwner {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(source_id);
         self.shared.downloads.clear(source_id.clone(), false);
-        if let Err(error) = self
-            .shared
-            .catalog
-            .clear_source_waveform_cache(source_id)
-            .await
-        {
-            self.shared.warn_nonfatal(&error.to_string());
-        }
-        if let Ok(playback) = self.shared.playback() {
-            if let Err(error) = playback.remove_waveform_cache(source_id) {
-                self.shared.warn_nonfatal(&error);
-            }
-        }
         if let Err(error) = self.shared.artwork.invalidate_source(source_id) {
             self.shared.warn_nonfatal(&error.to_string());
         }
@@ -786,7 +773,6 @@ impl SourceOwner {
                     selected.source_key,
                     source.as_ref().ok().cloned(),
                     selected.music_folder_key,
-                    owner.source_input_digest(&source_id),
                 )
                 .await
             {
@@ -811,7 +797,12 @@ impl SourceOwner {
                 owner.shared.runtime.spawn(async move {
                     if !cached_start {
                         let _ = refresh_owner
-                            .refresh_now(&source_id, &refresh_source, false, true)
+                            .refresh_now(
+                                &source_id,
+                                &refresh_source,
+                                false,
+                                sources::Refresh::Changed,
+                            )
                             .await;
                     } else if let Some(token) =
                         refresh_owner.shared.begin_refresh(&source_id, false, false)
@@ -822,8 +813,14 @@ impl SourceOwner {
                                 .refresh_progress(&source_id, &token, value)
                         };
                         let result = refresh_source
-                            .catch_up_local(&refresh_owner.shared.catalog, &progress, token.clone())
-                            .await;
+                            .acquire_catalog(
+                                &refresh_owner.shared.catalog,
+                                &progress,
+                                token.clone(),
+                                sources::Refresh::Changed,
+                            )
+                            .await
+                            .map(|_| ());
                         refresh_owner
                             .finish_source_refresh(&source_id, &token, result)
                             .await;
@@ -917,7 +914,6 @@ impl SourceOwner {
                         selected.source_key,
                         Some(source),
                         selected.music_folder_key,
-                        owner.source_input_digest(&selected.source_id),
                     )
                     .await
                 {
@@ -1027,9 +1023,12 @@ impl SourceOwner {
                     warn!(%error, "bounded source change failed; refreshing after feed boundary loss");
                 }
             }
-            let _ = owner
-                .refresh_now(&source_id, &source, true, !source.needs_periodic_refresh())
-                .await;
+            let refresh = if source.needs_periodic_refresh() {
+                sources::Refresh::Check
+            } else {
+                sources::Refresh::Changed
+            };
+            let _ = owner.refresh_now(&source_id, &source, true, refresh).await;
         }
     }
 
@@ -1038,7 +1037,7 @@ impl SourceOwner {
         source_id: &SourceId,
         source: &Arc<Source>,
         automatic: bool,
-        force: bool,
+        refresh: sources::Refresh,
     ) -> Result<(), String> {
         if source.is_retired() {
             return Err(SourceError::Cancelled.to_string());
@@ -1051,7 +1050,7 @@ impl SourceOwner {
         }
         let progress = |value| self.shared.refresh_progress(source_id, &token, value);
         let outcome = source
-            .acquire_catalog(&self.shared.catalog, &progress, token.clone(), force)
+            .acquire_catalog(&self.shared.catalog, &progress, token.clone(), refresh)
             .await;
         let outcome = outcome.map(|_| ());
         let result = outcome
@@ -1250,7 +1249,9 @@ impl SourceOwner {
                 let owner = self.clone();
                 self.shared.runtime.spawn(async move {
                     if owner.configuration(&id).is_some() {
-                        let _ = owner.refresh_now(&id, &source, false, true).await;
+                        let _ = owner
+                            .refresh_now(&id, &source, false, sources::Refresh::Changed)
+                            .await;
                     }
                 });
             } else {
@@ -1402,7 +1403,9 @@ impl SourceOwner {
 
     async fn check_remote_freshness(&self, source_id: &SourceId, source: &Arc<Source>) {
         if source.needs_periodic_refresh() {
-            let _ = self.refresh_now(source_id, source, true, false).await;
+            let _ = self
+                .refresh_now(source_id, source, true, sources::Refresh::Check)
+                .await;
         }
     }
 }
@@ -1839,7 +1842,12 @@ impl SourceOwner {
                     };
                     let _ = sender.try_send(Ok(selected));
                     let _ = owner
-                        .refresh_now(source.source_id(), &source, false, true)
+                        .refresh_now(
+                            source.source_id(),
+                            &source,
+                            false,
+                            sources::Refresh::Changed,
+                        )
                         .await;
                 }
                 Err(error) => {
@@ -2277,7 +2285,13 @@ impl SourceOwner {
             .open_client(source_id.clone())
             .await
             .map_err(SourceError::Other)?;
-        self.refresh_now(&source_id, &source, automatic, true)
+        // A manual refresh also reads rejected files again.
+        let refresh = if automatic {
+            sources::Refresh::Changed
+        } else {
+            sources::Refresh::Resync
+        };
+        self.refresh_now(&source_id, &source, automatic, refresh)
             .await
             .map_err(SourceError::Other)
     }
@@ -2612,13 +2626,7 @@ impl SourceOwner {
                 if let Err(error) = owner
                     .shared
                     .downloads
-                    .attach(
-                        source_id.clone(),
-                        source_key,
-                        Some(source),
-                        None,
-                        owner.source_input_digest(&source_id),
-                    )
+                    .attach(source_id.clone(), source_key, Some(source), None)
                     .await
                 {
                     owner.shared.warn_nonfatal(&error);
@@ -2797,7 +2805,6 @@ impl SourceOwner {
                             source_key,
                             downloads_owner.cached_client(&source_id),
                             key,
-                            downloads_owner.source_input_digest(&source_id),
                         )
                         .await
                     {
@@ -4041,10 +4048,16 @@ mod source_tests {
             let local_uri = url::Url::from_file_path(directory.path().join("local.flac"))
                 .unwrap()
                 .to_string();
+            let key = catalog
+                .remember_media_uris(std::slice::from_ref(&local_uri))
+                .await
+                .unwrap()[0];
+            let playable = catalog.playable(key, "original").await.unwrap().unwrap();
             let local_stream = tokio::time::timeout(
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(
                     &catalog,
+                    &playable,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
                     None,
                     None,

@@ -62,9 +62,12 @@ pub async fn local_files_available(
     .map_err(|error| SourceError::Other(error.to_string()))?
 }
 
+/// Lyrics beside or inside a local file: the playable's download or local file, else the file
+/// its URI names.
 pub async fn read_local_lyrics(
     catalog: &Catalog,
     media_uri: &str,
+    playable: Option<&library::Playable>,
     title: Option<&str>,
     preferences: &lyrics::UserPreferences,
 ) -> SourceResult<Option<lyrics::LyricsBundle>> {
@@ -74,10 +77,11 @@ pub async fn read_local_lyrics(
             |(_, uri, _, _)| library::file_media_path(&uri),
         )
     };
-    let access = catalog.playback_access(media_uri).await.ok().flatten();
+    let access =
+        playable.and_then(|playable| playable.download.clone().or_else(|| playable.local_uri()));
     let Some(path) = access
-        .as_ref()
-        .and_then(|(uri, _)| local_path(uri))
+        .as_deref()
+        .and_then(local_path)
         .or_else(|| local_path(media_uri))
     else {
         return Ok(None);
@@ -121,7 +125,6 @@ pub async fn read_local_lyrics(
 pub(crate) async fn cache_native_lyrics(
     catalog: &Catalog,
     uri: &str,
-    input: [u8; 32],
     bundle: &mut Option<lyrics::LyricsBundle>,
 ) -> SourceResult<()> {
     *bundle = bundle
@@ -135,16 +138,30 @@ pub(crate) async fn cache_native_lyrics(
     };
     bundle.origin = lyrics::LyricsOrigin::Native;
     let payload = bundle.cache_payload()?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
     catalog
-        .write_lyrics_cache(uri, "source", "original", "", "", input, &payload, now)
+        .write_lyrics_cache(uri, "source", "original", "", "", &payload, unix_now())
         .await?;
     Ok(())
 }
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
+
+/// What a catalog refresh lists.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Refresh {
+    /// The periodic check: freshness first, a listing only when it changed.
+    Check,
+    /// A listing of what changed.
+    Changed,
+    /// A listing that also reads rejected files again (Resync Library).
+    Resync,
+}
+
+pub(crate) fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64)
+}
 
 pub struct SelectedFeed {
     source: Arc<Source>,
@@ -260,7 +277,7 @@ impl SelectedFeed {
                 .map(|()| true),
             SelectedFeedChange::Files(crate::file::remote::changes::FileChange::FullRefresh) => {
                 self.source
-                    .acquire_catalog(catalog, &|_| {}, self.cancellation(), true)
+                    .acquire_catalog(catalog, &|_| {}, self.cancellation(), Refresh::Changed)
                     .await
                     .map(|_| true)
             }
@@ -314,12 +331,6 @@ pub struct SourceReadProgress {
     pub stage: SourceReadStage,
     pub completed: usize,
     pub total: Option<usize>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SourceInputIdentity {
-    pub source_id: SourceId,
-    pub digest: [u8; 32],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -769,21 +780,6 @@ impl Source {
         }
     }
 
-    async fn document_stream(
-        &self,
-        catalog: &Catalog,
-        media_uri: &str,
-    ) -> SourceResult<ResolvedStream> {
-        let file = catalog
-            .observed_media_file(media_uri)
-            .await?
-            .ok_or(SourceError::NotFound)?;
-        self.file_source(Some(&file.path))
-            .ok_or(SourceError::NotFound)?
-            .stream(catalog, media_uri)
-            .await
-    }
-
     pub async fn plex_companion_context(&self) -> SourceResult<crate::PlexCompanionContext> {
         Ok(self
             .plex_companion_source()?
@@ -1102,12 +1098,13 @@ impl Source {
         catalog: &Catalog,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
-        refresh: bool,
+        refresh: Refresh,
     ) -> SourceResult<(bool, Option<Freshness>)> {
         if cancelled.load(Ordering::Acquire) || self.is_retired() {
             return Err(SourceError::Cancelled);
         }
-        if !refresh && !self.needs_periodic_refresh() {
+        let check = refresh == Refresh::Check;
+        if check && !self.needs_periodic_refresh() {
             return Ok((false, None));
         }
         let source_id = self.source_id.as_str();
@@ -1117,7 +1114,7 @@ impl Source {
             return Err(SourceError::Cancelled);
         }
         self.catalog_operation(catalog, async |changes| {
-            if !refresh {
+            if check {
                 let accepted = if let Some(marker) = &freshness {
                     catalog
                         .accept_freshness(source_id, marker, &library::ReadCancellation::new())
@@ -1140,8 +1137,9 @@ impl Source {
                 }
             }
             let stamp = Some(changes.start_observation().await?);
+            let started = unix_now();
             let report = |value| {
-                if refresh || !matches!(&self.implementation, Implementation::Files(_)) {
+                if !check || !matches!(&self.implementation, Implementation::Files(_)) {
                     progress(value);
                 }
             };
@@ -1187,31 +1185,18 @@ impl Source {
             ) {
                 changes.purge_source_file_absences(stamp.unwrap()).await?;
             }
+            let files = matches!(
+                self.implementation,
+                Implementation::Local(_) | Implementation::Files(_)
+            );
             changes
-                .complete_source_observation(&[], freshness.as_ref().filter(|_| complete))
+                .complete_source_observation(
+                    &[],
+                    freshness.as_ref().filter(|_| complete),
+                    (!files).then_some(started),
+                )
                 .await?;
             Ok((true, freshness.clone()))
-        })
-        .await
-    }
-
-    pub async fn catch_up_local(
-        &self,
-        catalog: &Catalog,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-        cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<()> {
-        let Implementation::Local(local) = &self.implementation else {
-            return Err(SourceError::InvalidRequest(
-                "Local catch-up belongs to another source",
-            ));
-        };
-        let native_cancelled = || cancelled.load(Ordering::Acquire) || self.is_retired();
-        if self.is_retired() || (&|| cancelled.load(Ordering::Acquire))() {
-            return Err(SourceError::Cancelled);
-        }
-        self.catalog_operation(catalog, async |changes| {
-            local.catch_up(changes, progress, &native_cancelled).await
         })
         .await
     }
@@ -1225,96 +1210,100 @@ impl Source {
         }
     }
 
+    /// The stream of a remote or document file, or of a server track.
     pub async fn stream(
         &self,
-        catalog: &Catalog,
+        playable: &library::Playable,
         request: StreamRequest,
     ) -> SourceResult<ResolvedStream> {
-        if let Some(stream) = direct_stream(catalog, &request.media_uri).await? {
-            return Ok(stream);
-        }
-        let object_id = self.track_object_id(&request.media_uri)?;
         match &self.implementation {
             Implementation::Plex(source) => {
                 source
                     .resolve_stream(
-                        &object_id,
+                        &self.track_object_id(&playable.media_uri)?,
                         request.quality,
                         request.session_identifier.as_deref(),
                     )
                     .await
             }
-            Implementation::Files(source) => source.stream(catalog, &request.media_uri).await,
-            Implementation::Local(_) => self.document_stream(catalog, &request.media_uri).await,
+            Implementation::Files(_) | Implementation::Local(_) => {
+                let file = playable.file.as_ref().ok_or(SourceError::NotFound)?;
+                self.file_source(Some(&file.path))
+                    .ok_or(SourceError::NotFound)?
+                    .stream(file, &playable.media_uri, playable.window)
+                    .await
+            }
             Implementation::JellyfinEmby(source) => {
                 source
                     .resolve_stream(
-                        &object_id,
+                        &self.track_object_id(&playable.media_uri)?,
                         request.quality,
                         request.session_identifier.as_deref(),
                     )
                     .await
             }
             Implementation::OpenSubsonic(source) => {
-                source.resolve_stream(&object_id, request.quality).await
+                source
+                    .resolve_stream(&self.track_object_id(&playable.media_uri)?, request.quality)
+                    .await
             }
         }
     }
 
     pub async fn resolve_download(
         &self,
-        catalog: &Catalog,
-        media_uri: &str,
+        playable: &library::Playable,
         quality: DownloadQuality,
     ) -> SourceResult<ResolvedDownload> {
-        let cue = library::cue_media_parts(media_uri);
-        let backing = cue
-            .as_ref()
-            .map_or(media_uri, |(_, uri, _, _)| uri.as_str());
-        if library::file_media_path(backing).is_some() {
+        let backing = library::cue_media_parts(&playable.media_uri)
+            .map_or_else(|| playable.media_uri.clone(), |(_, uri, _, _)| uri);
+        if library::file_media_path(&backing).is_some() {
             return Ok(ResolvedDownload::encode(
                 ResolvedStream::new(backing),
                 quality,
             ));
         }
-        if let Some(stream) = direct_stream(catalog, media_uri).await? {
+        if let Some(uri) = playable.local_uri() {
+            let stream = if uri.starts_with("content:") {
+                crate::resolve_document_stream(&uri).await?
+            } else {
+                ResolvedStream::new(uri)
+            };
+            let stream = match playable.window {
+                Some((start, end)) => stream.with_window(start, end),
+                None => stream,
+            };
             return Ok(ResolvedDownload::encode(stream, quality));
         }
-        let object_id = self.track_object_id(media_uri)?;
         match &self.implementation {
             Implementation::Plex(source) => {
                 source
                     .resolve_download(
-                        &object_id,
+                        &self.track_object_id(&playable.media_uri)?,
                         quality,
-                        catalog
-                            .download_metadata(media_uri)
-                            .await?
-                            .and_then(|metadata| metadata.channels),
+                        playable.channels,
                     )
                     .await
             }
-            Implementation::Files(source) => source
-                .stream(catalog, media_uri)
-                .await
-                .map(|stream| ResolvedDownload::encode(stream, quality)),
-            Implementation::Local(_) => self
-                .document_stream(catalog, media_uri)
+            Implementation::Files(_) | Implementation::Local(_) => self
+                .stream(
+                    playable,
+                    StreamRequest::original(playable.media_uri.clone()),
+                )
                 .await
                 .map(|stream| ResolvedDownload::encode(stream, quality)),
             Implementation::JellyfinEmby(source) => {
                 source
                     .resolve_download(
-                        &object_id,
+                        &self.track_object_id(&playable.media_uri)?,
                         quality,
-                        catalog
-                            .download_metadata(media_uri)
-                            .await?
-                            .and_then(|metadata| metadata.channels),
+                        playable.channels,
                     )
                     .await
             }
-            Implementation::OpenSubsonic(source) => source.resolve_download(&object_id, quality),
+            Implementation::OpenSubsonic(source) => {
+                source.resolve_download(&self.track_object_id(&playable.media_uri)?, quality)
+            }
         }
     }
 
@@ -1442,7 +1431,6 @@ impl Source {
         &self,
         catalog: &Catalog,
         media_uri: &str,
-        input_digest: [u8; 32],
     ) -> SourceResult<Option<lyrics::LyricsBundle>> {
         match catalog
             .lyrics_cache_for_role(
@@ -1450,7 +1438,6 @@ impl Source {
                 "original",
                 "",
                 "",
-                input_digest,
                 "source",
                 &library::ReadCancellation::new(),
             )
@@ -1485,26 +1472,13 @@ impl Source {
             result => result?,
         };
         let mut bundle = native;
-        if let Err(error) = cache_native_lyrics(catalog, media_uri, input_digest, &mut bundle).await
-        {
+        if let Err(error) = cache_native_lyrics(catalog, media_uri, &mut bundle).await {
             tracing::warn!(%error, "could not save source lyrics cache");
         }
         if bundle.is_none() {
             // Bulk downloads skip known missing lyrics; opening the lyrics still retries.
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
             catalog
-                .write_lyrics_cache(
-                    media_uri,
-                    "source",
-                    "original",
-                    "",
-                    "",
-                    input_digest,
-                    "",
-                    now,
-                )
+                .write_lyrics_cache(media_uri, "source", "original", "", "", "", unix_now())
                 .await?;
         }
         Ok(bundle)
@@ -1541,6 +1515,7 @@ impl Source {
                 read_local_lyrics(
                     catalog,
                     media_uri,
+                    None,
                     None,
                     &lyrics::UserPreferences::default(),
                 )
@@ -2311,6 +2286,7 @@ impl Source {
         let root = root.to_path_buf();
         let server_prefix = server_prefix.map(str::to_owned);
         let local_prefix = local_prefix.map(str::to_owned);
+        let source_id = self.source_id.clone();
         let (root, server_prefix, access) = tokio::task::spawn_blocking(move || {
             let root = mapping_root(&root)?;
             let server_prefix = match_local_access_sample(
@@ -2323,6 +2299,7 @@ impl Source {
                 "The representative Track does not map to a local file",
             ))?;
             let access = mapped_track_access(
+                &source_id,
                 &root,
                 server_prefix.as_deref(),
                 local_prefix.as_deref(),
@@ -2339,7 +2316,7 @@ impl Source {
             return Err(SourceError::Cancelled);
         }
         catalog.clear_mapping_access(source).await?;
-        catalog.write_local_access(Some(source), &[&access]).await?;
+        catalog.write_local_locators(&[access]).await?;
         Ok((root, server_prefix))
     }
 
@@ -2370,6 +2347,7 @@ impl Source {
             let server_prefix = server_prefix.map(str::to_owned);
             let local_prefix = local_prefix.map(str::to_owned);
             let worker_cancelled = Arc::clone(&cancelled);
+            let source_id = self.source_id.clone();
             let accesses = tokio::task::spawn_blocking(move || {
                 if root.to_string_lossy().starts_with("content:") {
                     let paths = tracks
@@ -2392,7 +2370,9 @@ impl Source {
                         .zip(paths)
                         .zip(entries)
                         .filter_map(|((track, path), entry)| {
-                            Some(mapped_document_access(&root, &path?, track, entry?))
+                            Some(mapped_document_access(
+                                &source_id, &root, &path?, track, entry?,
+                            ))
                         })
                         .collect::<Vec<_>>());
                 }
@@ -2402,6 +2382,7 @@ impl Source {
                         return Err(SourceError::Cancelled);
                     }
                     if let Some(access) = mapped_track_access(
+                        &source_id,
                         &root,
                         server_prefix.as_deref(),
                         local_prefix.as_deref(),
@@ -2417,43 +2398,11 @@ impl Source {
             if cancelled.load(Ordering::Acquire) {
                 return Err(SourceError::Cancelled);
             }
-            catalog
-                .write_local_access(Some(source), &accesses.iter().collect::<Vec<_>>())
-                .await?;
+            catalog.write_local_locators(&accesses).await?;
             accepted += accesses.len();
         }
         Ok(accepted)
     }
-}
-
-async fn direct_stream(catalog: &Catalog, media_uri: &str) -> SourceResult<Option<ResolvedStream>> {
-    let cue = library::cue_media_parts(media_uri);
-    let backing = cue
-        .as_ref()
-        .map_or(media_uri, |(_, uri, _, _)| uri.as_str());
-    let Some(uri) = library::normalize_direct_media_uri(backing) else {
-        return Ok(None);
-    };
-    let mut access = catalog.playback_access(media_uri).await?;
-    if access.is_none() && cue.is_some() {
-        access = catalog.playback_access(backing).await?;
-    }
-    let uri = match access {
-        Some((uri, _)) => uri,
-        None if library::document_media_id(backing).is_some() => return Err(SourceError::NotFound),
-        None => uri,
-    };
-    let stream = if uri.starts_with("content:") {
-        crate::resolve_document_stream(&uri).await?
-    } else {
-        ResolvedStream::new(uri)
-    };
-    if cue.is_some()
-        && let Some((start, end)) = catalog.playback_window(media_uri).await?
-    {
-        return Ok(Some(stream.with_window(start, end)));
-    }
-    Ok(Some(stream))
 }
 
 fn mapping_root(root: &std::path::Path) -> SourceResult<PathBuf> {
@@ -2508,39 +2457,30 @@ fn mapping_path_exists(
 }
 
 fn mapped_document_access(
+    source_id: &SourceId,
     root: &std::path::Path,
     relative: &str,
     track: library::MappingTrackRow,
     entry: crate::DocumentEntry,
-) -> library::LocalAccessWrite {
-    let mut hash = blake3::Hasher::new();
-    hash.update(entry.uri.as_bytes());
-    hash.update(entry.revision.as_deref().unwrap_or_default().as_bytes());
-    library::LocalAccessWrite {
+) -> library::LocalLocatorWrite {
+    library::LocalLocatorWrite {
+        source_id: Some(source_id.as_str().to_owned()),
         media_uri: track.media_uri,
-        origin: library::LocalAccessOrigin::Mapping,
+        origin: "mapping".into(),
         path: entry.uri.clone(),
         root: root.to_string_lossy().into_owned(),
         relative_path: relative.into(),
-        size_bytes: entry
-            .size
-            .and_then(|size| i64::try_from(size).ok())
-            .unwrap_or_default(),
-        mtime_ns: 0,
-        device_id: None,
-        inode: None,
-        parser_version: 1,
         access_uri: entry.uri,
-        loudness_analysis_key: Some(*hash.finalize().as_bytes()),
     }
 }
 
 fn mapped_track_access(
+    source_id: &SourceId,
     root: &std::path::Path,
     server_prefix: Option<&str>,
     local_prefix: Option<&str>,
     track: library::MappingTrackRow,
-) -> SourceResult<Option<library::LocalAccessWrite>> {
+) -> SourceResult<Option<library::LocalLocatorWrite>> {
     if root.to_string_lossy().starts_with("content:") {
         let Some(path) = mapped_document_path(server_prefix, local_prefix, &track.source_path)
         else {
@@ -2550,41 +2490,20 @@ fn mapped_track_access(
         return Ok(
             crate::file::documents::find_document(&root.to_string_lossy(), &components)?
                 .filter(|entry| !entry.directory)
-                .map(|entry| mapped_document_access(root, &path, track, entry)),
+                .map(|entry| mapped_document_access(source_id, root, &path, track, entry)),
         );
     }
     let Some(path) = mapped_local_path(root, server_prefix, local_prefix, &track.source_path)
     else {
         return Ok(None);
     };
-    let metadata =
-        std::fs::metadata(&path).map_err(|error| SourceError::Other(error.to_string()))?;
-    let mtime_ns = metadata
-        .modified()
-        .ok()
-        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|value| i64::try_from(value.as_nanos()).ok())
-        .unwrap_or_default();
-    #[cfg(unix)]
-    let (device_id, inode) = {
-        use std::os::unix::fs::MetadataExt;
-        (
-            i64::try_from(metadata.dev()).ok(),
-            i64::try_from(metadata.ino()).ok(),
-        )
-    };
-    #[cfg(not(unix))]
-    let (device_id, inode) = (None, None);
     let access_uri = url::Url::from_file_path(&path)
         .map_err(|()| SourceError::Other("could not create mapped file URI".to_string()))?
         .to_string();
-    let mut hash = blake3::Hasher::new();
-    hash.update(path.to_string_lossy().as_bytes());
-    hash.update(&metadata.len().to_le_bytes());
-    hash.update(&mtime_ns.to_le_bytes());
-    Ok(Some(library::LocalAccessWrite {
+    Ok(Some(library::LocalLocatorWrite {
+        source_id: Some(source_id.as_str().to_owned()),
         media_uri: track.media_uri,
-        origin: library::LocalAccessOrigin::Mapping,
+        origin: "mapping".into(),
         path: path.to_string_lossy().into_owned(),
         root: root.to_string_lossy().into_owned(),
         relative_path: path
@@ -2592,13 +2511,7 @@ fn mapped_track_access(
             .unwrap_or(&path)
             .to_string_lossy()
             .into_owned(),
-        size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-        mtime_ns,
-        device_id,
-        inode,
-        parser_version: 1,
         access_uri,
-        loudness_analysis_key: Some(*hash.finalize().as_bytes()),
     }))
 }
 
@@ -2826,7 +2739,6 @@ mod refresh_laws {
                             },
                             object_id: id.to_owned(),
                             source_path: Some(path.to_owned()),
-                            loudness_analysis_key: [0; 32],
                             ..Default::default()
                         }])
                             .to_vec(),
@@ -2881,7 +2793,7 @@ mod refresh_laws {
         for track in &tracks {
             assert_eq!(
                 catalog
-                    .playback_access(&track.media_uri)
+                    .original_file(&track.media_uri)
                     .await
                     .unwrap()
                     .is_some(),
@@ -2920,7 +2832,7 @@ mod refresh_laws {
         for track in &tracks {
             assert_eq!(
                 catalog
-                    .playback_access(&track.media_uri)
+                    .original_file(&track.media_uri)
                     .await
                     .unwrap()
                     .is_some(),
@@ -3015,7 +2927,7 @@ mod refresh_laws {
                     &catalog,
                     &|_| panic!("unsupported freshness started acquisition progress"),
                     Arc::new(AtomicBool::new(false)),
-                    false,
+                    crate::Refresh::Check,
                 )
                 .await
                 .expect("freshness check");

@@ -5,43 +5,6 @@ use crate::{LibraryError, LibraryResult, SourceId, source_entity_uri};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::path::Path;
 
-pub(crate) async fn separate_file_access(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    sqlx::query("CREATE TEMP TABLE file_identity(physical INTEGER NOT NULL,canonical INTEGER NOT NULL,PRIMARY KEY(physical,canonical))")
-        .execute(&mut *connection).await?;
-    sqlx::raw_sql("INSERT OR IGNORE INTO file_identity SELECT local_file_key,local_file_key FROM local_files file WHERE local_file_key NOT IN(SELECT physical FROM file_identity) OR EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.source_key=file.source_key AND file.path IN(details.source_path,details.cue_path));
-        INSERT OR REPLACE INTO local_file_observations(local_file_key,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,native_id,revision,observed_stamp,parent_path,parsed_stamp,accepted_facts,state)
-        SELECT identity.canonical,file.path,file.root,file.relative_path,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.observed_stamp,file.parent_path,file.parsed_stamp,file.parsed_stamp,file.state
-        FROM file_identity identity JOIN local_files file ON file.local_file_key=identity.physical JOIN local_file_access_roots access USING(source_key,root);
-        DROP TABLE file_identity;")
-        .execute(&mut *connection).await?;
-    let roots: Vec<(i64,String,String,Option<String>)> = sqlx::query_as("SELECT DISTINCT file.source_key,source.object_id,file.root,(SELECT id FROM connect_roots shared WHERE shared.source_id=source.object_id AND shared.root=file.root LIMIT 1) FROM local_files file JOIN sources source USING(source_key)")
-        .fetch_all(&mut *connection).await?;
-    for (source, source_id, root, shared) in roots {
-        let id = shared.unwrap_or_else(|| blake3::hash(root.as_bytes()).to_hex().to_string());
-        sqlx::query("UPDATE local_files SET root_id=?3 WHERE source_key=?1 AND root=?2")
-            .bind(source)
-            .bind(&root)
-            .bind(&id)
-            .execute(&mut *connection)
-            .await?;
-        sqlx::query(
-            "INSERT OR IGNORE INTO connect_roots(source_id,id,label,root) VALUES(?1,?2,'',?3)",
-        )
-        .bind(source_id)
-        .bind(&id)
-        .bind(root)
-        .execute(&mut *connection)
-        .await?;
-    }
-    sqlx::raw_sql("ALTER TABLE local_file_access_roots RENAME TO old_file_roots;
-        CREATE TABLE local_file_access_roots(source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,root TEXT NOT NULL,root_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(source_key,root_id,root)) STRICT,WITHOUT ROWID;
-        INSERT OR IGNORE INTO local_file_access_roots SELECT file.source_key,observation.root,file.root_id FROM local_files file JOIN local_file_observations observation USING(local_file_key) JOIN old_file_roots access ON access.source_key=file.source_key AND access.root=observation.root;
-        DROP TABLE old_file_roots;
-        UPDATE local_files SET device_id=NULL,inode=NULL,native_id=NULL,observed_stamp=0;")
-        .execute(&mut *connection).await?;
-    Ok(())
-}
-
 async fn attach(connection: &mut SqliteConnection, path: &Path, alias: &str) -> LibraryResult<()> {
     let mut uri = url::Url::from_file_path(path.canonicalize()?)
         .map_err(|_| LibraryError::Migration("database path is not absolute".into()))?;
@@ -210,8 +173,8 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
         attach(&mut connection, path, "old_store").await?;
         sqlx::query("PRAGMA foreign_keys=OFF").execute(&mut connection).await?;
         let mut transaction = connection.begin().await?;
-        // The lyrics search documents follow lyrics_cache through their triggers.
-        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'lyrics_fts*' AND name<>'lyrics_documents'")
+        // The lyrics search rows are indexed from the copied lyrics.
+        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'lyrics_fts*'")
             .fetch_all(&mut *transaction).await?;
         let mut copied = 0;
         for table in tables {
@@ -227,6 +190,7 @@ pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
             return Err(LibraryError::Migration("no compatible Store tables were found".into()));
         }
         drop_dangling(&mut transaction).await?;
+        crate::lyrics::index_all_lyrics(&mut transaction).await?;
         transaction.commit().await?;
         LibraryResult::Ok(())
     }.await;
@@ -351,7 +315,8 @@ async fn tags(
 }
 
 /// Gains the files or the server reported. Rufin's own analysis results are not carried over;
-/// they are measured again.
+/// they are measured again. Each gain keeps the analysis key it was measured for, so a replay
+/// gain joins the loudness of the same audio.
 async fn gains(
     connection: &mut SqliteConnection,
     kind: &str,
@@ -401,18 +366,12 @@ async fn gains(
     Ok(result)
 }
 
-/// The gain a released row reported, when it was measured for the audio the row names.
+/// The gain a released row reported.
 fn gain(
     gains: &mut std::collections::HashMap<i64, (Vec<u8>, crate::NativeGain)>,
     entity: &Released,
-) -> Option<(Vec<u8>, crate::NativeGain)> {
-    let expected = entity
-        .row
-        .try_get::<Vec<u8>, _>("source_loudness_analysis_key")
-        .unwrap_or_else(|_| vec![0; 32]);
-    gains
-        .remove(&entity.key)
-        .filter(|(key, _)| *key == expected)
+) -> Option<crate::NativeGain> {
+    gains.remove(&entity.key).map(|(_, gain)| gain)
 }
 
 fn keys(page: &[Released]) -> LibraryResult<String> {
@@ -498,7 +457,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
         let keys = keys(&page)?;
         let mut artists = credits(connection, "album_artists", "album_key", &keys).await?;
         let mut genres = tags(connection, "album_genres", "album_key", "genre", &keys).await?;
-        let mut gains = gains(connection, "album", &keys).await?;
         for entity in page {
             let row = &entity.row;
             let release_types: Vec<String> = if release_types {
@@ -521,19 +479,11 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 release_types,
             };
-            let accepted = gain(&mut gains, &entity)
-                .map(|(token, gain)| {
-                    serde_json::to_vec(&serde_json::json!({
-                        "token": token.iter().map(|byte| format!("{byte:02X}")).collect::<String>(),
-                        "gain": gain,
-                    }))
-                })
-                .transpose()?;
             let lookup = text(row, "release_lookup_identity");
             let artwork = binding(row)?;
             let first_seen = number(row, "first_seen_at");
-            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,source_loudness_analysis_key,accepted_audio,released,added_at,flags)
-                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,coalesce(?19,zeroblob(32)),?20,?21,?22,?23)")
+            sqlx::query("INSERT INTO albums(album_key,source_key,object_id,media_uri,indexed,native_metadata,title,display_artist,sort_text,year,release_date,date_added,is_compilation,first_seen_at,release_lookup_identity,native_favorite,native_rating,metadata,input_metadata,native_artwork,released,added_at,flags)
+                VALUES(?1,?2,?3,?4,1,1,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,jsonb(?16),jsonb(?17),?18,?19,?20,?21)")
                 .bind(entity.key)
                 .bind(row.try_get::<i64, _>("migration_source_key")?)
                 .bind(row.try_get::<String, _>("object_id")?)
@@ -552,8 +502,6 @@ async fn copy_albums(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(metadata.details_json()?)
                 .bind(serde_json::to_string(&metadata)?)
                 .bind(&artwork)
-                .bind(row.try_get::<Option<Vec<u8>>, _>("source_loudness_analysis_key").ok().flatten())
-                .bind(accepted)
                 .bind(i64::from(release(metadata.release_date.as_deref())))
                 .bind(added(metadata.date_added.as_deref(), first_seen))
                 .bind(picture_flag(artwork.as_deref()))
@@ -616,7 +564,7 @@ async fn copy_tracks(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 album_artists: album_artists.remove(&entity.key).unwrap_or_default(),
                 genres: genres.remove(&entity.key).unwrap_or_default(),
                 moods: moods.remove(&entity.key).unwrap_or_default(),
-                source_loudness: gain(&mut gains, &entity).map(|(_, gain)| gain),
+                source_loudness: gain(&mut gains, &entity),
                 ..Default::default()
             };
             let artwork = binding(row)?;
@@ -652,7 +600,7 @@ async fn copy_tracks(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(added(metadata.date_added.as_deref(), first_seen))
                 .execute(&mut *connection)
                 .await?;
-            sqlx::query("INSERT INTO track_details(track_key,metadata,native_artwork,source_path,cue_path,cue_start_millis,cue_end_millis,source_loudness_analysis_key) VALUES(?1,jsonb(?2),?3,?4,?5,?6,?7,coalesce(?8,zeroblob(32)))")
+            sqlx::query("INSERT INTO track_details(track_key,metadata,native_artwork,source_path,cue_path,cue_start_millis,cue_end_millis) VALUES(?1,jsonb(?2),?3,?4,?5,?6,?7)")
                 .bind(entity.key)
                 .bind(metadata.details_json()?)
                 .bind(artwork)
@@ -660,7 +608,6 @@ async fn copy_tracks(connection: &mut SqliteConnection) -> LibraryResult<()> {
                 .bind(cue_path)
                 .bind(number(row, "cue_start_millis"))
                 .bind(number(row, "cue_end_millis"))
-                .bind(row.try_get::<Option<Vec<u8>>, _>("source_loudness_analysis_key").ok().flatten())
                 .execute(&mut *connection)
                 .await?;
         }
@@ -732,39 +679,55 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
     copy_albums(connection).await?;
     copy_tracks(connection).await?;
     copy_links(connection, mood_offset).await?;
-    for table in ["home_entries", "local_files", "local_file_dependencies"] {
-        copy_table(
-            connection,
-            "old_catalog",
-            table,
-            table,
-            &[(
-                "source_key",
-                "(SELECT source_key FROM migration_source_keys WHERE old_key=old.source_key)",
-            )],
-            "true",
-        )
-        .await?;
+    copy_table(
+        connection,
+        "old_catalog",
+        "home_entries",
+        "home_entries",
+        &[(
+            "source_key",
+            "(SELECT source_key FROM migration_source_keys WHERE old_key=old.source_key)",
+        )],
+        "true",
+    )
+    .await?;
+    // A file whose released facts were waiting for a parse is read again on the next walk.
+    let mut overrides = vec![
+        ("file_key", "old.local_file_key"),
+        (
+            "source_key",
+            "(SELECT source_key FROM migration_source_keys WHERE old_key=old.source_key)",
+        ),
+        ("relative_path", "replace(old.relative_path,char(92),'/')"),
+        (
+            "state",
+            "CASE old.state WHEN 'observed' THEN 'accepted' ELSE old.state END",
+        ),
+    ];
+    if columns(connection, "old_catalog", "local_files")
+        .await?
+        .iter()
+        .any(|column| column == "parse_version")
+    {
+        overrides.push((
+            "parse_version",
+            "CASE old.state WHEN 'observed' THEN NULL ELSE old.parse_version END",
+        ));
     }
-    sqlx::query("INSERT OR IGNORE INTO local_file_access_roots(source_key,root) SELECT DISTINCT source_key,root FROM local_files")
-        .execute(&mut *connection)
-        .await?;
-    let mut after = 0_i64;
-    loop {
-        let files: Vec<(i64, String)> = sqlx::query_as("SELECT local_file_key,path FROM local_files WHERE local_file_key>?1 ORDER BY local_file_key LIMIT 128")
-            .bind(after).fetch_all(&mut *connection).await?;
-        if files.is_empty() {
-            break;
-        }
-        for (key, path) in files {
-            after = key;
-            sqlx::query("UPDATE local_files SET parent_path=?2,parsed_stamp=CASE WHEN state IN('accepted','rejected') THEN CASE WHEN kind='directory' THEN json_array(size_bytes,mtime_ns,revision,parse_version,observed_stamp) ELSE json_array(size_bytes,mtime_ns,revision,parse_version) END END WHERE local_file_key=?1")
-                .bind(key).bind(crate::catalog::files::parent_locator(&path)).execute(&mut *connection).await?;
-        }
+    copy_table(
+        connection,
+        "old_catalog",
+        "local_files",
+        "files",
+        &overrides,
+        "true",
+    )
+    .await?;
+    if has_table(connection, "old_catalog", "local_file_dependencies").await? {
+        sqlx::query("INSERT INTO file_inputs(file_key,position,path) SELECT edge.local_file_key,edge.position,edge.dependency_path FROM old_catalog.local_file_dependencies edge JOIN main.files owner ON owner.file_key=edge.local_file_key WHERE owner.kind='cue' AND owner.state='accepted'")
+            .execute(&mut *connection)
+            .await?;
     }
-    sqlx::raw_sql("UPDATE tracks SET local_file_key=(SELECT file.local_file_key FROM track_details details JOIN local_files file ON file.path=coalesce(details.cue_path,details.source_path) WHERE details.track_key=tracks.track_key AND file.source_key=tracks.source_key AND file.state='accepted');
-        UPDATE local_file_dependencies AS edge SET accepted_inputs=json_array(dependency.size_bytes,dependency.mtime_ns,dependency.revision) FROM local_files owner JOIN local_files dependency ON dependency.source_key=owner.source_key WHERE owner.local_file_key=edge.local_file_key AND owner.kind='cue' AND owner.state='accepted' AND dependency.path=edge.dependency_path AND EXISTS(SELECT 1 FROM tracks WHERE tracks.local_file_key=owner.local_file_key);")
-        .execute(&mut *connection).await?;
     copy_table(
         connection,
         "old_catalog",
@@ -774,16 +737,7 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
         "true",
     )
     .await?;
-    copy_table(
-        connection,
-        "old_catalog",
-        "local_access_metadata",
-        "local_access_metadata",
-        &[],
-        "true",
-    )
-    .await?;
-    separate_file_access(connection).await?;
+    crate::lyrics::index_all_lyrics(connection).await?;
     Ok(())
 }
 
@@ -1344,6 +1298,10 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
         copy_table(&mut transaction, "old_store", table, table, &[], "true").await?;
     }
     user_data(&mut transaction, has_catalog).await?;
+    // Files under a directory root are walked; their import locators go.
+    sqlx::query("DELETE FROM local_locators WHERE origin='import' AND EXISTS(SELECT 1 FROM files file WHERE file.path=local_locators.path AND file.root<>file.path AND (local_locators.source_key IS NULL OR file.source_key=local_locators.source_key))")
+        .execute(&mut *transaction)
+        .await?;
     legacy_copies(&mut transaction).await?;
     sqlx::query("DROP TABLE migration_metadata")
         .execute(&mut *transaction)

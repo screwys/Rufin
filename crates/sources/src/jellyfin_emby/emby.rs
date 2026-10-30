@@ -241,7 +241,6 @@ mod tests {
                 .contains("use_jellyfin_instant_mix")
         );
         assert!(configuration.playlist_tracks_can_repeat());
-        let identity = configuration.input_identity().unwrap();
         let source = super::super::open(&configuration, credential, Some("device".into())).unwrap();
         let owner = crate::Source::new(
             crate::SourceId::new("source"),
@@ -251,7 +250,6 @@ mod tests {
             unreachable!()
         };
 
-        assert_eq!(configuration.input_identity().unwrap(), identity);
         let album = json!({"Id":"10","Type":"MusicAlbum","Name":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}]});
         let track = json!({"Id":"11","Type":"Audio","Name":"Song","AlbumId":"10","Album":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}],"UserData":{"LastPlayedDate":"2026-01-01T00:00:00Z","Rating":7},"ParentBackdropItemId":"10","ParentBackdropImageTags":["cover"]});
         for (kind, item) in [

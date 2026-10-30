@@ -23,6 +23,8 @@ pub(crate) struct ScannedTrack {
     pub(crate) picture_index: Option<i64>,
     pub(crate) artist_pictures: Vec<super::artwork::ArtistPicture>,
     pub(crate) audio_revision: blake3::Hasher,
+    /// The revision stands for the audio hash: the file is not read whole to hash it.
+    pub(crate) revision_hashes_audio: bool,
     pub(crate) lyrics_paths: Vec<String>,
     pub(crate) lyrics: Option<lyrics::LyricsBundle>,
 }
@@ -56,7 +58,9 @@ impl ScannedTrack {
             .update(&track.cue_start_millis.unwrap_or(-1).to_le_bytes());
         self.audio_revision
             .update(&track.cue_end_millis.unwrap_or(-1).to_le_bytes());
-        track.loudness_analysis_key = *self.audio_revision.finalize().as_bytes();
+        let revision = *self.audio_revision.finalize().as_bytes();
+        track.audio_revision = Some(revision);
+        track.audio_hash = self.revision_hashes_audio.then_some(revision);
         self.track
     }
 }
@@ -531,6 +535,7 @@ fn scanned_track(
         picture_index: None,
         artist_pictures: Vec::new(),
         audio_revision: blake3::Hasher::new(),
+        revision_hashes_audio: false,
         lyrics_paths: Vec::new(),
         lyrics: None,
     }

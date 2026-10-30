@@ -1,5 +1,5 @@
 use super::review::LookupProgress;
-use super::{EditDestination, EditSession, MetadataCandidate, MetadataEditor};
+use super::{EditSession, MetadataCandidate, MetadataEditor};
 use audio_processing::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 use library::ReadCancellation;
 use playback::{StreamQuality, StreamRequest};
@@ -80,13 +80,18 @@ impl MetadataEditor {
             .remember_media_uris(std::slice::from_ref(uri))
             .await
             .map_err(scan_error)?;
-        let revision = match &session.destination {
-            EditDestination::Files(files) => files.audio_revision().await?,
-            EditDestination::Server { .. } => {
-                catalog.audio_analysis_key(uri).await.map_err(scan_error)?
-            }
-        };
-        let cached = if let Some(revision) = revision {
+        let key = catalog
+            .track_keys(std::slice::from_ref(uri), &ReadCancellation::new())
+            .await
+            .map_err(scan_error)?
+            .pop()
+            .ok_or(Error::Unavailable)?;
+        let playable = catalog
+            .playable(key, "original")
+            .await
+            .map_err(scan_error)?
+            .ok_or(Error::Unavailable)?;
+        let cached = if let Some(revision) = playable.audio_hash {
             catalog
                 .fingerprint_cache(uri, &revision, FINGERPRINT_VERSION)
                 .await
@@ -105,6 +110,7 @@ impl MetadataEditor {
             let owner = self.source.clone();
             let stream = crate::playback::prepare_stream(
                 catalog,
+                &playable,
                 StreamRequest::new(uri, StreamQuality::Original),
                 local.as_ref(),
                 None,
@@ -127,7 +133,7 @@ impl MetadataEditor {
                 .await
                 .map_err(scan_error)?
                 .map_err(scan_error)?;
-            if let Some(revision) = revision {
+            if let Some(revision) = playable.audio_hash {
                 catalog
                     .write_fingerprint_cache(
                         uri,

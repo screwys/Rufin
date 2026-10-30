@@ -212,7 +212,7 @@ impl JellyfinEmbySource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         for (entity, stage_name, paths) in [
             ("album", SourceReadStage::Albums, &["MusicAlbum"][..]),
@@ -289,10 +289,10 @@ impl JellyfinEmbySource {
             if entity == "artist" {
                 self.acquire_missing_artists(observation, cancelled).await?;
             }
-            if complete && stamp.is_some() {
+            if complete && walk {
                 check_cancelled(cancelled)?;
                 observation
-                    .complete_source_observation(&[entity], None)
+                    .complete_source_observation(&[entity], None, None)
                     .await?;
             }
             if entity == "track" {
@@ -301,10 +301,10 @@ impl JellyfinEmbySource {
                     self.acquire_music_folder_memberships(observation, &folder, cancelled)
                         .await?;
                 }
-                if stamp.is_some() {
+                if walk {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(&["folder"], None)
+                        .complete_source_observation(&["folder"], None, None)
                         .await?;
                 }
             }
@@ -398,7 +398,7 @@ impl JellyfinEmbySource {
         folder_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         let raw_folder_id = raw_item_id(folder_id).to_string();
         let mut pages = PageState::default();
@@ -433,7 +433,7 @@ impl JellyfinEmbySource {
             check_cancelled(cancelled)?;
             observation.apply_catalog(&batch, true).await?;
             if finished {
-                if stamp.is_some() {
+                if walk {
                     check_cancelled(cancelled)?;
                     observation
                         .complete_source_folder_membership(&folder_id)
@@ -451,7 +451,7 @@ impl JellyfinEmbySource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
-        let stamp = observation.observed;
+        let walk = observation.is_walk();
 
         let mut pages = PageState::default();
         let mut seen = HashSet::new();
@@ -493,10 +493,10 @@ impl JellyfinEmbySource {
                 pages.total(),
             ));
             if finished {
-                if stamp.is_some() {
+                if walk {
                     check_cancelled(cancelled)?;
                     observation
-                        .complete_source_observation(&["playlist"], None)
+                        .complete_source_observation(&["playlist"], None, None)
                         .await?;
                 }
                 return Ok(());
@@ -896,10 +896,11 @@ mod tests {
                 );
                 assert!(track.artwork_binding.is_some());
                 assert_eq!(track.links.artists.len(), 2);
-                let (track_gain, album_gain) = catalog
-                    .playback_loudness(&uri, &cancellation)
-                    .await
-                    .unwrap();
+                let playable = crate::playable(&catalog, &uri).await;
+                let (track_gain, album_gain) = (
+                    playable.gains.track_loudness(playable.audio_hash),
+                    playable.gains.album_loudness(playable.audio_hash),
+                );
                 assert_eq!(track_gain.unwrap().replay_gain_db, Some(-4.25));
                 assert_eq!(album_gain.unwrap().replay_gain_db, Some(-3.5));
             }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_channel::Receiver;
 use library::{Change, Scope, SourceKey, TrackKey};
-use sources::{SourceConfiguration, SourceError, SourceId};
+use sources::{SourceConfiguration, SourceError};
 
 use super::{Shared, SourceOwner};
 use crate::features::follow;
@@ -66,12 +66,6 @@ impl SourceOwner {
                 download_added,
             ));
         }
-    }
-
-    pub(crate) fn source_input_digest(&self, source_id: &SourceId) -> [u8; 32] {
-        self.configuration(source_id)
-            .and_then(|configuration| configuration.input_identity().ok())
-            .map_or([0; 32], |input| input.digest)
     }
 
     /// Fetches artwork and lyrics for every source, or only for these tracks.
@@ -173,15 +167,11 @@ impl SourceOwner {
                 }
             }
         } else {
-            let input = configuration
-                .input_identity()
-                .map_err(super::string_error)?
-                .digest;
             let mut source = None;
             let mut after = None;
             loop {
                 let page = catalog
-                    .uncached_source_lyrics_page(source_key, input, after, keys, &cancel_read)
+                    .uncached_source_lyrics_page(source_key, after, keys, &cancel_read)
                     .await
                     .map_err(super::string_error)?;
                 if page.is_empty() {
@@ -196,12 +186,7 @@ impl SourceOwner {
                 };
                 after = page.last().map(|(key, _)| *key);
                 for (_, uri) in page {
-                    let input = if library::source_entity_parts(&uri).is_some() {
-                        input
-                    } else {
-                        [0; 32]
-                    };
-                    match source.cached_lyrics(catalog, &uri, input).await {
+                    match source.cached_lyrics(catalog, &uri).await {
                         Ok(_) => {}
                         Err(
                             error @ (SourceError::Network(_)

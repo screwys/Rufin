@@ -177,7 +177,7 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
     let keys = (counts.int(6), counts.int(7));
     drop(counts);
     let mut rows = handle.prepare(
-        "SELECT source_key,object_id,kind,display_name,catalog_complete,freshness FROM sources ORDER BY source_key",
+        "SELECT source_key,object_id,kind,display_name,catalog_complete,freshness,synced_at FROM sources ORDER BY source_key",
     )?;
     while rows.step()? {
         snapshot.put_source(Source {
@@ -187,6 +187,7 @@ fn small_families(handle: &Handle<'_>, snapshot: &mut Snapshot) -> LibraryResult
             name: rows.text(3).to_owned(),
             complete: rows.flag(4),
             freshness: rows.blob(5),
+            synced_at: rows.optional_int(6),
         });
     }
     let mut rows = handle.prepare(
