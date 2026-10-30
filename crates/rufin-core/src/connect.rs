@@ -1379,6 +1379,9 @@ impl ConnectOwner {
                 self.publish_devices();
                 let owner = Arc::clone(self);
                 self.runtime.spawn(async move {
+                    if let Err(error) = session.records.store.restart_peer(&peer).await {
+                        return owner.failed(self::error(error));
+                    }
                     match session.records.write_device(&peer).await {
                         Ok(Some(sequence)) => owner.changed(sequence).await,
                         Ok(None) => {}

@@ -414,6 +414,15 @@ impl Store {
         Ok(())
     }
 
+    /// A device that joined again numbers its records from the start in its new file.
+    pub async fn restart_peer(&self, device: &str) -> Result<()> {
+        sqlx::query("UPDATE connect_peers SET pulled=0,read=0 WHERE device=?1")
+            .bind(device)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_folder(&self, folder: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE connect_profile SET folder=?1")
             .bind(folder)
