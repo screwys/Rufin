@@ -1,7 +1,7 @@
 //! One walker for file sources. It merge-joins each name-sorted directory listing with the
 //! source's stored rows, read in walk order, and stages only new, changed and vanished files.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -797,17 +797,27 @@ impl<F: FileSource> Walker<'_, '_, F> {
             };
             self.push_read(staged);
         }
-        let (inputs, media): (Vec<_>, Vec<_>) = media
+        let (inputs, mut media): (Vec<_>, Vec<_>) = media
             .into_iter()
             .partition(|staged| taken.contains(&staged.row.path));
         for staged in inputs {
             self.push_read(staged);
         }
-        let mut media = media.into_iter().peekable();
+        let mut renames = std::mem::take(&mut self.batch.renames);
         loop {
-            let chunk = media.by_ref().take(BATCH).collect();
-            self.write_chunk(chunk, std::mem::take(&mut sheets)).await?;
-            if media.peek().is_none() {
+            let rest = media.split_off(media.len().min(BATCH));
+            // A rename resolves once its new path has a track, so it waits for that chunk.
+            let later = rest
+                .iter()
+                .map(|staged| staged.row.path.as_str())
+                .collect::<HashSet<_>>();
+            let (wait, now) = renames
+                .into_iter()
+                .partition(|(_, new)| later.contains(new.as_str()));
+            (self.batch.renames, renames) = (now, wait);
+            self.write_chunk(media, std::mem::take(&mut sheets)).await?;
+            media = rest;
+            if media.is_empty() {
                 return Ok(());
             }
         }
