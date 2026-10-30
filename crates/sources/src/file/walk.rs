@@ -449,11 +449,18 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 self.fresh.insert(id, row.path.clone());
             }
         }
-        if let Some(stored) = &stored
-            && stored.file.kind != row.kind
-        {
-            // A file that became a directory, or the reverse, leaves its tracks behind.
-            self.batch.removed.push(stored.file.clone());
+        if let Some(stored) = &stored {
+            if stored.file.kind != row.kind {
+                // A file that became a directory, or the reverse, leaves its tracks behind.
+                self.batch.removed.push(stored.file.clone());
+            } else if stored.file.path != row.path {
+                // The provider gave the file in this place a new identity, as Android does
+                // once MediaStore indexes a file; its tracks and user data move to the new path.
+                self.batch
+                    .renames
+                    .push((stored.file.path.clone(), row.path.clone()));
+                self.batch.removed.push(stored.file.clone());
+            }
         }
         if parseable(row.kind) {
             self.staged.push(Staged {
