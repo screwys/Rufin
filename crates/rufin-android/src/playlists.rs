@@ -101,19 +101,10 @@ impl AndroidLibrary {
     }
 
     pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
-        let catalog = self.catalog.clone();
-        self.runtime
-            .spawn(async move {
-                catalog
-                    .playlists(&[playlist], &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                    .pop()
-                    .map(|row| row.name)
-                    .ok_or_else(|| error("Playlist no longer exists"))
-            })
+        self.catalog
+            .playlist_name(playlist)
             .await
-            .map_err(error)?
+            .ok_or_else(|| error("Playlist no longer exists"))
     }
 
     pub fn playlist_artwork_limit(&self) -> u64 {

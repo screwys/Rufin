@@ -84,6 +84,14 @@ impl Catalog {
         }))
     }
 
+    /// A playlist's name from its resident record. An unnamed playlist has none.
+    pub async fn playlist_name(&self, playlist: PlaylistKey) -> Option<String> {
+        self.loaded().await;
+        let snapshot = self.snapshot();
+        let name = snapshot.text(snapshot.playlists.get(playlist.raw())?.name);
+        (!name.is_empty()).then(|| name.to_owned())
+    }
+
     /// URIs of a source's tracks that some playlist holds, by title.
     pub async fn all_playlist_track_order(
         &self,
