@@ -60,6 +60,13 @@ static HOST: OnceLock<Arc<dyn DocumentHost>> = OnceLock::new();
 
 pub fn install_document_host(host: Arc<dyn DocumentHost>) {
     HOST.get_or_init(|| host);
+    library::install_document_lookup(|root, components| {
+        find_document(root, components)
+            .ok()
+            .flatten()
+            .filter(|entry| !entry.directory)
+            .map(|entry| (entry.uri, entry.size))
+    });
 }
 
 fn host() -> SourceResult<&'static Arc<dyn DocumentHost>> {
@@ -147,97 +154,6 @@ pub fn find_document(root: &str, components: &[String]) -> SourceResult<Option<D
         entry = child;
     }
     Ok(Some(entry))
-}
-
-/// Resolve one bounded page of paths, listing each shared directory once.
-pub(crate) fn find_document_paths(
-    root: &str,
-    paths: &[Option<String>],
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> SourceResult<Vec<Option<DocumentEntry>>> {
-    Ok(find_document_path_entries(root, paths, cancelled, false)?
-        .into_iter()
-        .map(|entry| entry.map(|(_, entry)| entry))
-        .collect())
-}
-
-pub(crate) fn find_document_path_entries(
-    root: &str,
-    paths: &[Option<String>],
-    cancelled: &std::sync::atomic::AtomicBool,
-    include_directories: bool,
-) -> SourceResult<Vec<Option<(String, DocumentEntry)>>> {
-    let mut result = vec![None; paths.len()];
-    if include_directories && paths.iter().any(|path| path.as_deref() == Some("")) {
-        let entry = stat_document(root)?;
-        for (path, result) in paths.iter().zip(&mut result) {
-            if path.as_deref() == Some("") {
-                *result = Some((String::new(), entry.clone()));
-            }
-        }
-    }
-    let mut pending = vec![(
-        root.to_owned(),
-        String::new(),
-        paths
-            .iter()
-            .enumerate()
-            .filter_map(|(index, path)| Some((index, path.as_deref()?.to_owned())))
-            .filter(|(_, path)| !path.is_empty())
-            .collect::<Vec<_>>(),
-    )];
-    while let Some((parent, relative, wanted)) = pending.pop() {
-        if wanted.is_empty() {
-            continue;
-        }
-        let mut offset = 0;
-        loop {
-            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
-                return Err(SourceError::Cancelled);
-            }
-            let page = list_documents(&parent, offset)?;
-            for entry in page.entries {
-                let path = if relative.is_empty() {
-                    entry.name.clone()
-                } else {
-                    format!("{relative}/{}", entry.name)
-                };
-                let mut children = Vec::new();
-                for (index, wanted_path) in &wanted {
-                    let (name, rest) = wanted_path
-                        .split_once('/')
-                        .map_or((wanted_path.as_str(), None), |(name, rest)| {
-                            (name, Some(rest))
-                        });
-                    if name != entry.name {
-                        continue;
-                    }
-                    match rest {
-                        Some(rest) if entry.directory => children.push((*index, rest.to_owned())),
-                        None if !entry.directory || include_directories => {
-                            result[*index] = Some((path.clone(), entry.clone()));
-                        }
-                        _ => {}
-                    }
-                }
-                if !children.is_empty() {
-                    let path = format!(
-                        "{path}\u{1f}{}",
-                        percent_encoding::utf8_percent_encode(
-                            &entry.uri,
-                            percent_encoding::NON_ALPHANUMERIC
-                        )
-                    );
-                    pending.push((entry.uri, path, children));
-                }
-            }
-            let Some(next) = page.next else {
-                break;
-            };
-            offset = next;
-        }
-    }
-    Ok(result)
 }
 
 pub(crate) fn save_mapped_artwork(

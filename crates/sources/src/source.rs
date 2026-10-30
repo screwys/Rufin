@@ -77,11 +77,27 @@ pub async fn read_local_lyrics(
             |(_, uri, _, _)| library::file_media_path(&uri),
         )
     };
-    let access =
-        playable.and_then(|playable| playable.download.clone().or_else(|| playable.local_uri()));
+    let access = playable.and_then(|playable| {
+        playable
+            .download
+            .as_ref()
+            .map(|download| download.uri.clone())
+            .or_else(|| playable.local_uri())
+    });
+    let mapped = match playable.and_then(|playable| playable.mapped.clone()) {
+        Some(mapped) => tokio::task::spawn_blocking(move || mapped.locate())
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?,
+        None => None,
+    };
+    let mapped = match mapped {
+        Some(library::LocalMediaLocation::File(path)) => Some(path),
+        _ => None,
+    };
     let Some(path) = access
         .as_deref()
         .and_then(local_path)
+        .or(mapped)
         .or_else(|| local_path(media_uri))
     else {
         return Ok(None);
@@ -2310,7 +2326,9 @@ impl Source {
         }
     }
 
-    pub async fn apply_local_mapping(
+    /// Checks a mapping against a representative track: its root, and the server prefix that
+    /// maps the track to a file. Tracks resolve through the saved mapping when they are read.
+    pub async fn check_local_mapping(
         &self,
         catalog: &Catalog,
         source: library::SourceKey,
@@ -2318,11 +2336,7 @@ impl Source {
         server_prefix: Option<&str>,
         local_prefix: Option<&str>,
         sample_source_path: Option<&str>,
-        cancelled: Arc<AtomicBool>,
     ) -> SourceResult<(PathBuf, Option<String>)> {
-        if cancelled.load(Ordering::Acquire) {
-            return Err(SourceError::Cancelled);
-        }
         let sample = catalog
             .mapping_track_page(
                 source,
@@ -2339,8 +2353,7 @@ impl Source {
         let root = root.to_path_buf();
         let server_prefix = server_prefix.map(str::to_owned);
         let local_prefix = local_prefix.map(str::to_owned);
-        let source_id = self.source_id.clone();
-        let (root, server_prefix, access) = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let root = mapping_root(&root)?;
             let server_prefix = match_local_access_sample(
                 &root,
@@ -2351,110 +2364,10 @@ impl Source {
             .ok_or(SourceError::InvalidRequest(
                 "The representative Track does not map to a local file",
             ))?;
-            let access = mapped_track_access(
-                &source_id,
-                &root,
-                server_prefix.as_deref(),
-                local_prefix.as_deref(),
-                sample,
-            )?
-            .ok_or(SourceError::InvalidRequest(
-                "The representative Track does not map to a local file",
-            ))?;
-            Ok::<_, SourceError>((root, server_prefix, access))
+            Ok((root, server_prefix))
         })
         .await
-        .map_err(|error| SourceError::Other(error.to_string()))??;
-        if cancelled.load(Ordering::Acquire) {
-            return Err(SourceError::Cancelled);
-        }
-        catalog.clear_mapping_access(source).await?;
-        catalog.write_local_locators(&[access]).await?;
-        Ok((root, server_prefix))
-    }
-
-    pub async fn complete_local_mapping(
-        &self,
-        catalog: &Catalog,
-        source: library::SourceKey,
-        root: &std::path::Path,
-        server_prefix: Option<&str>,
-        local_prefix: Option<&str>,
-        cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<usize> {
-        let root = root.to_path_buf();
-        let mut after = None;
-        let mut accepted = 0;
-        loop {
-            if cancelled.load(Ordering::Acquire) {
-                return Err(SourceError::Cancelled);
-            }
-            let tracks = catalog
-                .mapping_track_page(source, after, None, 128, &library::ReadCancellation::new())
-                .await?;
-            if tracks.is_empty() {
-                break;
-            }
-            after = tracks.last().map(|track| track.track_key);
-            let root = root.clone();
-            let server_prefix = server_prefix.map(str::to_owned);
-            let local_prefix = local_prefix.map(str::to_owned);
-            let worker_cancelled = Arc::clone(&cancelled);
-            let source_id = self.source_id.clone();
-            let accesses = tokio::task::spawn_blocking(move || {
-                if root.to_string_lossy().starts_with("content:") {
-                    let paths = tracks
-                        .iter()
-                        .map(|track| {
-                            mapped_document_path(
-                                server_prefix.as_deref(),
-                                local_prefix.as_deref(),
-                                &track.source_path,
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let entries = crate::file::documents::find_document_paths(
-                        &root.to_string_lossy(),
-                        &paths,
-                        &worker_cancelled,
-                    )?;
-                    return Ok(tracks
-                        .into_iter()
-                        .zip(paths)
-                        .zip(entries)
-                        .filter_map(|((track, path), entry)| {
-                            Some(mapped_document_access(
-                                &source_id, &root, &path?, track, entry?,
-                            ))
-                        })
-                        .collect::<Vec<_>>());
-                }
-                let mut accesses = Vec::new();
-                for track in tracks {
-                    if worker_cancelled.load(Ordering::Acquire) {
-                        return Err(SourceError::Cancelled);
-                    }
-                    if let Some(access) = mapped_track_access(
-                        &source_id,
-                        &root,
-                        server_prefix.as_deref(),
-                        local_prefix.as_deref(),
-                        track,
-                    )? {
-                        accesses.push(access);
-                    }
-                }
-                Ok(accesses)
-            })
-            .await
-            .map_err(|error| SourceError::Other(error.to_string()))??;
-            if cancelled.load(Ordering::Acquire) {
-                return Err(SourceError::Cancelled);
-            }
-            catalog.write_local_locators(&accesses).await?;
-            accepted += accesses.len();
-        }
-        Ok(accepted)
+        .map_err(|error| SourceError::Other(error.to_string()))?
     }
 }
 
@@ -2475,8 +2388,12 @@ fn mapped_document_path(
     local_prefix: Option<&str>,
     path: &str,
 ) -> Option<String> {
-    let relative =
-        project_local_access_path(std::path::Path::new(""), server_prefix, local_prefix, path)?;
+    let relative = library::project_local_access_path(
+        std::path::Path::new(""),
+        server_prefix,
+        local_prefix,
+        path,
+    )?;
     if relative.components().any(|part| {
         !matches!(
             part,
@@ -2509,72 +2426,14 @@ fn mapping_path_exists(
     mapped_local_path(root, server, local, path).is_some()
 }
 
-fn mapped_document_access(
-    source_id: &SourceId,
-    root: &std::path::Path,
-    relative: &str,
-    track: library::MappingTrackRow,
-    entry: crate::DocumentEntry,
-) -> library::LocalLocatorWrite {
-    library::LocalLocatorWrite {
-        source_id: Some(source_id.as_str().to_owned()),
-        media_uri: track.media_uri,
-        origin: "mapping".into(),
-        path: entry.uri.clone(),
-        root: root.to_string_lossy().into_owned(),
-        relative_path: relative.into(),
-        access_uri: entry.uri,
-    }
-}
-
-fn mapped_track_access(
-    source_id: &SourceId,
-    root: &std::path::Path,
-    server_prefix: Option<&str>,
-    local_prefix: Option<&str>,
-    track: library::MappingTrackRow,
-) -> SourceResult<Option<library::LocalLocatorWrite>> {
-    if root.to_string_lossy().starts_with("content:") {
-        let Some(path) = mapped_document_path(server_prefix, local_prefix, &track.source_path)
-        else {
-            return Ok(None);
-        };
-        let components = path.split('/').map(str::to_owned).collect::<Vec<_>>();
-        return Ok(
-            crate::file::documents::find_document(&root.to_string_lossy(), &components)?
-                .filter(|entry| !entry.directory)
-                .map(|entry| mapped_document_access(source_id, root, &path, track, entry)),
-        );
-    }
-    let Some(path) = mapped_local_path(root, server_prefix, local_prefix, &track.source_path)
-    else {
-        return Ok(None);
-    };
-    let access_uri = url::Url::from_file_path(&path)
-        .map_err(|()| SourceError::Other("could not create mapped file URI".to_string()))?
-        .to_string();
-    Ok(Some(library::LocalLocatorWrite {
-        source_id: Some(source_id.as_str().to_owned()),
-        media_uri: track.media_uri,
-        origin: "mapping".into(),
-        path: path.to_string_lossy().into_owned(),
-        root: root.to_string_lossy().into_owned(),
-        relative_path: path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned(),
-        access_uri,
-    }))
-}
-
 fn mapped_local_path(
     root: &std::path::Path,
     server_prefix: Option<&str>,
     local_prefix: Option<&str>,
     source_path: &str,
 ) -> Option<PathBuf> {
-    let candidate = project_local_access_path(root, server_prefix, local_prefix, source_path)?;
+    let candidate =
+        library::project_local_access_path(root, server_prefix, local_prefix, source_path)?;
     mapped_file(root, candidate)
 }
 
@@ -2629,44 +2488,6 @@ fn infer_server_prefix(
         }
     }
     None
-}
-
-/// Applies one saved server-prefix/local-prefix formula to a reported source path.
-///
-/// File existence and containment within `root` remain the caller's responsibility.
-pub fn project_local_access_path(
-    root: &std::path::Path,
-    server_prefix: Option<&str>,
-    local_prefix: Option<&str>,
-    source_path: &str,
-) -> Option<PathBuf> {
-    let mut base = root.to_path_buf();
-    if let Some(prefix) = local_prefix
-        .map(str::trim)
-        .filter(|prefix| !prefix.is_empty())
-    {
-        base.push(prefix);
-    }
-    if let Some(prefix) = server_prefix
-        .map(str::trim)
-        .filter(|prefix| !prefix.is_empty())
-    {
-        let relative = source_path
-            .strip_prefix(prefix)?
-            .trim_start_matches(['/', '\\']);
-        return Some(base.join(relative.replace('\\', "/")));
-    }
-    if reported_path_is_absolute(source_path) {
-        Some(PathBuf::from(source_path))
-    } else {
-        Some(base.join(source_path.replace('\\', "/")))
-    }
-}
-
-pub fn reported_path_is_absolute(value: &str) -> bool {
-    std::path::Path::new(value).is_absolute()
-        || value.as_bytes().get(1) == Some(&b':')
-        || value.starts_with("\\\\")
 }
 
 fn mapped_file(root: &std::path::Path, candidate: PathBuf) -> Option<PathBuf> {
@@ -2803,34 +2624,22 @@ mod refresh_laws {
         }
         let publication = crate::published(&mut updates).expect("catalog update");
         assert!(publication.1.intersects(sources::Shown::CATALOG));
-        let cancelled = Arc::new(AtomicBool::new(false));
         let sample = Some("/server/music/Artist/one.flac");
         let (mapped_root, prefix) = source
-            .apply_local_mapping(
-                &catalog,
-                publication.0,
-                &root,
-                None,
-                None,
-                sample,
-                Arc::clone(&cancelled),
-            )
+            .check_local_mapping(&catalog, publication.0, &root, None, None, sample)
             .await
             .unwrap();
         assert_eq!(prefix.as_deref(), Some("/server/music"));
-        assert_eq!(
-            source
-                .complete_local_mapping(
-                    &catalog,
-                    publication.0,
-                    &mapped_root,
-                    prefix.as_deref(),
-                    None,
-                    Arc::clone(&cancelled),
-                )
-                .await
-                .unwrap(),
-            2
+        catalog.set_local_access(
+            [(
+                "mapping-test".to_owned(),
+                library::LocalAccess {
+                    root: mapped_root.to_string_lossy().into_owned(),
+                    server_prefix: prefix.clone(),
+                    local_prefix: None,
+                },
+            )]
+            .into(),
         );
         let tracks = catalog
             .mapping_track_page(
@@ -2855,28 +2664,26 @@ mod refresh_laws {
         }
         assert!(
             source
-                .apply_local_mapping(
+                .check_local_mapping(
                     &catalog,
                     publication.0,
                     &directory.path().join("unavailable-share"),
                     prefix.as_deref(),
                     None,
                     sample,
-                    Arc::clone(&cancelled),
                 )
                 .await
                 .is_err()
         );
         assert!(
             source
-                .apply_local_mapping(
+                .check_local_mapping(
                     &catalog,
                     publication.0,
                     &root,
                     Some("/wrong/prefix"),
                     None,
                     sample,
-                    cancelled,
                 )
                 .await
                 .is_err()
@@ -3083,7 +2890,7 @@ mod refresh_laws {
             Some(Some("/srv/navidrome/music".to_string()))
         );
         assert_eq!(
-            project_local_access_path(
+            library::project_local_access_path(
                 &canonical_root,
                 Some("/media/music"),
                 None,
@@ -3092,7 +2899,12 @@ mod refresh_laws {
             Some(canonical_track.clone())
         );
         assert_eq!(
-            project_local_access_path(&canonical_root, None, None, "Artist/Album/Track.flac",),
+            library::project_local_access_path(
+                &canonical_root,
+                None,
+                None,
+                "Artist/Album/Track.flac",
+            ),
             Some(canonical_track)
         );
         assert_eq!(

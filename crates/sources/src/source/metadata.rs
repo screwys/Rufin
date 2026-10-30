@@ -1176,7 +1176,10 @@ impl Source {
             playable.source_path.as_deref(),
             playable.format.as_deref(),
             false,
-            playable.locator.clone(),
+            playable
+                .locator
+                .clone()
+                .or_else(|| playable.mapped_locator()),
         ) else {
             return Vec::new();
         };

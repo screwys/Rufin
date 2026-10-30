@@ -116,6 +116,7 @@ impl MetadataEditor {
             StreamRequest::new(uri, StreamQuality::Original),
             local.as_ref(),
             None,
+            Some(self.source.downloads()),
             move |id| async move { owner.open_client(id).await },
         )
         .await

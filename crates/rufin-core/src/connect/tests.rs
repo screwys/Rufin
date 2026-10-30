@@ -127,6 +127,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     playback::StreamRequest::original(&uri),
                     None,
                     Some((b.as_ref(), rows[0].as_ref())),
+                    None,
                     |_| async { panic!("peer file") },
                 )
                 .await
@@ -190,7 +191,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .await
                     .unwrap();
                 a.catalog
-                    .write_local_locators(&[library::LocalLocatorWrite {
+                    .upsert_local_locator(&library::LocalLocatorWrite {
                         source_id: None,
                         media_uri: uri.clone(),
                         origin: "import".into(),
@@ -198,7 +199,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                         root: root.path().to_string_lossy().into_owned(),
                         relative_path: format!("outside-{index}.flac"),
                         access_uri: uri.clone(),
-                    }])
+                    })
                     .await
                     .unwrap();
                 shared.push((uri, bytes));

@@ -87,6 +87,11 @@ enum Command {
         media_uris: Vec<String>,
         notify: bool,
     },
+    /// Playback found this download gone or the wrong size.
+    Forget {
+        media_uri: String,
+        path: String,
+    },
     SettingsChanged(Vec<SourceDownloadSettings>),
     RemoveRule {
         source_id: SourceId,
@@ -899,6 +904,12 @@ impl Downloads {
         self.send(Command::Remove { media_uris, notify });
     }
 
+    /// Forgets a managed download playback found gone or the wrong size, while its row still
+    /// names `path`; its rules download it again.
+    pub fn forget(&self, media_uri: String, path: String) {
+        self.send(Command::Forget { media_uri, path });
+    }
+
     pub fn connect_changed(&self) {
         self.send(Command::ConnectChanged);
     }
@@ -1200,6 +1211,21 @@ impl Actor {
                     .await;
                     self.force_remove(source_id.as_ref(), media_uris, notify)
                         .await;
+                }
+            }
+            Command::Forget { media_uri, path } => {
+                let recorded = self.catalog.download_file(&media_uri).await;
+                if recorded
+                    .ok()
+                    .flatten()
+                    .is_some_and(|file| file.path == path)
+                {
+                    let source_id = media_source_id(&self.catalog, &media_uri).await;
+                    self.force_remove(source_id.as_ref(), vec![media_uri], false)
+                        .await;
+                    if let Some(source_id) = source_id {
+                        self.reconcile_all_rules(&source_id);
+                    }
                 }
             }
             Command::SettingsChanged(settings) => {

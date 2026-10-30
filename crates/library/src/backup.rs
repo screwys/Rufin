@@ -76,7 +76,7 @@ impl Catalog {
                 .bind(cursor).fetch_optional(&mut *transaction).await? {
                 let path = directory.join(format!("playlists/{ordinal}.m3u8"));
                 let mut output = private_file(&path)?;
-                crate::playlist_format::export_playlist_on(&mut transaction, key, &path, crate::PlaylistPathMode::Absolute, &mut output).await?;
+                crate::playlist_format::export_playlist_on(&mut transaction, key, &path, crate::PlaylistPathMode::Absolute, &mut output, |_, _, _| None).await?;
                 output.flush()?;
                 cursor = key.raw();
                 ordinal += 1;

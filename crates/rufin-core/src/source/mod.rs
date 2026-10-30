@@ -63,7 +63,6 @@ struct CachedSource {
     source: Arc<Source>,
     refresh: Option<Refresh>,
     observer: Option<(Arc<SelectedFeed>, tokio::task::AbortHandle)>,
-    mapping: Option<Arc<AtomicBool>>,
 }
 
 struct Refresh {
@@ -81,9 +80,6 @@ impl Drop for CachedSource {
         }
         if let Some(refresh) = &self.refresh {
             refresh.cancelled.store(true, Ordering::Release);
-        }
-        if let Some(mapping) = &self.mapping {
-            mapping.store(true, Ordering::Release);
         }
     }
 }
@@ -482,10 +478,15 @@ impl SourceOwner {
             .map_err(SourceError::Other)
     }
 
+    pub(crate) fn downloads(&self) -> &Downloads {
+        &self.shared.downloads
+    }
+
     pub(crate) fn start(&self) -> Result<(), String> {
         if self.shared.started.swap(true, Ordering::AcqRel) {
             return Err("the source owner is already running".to_string());
         }
+        self.publish_local_access();
         let shared = &self.shared;
         let (runtime, catalog, weak) = (&shared.runtime, &shared.catalog, Arc::downgrade(shared));
         follow(
@@ -1277,7 +1278,6 @@ impl SourceOwner {
                 source: source.clone(),
                 refresh: None,
                 observer: None,
-                mapping: None,
             },
         );
         source
@@ -2334,111 +2334,79 @@ impl SourceOwner {
         .map_err(SourceError::Other)
     }
 
+    /// Saves a folder mapping once a representative track maps to a file; every track of the
+    /// source resolves through it when it is read.
     pub async fn save_local_access(
         &self,
         mut input: SourceLocalAccess,
-        wait_until_mapped: bool,
     ) -> sources::SourceResult<()> {
-        let (sender, receiver) = async_channel::bounded(1);
-        let owner = self.clone();
-        self.shared.runtime.spawn(async move {
-            let cancelled = Arc::new(AtomicBool::new(false));
-            let result = async {
-                let (source, source_key) = owner.source_target(&input.source_id).await?;
-                {
-                    let mut clients = owner
-                        .shared
-                        .clients
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner());
-                    if let Some(cached) = clients.get_mut(&input.source_id) {
-                        if let Some(previous) = cached.mapping.replace(cancelled.clone()) {
-                            previous.store(true, Ordering::Release);
-                        }
-                    }
-                }
-                let (root_path, server_prefix) = source
-                    .apply_local_mapping(
-                        &owner.shared.catalog,
-                        source_key,
-                        &input.root_path,
-                        input.server_prefix.as_deref(),
-                        input.local_prefix.as_deref(),
-                        input.sample_source_path.as_deref(),
-                        Arc::clone(&cancelled),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                input.server_prefix = server_prefix;
-                if source.is_retired() || cancelled.load(Ordering::Acquire) {
-                    return Err(SourceError::Cancelled.to_string());
-                }
-                owner.shared.settings.update(|stored| {
-                    let configured = stored
-                        .sources
-                        .configured
-                        .iter_mut()
-                        .find(|configured| configured.configuration.source_id == input.source_id)
-                        .ok_or_else(|| "the mapped source is no longer configured".to_string())?;
-                    configured.local_access = Some(SavedLocalAccess {
-                        root_path: root_path.clone(),
-                        server_prefix: input.server_prefix.clone(),
-                        local_prefix: input.local_prefix.clone(),
-                    });
-                    Ok(())
-                })?;
-                owner.shared.playback()?.stream_inputs_changed()?;
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(owner.list_sources()))
-                    .await;
-                Ok((root_path, source, source_key))
+        self.reply(move |owner, catalog| async move {
+            let (source, source_key) = owner.source_target(&input.source_id).await?;
+            let (root_path, server_prefix) = source
+                .check_local_mapping(
+                    &catalog,
+                    source_key,
+                    &input.root_path,
+                    input.server_prefix.as_deref(),
+                    input.local_prefix.as_deref(),
+                    input.sample_source_path.as_deref(),
+                )
+                .await
+                .map_err(string_error)?;
+            input.server_prefix = server_prefix;
+            if source.is_retired() {
+                return Err(SourceError::Cancelled.to_string());
             }
-            .await;
-            let (root_path, source, source_key) = match result {
-                Ok(completed) => completed,
-                Err(error) => {
-                    let _ = sender.send(Err(error)).await;
-                    return;
-                }
-            };
-            if !wait_until_mapped {
-                let _ = sender.send(Ok(())).await;
-            }
-            let completion: Result<(), String> = async {
-                if cancelled.load(Ordering::Acquire) {
-                    return Err("Local file mapping was cancelled".to_string());
-                }
-                source
-                    .complete_local_mapping(
-                        &owner.shared.catalog,
-                        source_key,
-                        &root_path,
-                        input.server_prefix.as_deref(),
-                        input.local_prefix.as_deref(),
-                        Arc::clone(&cancelled),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                owner.shared.playback()?.stream_inputs_changed()?;
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(owner.list_sources()))
-                    .await;
+            owner.shared.settings.update(|stored| {
+                let configured = stored
+                    .sources
+                    .configured
+                    .iter_mut()
+                    .find(|configured| configured.configuration.source_id == input.source_id)
+                    .ok_or_else(|| "the mapped source is no longer configured".to_string())?;
+                configured.local_access = Some(SavedLocalAccess {
+                    root_path,
+                    server_prefix: input.server_prefix.clone(),
+                    local_prefix: input.local_prefix.clone(),
+                });
                 Ok(())
-            }
-            .await;
-            if wait_until_mapped {
-                let _ = sender.send(completion).await;
-            } else if let Err(error) = completion {
-                warn!(%error, "background Local mapping did not complete");
-            }
-        });
-        receiver
-            .recv()
-            .await
-            .map_err(|error| SourceError::Other(error.to_string()))?
-            .map_err(SourceError::Other)
+            })?;
+            owner.publish_local_access();
+            owner.shared.playback()?.stream_inputs_changed()?;
+            owner
+                .shared
+                .send(SourceEvent::Configured(owner.list_sources()))
+                .await;
+            Ok(())
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+        .map_err(SourceError::Other)
+    }
+
+    /// Hands the saved folder mappings to the Catalog, which resolves tracks through them.
+    pub(crate) fn publish_local_access(&self) {
+        let rules = self
+            .shared
+            .settings
+            .load()
+            .sources
+            .configured
+            .into_iter()
+            .filter_map(|configured| {
+                let access = configured.local_access?;
+                Some((
+                    configured.configuration.source_id.as_str().to_owned(),
+                    library::LocalAccess {
+                        root: access.root_path.to_string_lossy().into_owned(),
+                        server_prefix: access.server_prefix,
+                        local_prefix: access.local_prefix,
+                    },
+                ))
+            })
+            .collect();
+        self.shared.catalog.set_local_access(rules);
     }
 }
 
@@ -2447,24 +2415,6 @@ impl SourceOwner {
     pub fn clear_local_access(&self, source_id: SourceId) {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
-            if let Some(cached) = owner
-                .shared
-                .clients
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get_mut(&source_id)
-                && let Some(token) = cached.mapping.take()
-            {
-                token.store(true, Ordering::Release);
-            }
-
-            if let Some(source) = owner.shared.catalog.source_key(&source_id) {
-                let _ = owner.shared.catalog.clear_mapping_access(source).await;
-                let _ = owner
-                    .shared
-                    .playback()
-                    .and_then(|playback| playback.stream_inputs_changed());
-            }
             let _ = owner.shared.settings.update(|stored| {
                 if let Some(configured) = stored
                     .sources
@@ -2476,6 +2426,11 @@ impl SourceOwner {
                 }
                 Ok(())
             });
+            owner.publish_local_access();
+            let _ = owner
+                .shared
+                .playback()
+                .and_then(|playback| playback.stream_inputs_changed());
             owner
                 .shared
                 .send(SourceEvent::Configured(
@@ -3001,7 +2956,6 @@ impl SourceOwner {
                     source: Arc::clone(&source),
                     refresh: None,
                     observer: None,
-                    mapping: None,
                 },
             );
             return Ok(source);
@@ -4037,6 +3991,7 @@ mod source_tests {
                 assert_eq!(catalog.favorite(&favorite).await.unwrap(), value);
             }
             while receiver.try_recv().is_ok() {}
+            std::fs::write(directory.path().join("local.flac"), b"audio").unwrap();
             let local_uri = url::Url::from_file_path(directory.path().join("local.flac"))
                 .unwrap()
                 .to_string();
@@ -4051,6 +4006,7 @@ mod source_tests {
                     &catalog,
                     &playable,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
+                    None,
                     None,
                     None,
                     |source_id| owner.open_client(source_id),

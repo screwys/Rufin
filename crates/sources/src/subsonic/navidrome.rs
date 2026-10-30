@@ -643,6 +643,7 @@ fn track_from_navidrome(
                 sample_rate_hz: field(track, "sampleRate"),
                 bit_depth: field(track, "bitDepth"),
                 channels: field(track, "channels"),
+                size_bytes: field(track, "size"),
             },
             sort_text: clean_optional(field(track, "sortTitle"))
                 .unwrap_or_else(|| title.clone())

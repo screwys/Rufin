@@ -53,9 +53,14 @@ mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
 pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
+mod local_access;
 mod pins;
+pub use local_access::{
+    DocumentLookup, LocalAccess, MappedFile, install_document_lookup, project_local_access_path,
+    reported_path_is_absolute,
+};
 mod playable;
-pub use playable::{Gains, Playable, PlayableFile};
+pub use playable::{Gains, Playable, PlayableDownload, PlayableFile};
 mod playlists;
 pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;

@@ -31,6 +31,10 @@ pub struct AudioProperties {
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u32>,
     pub channels: Option<u32>,
+    /// The file size the server reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "bindings", uniffi(default = None))]
+    pub size_bytes: Option<u64>,
 }
 
 impl sqlx::Type<Sqlite> for AudioProperties {

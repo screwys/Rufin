@@ -146,6 +146,8 @@ struct RunContext {
     bitstream: bool,
     /// A seek was sent; the position that answers it is saved.
     seeking: bool,
+    /// The local copy that failed to open or decode; the run tries the next one only once.
+    failed_local: Option<String>,
 }
 
 impl RunContext {
@@ -168,6 +170,7 @@ impl RunContext {
             seekable: true,
             bitstream: false,
             seeking: false,
+            failed_local: None,
         }
     }
 
@@ -1301,6 +1304,17 @@ impl Player {
                 else {
                     return;
                 };
+                let local = current
+                    .resolved_stream
+                    .as_ref()
+                    .map(|stream| stream.uri().to_owned())
+                    .filter(|uri| uri.starts_with("file:") || uri.starts_with("content:"));
+                if current.failed_local.is_none()
+                    && let Some(local) = local
+                    && (error.kind().skippable() || error.kind() == FailureKind::DeniedAccess)
+                {
+                    return self.resolve_next_candidate(local);
+                }
                 let failed = FailedRun {
                     desired_playing: current.desired_playing,
                 };
@@ -2561,6 +2575,25 @@ impl Player {
         let mut request = request;
         request.session_identifier = Some(self.play_id(next_run));
         self.resolve_stream(next_run, next, request);
+    }
+
+    /// A local copy failed to open or decode: the run resolves again past it, from where it
+    /// was.
+    fn resolve_next_candidate(&mut self, failed: String) {
+        let Some(current) = self.current_run.as_mut() else {
+            return;
+        };
+        current.status = TransportStatus::Resolving;
+        current.resolved_stream = None;
+        current.backend_loaded = false;
+        current.failed_local = Some(failed.clone());
+        let (run, row) = (current.id, current.row.clone());
+        let mut request =
+            StreamRequest::new(row.track.media_uri.clone(), self.settings.stream_quality);
+        request.session_identifier = Some(current.play_id.clone());
+        request.failed_local = Some(failed);
+        self.dirty = true;
+        self.resolve_stream(run, row, request);
     }
 
     fn resolve_current(&mut self, run: RunId, entry: &std::sync::Arc<QueueRow>) {

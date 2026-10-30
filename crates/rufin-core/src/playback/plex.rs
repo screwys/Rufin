@@ -1549,9 +1549,11 @@ impl PlaybackOwner {
                 request,
                 local.as_ref(),
                 None,
+                None,
                 move |_| async { Ok(source) },
             )
-            .await?;
+            .await
+            .map_err(string_error)?;
             let prepared = prepare_media_stream(stream, super::track_loudness(&playable), row);
             check_cancelled(&cancelled)?;
             queue.progress_millis = plex

@@ -1802,7 +1802,7 @@ mod tests {
                 .upsert_local_locator(&library::LocalLocatorWrite {
                     source_id: None,
                     media_uri: media_uri.clone(),
-                    origin: "mapping".to_string(),
+                    origin: "import".to_string(),
                     path: path.to_string_lossy().into_owned(),
                     root: directory.path().to_string_lossy().into_owned(),
                     relative_path: path

@@ -420,6 +420,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
             .await
             .expect("resolve direct download access")
             .and_then(|playable| playable.download)
+            .map(|download| download.uri)
             .as_deref(),
         Some("file:///downloads/direct.flac")
     );
@@ -2170,15 +2171,15 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     let object = |index: usize| rows[index].object_id.clone().expect("indexed track object");
     fixture
         .catalog
-        .write_local_locators(&[library::LocalLocatorWrite {
+        .upsert_local_locator(&library::LocalLocatorWrite {
             source_id: Some("source".into()),
             media_uri: rows[0].media_uri.clone(),
-            origin: "mapping".into(),
+            origin: "import".into(),
             path: format!("/validated/{}.flac", object(0)),
             root: "/validated".to_string(),
             relative_path: format!("{}.flac", object(0)),
             access_uri: format!("file:///validated/{}.flac", object(0)),
-        }])
+        })
         .await
         .expect("write accepted Local access provenance");
     fixture

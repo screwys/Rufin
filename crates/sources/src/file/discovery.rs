@@ -169,6 +169,7 @@ fn metadata_from_info(info: &DiscovererInfo) -> Option<Metadata> {
         sample_rate_hz: (audio.sample_rate() > 0).then(|| audio.sample_rate()),
         bit_depth: (audio.depth() > 0).then(|| audio.depth()),
         channels: (audio.channels() > 0).then(|| audio.channels()),
+        size_bytes: None,
     };
     Some(metadata)
 }

@@ -546,6 +546,7 @@ impl PlaybackOwner {
             };
             keep_playable(&playables, &playable);
             lyrics.playable_resolved(Arc::clone(&playable));
+            let downloads = source_owner.as_ref().map(|owner| owner.downloads().clone());
             let result = prepare_stream(
                 &catalog,
                 &playable,
@@ -556,6 +557,7 @@ impl PlaybackOwner {
                     .as_deref()
                     .filter(|connect| connect.status().settings.enabled)
                     .map(|connect| (connect, occurrence.as_ref())),
+                downloads.as_ref(),
                 move |source_id| async move {
                     tokio::task::spawn_blocking(move || {
                         source_owner
@@ -566,19 +568,8 @@ impl PlaybackOwner {
                     .map_err(string_error)?
                 },
             )
-            .await;
-            let result = match result {
-                Ok(stream) if !local_stream_available(stream.uri()).await => {
-                    let kind = playback::FailureKind::UnavailableMedia;
-                    Err(playback::BackendFailure::with_kind(kind, kind.summary()))
-                }
-                Ok(stream) => Ok(prepare_media_stream(
-                    stream,
-                    track_loudness(&playable),
-                    occurrence,
-                )),
-                Err(error) => Err(playback::BackendFailure::new(error)),
-            };
+            .await
+            .map(|stream| prepare_media_stream(stream, track_loudness(&playable), occurrence));
             playback.post(move |player, sample| match result {
                 Ok(stream) => player.stream_resolved(run, stream),
                 Err(error) => player.stream_failed(run, error, sample),
@@ -1122,19 +1113,28 @@ impl PlaybackOwner {
     }
 }
 
-/// Opens a playable: its download, its local locator or Local file, the Connect peer while
-/// Connect is on, then its source's remote file or server stream.
+/// Opens a playable from the first usable of its download, its mapped file and its own local
+/// file, then the Connect peer while Connect is on, then its source's remote file or server
+/// stream. A local copy is usable when it is a regular file with the size it should have; one
+/// that cannot be looked at is skipped. A managed download that is gone or the wrong size is
+/// forgotten, so its rules download it again. A local track with no usable copy is unavailable.
 pub(crate) async fn prepare_stream<F>(
     catalog: &Catalog,
     playable: &library::Playable,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
     file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
+    downloads: Option<&downloads::Downloads>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
-) -> Result<audio_processing::ResolvedStream, String>
+) -> Result<audio_processing::ResolvedStream, playback::BackendFailure>
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
+    let failure = playback::BackendFailure::new;
+    let unavailable = || {
+        let kind = playback::FailureKind::UnavailableMedia;
+        playback::BackendFailure::with_kind(kind, kind.summary())
+    };
     let granted_uri = |uri: &str| {
         let path = library::file_media_path(uri)?;
         let (_, access) = local?.local_file_location(&path)?;
@@ -1147,56 +1147,83 @@ where
         .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
     let granted_file = granted_uri(file_uri);
     let file_uri = granted_file.as_deref().unwrap_or(file_uri);
-    // A download plays first while its file is there.
-    let mut download = playable.download.clone().map(granted);
-    if let Some(uri) = &download
-        && !local_access_available(uri).await?
-    {
-        download = None;
-    }
-    let mut access = download
+    let local_media =
+        url::Url::parse(file_uri).is_ok_and(|uri| matches!(uri.scheme(), "file" | "content"));
+    let download = playable
+        .download
         .clone()
-        .or_else(|| playable.local_uri().map(granted));
+        .map(|download| library::PlayableDownload {
+            uri: granted(download.uri),
+            ..download
+        });
+    let own = playable
+        .local_uri()
+        .map(granted)
+        .or_else(|| local_media.then(|| file_uri.to_owned()));
+    let candidates = Candidates {
+        download: download.clone(),
+        mapped: playable.mapped.clone(),
+        own,
+        failed: request.failed_local.clone(),
+    };
+    let (chosen, broken) = tokio::task::spawn_blocking(move || candidates.choose())
+        .await
+        .map_err(|error| failure(error.to_string()))?;
+    if let (Some(broken), Some(downloads)) = (broken, downloads) {
+        warn!(media_uri = %playable.media_uri, "forgetting a download that is gone or the wrong size");
+        downloads.forget(playable.media_uri.clone(), broken);
+    }
+    let from_download = chosen
+        .as_ref()
+        .zip(download.as_ref())
+        .is_some_and(|(chosen, download)| *chosen == download.uri);
+    let mut access = chosen;
     let mut fetched_uri = None;
     if let Some((connect, occurrence)) = file_transfer
-        && connect.is_local_media(&request.media_uri).await?
+        && connect
+            .is_local_media(&request.media_uri)
+            .await
+            .map_err(failure)?
     {
         if occurrence.received_from_connect && file_uri.starts_with("content://") {
-            return Err("The source device did not provide a portable document identity".into());
+            return Err(failure(
+                "The source device did not provide a portable document identity".into(),
+            ));
         }
         let received_document = url::Url::parse(file_uri)
             .is_ok_and(|uri| uri.scheme() == "content")
             && occurrence.received_from_connect;
-        if received_document && download.is_none() {
+        if received_document && !from_download {
             access = None;
         }
-        let remote = received_document
-            || catalog
+        // A file URI received from another device names that device's file.
+        if playable.local_uri().is_none()
+            && access.as_deref() == Some(file_uri)
+            && catalog
                 .file_media_is_remote(&request.media_uri, occurrence.received_from_connect)
                 .await
-                .map_err(string_error)?;
-        let local_access = match access.as_ref() {
-            Some(uri) => local_access_available(uri).await.unwrap_or(false),
-            None => false,
-        };
-        // A content URI received from another device is not a grant to this device's provider.
-        let available =
-            local_access || (!remote && local_access_available(file_uri).await.unwrap_or(false));
-        if !available {
+                .map_err(|error| failure(error.to_string()))?
+        {
+            access = None;
+        }
+        if access.is_none() {
             let peer = connect.peer_access();
             if let Some(location) = peer
                 .mapped_file(catalog, &request.media_uri)
                 .await
-                .map_err(string_error)?
+                .map_err(|error| failure(error.to_string()))?
             {
                 fetched_uri = Some(match location {
                     library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
                         .map(String::from)
-                        .map_err(|_| "Media path must be absolute".to_owned())?,
+                        .map_err(|_| failure("Media path must be absolute".to_owned()))?,
                     library::LocalMediaLocation::Document(uri) => uri,
                 });
             } else {
-                let mut stream = peer.stream(request.clone()).await.map_err(string_error)?;
+                let mut stream = peer
+                    .stream(request.clone())
+                    .await
+                    .map_err(|error| failure(error.to_string()))?;
                 if let Some((start, end)) = playable.window {
                     stream = stream.with_window(start, end);
                 }
@@ -1206,15 +1233,15 @@ where
     }
     // Downloads names its owned file using the actual transcoded extension.
     // Mapped and original files still use their parsed source format.
-    let content_type = match &download {
-        Some(uri) if access.as_ref() == Some(uri) => {
+    let content_type = match &access {
+        Some(uri) if from_download => {
             let path = if uri.starts_with("content:") {
                 let uri = uri.clone();
                 Some(
                     tokio::task::spawn_blocking(move || sources::stat_document(&uri))
                         .await
-                        .map_err(string_error)?
-                        .map_err(string_error)?
+                        .map_err(|error| failure(error.to_string()))?
+                        .map_err(|error| failure(error.to_string()))?
                         .name
                         .into(),
                 )
@@ -1230,47 +1257,127 @@ where
         _ => None,
     };
     let access_uri = access.or(fetched_uri);
+    // A local track has nothing else to play from.
+    if access_uri.is_none() && (local_media || playable.source_kind.as_deref() == Some("local")) {
+        return Err(unavailable());
+    }
     if let Some((start, end)) = playable
         .window
         .filter(|_| access_uri.is_some() || cue.is_some())
     {
         return Ok(
             direct_stream(access_uri.unwrap_or_else(|| file_uri.to_owned()))
-                .await?
+                .await
+                .map_err(failure)?
                 .with_content_type(content_type)
                 .with_window(start, end),
         );
     }
     if let Some(uri) = access_uri.or_else(|| library::normalize_direct_media_uri(file_uri)) {
-        return Ok(direct_stream(uri).await?.with_content_type(content_type));
+        return Ok(direct_stream(uri)
+            .await
+            .map_err(failure)?
+            .with_content_type(content_type));
     }
     let source_id = playable
         .source_id
         .clone()
-        .ok_or_else(crate::source::source_access_unavailable)?;
-    let source = source(source_id).await?;
-    source.stream(playable, request).await.map_err(string_error)
-}
-
-// Catches a removed local file before it reaches playback, where a failed
-// gapless preload would cut the current song short.
-async fn local_stream_available(uri: &str) -> bool {
-    let local = url::Url::parse(uri).is_ok_and(|uri| matches!(uri.scheme(), "file" | "content"));
-    !local || local_access_available(uri).await.unwrap_or(true)
-}
-
-async fn local_access_available(uri: &str) -> Result<bool, String> {
-    let location = if url::Url::parse(uri).is_ok_and(|uri| uri.scheme() == "content") {
-        library::LocalMediaLocation::Document(uri.to_owned())
-    } else if let Some(path) = library::file_media_path(uri) {
-        library::LocalMediaLocation::File(path)
-    } else {
-        return Ok(false);
-    };
-    sources::local_files_available(vec![vec![location]])
+        .ok_or_else(|| failure(crate::source::source_access_unavailable()))?;
+    let source = source(source_id).await.map_err(failure)?;
+    source
+        .stream(playable, request)
         .await
-        .map(|available| available.first() == Some(&true))
-        .map_err(string_error)
+        .map_err(|error| failure(error.to_string()))
+}
+
+/// A playable's local copies in the order playback tries them.
+struct Candidates {
+    download: Option<library::PlayableDownload>,
+    mapped: Option<library::MappedFile>,
+    own: Option<String>,
+    /// The copy that failed to open or decode: it and the ones before it are passed over.
+    failed: Option<String>,
+}
+
+impl Candidates {
+    /// The first usable copy, and the path of a managed download that is gone or the wrong
+    /// size. This blocks on the file system or the document provider.
+    fn choose(self) -> (Option<String>, Option<String>) {
+        let mut passed = self.failed.is_some();
+        let mut broken = None;
+        let mut pass = |uri: &str| {
+            let skip = passed;
+            if self.failed.as_deref() == Some(uri) {
+                passed = false;
+            }
+            skip
+        };
+        if let Some(download) = &self.download
+            && !pass(&download.uri)
+        {
+            match look(&download.uri, download.size) {
+                Found::Usable => return (Some(download.uri.clone()), None),
+                Found::Missing if download.managed => broken = Some(download.uri.clone()),
+                Found::Missing | Found::Unusable => {}
+            }
+        }
+        if let Some(uri) = self
+            .mapped
+            .as_ref()
+            .and_then(library::MappedFile::locate)
+            .map(|location| match location {
+                library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
+                    .map(String::from)
+                    .unwrap_or_default(),
+                library::LocalMediaLocation::Document(uri) => uri,
+            })
+            && !pass(&uri)
+        {
+            return (Some(uri), broken);
+        }
+        if let Some(uri) = &self.own
+            && !pass(uri)
+            && look(uri, None) == Found::Usable
+        {
+            return (Some(uri.clone()), broken);
+        }
+        (None, broken)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Found {
+    Usable,
+    /// Not there, or not the size it should be.
+    Missing,
+    /// Not a regular file, or it could not be looked at.
+    Unusable,
+}
+
+fn look(uri: &str, size: Option<u64>) -> Found {
+    let (file, actual) = if url::Url::parse(uri).is_ok_and(|uri| uri.scheme() == "content") {
+        match sources::stat_document(uri) {
+            Ok(entry) => (!entry.directory, entry.size),
+            Err(sources::SourceError::NotFound) => return Found::Missing,
+            Err(_) => return Found::Unusable,
+        }
+    } else {
+        let Some(path) = library::file_media_path(uri) else {
+            return Found::Unusable;
+        };
+        match std::fs::metadata(path) {
+            Ok(metadata) => (metadata.is_file(), Some(metadata.len())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Found::Missing,
+            Err(_) => return Found::Unusable,
+        }
+    };
+    if !file {
+        Found::Unusable
+    } else if size.is_some_and(|size| actual.is_some_and(|actual| actual != size)) {
+        Found::Missing
+    } else {
+        Found::Usable
+    }
 }
 
 async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, String> {
@@ -1515,6 +1622,7 @@ mod tests {
                 occurrence.track.media_uri.clone(),
                 playback::StreamQuality::Original,
             ),
+            None,
             None,
             None,
             |_| async { panic!("a completed download must resolve without contacting its source") },

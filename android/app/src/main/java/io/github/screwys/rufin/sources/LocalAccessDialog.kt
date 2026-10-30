@@ -91,7 +91,7 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
                 try {
                     val form = SourceLocalAccess(sourceId, root, serverPrefix.trim().ifEmpty { null },
                         localPrefix.trim().ifEmpty { null }, sample.takeIf { it.isNotBlank() })
-                    bridge!!.saveLocalAccess(form, true)
+                    bridge!!.saveLocalAccess(form)
                     onSaved()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { failure = error.userMessage() }

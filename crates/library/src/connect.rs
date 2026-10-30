@@ -142,15 +142,20 @@ impl Catalog {
     ) -> LibraryResult<Option<crate::LocalMediaLocation>> {
         let mut connection = self.acquire_reader().await?;
         let backing = crate::cue_media_parts(media_uri).map(|(_, backing, _, _)| backing);
-        let paths:Vec<String>=sqlx::query_scalar("SELECT access_uri FROM main.local_locators WHERE media_uri IN (?1,?2) ORDER BY media_uri=?1 DESC, CASE origin WHEN 'local' THEN 0 WHEN 'import' THEN 1 WHEN 'mapping' THEN 2 ELSE 3 END LIMIT 4").bind(media_uri).bind(backing.as_deref()).fetch_all(&mut *connection).await?;
-        Ok(paths.into_iter().find_map(|uri| {
+        let paths:Vec<String>=sqlx::query_scalar("SELECT access_uri FROM main.local_locators WHERE media_uri IN (?1,?2) ORDER BY media_uri=?1 DESC, CASE origin WHEN 'local' THEN 0 ELSE 1 END LIMIT 4").bind(media_uri).bind(backing.as_deref()).fetch_all(&mut *connection).await?;
+        drop(connection);
+        let stored = paths.into_iter().find_map(|uri| {
             if uri.starts_with("content://") {
                 return Some(crate::LocalMediaLocation::Document(uri));
             }
             crate::file_media_path(&uri)
                 .filter(|path| path.is_file())
                 .map(crate::LocalMediaLocation::File)
-        }))
+        });
+        match stored {
+            Some(location) => Ok(Some(location)),
+            None => self.located_mapped_file(media_uri).await,
+        }
     }
 }
 

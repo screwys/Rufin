@@ -174,7 +174,6 @@ fn manage_server_content(
         &server_prefix,
         Some(&local_prefix),
         sample_source_path.clone(),
-        false,
         Rc::new(move || close_manage_server(&exit_for_save)),
     );
     let update_state: Rc<dyn Fn()> = Rc::new({

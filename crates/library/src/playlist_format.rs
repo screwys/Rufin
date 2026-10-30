@@ -5,7 +5,8 @@ use futures_util::TryStreamExt;
 use sqlx::{FromRow, Row};
 
 use crate::{
-    Catalog, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
+    Catalog, LibraryError, LibraryResult, LocalMediaLocation, PlaylistEntryWrite, PlaylistIdentity,
+    PlaylistKey,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -349,7 +350,15 @@ impl Catalog {
         output: impl Write,
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
-        export_playlist_on(&mut connection, playlist, file, mode, output).await
+        export_playlist_on(
+            &mut connection,
+            playlist,
+            file,
+            mode,
+            output,
+            |source, path, size| self.mapped_file(source, path, size),
+        )
+        .await
     }
 
     pub async fn export_playlist_file_as(
@@ -361,7 +370,16 @@ impl Catalog {
         output: impl Write,
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
-        export_playlist_as_on(&mut connection, playlist, file, format, mode, output).await
+        export_playlist_as_on(
+            &mut connection,
+            playlist,
+            file,
+            format,
+            mode,
+            output,
+            |source, path, size| self.mapped_file(source, path, size),
+        )
+        .await
     }
 }
 
@@ -483,10 +501,11 @@ pub(crate) async fn export_playlist_on(
     file: &Path,
     mode: PlaylistPathMode,
     output: impl Write,
+    mapped: impl Fn(&str, &str, Option<u64>) -> Option<crate::MappedFile>,
 ) -> LibraryResult<u64> {
     let format =
         PlaylistFormat::from_path(file).ok_or_else(|| invalid("Unsupported playlist format"))?;
-    export_playlist_as_on(connection, playlist, file, format, mode, output).await
+    export_playlist_as_on(connection, playlist, file, format, mode, output, mapped).await
 }
 
 async fn export_playlist_as_on(
@@ -496,6 +515,7 @@ async fn export_playlist_as_on(
     format: PlaylistFormat,
     mode: PlaylistPathMode,
     output: impl Write,
+    mapped: impl Fn(&str, &str, Option<u64>) -> Option<crate::MappedFile>,
 ) -> LibraryResult<u64> {
     let identity = sqlx::query_as::<_, PlaylistIdentity>(
         "SELECT playlist.owner='source' source_owned,source.object_id source_id,
@@ -519,10 +539,12 @@ async fn export_playlist_as_on(
                 CASE WHEN ?2 THEN coalesce((
                     SELECT access_uri FROM local_locators
                     WHERE media_uri=track.media_uri AND access_uri LIKE 'content:%'
-                    ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1
-                ),details.source_path) END document_locator
+                    ORDER BY local_access_file_key LIMIT 1
+                ),details.source_path) END document_locator,
+                source.object_id mapping_source,details.source_path mapping_path,
+                json_extract(details.metadata,'$.audio_properties.size_bytes') mapping_size
          FROM playlist_entries entry JOIN tracks track USING(track_key)
-         LEFT JOIN track_details details USING(track_key)
+         LEFT JOIN track_details details USING(track_key) LEFT JOIN sources source ON source.source_key=track.source_key
          WHERE entry.playlist_key=?1 ORDER BY entry.rank,entry.playlist_entry_key",
         crate::track_metadata_sql("track", "details")
     ))).bind(playlist).bind(file.to_str().is_some_and(|file| file.starts_with("content:"))).fetch(&mut *connection);
@@ -532,7 +554,21 @@ async fn export_playlist_as_on(
         let locator = locator.filter(|_| crate::cue_media_parts(&entry.track.media_uri).is_none());
         let locator = locator.and_then(|locator| {
             crate::document_access_uri(&locator)
-                .or_else(|| locator.starts_with("content:").then_some(locator))
+                .or_else(|| locator.starts_with("content:").then(|| locator.clone()))
+                .or_else(|| {
+                    // A mapped document: the server's path under the mapped document tree.
+                    let source: Option<String> = row.try_get("mapping_source").ok()?;
+                    let size: Option<i64> = row.try_get("mapping_size").ok()?;
+                    let mapped = mapped(
+                        &source?,
+                        &locator,
+                        size.and_then(|size| u64::try_from(size).ok()),
+                    )?;
+                    match mapped.locate()? {
+                        LocalMediaLocation::Document(uri) => Some(uri),
+                        LocalMediaLocation::File(_) => None,
+                    }
+                })
         });
         writer.entry_with_locator(&entry, locator.as_deref().unwrap_or(&entry.track.media_uri))?;
     }

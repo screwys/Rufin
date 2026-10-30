@@ -4,8 +4,8 @@
 use sqlx::Row as _;
 
 use crate::{
-    Catalog, LibraryResult, LocalLocatorWrite, LoudnessMeasurement, NativeGain, SourceId,
-    SourceKey, TrackKey,
+    Catalog, LibraryResult, LocalLocatorWrite, LoudnessMeasurement, MappedFile, NativeGain,
+    SourceId, SourceKey, TrackKey,
 };
 
 #[derive(Clone, Debug)]
@@ -19,9 +19,10 @@ pub struct Playable {
     pub format: Option<String>,
     pub source_path: Option<String>,
     pub cue_path: Option<String>,
-    /// A downloaded copy, the first one recorded.
-    pub download: Option<String>,
-    /// A local locator, the mapping first.
+    pub download: Option<PlayableDownload>,
+    /// Where the source's folder mapping puts the file, before anything looked at it.
+    pub mapped: Option<MappedFile>,
+    /// An imported or local file locator.
     pub locator: Option<LocalLocatorWrite>,
     /// The file row of the backing audio.
     pub file: Option<PlayableFile>,
@@ -32,6 +33,15 @@ pub struct Playable {
     pub audio_hash: Option<[u8; 32]>,
     pub channels: Option<u32>,
     pub gains: Gains,
+}
+
+/// A downloaded copy and the size it was written with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayableDownload {
+    pub uri: String,
+    pub size: Option<u64>,
+    /// Rufin owns the file, so a broken one is forgotten.
+    pub managed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,9 +133,9 @@ impl Catalog {
             "SELECT track.source_key,track.object_id,track.media_uri,track.source_format,details.source_path,details.cue_path,details.cue_start_millis,
                 CASE WHEN {whole_file} THEN NULL ELSE details.cue_end_millis END,
                 file.path,file.root,file.relative_path,json_array(file.size_bytes,file.revision),
-                (SELECT path FROM downloads WHERE media_uri=track.media_uri ORDER BY rowid LIMIT 1),
+                (SELECT json_array(path,size,managed) FROM downloads WHERE media_uri=track.media_uri),
                 (SELECT json_array(origin,path,root,relative_path,access_uri) FROM local_locators WHERE media_uri=track.media_uri
-                    ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1),
+                    ORDER BY local_access_file_key LIMIT 1),
                 details.audio_hash,
                 json_extract(details.metadata,'$.audio_properties.channels'),
                 CASE WHEN json_type(details.metadata,'$.source_loudness')='object' THEN json(json_extract(details.metadata,'$.source_loudness')) END,
@@ -133,7 +143,8 @@ impl Catalog {
                     SELECT json(json_extract(member_details.metadata,'$.album_loudness')) FROM tracks member JOIN track_details member_details USING(track_key)
                     WHERE member.album_key=track.album_key AND member.indexed=1 AND {member}
                     ORDER BY coalesce(member_details.cue_path,member_details.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,
-                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision,track.track_key
+                measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision,track.track_key,
+                json_extract(details.metadata,'$.audio_properties.size_bytes')
              FROM tracks track LEFT JOIN track_details details USING(track_key)
              LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
              LEFT JOIN loudness measured ON measured.audio_hash=details.audio_hash
@@ -173,6 +184,7 @@ impl Catalog {
         let album_peak: Option<f64> = row.try_get(21)?;
         let audio_revision: Option<Vec<u8>> = row.try_get(22)?;
         let track: TrackKey = row.try_get(23)?;
+        let server_size: Option<i64> = row.try_get(24)?;
         let source = source.map(SourceKey::from_raw);
         let (source_id, source_kind) = source
             .and_then(|source| {
@@ -197,6 +209,24 @@ impl Catalog {
                     access_uri,
                 },
             );
+        let download = download
+            .map(|download| serde_json::from_str::<(String, Option<i64>, i64)>(&download))
+            .transpose()?
+            .map(|(uri, size, managed)| PlayableDownload {
+                uri,
+                size: size.and_then(|size| u64::try_from(size).ok()),
+                managed: managed != 0,
+            });
+        let mapped = source_id
+            .as_ref()
+            .zip(source_path.as_deref())
+            .and_then(|(id, path)| {
+                self.mapped_file(
+                    id.as_str(),
+                    path,
+                    server_size.and_then(|size| u64::try_from(size).ok()),
+                )
+            });
         let audio_hash = hash.and_then(|hash| hash.try_into().ok());
         let parse = |json: Option<String>| {
             json.map(|json| serde_json::from_str::<NativeGain>(&json))
@@ -229,6 +259,7 @@ impl Catalog {
             source_path,
             cue_path,
             download,
+            mapped,
             locator,
             file: path
                 .zip(root)
