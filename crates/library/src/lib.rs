@@ -61,7 +61,6 @@ pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
 pub mod rank;
 mod waveform;
-pub use connect_media::{CatalogFile, CatalogFileDependency, CatalogFileStamp};
 pub use downloads::{DownloadFile, FileTrack, media_encoding_key};
 mod catalog;
 mod radio;
@@ -97,7 +96,7 @@ pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
     AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice,
 };
-pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
+pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, RecordStamp, StampedRecord};
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use home::{

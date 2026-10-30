@@ -367,43 +367,6 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkBox" id="media_section">
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">12</property>
-                            <property name="visible">false</property>
-                            <child>
-                              <object class="GtkBox" id="folders_section">
-                                <property name="orientation">vertical</property>
-                                <property name="spacing">12</property>
-                                <child>
-                                  <object class="GtkBox">
-                                    <property name="spacing">6</property>
-                                    <child>
-                                      <object class="GtkLabel">
-                                        <property name="label" translatable="yes">Local music folders</property>
-                                        <style>
-                                          <class name="heading" />
-                                        </style>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkImage" id="folders_help">
-                                        <property name="icon-name">rufin-help-about-symbolic</property>
-                                        <property name="tooltip-text" translatable="yes">Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.</property>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="AdwPreferencesGroup" id="folders">
-                                    <property name="visible">false</property>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
                           <object class="GtkBox" id="network_section">
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
@@ -503,8 +466,5 @@
   </object>
   <object class="GtkLabel" id="membership_status_text">
     <property name="label" translatable="yes">Connecting devices</property>
-  </object>
-  <object class="GtkFileDialog" id="folder_chooser">
-    <property name="title" translatable="yes">Local folder</property>
   </object>
 </interface>

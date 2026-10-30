@@ -1,7 +1,6 @@
 package io.github.screwys.rufin.connect
 
 import android.content.Context
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -10,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
@@ -51,29 +49,16 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
             }
         }
     }
-    val context = LocalContext.current
     var join by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
     var disable by remember { mutableStateOf(false) }
-    var musicFolderChoice by remember { mutableStateOf<ConnectMusicFolder?>(null) }
     var relayEdit by remember { mutableStateOf(false) }
     var remoteFile by remember { mutableStateOf<Boolean?>(null) }
     var controlDevice by remember { mutableStateOf<Device?>(null) }
     var removeDevice by remember { mutableStateOf<Device?>(null) }
     LaunchedEffect(connect, state != null) {
         if (state?.settings?.nearby == true && state.identity == null) connect.action(ConnectAction.Discover)
-    }
-    LaunchedEffect(connect, state?.settings?.profile, state?.connecting, model.sources) {
-        if (state?.settings?.profile != null && !state.connecting) connect.refreshMusicFolders()
-    }
-    val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        val folder = musicFolderChoice
-        if (uri != null && folder != null) try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            connect.folder(folder, uri.toString())
-        } catch (failure: Exception) { connect.reportError(failure) }
-        musicFolderChoice = null
     }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { connect.importDocument(it.toString()) }
@@ -171,20 +156,6 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
                 modifier = Modifier.clickable(enabled) { relayEdit = true })
             SettingsRow(translate("Use a public relay"),
                 trailing = { Switch(state.settings.publicRelay, { connect.action(ConnectAction.Network(state.settings.nearby, state.settings.relay, it)) }, enabled = enabled) })
-        }
-        }
-        if (!progressOnly) {
-        if (connect.musicFolders.isNotEmpty()) SettingsGroup(translate("Local music folders")) {
-            connect.musicFolders.forEach { folder ->
-                key(folder.sourceId, folder.rootId) {
-                    SettingsRow(folder.title, summary = folder.location ?: translate("Rufin data folder"),
-                        trailing = { if (folder.location != null) TextButton({ connect.folder(folder, null) }, enabled = enabled) { Text(translate("Default")) } },
-                        modifier = Modifier.clickable(enabled) {
-                            musicFolderChoice = folder
-                            chooseMusicFolder.launch(folder.location?.takeIf { it.startsWith("content://") }?.let(android.net.Uri::parse))
-                        })
-                }
-            }
         }
         }
         if (!progressOnly) {

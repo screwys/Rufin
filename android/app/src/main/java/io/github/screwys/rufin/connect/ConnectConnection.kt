@@ -7,13 +7,10 @@ import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
 import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
 import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
-import io.github.screwys.rufin.shared.downloads.DownloadDirectory
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import io.github.screwys.rufin.ui.userMessage
-
-internal data class ConnectMusicFolder(val sourceId: String, val rootId: String, val title: String, val location: String?)
 
 internal data class ConnectConfirmation(val kind: Confirmation, val message: String, val retry: () -> Unit)
 
@@ -31,8 +28,6 @@ internal class ConnectConnection(private val model: RufinConnection) {
     var confirmation by mutableStateOf<ConnectConfirmation?>(null)
         private set
     var fileSources by mutableStateOf<List<FileIntegration>>(emptyList())
-        private set
-    var musicFolders by mutableStateOf<List<ConnectMusicFolder>>(emptyList())
         private set
     private var bridge: ConnectOwner? = null
     private var dismissedStatusError: String? = null
@@ -119,25 +114,6 @@ internal class ConnectConnection(private val model: RufinConnection) {
     }
     fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
         { it.execute(ConnectAction.Join(invitation, true)) })
-    private suspend fun loadMusicFolders(owner: ConnectOwner): List<ConnectMusicFolder> {
-        val settings = owner.status().settings
-        return model.sources?.sources.orEmpty().flatMap { source ->
-            owner.roots(source.id).map { root ->
-                val location = settings.folders["${source.id}/${root.id}"] ?: settings.folders[source.id]
-                ConnectMusicFolder(source.id, root.id, "${source.name} · ${root.label}", when (location) {
-                    is DownloadDirectory.Native -> location.v1
-                    is DownloadDirectory.Document -> location.uri
-                    null -> null
-                })
-            }
-        }
-    }
-    fun refreshMusicFolders() = model.runAction { bridge?.let { musicFolders = loadMusicFolders(it) } }
-    fun folder(folder: ConnectMusicFolder, uri: String?) = request({ owner ->
-        val updated = owner.execute(ConnectAction.Folder(folder.sourceId, folder.rootId, uri?.let { DownloadDirectory.Document(it) } ?: DownloadDirectory.Native("")))
-        musicFolders = loadMusicFolders(owner)
-        updated
-    })
     fun importDocument(uri: String) = request({ it.importDocument(uri, false, null) },
         { it.importDocument(uri, true, null) }, success = translate("Applied"))
     fun exportDocument(uri: String) = request({ it.exportDocument(uri) }, success = translate("Saved"))

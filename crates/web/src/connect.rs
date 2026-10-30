@@ -5,29 +5,6 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/connect", get(status).post(action))
         .route("/api/connect/events", get(events))
         .route("/api/connect/continuation", get(continuation))
-        .route("/api/connect/roots", get(roots))
-}
-
-#[derive(serde::Deserialize)]
-struct RootQuery {
-    source: String,
-}
-
-async fn roots(
-    State(products): State<ProductHandles>,
-    Query(query): Query<RootQuery>,
-) -> Result<axum::Json<Vec<library::ConnectRoot>>, Error> {
-    products
-        .connect
-        .roots(query.source)
-        .await
-        .map(axum::Json)
-        .map_err(|error| {
-            (
-                StatusCode::BAD_REQUEST,
-                axum::Json(json!({"error":error.to_string()})),
-            )
-        })
 }
 
 async fn continuation(

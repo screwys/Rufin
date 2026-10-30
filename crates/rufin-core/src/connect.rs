@@ -226,11 +226,6 @@ pub enum Action {
         peer: String,
         command: Control,
     },
-    Folder {
-        source: String,
-        root_id: Option<String>,
-        path: downloads::DownloadDirectory,
-    },
     Download {
         peer: String,
         uri: String,
@@ -563,30 +558,6 @@ impl ConnectOwner {
             }
         }
         Ok(available)
-    }
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl ConnectOwner {
-    pub async fn roots(&self, source: String) -> Result<Vec<library::ConnectRoot>, ActionError> {
-        let sources = self.source.list_sources();
-        if !sources
-            .sources
-            .iter()
-            .any(|entry| entry.id.as_str() == source && entry.kind == "local")
-        {
-            return Ok(Vec::new());
-        }
-        let catalog = self.catalog.clone();
-        self.runtime
-            .spawn(async move {
-                catalog
-                    .connect_roots(&source)
-                    .await
-                    .map_err(|error| ActionError::Failed(error.to_string()))
-            })
-            .await
-            .map_err(|error| ActionError::Failed(error.to_string()))?
     }
 }
 
@@ -1718,29 +1689,6 @@ impl ConnectOwner {
                         Action::Continue { peer } => owner.continue_from(&peer).await?,
                         Action::Control { peer, command } => {
                             owner.request(&peer, Request::Control { command }).await?;
-                        }
-                        Action::Folder {
-                            source,
-                            root_id,
-                            path,
-                        } => {
-                            let key = root_id
-                                .map_or_else(|| source.clone(), |root| format!("{source}/{root}"));
-                            owner.save(|config| {
-                                if match &path {
-                                    downloads::DownloadDirectory::Native(path) => {
-                                        path.as_os_str().is_empty()
-                                    }
-                                    downloads::DownloadDirectory::Document { uri } => {
-                                        uri.is_empty()
-                                    }
-                                } {
-                                    config.folders.remove(&key);
-                                } else {
-                                    config.folders.insert(key, path);
-                                }
-                            })?;
-                            owner.source.connect_media_changed();
                         }
                         Action::Download { peer: _, uri } => {
                             owner.source.download_media(
