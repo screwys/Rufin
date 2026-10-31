@@ -60,7 +60,7 @@ pub fn configure_ownership_toggle(
         }
         let tooltip = if current {
             tr_with(
-                "This is owned by {source}. Regular playlists are synced to your remote.",
+                "This is owned by {source} and synced to it.",
                 &[("source", source_name.as_deref().unwrap_or(DISPLAY_NAME))],
             )
         } else {

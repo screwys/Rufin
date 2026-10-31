@@ -60,6 +60,12 @@ pub fn new_playlist_dialog(
         new_cancel: gtk::Button, new_create: gtk::Button,
     });
     new_entry.set_text(name);
+    // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
+    let selected = selected.filter(|source| source.owns_playlists);
+    if selected.is_none() {
+        new_owner.set_visible(false);
+        new_entry.remove_css_class("playlist-name-owner-entry");
+    }
     configure_ownership_toggle(&new_owner, selected.as_ref(), true);
     let supports_public = selected
         .as_ref()
