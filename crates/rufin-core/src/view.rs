@@ -598,14 +598,11 @@ async fn read(
             favorites,
         });
     }
-    // Smart Playlists keep the members they opened with when the page reads again.
+    // A smart playlist keeps the members it opened with when the page reads again; the Smart
+    // Playlists list counts as of each read.
     if let Body::Rows {
         read:
-            Read::List(ListRead {
-                kind: ListKind::SmartPlaylists { now },
-                ..
-            })
-            | Read::Members(MemberRead {
+            Read::Members(MemberRead {
                 collection: Collection::Smart { now, .. },
                 ..
             }),
