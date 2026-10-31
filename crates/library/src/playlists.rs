@@ -626,7 +626,10 @@ async fn move_entry_on(
         let Some(track) = snapshot.tracks.key_of(moved.track) else {
             return Ok(false);
         };
-        (crate::rank::between(low, high), TrackKey::from_raw(track))
+        (
+            crate::rank::distinct(crate::rank::between(low, high), high),
+            TrackKey::from_raw(track),
+        )
     };
     sqlx::query("UPDATE playlist_entries SET rank=?2 WHERE playlist_entry_key=?1")
         .bind(entry)
@@ -771,10 +774,14 @@ async fn insert_playlist_tracks(
     if tracks.is_empty() {
         return Ok(0);
     }
+    let ranks = crate::rank::spread(last.as_deref(), None, tracks.len());
     let rows = tracks
         .iter()
-        .zip(crate::rank::spread(last.as_deref(), None, tracks.len()))
-        .map(|(track, rank)| (track.raw(), crate::rank::hex(&rank)))
+        .zip(ranks.iter().enumerate())
+        .map(|(track, (index, rank))| {
+            let rank = crate::rank::distinct(rank.clone(), ranks.get(index + 1).map(Vec::as_slice));
+            (track.raw(), crate::rank::hex(&rank))
+        })
         .collect::<Vec<_>>();
     let inserted: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
         "INSERT INTO playlist_entries(playlist_key,object_id,track_key,rank)

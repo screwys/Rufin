@@ -173,6 +173,26 @@ pub fn spread(low: Option<&[u8]>, high: Option<&[u8]>, count: usize) -> Vec<Vec<
     keys
 }
 
+/// `key` followed by random bytes, still before `high`. Devices that place playlist entries in
+/// the same gap while apart then give them different keys, so every device orders them alike.
+pub(crate) fn distinct(mut key: Vec<u8>, high: Option<&[u8]>) -> Vec<u8> {
+    // A key that `high` starts with continues with a fraction below the rest of `high`.
+    let mut rest = high
+        .and_then(|high| high.strip_prefix(key.as_slice()))
+        .map(<[u8]>::to_vec);
+    while let Some(remaining) = rest {
+        let fraction = midpoint(&[], Some(&remaining));
+        rest = remaining
+            .strip_prefix(fraction.as_slice())
+            .map(<[u8]>::to_vec);
+        key.extend(fraction);
+    }
+    let random =
+        std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), ());
+    key.extend_from_slice(&(random as u32 | 1).to_be_bytes());
+    key
+}
+
 /// The key at `index` in a list built by appending from the empty list.
 pub(crate) fn nth(index: u64) -> Vec<u8> {
     let (mut start, mut width) = (0_u64, 1_u32);
@@ -225,5 +245,16 @@ mod tests {
         let inserted = spread(Some(&appended[3]), Some(&appended[4]), 1000);
         assert!(inserted.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(appended[3] < inserted[0] && inserted[999] < appended[4]);
+        for (low, high) in [(&appended[3], &inserted[0]), (&inserted[0], &inserted[1])] {
+            let middle = between(Some(low), Some(high));
+            let (first, second) = (
+                distinct(middle.clone(), Some(high)),
+                distinct(middle, Some(high)),
+            );
+            assert!(first != second && *low < first && first < *high && second < *high);
+        }
+        let high = between(Some(&appended[5]), Some(&appended[6]));
+        let key = distinct(appended[5].clone(), Some(&high));
+        assert!(high.starts_with(&appended[5]) && appended[5] < key && key < high);
     }
 }
