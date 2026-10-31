@@ -6,9 +6,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use library::{
-    AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomePage,
-    Item, LibraryError, LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read,
-    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SourceKey,
+    AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomeAlbumRow,
+    HomeBlockKind, HomePage, HomeProviderSection, HomeSectionRows, Item, LibraryError,
+    LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read, ReadCancellation,
+    RouteSeedWindow, Row, ScrollSection, SourceKey, TagRow,
 };
 
 use crate::route::{CollectionCategory, Route};
@@ -671,6 +672,17 @@ impl View {
         }
     }
 
+    /// Home's sections as clients show them, from the blocks and filter it opened with.
+    pub fn home_sections(&self) -> Option<Vec<HomeSection>> {
+        self.home().map(|home| {
+            home_sections(
+                home,
+                &self.settings.application.home_blocks,
+                &self.options.filter,
+            )
+        })
+    }
+
     /// How many child folders come before a folder's tracks.
     pub fn folder_len(&self) -> Option<usize> {
         match &self.body {
@@ -976,8 +988,9 @@ impl View {
     /// Whether a favorite or rating change can move or drop rows: the page lists only favorites
     /// or sorts by favorites or ratings. Other pages patch the shown values into their rows.
     pub fn states_reorder(&self) -> bool {
-        let orders =
-            |field: LibraryField| matches!(field, LibraryField::Favorite | LibraryField::UserRating);
+        let orders = |field: LibraryField| {
+            matches!(field, LibraryField::Favorite | LibraryField::UserRating)
+        };
         match &self.body {
             Body::Rows {
                 read: Read::Members(read),
@@ -1129,6 +1142,98 @@ impl View {
     fn catalog(&self) -> &Catalog {
         &self.owner.shared.catalog
     }
+}
+
+/// One Home section, as every client shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HomeSection {
+    Showcase(HomeAlbumRow),
+    /// Explore, Most played, Newly added, Recently played or Recently released.
+    Rows {
+        block: HomeBlockKind,
+        rows: HomeSectionRows,
+    },
+    /// A section the source's server lists.
+    Provider(HomeProviderSection),
+    Genres(Vec<TagRow>),
+}
+
+/// Home's sections in the order clients show them: the visible `blocks` in their order, except
+/// that the showcase leads the server's own sections when there are any. Sections with nothing
+/// to show are left out, and so are rows whose title, artist and album do not contain `filter`.
+pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) -> Vec<HomeSection> {
+    let filter = filter.trim().to_lowercase();
+    let shown = |text: String| filter.is_empty() || text.to_lowercase().contains(&filter);
+    let album = |row: &HomeAlbumRow| shown(format!("{} {}", row.title, row.album.artist));
+    let rows = |rows: &HomeSectionRows| HomeSectionRows {
+        tracks: rows
+            .tracks
+            .iter()
+            .filter(|row| {
+                shown(format!(
+                    "{} {} · {}",
+                    row.title, row.track.artist, row.track.album
+                ))
+            })
+            .cloned()
+            .collect(),
+        albums: rows
+            .albums
+            .iter()
+            .filter(|row| album(row))
+            .cloned()
+            .collect(),
+    };
+    let block = |block: HomeBlockKind| {
+        let section = match block {
+            HomeBlockKind::Showcase => {
+                return home
+                    .showcase
+                    .as_ref()
+                    .filter(|row| album(row))
+                    .cloned()
+                    .map(HomeSection::Showcase);
+            }
+            HomeBlockKind::Genres => {
+                return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));
+            }
+            HomeBlockKind::Explore => rows(&HomeSectionRows {
+                tracks: Vec::new(),
+                albums: home.explore.clone(),
+            }),
+            HomeBlockKind::MostPlayed => rows(&home.most_played),
+            HomeBlockKind::NewlyAdded => rows(&home.newly_added),
+            HomeBlockKind::RecentlyPlayed => rows(&home.recently_played),
+            HomeBlockKind::RecentlyReleased => rows(&home.recently_released),
+        };
+        (!section.tracks.is_empty() || !section.albums.is_empty()).then_some(HomeSection::Rows {
+            block,
+            rows: section,
+        })
+    };
+    let providers = home
+        .provider_sections
+        .iter()
+        .map(|section| HomeProviderSection {
+            rows: rows(&section.rows),
+            ..section.clone()
+        })
+        .filter(|section| !section.rows.tracks.is_empty() || !section.rows.albums.is_empty())
+        .map(HomeSection::Provider)
+        .collect::<Vec<_>>();
+    let mut sections = Vec::new();
+    let mut blocks = blocks.iter().copied().collect::<Vec<_>>();
+    if !providers.is_empty() {
+        if let Some(index) = blocks
+            .iter()
+            .position(|block| *block == HomeBlockKind::Showcase)
+        {
+            sections.extend(block(blocks.remove(index)));
+        }
+        sections.extend(providers);
+    }
+    sections.extend(blocks.into_iter().filter_map(block));
+    sections
 }
 
 /// What a committed change means for a page open on `route` with `options`, opened while

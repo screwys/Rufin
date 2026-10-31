@@ -362,8 +362,7 @@ impl Analysis<'_> {
                         continue;
                     }
                 };
-                let Some(playable) =
-                    playable.filter(|playable| playable.gains.analysed.is_none())
+                let Some(playable) = playable.filter(|playable| playable.gains.analysed.is_none())
                 else {
                     continue;
                 };
