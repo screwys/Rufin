@@ -646,25 +646,27 @@ impl AndroidLibrary {
     }
 
     pub async fn pins(&self, offset: u64, limit: u32) -> Result<AndroidPinPage, AndroidError> {
-        let changes = self.settings.changes();
-        let stored = changes.borrow();
-        let sidebar = &stored.ui.sidebar;
-        if !sidebar.pins_visible {
-            return Ok(AndroidPinPage {
-                rows: Vec::new(),
-                next_offset: None,
-                total: 0,
-            });
-        }
-        let total = sidebar.pins.len() as u64;
-        let pins = sidebar
-            .pins
-            .iter()
-            .skip(usize::try_from(offset).map_err(error)?)
-            .take(limit.min(256) as usize)
-            .cloned()
-            .collect::<Vec<_>>();
-        drop(stored);
+        let skip = usize::try_from(offset).map_err(error)?;
+        let (total, pins) = {
+            let changes = self.settings.changes();
+            let stored = changes.borrow();
+            let sidebar = &stored.ui.sidebar;
+            if !sidebar.pins_visible {
+                return Ok(AndroidPinPage {
+                    rows: Vec::new(),
+                    next_offset: None,
+                    total: 0,
+                });
+            }
+            let pins = sidebar
+                .pins
+                .iter()
+                .skip(skip)
+                .take(limit.min(256) as usize)
+                .cloned()
+                .collect::<Vec<_>>();
+            (sidebar.pins.len() as u64, pins)
+        };
         let consumed = offset.saturating_add(pins.len() as u64);
         let next_offset = (consumed < total).then_some(consumed);
         let catalog = self.catalog.clone();
