@@ -83,14 +83,14 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
 
 internal val AndroidBrowseRow.downloadItem: DownloadItem?
-    get() = when (val route = detailRoute) {
-        is Route.AlbumDetail -> DownloadItem.Album(route.v1)
-        is Route.ArtistDetail -> DownloadItem.Artist(route.v1, false)
-        is Route.AlbumArtistDetail -> DownloadItem.Artist(route.v1, true)
-        is Route.GenreDetail -> DownloadItem.Genre(route.v1)
-        is Route.MoodDetail -> DownloadItem.Mood(route.v1)
-        is Route.PlaylistDetail -> DownloadItem.Playlist(route.v1)
-        is Route.SmartPlaylistDetail -> DownloadItem.SmartPlaylist(route.v1)
+    get() = when (val target = route) {
+        is Route.AlbumDetail -> DownloadItem.Album(target.v1)
+        is Route.ArtistDetail -> DownloadItem.Artist(target.v1, false)
+        is Route.AlbumArtistDetail -> DownloadItem.Artist(target.v1, true)
+        is Route.GenreDetail -> DownloadItem.Genre(target.v1)
+        is Route.MoodDetail -> DownloadItem.Mood(target.v1)
+        is Route.PlaylistDetail -> DownloadItem.Playlist(target.v1)
+        is Route.SmartPlaylistDetail -> DownloadItem.SmartPlaylist(target.v1)
         else -> if (kind == "track") DownloadItem.Track(mediaUri) else null
     }
 
@@ -231,7 +231,7 @@ internal fun BrowseMenuSheet(
         }
     }
     val downloadItem = item.row.downloadItem
-    val downloadFolder = (item.row.item as? AndroidBrowseItem.Folder)?.route as? Route.Folders
+    val downloadFolder = (item.row.route as? Route.Folders)?.takeIf { item.row.item is AndroidBrowseItem.Folder }
     var downloaded by remember(downloadItem, downloadFolder, browse.library) { mutableStateOf<DownloadStatus?>(null) }
     LaunchedEffect(downloadItem, downloadFolder, browse.library, model.downloads.state?.revision) {
         try {
@@ -349,7 +349,7 @@ internal fun BrowseMenuSheet(
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
                 BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
             }
-            if (item.row.playlist?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
+            if (item.row.playlist?.metadataWritable == true && item.row.route is Route.PlaylistDetail) {
                 MediaMenuDivider()
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
                 BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
@@ -366,7 +366,7 @@ internal fun BrowseMenuSheet(
     }
     if (navigation) MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == item.row.mediaUri }, player, { route, title, source ->
         navigation = false; onDismiss(); onNavigate(route, title, source)
-    }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.detailRoute)
+    }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.route)
     if (random) RandomPlaySheet(model, browse) { random = false; onDismiss() }
     if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
         folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
@@ -375,7 +375,7 @@ internal fun BrowseMenuSheet(
             { rename = false; onDismiss() }, playlistFolder)
         else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
         else browse.library?.let { library ->
-            PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
+            PlaylistEditor(model, library, player, (item.row.route as Route.PlaylistDetail).v1, item.row.title,
                 onDismiss = { rename = false; onDismiss() })
         }
     }
@@ -388,7 +388,7 @@ internal fun BrowseMenuSheet(
                 if ((browse.current?.route as? Route.PlaylistFolder)?.key == playlistFolder.folderKey) browse.back()
             } else if (smartPlaylist != null) browse.library?.deleteSmartPlaylist(smartPlaylist.smartPlaylistKey)
             else model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
-                deletePlaylist(source, (item.row.detailRoute as Route.PlaylistDetail).v1)
+                deletePlaylist(source, (item.row.route as Route.PlaylistDetail).v1)
             }
             browse.refresh()
             delete = false
@@ -567,7 +567,7 @@ internal fun PlaylistPickerSheet(
                                 val source = model.sourceOwner ?: return@runAction
                                 movePlaylistToFolder(source, item.row.playlistFolderMember!!,
                                     playlist.playlistFolder!!.folderKey)
-                            } else playlist.detailRoute?.let { destination ->
+                            } else playlist.route?.let { destination ->
                                 browse.library?.let { library ->
                                     playlistSelection(library, item).use { selection ->
                                         model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
@@ -610,7 +610,7 @@ internal fun PlaylistPickerSheet(
 
 private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): MemberSelection =
     if (item.row.kind == "track") MemberSelection.fromUris(listOf(item.row.mediaUri))
-    else library.targetQuery(item.row.detailRoute!!).use { it.selection() }
+    else library.targetQuery(item.row.route!!).use { it.selection() }
 
 @Composable
 internal fun PlaylistCreateSheet(

@@ -665,22 +665,16 @@ impl View {
         matches!(self.body, Body::Missing)
     }
 
-    pub fn home(&self) -> Option<&HomePage> {
-        match &self.body {
-            Body::Home(home) => Some(home),
-            _ => None,
-        }
-    }
-
     /// Home's sections as clients show them, from the blocks and filter it opened with.
     pub fn home_sections(&self) -> Option<Vec<HomeSection>> {
-        self.home().map(|home| {
-            home_sections(
-                home,
-                &self.settings.application.home_blocks,
-                &self.options.filter,
-            )
-        })
+        let Body::Home(home) = &self.body else {
+            return None;
+        };
+        Some(home_sections(
+            home,
+            &self.settings.application.home_blocks,
+            &self.options.filter,
+        ))
     }
 
     /// How many child folders come before a folder's tracks.
@@ -1233,6 +1227,34 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
     }
     sections.extend(blocks.into_iter().filter_map(block));
     sections
+}
+
+/// The context id a play of a page on `route` carries: its collection's id or its route, with
+/// the filter, source, music folder and order `options` and `sort` show.
+pub fn context_id(
+    route: &Route,
+    selected: Option<&SelectedLibrary>,
+    options: &OpenOptions,
+    sort: LibraryField,
+    descending: bool,
+) -> String {
+    let base = crate::collection_context::CollectionTarget::for_route(route).map_or_else(
+        || {
+            format!(
+                "route:{}",
+                serde_json::to_string(route).expect("Route serialization")
+            )
+        },
+        |target| target.context_id(),
+    );
+    format!(
+        "{base}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}",
+        options.filter,
+        selected.map_or("", |selected| selected.source_id.as_str()),
+        selected.and_then(|selected| selected.music_folder_key),
+        favorites_only(route, options),
+        options.downloaded_only && supports_downloaded_filter(route, options.category),
+    )
 }
 
 /// What a committed change means for a page open on `route` with `options`, opened while

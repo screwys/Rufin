@@ -96,6 +96,39 @@ pub struct TrackView {
     pub artwork_binding: Option<Vec<u8>>,
 }
 
+/// A track as a list row shows it. A TrackView knows no date added, so the row has none.
+impl From<TrackView> for crate::TrackRow {
+    fn from(track: TrackView) -> Self {
+        Self {
+            track_key: track.track_key,
+            entry: None,
+            source_key: track.source_key,
+            source_id: track.source_id,
+            source_name: track.access.source_name,
+            media_uri: track.media_uri,
+            object_id: track.object_id,
+            title: track.metadata.title,
+            artist: track.metadata.artist,
+            album: track.metadata.album,
+            duration_millis: track.metadata.duration_millis,
+            disc_number: track.metadata.disc_number,
+            track_number: track.metadata.track_number,
+            year: track.metadata.year,
+            bpm: track.metadata.bpm,
+            date_added: None,
+            source_format: track.metadata.source_format,
+            state: track.state,
+            is_downloaded: track.access.is_downloaded,
+            cue: track.access.cue_path.is_some(),
+            links: track.links,
+            release_date: track.metadata.release_date,
+            source_path: track.access.source_path,
+            audio: track.metadata.audio_properties,
+            artwork_binding: track.artwork_binding,
+        }
+    }
+}
+
 impl crate::TrackReference {
     pub fn direct(
         uri: impl Into<String>,

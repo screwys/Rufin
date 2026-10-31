@@ -122,7 +122,7 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
-        smart_opened: Option<i64>,
+        previous: Option<Arc<AndroidBrowseQuery>>,
     ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         let history_current_only = category == "current";
         let category = CollectionCategory::from_name(&category);
@@ -156,7 +156,10 @@ impl AndroidLibrary {
                 .as_ref()
                 .filter(|_| history_current_only)
                 .map(|selected| selected.source_id.clone()),
-            smart_opened,
+            // A Smart Playlist page keeps the members it opened with while it stays open.
+            smart_opened: previous
+                .filter(|previous| previous.route == route)
+                .and_then(|previous| previous.view.get()?.options().smart_opened),
             ..Default::default()
         };
         Ok(Arc::new(AndroidBrowseQuery {
@@ -173,7 +176,6 @@ impl AndroidLibrary {
             display,
             album_tracks: settings.library_list(LibraryListKey::AlbumDetailTracks),
             artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
-            blocks: settings.application.home_blocks,
             view: tokio::sync::OnceCell::new(),
             home: std::sync::OnceLock::new(),
         }))
@@ -504,7 +506,7 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
-        smart_opened: Option<i64>,
+        previous: Option<Arc<AndroidBrowseQuery>>,
     ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         self.browse_query(
             route,
@@ -514,7 +516,7 @@ impl AndroidLibrary {
             descending,
             favorites_only,
             downloaded_only,
-            smart_opened,
+            previous,
         )
     }
 

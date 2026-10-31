@@ -39,8 +39,8 @@ impl AndroidBrowseQuery {
         run_read(&runtime, move |cancel| async move {
             let opened = self.open(&cancel).await.map_err(error)?;
             let view = &opened.view;
-            if view.home().is_some() {
-                let rows = self.home_rows(view).to_vec();
+            if let Some(rows) = self.home_rows(view) {
+                let rows = rows.to_vec();
                 let _ = self.view.set(opened.view);
                 return Ok(AndroidBrowsePage {
                     count: rows.len() as u64,

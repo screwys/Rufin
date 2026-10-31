@@ -52,7 +52,7 @@ internal fun MediaDetailsDialog(
     val initial = remember(item.row.mediaUri, item.row.kind) {
         when (item.row.kind) {
             "album", "album_header" -> MediaDetailsItem.Album(item.row.mediaUri)
-            "artist" -> MediaDetailsItem.Artist(item.row.mediaUri, item.row.detailRoute is Route.AlbumArtistDetail)
+            "artist" -> MediaDetailsItem.Artist(item.row.mediaUri, item.row.route is Route.AlbumArtistDetail)
             else -> MediaDetailsItem.Track(item.row.mediaUri)
         }
     }

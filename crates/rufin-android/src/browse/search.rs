@@ -17,7 +17,18 @@ impl AndroidLibrary {
             .load()
             .recent_search_results
             .into_iter()
-            .map(|row| AndroidBrowseRow::new(AndroidBrowseItem::Recent { row }))
+            .map(|row| {
+                let route = match row.kind {
+                    RecentSearchKind::Album => Some(Route::AlbumDetail(row.media_uri.clone())),
+                    RecentSearchKind::Artist => Some(Route::ArtistDetail(row.media_uri.clone())),
+                    RecentSearchKind::Track => None,
+                };
+                let item = AndroidBrowseItem::Recent { row };
+                match route {
+                    Some(route) => AndroidBrowseRow::opening(item, route),
+                    None => AndroidBrowseRow::new(item),
+                }
+            })
             .collect()
     }
 

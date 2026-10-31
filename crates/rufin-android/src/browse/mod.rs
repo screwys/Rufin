@@ -165,12 +165,12 @@ pub struct AndroidBrowseQuery {
     options: OpenOptions,
     sort: LibraryField,
     descending: bool,
-    blocks: Vec<library::HomeBlockKind>,
     display: LibraryListSettings,
     album_tracks: LibraryListSettings,
     artist_tracks: LibraryListSettings,
     view: tokio::sync::OnceCell<Arc<View>>,
-    home: std::sync::OnceLock<Vec<AndroidBrowseRow>>,
+    /// Home's rows in the order core composes its sections; None for other pages.
+    home: std::sync::OnceLock<Option<Vec<AndroidBrowseRow>>>,
 }
 
 fn search_rows(mut rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
@@ -238,20 +238,6 @@ impl AndroidBrowseQuery {
             .map(Arc::as_ref)
     }
 
-    fn downloaded(&self) -> bool {
-        self.options.downloaded_only && self.supports_downloaded_filter()
-    }
-
-    fn favorites(&self) -> bool {
-        (self.options.favorites_only && self.supports_favorite_filter())
-            || matches!(
-                self.route,
-                Route::Favorites
-                    | Route::ArtistFavoriteTracks(_)
-                    | Route::AlbumArtistFavoriteTracks(_)
-            )
-    }
-
     fn selected_track_fields(&self) -> &[LibraryField] {
         if self.album_detail_layout() {
             &self.display.detail_track_fields
@@ -299,10 +285,12 @@ impl AndroidBrowseQuery {
                         id: folder.object_id,
                         name: folder.name,
                     });
-                    AndroidBrowseRow::new(AndroidBrowseItem::Folder {
-                        route: Route::Folders { path },
-                        artwork: folder.artwork_binding,
-                    })
+                    AndroidBrowseRow::opening(
+                        AndroidBrowseItem::Folder {
+                            artwork: folder.artwork_binding,
+                        },
+                        Route::Folders { path },
+                    )
                 }
                 Row::Album(_) if releases.is_some() => {
                     let mut end = 0;
@@ -333,8 +321,7 @@ impl AndroidBrowseQuery {
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
         let view = self.view(cancel).await?;
-        if view.home().is_some() {
-            let rows = self.home_rows(view);
+        if let Some(rows) = self.home_rows(view) {
             let range = range.start.min(rows.len())..range.end.min(rows.len());
             return Ok(rows[range].to_vec());
         }
@@ -342,99 +329,76 @@ impl AndroidBrowseQuery {
         Ok(self.browse_rows(view, view.rows(range, cancel).await?, first))
     }
 
-    fn home_rows(&self, view: &View) -> &[AndroidBrowseRow] {
-        self.home.get_or_init(|| {
-            let home = view.home().expect("Home rows").clone();
-            let mut rows = Vec::new();
-            let block = |row: Row, block| {
-                let mut row: AndroidBrowseRow = row.into();
-                home_section(&mut row, block);
-                row
-            };
-            let album = |album: library::HomeAlbumRow, kind| AndroidBrowseRow {
-                display_title: Some(album.title),
-                ..block(Row::Album(album.album), kind)
-            };
-            let track = |track: library::HomeTrackRow, kind| AndroidBrowseRow {
-                display_title: Some(track.title),
-                ..block(Row::Track(track.track), kind)
-            };
-            rows.extend(
-                home.showcase
-                    .map(|row| album(row, library::HomeBlockKind::Showcase)),
-            );
-            rows.extend(
-                home.explore
-                    .into_iter()
-                    .map(|row| album(row, library::HomeBlockKind::Explore)),
-            );
-            for (kind, section) in [
-                (library::HomeBlockKind::MostPlayed, home.most_played),
-                (library::HomeBlockKind::NewlyAdded, home.newly_added),
-                (library::HomeBlockKind::RecentlyPlayed, home.recently_played),
-                (
-                    library::HomeBlockKind::RecentlyReleased,
-                    home.recently_released,
-                ),
-            ] {
-                rows.extend(section.tracks.into_iter().map(|row| track(row, kind)));
-                rows.extend(section.albums.into_iter().map(|row| album(row, kind)));
-            }
-            for section in home.provider_sections {
-                let id = format!("provider:{}", section.section_id);
-                let title = rufin_core::settings::presentation::home_provider_title(
-                    &section.section_id,
-                    section.title.as_deref(),
-                );
-                let provider = |row: AndroidBrowseRow| AndroidBrowseRow {
-                    section: title.clone(),
-                    section_id: id.clone(),
-                    section_kind: "section".into(),
-                    ..row
+    /// Home's rows, section after section; None when the page is not Home.
+    fn home_rows(&self, view: &View) -> Option<&[AndroidBrowseRow]> {
+        use library::HomeBlockKind;
+        use rufin_core::view::HomeSection;
+        self.home
+            .get_or_init(|| {
+                let block = |row: Row, block| {
+                    let mut row: AndroidBrowseRow = row.into();
+                    home_section(&mut row, block);
+                    row
                 };
-                rows.extend(section.rows.tracks.into_iter().map(|row| {
-                    provider(AndroidBrowseRow {
-                        display_title: Some(row.title),
-                        ..Row::Track(row.track).into()
-                    })
-                }));
-                rows.extend(section.rows.albums.into_iter().map(|row| {
-                    provider(AndroidBrowseRow {
-                        display_title: Some(row.title),
-                        ..Row::Album(row.album).into()
-                    })
-                }));
-            }
-            rows.extend(home.genres.into_iter().map(|row| AndroidBrowseRow {
-                section: localization::tr("Featured genres"),
-                section_id: "Genres".into(),
-                section_kind: "genres".into(),
-                ..AndroidBrowseRow::new(AndroidBrowseItem::Library { row: Row::Tag(row) })
-            }));
-            let provider = rows
-                .iter()
-                .any(|row| row.section_id.starts_with("provider:"));
-            rows.sort_by_key(|row| {
-                if provider && row.section_id == "Showcase" {
-                    return 0;
+                let album = |album: library::HomeAlbumRow, kind| AndroidBrowseRow {
+                    display_title: Some(album.title),
+                    ..block(Row::Album(album.album), kind)
+                };
+                let track = |track: library::HomeTrackRow, kind| AndroidBrowseRow {
+                    display_title: Some(track.title),
+                    ..block(Row::Track(track.track), kind)
+                };
+                let mut rows = Vec::new();
+                for section in view.home_sections()? {
+                    match section {
+                        HomeSection::Showcase(row) => {
+                            rows.push(album(*row, HomeBlockKind::Showcase))
+                        }
+                        HomeSection::Rows {
+                            block,
+                            rows: section,
+                        } => {
+                            rows.extend(section.tracks.into_iter().map(|row| track(row, block)));
+                            rows.extend(section.albums.into_iter().map(|row| album(row, block)));
+                        }
+                        HomeSection::Provider(section) => {
+                            let id = format!("provider:{}", section.section_id);
+                            let title = rufin_core::settings::presentation::home_provider_title(
+                                &section.section_id,
+                                section.title.as_deref(),
+                            );
+                            let provider = |row: AndroidBrowseRow| AndroidBrowseRow {
+                                section: title.clone(),
+                                section_id: id.clone(),
+                                section_kind: "section".into(),
+                                ..row
+                            };
+                            rows.extend(section.rows.tracks.into_iter().map(|row| {
+                                provider(AndroidBrowseRow {
+                                    display_title: Some(row.title),
+                                    ..Row::Track(row.track).into()
+                                })
+                            }));
+                            rows.extend(section.rows.albums.into_iter().map(|row| {
+                                provider(AndroidBrowseRow {
+                                    display_title: Some(row.title),
+                                    ..Row::Album(row.album).into()
+                                })
+                            }));
+                        }
+                        HomeSection::Genres(genres) => {
+                            rows.extend(genres.into_iter().map(|row| AndroidBrowseRow {
+                                section: localization::tr("Featured genres"),
+                                section_id: "Genres".into(),
+                                section_kind: "genres".into(),
+                                ..Row::Tag(row).into()
+                            }));
+                        }
+                    }
                 }
-                if row.section_id.starts_with("provider:") {
-                    return 1;
-                }
-                self.blocks
-                    .iter()
-                    .position(|block| {
-                        serde_json::to_value(block)
-                            .expect("Home block name")
-                            .as_str()
-                            == Some(row.section_id.as_str())
-                    })
-                    .map_or(usize::MAX, |index| index + 2)
-            });
-            let filter = self.options.filter.to_lowercase();
-            rows.retain(|row| row.matches_filter(&filter));
-            rows
-        })
+                Some(rows)
+            })
+            .as_deref()
     }
 }
 

@@ -1,13 +1,14 @@
 use super::*;
 use library::{Item, MemberRead};
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 use rufin_core::source::feed::Changed;
 use rufin_core::view::Refresh;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    /// Whether a committed change means the page reads again.
+    /// Whether a committed change means the page reads again. Favorites and ratings read it
+    /// again only where they order or filter its rows; elsewhere rows show them through
+    /// `show_state`.
     pub fn refresh(&self, changed: Changed) -> bool {
         rufin_core::view::refresh(
             &self.source,
@@ -16,31 +17,18 @@ impl AndroidBrowseQuery {
             &self.options,
             &changed,
         ) != Refresh::Nothing
+            || (!changed.items.is_empty()
+                && self.view.get().is_some_and(|view| view.states_reorder()))
     }
 
+    /// The context id the page's plays carry.
     pub fn context_id(&self) -> String {
-        let context = CollectionTarget::for_route(&self.route).map_or_else(
-            || {
-                format!(
-                    "android:{}",
-                    serde_json::to_string(&self.route).expect("Route serialization")
-                )
-            },
-            |target| target.context_id(),
-        );
-        format!(
-            "{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
-            self.options.filter,
-            self.selected
-                .as_ref()
-                .map_or("rufin", |selected| selected.source_id.as_str()),
-            self.selected
-                .as_ref()
-                .and_then(|selected| selected.music_folder_key),
+        rufin_core::view::context_id(
+            &self.route,
+            self.selected.as_ref(),
+            &self.options,
             self.sort,
             self.descending,
-            self.favorites(),
-            self.downloaded()
         )
     }
 
@@ -122,6 +110,7 @@ impl AndroidBrowseQuery {
                 let view = self.view(&cancel).await.map_err(error)?;
                 let selections = self
                     .home_rows(view)
+                    .unwrap_or_default()
                     .iter()
                     .filter(|row| row.section_id == section_id)
                     .filter_map(home_selection)
@@ -144,11 +133,7 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
             let view = self.view(&cancel).await.map_err(error)?;
-            let count = if view.home().is_some() {
-                self.home_rows(view).len()
-            } else {
-                view.len()
-            };
+            let count = self.home_rows(view).map_or_else(|| view.len(), <[_]>::len);
             Ok(count as u64)
         })
         .await
@@ -209,8 +194,7 @@ impl AndroidBrowseQuery {
                 let view = self.view(&cancel).await.map_err(error)?;
                 let gone = || error("Track is no longer in this route");
                 let caption = context_caption(&self.route, context_title.clone());
-                let request = if view.home().is_some() {
-                    let rows = self.home_rows(view);
+                let request = if let Some(rows) = self.home_rows(view) {
                     let key = rows
                         .get(index)
                         .and_then(AndroidBrowseRow::track)
@@ -248,11 +232,12 @@ impl AndroidBrowseQuery {
                                 .ok_or_else(|| error("Album is no longer available"))?;
                             PlayRequest::captured(read.selection(), 0, placement, false)
                                 .with_context(
-                                    format!(
-                                        "{}|query=|sort={:?}|descending={}",
-                                        CollectionTarget::Album(album_uri).context_id(),
+                                    rufin_core::view::context_id(
+                                        &Route::AlbumDetail(album_uri),
+                                        None,
+                                        &OpenOptions::default(),
                                         self.album_tracks.sort_key,
-                                        self.album_tracks.descending
+                                        self.album_tracks.descending,
                                     )
                                     .into(),
                                 )

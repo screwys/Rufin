@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
+import io.github.screwys.rufin.core.showState
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
@@ -354,18 +355,19 @@ internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shu
 
 private fun browseItemKey(item: BrowseItem): String = "${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
 
+/** The item showing the favorites and ratings committed while it is shown. */
 @Composable
 internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem {
     val kind = if (item.row.kind == "album_header") "album" else item.row.kind
-    if (kind !in setOf("track", "album", "artist")) return item
-    var effective by remember(kind, item.row.mediaUri) { mutableStateOf(item.row.favorite) }
-    LaunchedEffect(item.row.favorite) { effective = item.row.favorite }
-    LaunchedEffect(model, kind, item.row.mediaUri) {
+    val key = item.row.stateKey
+    if (kind !in setOf("track", "album", "artist") || key == null) return item
+    var effective by remember(item.row) { mutableStateOf(item.row) }
+    LaunchedEffect(model, item.row) {
         model.favoriteStates.collect { state ->
-            if (state.kind == kind && state.mediaUri == item.row.mediaUri) effective = state.favorite
+            if (state.kind == kind && state.key == key) showState(effective, state)?.let { effective = it }
         }
     }
-    return item.copy(row = item.row.withFavorite(effective))
+    return item.copy(row = effective)
 }
 
 @Composable
@@ -376,13 +378,13 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     val row = item.row
     val occurrence = row.track?.entry != null
     val queryContext = remember(item.query, occurrence) { if (occurrence) item.query?.contextId() else null }
-    val playing by remember(row.kind, row.mediaUri, row.playbackContextId, occurrence, item.index, queryContext, player) { derivedStateOf {
+    val playing by remember(row.kind, row.mediaUri, row.contextId, occurrence, item.index, queryContext, player) { derivedStateOf {
         player != null && player.playingMediaUri != null &&
             if (row.kind == "track") {
                 player.playingMediaUri == row.mediaUri && (!occurrence ||
                     queryContext != null && queryContext == player.currentContextId && item.index == player.currentSourceRank)
             } else {
-                val target = row.playbackContextId
+                val target = row.contextId
                 val context = player.currentContextId
                 target != null && context != null && (context == target || context.startsWith("$target|query="))
             }

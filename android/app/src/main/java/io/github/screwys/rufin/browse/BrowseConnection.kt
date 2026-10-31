@@ -25,8 +25,6 @@ internal class BrowseOptions {
     var sort by mutableStateOf<io.github.screwys.rufin.shared.library.LibraryField?>(null)
     var descending by mutableStateOf(false)
     var displaySettings by mutableStateOf<AndroidBrowseDisplay?>(null)
-    /** When a Smart Playlist page opened: it keeps those members until the next visit. */
-    var smartOpened: Long? = null
 }
 
 internal data class BrowseLocation(
@@ -225,7 +223,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
     }
     fun open(item: BrowseItem) {
-        val route = item.row.detailRoute ?: return play(item)
+        val route = item.row.route ?: return play(item)
         connection.runAction {
             item.row.sourceId?.takeIf { it != connection.sources?.selectedSourceId }?.let { source -> connection.sourceOwner?.selectSource(source) }
             section = AppSection.Browse
@@ -277,7 +275,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val service = connection.connectedService()
         service.playRequest {
         if (item.row.kind != "track") {
-            item.row.detailRoute?.let { route -> library?.targetQuery(route)?.use { it.playAll(placement, shuffled, item.row.title) } }
+            item.row.route?.let { route -> library?.targetQuery(route)?.use { it.playAll(placement, shuffled, item.row.title) } }
             return@playRequest
         }
         if (item.fromPins) {
@@ -301,7 +299,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun radio(item: BrowseItem, placement: String) = connection.runAction {
         connection.connectedService().playRequest {
-            library?.playRadio(item.row.kind, item.row.mediaUri, item.row.detailRoute, placement)
+            library?.playRadio(item.row.kind, item.row.mediaUri, item.row.route, placement)
         }
     }
     fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {
@@ -310,7 +308,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun refresh() { visiblePage?.refresh() }
     fun download(item: BrowseItem, remove: Boolean = false) = connection.runAction {
-        library?.downloadTarget(item.row.detailRoute, item.row.mediaUri, remove)
+        library?.downloadTarget(item.row.route, item.row.mediaUri, remove)
     }
     fun refreshLabels(version: Int) {
         val previous = translationVersion

@@ -162,7 +162,7 @@ private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, o
             items(rows.itemCount, key = rows.itemKey { it.row.key }) { index ->
                 val row = rows[index]?.row
                 if (row == null) Spacer(Modifier.height(56.dp))
-                else ListItem(headlineContent = { Text(row.title) }, modifier = Modifier.clickable { select(row.detailRoute) })
+                else ListItem(headlineContent = { Text(row.title) }, modifier = Modifier.clickable { select(row.route) })
             }
             if (rows.loadState.refresh is LoadState.Loading || rows.loadState.append is LoadState.Loading) item {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

@@ -169,9 +169,8 @@ pub enum AndroidBrowseItem {
     Library {
         row: library::Row,
     },
-    /// A child folder and the route that opens it.
+    /// A child folder; the row's route opens it.
     Folder {
-        route: Route,
         artwork: Option<Vec<u8>>,
     },
     Recent {
@@ -186,6 +185,9 @@ pub struct AndroidBrowseRow {
     pub display_title: Option<String>,
     pub lyrics_snippet: Option<library::LyricsSnippet>,
     pub pin: Option<SidebarPin>,
+    /// The page the row opens, and the context id a play of that page carries.
+    pub route: Option<Route>,
+    pub context_id: Option<String>,
     pub section: String,
     pub section_id: String,
     pub section_kind: String,
@@ -200,6 +202,8 @@ impl AndroidBrowseRow {
             display_title: None,
             lyrics_snippet: None,
             pin: None,
+            route: None,
+            context_id: None,
             section: String::new(),
             section_id: String::new(),
             section_kind: String::new(),
@@ -216,65 +220,20 @@ impl AndroidBrowseRow {
         }
     }
 
-    pub(super) fn matches_filter(&self, filter: &str) -> bool {
-        let (title, subtitle) = match &self.item {
-            AndroidBrowseItem::Library {
-                row: Row::Track(track),
-            } => (&track.title, format!("{} · {}", track.artist, track.album)),
-            AndroidBrowseItem::Library {
-                row: Row::Album(album),
-            } => (&album.title, album.artist.clone()),
-            _ => return true,
-        };
-        format!(
-            "{} {}",
-            self.display_title.as_ref().unwrap_or(title),
-            subtitle
-        )
-        .to_lowercase()
-        .contains(filter)
+    /// A row that opens `route`.
+    pub(crate) fn opening(item: AndroidBrowseItem, route: Route) -> Self {
+        Self {
+            context_id: rufin_core::collection_context::CollectionTarget::for_route(&route)
+                .map(|target| target.context_id()),
+            route: Some(route),
+            ..Self::new(item)
+        }
     }
 }
 
 impl From<Row> for AndroidBrowseRow {
     fn from(row: Row) -> Self {
-        let pin = match &row {
-            Row::Album(album) | Row::AlbumHeading(album) => {
-                library::source_entity_parts(&album.media_uri).map(|(source_id, _, album_id)| {
-                    SidebarPin::Album {
-                        source_id,
-                        album_id,
-                    }
-                })
-            }
-            Row::Artist(artist) => {
-                library::source_entity_parts(&artist.media_uri).map(|(source_id, _, artist_id)| {
-                    SidebarPin::Artist {
-                        source_id,
-                        artist_id,
-                        album_artist: artist.album_artist,
-                    }
-                })
-            }
-            Row::Tag(tag) if tag.kind == library::TagKind::Genre => Some(SidebarPin::Genre {
-                source_id: sources::SourceId::new(tag.source_id.clone()),
-                genre_id: tag.object_id.clone(),
-            }),
-            Row::Playlist(PlaylistListRow::Playlist(playlist)) => Some(SidebarPin::Playlist {
-                source_id: playlist.source_id.as_ref().map(sources::SourceId::new),
-                playlist_id: playlist.object_id.clone(),
-            }),
-            Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
-                Some(SidebarPin::SmartPlaylist {
-                    playlist_id: playlist.object_id.clone(),
-                })
-            }
-            Row::Playlist(PlaylistListRow::Folder(folder)) => Some(SidebarPin::PlaylistFolder {
-                folder_id: folder.object_id.clone(),
-                smart: folder.smart,
-            }),
-            _ => None,
-        };
+        let pin = row.pin();
         let display_title = match &row {
             Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
                 Some(rufin_core::playlists::smart_playlist_display_name(
@@ -284,10 +243,15 @@ impl From<Row> for AndroidBrowseRow {
             }
             _ => None,
         };
+        let route = Route::of_row(&row);
+        let item = AndroidBrowseItem::Library { row };
         Self {
             pin,
             display_title,
-            ..Self::new(AndroidBrowseItem::Library { row })
+            ..match route {
+                Some(route) => Self::opening(item, route),
+                None => Self::new(item),
+            }
         }
     }
 }
@@ -300,4 +264,30 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
             icon_id: link.icon_name.into(),
         }
     }
+}
+
+/// `row` showing a committed favorite or rating; None when it shows another item, or this one
+/// as it is.
+#[uniffi::export]
+pub fn show_state(
+    mut row: AndroidBrowseRow,
+    change: library::StateChange,
+) -> Option<AndroidBrowseRow> {
+    use library::ShowsState;
+    let AndroidBrowseItem::Library { row: library } = &mut row.item else {
+        return None;
+    };
+    let state = library.state_mut(&change)?;
+    if change.shown_in(state) {
+        return None;
+    }
+    change.show_in(state);
+    if let Row::Track(track) | Row::AlbumTrack { track, .. } = library {
+        for field in &mut row.fields {
+            if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
+                field.text = rufin_core::settings::presentation::track_row_field(track, field.id);
+            }
+        }
+    }
+    Some(row)
 }
