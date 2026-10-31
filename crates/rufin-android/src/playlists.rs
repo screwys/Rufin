@@ -100,6 +100,24 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
+    /// Whether the playlist's menu offers Remove unavailable tracks.
+    pub fn can_remove_unavailable(&self, playlist: library::PlaylistRow) -> bool {
+        playlists::can_remove_unavailable(&self.source, &playlist)
+    }
+
+    /// Removes the playlist's tracks that are no longer available; returns how many went.
+    pub async fn remove_unavailable_tracks(
+        &self,
+        playlist: PlaylistKey,
+    ) -> Result<u64, AndroidError> {
+        playlists::remove_unavailable_tracks(&self.source, playlist)
+            .recv()
+            .await
+            .map_err(error)?
+            .map(|removed| removed as u64)
+            .map_err(error)
+    }
+
     pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
         self.catalog
             .playlist_name(playlist)

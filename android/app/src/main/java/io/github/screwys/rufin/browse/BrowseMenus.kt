@@ -203,6 +203,9 @@ internal fun BrowseMenuSheet(
     val playlistFolder = item.row.playlistFolder
     val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
+    val removeUnavailable = remember(item.row.item, browse.library) {
+        item.row.playlist?.let { browse.library?.canRemoveUnavailable(it) } == true
+    }
     var memberFolder by remember(item.row.key) { mutableStateOf<Long?>(null) }
     LaunchedEffect(folderMember, browse.library) {
         if (folderMember != null) {
@@ -320,6 +323,10 @@ internal fun BrowseMenuSheet(
                         onDismiss()
                     } }
                 }
+                if (removeUnavailable) BrowseMenuAction("rufin-user-trash-symbolic", "Remove unavailable tracks") { model.runAction {
+                    browse.library?.removeUnavailableTracks(item.row.playlist!!.playlistKey)
+                    onDismiss()
+                } }
                 downloaded?.let { status ->
                     if (status.downloaded == 0UL || status.downloaded < status.total)
                         BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
