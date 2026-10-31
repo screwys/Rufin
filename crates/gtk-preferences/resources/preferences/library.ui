@@ -391,7 +391,7 @@
   </object>
   <object class="AdwAlertDialog" id="forget_local_confirm">
     <property name="heading" translatable="yes">Forget Source</property>
-    <property name="body" translatable="yes">Remove Local and its cached library from Rufin? Your music files will not be deleted.</property>
+    <property name="body" translatable="yes">Remove everything Rufin keeps about Local, including its favorites, ratings and lyrics? Your music files will not be deleted.</property>
     <property name="close-response">cancel</property>
     <property name="default-response">cancel</property>
     <responses>

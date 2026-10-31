@@ -5,7 +5,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use rufin_core::runtime::source::SourceSummary;
 
-use localization::tr;
+use localization::{tr, tr_with};
 use sources::SourceId;
 
 use super::login::source_settings_group;
@@ -373,10 +373,9 @@ pub fn confirm_forget_source(
 ) {
     let dialog = adw::AlertDialog::builder()
         .heading(tr("Forget Source"))
-        .body(format!(
-            "{} {}",
-            tr("This removes the server, cached library metadata, queue snapshot, and saved token for"),
-            server_name
+        .body(tr_with(
+            "Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?",
+            &[("name", server_name)],
         ))
         .build();
     let cancel = tr("Cancel");
