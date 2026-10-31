@@ -402,8 +402,9 @@ impl ConnectOwner {
         self.offer();
     }
 
-    /// The newest session of another trusted device that is newer than this device's own,
-    /// while this device does not play.
+    /// Marks each paired device whose session holds something to continue, and offers the
+    /// newest session of another trusted device that is newer than this device's own, while
+    /// this device does not play.
     pub(super) fn offer(&self) {
         let playing = self
             .playback
@@ -411,34 +412,48 @@ impl ConnectOwner {
             .is_some_and(|projection| {
                 projection.view.transport.effective_state() == playback::TransportStatus::Playing
             });
-        let continuation = self.session().filter(|_| !playing).and_then(|session| {
+        let mut continuable = std::collections::BTreeSet::new();
+        let mut continuation: Option<Continuation> = None;
+        if let Some(session) = self.session() {
             let devices = session.records.devices();
             let sessions = session.records.sessions.borrow();
             let own = sessions
                 .get(&session.records.device)
                 .map_or(i64::MIN, |own| own.at);
-            sessions
-                .iter()
-                .filter(|(_, value)| value.at > own)
-                .filter_map(|(device, value)| {
-                    let (_, item) = value.current.as_ref()?;
-                    Some(Continuation {
-                        device: device.clone(),
-                        name: devices.get(device)?.clone(),
-                        title: item.copy.title.clone(),
-                        artist: item.copy.artist.clone(),
-                        position_ms: value.position_ms.max(0) as u64,
-                        at: value.at,
-                    })
-                })
-                .max_by_key(|continuation| continuation.at)
-        });
-        self.status.send_if_modified(|status| {
-            if status.continuation == continuation {
-                return false;
+            for (device, value) in sessions.iter() {
+                let Some((_, item)) = value.current.as_ref() else {
+                    continue;
+                };
+                continuable.insert(device.clone());
+                let Some(name) = devices.get(device) else {
+                    continue;
+                };
+                if playing
+                    || value.at <= own
+                    || continuation
+                        .as_ref()
+                        .is_some_and(|offer| offer.at > value.at)
+                {
+                    continue;
+                }
+                continuation = Some(Continuation {
+                    device: device.clone(),
+                    name: name.clone(),
+                    title: item.copy.title.clone(),
+                    artist: item.copy.artist.clone(),
+                    position_ms: value.position_ms.max(0) as u64,
+                    at: value.at,
+                });
             }
+        }
+        self.status.send_if_modified(|status| {
+            let mut changed = status.continuation != continuation;
             status.continuation = continuation;
-            true
+            for device in &mut status.devices {
+                let next = device.enrolled && continuable.contains(&device.id);
+                changed |= std::mem::replace(&mut device.continuable, next) != next;
+            }
+            changed
         });
     }
 

@@ -100,6 +100,9 @@ pub struct Device {
     #[serde(default)]
     pub enrolled: bool,
     pub connection: String,
+    /// A paired device whose session records something to continue, online or not.
+    #[serde(default)]
+    pub continuable: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1139,6 +1142,7 @@ impl ConnectOwner {
                             reachable: false,
                             enrolled: true,
                             connection: String::new(),
+                            continuable: false,
                         })
                 })
                 .collect::<Vec<_>>();
@@ -1463,6 +1467,7 @@ impl ConnectOwner {
                             reachable: true,
                             enrolled: false,
                             connection: String::new(),
+                            continuable: false,
                         });
                     }
                     true
