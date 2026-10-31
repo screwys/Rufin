@@ -190,7 +190,6 @@ impl PeerSource {
         playable: &library::Playable,
         request: playback::StreamRequest,
     ) -> SourceResult<ResolvedStream> {
-        let object = playable.object_id.as_deref().ok_or(SourceError::NotFound)?;
         let encoding = request
             .quality
             .max_bitrate_kbps()
@@ -199,6 +198,30 @@ impl PeerSource {
                 bitrate_kbps: Some(bitrate),
                 channels: AudioChannels::StereoLossy,
             });
+        self.audio_stream(playable, encoding).await
+    }
+
+    /// A download in the profile's format, which the owner encodes as it does for streaming.
+    pub(crate) async fn download(
+        &self,
+        playable: &library::Playable,
+        quality: crate::DownloadQuality,
+    ) -> SourceResult<crate::ResolvedDownload> {
+        let encoding = quality.encoding();
+        let stream = self.audio_stream(playable, encoding).await?;
+        Ok(crate::ResolvedDownload::ready(
+            stream,
+            encoding.map(|encoding| encoding.codec),
+        ))
+    }
+
+    /// The track's audio from the owner, encoded there when `encoding` names a format.
+    async fn audio_stream(
+        &self,
+        playable: &library::Playable,
+        encoding: Option<AudioEncoding>,
+    ) -> SourceResult<ResolvedStream> {
+        let object = playable.object_id.as_deref().ok_or(SourceError::NotFound)?;
         let input = FileInputServer::start(FileInput::Link {
             peer: self.clone(),
             encoding,

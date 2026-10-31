@@ -1396,13 +1396,14 @@ impl Source {
                     )
                     .await
             }
-            Implementation::Files(_) | Implementation::Local(_) | Implementation::Peer(_) => self
+            Implementation::Files(_) | Implementation::Local(_) => self
                 .stream(
                     playable,
                     StreamRequest::original(playable.media_uri.clone()),
                 )
                 .await
                 .map(|stream| ResolvedDownload::encode(stream, quality)),
+            Implementation::Peer(source) => source.download(playable, quality).await,
             Implementation::JellyfinEmby(source) => {
                 source
                     .resolve_download(
