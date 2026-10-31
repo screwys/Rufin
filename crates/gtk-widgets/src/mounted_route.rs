@@ -91,66 +91,6 @@ pub fn item_navigation_entry_position(
     }
 }
 
-/// A row that shows a track's, album's or artist's favorite and rating.
-pub trait StateRow {
-    /// The state this row shows of the item `change` names, if it shows that item.
-    fn state(&self, _change: &library::StateChange) -> Option<&library::TrackState> {
-        None
-    }
-    fn state_mut(&mut self, _change: &library::StateChange) -> Option<&mut library::TrackState> {
-        None
-    }
-}
-
-impl StateRow for library::TrackRow {
-    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
-        (change.track() == Some(self.track_key)).then_some(&self.state)
-    }
-    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
-        (change.track() == Some(self.track_key)).then_some(&mut self.state)
-    }
-}
-
-impl StateRow for library::AlbumRow {
-    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
-        (change.album() == Some(self.album_key)).then_some(&self.state)
-    }
-    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
-        (change.album() == Some(self.album_key)).then_some(&mut self.state)
-    }
-}
-
-impl StateRow for library::ArtistRow {
-    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
-        (change.artist() == Some(self.artist_key)).then_some(&self.state)
-    }
-    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
-        (change.artist() == Some(self.artist_key)).then_some(&mut self.state)
-    }
-}
-
-impl StateRow for library::Row {
-    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
-        match self {
-            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state(change),
-            Self::Album(album) | Self::AlbumHeading(album) => album.state(change),
-            Self::Artist(artist) => artist.state(change),
-            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
-        }
-    }
-    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
-        match self {
-            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state_mut(change),
-            Self::Album(album) | Self::AlbumHeading(album) => album.state_mut(change),
-            Self::Artist(artist) => artist.state_mut(change),
-            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
-        }
-    }
-}
-
-impl StateRow for library::TagRow {}
-impl StateRow for library::PlaylistListRow {}
-
 /// The view a mounted route reads, which its models read their windows from, and the models
 /// that show committed favorites and ratings in their rows.
 pub struct RouteViewState {
@@ -174,7 +114,7 @@ impl RouteViewState {
     pub fn show_states<K, R>(&self, model: &Rc<SparseRouteModel<K, R>>)
     where
         K: Clone + Eq + Send + Sync + 'static,
-        R: StateRow + Clone + Send + Sync + 'static,
+        R: library::ShowsState + Clone + Send + Sync + 'static,
     {
         let model = Rc::downgrade(model);
         self.rows.borrow_mut().push(Box::new(move |change| {
@@ -228,7 +168,7 @@ pub fn view_model<K, R>(
 ) -> Rc<SparseRouteModel<K, R>>
 where
     K: Clone + Eq + Send + Sync + 'static,
-    R: StateRow + Clone + Send + Sync + 'static,
+    R: library::ShowsState + Clone + Send + Sync + 'static,
 {
     let load_view = Rc::clone(view);
     let model = SparseRouteModel::new(

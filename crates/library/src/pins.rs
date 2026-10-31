@@ -37,6 +37,158 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// What a collection row shows of itself: an album, artist, tag, playlist, smart playlist or
+/// playlist folder.
+#[derive(Debug, PartialEq)]
+pub struct CollectionShown<'a> {
+    /// The row's key in its kind.
+    pub key: i64,
+    pub name: &'a str,
+    pub track_count: i64,
+    pub duration_millis: i64,
+    /// Its picture, or the covers its mosaic picked.
+    pub artwork: Vec<&'a [u8]>,
+}
+
+impl crate::AlbumRow {
+    pub fn pin(&self) -> Option<SidebarPin> {
+        let (source_id, _, album_id) = crate::source_entity_parts(&self.media_uri)?;
+        Some(SidebarPin::Album {
+            source_id,
+            album_id,
+        })
+    }
+}
+
+impl crate::ArtistRow {
+    pub fn pin(&self) -> Option<SidebarPin> {
+        let (source_id, _, artist_id) = crate::source_entity_parts(&self.media_uri)?;
+        Some(SidebarPin::Artist {
+            source_id,
+            artist_id,
+            album_artist: self.album_artist,
+        })
+    }
+}
+
+impl crate::TagRow {
+    /// A genre's pin; moods have none.
+    pub fn pin(&self) -> Option<SidebarPin> {
+        (self.kind == crate::TagKind::Genre).then(|| SidebarPin::Genre {
+            source_id: SourceId::new(self.source_id.clone()),
+            genre_id: self.object_id.clone(),
+        })
+    }
+}
+
+impl crate::PlaylistRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::Playlist {
+            source_id: self.source_id.as_ref().map(SourceId::new),
+            playlist_id: self.object_id.clone(),
+        }
+    }
+}
+
+impl crate::SmartPlaylistRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::SmartPlaylist {
+            playlist_id: self.object_id.clone(),
+        }
+    }
+}
+
+impl crate::PlaylistFolderRow {
+    pub fn pin(&self) -> SidebarPin {
+        SidebarPin::PlaylistFolder {
+            folder_id: self.object_id.clone(),
+            smart: self.smart,
+        }
+    }
+}
+
+impl PlaylistListRow {
+    pub fn pin(&self) -> SidebarPin {
+        match self {
+            Self::Playlist(playlist) => playlist.pin(),
+            Self::SmartPlaylist(playlist) => playlist.pin(),
+            Self::Folder(folder) => folder.pin(),
+        }
+    }
+}
+
+impl Row {
+    /// The sidebar pin of a collection row.
+    pub fn pin(&self) -> Option<SidebarPin> {
+        match self {
+            Self::Album(album) | Self::AlbumHeading(album) => album.pin(),
+            Self::Artist(artist) => artist.pin(),
+            Self::Tag(tag) => tag.pin(),
+            Self::Playlist(playlist) => Some(playlist.pin()),
+            Self::Track(_) | Self::AlbumTrack { .. } | Self::Folder(_) => None,
+        }
+    }
+
+    /// What a collection row shows of itself; None for tracks and child folders.
+    pub fn collection(&self) -> Option<CollectionShown<'_>> {
+        fn picture(binding: &Option<Vec<u8>>) -> Vec<&[u8]> {
+            binding.iter().map(Vec::as_slice).collect()
+        }
+        Some(match self {
+            Self::Album(album) | Self::AlbumHeading(album) => CollectionShown {
+                key: album.album_key.raw(),
+                name: &album.title,
+                track_count: album.summary.track_count,
+                duration_millis: album.summary.duration_millis,
+                artwork: picture(&album.artwork_binding),
+            },
+            Self::Artist(artist) => CollectionShown {
+                key: artist.artist_key.raw(),
+                name: &artist.name,
+                track_count: artist.summary.track_count,
+                duration_millis: artist.summary.duration_millis,
+                artwork: picture(&artist.artwork_binding),
+            },
+            Self::Tag(tag) => CollectionShown {
+                key: tag.key,
+                name: &tag.name,
+                track_count: tag.summary.track_count,
+                duration_millis: tag.summary.duration_millis,
+                artwork: match &tag.artwork_binding {
+                    Some(binding) => vec![binding.as_slice()],
+                    None => tag
+                        .representative_artwork
+                        .iter()
+                        .map(Vec::as_slice)
+                        .collect(),
+                },
+            },
+            Self::Playlist(PlaylistListRow::Playlist(playlist)) => CollectionShown {
+                key: playlist.playlist_key.raw(),
+                name: &playlist.name,
+                track_count: playlist.track_count,
+                duration_millis: playlist.duration_millis,
+                artwork: picture(&playlist.artwork_binding),
+            },
+            Self::Playlist(PlaylistListRow::SmartPlaylist(smart)) => CollectionShown {
+                key: smart.smart_playlist_key.raw(),
+                name: &smart.name,
+                track_count: smart.track_count,
+                duration_millis: smart.duration_millis,
+                artwork: picture(&smart.artwork_binding),
+            },
+            Self::Playlist(PlaylistListRow::Folder(folder)) => CollectionShown {
+                key: folder.folder_key.raw(),
+                name: &folder.name,
+                track_count: folder.track_count,
+                duration_millis: folder.duration_millis,
+                artwork: picture(&folder.artwork_binding),
+            },
+            Self::Track(_) | Self::AlbumTrack { .. } | Self::Folder(_) => return None,
+        })
+    }
+}
+
 impl Catalog {
     /// The item of a pinned row, when the Catalog still holds it.
     fn pin_item(&self, pin: &SidebarPin) -> Option<Item> {

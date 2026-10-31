@@ -1130,35 +1130,45 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             album_id: "missing".into(),
         },
     ];
-    let rows = catalog
-        .pin_rows(&pins, 1000, &cancel)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(PinSummary::of)
-        .collect::<Vec<_>>();
+    let rows = catalog.pin_rows(&pins, 1000, &cancel).await.unwrap();
+    let totals = |index: usize| {
+        rows[index]
+            .1
+            .collection()
+            .map(|shown| (shown.track_count, shown.duration_millis))
+    };
+    let artwork = |index: usize| {
+        rows[index]
+            .1
+            .collection()
+            .unwrap()
+            .artwork
+            .into_iter()
+            .map(<[u8]>::to_vec)
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        rows.iter().map(|row| &row.pin).collect::<Vec<_>>(),
+        rows.iter().map(|(pin, _)| pin).collect::<Vec<_>>(),
         pins[..10].iter().collect::<Vec<_>>()
     );
-    assert_eq!(rows[4].totals, Some((1, 0)));
+    assert_eq!(totals(4), Some((1, 0)));
     assert_eq!(
-        rows[5].totals,
+        totals(5),
         Some((smart_rows[0].track_count, smart_rows[0].duration_millis))
     );
     assert_eq!(
-        rows[6].totals,
+        totals(6),
         Some((smart_rows[1].track_count, smart_rows[1].duration_millis))
     );
     assert_eq!(
-        rows[8].totals,
+        totals(8),
         Some((
             smart_rows[0].track_count + smart_rows[1].track_count,
             smart_rows[0].duration_millis + smart_rows[1].duration_millis
         ))
     );
-    assert_eq!(rows[7].totals, Some((1, 0)));
-    assert_eq!(rows[9].totals, Some((0, 0)));
+    assert_eq!(totals(7), Some((1, 0)));
+    assert_eq!(totals(9), Some((0, 0)));
     let album = catalog
         .album(&fixture.album_uris[0], false, &cancel)
         .await
@@ -1166,11 +1176,11 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .unwrap()
         .row;
     assert_eq!(
-        rows[0].totals,
+        totals(0),
         Some((album.summary.track_count, album.summary.duration_millis))
     );
     assert_eq!(
-        rows[0].artwork,
+        artwork(0),
         album.artwork_binding.iter().cloned().collect::<Vec<_>>()
     );
     for (index, role) in [(1, false), (2, true)] {
@@ -1181,16 +1191,16 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             .unwrap()
             .row;
         assert_eq!(
-            rows[index].totals,
+            totals(index),
             Some((artist.summary.track_count, artist.summary.duration_millis))
         );
     }
     assert_eq!(
-        rows[3].totals,
+        totals(3),
         Some((genre.summary.track_count, genre.summary.duration_millis))
     );
     assert_eq!(
-        rows[3].artwork,
+        artwork(3),
         genre
             .artwork_binding
             .as_ref()
@@ -2304,7 +2314,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|pinned| PinSummary::of(pinned).key)
+                .map(|(_, row)| row.collection().unwrap().key)
                 .collect::<Vec<_>>(),
             [row.playlist_key.raw()]
         );
@@ -2983,19 +2993,12 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         .into_iter()
         .map(|playlist_id| library::SidebarPin::SmartPlaylist { playlist_id })
         .collect::<Vec<_>>();
-    let rows = fixture
-        .catalog
-        .pin_rows(&pins, 0, &cancel)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(PinSummary::of)
-        .collect::<Vec<_>>();
+    let rows = fixture.catalog.pin_rows(&pins, 0, &cancel).await.unwrap();
     assert_eq!(rows.len(), 70);
-    for (index, row) in rows.iter().enumerate() {
-        assert_eq!(row.pin, pins[index]);
+    for (index, (pin, row)) in rows.iter().enumerate() {
+        assert_eq!(*pin, pins[index]);
         assert_eq!(
-            row.totals.unwrap().0,
+            row.collection().unwrap().track_count,
             ((index % 4 + 1).min(fixture.tracks.len())) as i64
         );
     }
@@ -3626,60 +3629,4 @@ async fn home_search_and_radio_results_stay_bounded() {
         .expect("Playlist first-Track Radio context");
     assert!(!playlist_radio.contains(&fixture.tracks[0]));
     assert_ne!(playlist_radio, [fixture.tracks[0]]);
-}
-
-/// What a sidebar pin shows of its row.
-struct PinSummary {
-    pin: library::SidebarPin,
-    key: i64,
-    totals: Option<(i64, i64)>,
-    artwork: Vec<Vec<u8>>,
-}
-
-impl PinSummary {
-    fn of((pin, row): (library::SidebarPin, library::Row)) -> Self {
-        use library::{PlaylistListRow, Row};
-        let (key, totals, artwork) = match row {
-            Row::Album(album) => (
-                album.album_key.raw(),
-                (album.summary.track_count, album.summary.duration_millis),
-                album.artwork_binding.into_iter().collect(),
-            ),
-            Row::Artist(artist) => (
-                artist.artist_key.raw(),
-                (artist.summary.track_count, artist.summary.duration_millis),
-                artist.artwork_binding.into_iter().collect(),
-            ),
-            Row::Tag(genre) => (
-                genre.key,
-                (genre.summary.track_count, genre.summary.duration_millis),
-                match genre.artwork_binding {
-                    Some(binding) => vec![binding],
-                    None => genre.representative_artwork,
-                },
-            ),
-            Row::Playlist(PlaylistListRow::Playlist(playlist)) => (
-                playlist.playlist_key.raw(),
-                (playlist.track_count, playlist.duration_millis),
-                playlist.artwork_binding.into_iter().collect(),
-            ),
-            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => (
-                smart.smart_playlist_key.raw(),
-                (smart.track_count, smart.duration_millis),
-                smart.artwork_binding.into_iter().collect(),
-            ),
-            Row::Playlist(PlaylistListRow::Folder(folder)) => (
-                folder.folder_key.raw(),
-                (folder.track_count, folder.duration_millis),
-                folder.artwork_binding.into_iter().collect(),
-            ),
-            row => panic!("not a pinned collection: {row:?}"),
-        };
-        Self {
-            pin,
-            key,
-            totals: Some(totals),
-            artwork,
-        }
-    }
 }

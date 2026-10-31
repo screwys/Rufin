@@ -9,7 +9,8 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, StateRow, route_view};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
+use library::ShowsState;
 use rufin_core::view::{Opened, View};
 
 use gtk_widgets::route::{FolderPathItem, Route};
@@ -86,7 +87,7 @@ enum FolderTableRow {
     Track(library::TrackRow),
 }
 
-impl StateRow for FolderTableRow {
+impl ShowsState for FolderTableRow {
     fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
         match self {
             Self::Track(track) => track.state(change),

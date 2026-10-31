@@ -175,9 +175,7 @@ impl CatalogUi {
     }
 }
 
-pub trait CollectionRow:
-    gtk_widgets::mounted_route::StateRow + Clone + PartialEq + Send + Sync + 'static
-{
+pub trait CollectionRow: library::ShowsState + Clone + PartialEq + Send + Sync + 'static {
     type Key: Clone + Eq + Send + Sync + 'static;
     /// The row of a list of these rows.
     fn row(row: Row) -> Option<Self>;

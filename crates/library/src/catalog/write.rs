@@ -155,6 +155,66 @@ impl StateChange {
     }
 }
 
+/// A row that shows a track's, album's or artist's favorite and rating.
+pub trait ShowsState {
+    /// The state this row shows of the item `change` names, if it shows that item.
+    fn state(&self, _change: &crate::StateChange) -> Option<&crate::TrackState> {
+        None
+    }
+    fn state_mut(&mut self, _change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        None
+    }
+}
+
+impl ShowsState for crate::TrackRow {
+    fn state(&self, change: &crate::StateChange) -> Option<&crate::TrackState> {
+        (change.track() == Some(self.track_key)).then_some(&self.state)
+    }
+    fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        (change.track() == Some(self.track_key)).then_some(&mut self.state)
+    }
+}
+
+impl ShowsState for crate::AlbumRow {
+    fn state(&self, change: &crate::StateChange) -> Option<&crate::TrackState> {
+        (change.album() == Some(self.album_key)).then_some(&self.state)
+    }
+    fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        (change.album() == Some(self.album_key)).then_some(&mut self.state)
+    }
+}
+
+impl ShowsState for crate::ArtistRow {
+    fn state(&self, change: &crate::StateChange) -> Option<&crate::TrackState> {
+        (change.artist() == Some(self.artist_key)).then_some(&self.state)
+    }
+    fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        (change.artist() == Some(self.artist_key)).then_some(&mut self.state)
+    }
+}
+
+impl ShowsState for crate::Row {
+    fn state(&self, change: &crate::StateChange) -> Option<&crate::TrackState> {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state(change),
+            Self::Album(album) | Self::AlbumHeading(album) => album.state(change),
+            Self::Artist(artist) => artist.state(change),
+            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
+        }
+    }
+    fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state_mut(change),
+            Self::Album(album) | Self::AlbumHeading(album) => album.state_mut(change),
+            Self::Artist(artist) => artist.state_mut(change),
+            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
+        }
+    }
+}
+
+impl ShowsState for crate::TagRow {}
+impl ShowsState for crate::PlaylistListRow {}
+
 /// One committed Write, as clients and features see it.
 #[derive(Clone, Debug)]
 pub struct Change {

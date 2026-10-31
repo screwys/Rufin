@@ -72,6 +72,35 @@ pub enum Route {
 }
 
 impl Route {
+    /// The page a collection row opens; None for tracks and child folders.
+    pub fn of_row(row: &library::Row) -> Option<Self> {
+        use library::{PlaylistListRow, Row, TagKind};
+        Some(match row {
+            Row::Album(album) | Row::AlbumHeading(album) => {
+                Self::AlbumDetail(album.media_uri.clone())
+            }
+            Row::Artist(artist) if artist.album_artist => {
+                Self::AlbumArtistDetail(artist.media_uri.clone())
+            }
+            Row::Artist(artist) => Self::ArtistDetail(artist.media_uri.clone()),
+            Row::Tag(tag) if tag.kind == TagKind::Genre => {
+                Self::GenreDetail(GenreKey::from_raw(tag.key))
+            }
+            Row::Tag(tag) => Self::MoodDetail(MoodKey::from_raw(tag.key)),
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
+                Self::PlaylistDetail(playlist.playlist_key)
+            }
+            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {
+                Self::SmartPlaylistDetail(smart.smart_playlist_key)
+            }
+            Row::Playlist(PlaylistListRow::Folder(folder)) => Self::PlaylistFolder {
+                key: folder.folder_key,
+                smart: folder.smart,
+            },
+            Row::Track(_) | Row::AlbumTrack { .. } | Row::Folder(_) => return None,
+        })
+    }
+
     pub fn requires_selected_source(&self) -> bool {
         matches!(
             self,

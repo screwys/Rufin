@@ -198,14 +198,7 @@ pub fn present_folder_context_menu(
     position: Option<(f64, f64)>,
 ) {
     let surface = ContextMenuSurface::new(target, "playlist-folder", position);
-    crate::media_menus::install_sidebar_pin_action(
-        &surface,
-        menus,
-        Some(rufin_core::settings::SidebarPin::PlaylistFolder {
-            folder_id: folder.object_id.clone(),
-            smart: folder.smart,
-        }),
-    );
+    crate::media_menus::install_sidebar_pin_action(&surface, menus, Some(folder.pin()));
     surface.append_fixed_action(
         msgid("Rename folder"),
         "rename",

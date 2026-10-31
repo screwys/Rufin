@@ -60,7 +60,7 @@ pub use local_access::{
 mod playable;
 pub use playable::{Gains, Playable, PlayableDownload, PlayableFile, PlayableNames};
 mod playlists;
-pub use pins::SidebarPin;
+pub use pins::{CollectionShown, SidebarPin};
 mod queue;
 pub mod rank;
 mod waveform;
@@ -93,7 +93,7 @@ pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
     AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FileBatch,
     FolderObservation, Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation,
-    PlaylistObservation, Scope, SourcePhase, StateChange, StoredFile, TagObservation,
+    PlaylistObservation, Scope, ShowsState, SourcePhase, StateChange, StoredFile, TagObservation,
     TrackObservation, walk_key,
 };
 pub use collections::{

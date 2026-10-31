@@ -516,97 +516,31 @@ impl SidebarPinItem {
     fn stored_pin(&self) -> SidebarPin {
         self.pin.clone()
     }
-    /// The pinned collection's key, name, track count and duration in milliseconds.
-    fn summary(&self) -> (i64, &str, i64, i64) {
-        use library::{PlaylistListRow, Row};
-        match &self.row {
-            Row::Album(album) => (
-                album.album_key.raw(),
-                &album.title,
-                album.summary.track_count,
-                album.summary.duration_millis,
-            ),
-            Row::Artist(artist) => (
-                artist.artist_key.raw(),
-                &artist.name,
-                artist.summary.track_count,
-                artist.summary.duration_millis,
-            ),
-            Row::Tag(genre) => (
-                genre.key,
-                &genre.name,
-                genre.summary.track_count,
-                genre.summary.duration_millis,
-            ),
-            Row::Playlist(PlaylistListRow::Playlist(playlist)) => (
-                playlist.playlist_key.raw(),
-                &playlist.name,
-                playlist.track_count,
-                playlist.duration_millis,
-            ),
-            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => (
-                smart.smart_playlist_key.raw(),
-                &smart.name,
-                smart.track_count,
-                smart.duration_millis,
-            ),
-            Row::Playlist(PlaylistListRow::Folder(folder)) => (
-                folder.folder_key.raw(),
-                &folder.name,
-                folder.track_count,
-                folder.duration_millis,
-            ),
-            Row::Track(_) | Row::AlbumHeading(_) | Row::AlbumTrack { .. } | Row::Folder(_) => {
-                unreachable!("pin_rows returns pinned collections only")
-            }
-        }
+    /// What the pinned collection's row shows.
+    fn summary(&self) -> library::CollectionShown<'_> {
+        self.row
+            .collection()
+            .expect("pin_rows returns pinned collections only")
     }
     fn key(&self) -> i64 {
-        self.summary().0
-    }
-    fn name(&self) -> &str {
-        self.summary().1
+        self.summary().key
     }
     fn title(&self) -> String {
+        let name = self.summary().name;
         if let SidebarPin::SmartPlaylist { playlist_id } = &self.pin {
-            smart_playlist_display_name(playlist_id, self.name())
+            smart_playlist_display_name(playlist_id, name)
         } else {
-            self.name().to_owned()
+            name.to_owned()
         }
     }
     fn track_count(&self) -> u32 {
-        self.summary().2.clamp(0, u32::MAX as i64) as u32
+        self.summary().track_count.clamp(0, u32::MAX as i64) as u32
     }
     fn duration_seconds(&self) -> u32 {
-        (self.summary().3.max(0) / 1000).min(u32::MAX as i64) as u32
+        (self.summary().duration_millis.max(0) / 1000).min(u32::MAX as i64) as u32
     }
     fn route(&self) -> Route {
-        let key = self.key();
-        match &self.pin {
-            SidebarPin::Album {
-                source_id,
-                album_id,
-            } => Route::AlbumDetail(library::source_entity_uri(source_id, "album", album_id)),
-            SidebarPin::Artist {
-                source_id,
-                artist_id,
-                album_artist,
-            } => gtk_library::artist_detail_route(
-                library::source_entity_uri(source_id, "artist", artist_id),
-                *album_artist,
-            ),
-            SidebarPin::Genre { .. } => Route::GenreDetail(library::GenreKey::from_raw(key)),
-            SidebarPin::Playlist { .. } => {
-                Route::PlaylistDetail(library::PlaylistKey::from_raw(key))
-            }
-            SidebarPin::SmartPlaylist { .. } => {
-                Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(key))
-            }
-            SidebarPin::PlaylistFolder { smart, .. } => Route::PlaylistFolder {
-                key: library::PlaylistFolderKey::from_raw(key),
-                smart: *smart,
-            },
-        }
+        Route::of_row(&self.row).expect("pin_rows returns pinned collections only")
     }
     fn playback_target(&self) -> Option<PlayRequest> {
         let key = self.key();
@@ -641,28 +575,10 @@ impl SidebarPinItem {
         )
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
-        use library::{PlaylistListRow, Row};
-        let binding = match &self.row {
-            Row::Album(album) => album.artwork_binding.as_ref(),
-            Row::Artist(artist) => artist.artwork_binding.as_ref(),
-            Row::Tag(genre) => match &genre.artwork_binding {
-                Some(binding) => Some(binding),
-                None => {
-                    return genre
-                        .representative_artwork
-                        .iter()
-                        .map(|binding| ArtworkBinding::opaque(binding))
-                        .collect();
-                }
-            },
-            Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist.artwork_binding.as_ref(),
-            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => smart.artwork_binding.as_ref(),
-            Row::Playlist(PlaylistListRow::Folder(folder)) => folder.artwork_binding.as_ref(),
-            Row::Track(_) | Row::AlbumHeading(_) | Row::AlbumTrack { .. } | Row::Folder(_) => None,
-        };
-        binding
-            .map(|binding| ArtworkBinding::opaque(binding))
+        self.summary()
+            .artwork
             .into_iter()
+            .map(ArtworkBinding::opaque)
             .collect()
     }
     fn present_context_menu(
@@ -968,7 +884,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .collect::<HashMap<_, _>>();
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
-            previous.artwork() != item.artwork() || previous.name() != item.name()
+            previous.artwork() != item.artwork() || previous.summary().name != item.summary().name
         })
     };
     let desired_keys = items
@@ -1525,7 +1441,7 @@ fn install_playlist_pin_drop(
         return;
     }
     let playlist_key = library::PlaylistKey::from_raw(pin.key());
-    let playlist_name = pin.name().to_owned();
+    let playlist_name = pin.summary().name.to_owned();
     let drop_target = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,

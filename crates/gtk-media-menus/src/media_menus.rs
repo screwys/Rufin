@@ -964,14 +964,7 @@ pub fn present_album_context_menu(
         "edit-metadata",
         EDIT_ICON,
     );
-    install_sidebar_pin_action(
-        &surface,
-        menus,
-        library::source_entity_parts(&album.media_uri).map(|(source_id, _, _)| SidebarPin::Album {
-            source_id,
-            album_id: album.object_id.clone(),
-        }),
-    );
+    install_sidebar_pin_action(&surface, menus, album.pin());
     let submenu = go_to_submenu(
         &surface,
         menus,
@@ -1229,14 +1222,7 @@ pub fn present_genre_context_menu(
         &radio_context_submenu("genre"),
         RADIO_ICON,
     );
-    install_sidebar_pin_action(
-        &surface,
-        menus,
-        Some(SidebarPin::Genre {
-            source_id: sources::SourceId::new(genre.source_id.clone()),
-            genre_id: genre.object_id.clone(),
-        }),
-    );
+    install_sidebar_pin_action(&surface, menus, genre.pin());
     let playback = collection_play_request(library::Collection::Genre(
         library::GenreKey::from_raw(genre.key),
     ));
@@ -1324,14 +1310,7 @@ pub fn present_playlist_context_menu(
         &radio_context_submenu("playlist"),
         RADIO_ICON,
     );
-    install_sidebar_pin_action(
-        &surface,
-        menus,
-        Some(SidebarPin::Playlist {
-            source_id: playlist.source_id.clone().map(sources::SourceId::new),
-            playlist_id: playlist.object_id.clone(),
-        }),
-    );
+    install_sidebar_pin_action(&surface, menus, Some(playlist.pin()));
     surface.append_fixed_action(
         msgid("Export playlist"),
         "export",
@@ -1479,13 +1458,7 @@ pub fn present_smart_playlist_context_menu(
     }
     let surface = ContextMenuSurface::new(target, "smart-playlist", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
-    install_sidebar_pin_action(
-        &surface,
-        menus,
-        Some(SidebarPin::SmartPlaylist {
-            playlist_id: playlist.object_id.clone(),
-        }),
-    );
+    install_sidebar_pin_action(&surface, menus, Some(playlist.pin()));
     surface.append_fixed_action(
         msgid("Export playlist"),
         "export",
