@@ -369,27 +369,13 @@ pub(super) async fn entries_data(
     let limit = number(parameters, "limit", 100)?.min(256);
     let (order, total) =
         catalog::order(products, parameters, library::Read::Members(query)).await?;
-    // The first page carries the header name, so an open page shows a rename.
-    let fetched = products
-        .library
-        .fetch(
-            library::Fetch {
-                rows: Some((&order, offset..offset.saturating_add(limit))),
-                header: (offset == 0)
-                    .then(|| key(parameters, "id").map(library::HeaderKey::Playlist))
-                    .transpose()?,
-                ..library::Fetch::default()
-            },
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
-    let name = match fetched.header {
-        Some(library::Header::Playlist(playlist)) => Some(playlist.name),
+    // The first page carries the playlist's name, so an open page shows a rename.
+    let name = match offset {
+        0 => products.library.playlist_name(key(parameters, "id")?).await,
         _ => None,
     };
-    let entries = fetched
-        .rows
+    let rows = catalog::rows(products, &order, offset, limit, false).await?;
+    let entries = rows
         .iter()
         .filter_map(|row| match row {
             library::Row::Track(track) => {
