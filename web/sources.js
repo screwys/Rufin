@@ -91,7 +91,14 @@ function renderSources(configured) {
       button(
         tr("Forget Source"),
         async () => {
-          if (confirm(tr('Forget "{name}"?', { name: item.name }))) {
+          if (
+            confirm(
+              tr(
+                "Remove everything Rufin keeps about {name}, including its favorites, ratings and lyrics?",
+                { name: item.name },
+              ),
+            )
+          ) {
             await api(
               `/sources?${new URLSearchParams({ id: item.id })}`,
               "DELETE",
