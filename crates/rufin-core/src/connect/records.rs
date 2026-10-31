@@ -1159,12 +1159,14 @@ impl Records {
 
     /// Source and integration configurations with their logins, the shared preferences,
     /// scrobbling accounts and the relay. Secrets are in the clear here; they are sealed when
-    /// a value leaves the device.
+    /// a value leaves the device. A digest covers a secret only as a hash keyed with the
+    /// profile key, so no unkeyed hash of a login is stored or sent.
     async fn settings_items(&self) -> Result<Vec<Item>, String> {
         let owner = self.owner()?;
         let stored = owner.settings.load();
         let secrets = Arc::clone(&owner.secrets);
         let device = self.device.clone();
+        let key = blake3::derive_key("Rufin Connect setting digests", self.key_text().as_bytes());
         let mut items = tokio::task::spawn_blocking(move || {
             let mut items = Vec::new();
             for (kind, sources) in [
@@ -1172,10 +1174,10 @@ impl Records {
                 ("integration", &stored.sources.integrations),
             ] {
                 for source in sources {
-                    items.push(Item::new(
+                    items.push(secret_item(
                         format!("setting:{kind}:{}", source.configuration.source_id),
-                        None,
                         &source_value(source, &device, secrets.as_ref())?,
+                        &key,
                     )?);
                 }
             }
@@ -1189,10 +1191,10 @@ impl Records {
             let scrobbling =
                 serde_json::to_value(read_scrobbling(&stored, secrets.as_ref())?).map_err(error)?;
             for service in SCROBBLING {
-                items.push(Item::new(
+                items.push(secret_item(
                     format!("setting:scrobbling:{service}"),
-                    None,
                     &scrobbling_value(&scrobbling, service)?,
+                    &key,
                 )?);
             }
             Ok::<_, String>(items)
@@ -1893,6 +1895,16 @@ impl rufin_connect::sync::Values for Records {
     fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move { self.values(rows).await.map_err(anyhow::Error::msg) })
     }
+}
+
+/// A setting item whose digest covers its secret as a hash keyed with `key`.
+fn secret_item(id: String, value: &impl Serialize, key: &[u8; 32]) -> Result<Item, String> {
+    let value = serde_json::to_value(value).map_err(error)?;
+    let mut digest = value.clone();
+    if let Some(secret) = digest.get("secret").and_then(Value::as_str) {
+        digest["secret"] = json!(blake3::keyed_hash(key, secret.as_bytes()).to_hex().as_str());
+    }
+    Item::digested(id, None, &value, &digest)
 }
 
 fn kind(id: &str) -> &str {
