@@ -10,7 +10,7 @@ use rufin_core::playback::QueuePlacement;
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, StateRow, route_view};
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 use gtk_widgets::route::{FolderPathItem, Route};
 use gtk_widgets::sparse_model::{SparseSource, connect_sparse_bind};
@@ -243,7 +243,7 @@ fn folder_page(
 
     let apply = {
         let stack = table_stack.clone();
-        move |read: Opened| {
+        move |read: Opened, _: &View| {
             stack.set_visible_child_name(if read.view.is_empty() {
                 "empty"
             } else {

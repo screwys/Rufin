@@ -14,7 +14,7 @@ use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey};
 use gtk_widgets::artwork::CoverGroupProjection;
 use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view, view_model};
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
@@ -95,7 +95,7 @@ impl CatalogUi {
             let page = page.clone();
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
-            move |read: Opened| {
+            move |read: Opened, _: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };

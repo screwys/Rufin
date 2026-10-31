@@ -19,7 +19,7 @@ use gtk_widgets::favorites::{
 use gtk_widgets::layout::width_allocation_owner;
 use gtk_widgets::localization::localized_label;
 use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view};
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
@@ -158,13 +158,13 @@ impl CatalogUi {
             let favorite_scroller = favorite_scroller.clone();
             let releases = Rc::clone(&releases);
             let header = header.clone();
-            move |mut read: Opened| {
+            move |mut read: Opened, previous: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
                 // A release reread leaves the header and favorite tracks as they are.
                 let Some(favorite_rows) = read.favorites.take() else {
-                    if !releases.replace_page(read) {
+                    if !releases.replace_page(previous, read) {
                         return false;
                     }
                     shell.reapply_current_track();
@@ -183,7 +183,7 @@ impl CatalogUi {
                 favorite_scroller.set_max_content_height(-1);
                 favorite_scroller.set_min_content_height(height);
                 favorite_scroller.set_max_content_height(height);
-                if !releases.replace_page(read) {
+                if !releases.replace_page(previous, read) {
                     return false;
                 }
                 releases.apply_library_list_settings(
@@ -337,11 +337,11 @@ impl CatalogUi {
         let apply = {
             let shell = Rc::downgrade(self);
             let releases = Rc::clone(&releases);
-            move |read: Opened| {
+            move |read: Opened, previous: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
-                if !releases.replace_page(read) {
+                if !releases.replace_page(previous, read) {
                     return false;
                 }
                 shell.reapply_current_track();

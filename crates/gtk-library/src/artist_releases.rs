@@ -25,7 +25,7 @@ use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 
@@ -777,13 +777,15 @@ impl ArtistReleaseProjections {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
     }
 
-    /// Shows a reread's releases; false when it has none because the artist is gone.
-    pub fn replace_page(&self, read: Opened) -> bool {
-        if release_read(&read.view).is_none() {
+    /// Shows a reread's releases over the view it replaces; false when it has none because the
+    /// artist is gone. The selection goes when the releases are read in another order or
+    /// filter, or their count changes, since its positions then name other releases.
+    pub fn replace_page(&self, previous: &View, read: Opened) -> bool {
+        let Some(releases) = release_read(&read.view) else {
             return false;
-        }
+        };
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        if self.counts.replace(counts) != counts {
+        if self.counts.replace(counts) != counts || release_read(previous) != Some(releases) {
             self.selection.unselect_all();
         }
         self.sparse.replace_prepared_at(

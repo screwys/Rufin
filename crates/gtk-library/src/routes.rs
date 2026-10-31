@@ -10,7 +10,7 @@ use gtk_widgets::localization::bind_search_placeholder;
 use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
 use localization::msgid;
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 use super::album_detail::AlbumCollectionModels;
 use super::collections::{
@@ -146,7 +146,7 @@ impl TrackListProjection {
                 scope(&mut options);
                 options
             },
-            move |mut read| {
+            move |mut read, _| {
                 let header = read.header.take();
                 let replaced = current.upgrade().is_some_and(|shell| (shell.is_current)())
                     && model.replace_page(read);
@@ -323,7 +323,7 @@ impl CatalogUi {
             let content = content.clone();
             let page = page.clone();
             let view = Rc::clone(&view);
-            move |read: Opened| {
+            move |read: Opened, _: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };

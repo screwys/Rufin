@@ -258,12 +258,12 @@ where
 }
 
 /// A mounted route's view and the reads that replace it. One read runs at a time and only the
-/// latest request is read next. The route says what it wants read and how a new read applies;
-/// a read the route rejects is not kept.
+/// latest request is read next. The route says what it wants read and how a new read applies
+/// over the view it replaces; a read the route rejects is not kept.
 pub struct PageReread {
     view: RouteView,
     inputs: Box<dyn Fn(&OpenOptions) -> OpenOptions>,
-    apply: Box<dyn Fn(Opened) -> bool>,
+    apply: Box<dyn Fn(Opened, &View) -> bool>,
     runtime: tokio::runtime::Handle,
     context: &'static str,
     generation: Cell<u64>,
@@ -284,7 +284,7 @@ impl PageReread {
         context: &'static str,
         view: &RouteView,
         inputs: impl Fn(&OpenOptions) -> OpenOptions + 'static,
-        apply: impl Fn(Opened) -> bool + 'static,
+        apply: impl Fn(Opened, &View) -> bool + 'static,
     ) -> Rc<Self> {
         Rc::new(Self {
             view: Rc::clone(view),
@@ -400,7 +400,7 @@ impl PageReread {
                 Ok(Ok(read)) => {
                     // Models read windows of the new view as soon as they take its rows.
                     let previous = reread.view.replace(Arc::clone(&read.view));
-                    if !(reread.apply)(read) {
+                    if !(reread.apply)(read, &previous) {
                         reread.view.replace(previous);
                     }
                 }
