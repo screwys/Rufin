@@ -338,14 +338,17 @@ async function openName(playlist = null, uris = []) {
   if (playlist) await loadPlaylistFile();
   if (!playlist) {
     const configured = await api("/sources");
+    // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     playlistSource =
-      configured.sources.find((source) => source.id === state.source) || null;
-    $("playlist-owner").disabled = !playlistSource;
+      configured.sources.find(
+        (source) => source.id === state.source && source.owns_playlists,
+      ) || null;
+    $("playlist-owner").hidden = !playlistSource;
     $("playlist-owner").setAttribute(
       "aria-pressed",
       String(!!playlistSource),
     );
-    showPlaylistOwner();
+    if (playlistSource) showPlaylistOwner();
   }
   $("name-dialog").showModal();
   $("playlist-name").focus();
@@ -378,7 +381,7 @@ function showPlaylistOwner() {
   owner.replaceChildren(image);
   owner.title = current
     ? tr(
-        "This is owned by {source}. Regular playlists are synced to your remote.",
+        "This is owned by {source} and synced to it.",
         { source: playlistSource.name },
       )
     : tr(

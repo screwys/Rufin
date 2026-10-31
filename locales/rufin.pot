@@ -3948,10 +3948,6 @@ msgstr ""
 msgid "This is owned by {source} and synced to it."
 msgstr ""
 
-#, rust-format
-msgid "This is owned by {source}. Regular playlists are synced to your remote."
-msgstr ""
-
 msgid "This isn't available"
 msgstr ""
 
