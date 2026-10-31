@@ -11,8 +11,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, watch};
-use tokio_util::sync::CancellationToken;
+use tokio::{io::AsyncReadExt as _, sync::mpsc};
 
 type Events = mpsc::UnboundedReceiver<NetworkEvent>;
 
@@ -294,20 +293,17 @@ async fn enrollment_records_media_and_removal() {
 
         let original = a_dir.path().join("track.flac");
         tokio::fs::write(&original, b"original media bytes").await.unwrap();
-        let destination = b_dir.path().join("Music/track.flac");
-        let mut validator = None;
-        for (previous, offset) in [(None, 0), (Some(b"previous downloaded copy".as_slice()), 0), (Some(b"original ".as_slice()), 9)] {
-            if let Some(previous) = previous { tokio::fs::write(&destination, previous).await.unwrap(); }
+        for offset in [0, 9] {
             let requester = b.clone();
             let host = a.identity();
-            let target = destination.clone();
-            let body = serde_json::to_vec(&serde_json::json!({"offset":offset,"validator":validator})).unwrap();
+            let body = serde_json::to_vec(&serde_json::json!({ "offset": offset })).unwrap();
             let transfer = tokio::spawn(async move {
-                let response = requester.stream_request(&host, body).await.unwrap();
+                let mut response = requester.stream_request(&host, body).await.unwrap();
                 let metadata: rufin_connect::media::FileMetadata = serde_json::from_value(response.metadata).unwrap();
-                assert_eq!(metadata.offset, offset);
-                rufin_connect::media::receive_file(response.reader, &metadata, &target, CancellationToken::new(), watch::channel(0).0).await.unwrap();
-                metadata.validator
+                assert_eq!((metadata.length, metadata.offset), (20, offset));
+                let mut bytes = Vec::new();
+                response.reader.read_to_end(&mut bytes).await.unwrap();
+                bytes
             });
             let (peer, body, reply) = next(&mut a_events, |event| match event {
                 NetworkEvent::StreamRequest { peer, body, reply } => Some((peer, body, reply)),
@@ -315,11 +311,9 @@ async fn enrollment_records_media_and_removal() {
             }).await;
             assert_eq!(peer, b.identity());
             let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            let (metadata, reader) = rufin_connect::media::open_file(&original, request["offset"].as_u64().unwrap(), request["validator"].as_str()).await.unwrap();
+            let (metadata, reader) = rufin_connect::media::open_file(&original, request["offset"].as_u64().unwrap()).await.unwrap();
             assert!(reply.send(Ok(rufin_connect::media::PeerByteResponse { metadata: serde_json::to_value(metadata).unwrap(), reader: Box::pin(reader) })).is_ok());
-            validator = transfer.await.unwrap();
-            assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
-            assert_eq!(tokio::fs::read(&original).await.unwrap(), b"original media bytes");
+            assert_eq!(transfer.await.unwrap(), &b"original media bytes"[offset as usize..]);
         }
 
         // A third device's records reach B through A, keeping their writer.

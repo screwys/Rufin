@@ -319,10 +319,10 @@ impl ConnectOwner {
         range: Option<(u64, Option<u64>)>,
         window: Option<(u64, Option<u64>)>,
     ) -> Result<PeerByteResponse, String> {
-        let uri = self.local_track(source, object).await?;
+        self.local_source(source)?;
         let location = self
             .catalog
-            .playable_by_uri(&uri)
+            .playable_by_object(source, object)
             .await
             .map_err(error)?
             .and_then(|playable| playable.local_uri())
@@ -366,7 +366,7 @@ impl ConnectOwner {
         let end = move |length: u64| range.and_then(|(_, end)| end).unwrap_or(length).min(length);
         let reader: Pin<Box<dyn AsyncRead + Send + Unpin>> = match path {
             Some(path) => {
-                let (file, reader) = rufin_connect::media::open_file(&path, start, None)
+                let (file, reader) = rufin_connect::media::open_file(&path, start)
                     .await
                     .map_err(error)?;
                 metadata.length = Some(file.length);

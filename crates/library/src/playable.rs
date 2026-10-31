@@ -118,6 +118,19 @@ impl Catalog {
         self.read_playable("track.media_uri=?1", media_uri).await
     }
 
+    /// The same statement by a source's object id, for reads by another device's source.
+    pub async fn playable_by_object(
+        &self,
+        source: &SourceId,
+        object: &str,
+    ) -> LibraryResult<Option<Playable>> {
+        self.read_playable(
+            "track.source_key=(SELECT source_key FROM sources WHERE object_id=?1->>0) AND track.object_id=?1->>1",
+            serde_json::to_string(&(source.as_str(), object))?,
+        )
+        .await
+    }
+
     async fn read_playable<'q, T>(&self, condition: &str, key: T) -> LibraryResult<Option<Playable>>
     where
         T: 'q + Send + sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
