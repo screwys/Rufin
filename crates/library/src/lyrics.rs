@@ -20,6 +20,8 @@ pub struct LyricsCacheRow {
     pub script: String,
     pub lyrics: String,
     pub updated_at: i64,
+    /// A person picked these lyrics; an automatic fetch does not replace them.
+    pub picked: bool,
 }
 
 /// The display text of each version-4 lyric document that has any, by its position.
@@ -126,9 +128,10 @@ async fn put_lyrics_on(
         }
         let connection = write.connection().await?;
         let key: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7)
-             ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET lyrics=excluded.lyrics,updated_at=excluded.updated_at
-             WHERE lyrics_cache.lyrics IS NOT excluded.lyrics AND {replace} RETURNING lyrics_key"
+            "INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at,picked) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET lyrics=excluded.lyrics,updated_at=excluded.updated_at,picked=excluded.picked
+             WHERE (lyrics_cache.lyrics IS NOT excluded.lyrics OR lyrics_cache.picked<>excluded.picked)
+               AND (excluded.picked OR NOT lyrics_cache.picked) AND {replace} RETURNING lyrics_key"
         )))
         .bind(&row.media_uri)
         .bind(&row.authority)
@@ -137,6 +140,7 @@ async fn put_lyrics_on(
         .bind(&row.script)
         .bind(&row.lyrics)
         .bind(row.updated_at)
+        .bind(row.picked)
         .fetch_optional(&mut *connection)
         .await?;
         if let Some(key) = key {
@@ -214,6 +218,7 @@ pub(crate) async fn put_source_lyrics_on(
                     script: String::new(),
                     lyrics: (*payload).to_owned(),
                     updated_at: now,
+                    picked: false,
                 }],
                 "true",
             )
@@ -230,7 +235,7 @@ pub(crate) async fn move_lyrics_on(
     to: &str,
 ) -> LibraryResult<()> {
     let connection = write.connection().await?;
-    let copied: Vec<(i64, String)> = sqlx::query_as("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at) SELECT ?2,authority,role,language,script,lyrics,updated_at FROM lyrics_cache WHERE media_uri=?1 ORDER BY lyrics_key ON CONFLICT DO NOTHING RETURNING lyrics_key,lyrics")
+    let copied: Vec<(i64, String)> = sqlx::query_as("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at,picked) SELECT ?2,authority,role,language,script,lyrics,updated_at,picked FROM lyrics_cache WHERE media_uri=?1 ORDER BY lyrics_key ON CONFLICT DO NOTHING RETURNING lyrics_key,lyrics")
         .bind(from)
         .bind(to)
         .fetch_all(&mut *connection)
@@ -274,7 +279,7 @@ impl Catalog {
         let active = serde_json::to_string(active_media_uris)?;
         remove_lyrics_on(
             &mut write,
-            "NOT EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=lyrics_cache.media_uri) AND media_uri NOT IN (SELECT value FROM json_each(?1))",
+            "NOT picked AND NOT EXISTS(SELECT 1 FROM downloads download WHERE download.media_uri=lyrics_cache.media_uri) AND media_uri NOT IN (SELECT value FROM json_each(?1))",
             &[&active],
         )
         .await?;
@@ -293,7 +298,7 @@ impl Catalog {
     ) -> LibraryResult<Option<LyricsCacheRow>> {
         let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_as::<_, LyricsCacheRow>(
-            "SELECT media_uri,authority,role,language,script,lyrics,updated_at
+            "SELECT media_uri,authority,role,language,script,lyrics,updated_at,picked
              FROM lyrics_cache WHERE media_uri=?1
                AND (?5='source' OR (role=?2 AND language=?3 AND script=?4))
                AND authority=?5 ORDER BY updated_at DESC,role='original' DESC LIMIT 1",
@@ -317,6 +322,7 @@ impl Catalog {
         script: &str,
         lyrics: &str,
         updated_at: i64,
+        picked: bool,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
         put_lyrics_on(
@@ -329,10 +335,51 @@ impl Catalog {
                 script: script.to_owned(),
                 lyrics: lyrics.to_owned(),
                 updated_at,
+                picked,
             }],
             "true",
         )
         .await?;
+        write.commit().await?;
+        Ok(())
+    }
+
+    /// The lyrics people picked, all of them or those of `uris`, in URI order.
+    pub async fn picked_lyrics(
+        &self,
+        uris: Option<&[String]>,
+    ) -> LibraryResult<Vec<LyricsCacheRow>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT media_uri,authority,role,language,script,lyrics,updated_at,picked FROM lyrics_cache
+             WHERE picked AND (?1 IS NULL OR media_uri IN(SELECT value FROM json_each(?1)))
+             ORDER BY media_uri,authority,role,language,script",
+        )
+        .bind(uris.map(serde_json::to_string).transpose()?)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
+    /// Makes the picked lyrics of each URI the given rows, in one Write.
+    pub async fn replace_picked_lyrics(
+        &self,
+        tracks: &[(String, Vec<LyricsCacheRow>)],
+    ) -> LibraryResult<()> {
+        let mut write = self.write().await?;
+        for (uri, rows) in tracks {
+            let kept = rows
+                .iter()
+                .map(|row| (&row.authority, &row.role, &row.language, &row.script))
+                .collect::<Vec<_>>();
+            let kept = serde_json::to_string(&kept)?;
+            remove_lyrics_on(
+                &mut write,
+                "media_uri=?1 AND picked AND (authority,role,language,script) NOT IN(SELECT value->>0,value->>1,value->>2,value->>3 FROM json_each(?2))",
+                &[uri, &kept],
+            )
+            .await?;
+            put_lyrics_on(&mut write, rows, "true").await?;
+        }
         write.commit().await?;
         Ok(())
     }

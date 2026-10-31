@@ -21,7 +21,7 @@ use crate::settings::{
 
 const PAGE: usize = 512;
 /// Received rows apply kind by kind in this order, so parents come before their children.
-const ORDER: [&str; 14] = [
+const ORDER: [&str; 15] = [
     "device",
     "setting",
     "folder",
@@ -30,6 +30,7 @@ const ORDER: [&str; 14] = [
     "artwork",
     "entry",
     "state",
+    "lyrics",
     "listen",
     "legacy",
     "analysis",
@@ -40,8 +41,9 @@ const ORDER: [&str; 14] = [
 /// Kinds a full pass compares item by item, and whether an item that is gone leaves a
 /// tombstone. Listens and analysis results are compared by id: their values do not change
 /// once recorded, and reading every waveform at each start costs too much.
-const COMPARED: [(&str, bool); 8] = [
+const COMPARED: [(&str, bool); 9] = [
     ("state", true),
+    ("lyrics", true),
     ("legacy", true),
     ("folder", true),
     ("playlist", true),
@@ -118,6 +120,16 @@ struct StateValue {
     favorite: Option<bool>,
     rating: Option<i64>,
     changed_at: Option<i64>,
+}
+
+/// One row of the lyrics a person picked for a track.
+#[derive(Serialize, Deserialize)]
+struct LyricsValue {
+    authority: String,
+    role: String,
+    language: String,
+    script: String,
+    lyrics: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -527,6 +539,7 @@ impl Records {
         };
         let mut kinds = Vec::new();
         let mut states = Vec::new();
+        let mut lyrics = Vec::new();
         let mut entries = Vec::new();
         let mut hashes = Vec::new();
         let mut heard = false;
@@ -541,6 +554,7 @@ impl Records {
                     }))
                 }
                 Scope::Listened { .. } => heard = true,
+                Scope::Lyrics { uri } => lyrics.push(uri.clone()),
                 Scope::Playlist {
                     key,
                     entries: changed,
@@ -573,6 +587,12 @@ impl Records {
                 .collect::<Vec<_>>();
             let items = self.state_items(Some(&states), Some(portable)).await?;
             written.extend(self.diff(items, Select::Ids(&ids), true).await?);
+        }
+        if !lyrics.is_empty() {
+            lyrics.sort_unstable();
+            lyrics.dedup();
+            let objects = self.portable_all(lyrics).await?;
+            written.extend(self.compare_ids("lyrics", objects).await?);
         }
         for key in entries {
             written.extend(self.playlist_entry_changes(key).await?);
@@ -760,6 +780,13 @@ impl Records {
                     })
                     .transpose()?;
                 self.legacy_items(keys.as_deref()).await?
+            }
+            "lyrics" => {
+                let uris = match objects {
+                    Some(objects) => Some(self.local_all(objects).await?),
+                    None => None,
+                };
+                self.lyrics_items(uris.as_deref()).await?
             }
             "folder" => self.folder_items().await?,
             "playlist" => self.playlist_items().await?,
@@ -956,6 +983,30 @@ impl Records {
                         album: record.album,
                     },
                 )
+            })
+            .collect()
+    }
+
+    /// The lyrics people picked, by track.
+    async fn lyrics_items(&self, uris: Option<&[String]>) -> Result<Vec<Item>, String> {
+        let mut tracks = BTreeMap::<String, Vec<LyricsValue>>::new();
+        for row in self.catalog.picked_lyrics(uris).await.map_err(error)? {
+            tracks.entry(row.media_uri).or_default().push(LyricsValue {
+                authority: row.authority,
+                role: row.role,
+                language: row.language,
+                script: row.script,
+                lyrics: row.lyrics,
+            });
+        }
+        let portable = self
+            .portable(&tracks.keys().cloned().collect::<Vec<_>>())
+            .await?;
+        tracks
+            .into_iter()
+            .map(|(uri, rows)| {
+                let uri = portable.get(&uri).cloned().unwrap_or(uri);
+                Item::new(format!("lyrics:{uri}"), None, &rows)
             })
             .collect()
     }
@@ -1549,6 +1600,37 @@ impl Records {
                     });
                 }
                 catalog.put_user_states(&states).await.map_err(error)
+            }
+            "lyrics" => {
+                let uris = rows
+                    .iter()
+                    .map(|row| object(row, "lyrics:"))
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self.local(&uris).await?;
+                let updated_at = |row: &Row| (row.clock >> 16) / 1000;
+                let mut tracks = Vec::new();
+                for (row, uri) in rows.iter().zip(uris) {
+                    let uri = local.get(&uri).cloned().unwrap_or(uri);
+                    let values: Vec<LyricsValue> = match row.deleted {
+                        true => Vec::new(),
+                        false => decode(row)?,
+                    };
+                    let picked = values
+                        .into_iter()
+                        .map(|value| library::LyricsCacheRow {
+                            media_uri: uri.clone(),
+                            authority: value.authority,
+                            role: value.role,
+                            language: value.language,
+                            script: value.script,
+                            lyrics: value.lyrics,
+                            updated_at: updated_at(row).max(0),
+                            picked: true,
+                        })
+                        .collect();
+                    tracks.push((uri, picked));
+                }
+                catalog.replace_picked_lyrics(&tracks).await.map_err(error)
             }
             "listen" => {
                 let mut listens = live

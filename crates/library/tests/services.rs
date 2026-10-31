@@ -416,6 +416,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
             "Latn",
             "First",
             10,
+            false,
         )
         .await
         .expect("write lyrics");
@@ -429,6 +430,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
             "Latn",
             "External",
             20,
+            false,
         )
         .await
         .expect("write external lyrics");
@@ -485,6 +487,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
             "",
             &capacity_payload,
             20,
+            false,
         )
         .await
         .expect("write second lyrics");
@@ -511,7 +514,8 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
                 "",
                 "",
                 &oversized,
-                30
+                30,
+                false
             )
             .await
             .is_err()
@@ -526,7 +530,9 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO downloads(media_uri,quality,path,managed) VALUES(?1,'original',?1,1)")
         .bind(&fixture.track_uris[0])
-        .execute(&mut raw).await.unwrap();
+        .execute(&mut raw)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'import',?1,'','',?1)")
         .bind(&fixture.track_uris[2])
         .execute(&mut raw).await.unwrap();
@@ -542,6 +548,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
                     "Latn",
                     "Cached",
                     30,
+                    false,
                 )
                 .await
                 .unwrap();
@@ -618,6 +625,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
             "",
             "Lyrics",
             1,
+            false,
         )
         .await
         .expect("write source lyrics");

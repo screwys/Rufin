@@ -155,7 +155,16 @@ pub(crate) async fn cache_native_lyrics(
     bundle.origin = lyrics::LyricsOrigin::Native;
     let payload = bundle.cache_payload()?;
     catalog
-        .write_lyrics_cache(uri, "source", "original", "", "", &payload, unix_now())
+        .write_lyrics_cache(
+            uri,
+            "source",
+            "original",
+            "",
+            "",
+            &payload,
+            unix_now(),
+            false,
+        )
         .await?;
     Ok(())
 }
@@ -1586,7 +1595,16 @@ impl Source {
         if bundle.is_none() {
             // Bulk downloads skip known missing lyrics; opening the lyrics still retries.
             catalog
-                .write_lyrics_cache(media_uri, "source", "original", "", "", "", unix_now())
+                .write_lyrics_cache(
+                    media_uri,
+                    "source",
+                    "original",
+                    "",
+                    "",
+                    "",
+                    unix_now(),
+                    false,
+                )
                 .await?;
         }
         Ok(bundle)

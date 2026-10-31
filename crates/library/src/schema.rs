@@ -469,6 +469,9 @@ CREATE TABLE lyrics_cache (
     script TEXT NOT NULL DEFAULT '',
     lyrics TEXT NOT NULL,
     updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+    -- A person chose these lyrics for a track whose source cannot store them. Connect shares
+    -- them, and clearing the lyrics cache keeps them.
+    picked INTEGER NOT NULL DEFAULT 0 CHECK (picked IN (0, 1)),
     UNIQUE (media_uri, authority, role, language, script)
 ) STRICT;
 

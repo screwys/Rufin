@@ -561,7 +561,7 @@ impl LyricsService {
         if let Some(document) = fallback.document {
             if self.matches_current(request.id) {
                 if !fallback.from_cache && matches!(document.origin, LyricsOrigin::External(_)) {
-                    self.cache_and_accept(&request, document).await;
+                    self.cache_and_accept(&request, document, false).await;
                 } else if fallback.from_cache {
                     self.accept_cached_bundle(request.id, Arc::new(document))
                         .await;
@@ -732,7 +732,7 @@ impl LyricsService {
         }
         if acquisition_complete(&document, &request.plan) {
             if self.matches_current(request.id) {
-                self.cache_and_accept(request, document).await;
+                self.cache_and_accept(request, document, false).await;
             }
             return true;
         }
@@ -750,7 +750,14 @@ impl LyricsService {
         false
     }
 
-    async fn cache_and_accept(self: &Arc<Self>, request: &LyricsRequest, document: LyricsBundle) {
+    /// Caches fetched lyrics and shows them. `picked` marks lyrics a person chose for a track
+    /// whose source cannot store them.
+    async fn cache_and_accept(
+        self: &Arc<Self>,
+        request: &LyricsRequest,
+        document: LyricsBundle,
+        picked: bool,
+    ) {
         if !self.matches_current(request.id) {
             return;
         }
@@ -770,6 +777,7 @@ impl LyricsService {
                             &script,
                             &payload,
                             updated_at,
+                            picked,
                         )
                         .await
                     {
@@ -1088,14 +1096,14 @@ impl LyricsService {
     }
 
     fn preview(self: &Arc<Self>, media_id: CurrentMediaId, result: LyricsSearchResult) {
-        let Some(request) = self.begin_external_document(&media_id, &result) else {
+        let Some((request, picked)) = self.begin_external_document(&media_id, &result) else {
             return;
         };
         let service = Arc::clone(self);
         let _task = self.runtime.spawn(async move {
             match lyrics_from_search_result(&result).await {
                 Ok(Some(document)) => {
-                    service.cache_and_accept(&request, document).await;
+                    service.cache_and_accept(&request, document, picked).await;
                 }
                 Ok(None) | Err(_) => service.finish_current(request.id),
             }
@@ -1108,7 +1116,7 @@ impl LyricsService {
         result: LyricsSearchResult,
         path: Option<PathBuf>,
     ) {
-        let Some(request) = self.begin_external_document(&media_id, &result) else {
+        let Some((request, picked)) = self.begin_external_document(&media_id, &result) else {
             return;
         };
         let service = Arc::clone(self);
@@ -1162,6 +1170,7 @@ impl LyricsService {
                                 &script,
                                 &payload,
                                 updated_at,
+                                picked,
                             )
                             .await;
                     }
@@ -1184,11 +1193,13 @@ impl LyricsService {
         });
     }
 
+    /// Starts showing a search result a person chose; true when the track's source cannot
+    /// store lyrics, so the choice is a pick that Connect shares.
     fn begin_external_document(
         &self,
         media_id: &CurrentMediaId,
         result: &LyricsSearchResult,
-    ) -> Option<LyricsRequest> {
+    ) -> Option<(LyricsRequest, bool)> {
         let request = {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if !state
@@ -1218,10 +1229,13 @@ impl LyricsService {
             current.loading = true;
             current.content = None;
             current.bundle = None;
-            LyricsRequest::new(current.request, context, plan)
+            (
+                LyricsRequest::new(current.request, context, plan),
+                !current.writable,
+            )
         };
         self.publish(LyricsEvent::Current(CurrentLyrics::Loading {
-            media_id: request.context.media.id.clone(),
+            media_id: request.0.context.media.id.clone(),
         }));
         Some(request)
     }
@@ -1297,7 +1311,7 @@ impl LyricsService {
         let Some((request, _)) = self.begin_edited(&media_id) else {
             return;
         };
-        self.cache_and_accept(&request, bundle).await;
+        self.cache_and_accept(&request, bundle, false).await;
     }
 
     fn update_lyrics_text(self: &Arc<Self>, media_id: CurrentMediaId, text: String) {
@@ -1326,7 +1340,7 @@ impl LyricsService {
             {
                 Ok(()) => {
                     source.refresh_written_lyrics(&service.catalog);
-                    service.cache_and_accept(&request, bundle).await;
+                    service.cache_and_accept(&request, bundle, false).await;
                 }
                 Err(error) => {
                     warn!(%error, "could not save edited lyrics");
