@@ -129,7 +129,7 @@ impl PlexSource {
         .await
     }
 
-    /// A GET with the server's clock, for a catch-up's start.
+    /// A GET with the server's clock, for the start of a listing or catch-up.
     pub(crate) async fn get_dated(
         &self,
         path: &str,

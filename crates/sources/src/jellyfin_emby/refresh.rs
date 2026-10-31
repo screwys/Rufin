@@ -30,7 +30,7 @@ impl JellyfinEmbySource {
                 library::HomeEntryKind::Album,
             ),
         };
-        let page = self
+        let (page, _) = self
             .item_page_sorted(item_type, 0, 24, sort_by, "Descending")
             .await?;
         Ok(items(&page["Items"])
@@ -210,9 +210,11 @@ impl JellyfinEmbySource {
         observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
+    ) -> SourceResult<Option<i64>> {
         let source_id = observation.source_id;
         let walk = observation.is_walk();
+        // The server's clock at the first page, from which the next catch-up asks.
+        let mut started = None;
 
         for (entity, stage_name, paths) in [
             ("album", SourceReadStage::Albums, &["MusicAlbum"][..]),
@@ -238,10 +240,13 @@ impl JellyfinEmbySource {
                             self.music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
                                 .await
                         }
-                        _ => {
-                            self.item_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
-                                .await
-                        }
+                        _ => self
+                            .item_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
+                            .await
+                            .map(|(page, date)| {
+                                started = started.or(date);
+                                page
+                            }),
                     }
                     .and_then(|page| {
                         let finished = pages.advance(
@@ -320,7 +325,7 @@ impl JellyfinEmbySource {
             .await?;
 
         progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
-        Ok(())
+        Ok(started)
     }
 
     /// After a feed gap: the items the server saved since `since`, the user data, the
@@ -638,7 +643,7 @@ impl JellyfinEmbySource {
         let mut seen = HashSet::new();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let (page, _) = self
                 .item_page("Playlist", pages.offset(), COLLECTION_PAGE_SIZE)
                 .await?;
             let count = items(&page["Items"]).len();

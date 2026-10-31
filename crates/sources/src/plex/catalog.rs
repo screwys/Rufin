@@ -15,10 +15,11 @@ impl PlexSource {
         observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
+    ) -> SourceResult<Option<i64>> {
         let walk = observation.is_walk();
 
-        let sections = self.get("/library/sections", &[]).await?;
+        // The server's clock at the listing's start, from which the next catch-up asks.
+        let (sections, started) = self.get_dated("/library/sections", &[]).await?;
         let home_prefixes = items(&sections["MediaContainer"]["Directory"])
             .iter()
             .filter(|section| section["type"].as_str() == Some("artist"))
@@ -104,7 +105,7 @@ impl PlexSource {
             completed: 1,
             total: Some(1),
         });
-        Ok(())
+        Ok(started)
     }
 
     /// Reads one item type of a section in pages; `updated_after` keeps only the items the

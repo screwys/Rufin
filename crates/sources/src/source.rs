@@ -1215,9 +1215,10 @@ impl Source {
             let resync = refresh == Refresh::Resync;
             let complete = match &self.implementation {
                 Implementation::Plex(source) => {
-                    source
+                    let date = source
                         .acquire_catalog(changes, &report, &cancelled_fn)
                         .await?;
+                    started = date.unwrap_or(started);
                     true
                 }
                 Implementation::Files(source) => {
@@ -1243,9 +1244,10 @@ impl Source {
                     true
                 }
                 Implementation::JellyfinEmby(source) => {
-                    source
+                    let date = source
                         .acquire_catalog(changes, &report, &cancelled_fn)
                         .await?;
+                    started = date.unwrap_or(started);
                     true
                 }
                 Implementation::OpenSubsonic(source) => {

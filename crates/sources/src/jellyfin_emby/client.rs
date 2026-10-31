@@ -974,12 +974,13 @@ pub(super) fn ticks_to_millis(ticks: Option<i64>) -> Option<u64> {
 }
 
 impl JellyfinEmbySource {
+    /// A page and the server's clock from its Date header.
     pub(super) async fn item_page(
         &self,
         include_types: &str,
         offset: usize,
         limit: usize,
-    ) -> SourceResult<Value> {
+    ) -> SourceResult<(Value, Option<i64>)> {
         self.item_page_sorted(include_types, offset, limit, "SortName", "Ascending")
             .await
     }
@@ -991,7 +992,7 @@ impl JellyfinEmbySource {
         limit: usize,
         sort_by: &str,
         sort_order: &str,
-    ) -> SourceResult<Value> {
+    ) -> SourceResult<(Value, Option<i64>)> {
         let fields = match include_types {
             "MusicAlbum" => ALBUM_FIELDS,
             "Audio" => TRACK_FIELDS,
@@ -1009,7 +1010,7 @@ impl JellyfinEmbySource {
             .append_pair("SortBy", sort_by)
             .append_pair("SortOrder", sort_order);
 
-        self.get_json::<Value>(url).await
+        self.get_json_dated::<Value>(url).await
     }
 
     pub(super) async fn people_page(
@@ -1055,7 +1056,7 @@ impl JellyfinEmbySource {
         self.send_json(self.client.get(self.emby_fields(url))).await
     }
 
-    /// A GET with the server's clock, for a catch-up's start.
+    /// A GET with the server's clock, for the start of a listing or catch-up.
     pub(super) async fn get_json_dated<T: DeserializeOwned>(
         &self,
         url: Url,
