@@ -524,7 +524,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         onNavigate = { route, title, source -> menu = null; fullPlayer = false; browse.openLinkedRoute(route, title, source) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false },
-        initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public ->
+        initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public, _ ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
             io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)?.let { created ->

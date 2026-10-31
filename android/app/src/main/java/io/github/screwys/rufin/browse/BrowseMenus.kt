@@ -594,7 +594,7 @@ internal fun PlaylistPickerSheet(
         create = false
         pages.refresh()
     })
-    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
+    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public, _ ->
         browse.library?.let { library ->
             playlistSelection(library, item).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
@@ -617,7 +617,8 @@ internal fun PlaylistCreateSheet(
     model: RufinConnection,
     onDismiss: () -> Unit,
     initialCurrentSource: Boolean = true,
-    save: suspend (String, String?, Boolean?) -> Unit,
+    // Name, owning source, public, and the owner choice when it was offered.
+    save: suspend (String, String?, Boolean?, Boolean?) -> Unit,
 ) {
     // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
@@ -648,7 +649,7 @@ internal fun PlaylistCreateSheet(
             }
         } },
         confirmButton = { TextButton({ model.runAction {
-            save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic })
+            save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic }, currentSource.takeIf { source != null })
         } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Create")) } },
         dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } })
 }

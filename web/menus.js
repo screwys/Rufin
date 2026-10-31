@@ -498,8 +498,10 @@ function init() {
                 $("playlist-owner").getAttribute("aria-pressed") === "true"
                   ? playlistSource.id
                   : null,
-              current:
-                $("playlist-owner").getAttribute("aria-pressed") === "true",
+              // The remembered owner choice changes only when it was offered.
+              current: $("playlist-owner").hidden
+                ? null
+                : $("playlist-owner").getAttribute("aria-pressed") === "true",
               public: $("playlist-public-row").hidden ? null : $("playlist-public").checked,
             },
       );

@@ -300,8 +300,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
         val hasSource = player.model.sources?.selectedSourceId != null
         PlaylistCreateSheet(player.model, { create = false },
             initialCurrentSource = hasSource && preferences.applicationSettings?.newPlaylistCurrent != false,
-        ) { name, sourceId, public ->
-            player.createQueuePlaylist(name, sourceId, public)
+        ) { name, sourceId, public, current ->
+            player.createQueuePlaylist(name, sourceId, public, current)
             create = false
         }
     }
