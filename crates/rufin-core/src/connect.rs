@@ -338,7 +338,6 @@ enum Stream {
 
 #[derive(Serialize, Deserialize)]
 struct Presence {
-    name: String,
     sequence: i64,
     playing: bool,
 }
@@ -774,8 +773,7 @@ impl ConnectOwner {
                     .map_err(error)
             });
             self.update_device(&peer, |device| match &answer {
-                Ok((route, presence)) => {
-                    device.name = presence.name.clone();
+                Ok((route, _)) => {
                     device.reachable = true;
                     device.connection = connection_label(route);
                 }
@@ -1255,10 +1253,10 @@ impl ConnectOwner {
                     .playback
                     .current_projection()
                     .is_some_and(|projection| {
-                        projection.view.transport.state == playback::TransportStatus::Playing
+                        projection.view.transport.effective_state()
+                            == playback::TransportStatus::Playing
                     });
                 serde_json::to_value(Presence {
-                    name: self.device_config().name,
                     sequence: session.records.store.sequence().await.map_err(error)?,
                     playing,
                 })
