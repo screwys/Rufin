@@ -474,6 +474,8 @@ CREATE TABLE lyrics_cache (
     picked INTEGER NOT NULL DEFAULT 0 CHECK (picked IN (0, 1)),
     UNIQUE (media_uri, authority, role, language, script)
 ) STRICT;
+-- What changed lately, for a paired device that follows this device's source lyrics.
+CREATE INDEX lyrics_cache_updated_idx ON lyrics_cache(authority, updated_at);
 
 -- Analysis results by audio hash. Expiry and Forget leave them.
 CREATE TABLE loudness (audio_hash BLOB PRIMARY KEY, integrated_lufs REAL, true_peak REAL) STRICT, WITHOUT ROWID;

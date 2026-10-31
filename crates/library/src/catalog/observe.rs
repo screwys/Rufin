@@ -19,14 +19,17 @@ struct ObservedTrack {
 }
 
 impl Catalog {
-    /// Changes when a track of the source is added, removed or its file is rewritten.
+    /// Changes when a track of the source is added, removed or its file is rewritten, and
+    /// when source lyrics change, as a sidecar edit does without touching the audio file.
     pub async fn source_marker(&self, source: &SourceId) -> LibraryResult<Freshness> {
         let mut connection = self.acquire_reader().await?;
-        let (tracks, modified, last): (i64, Option<i64>, Option<i64>) =
+        let (tracks, modified, last, lyrics): (i64, Option<i64>, Option<i64>, Option<i64>) =
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT (SELECT count(*) FROM tracks WHERE source_key={SOURCE_KEY} AND indexed=1),
                     (SELECT max(mtime_ns) FROM files WHERE source_key={SOURCE_KEY}),
-                    (SELECT max(track_key) FROM tracks WHERE source_key={SOURCE_KEY} AND indexed=1)"
+                    (SELECT max(track_key) FROM tracks WHERE source_key={SOURCE_KEY} AND indexed=1),
+                    (SELECT lyrics.updated_at FROM lyrics_cache lyrics JOIN tracks track ON track.media_uri=lyrics.media_uri
+                     WHERE lyrics.authority='source' AND track.source_key={SOURCE_KEY} ORDER BY lyrics.updated_at DESC LIMIT 1)"
             )))
             .bind(source.as_str())
             .fetch_one(&mut *connection)
@@ -36,6 +39,7 @@ impl Catalog {
                 tracks,
                 modified.unwrap_or_default(),
                 last.unwrap_or_default(),
+                lyrics.unwrap_or_default(),
             ]
             .map(i64::to_be_bytes)
             .concat(),
@@ -53,8 +57,8 @@ impl Catalog {
         .await?)
     }
 
-    /// The source's indexed tracks whose file or CUE sheet changed after `since`, in unix
-    /// seconds.
+    /// The source's indexed tracks whose file, CUE sheet or source lyrics changed after
+    /// `since`, in unix seconds.
     pub async fn source_changed_since(
         &self,
         source: &SourceId,
@@ -62,12 +66,17 @@ impl Catalog {
     ) -> LibraryResult<Vec<String>> {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT DISTINCT track.object_id FROM tracks track JOIN track_details details USING(track_key)
+            "SELECT track.object_id FROM tracks track JOIN track_details details USING(track_key)
              JOIN files file ON file.source_key=track.source_key AND file.path IN(details.source_path,details.cue_path)
-             WHERE track.source_key={SOURCE_KEY} AND track.indexed=1 AND track.object_id IS NOT NULL AND file.mtime_ns>?2"
+             WHERE track.source_key={SOURCE_KEY} AND track.indexed=1 AND track.object_id IS NOT NULL AND file.mtime_ns>?2
+             UNION
+             SELECT track.object_id FROM lyrics_cache lyrics JOIN tracks track ON track.media_uri=lyrics.media_uri
+             WHERE lyrics.authority='source' AND lyrics.updated_at>?3 AND track.source_key={SOURCE_KEY}
+               AND track.indexed=1 AND track.object_id IS NOT NULL"
         )))
         .bind(source.as_str())
         .bind(since.saturating_mul(1_000_000_000))
+        .bind(since)
         .fetch_all(&mut *connection)
         .await?)
     }
