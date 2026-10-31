@@ -577,7 +577,7 @@ async fn exercise_http_api(
         .find(|row| row["id"] == playlist)
         .unwrap();
     let playlist_pin = json!({"Playlist":{"playlist_id":row["object_id"]}});
-    let mut sidebar = settings.sidebar_changes();
+    let mut sidebar = settings.changes();
     assert_eq!(
         serde_json::to_value(&settings.load().sidebar.pins).unwrap(),
         json!([playlist_pin])

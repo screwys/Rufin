@@ -699,11 +699,11 @@ impl ConnectOwner {
             }
         });
         let weak = Arc::downgrade(self);
-        let mut revision = self.settings_apply.revision_changes();
+        let mut changes = self.settings_apply.changes();
         let mut shared = records::shared_settings(&self.settings.load());
         self.runtime
             .spawn(stop.clone().run_until_cancelled_owned(async move {
-                while revision.changed().await.is_ok() {
+                while changes.changed().await.is_ok() {
                     let Some(owner) = weak.upgrade() else { return };
                     let now = records::shared_settings(&owner.settings.load());
                     if now.is_some() && now == shared {

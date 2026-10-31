@@ -1079,9 +1079,9 @@ impl ReleaseUpdateOwner {
                 u64::from(settings.application.release_check_interval_hours) * 60 * 60,
             )
         }
-        let mut changes = self.settings.preference_changes();
+        let mut changes = self.settings.changes();
         let task = self.runtime.clone().spawn(async move {
-            let mut period = interval(&changes.borrow_and_update());
+            let mut period = interval(&changes.borrow_and_update().ui);
             let wait = tokio::time::sleep(period);
             tokio::pin!(wait);
             loop {
@@ -1094,7 +1094,7 @@ impl ReleaseUpdateOwner {
                         if changed.is_err() {
                             return;
                         }
-                        let next = interval(&changes.borrow_and_update());
+                        let next = interval(&changes.borrow_and_update().ui);
                         if next != period {
                             period = next;
                             wait.as_mut().reset(tokio::time::Instant::now() + period);

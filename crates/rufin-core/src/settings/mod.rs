@@ -155,6 +155,9 @@ pub struct StoredSettings {
     pub(crate) jellyfin_device_id: String,
     #[serde(default)]
     visualizer_preset_bar_counts_updated: bool,
+    /// Rises when secrets kept outside the settings are replaced, so the feed tells it.
+    #[serde(skip)]
+    pub secrets_revision: u64,
 }
 
 impl Default for StoredSettings {
@@ -169,6 +172,7 @@ impl Default for StoredSettings {
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
             visualizer_preset_bar_counts_updated: true,
+            secrets_revision: 0,
         }
     }
 }
@@ -194,12 +198,8 @@ impl StoredSettings {
 
 #[derive(Clone)]
 pub struct SettingsFile {
-    /// Rises with every persisted change.
-    revision: tokio::sync::watch::Sender<u64>,
-    preferences: tokio::sync::watch::Sender<Arc<UiSettings>>,
-    sidebar: tokio::sync::watch::Sender<SidebarSettings>,
-    appearance: tokio::sync::watch::Sender<AppearancePreferences>,
-    web_controller: tokio::sync::watch::Sender<crate::settings::ControllerSettings>,
+    /// Every committed change, whichever writer made it: the one settings feed.
+    committed: tokio::sync::watch::Sender<Arc<StoredSettings>>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
@@ -213,12 +213,9 @@ pub struct SettingsFile {
 }
 
 impl SettingsFile {
-    pub(crate) fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
-        self.sidebar.subscribe()
-    }
-
-    pub(crate) fn preference_changes(&self) -> tokio::sync::watch::Receiver<Arc<UiSettings>> {
-        self.preferences.subscribe()
+    /// The committed settings, now and after every change.
+    pub(crate) fn changes(&self) -> tokio::sync::watch::Receiver<Arc<StoredSettings>> {
+        self.committed.subscribe()
     }
 
     pub(crate) fn config_dir(&self) -> &Path {
@@ -252,11 +249,7 @@ impl SettingsFile {
             }
         }
         Ok(Self {
-            revision: tokio::sync::watch::channel(0).0,
-            preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
-            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
-            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
+            committed: tokio::sync::watch::channel(Arc::new(value.clone())).0,
             config_dir: path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
@@ -281,11 +274,7 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
-            revision: tokio::sync::watch::channel(0).0,
-            preferences: tokio::sync::watch::channel(Arc::new(value.ui.clone())).0,
-            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
-            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
+            committed: tokio::sync::watch::channel(Arc::new(value.clone())).0,
             config_dir,
             value: Arc::new(Mutex::new(value.clone())),
             persistence: Arc::new(Mutex::new(value)),
@@ -428,9 +417,6 @@ impl SettingsFile {
         )?;
         *current = next;
         self.publish_changes(&current);
-        if changed {
-            self.revision.send_modify(|revision| *revision += 1);
-        }
         Ok(output)
     }
 
@@ -441,7 +427,6 @@ impl SettingsFile {
             if next != *saved {
                 self.persist(&next)?;
                 *saved = next;
-                self.revision.send_modify(|revision| *revision += 1);
             }
             Ok(())
         })();
@@ -496,7 +481,6 @@ impl StoredSettings {
 pub struct SettingsOwner {
     file: SettingsFile,
     secrets: Arc<SwitchableSecretStore>,
-    on_change: Arc<dyn Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync>,
 }
 
 impl SettingsOwner {
@@ -504,76 +488,42 @@ impl SettingsOwner {
         self.file.local_configuration()
     }
 
-    pub(crate) fn new(
-        file: SettingsFile,
-        secrets: Arc<SwitchableSecretStore>,
-        on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            file,
-            secrets,
-            on_change: Arc::new(on_change),
-        })
+    pub(crate) fn new(file: SettingsFile, secrets: Arc<SwitchableSecretStore>) -> Arc<Self> {
+        Arc::new(Self { file, secrets })
     }
 
-    pub(crate) fn revision_changes(&self) -> tokio::sync::watch::Receiver<u64> {
-        self.file.revision.subscribe()
-    }
-
+    /// Writes restored settings. `credentials_changed` says the secrets they name were
+    /// replaced, which the feed tells by a new `secrets_revision`.
     pub(crate) fn restore(
         &self,
         restore: impl FnOnce(&mut StoredSettings) -> Result<(), String>,
         credentials_changed: bool,
     ) -> Result<(), String> {
-        let previous = self.file.load();
-        self.file.update(restore)?;
-        (self.on_change)(&previous, &self.file.load(), credentials_changed);
-        Ok(())
+        self.file.update(|stored| {
+            restore(stored)?;
+            stored.secrets_revision += u64::from(credentials_changed);
+            Ok(())
+        })
     }
 }
 
 impl SettingsFile {
     fn publish_changes(&self, stored: &StoredSettings) {
-        self.preferences.send_if_modified(|current| {
-            if **current == stored.ui {
+        self.committed.send_if_modified(|current| {
+            if **current == *stored {
                 return false;
             }
-            *current = Arc::new(stored.ui.clone());
-            true
-        });
-        self.appearance.send_if_modified(|current| {
-            if *current == stored.ui.appearance {
-                return false;
-            }
-            *current = stored.ui.appearance.clone();
-            true
-        });
-        self.sidebar.send_if_modified(|current| {
-            if *current == stored.ui.sidebar {
-                return false;
-            }
-            *current = stored.ui.sidebar.clone();
-            true
-        });
-        let next = stored.ui.web_controller.clone();
-        self.web_controller.send_if_modified(|current| {
-            if *current == next {
-                return false;
-            }
-            *current = next;
+            *current = Arc::new(stored.clone());
             true
         });
     }
 
-    pub(crate) fn web_controller_changes(
-        &self,
-    ) -> tokio::sync::watch::Receiver<crate::settings::ControllerSettings> {
-        self.web_controller.subscribe()
-    }
-
-    pub(crate) fn web_controller_credentials_changed(&self) {
-        self.web_controller
-            .send_replace(self.load().ui.web_controller);
+    /// Tells the feed that secrets kept outside the settings were replaced.
+    pub(crate) fn secrets_replaced(&self) -> Result<(), String> {
+        self.edit(|stored| {
+            stored.secrets_revision += 1;
+            Ok(())
+        })
     }
 }
 
@@ -587,13 +537,9 @@ impl SettingsOwner {
         self.file.flush()
     }
 
-    pub fn appearance_changes(&self) -> tokio::sync::watch::Receiver<AppearancePreferences> {
-        self.file.appearance.subscribe()
-    }
-
-    /// Every committed preference change, whichever writer made it.
-    pub fn preference_changes(&self) -> tokio::sync::watch::Receiver<Arc<UiSettings>> {
-        self.file.preference_changes()
+    /// The committed settings, now and after every change, whichever writer made it.
+    pub fn changes(&self) -> tokio::sync::watch::Receiver<Arc<StoredSettings>> {
+        self.file.changes()
     }
 
     pub fn load(&self) -> UiSettings {
@@ -615,10 +561,6 @@ impl SettingsOwner {
             stored.ui.visualizer.fps_limit,
             stored.ui.visualizer.appearance.clone(),
         )
-    }
-
-    pub fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
-        self.file.sidebar_changes()
     }
 
     pub fn set_pinned(&self, pin: SidebarPin, pinned: bool) -> Result<bool, String> {
@@ -681,10 +623,7 @@ impl SettingsOwner {
         &self,
         edit: impl FnOnce(&mut UiSettings) -> Result<(), String>,
     ) -> Result<(), String> {
-        let previous = self.file.load();
-        self.file.edit(move |stored| edit(&mut stored.ui))?;
-        (self.on_change)(&previous, &self.file.load(), false);
-        Ok(())
+        self.file.edit(move |stored| edit(&mut stored.ui))
     }
 }
 
@@ -1337,7 +1276,7 @@ mod tests {
             ..SettingsFile::memory_at(directory.path().to_path_buf())
         };
         let initial = file.load();
-        let changes = file.web_controller_changes();
+        let changes = file.changes();
         assert!(
             file.update(|stored| {
                 stored.ui.web_controller.enabled = !stored.ui.web_controller.enabled;
@@ -1357,7 +1296,7 @@ mod tests {
         let committed = file.load();
         assert_ne!(committed.ui.web_controller, initial.ui.web_controller);
         assert!(changes.has_changed().unwrap());
-        assert_eq!(*changes.borrow(), committed.ui.web_controller);
+        assert_eq!(**changes.borrow(), committed);
         assert_eq!(read_startup_settings(&path).unwrap().0, committed);
     }
 

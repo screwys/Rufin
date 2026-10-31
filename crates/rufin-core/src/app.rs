@@ -234,20 +234,45 @@ where
 
     source.attach_playback(&playback);
 
-    let settings_playback = Arc::clone(&playback);
-    let settings_lyrics = Arc::clone(&lyrics);
+    let owners = (
+        Arc::downgrade(&playback),
+        Arc::downgrade(&lyrics),
+        Arc::downgrade(&source),
+        Arc::downgrade(&scrobbling),
+        Arc::downgrade(&library),
+    );
     let settings_downloads = downloads.clone();
-    let settings_source = Arc::clone(&source);
-    let settings_scrobbling = Arc::clone(&scrobbling);
-    let settings_library = Arc::clone(&library);
-    let settings_handle = SettingsOwner::new(
-        settings.clone(),
-        Arc::clone(&secrets),
-        move |previous, current, credentials_changed| {
-            settings_library
-                .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
-            settings_library.set_cover_lookup(current.ui.application.external_metadata_enabled);
-            settings_library.set_use_sort_tags(current.ui.application.use_sort_tags);
+    let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
+    // What a committed settings change means for the owners that follow it.
+    let mut committed = settings.changes();
+    runtime.spawn(async move {
+        let mut previous = Arc::clone(&committed.borrow_and_update());
+        while committed.changed().await.is_ok() {
+            let current = Arc::clone(&committed.borrow_and_update());
+            let (
+                Some(settings_playback),
+                Some(settings_lyrics),
+                Some(settings_source),
+                Some(settings_scrobbling),
+                Some(settings_library),
+            ) = (
+                owners.0.upgrade(),
+                owners.1.upgrade(),
+                owners.2.upgrade(),
+                owners.3.upgrade(),
+                owners.4.upgrade(),
+            )
+            else {
+                return;
+            };
+            let credentials_changed = previous.secrets_revision != current.secrets_revision;
+            if previous.ui.application != current.ui.application {
+                let application = &current.ui.application;
+                settings_library
+                    .set_distinct_track_covers(application.prefer_distinct_track_covers);
+                settings_library.set_cover_lookup(application.external_metadata_enabled);
+                settings_library.set_use_sort_tags(application.use_sort_tags);
+            }
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
@@ -315,10 +340,9 @@ where
                     settings_downloads.library_changed(None);
                 }
             }
-        },
-    );
-
-    source.attach_settings(&settings_handle);
+            previous = current;
+        }
+    });
 
     let backup = crate::backup::BackupOwner::new(
         Arc::clone(&library),

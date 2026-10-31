@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{PlayerPreferences, SettingsError, SettingsOwner, app};
+use super::{PlayerPreferences, SettingsError, SettingsOwner, StoredSettings, app};
 
 /// What the Android mirrors keep of the committed preferences.
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -12,7 +12,7 @@ pub struct CommittedPreferences {
 /// Committed preferences for one observer. The first call returns the current value.
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PreferenceSubscription {
-    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Arc<app::Settings>>>,
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Arc<StoredSettings>>>,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -25,8 +25,8 @@ impl PreferenceSubscription {
             .map_err(|error| SettingsError::from(error.to_string()))?;
         let settings = Arc::clone(&changes.borrow_and_update());
         Ok(CommittedPreferences {
-            player: PlayerPreferences::from(settings.as_ref()),
-            cast_network_interface: settings.cast_network_interface.clone(),
+            player: PlayerPreferences::from(&settings.ui),
+            cast_network_interface: settings.ui.cast_network_interface.clone(),
         })
     }
 }
@@ -34,7 +34,7 @@ impl PreferenceSubscription {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
     pub fn subscribe_preferences(&self) -> Arc<PreferenceSubscription> {
-        let mut changes = self.preference_changes();
+        let mut changes = self.changes();
         changes.mark_changed();
         Arc::new(PreferenceSubscription {
             changes: tokio::sync::Mutex::new(changes),

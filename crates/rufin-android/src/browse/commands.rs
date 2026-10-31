@@ -283,7 +283,7 @@ impl AndroidLibrary {
     }
 
     pub fn is_pinned(&self, pin: SidebarPin) -> Result<bool, AndroidError> {
-        Ok(self.settings.sidebar_changes().borrow().is_pinned(&pin))
+        Ok(self.settings.changes().borrow().ui.sidebar.is_pinned(&pin))
     }
 
     pub async fn refresh_home(&self, section_id: String) -> Result<(), AndroidError> {
@@ -302,8 +302,10 @@ impl AndroidLibrary {
 
     pub fn configured_routes(&self) -> Vec<AndroidRouteDescriptor> {
         self.settings
-            .sidebar_changes()
+            .changes()
             .borrow()
+            .ui
+            .sidebar
             .route_items
             .iter()
             .filter(|item| item.visible)
@@ -313,8 +315,10 @@ impl AndroidLibrary {
 
     pub fn route_settings(&self) -> Vec<AndroidRouteSetting> {
         self.settings
-            .sidebar_changes()
+            .changes()
             .borrow()
+            .ui
+            .sidebar
             .route_items
             .iter()
             .map(|item| AndroidRouteSetting {
@@ -630,23 +634,25 @@ impl AndroidLibrary {
     }
 
     pub async fn pins(&self, offset: u64, limit: u32) -> Result<AndroidPinPage, AndroidError> {
-        let sidebar = self.settings.sidebar_changes();
-        if !sidebar.borrow().pins_visible {
+        let changes = self.settings.changes();
+        let stored = changes.borrow();
+        let sidebar = &stored.ui.sidebar;
+        if !sidebar.pins_visible {
             return Ok(AndroidPinPage {
                 rows: Vec::new(),
                 next_offset: None,
                 total: 0,
             });
         }
-        let total = sidebar.borrow().pins.len() as u64;
+        let total = sidebar.pins.len() as u64;
         let pins = sidebar
-            .borrow()
             .pins
             .iter()
             .skip(usize::try_from(offset).map_err(error)?)
             .take(limit.min(256) as usize)
             .cloned()
             .collect::<Vec<_>>();
+        drop(stored);
         let consumed = offset.saturating_add(pins.len() as u64);
         let next_offset = (consumed < total).then_some(consumed);
         let catalog = self.catalog.clone();

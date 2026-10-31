@@ -150,10 +150,10 @@ impl AndroidPreferences {
         &self,
         packaged_languages: Vec<String>,
     ) -> Arc<AndroidPreferencesSubscription> {
-        let mut changes = self.settings.appearance_changes();
+        let mut changes = self.settings.changes();
         changes.mark_changed();
         Arc::new(AndroidPreferencesSubscription {
-            changes: tokio::sync::Mutex::new(changes),
+            changes: tokio::sync::Mutex::new((changes, None)),
             runtime: self.runtime.clone(),
             directory: self.directory.clone(),
             languages: packaged_languages,
@@ -182,7 +182,11 @@ impl AndroidPreferences {
 
 #[derive(uniffi::Object)]
 pub struct AndroidPreferencesSubscription {
-    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<AppearancePreferences>>,
+    /// The settings feed and the appearance last returned.
+    changes: tokio::sync::Mutex<(
+        tokio::sync::watch::Receiver<Arc<rufin_core::settings::StoredSettings>>,
+        Option<AppearancePreferences>,
+    )>,
     runtime: tokio::runtime::Handle,
     directory: PathBuf,
     languages: Vec<String>,
@@ -193,14 +197,21 @@ pub struct AndroidPreferencesSubscription {
 #[uniffi::export]
 impl AndroidPreferencesSubscription {
     pub async fn next(&self) -> Result<AndroidPreferencesState, AndroidError> {
-        let mut changes = self.changes.lock().await;
+        let mut guard = self.changes.lock().await;
+        let (changes, shown) = &mut *guard;
         let mut custom = self.custom_changes.lock().await;
-        tokio::select! {
-            changed = changes.changed() => changed.map_err(error)?,
-            changed = custom.changed() => changed.map_err(error)?,
-        }
-        custom.borrow_and_update();
-        let settings = changes.borrow_and_update().clone();
+        let settings = loop {
+            let themes = tokio::select! {
+                changed = changes.changed() => { changed.map_err(error)?; false }
+                changed = custom.changed() => { changed.map_err(error)?; true }
+            };
+            custom.borrow_and_update();
+            let appearance = changes.borrow_and_update().ui.appearance.clone();
+            if themes || shown.as_ref() != Some(&appearance) {
+                *shown = Some(appearance.clone());
+                break appearance;
+            }
+        };
         let mut loaded = self.themes.lock().await;
         if loaded.is_none() {
             let directory = self.directory.clone();

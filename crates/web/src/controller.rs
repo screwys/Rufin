@@ -59,14 +59,32 @@ impl Controller {
     pub fn new(products: ProductHandles) -> Self {
         let settings = products.settings.clone();
         let runtime = products.runtime.clone();
-        let mut changes = settings.web_controller_changes();
+        let mut changes = settings.changes();
+        // The controller starts again when its settings or its token change.
+        let wanted = |stored: &rufin_core::settings::StoredSettings| {
+            (stored.ui.web_controller.clone(), stored.secrets_revision)
+        };
         let (status, receiver) = watch::channel(ControllerStatus {
-            settings: changes.borrow().clone(),
+            settings: changes.borrow().ui.web_controller.clone(),
             ..Default::default()
         });
         let task = products.runtime.clone().spawn(async move {
+            let mut current = wanted(&changes.borrow_and_update());
+            let changed = async |changes: &mut watch::Receiver<
+                std::sync::Arc<rufin_core::settings::StoredSettings>,
+            >,
+                                 current: &mut (rufin_core::settings::ControllerSettings, u64)| {
+                while changes.changed().await.is_ok() {
+                    let next = wanted(&changes.borrow_and_update());
+                    if next != *current {
+                        *current = next;
+                        return true;
+                    }
+                }
+                false
+            };
             loop {
-                let config = changes.borrow_and_update().clone();
+                let config = current.0.clone();
                 status.send_replace(ControllerStatus { settings: config.clone(), ..Default::default() });
                 let run = async {
                     if !config.enabled {
@@ -90,9 +108,9 @@ impl Controller {
                             tracing::warn!(%error, "web controller stopped");
                             status.send_replace(ControllerStatus { settings: config.clone(), error: Some(error), ..Default::default() });
                         }
-                        if changes.changed().await.is_err() { break; }
+                        if !changed(&mut changes, &mut current).await { break; }
                     }
-                    changed = changes.changed() => { if changed.is_err() { break; } }
+                    more = changed(&mut changes, &mut current) => { if !more { break; } }
                 }
             }
         });

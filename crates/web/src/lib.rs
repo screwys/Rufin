@@ -975,11 +975,12 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         products.source.operation(),
         products.lyrics.current(),
         products.appearance.subscribe(),
-        products.settings.sidebar_changes(),
+        products.settings.changes(),
         products.source.changes(),
         products.clone(),
         true,
         None,
+        rufin_core::settings::SidebarSettings::default(),
     );
     let stream = futures_util::stream::unfold(
         receivers,
@@ -993,6 +994,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
             products,
             first,
             mut previous,
+            mut pins,
         )| async move {
             let values = if first {
                 let publication = playback.recv().await.ok()?;
@@ -1003,7 +1005,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     &products.settings.load().lyrics,
                 );
                 value["appearance"] = json!(*appearance.borrow_and_update());
-                sidebar.borrow_and_update();
+                pins = sidebar.borrow_and_update().ui.sidebar.clone();
                 value["pins_changed"] = json!(true);
                 vec![value]
             } else {
@@ -1012,7 +1014,11 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     changed = source.changed() => { changed.ok()?; vec![json!({"source":*source.borrow_and_update()})] },
                     changed = lyrics.changed() => { changed.ok()?; vec![json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)})] },
                     changed = appearance.changed() => { changed.ok()?; vec![json!({"appearance":*appearance.borrow_and_update()})] },
-                    changed = sidebar.changed() => { changed.ok()?; vec![json!({"pins_changed":true})] },
+                    changed = sidebar.changed() => {
+                        changed.ok()?;
+                        let now = sidebar.borrow_and_update().ui.sidebar.clone();
+                        if now == pins { Vec::new() } else { pins = now; vec![json!({"pins_changed":true})] }
+                    },
                     changed = catalog.next() => changed_json(&products, &changed?),
                 }
             };
@@ -1020,7 +1026,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                 values,
                 (
                     playback, source, lyrics, appearance, sidebar, catalog, products, false,
-                    previous,
+                    previous, pins,
                 ),
             ))
         },

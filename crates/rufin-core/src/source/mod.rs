@@ -38,8 +38,8 @@ use tracing::{info, warn};
 use crate::features::follow;
 use crate::playback::PlaybackOwner;
 use crate::settings::{
-    ConfiguredSource, SavedLocalAccess, SettingsFile, SettingsOwner, StoredSettings,
-    fresh_source_id, load_provider_secret, platform_secret_store, seal_credential,
+    ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, fresh_source_id,
+    load_provider_secret, platform_secret_store, seal_credential,
 };
 
 const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -128,7 +128,6 @@ pub(crate) struct Shared {
     playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
     /// Commits preference edits so their effects run like any other writer's.
-    preferences: Mutex<Weak<SettingsOwner>>,
     pub(crate) started: AtomicBool,
 }
 
@@ -436,7 +435,6 @@ impl SourceOwner {
             playlist_edits: Mutex::new(HashMap::new()),
             playback: Mutex::new(Weak::new()),
             connect: Mutex::new(Weak::new()),
-            preferences: Mutex::new(Weak::new()),
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
@@ -457,30 +455,6 @@ impl SourceOwner {
             .playback
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(playback);
-    }
-
-    pub(crate) fn attach_settings(&self, settings: &Arc<SettingsOwner>) {
-        *self
-            .shared
-            .preferences
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(settings);
-    }
-
-    fn update_preferences(
-        &self,
-        edit: impl FnOnce(&mut crate::settings::Settings) -> Result<(), String>,
-    ) -> sources::SourceResult<()> {
-        let settings = self
-            .shared
-            .preferences
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade()
-            .ok_or_else(|| SourceError::Other("settings are unavailable".to_string()))?;
-        settings
-            .update_preferences(edit)
-            .map_err(SourceError::Other)
     }
 
     pub(crate) fn downloads(&self) -> &Downloads {
@@ -1839,13 +1813,15 @@ impl SourceOwner {
         enabled: bool,
         delete_downloads: bool,
     ) -> sources::SourceResult<bool> {
-        let mut changed = false;
-        self.update_preferences(|ui| {
-            let mut rules = ui.download_rules(&source_id);
-            rules.set(rule, enabled);
-            changed = ui.set_download_rules(source_id.clone(), rules);
-            Ok(())
-        })?;
+        let changed = self
+            .shared
+            .settings
+            .edit(|stored| {
+                let mut rules = stored.ui.download_rules(&source_id);
+                rules.set(rule, enabled);
+                Ok(stored.ui.set_download_rules(source_id.clone(), rules))
+            })
+            .map_err(SourceError::Other)?;
         if changed && !enabled {
             self.shared
                 .downloads
@@ -1856,10 +1832,15 @@ impl SourceOwner {
 
     /// Turns every download rule off and deletes the source's downloads.
     pub fn clear_download_rules(&self, source_id: SourceId) -> sources::SourceResult<()> {
-        self.update_preferences(|ui| {
-            ui.set_download_rules(source_id.clone(), downloads::DownloadRules::default());
-            Ok(())
-        })?;
+        self.shared
+            .settings
+            .edit(|stored| {
+                stored
+                    .ui
+                    .set_download_rules(source_id.clone(), downloads::DownloadRules::default());
+                Ok(())
+            })
+            .map_err(SourceError::Other)?;
         self.shared.downloads.clear(source_id, true);
         Ok(())
     }
@@ -1991,7 +1972,7 @@ impl SourceOwner {
                         Ok(())
                     })?;
                     secrets.replace(platform_secret_store(&settings));
-                    settings.web_controller_credentials_changed();
+                    settings.secrets_replaced()?;
                     Ok(())
                 })
                 .await

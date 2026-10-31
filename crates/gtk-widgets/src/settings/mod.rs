@@ -13,13 +13,13 @@ use rufin_core::settings::app::{Settings, SettingsHandle};
 pub struct SettingsState {
     pub current: RefCell<Settings>,
     pub persistence: SettingsHandle,
-    changes: RefCell<watch::Receiver<Arc<Settings>>>,
+    changes: RefCell<watch::Receiver<Arc<rufin_core::settings::StoredSettings>>>,
 }
 
 impl SettingsState {
     pub fn new(persistence: SettingsHandle) -> Self {
-        let changes = persistence.preference_changes();
-        let current = Settings::clone(&changes.borrow());
+        let changes = persistence.changes();
+        let current = changes.borrow().ui.clone();
         Self {
             current: RefCell::new(current),
             persistence,
@@ -55,7 +55,7 @@ impl SettingsState {
             }
             Arc::clone(&changes.borrow_and_update())
         };
-        Some(self.current.replace(Settings::clone(&next)))
+        Some(self.current.replace(next.ui.clone()))
     }
 
     pub fn set_app_setting<T: PartialEq>(

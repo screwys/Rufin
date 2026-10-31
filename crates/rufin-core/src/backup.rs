@@ -925,20 +925,20 @@ mod tests {
         let mut incoming = file.load();
         incoming.ui.application.private_mode = true;
         incoming.scrobbling.listenbrainz.enabled = false;
-        let applied = Arc::new(Mutex::new(Vec::new()));
-        let observed = Arc::clone(&applied);
         let secrets = Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
             ConfigSecretStore::new(directory.path().join("secrets.json")),
         )));
-        let settings_apply =
-            (*SettingsOwner::new(file.clone(), secrets, move |_, current, credentials| {
-                observed.lock().unwrap().push((
-                    current.ui.application.private_mode,
-                    current.scrobbling.listenbrainz.enabled,
-                    credentials,
-                ));
-            }))
-            .clone();
+        let settings_apply = (*SettingsOwner::new(file.clone(), secrets)).clone();
+        let changes = file.changes();
+        let initial = changes.borrow().secrets_revision;
+        let committed = || {
+            let committed = changes.borrow();
+            (
+                committed.ui.application.private_mode,
+                committed.scrobbling.listenbrainz.enabled,
+                committed.secrets_revision - initial,
+            )
+        };
         let (writing, written) = mpsc::sync_channel(1);
         let (resume, resumed) = mpsc::sync_channel(1);
         let store = HeldStore {
@@ -966,7 +966,7 @@ mod tests {
         written.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(file.load().ui.application.private_mode);
         assert!(!file.load().scrobbling.listenbrainz.enabled);
-        assert_eq!(*applied.lock().unwrap(), vec![(true, false, false)]);
+        assert_eq!(committed(), (true, false, 0));
         settings_apply
             .restore(
                 |current| {
@@ -977,18 +977,12 @@ mod tests {
                 false,
             )
             .unwrap();
+        assert_eq!(committed(), (false, true, 0));
         resume.send(()).unwrap();
         assert!(restored.join().unwrap().is_empty());
         assert!(!file.load().ui.application.private_mode);
         assert!(file.load().scrobbling.listenbrainz.enabled);
-        assert_eq!(
-            *applied.lock().unwrap(),
-            vec![
-                (true, false, false),
-                (false, true, false),
-                (false, true, true),
-            ]
-        );
+        assert_eq!(committed(), (false, true, 1));
     }
 
     #[test]
