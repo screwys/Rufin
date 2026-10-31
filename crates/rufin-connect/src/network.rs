@@ -634,9 +634,9 @@ impl ConnectNetwork {
                 .context("Device is unreachable")??;
         let answered = async {
             let (mut send, mut recv) = connection.open_bi().await?;
-            write_frame(&mut send, &body).await?;
+            write_frame(&mut send, &body, MAX_FRAME).await?;
             send.finish()?;
-            read_frame::<Result<Vec<u8>, String>>(&mut recv).await
+            read_frame::<Result<Vec<u8>, String>>(&mut recv, MAX_FRAME).await
         }
         .await;
         let response = self.settle(&connection, answered).await?;
@@ -651,9 +651,10 @@ impl ConnectNetwork {
                 .context("Device is unreachable")??;
         let answered = async {
             let (mut send, mut recv) = connection.open_bi().await?;
-            write_frame(&mut send, &body).await?;
+            write_frame(&mut send, &body, MAX_FRAME).await?;
             send.finish()?;
-            let metadata: Result<serde_json::Value, String> = read_frame(&mut recv).await?;
+            let metadata: Result<serde_json::Value, String> =
+                read_frame(&mut recv, MAX_FRAME).await?;
             Ok((metadata, recv))
         }
         .await;
@@ -672,9 +673,9 @@ impl ConnectNetwork {
             let connection = self.connect(peer, RPC_PROTOCOL).await?;
             let answered = async {
                 let (mut send, mut recv) = connection.open_bi().await?;
-                write_frame(&mut send, &body).await?;
+                write_frame(&mut send, &body, MAX_FRAME).await?;
                 send.finish()?;
-                read_frame::<Result<Vec<u8>, String>>(&mut recv).await
+                read_frame::<Result<Vec<u8>, String>>(&mut recv, MAX_FRAME).await
             }
             .await;
             let response = self
@@ -757,7 +758,7 @@ impl ProtocolHandler for MediaProtocol {
         }
         let result: Result<()> = async {
             let (mut send, mut recv) = connection.accept_bi().await?;
-            let body = read_frame(&mut recv).await?;
+            let body = read_frame(&mut recv, MAX_FRAME).await?;
             let (reply, response) = oneshot::channel();
             network
                 .events
@@ -771,11 +772,12 @@ impl ProtocolHandler for MediaProtocol {
             let transfer = async {
                 match response.await? {
                     Ok(mut audio) => {
-                        write_frame(&mut send, &Ok::<_, String>(audio.metadata)).await?;
+                        write_frame(&mut send, &Ok::<_, String>(audio.metadata), MAX_FRAME).await?;
                         tokio::io::copy(&mut audio.reader, &mut send).await?;
                     }
                     Err(error) => {
-                        write_frame(&mut send, &Err::<serde_json::Value, _>(error)).await?
+                        write_frame(&mut send, &Err::<serde_json::Value, _>(error), MAX_FRAME)
+                            .await?
                     }
                 }
                 send.finish()?;
@@ -807,7 +809,7 @@ impl ProtocolHandler for RpcProtocol {
         }
         let result: Result<()> = async {
             let (mut send, mut recv) = conn.accept_bi().await?;
-            let body = read_frame(&mut recv).await?;
+            let body = read_frame(&mut recv, MAX_FRAME).await?;
             let (reply, answer) = oneshot::channel();
             network
                 .events
@@ -818,7 +820,7 @@ impl ProtocolHandler for RpcProtocol {
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
-            write_frame(&mut send, &answer.await?).await?;
+            write_frame(&mut send, &answer.await?, MAX_FRAME).await?;
             send.finish()?;
             let _ = send.stopped().await;
             let _ = conn.closed().await;
@@ -832,13 +834,15 @@ impl ProtocolHandler for RpcProtocol {
     }
 }
 
+/// Writes one frame of at most `limit` bytes, the most its reader accepts.
 pub(crate) async fn write_frame<T: Serialize>(
     send: &mut (impl tokio::io::AsyncWrite + Unpin),
     value: &T,
+    limit: usize,
 ) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
     ensure!(
-        bytes.len() <= MAX_FRAME,
+        bytes.len() <= limit,
         "Connect message exceeds transfer limit"
     );
     send.write_all(&(bytes.len() as u32).to_be_bytes()).await?;
@@ -846,17 +850,20 @@ pub(crate) async fn write_frame<T: Serialize>(
     Ok(())
 }
 
+/// Reads one frame of at most `limit` bytes.
 pub(crate) async fn read_frame<T: DeserializeOwned>(
     recv: &mut (impl tokio::io::AsyncRead + Unpin),
+    limit: usize,
 ) -> Result<T> {
-    let mut length = [0u8; 4];
-    recv.read_exact(&mut length).await?;
-    let length = u32::from_be_bytes(length) as usize;
-    if length > MAX_FRAME {
-        bail!("Connect message exceeds transfer limit");
-    }
-    let mut bytes = vec![0; length];
-    recv.read_exact(&mut bytes).await?;
+    let length = recv.read_u32().await? as usize;
+    ensure!(length <= limit, "Connect message exceeds transfer limit");
+    // The buffer grows with the bytes that arrive, not with the length the device claims.
+    let mut bytes = Vec::with_capacity(length.min(MAX_FRAME));
+    (&mut *recv)
+        .take(length as u64)
+        .read_to_end(&mut bytes)
+        .await?;
+    ensure!(bytes.len() == length, "Connect message ended early");
     Ok(serde_json::from_slice(&bytes)?)
 }
 

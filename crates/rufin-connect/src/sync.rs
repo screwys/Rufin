@@ -23,6 +23,11 @@ use crate::{
 };
 
 const PAGE: usize = 512;
+// Rows fill a frame up to this size; a larger row, such as a big playlist cover or a long
+// queue, goes in a frame of its own.
+const PAGE_BYTES: usize = 8 * 1024 * 1024;
+// Pages come from a trusted device and carry any row it holds, however large.
+const PAGE_FRAME: usize = u32::MAX as usize;
 const PUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Encodes the values a pull or a folder segment sends from the Store and settings.
@@ -57,7 +62,7 @@ pub struct Pull {
 
 impl Pull {
     pub async fn next(&mut self) -> Result<Frame> {
-        let frame = read_frame(&mut self.recv).await?;
+        let frame = read_frame(&mut self.recv, PAGE_FRAME).await?;
         if let Frame::End { .. } = frame {
             // The device keeps its connection until this, the last read, is done.
             self.connection.close(0u32.into(), b"pull complete");
@@ -81,10 +86,11 @@ impl ConnectNetwork {
                     profile: profile.to_owned(),
                     after,
                 },
+                MAX_FRAME,
             )
             .await?;
             send.finish()?;
-            let total: u64 = read_frame(&mut recv).await?;
+            let total: u64 = read_frame(&mut recv, MAX_FRAME).await?;
             Ok((total, recv))
         }
         .await;
@@ -123,7 +129,7 @@ impl ConnectNetwork {
         let connection = self.connect(peer, SYNC_PROTOCOL).await?;
         let notified = async {
             let (mut send, _recv) = connection.open_bi().await?;
-            write_frame(&mut send, request).await?;
+            write_frame(&mut send, request, MAX_FRAME).await?;
             send.finish()?;
             match connection.closed().await {
                 ConnectionError::ApplicationClosed(close) if close.error_code == 0u32.into() => {
@@ -149,7 +155,7 @@ impl ProtocolHandler for SyncProtocol {
         }
         let result: Result<()> = async {
             let (mut send, mut recv) = connection.accept_bi().await?;
-            let request: Request = read_frame(&mut recv).await?;
+            let request: Request = read_frame(&mut recv, MAX_FRAME).await?;
             let profile = network
                 .profile
                 .read()
@@ -196,7 +202,7 @@ impl ProtocolHandler for SyncProtocol {
 }
 
 async fn serve(profile: &Arc<Profile>, mut after: i64, send: &mut SendStream) -> Result<()> {
-    write_frame(send, &profile.store.count_after(after).await?).await?;
+    write_frame(send, &profile.store.count_after(after).await?, MAX_FRAME).await?;
     loop {
         let mut rows = profile.store.rows_after(after, PAGE, None).await?;
         let Some(last) = rows.last() else {
@@ -211,28 +217,23 @@ async fn serve(profile: &Arc<Profile>, mut after: i64, send: &mut SendStream) ->
             break;
         }
     }
-    write_frame(send, &Frame::End { sequence: after }).await
+    write_frame(send, &Frame::End { sequence: after }, MAX_FRAME).await
 }
 
-// Large values, such as playlist covers, split a page over several frames.
 async fn write_page(send: &mut SendStream, rows: Vec<Row>) -> Result<()> {
     let mut page = Vec::new();
     let mut size = 0;
     for row in rows {
         let length = serde_json::to_vec(&row)?.len() + 1;
-        if length > MAX_FRAME - 64 {
-            tracing::warn!(id = row.id, length, "Connect record is too large to send");
-            continue;
-        }
-        if size + length > MAX_FRAME / 2 && !page.is_empty() {
-            write_frame(send, &Frame::Page(std::mem::take(&mut page))).await?;
+        if size + length > PAGE_BYTES && !page.is_empty() {
+            write_frame(send, &Frame::Page(std::mem::take(&mut page)), PAGE_FRAME).await?;
             size = 0;
         }
         size += length;
         page.push(row);
     }
     if !page.is_empty() {
-        write_frame(send, &Frame::Page(page)).await?;
+        write_frame(send, &Frame::Page(page), PAGE_FRAME).await?;
     }
     Ok(())
 }

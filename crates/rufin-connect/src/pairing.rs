@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use vodozemac::sas::{Mac, Sas};
 
-use crate::network::{ConnectNetwork, NetworkEvent, read_frame, write_frame};
+use crate::network::{ConnectNetwork, MAX_FRAME, NetworkEvent, read_frame, write_frame};
 
 // Matrix's specified 64-symbol emoji alphabet. The seven indices are produced
 // by vodozemac; no Matrix account or Matrix transport is involved.
@@ -124,14 +124,14 @@ async fn exchange(
     };
     // Commit both ephemeral keys before revealing either. This prevents choosing
     // a key after seeing the other's key to bias the short comparison.
-    write_frame(&mut send, &hello).await?;
-    let remote: Hello = read_frame(&mut recv).await?;
+    write_frame(&mut send, &hello, MAX_FRAME).await?;
+    let remote: Hello = read_frame(&mut recv, MAX_FRAME).await?;
     ensure!(
         remote.identity == peer.to_string(),
         "Enrollment identity differs from the connected device"
     );
-    write_frame(&mut send, &public).await?;
-    let remote_public: String = read_frame(&mut recv).await?;
+    write_frame(&mut send, &public, MAX_FRAME).await?;
+    let remote_public: String = read_frame(&mut recv, MAX_FRAME).await?;
     ensure!(
         blake3::hash(remote_public.as_bytes()).to_hex().as_str() == remote.commitment,
         "Verification key commitment does not match"
@@ -182,7 +182,7 @@ async fn exchange(
             .await
             .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
         if joining {
-            let enrollment: Enrollment = read_frame(&mut recv).await?;
+            let enrollment: Enrollment = read_frame(&mut recv, MAX_FRAME).await?;
             ensure!(
                 enrollment.host.device == peer.to_string(),
                 "Enrollment identity differs from the connected device"
@@ -198,9 +198,9 @@ async fn exchange(
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
-            write_frame(&mut send, &true).await?;
+            write_frame(&mut send, &true, MAX_FRAME).await?;
             send.finish()?;
-            let complete: bool = read_frame(&mut recv).await?;
+            let complete: bool = read_frame(&mut recv, MAX_FRAME).await?;
             ensure!(complete, "The other device did not complete pairing");
             // Iroh requires the last application-data receiver to close. The host
             // keeps its connection alive until this final acknowledgement arrives.
@@ -218,8 +218,8 @@ async fn exchange(
                     },
                 }
             };
-            write_frame(&mut send, &enrollment).await?;
-            let accepted: bool = read_frame(&mut recv).await?;
+            write_frame(&mut send, &enrollment, MAX_FRAME).await?;
+            let accepted: bool = read_frame(&mut recv, MAX_FRAME).await?;
             ensure!(accepted, "The other device did not accept enrollment");
             network
                 .events
@@ -229,7 +229,7 @@ async fn exchange(
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
-            write_frame(&mut send, &true).await?;
+            write_frame(&mut send, &true, MAX_FRAME).await?;
             send.finish()?;
             match connection.closed().await {
                 ConnectionError::ApplicationClosed(close) if close.error_code == 0u32.into() => {}
@@ -255,7 +255,7 @@ async fn exchange_approval(
 ) -> Result<String> {
     // Keep the same read alive when local approval wins. read_frame may already
     // have consumed its length prefix or part of its body at that point.
-    let remote_approval = read_frame::<Option<String>>(recv);
+    let remote_approval = read_frame::<Option<String>>(recv, MAX_FRAME);
     tokio::pin!(remote_approval);
     let (approved, remote_mac) = tokio::select! {
         approved = async { decision.wait_for(|value| value.is_some()).await
@@ -269,7 +269,7 @@ async fn exchange_approval(
     };
     // The approval MAC binds TLS identity, role, key exchange, and this unique
     // verification session.
-    write_frame(send, &approved.then_some(mac)).await?;
+    write_frame(send, &approved.then_some(mac), MAX_FRAME).await?;
     ensure!(approved, "Pairing was rejected");
     Ok(match remote_mac {
         Some(mac) => mac,
@@ -302,7 +302,7 @@ mod tests {
             assert!(futures_util::poll!(&mut exchange).is_pending());
             approve.send(Some(true)).unwrap();
             let peer = async {
-                let mac: Option<String> = read_frame(&mut remote_recv).await.unwrap();
+                let mac: Option<String> = read_frame(&mut remote_recv, MAX_FRAME).await.unwrap();
                 assert_eq!(mac.as_deref(), Some("local approval"));
                 remote_send.write_all(&frame[split..]).await.unwrap();
             };
@@ -321,7 +321,7 @@ mod tests {
         let (mut recv, mut send) = tokio::io::split(local);
         let (approve, mut decision) = watch::channel(Some(true));
         let peer = async {
-            let _: Option<String> = read_frame(&mut remote).await.unwrap();
+            let _: Option<String> = read_frame(&mut remote, MAX_FRAME).await.unwrap();
             approve.send(Some(false)).unwrap();
         };
         let (result, _) = tokio::join!(
