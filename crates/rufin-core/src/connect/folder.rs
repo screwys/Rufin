@@ -88,8 +88,15 @@ pub(super) fn watch(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
     };
     let changed = Arc::new(tokio::sync::Notify::new());
     let wake = Arc::clone(&changed);
+    // This device's own writes are no news to it.
+    let own = path
+        .join(ROOT)
+        .join(&session.profile)
+        .join(&session.records.device);
     let created = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if event.is_ok_and(|event| !event.kind.is_access()) {
+        if event.is_ok_and(|event| {
+            !event.kind.is_access() && event.paths.iter().any(|path| !path.starts_with(&own))
+        }) {
             wake.notify_one();
         }
     })
