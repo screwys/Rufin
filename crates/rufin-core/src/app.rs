@@ -359,6 +359,7 @@ where
         Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
+        lyrics.handle(),
         runtime.clone(),
     );
     source.install_connect(&connect);

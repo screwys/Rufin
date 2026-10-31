@@ -342,13 +342,6 @@ impl PlaybackOwner {
             .map_err(string_error)
     }
 
-    pub async fn clear_waveform_cache(&self) -> Result<(), String> {
-        self.catalog
-            .clear_waveform_cache()
-            .await
-            .map_err(string_error)
-    }
-
     fn take_active(&self) -> Option<Playback> {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();

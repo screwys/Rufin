@@ -11,6 +11,7 @@ mod library_lists;
 pub mod presentation;
 pub mod right_panel;
 mod storage_reset;
+pub(crate) use storage_reset::device_secrets;
 pub use storage_reset::{StorageReset, StorageResetRequest};
 mod secret_storage;
 pub use secret_storage::KeyringSecretStore;

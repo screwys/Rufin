@@ -360,6 +360,7 @@ pub struct ConnectOwner {
     secrets: Arc<SwitchableSecretStore>,
     source: Arc<SourceOwner>,
     pub(crate) playback: Arc<PlaybackOwner>,
+    lyrics: crate::lyrics::LyricsHandle,
     runtime: tokio::runtime::Handle,
     config: Mutex<DeviceConfig>,
     status: tokio::sync::watch::Sender<Status>,
@@ -379,6 +380,7 @@ impl ConnectOwner {
         secrets: Arc<SwitchableSecretStore>,
         source: Arc<SourceOwner>,
         playback: Arc<PlaybackOwner>,
+        lyrics: crate::lyrics::LyricsHandle,
         runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let (config, error) = match std::fs::read(directory.join("device.json")) {
@@ -399,6 +401,7 @@ impl ConnectOwner {
             secrets,
             source,
             playback,
+            lyrics,
             runtime,
             status: tokio::sync::watch::channel(Status {
                 settings: settings_of(&config, None, None),
@@ -919,7 +922,8 @@ impl ConnectOwner {
     }
 
     /// What the "Clear all data" reset removes, done in place: every source and its library,
-    /// Rufin playlists, favorites, activity, the queue, analysis results and the settings.
+    /// Rufin playlists, favorites, activity, the queue, every cache, this device's secrets
+    /// and the settings. Connect's own keys stay; the joined profile holds them.
     async fn clear_data(&self) -> Result<(), String> {
         let stored = self.settings.load();
         self.source
@@ -935,8 +939,7 @@ impl ConnectOwner {
                             .await
                             .map_err(error)?;
                     }
-                    let catalog = &self.catalog;
-                    catalog
+                    self.catalog
                         .clear_state(library::StateGroups {
                             playlists: true,
                             favorites: true,
@@ -946,11 +949,22 @@ impl ConnectOwner {
                         })
                         .await
                         .map_err(error)?;
-                    catalog.clear_loudness_cache().await.map_err(error)?;
-                    catalog.clear_waveform_cache().await.map_err(error)?;
-                    catalog.clear_fingerprint_cache().await.map_err(error)?;
+                    for kind in crate::runtime::CacheKind::ALL {
+                        kind.clear(&self.catalog, self.source.downloads(), &self.lyrics)
+                            .await?;
+                    }
+                    let secrets = Arc::clone(&self.secrets);
+                    let backup =
+                        crate::settings::backup_password_store(&stored, self.settings.config_dir());
+                    let keys = crate::settings::device_secrets(&stored);
                     let settings = self.settings_apply.clone();
                     tokio::task::spawn_blocking(move || {
+                        for key in keys {
+                            secrets.delete_secret(&key).map_err(error)?;
+                        }
+                        backup
+                            .delete_secret(&crate::settings::backup_password_key())
+                            .map_err(error)?;
                         settings.restore(
                             |current| {
                                 let mut cleared = crate::settings::StoredSettings::default();

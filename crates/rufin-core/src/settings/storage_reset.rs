@@ -76,32 +76,8 @@ impl StorageResetRequest {
         let retained = if reset == StorageReset::KeepCredentials {
             retained_connections(*stored)
         } else {
-            let mut keys = vec![
-                super::settings_encryption_key(),
-                super::backup_password_key(),
-                super::web_controller::secret_key(),
-            ];
-            keys.extend(
-                stored
-                    .sources
-                    .connections()
-                    .filter_map(|source| source.credential.as_ref())
-                    .filter(|credential| matches!(credential, super::Credential::Legacy(_)))
-                    .map(super::provider_secret_key),
-            );
-            keys.extend(
-                stored
-                    .scrobbling_credentials
-                    .values()
-                    .filter(|credential| matches!(credential, super::Credential::Legacy(_)))
-                    .map(super::provider_secret_key),
-            );
-            keys.extend(
-                scrobbling::secret_descriptors()
-                    .iter()
-                    .copied()
-                    .map(super::scrobbling_secret_key),
-            );
+            let mut keys = device_secrets(&stored);
+            keys.push(super::backup_password_key());
             keys.extend(connect_keys);
             for key in keys {
                 secrets.delete_secret(&key).map_err(error)?;
@@ -119,6 +95,31 @@ impl StorageResetRequest {
             &serde_json::to_vec_pretty(&super::persistent_settings(&retained)).map_err(error)?,
         )
     }
+}
+
+/// The secrets "Clear all data" deletes besides the backup password and Connect's own: the
+/// key that seals logins, the web controller token, older logins and scrobbling sessions.
+pub(crate) fn device_secrets(stored: &StoredSettings) -> Vec<secrets::SecretKey> {
+    let mut keys = vec![
+        super::settings_encryption_key(),
+        super::web_controller::secret_key(),
+    ];
+    keys.extend(
+        stored
+            .sources
+            .connections()
+            .filter_map(|source| source.credential.as_ref())
+            .chain(stored.scrobbling_credentials.values())
+            .filter(|credential| matches!(credential, super::Credential::Legacy(_)))
+            .map(super::provider_secret_key),
+    );
+    keys.extend(
+        scrobbling::secret_descriptors()
+            .iter()
+            .copied()
+            .map(super::scrobbling_secret_key),
+    );
+    keys
 }
 
 fn retained_connections(previous: StoredSettings) -> StoredSettings {
