@@ -97,9 +97,9 @@ impl Catalog {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as("SELECT artist.object_id owner,track.object_id,file.path,track.disc_number,track.track_number,track.sort_text,coalesce((SELECT first.object_id FROM track_links credit JOIN artists first ON first.artist_key=credit.target WHERE credit.track_key=track.track_key AND credit.role=1 ORDER BY credit.position LIMIT 1)=artist.object_id,0) primary_artist,file.root,file.picture_index,file.artist_pictures,coalesce(file.revision,CAST(file.size_bytes AS TEXT)||'-'||CAST(file.mtime_ns AS TEXT)) revision
             FROM json_each(?2) requested CROSS JOIN artists artist ON artist.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND artist.object_id=requested.value
-            CROSS JOIN tracks track ON track.source_key=artist.source_key AND track.indexed AND track.track_key IN(SELECT credit.track_key FROM track_links credit WHERE credit.role IN(0,1) AND credit.target=artist.artist_key)
+            CROSS JOIN tracks track ON track.track_key IN(SELECT credit.track_key FROM track_links credit WHERE credit.role IN(0,1) AND credit.target=artist.artist_key)
             CROSS JOIN track_details details ON details.track_key=track.track_key CROSS JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
-            ORDER BY artist.object_id,track.object_id")
+            WHERE track.indexed ORDER BY artist.object_id,track.object_id")
             .bind(source_id).bind(serde_json::to_string(artists)?).fetch_all(&mut *connection).await?)
     }
 
@@ -109,7 +109,7 @@ impl Catalog {
         prefix: &str,
     ) -> LibraryResult<bool> {
         let mut connection = self.acquire_reader().await?;
-        let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT album_key) FROM track_details details JOIN tracks track USING(track_key) JOIN sources source USING(source_key) WHERE source.object_id=?1 AND track.indexed AND details.source_path>=?2 AND details.source_path<?2||char(1114111)")
+        let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT track.album_key) FROM track_details details CROSS JOIN tracks track USING(track_key) WHERE details.source_path>=?2 AND details.source_path<?2||char(1114111) AND track.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND track.indexed")
             .bind(source_id).bind(prefix).fetch_one(&mut *connection).await?;
         Ok(count == 1)
     }
@@ -121,7 +121,7 @@ impl Catalog {
         artist: &str,
     ) -> LibraryResult<bool> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("WITH directory AS(SELECT track.track_key FROM track_details details JOIN tracks track USING(track_key) JOIN sources source USING(source_key) WHERE source.object_id=?1 AND track.indexed AND details.source_path>=?2 AND details.source_path<?2||char(1114111)) SELECT EXISTS(SELECT 1 FROM directory) AND NOT EXISTS(SELECT 1 FROM directory WHERE NOT EXISTS(SELECT 1 FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=directory.track_key AND credit.role=1 AND artist.object_id=?3 AND credit.position=(SELECT min(position) FROM track_links WHERE track_key=directory.track_key AND role=1)))")
+        Ok(sqlx::query_scalar("WITH directory AS(SELECT track.track_key FROM track_details details CROSS JOIN tracks track USING(track_key) WHERE details.source_path>=?2 AND details.source_path<?2||char(1114111) AND track.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND track.indexed) SELECT EXISTS(SELECT 1 FROM directory) AND NOT EXISTS(SELECT 1 FROM directory WHERE NOT EXISTS(SELECT 1 FROM track_links credit JOIN artists artist ON artist.artist_key=credit.target WHERE credit.track_key=directory.track_key AND credit.role=1 AND artist.object_id=?3 AND credit.position=(SELECT min(position) FROM track_links WHERE track_key=directory.track_key AND role=1)))")
             .bind(source_id).bind(prefix).bind(artist).fetch_one(&mut *connection).await?)
     }
 }
