@@ -1,43 +1,20 @@
-use super::FileSource;
-use crate::{LocalImageRef, SourceResult};
+use crate::SourceResult;
+use crate::file::artwork::FolderImage;
 
-impl FileSource {
-    pub(crate) async fn directory_image(
-        &self,
-        catalog: &library::Catalog,
-        source_id: &str,
-        prefix: &str,
-    ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(catalog, source_id, prefix, None).await
-    }
-
-    pub(crate) async fn directory_artist_image_for(
-        &self,
-        catalog: &library::Catalog,
-        source_id: &str,
-        prefix: &str,
-        artist: &str,
-        allow_generic: bool,
-    ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(catalog, source_id, prefix, Some((artist, allow_generic))).await
-    }
-}
-
-pub(crate) async fn directory_image_by_role(
+/// The supported images the catalog holds directly in the folder `prefix`.
+pub(crate) async fn directory_images(
     catalog: &library::Catalog,
     source_id: &str,
     prefix: &str,
-    artist: Option<(&str, bool)>,
-) -> SourceResult<Option<LocalImageRef>> {
+) -> SourceResult<Vec<FolderImage>> {
     let mut after = String::new();
-    let mut best = None;
-    let mut count = 0;
+    let mut images = Vec::new();
     loop {
         let page = catalog
             .file_artwork_image_page(source_id, prefix, &after)
             .await?;
         if page.is_empty() {
-            break;
+            return Ok(images);
         }
         for (path, revision) in page {
             after.clone_from(&path);
@@ -51,29 +28,13 @@ pub(crate) async fn directory_image_by_role(
                 relative.into_owned()
             };
             let name = relative.rsplit('/').next().unwrap_or_default();
-            if !crate::file::artwork::supported_image(std::path::Path::new(name)) {
-                continue;
-            }
-            if artist.is_none() && crate::file::artwork::is_artist_image(name) {
-                continue;
-            }
-            count += 1;
-            let rank = if let Some((artist, allow_generic)) = artist {
-                crate::file::artwork::artist_image_rank_for(name, artist, allow_generic)
-            } else {
-                crate::file::artwork::image_rank(name)
-            };
-            let candidate = (rank, path, revision);
-            if best.as_ref().is_none_or(|current| &candidate < current) {
-                best = Some(candidate);
+            if crate::file::artwork::supported_image(std::path::Path::new(name)) {
+                images.push(FolderImage {
+                    name: name.to_owned(),
+                    path,
+                    revision,
+                });
             }
         }
     }
-    Ok(best
-        .filter(|(rank, _, _)| *rank != usize::MAX || artist.is_none() && count == 1)
-        .map(|(_, path, revision)| LocalImageRef::File {
-            source_id: crate::SourceId::new(source_id),
-            path,
-            revision: revision.unwrap_or_default(),
-        }))
 }

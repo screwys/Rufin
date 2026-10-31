@@ -5,9 +5,10 @@ use crate::file::check_cancelled;
 use crate::{ImageBytes, LocalImageRef, SourceError, SourceResult};
 use ::lofty::file::{TaggedFile, TaggedFileExt};
 use ::lofty::picture::{Picture, PictureType};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
 use std::path::Path;
+use std::sync::Arc;
 const LOCAL_IMAGE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const IMAGE_FORMATS: &[(&str, &str)] = &[
     ("jpg", "image/jpeg"),
@@ -70,6 +71,46 @@ pub(crate) fn artist_image_rank_for(name: &str, artist: &str, allow_generic: boo
     } else {
         usize::MAX
     }
+}
+
+/// A supported image in a folder: its file name and its path or location, with the revision
+/// the catalog holds for a remote file.
+#[derive(Clone, Debug)]
+pub(crate) struct FolderImage {
+    pub(crate) name: String,
+    pub(crate) path: String,
+    pub(crate) revision: Option<String>,
+}
+
+/// A folder's cover: its best-named image that is not an artist's, or its only such image.
+pub(crate) fn folder_cover(images: &[FolderImage]) -> Option<&FolderImage> {
+    let covers = images.iter().filter(|image| !is_artist_image(&image.name));
+    let only = covers.clone().nth(1).is_none();
+    covers
+        .map(|image| (image_rank(&image.name), &image.path, image))
+        .min_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)))
+        .filter(|(rank, _, _)| *rank != usize::MAX || only)
+        .map(|(_, _, image)| image)
+}
+
+/// A folder's portrait of `artist`: one named for them, else a generic one when allowed.
+pub(crate) fn folder_portrait<'i>(
+    images: &'i [FolderImage],
+    artist: &str,
+    allow_generic: bool,
+) -> Option<&'i FolderImage> {
+    images
+        .iter()
+        .map(|image| {
+            (
+                artist_image_rank_for(&image.name, artist, allow_generic),
+                &image.path,
+                image,
+            )
+        })
+        .filter(|(rank, _, _)| *rank != usize::MAX)
+        .min_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)))
+        .map(|(_, _, image)| image)
 }
 
 pub(crate) fn is_artist_image(name: &str) -> bool {
@@ -297,8 +338,8 @@ impl<'a> ArtworkFiles<'a> {
         let catalog = observation.catalog;
         let source_id = observation.source_id;
         let distinct = catalog.distinct_track_covers();
-        // Folder lookups, shared by the pass: a folder's cover, and whether it holds one album.
-        let mut covers = HashMap::new();
+        // Folder lookups, shared by the pass: a folder's images, and whether it holds one album.
+        let mut listings = HashMap::new();
         let mut single = HashMap::new();
         let albums = catalog
             .source_artwork_albums(source_id, directories)
@@ -326,10 +367,12 @@ impl<'a> ArtworkFiles<'a> {
                         {
                             continue;
                         }
-                        cover = cached(&mut covers, &prefix, async {
-                            self.folder_image(catalog, source_id, &prefix, None).await
+                        let images = cached(&mut listings, &prefix, async {
+                            self.folder_images(catalog, source_id, &prefix).await
                         })
                         .await?;
+                        cover =
+                            folder_cover(&images).and_then(|image| self.image(source_id, image));
                         if cover.is_some() {
                             break 'tracks;
                         }
@@ -381,16 +424,21 @@ impl<'a> ArtworkFiles<'a> {
                 check_cancelled(cancelled)?;
                 let tracks = owned(&tracks, artist);
                 // Folder portraits in any folder above a track come before embedded pictures.
-                let mut portraits = HashMap::new();
+                let mut visited = HashSet::new();
                 let mut image = None;
                 'folders: for track in tracks {
                     check_cancelled(cancelled)?;
                     for prefix in self.directories(track)? {
-                        image = cached(&mut portraits, &prefix, async {
-                            self.directory_artist_image(catalog, source_id, &prefix, artist, name)
-                                .await
+                        if !visited.insert(prefix.clone()) {
+                            continue;
+                        }
+                        let images = cached(&mut listings, &prefix, async {
+                            self.folder_images(catalog, source_id, &prefix).await
                         })
                         .await?;
+                        image = self
+                            .directory_portrait(catalog, source_id, &prefix, &images, artist, name)
+                            .await?;
                         if image.is_some() {
                             break 'folders;
                         }
@@ -482,91 +530,58 @@ impl<'a> ArtworkFiles<'a> {
         }
     }
 
-    async fn folder_image(
+    async fn folder_images(
         &self,
         catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
-        artist: Option<&str>,
-    ) -> SourceResult<Option<LocalImageRef>> {
-        match self.for_path(prefix) {
+    ) -> SourceResult<Arc<[FolderImage]>> {
+        Ok(match self.for_path(prefix) {
+            Self::Local => local::artwork::directory_images(Path::new(prefix)),
+            Self::Documents | Self::Remote(_) => {
+                crate::file::remote::artwork::directory_images(catalog, source_id, prefix).await?
+            }
+        }
+        .into())
+    }
+
+    fn image(&self, source_id: &str, image: &FolderImage) -> Option<LocalImageRef> {
+        match self.for_path(&image.path) {
             Self::Local => {
-                let directory = Path::new(prefix);
-                let path = match artist {
-                    Some(name) => local::artwork::directory_artist_image_for(directory, name, true),
-                    None => local::artwork::directory_image(directory),
-                };
-                Ok(path.and_then(|path| {
-                    local::artwork::revision(&path)
-                        .map(|revision| local::artwork::file_reference(source_id, &path, revision))
-                }))
+                let path = Path::new(&image.path);
+                local::artwork::revision(path)
+                    .map(|revision| local::artwork::file_reference(source_id, path, revision))
             }
-            Self::Documents => {
-                crate::file::remote::artwork::directory_image_by_role(
-                    catalog,
-                    source_id,
-                    prefix,
-                    artist.map(|name| (name, true)),
-                )
-                .await
-            }
-            Self::Remote(source) => match artist {
-                Some(name) => {
-                    source
-                        .directory_artist_image_for(catalog, source_id, prefix, name, true)
-                        .await
-                }
-                None => source.directory_image(catalog, source_id, prefix).await,
-            },
+            Self::Documents | Self::Remote(_) => Some(LocalImageRef::File {
+                source_id: crate::SourceId::new(source_id),
+                path: image.path.clone(),
+                revision: image.revision.clone().unwrap_or_default(),
+            }),
         }
     }
 
-    async fn directory_artist_image(
+    /// A portrait of the artist in a folder: one named for them, or a generic one when every
+    /// track in the folder is theirs.
+    async fn directory_portrait(
         &self,
         catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
+        images: &[FolderImage],
         artist: &str,
         name: &str,
     ) -> SourceResult<Option<LocalImageRef>> {
-        let found = self
-            .folder_image(catalog, source_id, prefix, Some(name))
-            .await?;
-        if let Some(LocalImageRef::File { path, .. }) = &found {
-            let filename = match self.for_path(path) {
-                Self::Local => Path::new(path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-                Self::Documents => {
-                    let uri = url::Url::parse(path).map_err(|_| SourceError::NotFound)?;
-                    percent_encoding::percent_decode_str(
-                        uri.path().rsplit('/').next().unwrap_or_default(),
-                    )
-                    .decode_utf8()
-                    .map_err(|_| SourceError::NotFound)?
-                    .into_owned()
-                }
-                Self::Remote(source) => {
-                    let relative = source.relative(path)?;
-                    let relative = if source.document_access().is_some() {
-                        crate::file::documents::display_path(&relative)
-                    } else {
-                        relative
-                    };
-                    relative.rsplit('/').next().unwrap_or_default().to_string()
-                }
-            };
-            if artist_image_rank_for(&filename, name, false) == usize::MAX
-                && !catalog
-                    .source_artwork_directory_has_artist(source_id, prefix, artist)
-                    .await?
-            {
-                return Ok(None);
-            }
+        let Some(found) = folder_portrait(images, name, true) else {
+            return Ok(None);
+        };
+        if artist_image_rank_for(&found.name, name, false) == usize::MAX
+            && !catalog
+                .source_artwork_directory_has_artist(source_id, prefix, artist)
+                .await?
+        {
+            return Ok(None);
         }
-        Ok(found)
+        Ok(self.image(source_id, found))
     }
 
     fn embedded_file_images(
