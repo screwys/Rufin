@@ -618,6 +618,7 @@ async fn icon(
         icon!("rufin-folders-symbolic.svg"),
         icon!("rufin-music-queue-symbolic.svg"),
         icon!("rufin-network-server-symbolic.svg"),
+        icon!("rufin-phonelink-symbolic.svg"),
         icon!("rufin-list-add-symbolic.svg"),
         icon!("rufin-list-remove-symbolic.svg"),
         icon!("rufin-view-refresh-symbolic.svg"),

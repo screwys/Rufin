@@ -27,6 +27,11 @@ function sourceIcon(kind) {
     node.classList.add("source-icon");
     return node;
   }
+  if (kind === "peer") {
+    const node = icon("device");
+    node.classList.add("source-icon");
+    return node;
+  }
   if (
     ![
       "jellyfin",

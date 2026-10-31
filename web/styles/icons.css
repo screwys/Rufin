@@ -46,6 +46,10 @@
   mask-image: url("/icons/rufin-network-server-symbolic.svg");
 }
 
+.icon[data-icon="device"] {
+  mask-image: url("/icons/rufin-phonelink-symbolic.svg");
+}
+
 .icon[data-icon="add"] {
   mask-image: url("/icons/rufin-list-add-symbolic.svg");
 }
