@@ -13,6 +13,7 @@ use std::time::Instant;
 use adw::prelude::*;
 use gtk::glib;
 use library::SourceKey;
+use localization::{msgid, tr};
 use sources::SourceId;
 use tracing::{debug, warn};
 
@@ -645,6 +646,9 @@ impl Shell {
             message: gtk::Label,
             refresh: gtk::Button,
         });
+        if matches!(route, Route::Folders { .. }) {
+            message.set_text(&tr(msgid("Couldn't load this folder")));
+        }
         let keep_content = self
             .route_viewport
             .mounted_route
