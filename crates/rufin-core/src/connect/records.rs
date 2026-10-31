@@ -1296,9 +1296,19 @@ impl Records {
             let (ready, waiting) = self.parents(kind, rows, settle).await?;
             held.extend(waiting);
             let rows = ready.iter().map(|(_, row)| row).collect::<Vec<_>>();
-            match self.apply_kind(kind, &rows).await {
-                Ok(()) => applied.extend(ready.into_iter().map(|(_, row)| row)),
-                Err(error) => tracing::warn!(%error, kind, "Connect could not apply records"),
+            if self.apply_kind(kind, &rows).await.is_ok() {
+                applied.extend(ready.into_iter().map(|(_, row)| row));
+                continue;
+            }
+            // One failing row must not lose the others: the sender records an unchanged
+            // value only once.
+            for (_, row) in ready {
+                match self.apply_kind(kind, &[&row]).await {
+                    Ok(()) => applied.push(row),
+                    Err(error) => {
+                        tracing::warn!(%error, id = row.id, "Connect could not apply a record");
+                    }
+                }
             }
         }
         Ok((applied, held))
