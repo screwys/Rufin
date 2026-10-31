@@ -591,8 +591,13 @@ impl Records {
         if !lyrics.is_empty() {
             lyrics.sort_unstable();
             lyrics.dedup();
-            let objects = self.portable_all(lyrics).await?;
-            written.extend(self.compare_ids("lyrics", objects).await?);
+            let portable = self.portable(&lyrics).await?;
+            let ids = lyrics
+                .iter()
+                .map(|uri| format!("lyrics:{}", portable.get(uri).unwrap_or(uri)))
+                .collect::<Vec<_>>();
+            let items = self.lyrics_items(Some(&lyrics), Some(portable)).await?;
+            written.extend(self.diff(items, Select::Ids(&ids), true).await?);
         }
         for key in entries {
             written.extend(self.playlist_entry_changes(key).await?);
@@ -754,13 +759,8 @@ impl Records {
         let mut items = match kind {
             "state" => match objects {
                 Some(objects) => {
-                    let local = self.local(objects).await?;
-                    let uris = objects
-                        .iter()
-                        .map(|uri| local.get(uri).unwrap_or(uri).clone())
-                        .collect::<Vec<_>>();
-                    let named = local.into_iter().map(|(portable, uri)| (uri, portable));
-                    self.state_items(Some(&uris), Some(named.collect())).await?
+                    let (uris, portable) = self.local_named(objects).await?;
+                    self.state_items(Some(&uris), Some(portable)).await?
                 }
                 None => self.state_items(None, None).await?,
             },
@@ -781,13 +781,13 @@ impl Records {
                     .transpose()?;
                 self.legacy_items(keys.as_deref()).await?
             }
-            "lyrics" => {
-                let uris = match objects {
-                    Some(objects) => Some(self.local_all(objects).await?),
-                    None => None,
-                };
-                self.lyrics_items(uris.as_deref()).await?
-            }
+            "lyrics" => match objects {
+                Some(objects) => {
+                    let (uris, portable) = self.local_named(objects).await?;
+                    self.lyrics_items(Some(&uris), Some(portable)).await?
+                }
+                None => self.lyrics_items(None, None).await?,
+            },
             "folder" => self.folder_items().await?,
             "playlist" => self.playlist_items().await?,
             "entry" => self.entry_items(None, objects).await?,
@@ -867,6 +867,25 @@ impl Records {
             .into_iter()
             .filter_map(|(source, object, track)| Some((named.remove(&(source, object))?, track)))
             .collect())
+    }
+
+    /// This device's URI of each portable URI, and the portable URI of each one that differs.
+    async fn local_named(
+        &self,
+        uris: &[String],
+    ) -> Result<(Vec<String>, HashMap<String, String>), String> {
+        let local = self.local(uris).await?;
+        let named = uris
+            .iter()
+            .map(|uri| local.get(uri).unwrap_or(uri).clone())
+            .collect();
+        Ok((
+            named,
+            local
+                .into_iter()
+                .map(|(portable, uri)| (uri, portable))
+                .collect(),
+        ))
     }
 
     pub(super) async fn local_all(&self, uris: &[String]) -> Result<Vec<String>, String> {
@@ -987,8 +1006,13 @@ impl Records {
             .collect()
     }
 
-    /// The lyrics people picked, by track.
-    async fn lyrics_items(&self, uris: Option<&[String]>) -> Result<Vec<Item>, String> {
+    /// The lyrics people picked, by track. `portable` names the requested URIs when the caller
+    /// already looked them up.
+    async fn lyrics_items(
+        &self,
+        uris: Option<&[String]>,
+        portable: Option<HashMap<String, String>>,
+    ) -> Result<Vec<Item>, String> {
         let mut tracks = BTreeMap::<String, Vec<LyricsValue>>::new();
         for row in self.catalog.picked_lyrics(uris).await.map_err(error)? {
             tracks.entry(row.media_uri).or_default().push(LyricsValue {
@@ -999,9 +1023,13 @@ impl Records {
                 lyrics: row.lyrics,
             });
         }
-        let portable = self
-            .portable(&tracks.keys().cloned().collect::<Vec<_>>())
-            .await?;
+        let portable = match portable {
+            Some(portable) => portable,
+            None => {
+                self.portable(&tracks.keys().cloned().collect::<Vec<_>>())
+                    .await?
+            }
+        };
         tracks
             .into_iter()
             .map(|(uri, rows)| {

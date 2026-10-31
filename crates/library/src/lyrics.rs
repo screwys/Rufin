@@ -114,8 +114,7 @@ async fn put_lyrics_on(
     write: &mut Write<'_>,
     rows: &[LyricsCacheRow],
     replace: &str,
-) -> LibraryResult<Vec<String>> {
-    let mut written = Vec::new();
+) -> LibraryResult<()> {
     for row in rows {
         if row.authority.is_empty()
             || row.role.is_empty()
@@ -146,13 +145,18 @@ async fn put_lyrics_on(
         if let Some(key) = key {
             unindex_lyrics(connection, &[key]).await?;
             index_lyrics(connection, key, &row.lyrics).await?;
-            write.changed(crate::Scope::Lyrics {
-                uri: row.media_uri.clone(),
-            });
-            written.push(row.media_uri.clone());
+            // A row written without the mark never replaced a picked one, and no client shows
+            // the cache as it changes.
+            if row.picked {
+                write.changed(crate::Scope::Lyrics {
+                    uri: row.media_uri.clone(),
+                });
+            } else {
+                write.keep();
+            }
         }
     }
-    Ok(written)
+    Ok(())
 }
 
 /// Deletes the rows a condition names, with their search documents.
@@ -162,8 +166,8 @@ async fn remove_lyrics_on(
     binds: &[&str],
 ) -> LibraryResult<u64> {
     let connection = write.connection().await?;
-    let mut query = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!(
-        "DELETE FROM lyrics_cache WHERE {condition} RETURNING lyrics_key,media_uri"
+    let mut query = sqlx::query_as::<_, (i64, String, bool)>(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM lyrics_cache WHERE {condition} RETURNING lyrics_key,media_uri,picked"
     )));
     for bind in binds {
         query = query.bind(*bind);
@@ -171,10 +175,17 @@ async fn remove_lyrics_on(
     let removed = query.fetch_all(&mut *connection).await?;
     unindex_lyrics(
         connection,
-        &removed.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+        &removed.iter().map(|(key, ..)| *key).collect::<Vec<_>>(),
     )
     .await?;
-    let mut uris = removed.iter().map(|(_, uri)| uri).collect::<Vec<_>>();
+    if !removed.is_empty() {
+        write.keep();
+    }
+    let mut uris = removed
+        .iter()
+        .filter(|(.., picked)| *picked)
+        .map(|(_, uri, _)| uri)
+        .collect::<Vec<_>>();
     uris.sort_unstable();
     uris.dedup();
     for uri in uris {
@@ -235,17 +246,18 @@ pub(crate) async fn move_lyrics_on(
     to: &str,
 ) -> LibraryResult<()> {
     let connection = write.connection().await?;
-    let copied: Vec<(i64, String)> = sqlx::query_as("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at,picked) SELECT ?2,authority,role,language,script,lyrics,updated_at,picked FROM lyrics_cache WHERE media_uri=?1 ORDER BY lyrics_key ON CONFLICT DO NOTHING RETURNING lyrics_key,lyrics")
+    let copied: Vec<(i64, String, bool)> = sqlx::query_as("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,lyrics,updated_at,picked) SELECT ?2,authority,role,language,script,lyrics,updated_at,picked FROM lyrics_cache WHERE media_uri=?1 ORDER BY lyrics_key ON CONFLICT DO NOTHING RETURNING lyrics_key,lyrics,picked")
         .bind(from)
         .bind(to)
         .fetch_all(&mut *connection)
         .await?;
-    for (key, payload) in &copied {
+    for (key, payload, _) in &copied {
         index_lyrics(connection, *key, payload).await?;
     }
-    if remove_lyrics_on(write, "media_uri=?1", &[from]).await? > 0 {
+    if copied.iter().any(|(.., picked)| *picked) {
         write.changed(crate::Scope::Lyrics { uri: to.to_owned() });
     }
+    remove_lyrics_on(write, "media_uri=?1", &[from]).await?;
     Ok(())
 }
 

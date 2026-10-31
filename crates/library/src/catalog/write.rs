@@ -92,6 +92,7 @@ pub enum Scope {
     Downloads {
         uris: Vec<String>,
     },
+    /// The lyrics a person picked for this track changed.
     Lyrics {
         uri: String,
     },
