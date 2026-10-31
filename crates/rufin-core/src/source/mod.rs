@@ -127,7 +127,6 @@ pub(crate) struct Shared {
     playlist_edits: Mutex<HashMap<library::PlaylistKey, Arc<tokio::sync::Mutex<()>>>>,
     playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
-    /// Commits preference edits so their effects run like any other writer's.
     pub(crate) started: AtomicBool,
 }
 
