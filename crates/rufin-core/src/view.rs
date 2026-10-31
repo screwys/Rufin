@@ -174,9 +174,9 @@ impl SourceOwner {
         .await
     }
 
-    /// Everything `route` lists, for playing, queueing or downloading it whole, without
-    /// reading its rows or header. None when the route lists nothing or its collection is
-    /// gone or empty.
+    /// Everything `route` lists, in the order and filter `options` ask, for playing, queueing or
+    /// downloading it whole, without reading its rows or header. None when the route lists nothing
+    /// or its collection is gone or empty.
     pub async fn selection(
         &self,
         route: &Route,
@@ -190,7 +190,6 @@ impl SourceOwner {
             .await?;
         Ok(Some(match plan {
             Plan::Rows(Read::Members(read)) | Plan::Folders { tracks: read, .. } => {
-                let read = whole(route, read);
                 // A tag page with no tracks reads as missing.
                 if matches!(header, Some(HeaderKey::Genre(_) | HeaderKey::Mood(_)))
                     && self
@@ -914,10 +913,11 @@ impl View {
         }
     }
 
-    /// Everything the page lists, for playing or queueing it whole.
+    /// Everything the page lists, in the order and filter it shows, for playing or queueing it
+    /// whole.
     pub fn selection(&self) -> Option<MemberSelection> {
         if let Some(read) = self.members() {
-            return Some(whole(&self.route, read.clone()).selection());
+            return Some(read.clone().selection());
         }
         match &self.body {
             Body::Rows {
@@ -1353,19 +1353,6 @@ fn favorites_only(route: &Route, options: &OpenOptions) -> bool {
             route,
             Route::Favorites | Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
         )
-}
-
-/// `read` as the whole page plays: in its collection's own order and, unless it is a Smart
-/// Playlist, in every music folder. Folders play as they list.
-fn whole(route: &Route, mut read: MemberRead) -> MemberRead {
-    if !matches!(route, Route::Folders { .. }) {
-        if !matches!(read.collection, Collection::Smart { .. }) {
-            read.folder = None;
-        }
-        read.sort = None;
-        read.descending = false;
-    }
-    read
 }
 
 /// How `route` reads the members of `collection`.
