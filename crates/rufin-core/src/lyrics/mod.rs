@@ -28,7 +28,7 @@ pub use events::{CurrentLyrics, CurrentLyricsContent, LyricsEvent};
 #[derive(Clone)]
 pub struct LyricsContext {
     pub media: Arc<CurrentMedia>,
-    /// Where the media's audio is, once playback resolved it.
+    /// Where the media's audio is, read once per current media.
     pub playable: Option<Arc<library::Playable>>,
 }
 
@@ -179,10 +179,14 @@ impl LyricsService {
         }
     }
 
-    pub fn set_current(self: &Arc<Self>, context: Option<LyricsContext>) {
-        let Some(mut context) = context else {
+    pub fn set_current(self: &Arc<Self>, media: Option<Arc<CurrentMedia>>) {
+        let Some(media) = media else {
             self.clear();
             return;
+        };
+        let mut context = LyricsContext {
+            media,
+            playable: None,
         };
         let (event, write_check) =
             {
@@ -194,9 +198,7 @@ impl LyricsService {
                     current.context.media.id.media_uri == context.media.id.media_uri
                 }) {
                     let media_changed = current.context.media.id != context.media.id;
-                    if context.playable.is_none() {
-                        context.playable = current.context.playable.take();
-                    }
+                    context.playable = current.context.playable.take();
                     let write_check = media_changed.then(|| context.clone());
                     current.context = context;
                     (media_changed.then(|| current_event(current)), write_check)
@@ -222,14 +224,13 @@ impl LyricsService {
         if let Some(event) = event {
             self.publish(event);
         }
-        // Writability is read from the playable, which playback resolves for every track it plays.
-        if let Some(context) = write_check.filter(|context| context.playable.is_some()) {
+        if let Some(context) = write_check {
             self.check_write_access(context);
         }
     }
 
-    /// The playable of the media: what playback resolved, else one read by key, which the
-    /// current media then keeps.
+    /// The playable of the media: the one the current media keeps, else one read by key, which
+    /// the current media then keeps.
     async fn playable(self: &Arc<Self>, context: &LyricsContext) -> Option<Arc<library::Playable>> {
         let kept = self
             .state
@@ -248,29 +249,20 @@ impl LyricsService {
                 .await
                 .ok()??,
         );
-        self.playable_resolved(Arc::clone(&playable));
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(current) = state.current.as_mut().filter(|current| {
+            current.context.playable.is_none()
+                && current.context.media.id.media_uri == context.media.id.media_uri
+        }) {
+            current.context.playable = Some(Arc::clone(&playable));
+        }
         Some(playable)
     }
 
-    /// Playback resolved a track; the current media takes its playable.
-    pub fn playable_resolved(self: &Arc<Self>, playable: Arc<library::Playable>) {
-        let context = {
-            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            let Some(current) = state.current.as_mut().filter(|current| {
-                current.context.playable.is_none()
-                    && current.context.media.row.track.track_key == playable.track
-            }) else {
-                return;
-            };
-            current.context.playable = Some(playable);
-            current.context.clone()
-        };
-        self.check_write_access(context);
-    }
-
-    fn check_write_access(self: &Arc<Self>, context: LyricsContext) {
+    fn check_write_access(self: &Arc<Self>, mut context: LyricsContext) {
         let service = Arc::clone(self);
         self.runtime.spawn(async move {
+            context.playable = service.playable(&context).await;
             let sidecar = service
                 .state
                 .lock()
@@ -828,7 +820,8 @@ impl LyricsService {
         }
     }
 
-    async fn write_lyrics_to_source(&self, target: LyricsWriteTarget) {
+    async fn write_lyrics_to_source(self: &Arc<Self>, mut target: LyricsWriteTarget) {
+        target.context.playable = self.playable(&target.context).await;
         let (Some(source), Some(playable)) = (
             self.source(&target.context).await,
             target.context.playable.clone(),
@@ -1869,33 +1862,30 @@ mod tests {
                 run: None,
                 media_uri: media_uri.as_str().into(),
             };
-            service.set_current(Some(LyricsContext {
-                media: Arc::new(CurrentMedia {
-                    stream: None,
-                    id: media_id.clone(),
-                    row: Arc::new(library::QueueRow {
-                        occurrence_id: None,
-                        track: library::TrackView {
-                            track_key: library::TrackKey::from_raw(1),
-                            source_key: None,
-                            source_id: None,
-                            object_id: None,
-                            media_uri: media_uri.to_string(),
-                            metadata: library::TrackReference::direct(
-                                media_uri, title, "Artist", "Album", 3_000,
-                            )
-                            .metadata,
-                            state: Default::default(),
-                            access: Default::default(),
-                            links: Default::default(),
-                            artwork_binding: None,
-                        },
-                        position: index,
-                        provenance: playback::Provenance::Manual,
-                    }),
+            service.set_current(Some(Arc::new(CurrentMedia {
+                stream: None,
+                id: media_id.clone(),
+                row: Arc::new(library::QueueRow {
+                    occurrence_id: None,
+                    track: library::TrackView {
+                        track_key: library::TrackKey::from_raw(1),
+                        source_key: None,
+                        source_id: None,
+                        object_id: None,
+                        media_uri: media_uri.to_string(),
+                        metadata: library::TrackReference::direct(
+                            media_uri, title, "Artist", "Album", 3_000,
+                        )
+                        .metadata,
+                        state: Default::default(),
+                        access: Default::default(),
+                        links: Default::default(),
+                        artwork_binding: None,
+                    },
+                    position: index,
+                    provenance: playback::Provenance::Manual,
                 }),
-                playable: None,
-            }));
+            })));
             service.handle().load(media_id.clone());
             let document = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 loop {
@@ -1988,33 +1978,30 @@ mod tests {
             run: None,
             media_uri: cue_uri.clone(),
         };
-        service.set_current(Some(LyricsContext {
-            media: Arc::new(CurrentMedia {
-                stream: None,
-                id: cue_media_id.clone(),
-                row: Arc::new(library::QueueRow {
-                    occurrence_id: None,
-                    track: library::TrackView {
-                        track_key: library::TrackKey::from_raw(1),
-                        source_key: None,
-                        source_id: None,
-                        object_id: None,
-                        media_uri: cue_uri.clone(),
-                        metadata: library::TrackReference::direct(
-                            &cue_uri, "Segment", "Artist", "Album", 2_000,
-                        )
-                        .metadata,
-                        state: Default::default(),
-                        access: Default::default(),
-                        links: Default::default(),
-                        artwork_binding: None,
-                    },
-                    position: 0,
-                    provenance: playback::Provenance::Manual,
-                }),
+        service.set_current(Some(Arc::new(CurrentMedia {
+            stream: None,
+            id: cue_media_id.clone(),
+            row: Arc::new(library::QueueRow {
+                occurrence_id: None,
+                track: library::TrackView {
+                    track_key: library::TrackKey::from_raw(1),
+                    source_key: None,
+                    source_id: None,
+                    object_id: None,
+                    media_uri: cue_uri.clone(),
+                    metadata: library::TrackReference::direct(
+                        &cue_uri, "Segment", "Artist", "Album", 2_000,
+                    )
+                    .metadata,
+                    state: Default::default(),
+                    access: Default::default(),
+                    links: Default::default(),
+                    artwork_binding: None,
+                },
+                position: 0,
+                provenance: playback::Provenance::Manual,
             }),
-            playable: None,
-        }));
+        })));
         service.handle().load(cue_media_id.clone());
         let document = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {

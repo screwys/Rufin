@@ -40,7 +40,7 @@ use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 
 use crate::loudness::LoudnessAnalysisOwner;
-use crate::lyrics::{LyricsContext, LyricsService};
+use crate::lyrics::LyricsService;
 use crate::settings::SettingsFile;
 use crate::source::SourceOwner;
 use crate::waveform::{WaveformMedia, WaveformOwner};
@@ -79,24 +79,6 @@ pub struct PlaybackOwner {
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
     plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
     rufin: Mutex<Option<Arc<connect::RufinPlayback>>>,
-    /// The playables resolved last, current and next among them, for the lyrics of the track
-    /// that becomes current.
-    playables: Arc<Mutex<std::collections::VecDeque<Arc<library::Playable>>>>,
-}
-
-/// How many resolved playables the owner keeps.
-const KEPT_PLAYABLES: usize = 4;
-
-fn keep_playable(
-    kept: &Mutex<std::collections::VecDeque<Arc<library::Playable>>>,
-    playable: &Arc<library::Playable>,
-) {
-    let mut kept = kept.lock().unwrap_or_else(|p| p.into_inner());
-    kept.retain(|kept| kept.track != playable.track);
-    if kept.len() == KEPT_PLAYABLES {
-        kept.pop_front();
-    }
-    kept.push_back(Arc::clone(playable));
 }
 
 enum PlaybackStoreWork {
@@ -224,7 +206,6 @@ impl PlaybackOwner {
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
-            playables: Arc::default(),
         });
         let weak = Arc::downgrade(&owner);
         // The queue restores after the Catalog loaded, so the first full pass has nothing to
@@ -499,8 +480,6 @@ impl PlaybackOwner {
         request: StreamRequest,
     ) -> tokio::task::JoinHandle<()> {
         let catalog = Arc::clone(&self.catalog);
-        let playables = Arc::clone(&self.playables);
-        let lyrics = Arc::clone(&self.lyrics);
         let source_owner = self.source_owner();
         let local = self.settings.local_configuration();
         self.runtime.spawn(async move {
@@ -518,8 +497,6 @@ impl PlaybackOwner {
                     return;
                 }
             };
-            keep_playable(&playables, &playable);
-            lyrics.playable_resolved(Arc::clone(&playable));
             let downloads = source_owner.as_ref().map(|owner| owner.downloads().clone());
             let result = prepare_stream(
                 &playable,
@@ -543,15 +520,6 @@ impl PlaybackOwner {
                 Err(error) => player.stream_failed(run, error, sample),
             });
         })
-    }
-
-    fn kept_playable(&self, track: library::TrackKey) -> Option<Arc<library::Playable>> {
-        self.playables
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .iter()
-            .find(|kept| kept.track == track)
-            .cloned()
     }
 
     pub(crate) fn waveform_setting_changed(&self, enabled: bool) {
@@ -651,13 +619,7 @@ impl PlaybackOwner {
             .as_ref()
             .map(|media| self.waveform_media(Arc::clone(media)));
         self.waveform.current_changed(waveform);
-        let Some(media) = media else {
-            self.lyrics.set_current(None);
-            return;
-        };
-        let playable = self.kept_playable(media.row.track.track_key);
-        self.lyrics
-            .set_current(Some(LyricsContext { media, playable }));
+        self.lyrics.set_current(media);
     }
 
     fn waveform_media(&self, media: Arc<playback::CurrentMedia>) -> WaveformMedia {
