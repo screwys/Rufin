@@ -49,23 +49,33 @@ fn install_grid_favorite<T: 'static>(
     current: &Rc<RefCell<Option<T>>>,
     button: &gtk::Button,
     target: impl Fn(&T) -> FavoriteTarget + 'static,
-    key: impl Fn(&T) -> FavoriteControlKey + 'static,
 ) {
-    let target = Rc::new(target);
     let click_shell = Rc::downgrade(shell);
     let click_current = Rc::clone(current);
-    let click_target = Rc::clone(&target);
     button.connect_clicked(move |button| {
         let Some(shell) = click_shell.upgrade() else {
             return;
         };
         let current = click_current.borrow();
         let Some(row) = current.as_ref() else { return };
-        shell.set_favorite(click_target(row), !favorite_button_is_active(button));
+        shell.set_favorite(target(row), !favorite_button_is_active(button));
     });
-    let favorite_current = Rc::clone(current);
+}
+
+/// Keeps a card's heart showing committed favorites of the row it holds, for cards bound
+/// outside a page model that shows them in its rows.
+fn follow_card_favorite<T: 'static>(
+    shell: &std::rc::Weak<CatalogUi>,
+    current: &Rc<RefCell<Option<T>>>,
+    button: &gtk::Button,
+    key: impl Fn(&T) -> FavoriteControlKey + 'static,
+) {
+    let Some(shell) = shell.upgrade() else {
+        return;
+    };
+    let current = Rc::downgrade(current);
     shell.register_dynamic_favorite_button(
-        Rc::new(move || favorite_current.borrow().as_ref().map(&key)),
+        Rc::new(move || current.upgrade()?.borrow().as_ref().map(&key)),
         button,
     );
 }
@@ -660,6 +670,13 @@ pub struct TrackGridCell<T: gtk_widgets::library_fields::TrackPresentation = lib
 }
 
 impl<T: gtk_widgets::library_fields::TrackPresentation> TrackGridCell<T> {
+    /// Shows committed favorites on a card no page model shows them in.
+    pub(crate) fn follow_favorites(&self) {
+        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
+            track_favorite_key(row.media_uri())
+        });
+    }
+
     pub fn new(
         shell: &Rc<CatalogUi>,
         fields: &[LibraryField],
@@ -715,13 +732,9 @@ impl<T: gtk_widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                 }
             });
         }
-        install_grid_favorite(
-            shell,
-            &current,
-            &favorite,
-            |row| FavoriteTarget::Track(row.media_uri().to_string()),
-            |row| track_favorite_key(row.media_uri()),
-        );
+        install_grid_favorite(shell, &current, &favorite, |row| {
+            FavoriteTarget::Track(row.media_uri().to_string())
+        });
         let drag_current = Rc::clone(&current);
         let drag_artwork = cover.drag_paintable_source();
         install_compact_media_drag_source(&body.card, &drag_artwork, move || {
@@ -814,6 +827,13 @@ impl AlbumGridCell {
         self.body.set_play_count_caption(count);
     }
 
+    /// Shows committed favorites on a card no page model shows them in.
+    pub(crate) fn follow_favorites(&self) {
+        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
+            album_favorite_key(&row.media_uri)
+        });
+    }
+
     pub fn enable_card_activation(&self) {
         let click = gtk::GestureClick::new();
         click.set_button(1);
@@ -890,13 +910,9 @@ impl AlbumGridCell {
                 );
             },
         );
-        install_grid_favorite(
-            shell,
-            &current,
-            &favorite,
-            |row| FavoriteTarget::Album(row.media_uri.clone()),
-            |row| album_favorite_key(&row.media_uri),
-        );
+        install_grid_favorite(shell, &current, &favorite, |row| {
+            FavoriteTarget::Album(row.media_uri.clone())
+        });
         body.set_download_badge(shell.downloads.download_badge(true));
         Self {
             body,
@@ -921,6 +937,13 @@ pub struct ArtistGridCell {
 impl ArtistGridCell {
     pub(crate) fn set_play_count_caption(&self, count: i64) {
         self.body.set_play_count_caption(count);
+    }
+
+    /// Shows committed favorites on a card no page model shows them in.
+    pub(crate) fn follow_favorites(&self) {
+        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
+            artist_favorite_key(&row.media_uri)
+        });
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], album_artist: bool) -> Self {
@@ -980,13 +1003,9 @@ impl ArtistGridCell {
                 (shell.media_menus.play_target)(&target, placement, false);
             },
         );
-        install_grid_favorite(
-            shell,
-            &current,
-            &favorite,
-            |row| FavoriteTarget::Artist(row.media_uri.clone()),
-            |row| artist_favorite_key(&row.media_uri),
-        );
+        install_grid_favorite(shell, &current, &favorite, |row| {
+            FavoriteTarget::Artist(row.media_uri.clone())
+        });
         body.set_download_badge(shell.downloads.download_badge(true));
         Self {
             body,

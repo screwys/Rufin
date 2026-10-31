@@ -1343,15 +1343,6 @@ impl AlbumTrackSlot {
                     LibraryField::Favorite => {
                         let button = row_favorite_icon_button("Favorite track");
                         install_context_menu_openers(&button, Rc::clone(&menu));
-                        let row = Rc::downgrade(&current);
-                        shell.register_dynamic_favorite_button(
-                            Rc::new(move || {
-                                Some(gtk_widgets::favorites::track_favorite_key(
-                                    &row.upgrade()?.borrow().as_ref()?.media_uri,
-                                ))
-                            }),
-                            &button,
-                        );
                         let row = Rc::clone(&current);
                         let favorite_shell = Rc::downgrade(shell);
                         button.connect_clicked(move |button| {

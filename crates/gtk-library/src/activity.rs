@@ -147,6 +147,7 @@ impl ActivityCollections {
         );
         for (position, row) in data.artists.iter().take(limit).enumerate() {
             let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount], false);
+            cell.follow_favorites();
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::cards::collection_grid_card_inset(&cell.widget(), 120);
@@ -155,6 +156,7 @@ impl ActivityCollections {
         }
         for (position, row) in data.albums.iter().take(limit).enumerate() {
             let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount], None);
+            cell.follow_favorites();
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::cards::collection_grid_card_inset(&cell.widget(), 120);

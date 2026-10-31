@@ -13,8 +13,8 @@ use crate::{LibraryField, LibraryListKey};
 use gtk_media_menus::media_menus::{present_album_context_menu, present_artist_context_menu};
 use gtk_widgets::artwork::ArtworkTile;
 use gtk_widgets::favorites::{
-    FAVORITE_COLUMN_WIDTH, album_favorite_key, artist_favorite_key, favorite_button_is_active,
-    row_favorite_icon_button, set_favorite_button_active, track_favorite_key,
+    FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active,
 };
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::localization::localized_column;
@@ -317,18 +317,6 @@ impl AlbumTableCell {
             }
             LibraryField::Favorite => {
                 let button = row_favorite_icon_button("Favorite album");
-                let weak = cell.downgrade();
-                shell.register_dynamic_favorite_button(
-                    Rc::new(move || {
-                        weak.upgrade()?
-                            .imp()
-                            .row
-                            .borrow()
-                            .as_ref()
-                            .map(|row| album_favorite_key(&row.media_uri))
-                    }),
-                    &button,
-                );
                 let weak = cell.downgrade();
                 button.connect_clicked(move |button| {
                     let Some(cell) = weak.upgrade() else {
@@ -1512,17 +1500,6 @@ pub fn artist_actions_column(
             return;
         };
         set_placeholder_favorite(&button, None);
-        let favorite_item = item.downgrade();
-        shell.register_dynamic_favorite_button(
-            Rc::new(move || {
-                favorite_item.upgrade()?.item().and_then(|object| {
-                    object_item::<ArtistRow, _>(object, |artist| {
-                        artist_favorite_key(&artist.media_uri)
-                    })
-                })
-            }),
-            &button,
-        );
         let favorite_shell = Rc::clone(&shell);
         let click_item = item.downgrade();
         button.connect_clicked(move |button| {
@@ -1596,21 +1573,6 @@ where
             return;
         };
         set_placeholder_favorite(&button, None);
-        let favorite_item = item.downgrade();
-        let favorite_key_value = Rc::clone(&setup_favorite_value);
-        setup_shell.register_dynamic_favorite_button(
-            Rc::new(move || {
-                favorite_item
-                    .upgrade()?
-                    .item()
-                    .and_then(|object| {
-                        object_item::<T, _>(object, |value| favorite_key_value(value))
-                    })
-                    .flatten()
-                    .map(|(track, _)| track_favorite_key(&track))
-            }),
-            &button,
-        );
         let favorite_shell = Rc::clone(&setup_shell);
         let click_item = item.downgrade();
         let click_favorite_value = Rc::clone(&setup_favorite_value);

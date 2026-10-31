@@ -1,7 +1,7 @@
 use gtk_widgets::media_drag::{
     MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider,
 };
-use gtk_widgets::sparse_model::{item_at_from_item, object_item};
+use gtk_widgets::sparse_model::item_at_from_item;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -12,9 +12,7 @@ use localization::msgid;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
-use gtk_widgets::favorites::{
-    favorite_button_is_active, set_favorite_button_active, track_favorite_key,
-};
+use gtk_widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::localization::{bind_search_placeholder, localized_column};
 
@@ -401,15 +399,6 @@ fn playlist_entry_actions_column(
         let Some(button) = gtk_widgets::recycled_cells::row_favorite_button(item) else {
             return;
         };
-        let favorite_item = item.downgrade();
-        setup_shell.register_dynamic_favorite_button(
-            Rc::new(move || {
-                favorite_item.upgrade()?.item().and_then(|object| {
-                    object_item::<TrackRow, _>(object, |entry| track_favorite_key(&entry.media_uri))
-                })
-            }),
-            &button,
-        );
         let click_shell = Rc::clone(&setup_shell);
         let click_current = current;
         button.connect_clicked(move |button| {

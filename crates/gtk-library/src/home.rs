@@ -549,11 +549,9 @@ impl CatalogUi {
             .as_ref()
             .expect("Home album has a Favorite cover control")
             .clone();
-        let favorite_key = album.media_uri.clone();
         for button in [favorite, hover_favorite] {
-            let favorite_key = favorite_key.clone();
-            self.register_dynamic_favorite_button(
-                Rc::new(move || Some(gtk_widgets::favorites::album_favorite_key(&favorite_key))),
+            self.register_favorite_button(
+                gtk_widgets::favorites::album_favorite_key(&album.media_uri),
                 &button,
             );
             let favorite_shell = Rc::clone(self);
@@ -701,6 +699,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 TrackPresentation::links(track, field)
             });
             let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
+            cell.follow_favorites();
             cell.bind(0, track);
             (
                 cell.widget(),
@@ -717,6 +716,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let mut album = item.album;
             album.title = item.title;
             let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
+            cell.follow_favorites();
             cell.bind(0, album);
             (
                 cell.widget(),
