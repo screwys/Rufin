@@ -15,8 +15,8 @@ use super::Shared;
 struct Picks {
     /// The incomplete owners.
     wanted: HashSet<MosaicOwner>,
-    /// The revision of the feature's own last commit, which it does not hear again.
-    own: Option<u64>,
+    /// The revisions of the feature's own last commits, which it does not hear again.
+    own: Vec<u64>,
 }
 
 pub(super) fn follow(shared: &Arc<Shared>) {
@@ -33,13 +33,13 @@ async fn pick(shared: Arc<Shared>, state: Arc<Mutex<Picks>>, changes: Option<Vec
     let catalog = &shared.catalog;
     let (mut wanted, own) = {
         let mut picks = state.lock().unwrap_or_else(|p| p.into_inner());
-        (std::mem::take(&mut picks.wanted), picks.own)
+        (std::mem::take(&mut picks.wanted), picks.own.clone())
     };
     // Whether smart playlists, whose members follow plays and dates, are picked again.
     let (mut listed, mut smart) = (changes.is_none(), changes.is_none());
     let mut picks = HashSet::new();
     for change in changes.iter().flatten() {
-        if Some(change.revision) != own {
+        if !own.contains(&change.revision) {
             members_changed(
                 catalog,
                 change,
@@ -68,12 +68,12 @@ async fn pick(shared: Arc<Shared>, state: Arc<Mutex<Picks>>, changes: Option<Vec
         }
     }
     picks.retain(|owner| wanted.contains(owner));
-    let mut own = None;
+    let mut own = Vec::new();
     if !picks.is_empty() {
         let owners = picks.into_iter().collect::<Vec<_>>();
         match catalog.pick_mosaics(&owners).await {
-            Ok((incomplete, revision)) => {
-                own = revision;
+            Ok((incomplete, revisions)) => {
+                own = revisions;
                 for owner in owners {
                     if !incomplete.contains(&owner) {
                         wanted.remove(&owner);
@@ -85,7 +85,7 @@ async fn pick(shared: Arc<Shared>, state: Arc<Mutex<Picks>>, changes: Option<Vec
     }
     let mut picks = state.lock().unwrap_or_else(|p| p.into_inner());
     picks.wanted = wanted;
-    if own.is_some() {
+    if !own.is_empty() {
         picks.own = own;
     }
 }

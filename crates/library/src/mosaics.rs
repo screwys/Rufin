@@ -8,6 +8,8 @@ use crate::catalog::write::Scope;
 use crate::{Catalog, Collection, LibraryResult, PlaylistKey, SmartPlaylistKey, TrackKey};
 
 const COVERS: usize = 4;
+/// Owners picked between Writes; about a fifth of a second of picking at 120k tracks.
+const PICK_BATCH: usize = 128;
 
 /// What a mosaic belongs to.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -72,70 +74,71 @@ impl Catalog {
         tags.into_iter().collect()
     }
 
-    /// Adds covers to the mosaics of these owners until each has four, keeping those it has,
-    /// and stores them in one Write. A first pick is stored even when it finds none, so the owner
-    /// counts as picked. The owners whose mosaic is still incomplete, and the revision of the
-    /// Write when one was committed.
+    /// Adds covers to the mosaics of these owners until each has four, keeping those it has.
+    /// Picks are stored every [`PICK_BATCH`] owners, so a pass cut short keeps what it picked. A
+    /// first pick is stored even when it finds none, so the owner counts as picked. The owners
+    /// whose mosaic is still incomplete, and the revisions of the Writes committed.
     pub async fn pick_mosaics(
         &self,
         owners: &[MosaicOwner],
-    ) -> LibraryResult<(Vec<MosaicOwner>, Option<u64>)> {
+    ) -> LibraryResult<(Vec<MosaicOwner>, Vec<u64>)> {
         self.loaded().await;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let mut connection = self.acquire_reader().await?;
-        let mut picked = Vec::new();
         let mut incomplete = Vec::new();
-        for owner in owners {
-            let (table, column, key) = owner.row();
-            let Some(current): Option<Option<String>> = sqlx::query_scalar(sqlx::AssertSqlSafe(
-                format!("SELECT mosaic FROM {table} WHERE {column}=?1"),
-            ))
-            .bind(key)
-            .fetch_optional(&mut *connection)
-            .await?
-            else {
-                continue;
-            };
-            let picks: Vec<String> = current
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?
-                .unwrap_or_default();
-            if picks.len() >= COVERS {
-                continue;
+        let mut revisions = Vec::new();
+        for batch in owners.chunks(PICK_BATCH) {
+            let mut connection = self.acquire_reader().await?;
+            let mut picked = Vec::new();
+            for owner in batch {
+                let (table, column, key) = owner.row();
+                let Some(current): Option<Option<String>> = sqlx::query_scalar(
+                    sqlx::AssertSqlSafe(format!("SELECT mosaic FROM {table} WHERE {column}=?1")),
+                )
+                .bind(key)
+                .fetch_optional(&mut *connection)
+                .await?
+                else {
+                    continue;
+                };
+                let picks: Vec<String> = current
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                if picks.len() >= COVERS {
+                    continue;
+                }
+                let collection = match *owner {
+                    MosaicOwner::Playlist(key) => Collection::Playlist(key),
+                    MosaicOwner::Smart(key) => Collection::Smart { key, now },
+                    // A mood's tracks hold it as they hold a genre.
+                    MosaicOwner::Tag(key) => Collection::Genre(crate::GenreKey::from_raw(key)),
+                };
+                let members = self.members(&mut connection, collection).await?;
+                let next = crate::artwork::playlist_artwork_choices_on(
+                    self,
+                    &mut connection,
+                    &members,
+                    &picks,
+                    false,
+                )
+                .await?;
+                if next.len() < COVERS {
+                    incomplete.push(*owner);
+                }
+                if next.len() > picks.len() || current.is_none() {
+                    picked.push((*owner, next));
+                }
             }
-            let collection = match *owner {
-                MosaicOwner::Playlist(key) => Collection::Playlist(key),
-                MosaicOwner::Smart(key) => Collection::Smart { key, now },
-                // A mood's tracks hold it as they hold a genre.
-                MosaicOwner::Tag(key) => Collection::Genre(crate::GenreKey::from_raw(key)),
-            };
-            let members = self.members(&mut connection, collection).await?;
-            let next = crate::artwork::playlist_artwork_choices_on(
-                self,
-                &mut connection,
-                &members,
-                &picks,
-                false,
-            )
-            .await?;
-            if next.len() < COVERS {
-                incomplete.push(*owner);
-            }
-            if next.len() > picks.len() || current.is_none() {
-                picked.push((*owner, next));
+            drop(connection);
+            if !picked.is_empty() {
+                revisions.extend(self.set_mosaics(&picked).await?);
             }
         }
-        drop(connection);
-        let revision = if picked.is_empty() {
-            None
-        } else {
-            self.set_mosaics(&picked).await?
-        };
-        Ok((incomplete, revision))
+        Ok((incomplete, revisions))
     }
 
     /// Stores the covers of mosaics in one Write, and returns its revision.
