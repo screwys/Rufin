@@ -93,7 +93,7 @@ internal fun ConnectFolderDialog(connect: ConnectConnection, current: SyncFolder
         if (uri != null) try {
             context.contentResolver.takePersistableUriPermission(uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            connect.action(ConnectAction.Folder(SyncFolder.Document(uri.toString())))
+            connect.folder(SyncFolder.Document(uri.toString()))
             dismiss()
         } catch (error: Exception) { connect.reportError(error) }
     }
@@ -111,10 +111,10 @@ internal fun ConnectFolderDialog(connect: ConnectConnection, current: SyncFolder
     }, confirmButton = { TextButton({
         val connection = selected
         if (connection == null) chooseFolder.launch(null)
-        else { connect.action(ConnectAction.Folder(SyncFolder.Connection(connection, path.trim()))); dismiss() }
+        else { connect.folder(SyncFolder.Connection(connection, path.trim())); dismiss() }
     }, enabled = !connect.pending) { Text(if (selected == null) translate("Choose folder") else translate("Apply")) } },
         dismissButton = { Row {
-            if (current != null) TextButton({ connect.action(ConnectAction.Folder(null)); dismiss() },
+            if (current != null) TextButton({ connect.folder(null); dismiss() },
                 enabled = !connect.pending) { Text(translate("Clear")) }
             TextButton(dismiss) { Text(translate("Cancel")) }
         } })

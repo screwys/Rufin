@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.connect
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
@@ -115,6 +117,20 @@ internal class ConnectConnection(private val model: RufinConnection) {
             }
             owner.execute(action)
         }, confirmed = confirmed, blocking = action != ConnectAction.Refresh)
+    }
+    /** Sets the sync folder, then gives up the grant of a document tree it no longer uses. */
+    fun folder(folder: SyncFolder?) {
+        val previous = (state?.settings?.folder as? SyncFolder.Document)?.document
+            ?.takeIf { it != (folder as? SyncFolder.Document)?.document }
+        request({ owner ->
+            owner.execute(ConnectAction.Folder(folder)).also {
+                val service = model.connectedService()
+                if (previous != null && service.runtime.value?.getOrNull()?.hasDocumentRoot(previous) != true) {
+                    service.contentResolver.releasePersistableUriPermission(Uri.parse(previous),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                }
+            }
+        })
     }
     fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
         { it.execute(ConnectAction.Join(invitation, true)) })
