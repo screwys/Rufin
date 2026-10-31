@@ -4398,6 +4398,14 @@ impl SourceOwner {
         .map_err(|error| SourceError::Other(error.to_string()))?
         .map_err(SourceError::Other)
     }
+    /// Renames another device's Local source on this device.
+    pub async fn save_peer(&self, source_id: SourceId, name: String) -> sources::SourceResult<()> {
+        self.update_source(SourceSettingsChange::Peer { source_id, name })
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+    }
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]

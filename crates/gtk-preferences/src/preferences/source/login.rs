@@ -107,6 +107,9 @@ pub fn source_settings_group(
     shell: &Rc<Preferences>,
     saved: &EditableSource,
 ) -> Option<Result<gtk::Widget, String>> {
+    if saved.source.kind == "peer" {
+        return Some(Ok(peer_settings_group(shell, saved)));
+    }
     let presentation = source_presentation(&saved.source.kind)?;
     presentation
         .settings_group
@@ -600,6 +603,41 @@ fn subsonic_settings_group(
     presentation: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
     subsonic_settings_group_for(shell, saved, presentation, SubsonicFlavor::Subsonic)
+}
+
+/// Another device's Local source has only its name, kept on this device.
+fn peer_settings_group(shell: &Rc<Preferences>, saved: &EditableSource) -> gtk::Widget {
+    let resource = crate::ui_resource::CREDENTIAL_HOST_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        section: gtk::Box,
+        fields_group: adw::PreferencesGroup,
+        rows: adw::PreferencesGroup,
+        name: adw::EntryRow,
+        save: gtk::Button,
+    });
+    rows.set_visible(false);
+    name.set_text(&saved.source.name);
+    fields_group.add(&name);
+    save.set_visible(true);
+    connect_entry_row_activation(&name, &save);
+    let source = shell.products.source.clone();
+    let source_id = saved.source.id.clone();
+    let weak_shell = Rc::downgrade(shell);
+    save.connect_clicked(move |button| {
+        let source = source.clone();
+        let source_id = source_id.clone();
+        let name = name.text().trim().to_string();
+        if let Some(shell) = weak_shell.upgrade() {
+            complete_source_save(&shell, button, async move {
+                source
+                    .save_peer(source_id, name)
+                    .await
+                    .map_err(|error| error.to_string())
+            });
+        }
+    });
+    section.upcast()
 }
 
 fn complete_source_save(

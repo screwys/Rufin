@@ -70,8 +70,6 @@ function renderSources(configured) {
       "source-edit",
     );
     edit.append(el("span", "", tr("Edit")));
-    // Another device's Local library has nothing to edit here.
-    edit.hidden = item.kind === "peer";
     const actions = el("div", "source-actions");
     actions.append(
       button(
@@ -227,9 +225,10 @@ async function openSource(item = null, integration = null) {
   $("source-title").textContent = integration ? tr("File connection") : item ? tr("Edit Source") : tr("Add Source");
   $("source-submit").textContent = item ? tr("Save") : integration ? tr("Connect") : tr("Add Source");
   $("source-label").placeholder = integration ? tr("Connection name") : tr("My music");
-  $("source-kind").querySelector('[value="plex"]')?.remove();
-  if (editingSource?.kind === "plex")
-    $("source-kind").append(new Option(tr("Plex"), "plex"));
+  for (const [kind, title] of [["plex", tr("Plex")], ["peer", tr("Rufin Connect")]]) {
+    $("source-kind").querySelector(`[value="${kind}"]`)?.remove();
+    if (editingSource?.kind === kind) $("source-kind").append(new Option(title, kind));
+  }
   $("source-kind").value = editingSource
     ? { webdav: "web_dav", subsonic: "open_subsonic" }[editingSource.kind] ||
       editingSource.kind
@@ -292,10 +291,11 @@ async function renderIntegrations(host) {
 function sourceFields() {
   const kind = $("source-kind").value;
   const local = kind === "local";
+  const peer = kind === "peer";
   $("local-fields").hidden = !local;
-  $("remote-fields").hidden = local;
+  $("remote-fields").hidden = local || peer;
   $("source-paths").required = local;
-  $("server-url").required = !local && kind !== "plex";
+  $("server-url").required = !local && !peer && kind !== "plex";
   for (const id of ["username", "password"]) {
     $(id).hidden = kind === "plex";
     document.querySelector(`label[for="${id}"]`).hidden = kind === "plex";
@@ -512,7 +512,8 @@ function sourceInput() {
   }
   if (editingSource) {
     const preset = editingSource.preset;
-    if (kind === "plex")
+    if (kind === "peer") input = { type: "peer", data: { name } };
+    else if (kind === "plex")
       input = {
         type: "plex",
         data: {

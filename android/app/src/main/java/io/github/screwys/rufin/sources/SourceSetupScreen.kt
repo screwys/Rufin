@@ -48,6 +48,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     val canSubmit = when (form.kind) {
         "plex" -> sourceId != null || setup.authorized && setup.choices.isNotEmpty()
         "emby" -> form.manualEmby && form.url.isNotBlank() || setup.authorized && setup.choices.isNotEmpty() || sourceId != null
+        "peer" -> form.name.isNotBlank()
         else -> setup.authorized || form.url.isNotBlank()
     }
     if (mapping && sourceId != null) LocalAccessDialog(model, sourceId,
@@ -64,7 +65,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 IconButton(close) { RufinIcon("rufin-window-close-symbolic", translate("Close")) }
             })
     }, bottomBar = {
-        if (setup.ready && form.kind != null && form.kind !in setOf("local", "peer")) {
+        if (setup.ready && form.kind != null && form.kind != "local") {
             Surface {
                 Button({
                     saved = false
@@ -118,7 +119,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
                         modifier = Modifier.clickable(enabled = !setup.working) { mapping = true }) }
                 }
-                if (form.kind != "peer") item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
+                item { SourceTextField("Name", form.name, { form.name = it }, !setup.working) }
                 when (form.kind) {
                     "jellyfin", "emby" -> item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (form.kind == "emby") SourceSwitch("Connect manually", form.manualEmby, {

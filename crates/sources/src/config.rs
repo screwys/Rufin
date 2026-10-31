@@ -143,6 +143,8 @@ pub enum SourceSettingsChange {
         authentication: crate::SubsonicAuthentication,
         credentials: CredentialInput,
     },
+    /// Another device's Local source takes only a name, kept on this device.
+    Peer { source_id: SourceId, name: String },
 }
 
 impl SourceSettingsChange {
@@ -155,7 +157,8 @@ impl SourceSettingsChange {
             | Self::Plex { source_id, .. }
             | Self::Files { source_id, .. }
             | Self::JellyfinEmby { source_id, .. }
-            | Self::OpenSubsonic { source_id, .. } => source_id,
+            | Self::OpenSubsonic { source_id, .. }
+            | Self::Peer { source_id, .. } => source_id,
         }
     }
 }
@@ -186,7 +189,7 @@ pub enum EditableSource {
         excluded_folders: Vec<PathBuf>,
         document_roots: Vec<crate::DocumentRoot>,
     },
-    /// Another device's Local source: nothing of it is edited here.
+    /// Another device's Local source: only its name is edited here.
     Peer { source_id: SourceId },
 }
 

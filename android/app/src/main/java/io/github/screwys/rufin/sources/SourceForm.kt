@@ -90,6 +90,7 @@ internal class SourceForm {
                 fileSettings(), fileCredentialsEdit(sourceId != null))
             "plex" -> setup.savePlex(sourceId ?: error(translate("Sign in to Plex first")),
                 PlexSettingsInput(name.trim(), optional(url), trustInvalidCertificate))
+            "peer" -> setup.savePeer(sourceId ?: error(translate("Select Source")), name.trim())
             else -> error(translate("Select Source"))
         }
     }

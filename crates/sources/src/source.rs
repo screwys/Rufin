@@ -1075,6 +1075,20 @@ impl Source {
                 crate::subsonic::edit(current, current_credential, authentication, credentials)
                     .await
             }
+            SourceSettingsChange::Peer { name, .. } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(SourceError::InvalidConfig("A source needs a name".into()));
+                }
+                Ok(if name == current.name {
+                    SourceEditResult::Unchanged
+                } else {
+                    SourceEditResult::ConfigurationOnly(SourceConfiguration {
+                        name: name.into(),
+                        ..current
+                    })
+                })
+            }
         }
     }
 
