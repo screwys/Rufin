@@ -507,32 +507,82 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
 }
 
 #[derive(Clone, PartialEq)]
-struct SidebarPinItem(library::SidebarPinRow);
+struct SidebarPinItem {
+    pin: SidebarPin,
+    row: library::Row,
+}
 
 impl SidebarPinItem {
     fn stored_pin(&self) -> SidebarPin {
-        self.0.pin.clone()
+        self.pin.clone()
+    }
+    /// The pinned collection's key, name, track count and duration in milliseconds.
+    fn summary(&self) -> (i64, &str, i64, i64) {
+        use library::{PlaylistListRow, Row};
+        match &self.row {
+            Row::Album(album) => (
+                album.album_key.raw(),
+                &album.title,
+                album.summary.track_count,
+                album.summary.duration_millis,
+            ),
+            Row::Artist(artist) => (
+                artist.artist_key.raw(),
+                &artist.name,
+                artist.summary.track_count,
+                artist.summary.duration_millis,
+            ),
+            Row::Tag(genre) => (
+                genre.key,
+                &genre.name,
+                genre.summary.track_count,
+                genre.summary.duration_millis,
+            ),
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => (
+                playlist.playlist_key.raw(),
+                &playlist.name,
+                playlist.track_count,
+                playlist.duration_millis,
+            ),
+            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => (
+                smart.smart_playlist_key.raw(),
+                &smart.name,
+                smart.track_count,
+                smart.duration_millis,
+            ),
+            Row::Playlist(PlaylistListRow::Folder(folder)) => (
+                folder.folder_key.raw(),
+                &folder.name,
+                folder.track_count,
+                folder.duration_millis,
+            ),
+            Row::Track(_) | Row::AlbumHeading(_) | Row::AlbumTrack { .. } | Row::Folder(_) => {
+                unreachable!("pin_rows returns pinned collections only")
+            }
+        }
+    }
+    fn key(&self) -> i64 {
+        self.summary().0
+    }
+    fn name(&self) -> &str {
+        self.summary().1
     }
     fn title(&self) -> String {
-        if let SidebarPin::SmartPlaylist { playlist_id } = &self.0.pin {
-            smart_playlist_display_name(playlist_id, &self.0.name)
+        if let SidebarPin::SmartPlaylist { playlist_id } = &self.pin {
+            smart_playlist_display_name(playlist_id, self.name())
         } else {
-            self.0.name.clone()
+            self.name().to_owned()
         }
     }
     fn track_count(&self) -> u32 {
-        self.0
-            .totals
-            .unwrap_or_default()
-            .0
-            .clamp(0, u32::MAX as i64) as u32
+        self.summary().2.clamp(0, u32::MAX as i64) as u32
     }
     fn duration_seconds(&self) -> u32 {
-        (self.0.totals.unwrap_or_default().1.max(0) / 1000).min(u32::MAX as i64) as u32
+        (self.summary().3.max(0) / 1000).min(u32::MAX as i64) as u32
     }
     fn route(&self) -> Route {
-        let key = self.0.key;
-        match &self.0.pin {
+        let key = self.key();
+        match &self.pin {
             SidebarPin::Album {
                 source_id,
                 album_id,
@@ -559,8 +609,8 @@ impl SidebarPinItem {
         }
     }
     fn playback_target(&self) -> Option<PlayRequest> {
-        let key = self.0.key;
-        let collection = match self.0.pin {
+        let key = self.key();
+        let collection = match self.pin {
             SidebarPin::Album { .. } => {
                 library::Collection::Album(library::AlbumKey::from_raw(key))
             }
@@ -590,10 +640,28 @@ impl SidebarPinItem {
         )
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
-        self.0
-            .artwork
-            .iter()
+        use library::{PlaylistListRow, Row};
+        let binding = match &self.row {
+            Row::Album(album) => album.artwork_binding.as_ref(),
+            Row::Artist(artist) => artist.artwork_binding.as_ref(),
+            Row::Tag(genre) => match &genre.artwork_binding {
+                Some(binding) => Some(binding),
+                None => {
+                    return genre
+                        .representative_artwork
+                        .iter()
+                        .map(|binding| ArtworkBinding::opaque(binding))
+                        .collect();
+                }
+            },
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist.artwork_binding.as_ref(),
+            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => smart.artwork_binding.as_ref(),
+            Row::Playlist(PlaylistListRow::Folder(folder)) => folder.artwork_binding.as_ref(),
+            Row::Track(_) | Row::AlbumHeading(_) | Row::AlbumTrack { .. } | Row::Folder(_) => None,
+        };
+        binding
             .map(|binding| ArtworkBinding::opaque(binding))
+            .into_iter()
             .collect()
     }
     fn present_context_menu(
@@ -603,7 +671,7 @@ impl SidebarPinItem {
         position: Option<(f64, f64)>,
     ) {
         let catalog = shell.products.library.clone();
-        let pin = self.0.pin.clone();
+        let pin = self.pin.clone();
         let task = shell.products.runtime.spawn(async move {
             catalog
                 .pin_rows(&[pin], unix_now(), &library::ReadCancellation::new())
@@ -729,16 +797,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         .pin_cancellation
         .replace(Some(cancellation.clone()));
     let catalog = Arc::clone(&shell.products.library);
-    let task = shell.products.runtime.spawn(async move {
-        catalog
-            .pin_rows(&pins, unix_now(), &cancellation)
-            .await
-            .map(|rows| {
-                rows.into_iter()
-                    .map(library::SidebarPinRow::from)
-                    .collect::<Vec<_>>()
-            })
-    });
+    let task = shell
+        .products
+        .runtime
+        .spawn(async move { catalog.pin_rows(&pins, unix_now(), &cancellation).await });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let result = task.await.ok().and_then(Result::ok);
@@ -757,7 +819,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         };
         let mut indexed = rows
             .into_iter()
-            .map(|row| (row.pin.clone(), SidebarPinItem(row)))
+            .map(|(pin, row)| (pin.clone(), SidebarPinItem { pin, row }))
             .collect::<HashMap<_, _>>();
         let items = current
             .settings
@@ -797,14 +859,19 @@ pub(crate) fn update_sidebar_smart_playlist_pin_metadata(
 ) {
     let item = {
         let mut items = shell.navigation.pin_items.borrow_mut();
-        let Some(playlist) = items.iter_mut().find(|item| {
-            matches!(item.0.pin, SidebarPin::SmartPlaylist { .. })
-                && item.0.key == summary.smart_playlist_key.raw()
+        let Some(item) = items.iter_mut().find(|item| {
+            matches!(&item.row, library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(smart))
+                if smart.smart_playlist_key == summary.smart_playlist_key)
         }) else {
             return;
         };
-        playlist.0.totals = Some((summary.track_count, summary.duration_millis));
-        playlist.clone()
+        if let library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(smart)) =
+            &mut item.row
+        {
+            smart.track_count = summary.track_count;
+            smart.duration_millis = summary.duration_millis;
+        }
+        item.clone()
     };
     let Some(key) = sidebar_pin_route_key(&item.route()) else {
         return;
@@ -900,7 +967,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .collect::<HashMap<_, _>>();
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
-            previous.artwork() != item.artwork() || previous.0.name != item.0.name
+            previous.artwork() != item.artwork() || previous.name() != item.name()
         })
     };
     let desired_keys = items
@@ -1007,19 +1074,19 @@ fn remove_sidebar_pin_widgets(container: &gtk::Box) {
 }
 
 fn update_sidebar_pin_widget_metadata(widget: &gtk::Widget, item: &SidebarPinItem) {
-    let mut labels = vec![("sidebar-pin-title", item.title())];
-    if item.0.totals.is_some() {
-        labels.push(("sidebar-pin-track-count", item.track_count().to_string()));
-        labels.push((
+    let labels = [
+        ("sidebar-pin-title", item.title()),
+        ("sidebar-pin-track-count", item.track_count().to_string()),
+        (
             "sidebar-pin-duration",
             format_duration_units(item.duration_seconds()),
-        ));
-        if let Some(metadata) = descendant_with_class(widget, "sidebar-pin-metadata") {
-            let mut child = metadata.first_child();
-            while let Some(item) = child {
-                child = item.next_sibling();
-                item.set_visible(true);
-            }
+        ),
+    ];
+    if let Some(metadata) = descendant_with_class(widget, "sidebar-pin-metadata") {
+        let mut child = metadata.first_child();
+        while let Some(item) = child {
+            child = item.next_sibling();
+            item.set_visible(true);
         }
     }
     for (class, text) in labels {
@@ -1094,7 +1161,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             &artwork,
             SIDEBAR_PIN_COVER_SIZE,
             SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin.0.pin, SidebarPin::Genre { .. }),
+            matches!(&pin.pin, SidebarPin::Genre { .. }),
         )
         .widget();
     cover.set_can_target(false);
@@ -1111,22 +1178,15 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     title_label.set_width_chars(1);
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    if matches!(&pin.0.pin, SidebarPin::PlaylistFolder { .. }) {
+    if matches!(&pin.pin, SidebarPin::PlaylistFolder { .. }) {
         title_row.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
     }
     title_row.append(&title_label);
     identity.append(&title_row);
     let metadata = sidebar_pin_metadata(track_count, duration_seconds);
-    if pin.0.totals.is_none() {
-        let mut child = metadata.first_child();
-        while let Some(item) = child {
-            child = item.next_sibling();
-            item.set_visible(false);
-        }
-    }
     let source_label = {
         let configured = shell.source.configured.borrow();
-        let source_id = match &pin.0.pin {
+        let source_id = match &pin.pin {
             SidebarPin::Playlist { source_id, .. } => {
                 Some(source_id.as_ref().map(sources::SourceId::as_str))
             }
@@ -1252,7 +1312,7 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             &artwork,
             COMPACT_SIDEBAR_PIN_COVER_SIZE,
             COMPACT_SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin.0.pin, SidebarPin::Genre { .. }),
+            matches!(&pin.pin, SidebarPin::Genre { .. }),
         )
         .widget();
     cover.set_can_target(false);
@@ -1426,8 +1486,8 @@ fn install_playlist_pin_drop(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    if let SidebarPin::PlaylistFolder { smart, .. } = &pin.0.pin {
-        let folder_key = library::PlaylistFolderKey::from_raw(pin.0.key);
+    if let SidebarPin::PlaylistFolder { smart, .. } = &pin.pin {
+        let folder_key = library::PlaylistFolderKey::from_raw(pin.key());
         let smart = *smart;
         let menus = Rc::downgrade(&shell.media_menus);
         let drop = gtk::DropTarget::new(
@@ -1460,11 +1520,11 @@ fn install_playlist_pin_drop(
         target.add_controller(drop);
         return;
     }
-    if !matches!(pin.0.pin, SidebarPin::Playlist { .. }) {
+    if !matches!(pin.pin, SidebarPin::Playlist { .. }) {
         return;
     }
-    let playlist_key = library::PlaylistKey::from_raw(pin.0.key);
-    let playlist_name = pin.0.name.clone();
+    let playlist_key = library::PlaylistKey::from_raw(pin.key());
+    let playlist_name = pin.name().to_owned();
     let drop_target = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,

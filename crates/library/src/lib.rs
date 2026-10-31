@@ -60,7 +60,7 @@ pub use local_access::{
 mod playable;
 pub use playable::{Gains, Playable, PlayableDownload, PlayableFile, PlayableNames};
 mod playlists;
-pub use pins::{SidebarPin, SidebarPinRow};
+pub use pins::SidebarPin;
 mod queue;
 pub mod rank;
 mod waveform;
