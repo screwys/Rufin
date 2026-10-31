@@ -20,6 +20,17 @@ use playback::{
     RunEndReason, RunId, StreamRequest, manual_end_is_skip, qualified_play_threshold_millis,
 };
 
+/// The listen of a run another device continues: that device carries it on, so one play
+/// across devices is one listen.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ContinuedListen {
+    pub(crate) play_id: String,
+    pub(crate) started_at: i64,
+    pub(crate) local_period: String,
+    pub(crate) audible_millis: u64,
+    pub(crate) qualified: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClockSample {
     pub monotonic_millis: u64,
@@ -148,6 +159,8 @@ struct RunContext {
     seeking: bool,
     /// The local copy that failed to open or decode; the run tries the next one only once.
     failed_local: Option<String>,
+    /// When and in which period the continued listen started, for the start of this run.
+    continued_start: Option<(i64, String)>,
 }
 
 impl RunContext {
@@ -171,6 +184,7 @@ impl RunContext {
             bitstream: false,
             seeking: false,
             failed_local: None,
+            continued_start: None,
         }
     }
 
@@ -528,11 +542,27 @@ impl Player {
         self.dirty |= position != previous;
     }
 
+    /// The listen of the current run as far as it was heard, for a device that continues it.
+    pub(super) fn current_listen(&mut self, sample: &ClockSample) -> Option<ContinuedListen> {
+        let current = self.current_run.as_mut()?;
+        current.advance_clock(sample.monotonic_millis);
+        Some(ContinuedListen {
+            play_id: current.play_id.clone(),
+            started_at: current.started_at_unix_seconds?,
+            local_period: current.local_period.clone()?,
+            audible_millis: current.audible_millis,
+            qualified: current.qualified,
+        })
+    }
+
+    /// Plays `queue` here from its current entry. With `listen` the run carries on the listen
+    /// another device started of that entry.
     pub(super) fn adopt_local(
         &mut self,
         queue: library::QueueRestore,
         stream: PreparedStream,
         playing: bool,
+        listen: Option<ContinuedListen>,
         backend: Box<dyn PlaybackBackend>,
         sample: &ClockSample,
     ) -> Result<(), PlaybackError> {
@@ -549,6 +579,12 @@ impl Player {
         self.queue_loading = false;
         self.queue_transport = None;
         self.adopt_sequence(sequence, stream, playing);
+        if let (Some(current), Some(listen)) = (self.current_run.as_mut(), listen) {
+            current.play_id = listen.play_id;
+            current.audible_millis = listen.audible_millis;
+            current.qualified = listen.qualified;
+            current.continued_start = Some((listen.started_at, listen.local_period));
+        }
         Ok(())
     }
 
@@ -2576,8 +2612,12 @@ impl Player {
             return;
         };
         current.status = TransportStatus::Playing;
-        current.started_at_unix_seconds = Some(sample.unix_seconds);
-        current.local_period = Some(sample.local_period.clone());
+        let (started_at, local_period) = current
+            .continued_start
+            .take()
+            .unwrap_or_else(|| (sample.unix_seconds, sample.local_period.clone()));
+        current.started_at_unix_seconds = Some(started_at);
+        current.local_period = Some(local_period);
         current.last_monotonic_millis = Some(sample.monotonic_millis);
         self.notices.push(PlaybackNotice::RunStarted(current.id));
         let current = self.current_run.as_ref().unwrap();

@@ -1451,6 +1451,7 @@ impl PlaybackOwner {
                     queue,
                     prepared,
                     matches!(timeline.state.as_str(), "playing" | "buffering"),
+                    None,
                     backend,
                 )
             })

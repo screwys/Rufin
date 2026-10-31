@@ -5,6 +5,7 @@ use super::{
     ConnectOwner, Control, Presence, Request, Session, Stream, error,
     records::{Copy as TrackCopy, Item, Records},
 };
+use crate::playback::state::ContinuedListen;
 use library::{QueuePlacement, QueueProvenance, QueueReorderTarget, QueueRepeatMode};
 use rufin_connect::{
     media::PeerByteResponse,
@@ -35,6 +36,8 @@ pub(super) struct SessionValue {
     /// When the session last changed, unix milliseconds.
     at: i64,
     queue_revision: String,
+    /// The listen of the current entry as far as this device heard it.
+    listen: Option<ContinuedListen>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,6 +64,7 @@ pub(super) struct Cast {
     auto_dj: bool,
     placement: Option<QueuePlacement>,
     target: Option<QueueReorderTarget>,
+    listen: Option<ContinuedListen>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -177,11 +181,16 @@ impl Records {
                 .pop();
             current = item.map(|item| (row.position, item));
         }
+        let listen = match current {
+            Some(_) => self.owner()?.playback.current_listen().await,
+            None => None,
+        };
         let session = SessionValue {
             current,
             position_ms: queue.progress_millis,
             at: now_millis(),
             queue_revision: revision,
+            listen,
         };
         // A session that did not move keeps the time it last changed.
         let digest = (
@@ -295,10 +304,11 @@ impl Records {
 
     /// The queue another device recorded, at its session's position; none when it recorded
     /// no current entry.
+    #[allow(clippy::type_complexity)]
     async fn queue_of(
         &self,
         device: &str,
-    ) -> Result<Option<(library::QueueRestore, bool)>, String> {
+    ) -> Result<Option<(library::QueueRestore, bool, Option<ContinuedListen>)>, String> {
         let Some(session) = self
             .sessions
             .borrow()
@@ -333,6 +343,7 @@ impl Records {
                 ..Default::default()
             },
             queue.auto_dj,
+            session.listen,
         )))
     }
 }
@@ -445,10 +456,10 @@ impl ConnectOwner {
                     .await;
             }
         }
-        let Some((queue, auto_dj)) = records.queue_of(peer).await? else {
+        let Some((queue, auto_dj, listen)) = records.queue_of(peer).await? else {
             return Ok(false);
         };
-        self.playback.continue_queue(queue, playing).await?;
+        self.playback.continue_queue(queue, playing, listen).await?;
         let playback = Arc::clone(&self.playback);
         tokio::task::spawn_blocking(move || playback.send_cast_auto_dj(auto_dj))
             .await
@@ -467,6 +478,11 @@ impl ConnectOwner {
     ) -> Result<(), String> {
         let records = Arc::clone(&self.active()?.records);
         let (placement, target) = placement.unzip();
+        // The receiver that takes the queue over at its position carries on its listen.
+        let listen = match placement {
+            None => self.playback.current_listen().await,
+            Some(_) => None,
+        };
         let cast = Cast {
             items: records.queue_items(&queue.entries).await?,
             order: queue.order.to_vec(),
@@ -478,6 +494,7 @@ impl ConnectOwner {
             auto_dj: self.settings.load().ui.auto_dj_enabled,
             placement,
             target: target.flatten(),
+            listen,
         };
         self.request(peer, Request::Cast(cast)).await.map(drop)
     }
@@ -499,6 +516,7 @@ impl ConnectOwner {
                         ..Default::default()
                     },
                     cast.playing,
+                    cast.listen,
                 )
                 .await?;
             return tokio::task::spawn_blocking(move || playback.send_cast_auto_dj(cast.auto_dj))

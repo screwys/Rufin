@@ -1559,6 +1559,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             queue,
             audio_processing::ResolvedStream::new("https://example.test/return.flac").into(),
             false,
+            None,
             Box::new(IdleBackend(commands.clone())),
             &sample,
         )
@@ -1581,6 +1582,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             session.sequence.snapshot(),
             audio_processing::ResolvedStream::new("https://example.test/return.flac").into(),
             true,
+            None,
             Box::new(IdleBackend(commands.clone())),
             &sample,
         )

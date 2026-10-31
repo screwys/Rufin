@@ -8,7 +8,7 @@ use std::time::Duration;
 use super::{
     PlaybackOwner,
     queue::{Sequence, SequenceError},
-    state::{ClockSample, Command, ExternalPlayback, Player},
+    state::{ClockSample, Command, ContinuedListen, ExternalPlayback, Player},
 };
 use playback::{
     PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream, RunId,
@@ -219,11 +219,15 @@ impl Playback {
         queue: library::QueueRestore,
         stream: PreparedStream,
         playing: bool,
+        listen: Option<ContinuedListen>,
         backend: Box<dyn PlaybackBackend>,
     ) -> PlaybackResult<()> {
         self.request(move |player, sample| {
-            player.adopt_local(queue, stream, playing, backend, sample)
+            player.adopt_local(queue, stream, playing, listen, backend, sample)
         })
+    }
+    pub(crate) fn current_listen(&self) -> PlaybackResult<Option<ContinuedListen>> {
+        self.request(|player, sample| Ok(player.current_listen(sample)))
     }
     pub(crate) fn auto_dj_unavailable(
         &self,

@@ -1,5 +1,6 @@
 //! Another device's queue continues here, as an ordinary queue restore.
 use super::*;
+use state::ContinuedListen;
 
 impl PlaybackOwner {
     pub(crate) async fn return_empty_local(&self) -> Result<(), String> {
@@ -20,11 +21,12 @@ impl PlaybackOwner {
     }
 
     /// Replaces the queue with `queue` and resumes its current entry at its position on this
-    /// device's own output.
+    /// device's own output, carrying on `listen` when another device started it.
     pub(crate) async fn continue_queue(
         &self,
         mut queue: library::QueueRestore,
         playing: bool,
+        listen: Option<ContinuedListen>,
     ) -> Result<(), String> {
         let current = queue
             .current_index
@@ -87,11 +89,23 @@ impl PlaybackOwner {
             plex.stop_for_continuation().await?;
             self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
         }
-        tokio::task::spawn_blocking(move || active.adopt_local(queue, stream, playing, backend))
-            .await
-            .map_err(string_error)?
-            .map_err(string_error)?;
+        tokio::task::spawn_blocking(move || {
+            active.adopt_local(queue, stream, playing, listen, backend)
+        })
+        .await
+        .map_err(string_error)?
+        .map_err(string_error)?;
         *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
         Ok(())
+    }
+
+    /// The listen of the track this device plays, for a device that continues it.
+    pub(crate) async fn current_listen(&self) -> Option<ContinuedListen> {
+        let active = self.active()?;
+        tokio::task::spawn_blocking(move || active.current_listen())
+            .await
+            .ok()?
+            .ok()
+            .flatten()
     }
 }
