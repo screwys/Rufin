@@ -122,14 +122,9 @@ impl PlaylistEntryModel {
     }
 
     pub fn visible_context_id(&self) -> String {
-        let view = self.inner.view.borrow();
-        let settings = view.list_settings();
         format!(
-            "{}|query={}|sort={:?}|descending={}|result={}",
-            CollectionTarget::Playlist(self.inner.playlist_key).context_id(),
-            view.members().map_or("", |query| query.filter.as_str()),
-            settings.sort_key,
-            settings.descending,
+            "{}|result={}",
+            self.inner.view.borrow().context_id(),
             self.inner.sparse.order_id()
         )
     }

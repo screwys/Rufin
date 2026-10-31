@@ -413,7 +413,7 @@ fn folder_table(
                     .with_context(
                         format!(
                             "{}|result={}",
-                            folder_context_id(&path),
+                            view.borrow().context_id(),
                             activate_tracks.order_id()
                         )
                         .into(),
@@ -907,13 +907,6 @@ fn folder_path_button(
     let shell = Rc::clone(shell);
     button.connect_clicked(move |_| shell.navigate(Route::Folders { path: path.clone() }));
     button
-}
-
-fn folder_context_id(path: &[FolderPathItem]) -> String {
-    path.last().map_or_else(
-        || "folders:root".to_string(),
-        |item| format!("folders:{}", item.id),
-    )
 }
 
 fn folder_empty_view(shell: &Rc<CatalogUi>) -> gtk::Widget {

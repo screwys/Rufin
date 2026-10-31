@@ -268,16 +268,21 @@ impl TrackCollectionModel {
         self.play(queue, 0, placement, &context_id, true, shuffled);
     }
 
+    /// The context id of a play from these rows; `|result=` ties it to this order snapshot.
+    /// A page's id is its view's; an artist's favorites and key lists start with
+    /// `context_base`.
     pub fn visible_context_id(&self, context_base: &str) -> String {
-        match self.0.read.members() {
-            Some(query) => format!(
-                "{context_base}|query={}|sort={:?}|descending={}|result={}",
-                query.filter,
-                query.sort,
-                query.descending,
-                self.0.sparse.order_id()
-            ),
-            None => format!("{context_base}|result={}", self.0.sparse.order_id()),
+        let order = self.0.sparse.order_id();
+        match &self.0.read {
+            TrackRead::Page(view) => format!("{}|result={order}", view.borrow().context_id()),
+            TrackRead::Favorites(view) => match view.borrow().favorites() {
+                Some(query) => format!(
+                    "{context_base}|query={}|sort={:?}|descending={}|result={order}",
+                    query.filter, query.sort, query.descending,
+                ),
+                None => format!("{context_base}|result={order}"),
+            },
+            TrackRead::Keys(_) => format!("{context_base}|result={order}"),
         }
     }
 

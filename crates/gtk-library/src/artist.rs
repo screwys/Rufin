@@ -421,7 +421,6 @@ impl CatalogUi {
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
-        let artist = summary.row.artist_key;
         let view = route_view(&read);
         let key = LibraryListKey::ArtistTracks;
         let context = if favorites_only && album_artist {
@@ -433,18 +432,11 @@ impl CatalogUi {
         } else {
             "artist-tracks"
         };
+        let context_id = rufin_core::view::context_base(read.view.route());
         let model =
             crate::track_model::TrackCollectionModel::new(self.runtime.clone(), &view, read);
-        let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
-            model,
-            key,
-            context,
-            CollectionTarget::Artist {
-                id: artist.to_string(),
-                album_artist,
-            }
-            .context_id(),
-        );
+        let (tracks_widget, tracks, toolbar) =
+            self.scrolling_track_projection(model, key, context, context_id);
         let tracks = Rc::new(tracks);
         let root = crate::route_layout::detail_route_wrapper(18);
         root.append(&artist_subroute_header(

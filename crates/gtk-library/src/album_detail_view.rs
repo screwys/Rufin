@@ -44,10 +44,9 @@ impl CatalogUi {
             ));
         };
         let album = *album;
-        let album_id = album.row.album_key;
         let view = route_view(&read);
         let current_album = Rc::new(RefCell::new(album.clone()));
-        let context_id = CollectionTarget::Album(album_id.to_string()).context_id();
+        let context_id = rufin_core::view::context_base(read.view.route());
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings
                 .current

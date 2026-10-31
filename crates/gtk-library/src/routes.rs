@@ -24,7 +24,6 @@ const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
 struct RootTrackRouteOptions {
     key: LibraryListKey,
-    context: &'static str,
     empty_body: &'static str,
 }
 
@@ -208,14 +207,13 @@ pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reread: &Rc<PageRer
 impl CatalogUi {
     pub fn opened_collection_view(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let route = read.view.route().clone();
-        let selected = read.view.selected().cloned();
         let category = read.view.options().category;
         match route {
             Route::History => self.history_route(read),
             Route::Favorites if category == CollectionCategory::Tracks => {
-                self.favorites_route(read, selected.expect("source collection"))
+                self.favorites_route(read)
             }
-            Route::Tracks => self.library_tracks_route(read, selected.expect("source collection")),
+            Route::Tracks => self.library_tracks_route(read),
             Route::Albums => self.library_albums_route(read, false),
             Route::Favorites if category == CollectionCategory::Albums => {
                 self.library_albums_route(read, true)
@@ -417,37 +415,25 @@ impl CatalogUi {
             .with_states(&view)
     }
 
-    pub fn library_tracks_route(
-        self: &Rc<Self>,
-        read: Opened,
-        selected: rufin_core::runtime::SelectedLibrary,
-    ) -> MountedRoute {
+    pub fn library_tracks_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         self.root_track_route(
             RootTrackRouteOptions {
                 key: LibraryListKey::Tracks,
-                context: "tracks",
                 empty_body: msgid("Nothing here yet"),
             },
             read,
-            selected,
             false,
         )
     }
 
-    pub fn favorites_route(
-        self: &Rc<Self>,
-        read: Opened,
-        selected: rufin_core::runtime::SelectedLibrary,
-    ) -> MountedRoute {
+    pub fn favorites_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let key = LibraryListKey::FavoriteTracks;
         self.root_track_route(
             RootTrackRouteOptions {
                 key,
-                context: "favorite-tracks",
                 empty_body: msgid("No favorites yet"),
             },
             read,
-            selected,
             true,
         )
     }
@@ -456,13 +442,9 @@ impl CatalogUi {
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
         read: Opened,
-        selected: rufin_core::runtime::SelectedLibrary,
         favorites_only: bool,
     ) -> MountedRoute {
-        let context_id = selected.music_folder_key.as_ref().map_or_else(
-            || format!("{}:all", options.context),
-            |folder_key| format!("{}:{folder_key}", options.context),
-        );
+        let context_id = rufin_core::view::context_base(read.view.route());
         let view = route_view(&read);
         let projection = self.searchable_track_collection(
             &view,
@@ -495,12 +477,13 @@ impl CatalogUi {
     pub fn history_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
         let key = LibraryListKey::History;
         let view = route_view(&read);
+        let context_id = rufin_core::view::context_base(read.view.route());
         let projection = self.searchable_track_collection(
             &view,
             read,
             key,
             SearchableTrackOptions {
-                context_id: "history:all".to_string(),
+                context_id,
                 content_inset: 0,
                 fixed_layout: None,
                 search: None,

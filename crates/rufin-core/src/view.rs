@@ -636,6 +636,18 @@ impl View {
         &self.options
     }
 
+    /// The context id a play of this page carries, in the order it reads.
+    pub fn context_id(&self) -> String {
+        let (sort, descending, _) = read_order(&self.route, &self.options, &self.settings);
+        context_id(
+            &self.route,
+            self.selected.as_ref(),
+            &self.options,
+            sort,
+            descending,
+        )
+    }
+
     /// The list settings of the route, as the view read with them.
     pub fn list_settings(&self) -> LibraryListSettings {
         self.settings
@@ -1229,6 +1241,20 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
     sections
 }
 
+/// The collection or route a page's context id starts with; a play of the collection from
+/// elsewhere carries it bare.
+pub fn context_base(route: &Route) -> String {
+    crate::collection_context::CollectionTarget::for_route(route).map_or_else(
+        || {
+            format!(
+                "route:{}",
+                serde_json::to_string(route).expect("Route serialization")
+            )
+        },
+        |target| target.context_id(),
+    )
+}
+
 /// The context id a play of a page on `route` carries: its collection's id or its route, with
 /// the filter, source, music folder and order `options` and `sort` show.
 pub fn context_id(
@@ -1238,17 +1264,9 @@ pub fn context_id(
     sort: LibraryField,
     descending: bool,
 ) -> String {
-    let base = crate::collection_context::CollectionTarget::for_route(route).map_or_else(
-        || {
-            format!(
-                "route:{}",
-                serde_json::to_string(route).expect("Route serialization")
-            )
-        },
-        |target| target.context_id(),
-    );
     format!(
-        "{base}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}",
+        "{}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}",
+        context_base(route),
         options.filter,
         selected.map_or("", |selected| selected.source_id.as_str()),
         selected.and_then(|selected| selected.music_folder_key),
