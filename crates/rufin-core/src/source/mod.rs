@@ -772,8 +772,7 @@ impl SourceOwner {
                                 token.clone(),
                                 sources::Refresh::Changed,
                             )
-                            .await
-                            .map(|_| ());
+                            .await;
                         refresh_owner
                             .finish_source_refresh(&source_id, &token, result)
                             .await;
@@ -994,7 +993,6 @@ impl SourceOwner {
         let outcome = source
             .acquire_catalog(&self.shared.catalog, &progress, token.clone(), refresh)
             .await;
-        let outcome = outcome.map(|_| ());
         let result = outcome
             .as_ref()
             .map(|_| ())
@@ -1003,20 +1001,25 @@ impl SourceOwner {
         result
     }
 
+    /// Ends a refresh. `result` says whether it stored, moved or removed a playlist file, which
+    /// discovery then imports or checks.
     pub(crate) async fn finish_source_refresh(
         &self,
         source_id: &SourceId,
         token: &Arc<AtomicBool>,
-        result: sources::SourceResult<()>,
+        result: sources::SourceResult<bool>,
     ) {
         if !self.shared.refresh_is_current(source_id, token) {
             return;
         }
-        if result.is_ok() {
+        if let Ok(playlist_files) = &result {
             self.shared.outbox.notify_one();
             self.import_playlist_pins_once(source_id).await;
-            crate::playlist_files::discover(self, source_id).await;
+            if *playlist_files {
+                crate::playlist_files::discover(self, source_id).await;
+            }
         }
+        let result = result.map(drop);
         {
             let mut clients = self
                 .shared
@@ -3485,7 +3488,7 @@ mod source_tests {
             matches!(&*owner.shared.operation.borrow(), SourceOperation::Refreshing {source_id: current,..} if current==&source_id)
         );
         owner
-            .finish_source_refresh(&other_id, &second, Ok(()))
+            .finish_source_refresh(&other_id, &second, Ok(false))
             .await;
         assert!(
             matches!(&*owner.shared.operation.borrow(), SourceOperation::Refreshing {source_id: current,..} if current==&source_id)
@@ -3501,7 +3504,7 @@ mod source_tests {
         owner.shared.retire_changed_clients(false).await.unwrap();
         assert!(owner.shared.refresh_is_current(&source_id, &first));
         owner
-            .finish_source_refresh(&source_id, &first, Ok(()))
+            .finish_source_refresh(&source_id, &first, Ok(false))
             .await;
         for error in [
             SourceError::Network("connection refused".into()),

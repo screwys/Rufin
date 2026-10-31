@@ -40,7 +40,7 @@ pub fn import_local_paths(
             let playlist = result.as_ref().copied().map_err(string_error);
             if let Some(token) = token {
                 owner
-                    .finish_source_refresh(source.source_id(), &token, result.map(|_| ()))
+                    .finish_source_refresh(source.source_id(), &token, result.map(|_| true))
                     .await;
             }
             playlist

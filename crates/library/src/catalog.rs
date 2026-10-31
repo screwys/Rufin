@@ -56,6 +56,8 @@ pub struct Observation<'a> {
     pub(crate) memberships: HashMap<i64, HashSet<i64>>,
     /// The entries of a source playlist read so far, until its last page.
     pub(crate) playlist_entries: Vec<(String, crate::TrackKey)>,
+    /// Some Write of this observation stored, moved or removed a playlist file.
+    pub playlist_files: bool,
 }
 
 /// The table and key column of a source-owned record kind.
@@ -136,6 +138,7 @@ impl Catalog {
             changed: false,
             memberships: HashMap::new(),
             playlist_entries: Vec::new(),
+            playlist_files: false,
         })
     }
 

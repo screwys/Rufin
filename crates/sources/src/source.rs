@@ -1156,19 +1156,21 @@ impl Source {
         }
     }
 
+    /// Lists what changed on the source, or all of it, into the Catalog. Returns whether the
+    /// listing stored, moved or removed a playlist file.
     pub async fn acquire_catalog(
         &self,
         catalog: &Catalog,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
         refresh: Refresh,
-    ) -> SourceResult<(bool, Option<Freshness>)> {
+    ) -> SourceResult<bool> {
         if cancelled.load(Ordering::Acquire) || self.is_retired() {
             return Err(SourceError::Cancelled);
         }
         let check = refresh == Refresh::Check;
         if check && !self.needs_periodic_refresh() {
-            return Ok((false, None));
+            return Ok(false);
         }
         let source_id = self.source_id.as_str();
         let freshness = self.freshness().await.ok().flatten();
@@ -1202,7 +1204,7 @@ impl Source {
                             .acquire_user_collections(changes, &|_| {}, &cancelled_fn)
                             .await?;
                     }
-                    return Ok((false, freshness.clone()));
+                    return Ok(false);
                 }
             }
             changes.start_observation().await?;
@@ -1285,7 +1287,7 @@ impl Source {
                     (!files).then_some(started),
                 )
                 .await?;
-            Ok((true, freshness.clone()))
+            Ok(changes.playlist_files)
         })
         .await
     }

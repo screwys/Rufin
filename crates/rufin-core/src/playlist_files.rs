@@ -929,7 +929,7 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
 }
 
 /// Imports the playlist files a file source holds that no playlist is made from yet, and
-/// checks the linked ones. Runs after each refresh of the source.
+/// checks the linked ones. Runs after a refresh that stored, moved or removed a playlist file.
 pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
     let Some(configuration) = owner
         .configuration(source_id)
