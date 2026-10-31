@@ -1024,6 +1024,8 @@ impl Player {
                     let mut shown = false;
                     self.edit_queue(|sequence| shown = sequence.show_states(items));
                     self.dirty |= shown;
+                    // A read in flight may have taken its rows before this commit.
+                    refresh |= self.pending_hydration.is_some();
                 }
                 library::Scope::Source {
                     phase: library::SourcePhase::Removed,
