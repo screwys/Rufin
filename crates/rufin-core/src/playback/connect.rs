@@ -132,30 +132,57 @@ impl RufinPlayback {
         Ok(())
     }
 
-    /// Mirrors the receiver's frames until it ends the stream.
+    /// Mirrors the receiver's frames. When the stream ends it is opened again once; a
+    /// receiver that cannot be observed again is left, and its queue continues here.
     fn follow(self: &Arc<Self>, runtime: &tokio::runtime::Handle, mut observing: Observing) {
         let weak = Arc::downgrade(self);
         let task = runtime.spawn(async move {
+            let mut reopened = false;
             loop {
                 let frame = observing.next().await;
                 let Some(receiver) = weak.upgrade() else {
                     break;
                 };
-                let (error, ended) = match frame {
-                    Ok(Some(frame)) => match receiver.mirror(frame).await {
-                        Ok(()) => continue,
-                        Err(error) => (error, false),
-                    },
-                    Ok(None) => ("Device is unreachable".into(), true),
-                    Err(error) => (error, true),
-                };
                 if receiver.cancelled.load(Ordering::Acquire) {
                     break;
                 }
-                let _ = receiver.playback.command(Command::OperationFailed(error));
-                if ended {
-                    break;
+                match frame {
+                    Ok(Some(frame)) => {
+                        reopened = false;
+                        if let Err(error) = receiver.mirror(frame).await {
+                            let _ = receiver.playback.command(Command::OperationFailed(error));
+                        }
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(error) => debug!(%error, "The Rufin receiver's stream failed"),
                 }
+                if !reopened {
+                    reopened = true;
+                    let observed = match receiver.connection() {
+                        Ok(connect) => connect.observe(&receiver.peer).await,
+                        Err(error) => Err(error),
+                    };
+                    if let Ok(next) = observed {
+                        observing = next;
+                        continue;
+                    }
+                }
+                let Ok(connect) = receiver.connection() else {
+                    break;
+                };
+                let owner = Arc::clone(&connect.playback);
+                tokio::task::spawn_blocking(move || {
+                    if !receiver.cancelled.load(Ordering::Acquire)
+                        && let Err(error) = owner.select_playback_output(
+                            PlaybackOutput::Local,
+                            Arc::new(AtomicBool::new(false)),
+                        )
+                    {
+                        let _ = receiver.playback.command(Command::OperationFailed(error));
+                    }
+                });
+                break;
             }
         });
         *self.observer.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);

@@ -359,7 +359,7 @@ pub struct ConnectOwner {
     settings_apply: SettingsOwner,
     secrets: Arc<SwitchableSecretStore>,
     source: Arc<SourceOwner>,
-    playback: Arc<PlaybackOwner>,
+    pub(crate) playback: Arc<PlaybackOwner>,
     runtime: tokio::runtime::Handle,
     config: Mutex<DeviceConfig>,
     status: tokio::sync::watch::Sender<Status>,
