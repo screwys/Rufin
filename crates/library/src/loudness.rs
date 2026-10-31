@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::catalog::families::Query;
 use crate::{
     AlbumKey, Catalog, LibraryError, LibraryResult, ReadCancellation, Scope, SourceKey, TrackKey,
 };
@@ -130,14 +129,20 @@ impl Catalog {
         revision: [u8; 32],
         hash: [u8; 32],
     ) -> LibraryResult<bool> {
-        self.put_analysis(
-            hash,
-            sqlx::query("UPDATE track_details SET audio_hash=?3 WHERE track_key=?1 AND audio_revision=?2 AND audio_hash IS NOT ?3")
-                .bind(track)
-                .bind(revision.as_slice())
-                .bind(hash.as_slice()),
-        )
-        .await
+        let mut write = self.write().await?;
+        let changed = sqlx::query("UPDATE track_details SET audio_hash=?3 WHERE track_key=?1 AND audio_revision=?2 AND audio_hash IS NOT ?3")
+            .bind(track)
+            .bind(revision.as_slice())
+            .bind(hash.as_slice())
+            .execute(write.connection().await?)
+            .await?
+            .rows_affected()
+            > 0;
+        if changed {
+            write.changed(Scope::Analysis { hash });
+        }
+        write.commit().await?;
+        Ok(changed)
     }
 
     pub async fn put_loudness(
@@ -145,16 +150,12 @@ impl Catalog {
         hash: [u8; 32],
         value: &LoudnessMeasurement,
     ) -> LibraryResult<bool> {
-        valid(value)?;
-        self.put_analysis(
+        self.put_analysis_copies(&[AnalysisCopy {
             hash,
-            sqlx::query("INSERT INTO loudness(audio_hash,integrated_lufs,true_peak) VALUES(?1,?2,?3)
-                 ON CONFLICT(audio_hash) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
-                 WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak)")
-                .bind(hash.as_slice())
-                .bind(value.integrated_lufs)
-                .bind(value.true_peak),
-        )
+            loudness: Some((value.integrated_lufs, value.true_peak)),
+            waveform: None,
+            fingerprint: None,
+        }])
         .await
     }
 
@@ -165,43 +166,24 @@ impl Catalog {
         album: AlbumKey,
         value: &LoudnessMeasurement,
     ) -> LibraryResult<bool> {
-        valid(value)?;
-        let members = album_members_sql("?1");
         let mut write = self.write().await?;
-        let changed: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO album_loudness(members,integrated_lufs,true_peak) SELECT members,?2,?3 FROM (SELECT {members} members) WHERE members IS NOT NULL
-             ON CONFLICT(members) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
-             WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak) RETURNING members"
+        let members: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT {}",
+            album_members_sql("?1")
         )))
         .bind(album)
-        .bind(value.integrated_lufs)
-        .bind(value.true_peak)
-        .fetch_optional(write.connection().await?)
+        .fetch_one(write.connection().await?)
         .await?;
-        if let Some(members) = &changed {
-            write.changed(Scope::Analysis {
-                hash: *blake3::hash(members.as_bytes()).as_bytes(),
-            });
-        }
-        write.commit().await?;
-        Ok(changed.is_some())
-    }
-
-    /// One analysis statement in a Write; a changed row raises `Scope::Analysis`.
-    pub(crate) async fn put_analysis(
-        &self,
-        hash: [u8; 32],
-        query: Query<'_>,
-    ) -> LibraryResult<bool> {
-        let mut write = self.write().await?;
-        let changed = query
-            .execute(write.connection().await?)
-            .await?
-            .rows_affected()
-            > 0;
-        if changed {
-            write.changed(Scope::Analysis { hash });
-        }
+        let changed = match members {
+            Some(members) => {
+                write_album_loudness(
+                    &mut write,
+                    &[(members, value.integrated_lufs, value.true_peak)],
+                )
+                .await?
+            }
+            None => false,
+        };
         write.commit().await?;
         Ok(changed)
     }
@@ -285,8 +267,9 @@ impl Catalog {
         Ok(copies)
     }
 
-    /// Writes analysis results another installation computed, in one Write.
-    pub async fn put_analysis_copies(&self, copies: &[AnalysisCopy]) -> LibraryResult<()> {
+    /// Writes analysis results, measured here or by another installation, in one Write: one
+    /// statement per kind that has any. Whether a result changed.
+    pub async fn put_analysis_copies(&self, copies: &[AnalysisCopy]) -> LibraryResult<bool> {
         let hex = |hash: &[u8; 32]| blake3::Hash::from_bytes(*hash).to_hex().to_string();
         let mut loudness = Vec::new();
         let mut waveforms = Vec::new();
@@ -323,40 +306,49 @@ impl Catalog {
             }
         }
         let mut write = self.write().await?;
-        let mut changed: Vec<Vec<u8>> = sqlx::query_scalar(
-            "INSERT INTO loudness(audio_hash,integrated_lufs,true_peak) SELECT unhex(value->>0),value->>1,value->>2 FROM json_each(?1) WHERE true
-             ON CONFLICT(audio_hash) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
-             WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak) RETURNING audio_hash",
-        )
-        .bind(serde_json::to_string(&loudness)?)
-        .fetch_all(write.connection().await?)
-        .await?;
-        changed.extend(
-            sqlx::query_scalar::<_, Vec<u8>>(
-                "INSERT INTO waveform(audio_hash,peaks) SELECT unhex(value->>0),value->>1 FROM json_each(?1) WHERE true
-                 ON CONFLICT(audio_hash) DO UPDATE SET peaks=excluded.peaks WHERE peaks IS NOT excluded.peaks RETURNING audio_hash",
+        let mut changed: Vec<Vec<u8>> = Vec::new();
+        if !loudness.is_empty() {
+            changed.extend(sqlx::query_scalar::<_, Vec<u8>>(
+                "INSERT INTO loudness(audio_hash,integrated_lufs,true_peak) SELECT unhex(value->>0),value->>1,value->>2 FROM json_each(?1) WHERE true
+                 ON CONFLICT(audio_hash) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
+                 WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak) RETURNING audio_hash",
             )
-            .bind(serde_json::to_string(&waveforms)?)
+            .bind(serde_json::to_string(&loudness)?)
             .fetch_all(write.connection().await?)
-            .await?,
-        );
-        changed.extend(
-            sqlx::query_scalar::<_, Vec<u8>>(
-                "INSERT INTO fingerprint(audio_hash,version,fingerprint,duration_seconds) SELECT unhex(value->>0),value->>1,value->>2,value->>3 FROM json_each(?1) WHERE true
-                 ON CONFLICT(audio_hash) DO UPDATE SET version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds,lookup_key=''
-                 WHERE (version,fingerprint,duration_seconds) IS NOT (excluded.version,excluded.fingerprint,excluded.duration_seconds) RETURNING audio_hash",
-            )
-            .bind(serde_json::to_string(&fingerprints)?)
-            .fetch_all(write.connection().await?)
-            .await?,
-        );
+            .await?);
+        }
+        if !waveforms.is_empty() {
+            changed.extend(
+                sqlx::query_scalar::<_, Vec<u8>>(
+                    "INSERT INTO waveform(audio_hash,peaks) SELECT unhex(value->>0),value->>1 FROM json_each(?1) WHERE true
+                     ON CONFLICT(audio_hash) DO UPDATE SET peaks=excluded.peaks WHERE peaks IS NOT excluded.peaks RETURNING audio_hash",
+                )
+                .bind(serde_json::to_string(&waveforms)?)
+                .fetch_all(write.connection().await?)
+                .await?,
+            );
+        }
+        // A new fingerprint drops the AcoustID lookup the old one linked.
+        if !fingerprints.is_empty() {
+            changed.extend(
+                sqlx::query_scalar::<_, Vec<u8>>(
+                    "INSERT INTO fingerprint(audio_hash,version,fingerprint,duration_seconds) SELECT unhex(value->>0),value->>1,value->>2,value->>3 FROM json_each(?1) WHERE true
+                     ON CONFLICT(audio_hash) DO UPDATE SET version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds,lookup_key=''
+                     WHERE (version,fingerprint,duration_seconds) IS NOT (excluded.version,excluded.fingerprint,excluded.duration_seconds) RETURNING audio_hash",
+                )
+                .bind(serde_json::to_string(&fingerprints)?)
+                .fetch_all(write.connection().await?)
+                .await?,
+            );
+        }
+        let any = !changed.is_empty();
         for hash in changed {
             if let Ok(hash) = hash.try_into() {
                 write.changed(Scope::Analysis { hash });
             }
         }
         write.commit().await?;
-        Ok(())
+        Ok(any)
     }
 
     /// Every stored album loudness by its members key: integrated loudness and true peak.
@@ -376,31 +368,41 @@ impl Catalog {
         &self,
         rows: &[(String, Option<f64>, Option<f64>)],
     ) -> LibraryResult<()> {
-        for (_, lufs, peak) in rows {
-            valid(&LoudnessMeasurement {
-                integrated_lufs: *lufs,
-                true_peak: *peak,
-                replay_gain_db: None,
-                replay_gain_peak: None,
-            })?;
-        }
         let mut write = self.write().await?;
-        let changed: Vec<String> = sqlx::query_scalar(
-            "INSERT INTO album_loudness(members,integrated_lufs,true_peak) SELECT value->>0,value->>1,value->>2 FROM json_each(?1) WHERE true
-             ON CONFLICT(members) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
-             WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak) RETURNING members",
-        )
-        .bind(serde_json::to_string(rows)?)
-        .fetch_all(write.connection().await?)
-        .await?;
-        for members in changed {
-            write.changed(Scope::Analysis {
-                hash: *blake3::hash(members.as_bytes()).as_bytes(),
-            });
-        }
+        write_album_loudness(&mut write, rows).await?;
         write.commit().await?;
         Ok(())
     }
+}
+
+/// The one album loudness statement, by members key; a changed row raises `Scope::Analysis`.
+/// Whether one changed.
+async fn write_album_loudness(
+    write: &mut crate::catalog::write::Write<'_>,
+    rows: &[(String, Option<f64>, Option<f64>)],
+) -> LibraryResult<bool> {
+    for (_, lufs, peak) in rows {
+        valid(&LoudnessMeasurement {
+            integrated_lufs: *lufs,
+            true_peak: *peak,
+            replay_gain_db: None,
+            replay_gain_peak: None,
+        })?;
+    }
+    let changed: Vec<String> = sqlx::query_scalar(
+        "INSERT INTO album_loudness(members,integrated_lufs,true_peak) SELECT value->>0,value->>1,value->>2 FROM json_each(?1) WHERE true
+         ON CONFLICT(members) DO UPDATE SET integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
+         WHERE (integrated_lufs,true_peak) IS NOT (excluded.integrated_lufs,excluded.true_peak) RETURNING members",
+    )
+    .bind(serde_json::to_string(rows)?)
+    .fetch_all(write.connection().await?)
+    .await?;
+    for members in &changed {
+        write.changed(Scope::Analysis {
+            hash: *blake3::hash(members.as_bytes()).as_bytes(),
+        });
+    }
+    Ok(!changed.is_empty())
 }
 
 fn valid(value: &LoudnessMeasurement) -> LibraryResult<()> {

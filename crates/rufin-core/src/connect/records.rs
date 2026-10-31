@@ -1760,7 +1760,11 @@ impl Records {
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                catalog.put_analysis_copies(&copies).await.map_err(error)
+                catalog
+                    .put_analysis_copies(&copies)
+                    .await
+                    .map(drop)
+                    .map_err(error)
             }
             "album-loudness" => {
                 let values = live

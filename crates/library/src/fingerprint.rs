@@ -30,16 +30,12 @@ impl Catalog {
         hash: [u8; 32],
         row: &FingerprintRow,
     ) -> LibraryResult<bool> {
-        self.put_analysis(
+        self.put_analysis_copies(&[crate::AnalysisCopy {
             hash,
-            sqlx::query("INSERT INTO fingerprint(audio_hash,version,fingerprint,duration_seconds) VALUES(?1,?2,?3,?4)
-                 ON CONFLICT(audio_hash) DO UPDATE SET version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds,lookup_key=''
-                 WHERE (version,fingerprint,duration_seconds) IS NOT (excluded.version,excluded.fingerprint,excluded.duration_seconds)")
-                .bind(hash.as_slice())
-                .bind(&row.version)
-                .bind(&row.fingerprint)
-                .bind(row.duration_seconds as i64),
-        )
+            loudness: None,
+            waveform: None,
+            fingerprint: Some(row.clone()),
+        }])
         .await
     }
 }

@@ -1,5 +1,5 @@
 //! Seekbar waveforms, keyed by the audio they were drawn from.
-use crate::{Catalog, LibraryError, LibraryResult};
+use crate::{Catalog, LibraryResult};
 
 impl Catalog {
     pub async fn waveform(&self, hash: [u8; 32]) -> LibraryResult<Option<Vec<(f64, f64)>>> {
@@ -15,21 +15,12 @@ impl Catalog {
     }
 
     pub async fn put_waveform(&self, hash: [u8; 32], peaks: &[(f64, f64)]) -> LibraryResult<bool> {
-        if peaks.is_empty()
-            || peaks
-                .iter()
-                .any(|(left, right)| !(0.0..=1.0).contains(left) || !(0.0..=1.0).contains(right))
-        {
-            return Err(LibraryError::InvalidRequest(
-                "invalid waveform peaks".into(),
-            ));
-        }
-        self.put_analysis(
+        self.put_analysis_copies(&[crate::AnalysisCopy {
             hash,
-            sqlx::query("INSERT INTO waveform(audio_hash,peaks) VALUES(?1,?2) ON CONFLICT(audio_hash) DO UPDATE SET peaks=excluded.peaks WHERE peaks IS NOT excluded.peaks")
-                .bind(hash.as_slice())
-                .bind(serde_json::to_string(peaks)?),
-        )
+            loudness: None,
+            waveform: Some(peaks.to_vec()),
+            fingerprint: None,
+        }])
         .await
     }
 }
