@@ -33,7 +33,7 @@ const PUSH_TIMEOUT: Duration = Duration::from_secs(5);
 pub trait Values: Send + Sync {
     /// Fills in the value of each live row that holds none, as it leaves this device. A row
     /// whose item is gone keeps none and is not sent; the next diff pass tombstones it.
-    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, Result<()>>;
+    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, Result<(), String>>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -209,7 +209,11 @@ async fn serve(profile: &Arc<Profile>, mut after: i64, send: &mut SendStream) ->
         };
         after = last.sequence;
         let complete = rows.len() < PAGE;
-        profile.values.encode(&mut rows).await?;
+        profile
+            .values
+            .encode(&mut rows)
+            .await
+            .map_err(anyhow::Error::msg)?;
         rows.retain(|row| row.deleted || row.value.is_some());
         write_page(send, rows).await?;
         if complete {

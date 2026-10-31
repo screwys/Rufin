@@ -2069,8 +2069,8 @@ impl Records {
 }
 
 impl rufin_connect::sync::Values for Records {
-    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, anyhow::Result<()>> {
-        Box::pin(async move { self.values(rows).await.map_err(anyhow::Error::msg) })
+    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(self.values(rows))
     }
 }
 

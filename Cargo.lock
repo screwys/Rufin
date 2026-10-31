@@ -7338,7 +7338,6 @@ name = "rufin-core"
 version = "0.16.6"
 dependencies = [
  "age",
- "anyhow",
  "app-identity",
  "artwork",
  "async-channel",

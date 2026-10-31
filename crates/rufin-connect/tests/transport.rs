@@ -20,7 +20,7 @@ type Events = mpsc::UnboundedReceiver<NetworkEvent>;
 struct Items(Mutex<HashMap<String, serde_json::Value>>);
 
 impl Values for Items {
-    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn encode<'a>(&'a self, rows: &'a mut [Row]) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
             let items = self.0.lock().unwrap();
             for row in rows

@@ -16,7 +16,6 @@ bindings = ["dep:uniffi", "playback/bindings", "lyrics/bindings", "sources/bindi
 [dependencies]
 uniffi = { workspace = true, optional = true }
 rufin-connect.workspace = true
-anyhow = "1"
 age.workspace = true
 # Bundle age error translations in development packages too.
 rust-embed.workspace = true
