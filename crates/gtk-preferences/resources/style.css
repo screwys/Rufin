@@ -918,7 +918,9 @@ row.artist-search-result button.search-preview-play {
   background-color: transparent;
 }
 
-label.track-row-playing:not(.track-row-paused) {
+/* The queue marks its current row also while nothing plays, as after a restored start. */
+label.track-row-playing:not(.track-row-paused),
+.queue-list label.track-row-playing {
   color: var(--accent-color);
 }
 
