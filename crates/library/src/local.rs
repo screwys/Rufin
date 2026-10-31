@@ -56,18 +56,6 @@ pub enum LocalMediaLocation {
     Document(String),
 }
 
-#[derive(Debug, FromRow)]
-pub struct DownloadMetadata {
-    pub channels: Option<u32>,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub disc_number: i64,
-    pub track_number: i64,
-    pub duration_millis: i64,
-    pub source_format: Option<String>,
-}
-
 #[derive(Clone, Debug, FromRow)]
 pub struct FileEditRow {
     pub track_key: TrackKey,
@@ -310,15 +298,6 @@ impl Catalog {
             .bind(serde_json::to_string(&members)?).fetch_all(&mut *connection).await?)
     }
 
-    pub async fn original_files(
-        &self,
-        media_uris: &[String],
-    ) -> LibraryResult<Vec<LocalLocatorWrite>> {
-        let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("WITH ranked AS(SELECT source.object_id source_id,locator.*,row_number() OVER(PARTITION BY media_uri ORDER BY local_access_file_key) choice FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE media_uri IN(SELECT value FROM json_each(?1))) SELECT source_id,media_uri,origin,path,root,relative_path,access_uri FROM ranked WHERE choice=1")
-            .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
-    }
-
     pub async fn media_uris_for_document_ids(
         &self,
         ids: &[String],
@@ -460,116 +439,6 @@ impl Catalog {
         Ok(usize::try_from(count?).unwrap_or_default())
     }
 
-    pub async fn download_metadata(
-        &self,
-        media_uri: &str,
-    ) -> LibraryResult<Option<DownloadMetadata>> {
-        let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as(
-            "SELECT CASE WHEN title='' THEN media_uri ELSE title END title,display_artist artist,display_album album,disc_number,track_number,
-                    duration_millis,source_format,json_extract(details.metadata,'$.audio_properties.channels') channels
-             FROM tracks LEFT JOIN track_details details USING(track_key) WHERE media_uri=?1",
-        )
-        .bind(media_uri)
-        .fetch_optional(&mut *connection)
-        .await?)
-    }
-
-    /// Paths admitted on this device, including downloaded and mapped copies.
-    pub async fn local_media_locations(
-        &self,
-        uris: &[String],
-    ) -> LibraryResult<Vec<(String, Vec<LocalMediaLocation>, bool)>> {
-        let backings = uris
-            .iter()
-            .map(|uri| {
-                crate::cue_media_parts(uri)
-                    .map(|(_, backing, _, _)| backing)
-                    .filter(|backing| crate::document_media_id(backing).is_some())
-            })
-            .collect::<Vec<_>>();
-        let mut connection = self.acquire_reader().await?;
-        let rows: Vec<(String, String, bool, bool, Option<String>)> = sqlx::query_as(
-            "SELECT requested.value,
-                (SELECT json_group_array(path) FROM (
-                    SELECT CASE WHEN access_uri LIKE 'content:%' THEN access_uri ELSE path END AS path FROM main.local_locators WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
-                    UNION SELECT path FROM main.downloads WHERE media_uri IN (requested.value,json_extract(?2,'$[' || requested.key || ']'))
-                    UNION SELECT file.path FROM main.tracks track JOIN sources source USING(source_key) JOIN track_details details USING(track_key) JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
-                      WHERE media_uri=requested.value AND source.kind='local')),
-                EXISTS(SELECT 1 FROM tracks track JOIN track_details details USING(track_key) WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin IN ('local','import'))),
-                EXISTS(SELECT 1 FROM playlist_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value)
-                    OR EXISTS(SELECT 1 FROM queue_entries entry JOIN tracks track USING(track_key) WHERE track.media_uri=requested.value),
-                (SELECT json_array(source.object_id,details.source_path,json_extract(details.metadata,'$.audio_properties.size_bytes'))
-                    FROM tracks track JOIN sources source USING(source_key) JOIN track_details details USING(track_key)
-                    WHERE track.media_uri=requested.value AND details.source_path IS NOT NULL)
-             FROM json_each(?1) requested",
-        )
-        .bind(serde_json::to_string(uris)?)
-        .bind(serde_json::to_string(&backings)?)
-        .fetch_all(&mut *connection).await?;
-        drop(connection);
-        let mapped = rows
-            .iter()
-            .map(|row| {
-                let (source, path, size) =
-                    serde_json::from_str::<(String, String, Option<u64>)>(row.4.as_deref()?)
-                        .ok()?;
-                self.mapped_file(&source, &path, size)
-            })
-            .collect::<Vec<_>>();
-        let mapped = tokio::task::spawn_blocking(move || {
-            mapped
-                .into_iter()
-                .map(|mapped| mapped.and_then(|mapped| mapped.locate()))
-                .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|error| LibraryError::InvalidRequest(error.to_string()))?;
-        rows.into_iter()
-            .zip(mapped)
-            .map(|((uri, paths, shared, direct, _), mapped)| {
-                let paths: Vec<String> = serde_json::from_str(&paths)?;
-                let mut paths = paths
-                    .into_iter()
-                    .map(|path| {
-                        if path.starts_with("content:") {
-                            Ok(LocalMediaLocation::Document(path))
-                        } else if path.starts_with("file:") {
-                            crate::file_media_path(&path)
-                                .map(LocalMediaLocation::File)
-                                .ok_or(LibraryError::InvalidRequest(
-                                    "Download has no local path".into(),
-                                ))
-                        } else if path.starts_with("rufin-document:") {
-                            crate::document_access_uri(&path)
-                                .map(LocalMediaLocation::Document)
-                                .ok_or(LibraryError::InvalidRequest(
-                                    "Document locator has no access URI".into(),
-                                ))
-                        } else {
-                            Ok(LocalMediaLocation::File(path.into()))
-                        }
-                    })
-                    .collect::<LibraryResult<Vec<_>>>()?;
-                paths.extend(mapped);
-                // A direct import can be checked before its metadata has been read.
-                if direct && !shared {
-                    let backing = crate::cue_media_parts(&uri).map(|(_, backing, _, _)| backing);
-                    if let Some(path) = crate::file_media_path(backing.as_deref().unwrap_or(&uri)) {
-                        paths.push(LocalMediaLocation::File(path));
-                    } else if let Some(uri) = backing
-                        .as_deref()
-                        .or(Some(uri.as_str()))
-                        .filter(|uri| uri.starts_with("content:"))
-                    {
-                        paths.push(LocalMediaLocation::Document(uri.to_owned()));
-                    }
-                }
-                Ok((uri, paths, shared))
-            })
-            .collect()
-    }
-
     pub async fn catalog_missing_media(
         &self,
         media: &[(String, crate::SourceId)],
@@ -689,23 +558,6 @@ impl Catalog {
         .bind(limit.clamp(1, 128) as i64)
         .fetch_all(&mut *connection)
         .await?)
-    }
-
-    /// The track's own file on this device: its locator, else its mapped file while it is there.
-    pub async fn original_file(&self, media_uri: &str) -> LibraryResult<Option<LocalLocatorWrite>> {
-        let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
-        let locator = sqlx::query_as("SELECT source.object_id source_id,locator.media_uri,locator.origin,locator.path,locator.root,locator.relative_path,locator.access_uri FROM main.local_locators locator LEFT JOIN main.sources source USING(source_key) WHERE media_uri=?1 ORDER BY local_access_file_key LIMIT 1")
-            .bind(media_uri).fetch_optional(&mut *connection).await?;
-        drop(connection);
-        if locator.is_some() {
-            return Ok(locator);
-        }
-        let Some(playable) = self.playable_by_uri(media_uri).await? else {
-            return Ok(None);
-        };
-        tokio::task::spawn_blocking(move || playable.mapped_locator())
-            .await
-            .map_err(|error| LibraryError::InvalidRequest(error.to_string()))
     }
 }
 

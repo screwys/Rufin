@@ -1916,10 +1916,11 @@ mod tests {
         }
         assert_eq!(
             catalog
-                .original_file(&downloaded_uri)
+                .playable_by_uri(&downloaded_uri)
                 .await
                 .expect("original path")
-                .map(|file| file.path),
+                .and_then(|playable| playable.locator)
+                .map(|locator| locator.path),
             Some(original.to_string_lossy().into_owned())
         );
         let (_, source, _) = sources::Source::connect(

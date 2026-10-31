@@ -54,29 +54,38 @@ impl NativeFile {
         })
     }
 
-    fn resolve(
-        source: &Arc<Source>,
-        media_uri: &str,
-        source_path: Option<&str>,
-        format: Option<&str>,
-        cue: bool,
-        original: Option<library::LocalLocatorWrite>,
-    ) -> Result<Self, Error> {
+    /// The file of a track: on the source's file share, its local locator, its mapped file
+    /// while it is there, or a Local source's path. A mapped file is looked for on the file
+    /// system, so this blocks.
+    fn resolve(source: &Arc<Source>, playable: &library::Playable) -> Result<Self, Error> {
+        let source_path = playable.source_path.as_deref();
+        let mapped = || {
+            let mapped = playable.mapped.as_ref()?;
+            Some((mapped, mapped.locate()?))
+        };
         let location = if source.file_source(source_path).is_some() {
             FileLocation::Remote {
                 source: Arc::clone(source),
                 path: source_path.map(str::to_owned).ok_or(Error::Unavailable)?,
             }
-        } else if let Some(original) = original {
-            if original.access_uri.starts_with("content:") || original.path.starts_with("content:")
-            {
+        } else if let Some(locator) = &playable.locator {
+            if locator.access_uri.starts_with("content:") || locator.path.starts_with("content:") {
                 FileLocation::Document {
-                    uri: original.access_uri,
-                    root: original.root,
-                    relative: original.relative_path,
+                    uri: locator.access_uri.clone(),
+                    root: locator.root.clone(),
+                    relative: locator.relative_path.clone(),
                 }
             } else {
-                FileLocation::Native(PathBuf::from(original.path))
+                FileLocation::Native(PathBuf::from(&locator.path))
+            }
+        } else if let Some((mapped, location)) = mapped() {
+            match location {
+                library::LocalMediaLocation::File(path) => FileLocation::Native(path),
+                library::LocalMediaLocation::Document(uri) => FileLocation::Document {
+                    uri,
+                    root: mapped.root.clone(),
+                    relative: mapped.path.clone(),
+                },
             }
         } else if matches!(source.implementation, Implementation::Local(_)) {
             FileLocation::Native(PathBuf::from(source_path.ok_or(Error::Unavailable)?))
@@ -90,9 +99,9 @@ impl NativeFile {
         };
         Ok(Self {
             location,
-            format: format.map(str::to_owned),
-            cue: cue,
-            media_uri: media_uri.to_owned(),
+            format: playable.format.clone(),
+            cue: playable.cue_path.is_some(),
+            media_uri: playable.media_uri.clone(),
         })
     }
 
@@ -575,14 +584,7 @@ impl FileEditSession {
                         None
                     };
                     let file = if let Some(source) = &source {
-                        NativeFile::resolve(
-                            source,
-                            &row.media_uri,
-                            row.access.source_path.as_deref(),
-                            row.metadata.source_format.as_deref(),
-                            row.access.cue_path.is_some(),
-                            catalog.original_file(&media_uri).await.map_err(failure)?,
-                        )?
+                        source.resolved_track(catalog, &media_uri).await?.0
                     } else {
                         NativeFile::direct(&media_uri)?
                     };
@@ -798,7 +800,7 @@ impl FileEditSession {
                         source
                             .resolved_track(catalog, uri)
                             .await
-                            .map(|(file, row)| (file, row.object_id))
+                            .map(|(file, playable)| (file, playable.object_id))
                     } else {
                         NativeFile::direct(uri).map(|file| (file, None))
                     };
@@ -1062,25 +1064,31 @@ impl FileEditSession {
 }
 
 impl Source {
+    /// A track's playable and its file.
     async fn resolved_track(
         self: &Arc<Self>,
         catalog: &Catalog,
         uri: &str,
-    ) -> Result<(NativeFile, library::TrackView), Error> {
-        let row = catalog
-            .track(&(uri), &ReadCancellation::new())
+    ) -> Result<(NativeFile, library::Playable), Error> {
+        let playable = catalog
+            .playable_by_uri(uri)
             .await
             .map_err(failure)?
             .ok_or(Error::Unavailable)?;
-        let file = NativeFile::resolve(
-            self,
-            &row.media_uri,
-            row.access.source_path.as_deref(),
-            row.metadata.source_format.as_deref(),
-            row.access.cue_path.is_some(),
-            catalog.original_file(uri).await.map_err(failure)?,
-        )?;
-        Ok((file, row))
+        self.native_file(playable).await
+    }
+
+    /// A playable's file, looked for off the async threads.
+    async fn native_file(
+        self: &Arc<Self>,
+        playable: library::Playable,
+    ) -> Result<(NativeFile, library::Playable), Error> {
+        let source = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            NativeFile::resolve(&source, &playable).map(|file| (file, playable))
+        })
+        .await
+        .map_err(failure)?
     }
 
     fn refresh_metadata_after_write(self: &Arc<Self>, catalog: &Catalog, work: Option<SaveWork>) {
@@ -1135,8 +1143,8 @@ impl Source {
             return Ok(());
         }
         self.catalog_operation(catalog, async |observation| {
-            let (file, row) = self.resolved_track(catalog, uri).await?;
-            if row.source_key != Some(source) {
+            let (file, playable) = self.resolved_track(catalog, uri).await?;
+            if playable.source != Some(source) {
                 return Err(Error::Unavailable);
             }
             let (prepared, _) = file
@@ -1170,17 +1178,7 @@ impl Source {
                 Vec::new()
             };
         }
-        let Ok(file) = NativeFile::resolve(
-            self,
-            &playable.media_uri,
-            playable.source_path.as_deref(),
-            playable.format.as_deref(),
-            false,
-            playable
-                .locator
-                .clone()
-                .or_else(|| playable.mapped_locator()),
-        ) else {
+        let Ok(file) = NativeFile::resolve(self, playable) else {
             return Vec::new();
         };
         file.lyrics_storage()
@@ -1206,12 +1204,12 @@ impl Source {
         sidecar: bool,
     ) -> Result<(), Error> {
         self.catalog_operation(catalog, async |observation| {
-            let row = catalog
-                .track(&(uri), &ReadCancellation::new())
+            let playable = catalog
+                .playable_by_uri(uri)
                 .await
                 .map_err(failure)?
                 .ok_or(Error::Unavailable)?;
-            if row.access.cue_path.is_some() {
+            if playable.cue_path.is_some() {
                 return Err(Error::Unavailable);
             }
             if let Implementation::JellyfinEmby(provider) = &self.implementation
@@ -1221,18 +1219,14 @@ impl Source {
                     return Err(crate::SourceError::Cancelled.into());
                 }
                 provider
-                    .write_lyrics(row.object_id.as_deref().ok_or(Error::Unavailable)?, lyrics)
+                    .write_lyrics(
+                        playable.object_id.as_deref().ok_or(Error::Unavailable)?,
+                        lyrics,
+                    )
                     .await
                     .map_err(failure)?;
             } else {
-                let file = NativeFile::resolve(
-                    self,
-                    &row.media_uri,
-                    row.access.source_path.as_deref(),
-                    row.metadata.source_format.as_deref(),
-                    row.access.cue_path.is_some(),
-                    catalog.original_file(uri).await.map_err(failure)?,
-                )?;
+                let file = self.native_file(playable).await?.0;
                 if let Some(committed) = file
                     .save_lyrics(lyrics, sidecar, || self.is_retired())
                     .await?
@@ -1297,41 +1291,29 @@ impl Source {
             return Err(Error::Unavailable);
         }
         for page in measurements.chunks(64) {
-            let rows = catalog
-                .tracks(
-                    &page.iter().map(|row| row.0).collect::<Vec<_>>(),
-                    &ReadCancellation::new(),
-                )
+            let playables = catalog
+                .playables(&page.iter().map(|row| row.0).collect::<Vec<_>>())
                 .await
                 .map_err(failure)?;
-            let mut originals = catalog
-                .original_files(
-                    &rows
-                        .iter()
-                        .map(|row| row.media_uri.clone())
-                        .collect::<Vec<_>>(),
-                )
-                .await
-                .map_err(failure)?
-                .into_iter()
-                .map(|file| (file.media_uri.clone(), file))
-                .collect::<std::collections::HashMap<_, _>>();
-            for row in rows {
-                if row.source_key != Some(source) || row.access.cue_path.is_some() {
-                    continue;
-                }
-                let Some((_, track, album)) = page.iter().find(|value| value.0 == row.track_key)
-                else {
+            let owner = Arc::clone(self);
+            let files = tokio::task::spawn_blocking(move || {
+                playables
+                    .into_iter()
+                    .filter(|playable| {
+                        playable.source == Some(source) && playable.cue_path.is_none()
+                    })
+                    .map(|playable| {
+                        NativeFile::resolve(&owner, &playable).map(|file| (playable.track, file))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .map_err(failure)?;
+            for file in files {
+                let (key, file) = file?;
+                let Some((_, track, album)) = page.iter().find(|value| value.0 == key) else {
                     continue;
                 };
-                let file = NativeFile::resolve(
-                    self,
-                    &row.media_uri,
-                    row.access.source_path.as_deref(),
-                    row.metadata.source_format.as_deref(),
-                    row.access.cue_path.is_some(),
-                    originals.remove(&row.media_uri),
-                )?;
                 if let Some(writer) = file
                     .format
                     .as_deref()

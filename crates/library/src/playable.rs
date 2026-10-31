@@ -1,5 +1,6 @@
-//! What playing a track needs, read by key in one statement: where its audio is, its CUE
-//! window, its gains and what writing its lyrics needs.
+//! What playing or downloading a track needs, read by key in one statement: where its audio is
+//! on this device, its CUE window, its gains, what writing its lyrics needs and what names a
+//! download.
 
 use sqlx::Row as _;
 
@@ -33,6 +34,19 @@ pub struct Playable {
     pub audio_hash: Option<[u8; 32]>,
     pub channels: Option<u32>,
     pub gains: Gains,
+    /// What names a downloaded copy.
+    pub names: PlayableNames,
+}
+
+/// The tags a download's folders and file name are made of; an untitled track is named by its
+/// URI.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlayableNames {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub disc: i64,
+    pub number: i64,
 }
 
 /// A downloaded copy and the size it was written with.
@@ -110,12 +124,33 @@ fn measurement(gain: &NativeGain) -> LoudnessMeasurement {
 impl Catalog {
     /// One reader statement by key.
     pub async fn playable(&self, track: TrackKey) -> LibraryResult<Option<Playable>> {
-        self.read_playable("track.track_key=?1", track).await
+        Ok(self.read_playable("track.track_key=?1", track).await?.pop())
     }
 
     /// The same statement by media URI, for reads that start from one.
     pub async fn playable_by_uri(&self, media_uri: &str) -> LibraryResult<Option<Playable>> {
-        self.read_playable("track.media_uri=?1", media_uri).await
+        Ok(self
+            .read_playable("track.media_uri=?1", media_uri)
+            .await?
+            .pop())
+    }
+
+    /// The same statement for many keys; keys the Store does not hold are left out.
+    pub async fn playables(&self, tracks: &[TrackKey]) -> LibraryResult<Vec<Playable>> {
+        self.read_playable(
+            "track.track_key IN(SELECT value FROM json_each(?1))",
+            serde_json::to_string(tracks)?,
+        )
+        .await
+    }
+
+    /// The same statement for many media URIs; URIs the Store does not hold are left out.
+    pub async fn playables_by_uri(&self, media_uris: &[String]) -> LibraryResult<Vec<Playable>> {
+        self.read_playable(
+            "track.media_uri IN(SELECT value FROM json_each(?1))",
+            serde_json::to_string(media_uris)?,
+        )
+        .await
     }
 
     /// The same statement by a source's object id, for reads by another device's source.
@@ -124,14 +159,16 @@ impl Catalog {
         source: &SourceId,
         object: &str,
     ) -> LibraryResult<Option<Playable>> {
-        self.read_playable(
-            "track.source_key=(SELECT source_key FROM sources WHERE object_id=?1->>0) AND track.object_id=?1->>1",
-            serde_json::to_string(&(source.as_str(), object))?,
-        )
-        .await
+        Ok(self
+            .read_playable(
+                "track.source_key=(SELECT source_key FROM sources WHERE object_id=?1->>0) AND track.object_id=?1->>1",
+                serde_json::to_string(&(source.as_str(), object))?,
+            )
+            .await?
+            .pop())
     }
 
-    async fn read_playable<'q, T>(&self, condition: &str, key: T) -> LibraryResult<Option<Playable>>
+    async fn read_playable<'q, T>(&self, condition: &str, key: T) -> LibraryResult<Vec<Playable>>
     where
         T: 'q + Send + sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
     {
@@ -159,7 +196,8 @@ impl Catalog {
                     WHERE member.album_key=track.album_key AND member.indexed=1 AND {member}
                     ORDER BY coalesce(member_details.cue_path,member_details.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,
                 measured.integrated_lufs,measured.true_peak,album.integrated_lufs,album.true_peak,details.audio_revision,track.track_key,
-                json_extract(details.metadata,'$.audio_properties.size_bytes')
+                json_extract(details.metadata,'$.audio_properties.size_bytes'),
+                CASE WHEN track.title='' THEN track.media_uri ELSE track.title END,track.display_artist,track.display_album,track.disc_number,track.track_number
              FROM tracks track LEFT JOIN track_details details USING(track_key)
              LEFT JOIN files file ON file.source_key=track.source_key AND file.path=details.source_path
              LEFT JOIN loudness measured ON measured.audio_hash=details.audio_hash
@@ -167,14 +205,15 @@ impl Catalog {
              WHERE {condition}"
         );
         let mut connection = self.acquire_reader().await?;
-        let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(key)
-            .fetch_optional(&mut *connection)
+            .fetch_all(&mut *connection)
             .await?;
         drop(connection);
-        let Some(row) = row else {
-            return Ok(None);
-        };
+        rows.iter().map(|row| self.playable_row(row)).collect()
+    }
+
+    fn playable_row(&self, row: &sqlx::sqlite::SqliteRow) -> LibraryResult<Playable> {
         let source: Option<i64> = row.try_get(0)?;
         let object_id: Option<String> = row.try_get(1)?;
         let media_uri: String = row.try_get(2)?;
@@ -200,6 +239,13 @@ impl Catalog {
         let audio_revision: Option<Vec<u8>> = row.try_get(22)?;
         let track: TrackKey = row.try_get(23)?;
         let server_size: Option<i64> = row.try_get(24)?;
+        let names = PlayableNames {
+            title: row.try_get(25)?,
+            artist: row.try_get(26)?,
+            album: row.try_get(27)?,
+            disc: row.try_get(28)?,
+            number: row.try_get(29)?,
+        };
         let source = source.map(SourceKey::from_raw);
         let (source_id, source_kind) = source
             .and_then(|source| {
@@ -264,7 +310,7 @@ impl Catalog {
             _ => crate::cue_media_parts(&media_uri)
                 .map(|(_, _, start, end)| (start as u64, end as u64)),
         };
-        Ok(Some(Playable {
+        Ok(Playable {
             track,
             source,
             source_id,
@@ -302,6 +348,7 @@ impl Catalog {
                 analysed: analysed(lufs, peak),
                 album_analysed: analysed(album_lufs, album_peak),
             },
-        }))
+            names,
+        })
     }
 }

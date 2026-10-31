@@ -86,33 +86,6 @@ impl MappedFile {
     }
 }
 
-impl crate::Playable {
-    /// The mapped file as a locator while it is there. This blocks on the file system.
-    pub fn mapped_locator(&self) -> Option<crate::LocalLocatorWrite> {
-        let mapped = self.mapped.as_ref()?;
-        let (path, access_uri) = match mapped.locate()? {
-            LocalMediaLocation::File(path) => {
-                let access_uri = url::Url::from_file_path(&path).ok()?.to_string();
-                (path.to_string_lossy().into_owned(), access_uri)
-            }
-            LocalMediaLocation::Document(uri) => (uri.clone(), uri),
-        };
-        let relative_path = Path::new(&path).strip_prefix(&mapped.root).map_or_else(
-            |_| mapped.path.clone(),
-            |relative| relative.to_string_lossy().into_owned(),
-        );
-        Some(crate::LocalLocatorWrite {
-            source_id: self.source_id.as_ref().map(|id| id.as_str().to_owned()),
-            media_uri: self.media_uri.clone(),
-            origin: "mapping".into(),
-            path,
-            root: mapped.root.clone(),
-            relative_path,
-            access_uri,
-        })
-    }
-}
-
 /// Finds a regular document under a tree by its path components: its URI and size.
 pub type DocumentLookup = fn(&str, &[String]) -> Option<(String, Option<u64>)>;
 

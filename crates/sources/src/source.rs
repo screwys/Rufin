@@ -2704,10 +2704,10 @@ mod refresh_laws {
             .unwrap();
         for track in &tracks {
             assert_eq!(
-                catalog
-                    .original_file(&track.media_uri)
+                crate::playable(&catalog, &track.media_uri)
                     .await
-                    .unwrap()
+                    .mapped
+                    .and_then(|mapped| mapped.locate())
                     .is_some(),
                 track.media_uri
                     != library::source_entity_uri(&SourceId::new("mapping-test"), "track", "other")
@@ -2741,10 +2741,10 @@ mod refresh_laws {
         );
         for track in &tracks {
             assert_eq!(
-                catalog
-                    .original_file(&track.media_uri)
+                crate::playable(&catalog, &track.media_uri)
                     .await
-                    .unwrap()
+                    .mapped
+                    .and_then(|mapped| mapped.locate())
                     .is_some(),
                 track.media_uri
                     != library::source_entity_uri(&SourceId::new("mapping-test"), "track", "other")

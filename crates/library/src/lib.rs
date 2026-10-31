@@ -58,7 +58,7 @@ pub use local_access::{
     reported_path_is_absolute,
 };
 mod playable;
-pub use playable::{Gains, Playable, PlayableDownload, PlayableFile};
+pub use playable::{Gains, Playable, PlayableDownload, PlayableFile, PlayableNames};
 mod playlists;
 pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
@@ -116,8 +116,8 @@ pub use keys::{
     source_entity_uri, source_id_for_uri,
 };
 pub use local::{
-    DownloadItem, DownloadMetadata, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState,
-    LocalFileWrite, LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
+    DownloadItem, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite,
+    LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;

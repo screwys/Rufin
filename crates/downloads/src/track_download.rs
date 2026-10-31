@@ -1253,7 +1253,7 @@ pub(super) fn new_download_paths(
     root: &Path,
     source_id: Option<&SourceId>,
     media_uri: &str,
-    media: Option<&library::DownloadMetadata>,
+    media: Option<&library::Playable>,
     directory: Option<&DownloadDirectory>,
     transcoded_extension: Option<&str>,
 ) -> DownloadPaths {
@@ -1262,19 +1262,20 @@ pub(super) fn new_download_paths(
         .and_then(DownloadDirectory::native)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| source_directory(root, source_id));
-    let artist = safe_path_component(media.map_or("", |media| &media.artist), "Unknown Artist");
-    let album = safe_path_component(media.map_or("", |media| &media.album), "Unknown Album");
-    let title = safe_path_component(media.map_or("", |media| &media.title), "Untitled");
+    let names = media.map(|media| &media.names);
+    let artist = safe_path_component(names.map_or("", |names| &names.artist), "Unknown Artist");
+    let album = safe_path_component(names.map_or("", |names| &names.album), "Unknown Album");
+    let title = safe_path_component(names.map_or("", |names| &names.title), "Untitled");
     let id = hash_id(media_uri);
     let short_id = id.chars().take(12).collect::<String>();
     let extension = download_extension(
-        media.and_then(|media| media.source_format.as_deref()),
+        media.and_then(|media| media.format.as_deref()),
         transcoded_extension,
     );
     let file_name = format!(
         "{:02}-{:02} {title} [{}].{extension}",
-        media.map(|media| media.disc_number).unwrap_or_default(),
-        media.map(|media| media.track_number).unwrap_or_default(),
+        names.map(|names| names.disc).unwrap_or_default(),
+        names.map(|names| names.number).unwrap_or_default(),
         short_id
     );
     let audio = audio_root.join(&artist).join(&album).join(&file_name);

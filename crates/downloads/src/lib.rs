@@ -1908,10 +1908,7 @@ impl Actor {
                     continue;
                 }
             }
-            let playable = match source {
-                Some(_) => playable(&self.catalog, &media_uri).await,
-                None => Err(SourceError::NotFound),
-            };
+            let playable = playable(&self.catalog, &media_uri).await;
             let resolved = if let Some(source) = source.as_ref() {
                 match &playable {
                     Ok(playable) => source.resolve_download(playable, quality).await,
@@ -1933,17 +1930,11 @@ impl Actor {
                 Ok(ResolvedDownload::Encode { encoding, .. }) => Some(encoding.codec.extension()),
                 Err(_) => None,
             };
-            let metadata = self
-                .catalog
-                .download_metadata(&media_uri)
-                .await
-                .ok()
-                .flatten();
             let paths = new_download_paths(
                 &self.root,
                 source_id.as_ref(),
                 &media_uri,
-                metadata.as_ref(),
+                playable.as_ref().ok(),
                 custom_directory,
                 transcoded_extension,
             );
