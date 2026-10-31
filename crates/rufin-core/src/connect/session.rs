@@ -206,23 +206,7 @@ impl Records {
     }
 
     async fn queue_items(&self, entries: &[library::QueueEntry]) -> Result<Vec<QueueItem>, String> {
-        let mut keys = entries
-            .iter()
-            .map(|entry| entry.track_key)
-            .collect::<Vec<_>>();
-        keys.sort_unstable();
-        keys.dedup();
-        let mut tracks = std::collections::HashMap::new();
-        for page in keys.chunks(library::QUEUE_CONTEXT_LIMIT) {
-            tracks.extend(
-                self.catalog
-                    .tracks(page, &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                    .into_iter()
-                    .map(|track| (track.track_key, track)),
-            );
-        }
+        let tracks = self.queue_tracks(entries).await?;
         let tracks = entries
             .iter()
             .map(|entry| {
@@ -234,6 +218,44 @@ impl Records {
             })
             .collect::<Result<Vec<_>, String>>()?;
         self.items_of(tracks).await
+    }
+
+    /// Queue items of the entries whose track the Store holds, as the queue panel shows them.
+    async fn shown_items(
+        &self,
+        entries: Vec<library::QueueEntry>,
+    ) -> Result<Vec<QueueItem>, String> {
+        let tracks = self.queue_tracks(&entries).await?;
+        let shown = entries
+            .into_iter()
+            .filter_map(|entry| Some((tracks.get(&entry.track_key)?.clone(), entry.provenance)))
+            .collect();
+        self.items_of(shown).await
+    }
+
+    /// The tracks of `entries` the Store holds, by key.
+    async fn queue_tracks(
+        &self,
+        entries: &[library::QueueEntry],
+    ) -> Result<std::collections::HashMap<library::TrackKey, library::TrackView>, String> {
+        let mut keys = entries
+            .iter()
+            .map(|entry| entry.track_key)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut tracks = std::collections::HashMap::with_capacity(keys.len());
+        for page in keys.chunks(library::QUEUE_CONTEXT_LIMIT) {
+            tracks.extend(
+                self.catalog
+                    .tracks(page, &library::ReadCancellation::new())
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .map(|track| (track.track_key, track)),
+            );
+        }
+        Ok(tracks)
     }
 
     async fn items_of(
@@ -539,6 +561,22 @@ impl ConnectOwner {
         self.request(peer, Request::Control { command })
             .await
             .map(drop)
+    }
+
+    /// Another device's whole queue in play order, as its queue panel shows it, as queue
+    /// entries of this device.
+    pub(crate) async fn queue(&self, peer: &str) -> Result<Vec<library::QueueEntry>, String> {
+        let records = Arc::clone(&self.active()?.records);
+        let items: Vec<QueueItem> =
+            serde_json::from_value(self.request(peer, Request::Queue).await?).map_err(error)?;
+        records.entries(items).await
+    }
+
+    pub(super) async fn answer_queue(&self) -> Result<Vec<QueueItem>, String> {
+        let records = Arc::clone(&self.active()?.records);
+        records
+            .shown_items(self.playback.queue_entries().await?)
+            .await
     }
 
     /// A page of another device's queue, as queue items of this device.

@@ -245,34 +245,6 @@ impl RufinPlayback {
             .cast(&self.peer, &queue, true, Some((placement, target)))
             .await
     }
-
-    /// The receiver's whole queue in play order, read as its queue panel reads it.
-    pub(super) async fn queue(&self) -> Result<library::QueueRestore, String> {
-        let connect = self.connection()?;
-        let mut entries = Vec::new();
-        loop {
-            let (page, total, _) = connect
-                .queue_page(
-                    &self.peer,
-                    entries.len() as u64,
-                    library::QUEUE_CONTEXT_LIMIT as u32,
-                    String::new(),
-                )
-                .await?;
-            if page.is_empty() {
-                break;
-            }
-            entries.extend(page.into_iter().map(|(_, entry)| entry));
-            if entries.len() as u64 >= total {
-                break;
-            }
-        }
-        Ok(library::QueueRestore {
-            order: (0..entries.len() as u32).collect(),
-            entries: entries.into(),
-            ..Default::default()
-        })
-    }
 }
 
 impl PlaybackOwner {
@@ -324,6 +296,20 @@ impl PlaybackOwner {
             revision: view.queue.revision,
             total: view.queue.total,
         }
+    }
+
+    /// The whole queue in play order as the queue panel shows it: this device's, or that of
+    /// the Rufin receiver it casts to.
+    pub(crate) async fn queue_entries(&self) -> Result<Vec<library::QueueEntry>, String> {
+        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(receiver) = receiver {
+            return receiver.connection()?.queue(&receiver.peer).await;
+        }
+        let Some(active) = self.active() else {
+            return Ok(Vec::new());
+        };
+        let (entries, _) = active.page_entries(0, usize::MAX).map_err(string_error)?;
+        Ok(entries.into_iter().map(|(.., entry)| entry).collect())
     }
 
     pub(crate) async fn receiver_queue_page(

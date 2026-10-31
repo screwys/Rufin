@@ -304,6 +304,8 @@ enum Request {
         command: Control,
     },
     Cast(session::Cast),
+    /// The whole queue, for a selection of it.
+    Queue,
     QueuePage {
         offset: u64,
         limit: u32,
@@ -1297,6 +1299,7 @@ impl ConnectOwner {
                 self.receive_cast(cast).await?;
                 serde_json::Value::Null
             }
+            Request::Queue => serde_json::to_value(self.answer_queue().await?).map_err(error)?,
             Request::QueuePage {
                 offset,
                 limit,

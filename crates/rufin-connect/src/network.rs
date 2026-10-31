@@ -38,6 +38,9 @@ const PREVIOUS_INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
 const MEDIA_PROTOCOL: &[u8] = b"rufin/connect/media/2";
 pub(crate) const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/4";
 pub(crate) const MAX_FRAME: usize = 16 * 1024 * 1024;
+// A device reads a frame of this size only from a member of the profile it admitted, such as
+// a sync page or an RPC that carries a whole queue.
+pub(crate) const TRUSTED_FRAME: usize = u32::MAX as usize;
 // A device that removed this one closes its connections with this code.
 const REMOVED: VarInt = VarInt::from_u32(2);
 
@@ -634,9 +637,9 @@ impl ConnectNetwork {
                 .context("Device is unreachable")??;
         let answered = async {
             let (mut send, mut recv) = connection.open_bi().await?;
-            write_frame(&mut send, &body, MAX_FRAME).await?;
+            write_frame(&mut send, &body, TRUSTED_FRAME).await?;
             send.finish()?;
-            read_frame::<Result<Vec<u8>, String>>(&mut recv, MAX_FRAME).await
+            read_frame::<Result<Vec<u8>, String>>(&mut recv, TRUSTED_FRAME).await
         }
         .await;
         let response = self.settle(&connection, answered).await?;
@@ -809,7 +812,7 @@ impl ProtocolHandler for RpcProtocol {
         }
         let result: Result<()> = async {
             let (mut send, mut recv) = conn.accept_bi().await?;
-            let body = read_frame(&mut recv, MAX_FRAME).await?;
+            let body = read_frame(&mut recv, TRUSTED_FRAME).await?;
             let (reply, answer) = oneshot::channel();
             network
                 .events
@@ -820,7 +823,7 @@ impl ProtocolHandler for RpcProtocol {
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
-            write_frame(&mut send, &answer.await?, MAX_FRAME).await?;
+            write_frame(&mut send, &answer.await?, TRUSTED_FRAME).await?;
             send.finish()?;
             let _ = send.stopped().await;
             let _ = conn.closed().await;

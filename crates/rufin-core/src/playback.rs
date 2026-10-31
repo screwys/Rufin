@@ -803,20 +803,6 @@ impl PlaybackOwner {
 }
 
 impl PlaybackOwner {
-    pub fn snapshot(&self) -> Result<library::QueueRestore, String> {
-        let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(receiver) = receiver {
-            return self.runtime.block_on(receiver.queue());
-        }
-        let Some(active) = self.active() else {
-            return Ok(library::QueueRestore::default());
-        };
-        active
-            .handoff_snapshot()
-            .map(|(queue, _, _)| queue)
-            .map_err(string_error)
-    }
-
     pub fn play_selection(&self, request: PlayRequest) {
         if self.play_rufin(&request) {
             return;
@@ -1620,14 +1606,13 @@ impl PlaybackOwner {
     ) -> Result<Arc<library::MemberSelection>, PlaybackError> {
         let runtime = self.runtime.clone();
         runtime
-            .spawn_blocking(move || {
-                let queue = self.snapshot().map_err(PlaybackError::Message)?;
+            .spawn(async move {
+                let entries = self.queue_entries().await.map_err(PlaybackError::Message)?;
                 Ok(Arc::new(library::MemberSelection::Keys {
                     source: None,
-                    keys: queue
-                        .order
+                    keys: entries
                         .iter()
-                        .map(|index| queue.entries[*index as usize].track_key)
+                        .map(|entry| entry.track_key)
                         .collect::<Vec<_>>()
                         .into(),
                 }))

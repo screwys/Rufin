@@ -255,7 +255,7 @@ fn replace_queue(owner: &PlaybackOwner, prefix: &str, count: usize) {
         ),
         crate::playback::QueuePlacement::Now,
     ));
-    owner.snapshot().unwrap();
+    owner.active().unwrap().page_entries(0, 0).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

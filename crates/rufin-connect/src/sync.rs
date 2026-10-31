@@ -17,7 +17,8 @@ use tokio::sync::oneshot;
 
 use crate::{
     network::{
-        ConnectNetwork, MAX_FRAME, NetworkEvent, Profile, SYNC_PROTOCOL, read_frame, write_frame,
+        ConnectNetwork, MAX_FRAME, NetworkEvent, Profile, SYNC_PROTOCOL, TRUSTED_FRAME, read_frame,
+        write_frame,
     },
     store::Row,
 };
@@ -26,8 +27,6 @@ const PAGE: usize = 512;
 // Rows fill a frame up to this size; a larger row, such as a big playlist cover or a long
 // queue, goes in a frame of its own.
 const PAGE_BYTES: usize = 8 * 1024 * 1024;
-// Pages come from a trusted device and carry any row it holds, however large.
-const PAGE_FRAME: usize = u32::MAX as usize;
 const PUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Encodes the values a pull or a folder segment sends from the Store and settings.
@@ -62,7 +61,7 @@ pub struct Pull {
 
 impl Pull {
     pub async fn next(&mut self) -> Result<Frame> {
-        let frame = read_frame(&mut self.recv, PAGE_FRAME).await?;
+        let frame = read_frame(&mut self.recv, TRUSTED_FRAME).await?;
         if let Frame::End { .. } = frame {
             // The device keeps its connection until this, the last read, is done.
             self.connection.close(0u32.into(), b"pull complete");
@@ -226,14 +225,14 @@ async fn write_page(send: &mut SendStream, rows: Vec<Row>) -> Result<()> {
     for row in rows {
         let length = serde_json::to_vec(&row)?.len() + 1;
         if size + length > PAGE_BYTES && !page.is_empty() {
-            write_frame(send, &Frame::Page(std::mem::take(&mut page)), PAGE_FRAME).await?;
+            write_frame(send, &Frame::Page(std::mem::take(&mut page)), TRUSTED_FRAME).await?;
             size = 0;
         }
         size += length;
         page.push(row);
     }
     if !page.is_empty() {
-        write_frame(send, &Frame::Page(page), PAGE_FRAME).await?;
+        write_frame(send, &Frame::Page(page), TRUSTED_FRAME).await?;
     }
     Ok(())
 }
