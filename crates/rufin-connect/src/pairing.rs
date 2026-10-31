@@ -32,17 +32,11 @@ struct Hello {
     commitment: String,
 }
 
+/// The host's profile. The host is the verified device that said Hello.
 #[derive(Serialize, Deserialize)]
 struct Enrollment {
     profile: String,
     key: String,
-    host: Host,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Host {
-    device: String,
-    name: String,
 }
 
 #[derive(Debug)]
@@ -183,18 +177,14 @@ async fn exchange(
             .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
         if joining {
             let enrollment: Enrollment = read_frame(&mut recv, MAX_FRAME).await?;
-            ensure!(
-                enrollment.host.device == peer.to_string(),
-                "Enrollment identity differs from the connected device"
-            );
             network
                 .events
                 .send(NetworkEvent::Paired {
                     session,
                     profile: enrollment.profile,
                     key: enrollment.key,
-                    peer: enrollment.host.device,
-                    name: enrollment.host.name,
+                    peer: peer.to_string(),
+                    name: remote.name,
                 })
                 .await
                 .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
@@ -212,10 +202,6 @@ async fn exchange(
                 Enrollment {
                     profile: profile.id.clone(),
                     key: profile.key.clone(),
-                    host: Host {
-                        device: network.identity(),
-                        name: network.name.read().await.clone(),
-                    },
                 }
             };
             write_frame(&mut send, &enrollment, MAX_FRAME).await?;
