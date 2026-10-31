@@ -2196,19 +2196,23 @@ impl SourceOwner {
         source_id: SourceId,
         automatic: bool,
     ) -> sources::SourceResult<()> {
-        let source = self
-            .open_client(source_id.clone())
-            .await
-            .map_err(SourceError::Other)?;
-        // A manual refresh also reads rejected files again.
-        let refresh = if automatic {
-            sources::Refresh::Changed
-        } else {
-            sources::Refresh::Resync
-        };
-        self.refresh_now(&source_id, &source, automatic, refresh)
-            .await
-            .map_err(SourceError::Other)
+        // Clients call this outside the runtime, which opening a client needs.
+        self.reply(move |owner, _| async move {
+            let source = owner.open_client(source_id.clone()).await?;
+            // A manual refresh also reads rejected files again.
+            let refresh = if automatic {
+                sources::Refresh::Changed
+            } else {
+                sources::Refresh::Resync
+            };
+            owner
+                .refresh_now(&source_id, &source, automatic, refresh)
+                .await
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+        .map_err(SourceError::Other)
     }
 }
 
