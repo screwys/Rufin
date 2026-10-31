@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use library::{
     AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomeAlbumRow,
-    HomeBlockKind, HomePage, HomeProviderSection, HomeSectionRows, Item, LibraryError,
-    LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read, ReadCancellation,
-    RouteSeedWindow, Row, ScrollSection, SourceKey, TagRow,
+    HomeBlockKind, HomePage, HomeProviderSection, HomeSectionRows, HomeTrackRow, Item,
+    LibraryError, LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read,
+    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SourceKey, TagRow,
 };
 
 use crate::route::{CollectionCategory, Route};
@@ -1169,27 +1169,25 @@ pub enum HomeSection {
 /// to show are left out, and so are rows whose title, artist and album do not contain `filter`.
 pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) -> Vec<HomeSection> {
     let filter = filter.trim().to_lowercase();
-    let shown = |text: String| filter.is_empty() || text.to_lowercase().contains(&filter);
-    let album = |row: &HomeAlbumRow| shown(format!("{} {}", row.title, row.album.artist));
-    let rows = |rows: &HomeSectionRows| HomeSectionRows {
-        tracks: rows
-            .tracks
+    let shown = |text: String| text.to_lowercase().contains(&filter);
+    let album = |row: &HomeAlbumRow| {
+        filter.is_empty() || shown(format!("{} {}", row.title, row.album.artist))
+    };
+    let rows = |tracks: &[HomeTrackRow], albums: &[HomeAlbumRow]| HomeSectionRows {
+        tracks: tracks
             .iter()
             .filter(|row| {
-                shown(format!(
-                    "{} {} · {}",
-                    row.title, row.track.artist, row.track.album
-                ))
+                filter.is_empty()
+                    || shown(format!(
+                        "{} {} · {}",
+                        row.title, row.track.artist, row.track.album
+                    ))
             })
             .cloned()
             .collect(),
-        albums: rows
-            .albums
-            .iter()
-            .filter(|row| album(row))
-            .cloned()
-            .collect(),
+        albums: albums.iter().filter(|row| album(row)).cloned().collect(),
     };
+    let section_rows = |section: &HomeSectionRows| rows(&section.tracks, &section.albums);
     let block = |block: HomeBlockKind| {
         let section = match block {
             HomeBlockKind::Showcase => {
@@ -1202,14 +1200,11 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
             HomeBlockKind::Genres => {
                 return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));
             }
-            HomeBlockKind::Explore => rows(&HomeSectionRows {
-                tracks: Vec::new(),
-                albums: home.explore.clone(),
-            }),
-            HomeBlockKind::MostPlayed => rows(&home.most_played),
-            HomeBlockKind::NewlyAdded => rows(&home.newly_added),
-            HomeBlockKind::RecentlyPlayed => rows(&home.recently_played),
-            HomeBlockKind::RecentlyReleased => rows(&home.recently_released),
+            HomeBlockKind::Explore => rows(&[], &home.explore),
+            HomeBlockKind::MostPlayed => section_rows(&home.most_played),
+            HomeBlockKind::NewlyAdded => section_rows(&home.newly_added),
+            HomeBlockKind::RecentlyPlayed => section_rows(&home.recently_played),
+            HomeBlockKind::RecentlyReleased => section_rows(&home.recently_released),
         };
         (!section.tracks.is_empty() || !section.albums.is_empty()).then_some(HomeSection::Rows {
             block,
@@ -1220,8 +1215,9 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
         .provider_sections
         .iter()
         .map(|section| HomeProviderSection {
-            rows: rows(&section.rows),
-            ..section.clone()
+            section_id: section.section_id.clone(),
+            title: section.title.clone(),
+            rows: section_rows(&section.rows),
         })
         .filter(|section| !section.rows.tracks.is_empty() || !section.rows.albums.is_empty())
         .map(HomeSection::Provider)
