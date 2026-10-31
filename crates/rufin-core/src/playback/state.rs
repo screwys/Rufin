@@ -1000,9 +1000,9 @@ impl Player {
     }
 
     /// Follows committed Changes, or everything after a lag. Identity moves move queue entries,
-    /// whose saved rows their Write moved already. Changed tracks that the queue shows, and
-    /// rating changes of them, read the shown rows again. Entries of a forgotten source, which
-    /// its Write deleted, leave the queue.
+    /// whose saved rows their Write moved already. Changed tracks that the queue shows read the
+    /// shown rows again; their committed favorites and ratings show in them as they are. Entries
+    /// of a forgotten source, which its Write deleted, leave the queue.
     pub(super) fn library_changed(
         &mut self,
         changes: Option<&[Arc<library::Change>]>,
@@ -1021,11 +1021,9 @@ impl Player {
                 library::Scope::Rekey { old, new } => rekeys.push((*old, *new)),
                 library::Scope::Tracks { keys, .. } => refresh |= self.sequence.shows_any(keys),
                 library::Scope::State { items } => {
-                    refresh |= items.iter().any(|item| {
-                        item.rating_changed
-                            && matches!(&item.target, library::FavoriteTarget::Track(uri)
-                                if self.sequence.shows_uri(uri))
-                    });
+                    let mut shown = false;
+                    self.edit_queue(|sequence| shown = sequence.show_states(items));
+                    self.dirty |= shown;
                 }
                 library::Scope::Source {
                     phase: library::SourcePhase::Removed,

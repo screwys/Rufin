@@ -37,10 +37,4 @@ impl Shell {
     pub(crate) fn set_favorite(self: &Rc<Self>, item: FavoriteTarget, favorite: bool) {
         self.products.source.set_favorite(item, favorite);
     }
-
-    /// Shows a committed favorite on every visible heart of the item.
-    pub(crate) fn apply_favorite_state(&self, item: &FavoriteTarget, favorite: bool) {
-        self.update_visible_favorite_buttons(item, favorite);
-        self.player_ui.set_bottom_player_favorite(item, favorite);
-    }
 }

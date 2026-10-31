@@ -23,8 +23,6 @@ let seeking = false;
 
 let seekPreview = null;
 
-let currentFavoriteRequest = Promise.resolve();
-
 let lyricsDocument = null;
 
 let activeLine = -1;
@@ -91,8 +89,6 @@ function showPlayback(value) {
     state.currentMediaUri = value?.current?.media_uri ?? null;
     state.currentRun = value?.current?.run ?? null;
     $("current-favorite").disabled = !track;
-    $("current-favorite").dataset.favoriteUri = track?.uri || "";
-    if (!track) showFavorite($("current-favorite"), false);
     lyricsDocument = null;
     activeLine = -1;
     showLyrics({ state: "empty" });
@@ -104,17 +100,6 @@ function showPlayback(value) {
       delete $("mini-cover").dataset.coverFull;
     }
     if (track) {
-      const mediaUri = state.currentMediaUri;
-      const mediaRun = state.currentRun;
-      currentFavoriteRequest = (async () => {
-        const metadata = await api(
-          `/media?${new URLSearchParams({ uri: track.uri })}`,
-        );
-        if (state.currentMediaUri !== mediaUri || state.currentRun !== mediaRun)
-          return;
-        showFavorite($("current-favorite"), metadata.favorite);
-      })();
-      run(() => currentFavoriteRequest);
       const signal = AbortSignal.any([session.signal, coverRequest.signal]);
       run(async () => {
         const shown = await cover(
@@ -132,6 +117,8 @@ function showPlayback(value) {
       });
     }
   }
+  // The heart shows the playback row's favorite, which follows every committed change.
+  showFavorite($("current-favorite"), !!track?.favorite);
   for (const notice of value?.notices || []) {
     if (notice.type !== "operation_failed") continue;
     const message = [
@@ -384,21 +371,8 @@ function init() {
       volumeEditing = false;
     });
   $("current-favorite").addEventListener("click", () => {
-    const mediaUri = state.currentMediaUri;
-    const mediaRun = state.currentRun;
-    if (state.playback?.current?.track)
-      run(async () => {
-        await currentFavoriteRequest;
-        if (state.currentMediaUri !== mediaUri || state.currentRun !== mediaRun)
-          return;
-        await setFavorite([
-          {
-            ...state.playback.current.track,
-            favorite:
-              $("current-favorite").getAttribute("aria-pressed") === "true",
-          },
-        ]);
-      });
+    const track = state.playback?.current?.track;
+    if (track) run(() => setFavorite([track]));
   });
   $("seek").addEventListener("input", () => {
     seeking = true;

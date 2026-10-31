@@ -737,15 +737,28 @@ impl Sequence {
         changed
     }
 
+    /// Shows committed favorites and ratings in the rows that show their tracks.
+    pub(super) fn show_states(&mut self, items: &[library::StateChange]) -> bool {
+        let mut changed = false;
+        for row in &mut self.rows {
+            for item in items {
+                if item.track() == Some(row.track.track_key) && !item.shown_in(&row.track.state) {
+                    item.show_in(&mut Arc::make_mut(row).track.state);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.revision += 1;
+        }
+        changed
+    }
+
     /// Whether the rows shown hold one of these tracks.
     pub(super) fn shows_any(&self, keys: &[library::TrackKey]) -> bool {
         self.rows
             .iter()
             .any(|row| keys.contains(&row.track.track_key))
-    }
-
-    pub(super) fn shows_uri(&self, uri: &str) -> bool {
-        self.rows.iter().any(|row| row.track.media_uri == uri)
     }
 
     pub(super) fn need_metadata(&mut self) {

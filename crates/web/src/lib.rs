@@ -673,7 +673,7 @@ fn track_json(
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"links":track.links});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"links":track.links});
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }

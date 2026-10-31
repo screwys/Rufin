@@ -925,13 +925,9 @@ async fn index(
             playback["state"].as_str(),
             Some("playing" | "resolving" | "buffering")
         );
-        if let Some(uri) = playback["current"]["track"]["uri"].as_str() {
-            page.current_favorite = products
-                .library
-                .favorite(&library::FavoriteTarget::Track(uri.into()))
-                .await
-                .map_err(internal)?;
-        }
+        page.current_favorite = playback["current"]["track"]["favorite"]
+            .as_bool()
+            .unwrap_or(false);
         page.controls = playback.clone();
         page.volume = playback["volume"].as_f64().unwrap_or(1.0);
         page.playing = playback["current"]["track"]["title"]

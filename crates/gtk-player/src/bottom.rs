@@ -1273,20 +1273,6 @@ impl crate::PlayerUi {
         (self.refresh_current_controls)();
     }
 
-    pub fn set_bottom_player_favorite(&self, target: &library::FavoriteTarget, value: bool) {
-        let library::FavoriteTarget::Track(media_uri) = target else {
-            return;
-        };
-        let current_matches = self
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.transport.current.as_ref())
-            .is_some_and(|current| current.row.track.media_uri == *media_uri);
-        if current_matches {
-            set_favorite_button_active(&self.views.player_controls.favorite_button, value);
-        }
-    }
-
     pub fn navigate_current_track_album(self: &Rc<Self>) {
         let Some(current) = self
             .selected_playback()
