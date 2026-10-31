@@ -211,11 +211,9 @@ fn apply_selected_source(
 }
 
 fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
-    let rating = changed.items.iter().any(|item| item.rating_changed);
     if let Some(selected) = shell.products.source.selected_library()
         && (changed.sources.contains(&selected.source_key)
-            || changed.scope == Some(selected.source_key)
-            || rating)
+            || changed.scope == Some(selected.source_key))
         && shell
             .selected_library()
             .is_some_and(|current| current.source_key == selected.source_key)
