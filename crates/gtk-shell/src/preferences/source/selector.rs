@@ -306,6 +306,7 @@ mod tests {
             kind: "test".to_string(),
             name: id.to_string(),
             half_stars_enabled: false,
+            owns_playlists: false,
             supports_playlist_public: false,
         }
     }
@@ -380,6 +381,7 @@ mod tests {
             kind: "local".to_string(),
             name: "Local".to_string(),
             half_stars_enabled: false,
+            owns_playlists: false,
             supports_playlist_public: false,
         };
 

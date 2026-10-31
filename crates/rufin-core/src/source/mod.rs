@@ -3072,6 +3072,7 @@ fn configured_sources(
             kind: configured.configuration.kind.clone(),
             name: configured.configuration.name.clone(),
             half_stars_enabled: half_stars_enabled(configured),
+            owns_playlists: configured.configuration.owns_playlists(),
             supports_playlist_public: configured.configuration.supports_playlist_public(),
         })
         .collect::<Vec<_>>();
@@ -3179,6 +3180,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             kind: configuration.kind.clone(),
             name: configuration.name.clone(),
             half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby" | "plex"),
+            owns_playlists: configuration.owns_playlists(),
             supports_playlist_public: configuration.supports_playlist_public(),
         },
         credentials: CredentialPreset {

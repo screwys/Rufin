@@ -30,6 +30,9 @@ pub struct SourceSummary {
     pub kind: String,
     pub name: String,
     pub half_stars_enabled: bool,
+    /// Whether a playlist can belong to this source, so the owner choice shows; file and peer
+    /// sources make Rufin playlists.
+    pub owns_playlists: bool,
     pub supports_playlist_public: bool,
 }
 

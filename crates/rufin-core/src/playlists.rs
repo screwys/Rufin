@@ -1226,9 +1226,9 @@ fn configured_playlist_owner(
     id: &SourceId,
     key: SourceKey,
 ) -> Result<PlaylistOwner, String> {
-    if owner
+    if !owner
         .configuration(id)
-        .is_some_and(|configuration| configuration.is_file_library())
+        .is_some_and(|configuration| configuration.owns_playlists())
     {
         Ok(PlaylistOwner::Local)
     } else {

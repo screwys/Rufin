@@ -302,6 +302,15 @@ impl SourceConfiguration {
         matches!(self.kind.as_str(), "local" | "smb" | "webdav")
     }
 
+    /// Whether a playlist can belong to this source: its server stores it. Playlists made for
+    /// any other source are Rufin playlists.
+    pub fn owns_playlists(&self) -> bool {
+        matches!(
+            self.kind.as_str(),
+            "jellyfin" | "emby" | "plex" | "navidrome" | "subsonic"
+        )
+    }
+
     pub fn supports_playlist_public(&self) -> bool {
         matches!(
             self.kind.as_str(),
