@@ -870,6 +870,7 @@ async fn headers<R: Owned>(
                     (record, header, changed)
                 }
             };
+            let header_changed = header.is_some();
             if let Some(json) = header {
                 record.set_header(&parsed(&json), json);
             }
@@ -890,13 +891,13 @@ async fn headers<R: Owned>(
             if record.key() == 0 {
                 inserted.push(record);
             } else {
-                record.touch(touched);
+                record.touch(touched, header_changed);
                 write.see(&record);
                 write.put(record);
             }
         }
         for record in write.insert(inserted).await? {
-            record.touch(touched);
+            record.touch(touched, true);
             write.see(&record);
         }
     }

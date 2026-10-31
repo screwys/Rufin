@@ -478,8 +478,8 @@ pub(crate) trait Owned: Row {
     fn picture(&self, observed: Option<&[u8]>, _native: bool) -> LibraryResult<Option<Vec<u8>>> {
         Ok(observed.map(<[u8]>::to_vec))
     }
-    /// Notes a staged change for album resolution.
-    fn touch(&self, _touched: &mut Touched) {}
+    /// Notes a staged change for album resolution; `header` says the header changed.
+    fn touch(&self, _touched: &mut Touched, _header: bool) {}
 }
 
 /// What every family declares alike: its table, its overlay in a Write, its key and natural key.
@@ -924,7 +924,7 @@ impl Owned for Album {
         self.writes.header = Some(Some(json));
     }
 
-    fn touch(&self, touched: &mut Touched) {
+    fn touch(&self, touched: &mut Touched, _header: bool) {
         touched.albums.insert(self.key.raw());
     }
 }
@@ -1041,8 +1041,12 @@ impl Owned for Artist {
         )?))
     }
 
-    fn touch(&self, touched: &mut Touched) {
-        touched.artists.insert(self.key.raw());
+    /// Albums read an artist's header (name, sort text, MusicBrainz id), not its flags or
+    /// picture.
+    fn touch(&self, touched: &mut Touched, header: bool) {
+        if header {
+            touched.artists.insert(self.key.raw());
+        }
     }
 }
 
