@@ -378,6 +378,16 @@ struct TypedSparseObjectState<K, R> {
     objects: BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
 }
 
+/// Whether a live item shows a row of the window starting at `first`.
+fn window_is_live(
+    objects: &BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
+    first: usize,
+) -> bool {
+    objects
+        .range(first..first.saturating_add(SPARSE_WINDOW_SIZE))
+        .any(|(_, item)| item.upgrade().is_some())
+}
+
 impl<K, R> SparseObjectState for TypedSparseObjectState<K, R>
 where
     K: Clone + 'static,
@@ -609,7 +619,12 @@ impl SparseObjectModel {
         K: Clone + 'static,
         R: 'static,
     {
-        self.with_typed_mut::<K, R, _>(|state| state.sparse.seed_at(first, rows));
+        self.with_typed_mut::<K, R, _>(|state| {
+            let objects = &state.objects;
+            state
+                .sparse
+                .seed_at(first, rows, |window| window_is_live(objects, window))
+        });
     }
 
     fn cold_live_windows(&self) -> Vec<usize> {
@@ -662,7 +677,10 @@ impl SparseObjectModel {
         R: 'static,
     {
         let accepted = self.with_typed_mut::<K, R, _>(|state| {
-            let change = state.sparse.accept(page, rows)?;
+            let objects = &state.objects;
+            let change = state
+                .sparse
+                .accept(page, rows, |window| window_is_live(objects, window))?;
             let updates = change
                 .range
                 .clone()
@@ -726,7 +744,10 @@ impl SparseObjectModel {
                 _ => false,
             };
             state.sparse.replace_order(order);
-            state.sparse.seed_at(first, rows);
+            let objects = &state.objects;
+            state
+                .sparse
+                .seed_at(first, rows, |window| window_is_live(objects, window));
             if !preserve_items {
                 state.objects.clear();
                 return (false, Vec::new());
@@ -799,15 +820,6 @@ impl SparseObjectModel {
                 .ready
                 .iter()
                 .find_map(|(position, row)| matches(row).then_some(*position))
-                .or_else(|| {
-                    state.objects.iter().find_map(|(position, item)| {
-                        let item = item.upgrade()?;
-                        let SparseItem::Ready(row) = item.typed_value::<K, R>()? else {
-                            return None;
-                        };
-                        matches(&row).then_some(*position)
-                    })
-                })
         })
     }
 
@@ -1217,7 +1229,7 @@ where
         self.order.clone()
     }
 
-    fn seed_at(&mut self, first: usize, rows: Vec<R>) {
+    fn seed_at(&mut self, first: usize, rows: Vec<R>, live: impl Fn(usize) -> bool) {
         let capacity = SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - first % SPARSE_WINDOW_SIZE;
         let rows = rows.into_iter().take(capacity);
         for (offset, row) in rows.enumerate() {
@@ -1230,6 +1242,7 @@ where
             }
             self.ready.insert(position, Arc::new(row));
         }
+        self.evict(live);
     }
 
     #[cfg(test)]
@@ -1285,7 +1298,12 @@ where
         })
     }
 
-    pub fn accept(&mut self, page: &HydrationPage<K>, rows: Vec<R>) -> Option<ReadyChange> {
+    pub fn accept(
+        &mut self,
+        page: &HydrationPage<K>,
+        rows: Vec<R>,
+        live: impl Fn(usize) -> bool,
+    ) -> Option<ReadyChange> {
         if page.generation != self.generation
             || rows.len() != page.range.len()
             || page.range.end > self.order.len()
@@ -1296,6 +1314,7 @@ where
         for (position, row) in page.range.clone().zip(rows) {
             self.ready.insert(position, Arc::new(row));
         }
+        self.evict(live);
         Some(ReadyChange {
             range: page.range.clone(),
         })
@@ -1321,13 +1340,26 @@ where
             .position(|window| *window == first)
         {
             self.ready_windows.remove(position);
-        } else if self.ready_windows.len() == SPARSE_READY_WINDOW_CAP
-            && let Some(evicted) = self.ready_windows.pop_front()
+        }
+        self.ready_windows.push_back(first);
+    }
+
+    /// Drops the least recently used windows over the cap. Windows that `live` items still
+    /// show stay, so patches to the ready rows reach every row on screen, and so does the
+    /// window touched last, whose rows were just read.
+    fn evict(&mut self, live: impl Fn(usize) -> bool) {
+        let mut index = 0;
+        while self.ready_windows.len() > SPARSE_READY_WINDOW_CAP
+            && index + 1 < self.ready_windows.len()
         {
+            if live(self.ready_windows[index]) {
+                index += 1;
+                continue;
+            }
+            let evicted = self.ready_windows.remove(index).expect("ready window");
             self.ready
                 .retain(|position, _| window_first(*position) != evicted);
         }
-        self.ready_windows.push_back(first);
     }
 }
 
@@ -1454,14 +1486,22 @@ mod tests {
             Some(SparseItem::Placeholder(Some(5_000)))
         ));
         model
-            .accept(&first, first.keys.iter().map(u64::to_string).collect())
+            .accept(
+                &first,
+                first.keys.iter().map(u64::to_string).collect(),
+                |_| false,
+            )
             .expect("accept rows");
         assert!(matches!(model.item(5_000), Some(SparseItem::Ready(_))));
         assert_eq!(model.ready_len(), 64);
 
         let deep = model.hydrate(9_900..9_920).expect("deep hydration");
         model
-            .accept(&deep, deep.keys.iter().map(u64::to_string).collect())
+            .accept(
+                &deep,
+                deep.keys.iter().map(u64::to_string).collect(),
+                |_| false,
+            )
             .expect("accept deep rows");
         assert_eq!(model.ready_len(), 128);
         for position in [100, 2_000] {
@@ -1469,7 +1509,11 @@ mod tests {
                 .hydrate(position..position + 1)
                 .expect("additional hydration page");
             model
-                .accept(&page, page.keys.iter().map(u64::to_string).collect())
+                .accept(
+                    &page,
+                    page.keys.iter().map(u64::to_string).collect(),
+                    |_| false,
+                )
                 .expect("accept additional page");
         }
         assert_eq!(
@@ -1518,7 +1562,7 @@ mod tests {
     fn prepared_seed_respects_the_existing_ready_window_capacity() {
         let mut model = SparseModel::<u64, u64>::new(SPARSE_WINDOW_SIZE);
         model.replace_order((0..1000).collect::<Vec<_>>());
-        model.seed_at(31, (31..1000).collect::<Vec<_>>());
+        model.seed_at(31, (31..1000).collect::<Vec<_>>(), |_| false);
         assert_eq!(
             model.ready_len(),
             SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - 31
@@ -1527,6 +1571,7 @@ mod tests {
             model.seed_at(
                 position,
                 (position as u64..position as u64 + 64).collect::<Vec<_>>(),
+                |_| false,
             );
         }
         assert_eq!(
@@ -1548,6 +1593,7 @@ mod tests {
             (128..192)
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>(),
+            |_| false,
         );
 
         assert!(matches!(
@@ -1567,7 +1613,11 @@ mod tests {
         model.replace_order((0..20).collect::<Vec<_>>());
         let delayed = model.hydrate(5..10).expect("hydration page");
         model.replace_order((100..120).collect::<Vec<_>>());
-        assert!(model.accept(&delayed, delayed.keys.clone()).is_none());
+        assert!(
+            model
+                .accept(&delayed, delayed.keys.clone(), |_| false)
+                .is_none()
+        );
         model.teardown();
         assert_eq!(model.len(), 0);
     }
