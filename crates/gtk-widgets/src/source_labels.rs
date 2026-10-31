@@ -39,20 +39,15 @@ pub fn configured_source_icon_name(source: &SourceSummary) -> &'static str {
 }
 pub fn configure_ownership_toggle(
     button: &gtk::ToggleButton,
-    source: Option<&SourceSummary>,
+    source: &SourceSummary,
     belongs_to_source: bool,
 ) {
-    let source_icon = source.map(configured_source_icon_name);
-    let source_name = source.map(configured_source_display_name);
-    button.set_sensitive(source.is_some());
-    button.set_active(belongs_to_source && source.is_some());
+    let source_icon = configured_source_icon_name(source);
+    let source_name = configured_source_display_name(source);
+    button.set_active(belongs_to_source);
     let update = move |button: &gtk::ToggleButton| {
-        let current = button.is_active() && source_icon.is_some();
-        button.set_icon_name(if current {
-            source_icon.unwrap_or(STABLE_APP_ID)
-        } else {
-            STABLE_APP_ID
-        });
+        let current = button.is_active();
+        button.set_icon_name(if current { source_icon } else { STABLE_APP_ID });
         if current {
             button.remove_css_class("rufin-ownership-icon");
         } else {
@@ -61,7 +56,7 @@ pub fn configure_ownership_toggle(
         let tooltip = if current {
             tr_with(
                 "This is owned by {source} and synced to it.",
-                &[("source", source_name.as_deref().unwrap_or(DISPLAY_NAME))],
+                &[("source", source_name.as_str())],
             )
         } else {
             tr(
