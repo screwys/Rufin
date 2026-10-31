@@ -9,6 +9,7 @@ use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{ArtistKey, ArtistRow, Row, TagKind, TagRow};
 use localization::{album_count_text, msgid, track_count_text};
+use rufin_core::collection_context::CollectionTarget;
 
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey};
@@ -283,11 +284,21 @@ impl CollectionRow for TagRow {
     }
 
     fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
+        let (scope, target) = match self.kind {
+            TagKind::Genre => {
+                let key = library::GenreKey::from_raw(self.key);
+                (
+                    library::Collection::Genre(key),
+                    CollectionTarget::Genre(key),
+                )
+            }
+            TagKind::Mood => {
+                let key = library::MoodKey::from_raw(self.key);
+                (library::Collection::Mood(key), CollectionTarget::Mood(key))
+            }
+        };
         Some(gtk_widgets::selection::collection_play_request(
-            match self.kind {
-                TagKind::Genre => library::Collection::Genre(library::GenreKey::from_raw(self.key)),
-                TagKind::Mood => library::Collection::Mood(library::MoodKey::from_raw(self.key)),
-            },
+            scope, &target,
         ))
     }
 
@@ -373,6 +384,7 @@ impl CollectionRow for library::PlaylistListRow {
         match self {
             Self::Playlist(row) => Some(gtk_widgets::selection::collection_play_request(
                 library::Collection::Playlist(row.playlist_key),
+                &CollectionTarget::Playlist(row.playlist_key),
             )),
             Self::SmartPlaylist(row) => Some(gtk_widgets::selection::smart_play_request(
                 row.smart_playlist_key,

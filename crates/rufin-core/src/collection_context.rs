@@ -1,14 +1,13 @@
 //! The context ids that plays and downloads of a whole collection carry. Queues and download
-//! jobs save them, so each spelling stays as callers have always written it: albums and artists
-//! go by media URI in some places and by catalog key in others.
+//! jobs save them; albums and artists go by media URI, the other collections by key.
 
 use crate::route::Route;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CollectionTarget {
-    /// An album by media URI, or by album key where the caller names it that way.
+    /// An album by media URI.
     Album(String),
-    /// An artist by media URI or artist key, read as an artist or as an album artist.
+    /// An artist by media URI, read as an artist or as an album artist.
     Artist {
         id: String,
         album_artist: bool,
@@ -43,6 +42,25 @@ impl CollectionTarget {
             Route::PlaylistDetail(key) => Self::Playlist(*key),
             Route::SmartPlaylistDetail(key) => Self::SmartPlaylist(*key),
             _ => return None,
+        })
+    }
+
+    /// The collection `collection` reads, naming albums and artists by the URI `catalog`
+    /// holds for them. Sources, folder objects and history are no collection here.
+    pub fn of(catalog: &library::Catalog, collection: &library::Collection) -> Option<Self> {
+        Some(match *collection {
+            library::Collection::Album(key) => Self::Album(catalog.uri(library::Item::Album(key))?),
+            library::Collection::Artist { key, album_artist } => Self::Artist {
+                id: catalog.uri(library::Item::Artist { key, album_artist })?,
+                album_artist,
+            },
+            library::Collection::Genre(key) => Self::Genre(key),
+            library::Collection::Mood(key) => Self::Mood(key),
+            library::Collection::Playlist(key) => Self::Playlist(key),
+            library::Collection::Smart { key, .. } => Self::SmartPlaylist(key),
+            library::Collection::Source(_)
+            | library::Collection::Objects { .. }
+            | library::Collection::History { .. } => return None,
         })
     }
 

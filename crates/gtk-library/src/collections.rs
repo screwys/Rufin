@@ -1,5 +1,3 @@
-#[cfg(test)]
-use gtk_widgets::selection::collection_play_request;
 use gtk_widgets::sparse_model::{item_at, item_at_from_item};
 use std::{
     cell::{Cell, RefCell},
@@ -1185,15 +1183,6 @@ pub fn collection_grid_field_label(value: &str, field: LibraryField) -> (gtk::Wi
 #[cfg(test)]
 mod layout_policy_tests {
     use super::*;
-
-    #[test]
-    fn contextual_playback_target_uses_the_route_context() {
-        let target =
-            collection_play_request(library::Collection::Album(library::AlbumKey::from_raw(1)))
-                .with_context("artist:1|releases".into());
-
-        assert_eq!(target.context(), Some("artist:1|releases"));
-    }
 
     #[test]
     fn playing_selection_accepts_base_and_decorated_route_contexts() {

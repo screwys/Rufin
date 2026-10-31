@@ -6,6 +6,7 @@ use library::{
     AlbumRow, ArtistRow, FavoriteTarget, PlaylistRow, RadioSeed, SmartPlaylistRow, TagRow,
     TrackLinks, TrackRow, TrackView,
 };
+use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
 use gtk_widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
@@ -1180,14 +1181,12 @@ pub fn present_genre_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    if present_collection_selection_menu(
-        target,
-        menus,
-        collection_play_request(library::Collection::Genre(library::GenreKey::from_raw(
-            genre.key,
-        ))),
-        position,
-    ) {
+    let key = library::GenreKey::from_raw(genre.key);
+    let playback = collection_play_request(
+        library::Collection::Genre(key),
+        &CollectionTarget::Genre(key),
+    );
+    if present_collection_selection_menu(target, menus, playback.clone(), position) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "genre", position);
@@ -1199,9 +1198,6 @@ pub fn present_genre_context_menu(
         RADIO_ICON,
     );
     install_sidebar_pin_action(&surface, menus, genre.pin());
-    let playback = collection_play_request(library::Collection::Genre(
-        library::GenreKey::from_raw(genre.key),
-    ));
     install_download_actions(
         &surface,
         menus,
@@ -1212,11 +1208,7 @@ pub fn present_genre_context_menu(
             && genre.summary.downloaded_count == genre.summary.track_count,
     );
     install_loaded_actions(&surface, menus, playback, play);
-    install_radio_actions(
-        &surface,
-        menus,
-        RadioSeed::Genre(library::GenreKey::from_raw(genre.key)),
-    );
+    install_radio_actions(&surface, menus, RadioSeed::Genre(key));
     surface.popup(&menus.settings.current.borrow().application.context_menu);
 }
 
@@ -1227,21 +1219,14 @@ pub fn present_mood_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    if present_collection_selection_menu(
-        target,
-        menus,
-        collection_play_request(library::Collection::Mood(library::MoodKey::from_raw(
-            mood.key,
-        ))),
-        position,
-    ) {
+    let key = library::MoodKey::from_raw(mood.key);
+    let playback =
+        collection_play_request(library::Collection::Mood(key), &CollectionTarget::Mood(key));
+    if present_collection_selection_menu(target, menus, playback.clone(), position) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "mood", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
-    let playback = collection_play_request(library::Collection::Mood(library::MoodKey::from_raw(
-        mood.key,
-    )));
     install_download_actions(
         &surface,
         menus,
@@ -1269,13 +1254,11 @@ pub fn present_playlist_context_menu(
             key: playlist.playlist_key,
         })
         .is_some();
-    if present_playlist_selection_menu(
-        target,
-        menus,
-        collection_play_request(library::Collection::Playlist(playlist.playlist_key)),
-        position,
-        in_folder,
-    ) {
+    let playback = collection_play_request(
+        library::Collection::Playlist(playlist.playlist_key),
+        &CollectionTarget::Playlist(playlist.playlist_key),
+    );
+    if present_playlist_selection_menu(target, menus, playback.clone(), position, in_folder) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "playlist", position);
@@ -1362,7 +1345,6 @@ pub fn present_playlist_context_menu(
     if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     }
-    let playback = collection_play_request(library::Collection::Playlist(playlist.playlist_key));
     install_download_actions(
         &surface,
         menus,

@@ -7,6 +7,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use downloads::DownloadSubject;
 use gtk::glib;
+use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::PlayRequest;
 use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};
@@ -56,8 +57,9 @@ impl CollectionTargets {
                 let mut targets = Vec::new();
                 for (read, ranges) in reads {
                     let collections = selected_parent_collections(catalog, read, ranges).await?;
-                    targets.extend(collections.into_iter().map(|collection| {
-                        if let library::Collection::Smart { key, .. } = collection {
+                    targets.extend(collections.into_iter().filter_map(|collection| {
+                        let target = CollectionTarget::of(catalog, &collection)?;
+                        Some(if let library::Collection::Smart { .. } = collection {
                             let mut members = library::MemberRead::new(collection);
                             members.folder = read.folder;
                             PlayRequest::ordered(
@@ -66,16 +68,10 @@ impl CollectionTargets {
                                 rufin_core::playback::QueuePlacement::Now,
                                 true,
                             )
-                            .with_context(
-                                rufin_core::collection_context::CollectionTarget::SmartPlaylist(
-                                    key,
-                                )
-                                .context_id()
-                                .into(),
-                            )
+                            .with_context(target.context_id().into())
                         } else {
-                            collection_play_request(collection)
-                        }
+                            collection_play_request(collection, &target)
+                        })
                     }));
                 }
                 Ok(targets)
@@ -685,20 +681,24 @@ async fn prepare_live_collection(
         .recv()
         .await
         .map_err(|error| error.to_string())??;
-    let scope = match catalog.item(media_uri) {
-        Some(library::Item::Album(key)) => Some(library::Collection::Album(key)),
-        Some(library::Item::Artist { key, .. }) => Some(library::Collection::Artist {
-            key,
-            album_artist: false,
-        }),
-        _ => None,
-    }
-    .ok_or_else(|| "Collection is no longer available".to_string())?;
-    let kind = match &scope {
-        library::Collection::Album(_) => "album",
-        _ => "artist",
+    let (scope, target) = match catalog.item(media_uri) {
+        Some(library::Item::Album(key)) => (
+            library::Collection::Album(key),
+            CollectionTarget::Album(media_uri.to_owned()),
+        ),
+        Some(library::Item::Artist { key, .. }) => (
+            library::Collection::Artist {
+                key,
+                album_artist: false,
+            },
+            CollectionTarget::Artist {
+                id: media_uri.to_owned(),
+                album_artist: false,
+            },
+        ),
+        _ => return Err("Collection is no longer available".to_string()),
     };
-    Ok(collection_play_request(scope).with_context(format!("{kind}:{media_uri}").into()))
+    Ok(collection_play_request(scope, &target))
 }
 
 #[cfg(test)]

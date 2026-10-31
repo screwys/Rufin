@@ -344,31 +344,18 @@ mod tests {
     }
 }
 
-pub fn collection_play_request(scope: library::Collection) -> rufin_core::playback::PlayRequest {
-    let context = match &scope {
-        library::Collection::Source(key) => format!("tracks:{key}"),
-        library::Collection::Objects { source, .. } => format!("objects:{source}"),
-        library::Collection::Album(key) => CollectionTarget::Album(key.to_string()).context_id(),
-        library::Collection::Artist { key, album_artist } => CollectionTarget::Artist {
-            id: key.to_string(),
-            album_artist: *album_artist,
-        }
-        .context_id(),
-        library::Collection::Genre(key) => CollectionTarget::Genre(*key).context_id(),
-        library::Collection::Mood(key) => CollectionTarget::Mood(*key).context_id(),
-        library::Collection::Playlist(key) => CollectionTarget::Playlist(*key).context_id(),
-        library::Collection::Smart { key, .. } => {
-            CollectionTarget::SmartPlaylist(*key).context_id()
-        }
-        library::Collection::History { source } => format!("history:{source:?}"),
-    };
+/// Plays `scope` whole, carrying the context id of `target`, the collection it reads.
+pub fn collection_play_request(
+    scope: library::Collection,
+    target: &CollectionTarget,
+) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(
         library::MemberRead::new(scope).selection(),
         0,
         QueuePlacement::Now,
         true,
     )
-    .with_context(context.into())
+    .with_context(target.context_id().into())
 }
 
 pub fn track_play_request(key: library::TrackKey) -> rufin_core::playback::PlayRequest {
@@ -391,22 +378,16 @@ pub fn smart_play_request(key: library::SmartPlaylistKey) -> rufin_core::playbac
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |value| value.as_secs() as i64);
-    let query = library::MemberRead::new(library::Collection::Smart { key, now });
-    rufin_core::playback::PlayRequest::ordered(query.selection(), 0, QueuePlacement::Now, true)
-        .with_context(CollectionTarget::SmartPlaylist(key).context_id().into())
+    collection_play_request(
+        library::Collection::Smart { key, now },
+        &CollectionTarget::SmartPlaylist(key),
+    )
 }
 
 pub fn album_play_request(row: &library::AlbumRow) -> rufin_core::playback::PlayRequest {
-    rufin_core::playback::PlayRequest::ordered(
-        library::MemberRead::new(library::Collection::Album(row.album_key)).selection(),
-        0,
-        QueuePlacement::Now,
-        true,
-    )
-    .with_context(
-        CollectionTarget::Album(row.media_uri.clone())
-            .context_id()
-            .into(),
+    collection_play_request(
+        library::Collection::Album(row.album_key),
+        &CollectionTarget::Album(row.media_uri.clone()),
     )
 }
 
@@ -414,22 +395,14 @@ pub fn artist_play_request(
     row: &library::ArtistRow,
     album_artist: bool,
 ) -> rufin_core::playback::PlayRequest {
-    rufin_core::playback::PlayRequest::ordered(
-        library::MemberRead::new(library::Collection::Artist {
+    collection_play_request(
+        library::Collection::Artist {
             key: row.artist_key,
             album_artist,
-        })
-        .selection(),
-        0,
-        QueuePlacement::Now,
-        true,
-    )
-    .with_context(
-        CollectionTarget::Artist {
+        },
+        &CollectionTarget::Artist {
             id: row.media_uri.clone(),
             album_artist,
-        }
-        .context_id()
-        .into(),
+        },
     )
 }

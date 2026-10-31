@@ -110,9 +110,7 @@ impl AlbumCollectionModels {
         }
         let rows = view_model(runtime.clone(), view, album_row, &mut read);
         gtk_widgets::media_drag::install_parent_selection(&rows, view, |row| {
-            Some(gtk_widgets::selection::collection_play_request(
-                library::Collection::Album(row.album_key),
-            ))
+            Some(gtk_widgets::selection::album_play_request(row))
         });
         Self::Rows(rows)
     }
@@ -1327,7 +1325,7 @@ impl AlbumTrackSlot {
                 && let Some(track) = row
             {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                play_album_track(&shell, track.links.album_key, track.track_key, folder);
+                play_album_track(&shell, &track, folder);
             }
         });
         widget.add_controller(click);
@@ -1370,12 +1368,7 @@ impl AlbumTrackSlot {
                             if let Some(shell) = play_shell.upgrade()
                                 && let Some(track) = row
                             {
-                                play_album_track(
-                                    &shell,
-                                    track.links.album_key,
-                                    track.track_key,
-                                    folder,
-                                );
+                                play_album_track(&shell, &track, folder);
                             }
                         });
                         (cell.clone().upcast(), AlbumTrackField::Index(cell))
@@ -1646,13 +1639,9 @@ fn album_track_column_width(field: LibraryField) -> i32 {
     }
 }
 
-fn play_album_track(
-    shell: &Rc<CatalogUi>,
-    album: Option<library::AlbumKey>,
-    track_key: library::TrackKey,
-    folder: Option<library::FolderKey>,
-) {
-    let Some(album) = album else {
+fn play_album_track(shell: &Rc<CatalogUi>, track: &TrackRow, folder: Option<library::FolderKey>) {
+    let (Some(album), Some(uri)) = (track.links.album_key, track.links.album_media_uri.clone())
+    else {
         return;
     };
     let queue = shell.playback.clone();
@@ -1675,11 +1664,11 @@ fn play_album_track(
             false,
         )
         .with_context(
-            rufin_core::collection_context::CollectionTarget::Album(album.to_string())
+            rufin_core::collection_context::CollectionTarget::Album(uri)
                 .context_id()
                 .into(),
         )
-        .with_anchor(track_key, None),
+        .with_anchor(track.track_key, None),
     );
 }
 

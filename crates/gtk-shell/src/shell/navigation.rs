@@ -565,14 +565,10 @@ impl SidebarPinItem {
             }
             SidebarPin::PlaylistFolder { .. } => return None,
         };
-        Some(
-            collection_play_request(collection).with_context(
-                CollectionTarget::for_route(&self.route())
-                    .expect("pin route")
-                    .context_id()
-                    .into(),
-            ),
-        )
+        Some(collection_play_request(
+            collection,
+            &CollectionTarget::for_route(&self.route()).expect("pin route"),
+        ))
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
         self.summary()
