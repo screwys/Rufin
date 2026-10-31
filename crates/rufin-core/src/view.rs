@@ -973,24 +973,24 @@ impl View {
         changed.then_some(Reread::Page)
     }
 
-    /// Whether a favorite change can move or drop rows: the page lists only favorites or sorts
-    /// by them.
-    pub fn favorites_reorder(&self) -> bool {
-        if !matches!(
-            self.route,
-            Route::Tracks | Route::Favorites | Route::Albums | Route::Artists | Route::AlbumArtists
-        ) {
-            return false;
-        }
+    /// Whether a favorite or rating change can move or drop rows: the page lists only favorites
+    /// or sorts by favorites or ratings. Other pages patch the shown values into their rows.
+    pub fn states_reorder(&self) -> bool {
+        let orders =
+            |field: LibraryField| matches!(field, LibraryField::Favorite | LibraryField::UserRating);
         match &self.body {
             Body::Rows {
                 read: Read::Members(read),
                 ..
-            } => read.favorites_only || read.sort == Some(LibraryField::Favorite),
+            }
+            | Body::Folders { tracks: read, .. } => {
+                read.favorites_only || orders(read.effective_sort())
+            }
             Body::Rows {
                 read: Read::List(read) | Read::AlbumTracks(read),
                 ..
-            } => read.favorites_only || read.sort == LibraryField::Favorite,
+            }
+            | Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
             _ => false,
         }
     }
@@ -1154,19 +1154,13 @@ pub fn refresh(
         )
     };
     let mut refresh = Refresh::Nothing;
-    // A rating shows on every page of the source, so it reads like a catalog change.
+    // Favorites and ratings are patched into the rows that show them; a page whose rows they
+    // order or filter reads again through `View::states_reorder`.
     let catalog = changed
         .all
         .then_some(None)
         .into_iter()
-        .chain(changed.sources.iter().map(|source| Some(*source)))
-        .chain(
-            changed
-                .items
-                .iter()
-                .any(|item| item.rating)
-                .then_some(selected),
-        );
+        .chain(changed.sources.iter().map(|source| Some(*source)));
     for source in catalog {
         refresh = refresh.max(if unaffected(source) {
             Refresh::Nothing
@@ -1225,15 +1219,16 @@ pub fn refresh(
     refresh
 }
 
-/// Whether a committed change can change the sidebar pins.
+/// Whether a committed change can change the sidebar pins. Plays and ratings change only what
+/// smart playlist pins count.
 pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
     changed.all
         || changed.pins
         || changed.playlist_lists
         || !changed.sources.is_empty()
         || !changed.playlists.is_empty()
-        || changed.items.iter().any(|item| item.rating)
-        || changed.listened && owner.shared.settings.load().ui.sidebar.pins_use_activity()
+        || (changed.listened || changed.items.iter().any(|item| item.rating_changed))
+            && owner.shared.settings.load().ui.sidebar.pins_use_activity()
 }
 
 pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryListKey {

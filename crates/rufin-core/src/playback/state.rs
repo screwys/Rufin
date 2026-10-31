@@ -1022,7 +1022,7 @@ impl Player {
                 library::Scope::Tracks { keys, .. } => refresh |= self.sequence.shows_any(keys),
                 library::Scope::State { items } => {
                     refresh |= items.iter().any(|item| {
-                        item.rating
+                        item.rating_changed
                             && matches!(&item.target, library::FavoriteTarget::Track(uri)
                                 if self.sequence.shows_uri(uri))
                     });

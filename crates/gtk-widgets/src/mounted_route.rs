@@ -355,7 +355,7 @@ impl PageReread {
 
     /// Reads again where the list is when a favorite change can move or drop its rows.
     pub fn favorite_changed(&self, live: library::RouteSeedWindow) {
-        if self.view.borrow().favorites_reorder() {
+        if self.view.borrow().states_reorder() {
             self.refresh(live);
         }
     }

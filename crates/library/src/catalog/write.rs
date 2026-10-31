@@ -116,8 +116,10 @@ pub struct StateChange {
     pub target: crate::FavoriteTarget,
     /// The favorite it shows now.
     pub favorite: bool,
+    /// The rating it shows now.
+    pub rating: Option<u8>,
     /// Whether the rating it shows changed.
-    pub rating: bool,
+    pub rating_changed: bool,
 }
 
 /// One committed Write, as clients and features see it.
@@ -860,12 +862,11 @@ impl<'a> Write<'a> {
         let Some(item) = item else {
             return Ok(());
         };
-        let favorite = self
+        let (favorite, rating) = self
             .catalog
             .snapshot()
             .shown_state(item)
-            .and_then(|(favorite, _)| favorite)
-            .unwrap_or(false);
+            .unwrap_or_default();
         let uri = uri.to_owned();
         let target = match item {
             UserItem::Track(_) => crate::FavoriteTarget::Track(uri),
@@ -875,8 +876,9 @@ impl<'a> Write<'a> {
         self.changed(Scope::State {
             items: vec![StateChange {
                 target,
-                favorite,
-                rating: false,
+                favorite: favorite.unwrap_or(false),
+                rating,
+                rating_changed: false,
             }],
         });
         Ok(())
@@ -1183,7 +1185,8 @@ impl<'a> Write<'a> {
                         UserItem::Artist(_) => crate::FavoriteTarget::Artist(uri),
                     },
                     favorite: after.0.unwrap_or(false),
-                    rating: after.1 != before.1,
+                    rating: after.1,
+                    rating_changed: after.1 != before.1,
                 })
             })
             .collect::<Vec<_>>();
