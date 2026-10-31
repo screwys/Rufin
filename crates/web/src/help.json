@@ -189,7 +189,7 @@
       "mode": "replace | next | append"
     },
     "GET /api/smart-playlists?source=...": "Browse saved smart playlists, up to 64 at a time. Source is optional; use q, sort and descending.",
-    "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and limit. Use source, q, offset, limit (up to 256), sort and descending. Sort accepts track_sort choices or definition for the saved playlist order, the default.",
+    "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and limit. Use source, q, offset, limit (up to 256), sort and descending. Sort accepts track_sort choices or definition for the saved playlist order, the default. An opened smart playlist keeps the members it opened with: pass opened (Unix seconds of the first read) on every later read of the page, so plays, ratings and syncs change its members only when it is opened again.",
     "POST /api/queue/artist": {
       "id": 1,
       "mode": "replace"
