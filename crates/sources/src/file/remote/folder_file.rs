@@ -1,5 +1,8 @@
 //! Files of a sync folder on a file connection.
-use super::{FileSource, input::FileInput};
+use super::{
+    FileSource,
+    input::{FileInput, FileInputServer},
+};
 use crate::{SourceError, SourceResult};
 use reqwest::{StatusCode, header::ETAG};
 use std::path::Path;
@@ -30,22 +33,11 @@ impl FileSource {
     }
 
     /// Creates `relative` and the folders above it that are missing.
-    pub async fn create_folders(&self, relative: &str) -> SourceResult<()> {
-        self.location(relative)?;
-        let input = self.input().await?;
+    async fn create_folders(&self, input: &FileInputServer, relative: &str) -> SourceResult<()> {
         let parts = relative
             .split('/')
             .filter(|part| !part.is_empty())
-            .map(str::to_owned)
             .collect::<Vec<_>>();
-        if let FileInput::Documents(access) = input.input() {
-            let root = access.root.uri.clone();
-            return tokio::task::spawn_blocking(move || {
-                crate::create_document_directories(&root, &parts).map(|_| ())
-            })
-            .await
-            .map_err(error)?;
-        }
         for depth in 1..=parts.len() {
             let path = parts[..depth].join("/");
             match input.input() {
@@ -254,15 +246,36 @@ impl FileSource {
         Ok(Some(etag))
     }
 
-    /// Writes the file at `relative`, replacing one already there.
+    /// Writes the file at `relative`, replacing one already there. The folders above it are
+    /// created only when a write finds them missing.
     pub async fn write_file(&self, relative: &str, file: &Path) -> SourceResult<()> {
         self.location(relative)?;
         let input = self.input().await?;
+        let written = self.put_file(&input, relative, file).await;
+        let Err(failed) = written else {
+            return Ok(());
+        };
+        let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+        if parent.is_empty()
+            || !matches!(self.stat(&input, parent).await, Err(SourceError::NotFound))
+        {
+            return Err(failed);
+        }
+        self.create_folders(&input, parent).await?;
+        self.put_file(&input, relative, file).await
+    }
+
+    async fn put_file(
+        &self,
+        input: &FileInputServer,
+        relative: &str,
+        file: &Path,
+    ) -> SourceResult<()> {
         if let FileInput::WebDav(client) = input.input() {
             let url = url::Url::parse(&self.input_path(input.input(), relative)?).map_err(error)?;
             return client.upload(&url, file, false).await;
         }
-        let revision = match self.stat(&input, relative).await {
+        let revision = match self.stat(input, relative).await {
             Ok(entry) => Some(entry.revision),
             Err(SourceError::NotFound) => None,
             Err(error) => return Err(error),
@@ -308,9 +321,20 @@ mod tests {
             ))
             .mount(&server)
             .await;
+        Mock::given(method("PROPFIND"))
+            .and(path("/Rufin%20Connect/peer"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
         Mock::given(method("MKCOL"))
             .and(path("/Rufin%20Connect/"))
             .respond_with(ResponseTemplate::new(405))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("MKCOL"))
+            .and(path("/Rufin%20Connect/peer/"))
+            .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
@@ -325,6 +349,20 @@ mod tests {
             .await;
         Mock::given(method("PUT"))
             .and(path("/Rufin%20Connect/000000000003-000000000003.rcs"))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // A write into a missing folder creates it, then writes again.
+        Mock::given(method("PUT"))
+            .and(path("/Rufin%20Connect/peer/000000000004-000000000004.rcs"))
+            .respond_with(ResponseTemplate::new(409))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/Rufin%20Connect/peer/000000000004-000000000004.rcs"))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
@@ -345,7 +383,6 @@ mod tests {
             .configuration(SourceId::new("dav"), "webdav", "Files".into())
             .unwrap();
         let source = FileSource::open(&config, None).unwrap();
-        source.create_folders("Rufin Connect").await.unwrap();
         let files = source
             .list_folder_files("Rufin Connect", ".rcs")
             .await
@@ -362,6 +399,13 @@ mod tests {
         assert_eq!(std::fs::read(file.path()).unwrap(), b"encrypted segment");
         source
             .write_file("Rufin Connect/000000000003-000000000003.rcs", file.path())
+            .await
+            .unwrap();
+        source
+            .write_file(
+                "Rufin Connect/peer/000000000004-000000000004.rcs",
+                file.path(),
+            )
             .await
             .unwrap();
     }

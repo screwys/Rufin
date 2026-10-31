@@ -443,10 +443,11 @@ impl Folder {
             Self::Connection(source, root) => {
                 let file = staged(owner, &bytes)?;
                 let files = source.file_connection().map_err(error)?;
-                let directory = relative(root, directory);
-                files.create_folders(&directory).await.map_err(error)?;
                 files
-                    .write_file(&format!("{directory}/{name}"), file.path())
+                    .write_file(
+                        &format!("{}/{name}", relative(root, directory)),
+                        file.path(),
+                    )
                     .await
                     .map_err(error)
             }
