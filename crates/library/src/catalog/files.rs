@@ -38,6 +38,8 @@ pub struct FileBatch {
     pub tracks: Vec<TrackObservation>,
     /// A vanished media path and the new path the same file was listed at.
     pub renames: Vec<(String, String)>,
+    /// Unchanged files listed with a new device, inode or native id.
+    pub identities: Vec<LocalFileWrite>,
 }
 
 impl FileBatch {
@@ -47,6 +49,7 @@ impl FileBatch {
             && self.hidden.is_empty()
             && self.tracks.is_empty()
             && self.renames.is_empty()
+            && self.identities.is_empty()
     }
 }
 
@@ -164,6 +167,15 @@ impl super::Observation<'_> {
             query.push(" ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,picture_index=excluded.picture_index,artist_pictures=excluded.artist_pictures,parse_version=excluded.parse_version,state=excluded.state");
             query.build().execute(write.connection().await?).await?;
         }
+        if !batch.identities.is_empty() {
+            let rows = batch
+                .identities
+                .iter()
+                .map(|file| (&file.path, file.device_id, file.inode, &file.native_id))
+                .collect::<Vec<_>>();
+            sqlx::query("UPDATE files SET device_id=json_extract(item.value,'$[1]'),inode=json_extract(item.value,'$[2]'),native_id=json_extract(item.value,'$[3]') FROM json_each(?2) item WHERE files.source_key=?1 AND files.path=json_extract(item.value,'$[0]')")
+                .bind(source).bind(serde_json::to_string(&rows)?).execute(write.connection().await?).await?;
+        }
         if !batch.inputs.is_empty() {
             sqlx::query("INSERT INTO file_inputs(file_key,position,path) SELECT cue.file_key,CAST(input.key AS INTEGER),input.value FROM json_each(?2) requested JOIN files cue ON cue.source_key=?1 AND cue.path=json_extract(requested.value,'$[0]') CROSS JOIN json_each(json_extract(requested.value,'$[1]')) input")
                 .bind(source).bind(serde_json::to_string(&batch.inputs)?).execute(write.connection().await?).await?;
@@ -251,7 +263,7 @@ impl super::Observation<'_> {
                 .bind(source).bind(serde_json::to_string(&batch.renames)?).fetch_all(write.connection().await?).await?;
             merge_local_file_uris_on(&mut write, &aliases, &mut touched).await?;
         }
-        if !batch.files.is_empty() || !removed.is_empty() {
+        if !batch.files.is_empty() || !removed.is_empty() || !batch.identities.is_empty() {
             // File rows are not resident. Folder pages list directories and the tracks in them.
             write.keep();
             if batch

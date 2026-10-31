@@ -417,18 +417,30 @@ impl<F: FileSource> Walker<'_, '_, F> {
         let Some(stored) = stored.map(|stored| &stored.file).filter(|_| !forced) else {
             return false;
         };
-        stored.kind == row.kind
+        let unchanged = stored.kind == row.kind
             && stored.size_bytes == row.size_bytes
             && stored.mtime_ns == row.mtime_ns
             && stored.revision == row.revision
             && stored.parse_version == row.parse_version
-            && (stored.device_id, stored.inode, &stored.native_id)
-                == (row.device_id, row.inode, &row.native_id)
             && match stored.state {
                 LocalFileState::Accepted => true,
                 LocalFileState::Rejected => !self.resync || !parseable(stored.kind),
                 LocalFileState::Unreadable => false,
-            }
+            };
+        if !unchanged
+            || (stored.device_id, stored.inode, &stored.native_id)
+                == (row.device_id, row.inode, &row.native_id)
+        {
+            return unchanged;
+        }
+        // A provider that names the file in this place anew moves its tracks there (stage).
+        if stored.path != row.path {
+            return false;
+        }
+        // A remount that numbers the device again changes no content: the row takes the new
+        // identity, which later renames are matched by, without a parse.
+        self.batch.identities.push(row.clone());
+        true
     }
 
     fn stage(
@@ -769,7 +781,13 @@ impl<F: FileSource> Walker<'_, '_, F> {
     /// Parses and writes what is staged, at a directory's end once a batch is full: the CUE
     /// sheets first, then the media files in batches, one Write each.
     async fn flush(&mut self, now: bool) -> SourceResult<()> {
-        if !now && self.staged.len() + self.batch.files.len() + self.batch.removed.len() < BATCH {
+        if !now
+            && self.staged.len()
+                + self.batch.files.len()
+                + self.batch.removed.len()
+                + self.batch.identities.len()
+                < BATCH
+        {
             return Ok(());
         }
         if self.staged.is_empty() && self.batch.is_empty() {
