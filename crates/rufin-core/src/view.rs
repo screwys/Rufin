@@ -1147,7 +1147,7 @@ impl View {
 /// One Home section, as every client shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HomeSection {
-    Showcase(HomeAlbumRow),
+    Showcase(Box<HomeAlbumRow>),
     /// Explore, Most played, Newly added, Recently played or Recently released.
     Rows {
         block: HomeBlockKind,
@@ -1191,8 +1191,7 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
                     .showcase
                     .as_ref()
                     .filter(|row| album(row))
-                    .cloned()
-                    .map(HomeSection::Showcase);
+                    .map(|row| HomeSection::Showcase(Box::new(row.clone())));
             }
             HomeBlockKind::Genres => {
                 return (!home.genres.is_empty()).then(|| HomeSection::Genres(home.genres.clone()));
