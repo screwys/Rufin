@@ -809,10 +809,16 @@ impl ConnectOwner {
         let total = pull.total;
         let mut receiving = Receiving::default();
         let mut applied = 0;
+        // A page is applied once the next frame arrived, so the last one stores with the end.
+        let mut page = Vec::new();
         loop {
             let (rows, end) = match pull.next().await.map_err(error)? {
-                Frame::Page(rows) => (rows, None),
-                Frame::End { sequence } => (Vec::new(), Some(sequence)),
+                Frame::Page(rows) if page.is_empty() => {
+                    page = rows;
+                    continue;
+                }
+                Frame::Page(rows) => (std::mem::replace(&mut page, rows), None),
+                Frame::End { sequence } => (std::mem::take(&mut page), Some(sequence)),
             };
             applied += records
                 .receive(peer, rows, &mut receiving, end, |device, sequence| {

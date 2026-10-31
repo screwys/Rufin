@@ -551,8 +551,13 @@ impl Records {
             written.extend(self.compare(kind, true).await?);
         }
         if !states.is_empty() {
-            let objects = self.portable_all(states).await?;
-            written.extend(self.compare_ids("state", objects).await?);
+            let portable = self.portable(&states).await?;
+            let ids = states
+                .iter()
+                .map(|uri| format!("state:{}", portable.get(uri).unwrap_or(uri)))
+                .collect::<Vec<_>>();
+            let items = self.state_items(Some(&states), Some(portable)).await?;
+            written.extend(self.diff(items, Select::Ids(&ids), true).await?);
         }
         if !lyrics.is_empty() {
             let objects = self.portable_all(lyrics).await?;
@@ -719,13 +724,18 @@ impl Records {
     /// Images are read only for ids; a diff compares their revisions.
     async fn items(&self, kind: &str, objects: Option<&[String]>) -> Result<Vec<Item>, String> {
         let mut items = match kind {
-            "state" => {
-                let uris = match objects {
-                    Some(objects) => Some(self.local_all(objects).await?),
-                    None => None,
-                };
-                self.state_items(uris.as_deref()).await?
-            }
+            "state" => match objects {
+                Some(objects) => {
+                    let local = self.local(objects).await?;
+                    let uris = objects
+                        .iter()
+                        .map(|uri| local.get(uri).unwrap_or(uri).clone())
+                        .collect::<Vec<_>>();
+                    let named = local.into_iter().map(|(portable, uri)| (uri, portable));
+                    self.state_items(Some(&uris), Some(named.collect())).await?
+                }
+                None => self.state_items(None, None).await?,
+            },
             "listen" => match objects {
                 Some(ids) => {
                     let listens = self.catalog.listens_by_id(ids).await.map_err(error)?;
@@ -857,8 +867,13 @@ impl Records {
             .collect())
     }
 
-    /// Favorites and ratings Rufin holds: no server delivery waits for them.
-    async fn state_items(&self, uris: Option<&[String]>) -> Result<Vec<Item>, String> {
+    /// Favorites and ratings Rufin holds: no server delivery waits for them. `portable` names
+    /// the requested URIs when the caller already looked them up.
+    async fn state_items(
+        &self,
+        uris: Option<&[String]>,
+        portable: Option<HashMap<String, String>>,
+    ) -> Result<Vec<Item>, String> {
         let states = self
             .catalog
             .user_states(uris)
@@ -868,14 +883,18 @@ impl Records {
             .filter(|(_, delivering)| !delivering)
             .map(|(state, _)| state)
             .collect::<Vec<_>>();
-        let portable = self
-            .portable(
-                &states
-                    .iter()
-                    .map(|state| state.media_uri.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .await?;
+        let portable = match portable {
+            Some(portable) => portable,
+            None => {
+                self.portable(
+                    &states
+                        .iter()
+                        .map(|state| state.media_uri.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await?
+            }
+        };
         states
             .into_iter()
             .map(|state| {
