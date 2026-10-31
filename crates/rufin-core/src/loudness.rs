@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{
-    AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
+    AnalyzedLoudness, DecodeError, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
 use library::{
     Catalog, Change, LoudnessMeasurement, Playable, Scope, SourceKey, SourcePhase, TrackKey,
@@ -41,8 +41,8 @@ pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
     settings: SettingsFile,
     active: Mutex<Option<ActiveAnalysis>>,
-    /// Tracks whose audio could not be read or decoded, at the audio revision that failed:
-    /// a pass skips them until their audio changes.
+    /// Tracks whose audio itself could not be decoded, at the audio revision that failed: a
+    /// pass skips them until their audio changes.
     failed: Arc<Failed>,
 }
 
@@ -388,7 +388,7 @@ impl Analysis<'_> {
     }
 
     /// The track's playable with its audio hash, None when it is gone. Err when its audio
-    /// failed before at this audio revision, or its hash cannot be read now.
+    /// could not be decoded at this audio revision, or its hash cannot be read now.
     async fn playable(&self, track: TrackKey) -> Result<Option<Playable>, ()> {
         let playable = match self.catalog.playable(track).await {
             Ok(Some(playable)) => playable,
@@ -410,20 +410,7 @@ impl Analysis<'_> {
         }
         with_audio_hash(self.catalog, playable)
             .await
-            .map_err(|error| {
-                warn!(%error, "skipping loudness");
-                self.failed(track, revision);
-            })
-    }
-
-    /// Remembers that the track's audio failed at `revision`, unless the pass was cancelled.
-    fn failed(&self, track: TrackKey, revision: Option<[u8; 32]>) {
-        if !self.cancelled.load(Ordering::Acquire) {
-            self.failed
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(track, revision);
-        }
+            .map_err(|error| warn!(%error, "skipping loudness"))
     }
 
     async fn store_track(&self, hash: [u8; 32], value: AnalyzedLoudness) -> Result<(), String> {
@@ -456,7 +443,7 @@ impl Analysis<'_> {
     }
 
     /// The track's loudness, or None when its audio cannot be read or decoded; the pass goes on
-    /// without it.
+    /// without it. Audio that itself cannot be decoded is remembered at its audio revision.
     async fn analyze(&self, playable: &Playable) -> Option<LoudnessAnalysis> {
         debug!(track = %playable.track, "decoding for loudness");
         let owner = Arc::clone(self.source_owner);
@@ -472,23 +459,34 @@ impl Analysis<'_> {
             },
         )
         .await;
-        let cancelled = Arc::clone(self.cancelled);
-        let analysis = async {
-            tokio::task::spawn_blocking(move || {
-                analyze_loudness_cancellable(&stream.map_err(|error| error.to_string())?, || {
-                    cancelled.load(Ordering::Acquire)
-                })
-            })
-            .await
-            .map_err(|_| "the worker stopped".to_string())?
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                warn!(track = %playable.track, %error, "could not open Track audio for loudness");
+                return None;
+            }
         };
-        analysis
-            .await
-            .inspect_err(|error| {
-                warn!(track = %playable.track, %error, "could not analyze Track loudness");
-                self.failed(playable.track, playable.audio_revision);
-            })
-            .ok()
+        let cancelled = Arc::clone(self.cancelled);
+        let analysis = tokio::task::spawn_blocking(move || {
+            analyze_loudness_cancellable(&stream, || cancelled.load(Ordering::Acquire))
+        })
+        .await;
+        let error = match analysis {
+            Ok(Ok(analysis)) => return Some(analysis),
+            Ok(Err(error)) => error,
+            Err(error) => {
+                warn!(track = %playable.track, %error, "loudness worker stopped");
+                return None;
+            }
+        };
+        warn!(track = %playable.track, %error, "could not analyze Track loudness");
+        if let DecodeError::Content(_) = error {
+            self.failed
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(playable.track, playable.audio_revision);
+        }
+        None
     }
 }
 

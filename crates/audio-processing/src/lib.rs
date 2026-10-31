@@ -5,6 +5,7 @@ use gstreamer as gst;
 use std::sync::OnceLock;
 
 mod decode;
+pub use decode::{ContentFailure, DecodeError, content_failure};
 pub mod effects;
 mod fingerprint;
 pub use fingerprint::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};

@@ -1,5 +1,7 @@
 use audio_processing::ResolvedStream;
-use audio_processing::{configure_sources, ensure_gstreamer_initialized};
+use audio_processing::{
+    ContentFailure, configure_sources, content_failure, ensure_gstreamer_initialized,
+};
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
@@ -73,23 +75,13 @@ fn failure_kind(error: &glib::Error, element: Option<&gst::Element>) -> FailureK
             _ => FailureKind::Unclassified,
         };
     }
-    // A network source stops its stream when the connection fails.
-    if has_class("Network") {
-        return FailureKind::Connection;
+    match content_failure(error, element) {
+        Some(ContentFailure::Unsupported) => FailureKind::UnsupportedFormat,
+        Some(ContentFailure::Corrupt) => FailureKind::Decode,
+        // A network source stops its stream when the connection fails.
+        None if has_class("Network") => FailureKind::Connection,
+        None => FailureKind::Unclassified,
     }
-    if let Some(error) = error.kind::<gst::StreamError>() {
-        return match error {
-            gst::StreamError::CodecNotFound
-            | gst::StreamError::TypeNotFound
-            | gst::StreamError::WrongType
-            | gst::StreamError::Format => FailureKind::UnsupportedFormat,
-            _ => FailureKind::Decode,
-        };
-    }
-    if error.kind::<gst::CoreError>() == Some(gst::CoreError::MissingPlugin) {
-        return FailureKind::UnsupportedFormat;
-    }
-    FailureKind::Unclassified
 }
 
 fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

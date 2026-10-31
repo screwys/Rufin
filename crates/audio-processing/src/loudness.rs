@@ -1,6 +1,6 @@
 //! Cancellable EBU R128 analysis for one prepared audio stream.
 
-use super::decode::DecodePipeline;
+use super::decode::{DecodeError, DecodePipeline};
 use crate::ResolvedStream;
 use ebur128::{Channel, EbuR128, Mode};
 use gst::prelude::*;
@@ -31,7 +31,7 @@ impl LoudnessAnalysis {
 pub fn analyze_loudness_cancellable(
     stream: &ResolvedStream,
     cancelled: impl Fn() -> bool,
-) -> Result<LoudnessAnalysis, String> {
+) -> Result<LoudnessAnalysis, DecodeError> {
     let pipeline = DecodePipeline::new(
         stream,
         "audio/x-raw,format=F32LE,layout=interleaved ! appsink name=sink sync=false max-buffers=8 drop=false",
@@ -49,15 +49,16 @@ pub fn analyze_loudness_cancellable(
     while let Some(sample) =
         pipeline.sample(&sink, || check_analysis_progress(&cancelled, last_progress))?
     {
-        add_sample(&mut analyzer, &sample, &mut decoded_samples)?;
+        add_sample(&mut analyzer, &sample, &mut decoded_samples).map_err(DecodeError::Content)?;
         last_progress = Instant::now();
     }
-    let mut analyzer = analyzer.ok_or_else(|| "audio stream produced no samples".to_string())?;
-    let measurement = measurement(&analyzer)?;
+    let mut analyzer = analyzer
+        .ok_or_else(|| DecodeError::Content("audio stream produced no samples".to_string()))?;
+    let measurement = measurement(&analyzer).map_err(DecodeError::Content)?;
     // Album aggregation reads the completed histogram, not the source-rate signal window.
     analyzer
         .change_parameters(1, 16)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| DecodeError::Content(error.to_string()))?;
     Ok(LoudnessAnalysis {
         analyzer,
         measurement,
@@ -293,7 +294,10 @@ mod tests {
         let error = analyze_loudness_cancellable(&stream, || true)
             .err()
             .expect("cancelled analysis");
-        assert_eq!(error, "loudness analysis cancelled");
+        assert!(
+            matches!(&error, DecodeError::Stopped(message) if message == "loudness analysis cancelled"),
+            "{error:?}"
+        );
     }
 
     fn analyze_path(path: &std::path::Path) -> LoudnessAnalysis {
