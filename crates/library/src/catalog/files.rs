@@ -105,12 +105,14 @@ impl super::Observation<'_> {
         if batch.is_empty() {
             return Ok(Vec::new());
         }
-        let playlist = |path: &String| {
-            crate::PlaylistFormat::from_path(std::path::Path::new(path)).is_some()
-        };
+        let playlist =
+            |path: &String| crate::PlaylistFormat::from_path(std::path::Path::new(path)).is_some();
         self.playlist_files |= batch.files.iter().any(|file| playlist(&file.path))
             || batch.removed.iter().any(|file| playlist(&file.path))
-            || batch.renames.iter().any(|(old, new)| playlist(old) || playlist(new));
+            || batch
+                .renames
+                .iter()
+                .any(|(old, new)| playlist(old) || playlist(new));
         let source = self.source;
         let mut write = self.write().await?;
         let mut touched = Touched::default();
