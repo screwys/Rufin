@@ -2,6 +2,7 @@
 //! is EBU R128 it follows the change feed: tracks added to the selected source, or a listing
 //! of it that changed something, start a pass over what is missing.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
@@ -40,7 +41,12 @@ pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
     settings: SettingsFile,
     active: Mutex<Option<ActiveAnalysis>>,
+    /// Tracks whose audio could not be read or decoded, at the audio revision that failed:
+    /// a pass skips them until their audio changes.
+    failed: Arc<Failed>,
 }
+
+type Failed = Mutex<HashMap<TrackKey, Option<[u8; 32]>>>;
 
 /// While normalization is EBU R128, tracks added to the selected source, or a listing of it that
 /// changed something, start a pass over what is missing.
@@ -85,6 +91,7 @@ impl LoudnessAnalysisOwner {
             runtime,
             settings,
             active: Mutex::new(None),
+            failed: Arc::default(),
         })
     }
 
@@ -130,6 +137,7 @@ impl LoudnessAnalysisOwner {
         }
         let owner = Arc::downgrade(self);
         let task_cancelled = Arc::clone(&cancelled);
+        let failed = Arc::clone(&self.failed);
         let task = self.runtime.spawn(async move {
             info!(%source_key, "analyzing missing loudness data");
             analyze_selected(
@@ -139,6 +147,7 @@ impl LoudnessAnalysisOwner {
                 scope,
                 write_tags,
                 Arc::clone(&task_cancelled),
+                &failed,
             )
             .await;
             if let Some(owner) = owner.upgrade() {
@@ -212,6 +221,7 @@ async fn analyze_selected(
     scope: LoudnessNormalizationScope,
     write_tags: bool,
     cancelled: Arc<AtomicBool>,
+    failed: &Failed,
 ) {
     let catalog = Arc::clone(&source_owner.shared.catalog);
     if write_tags && configuration.is_file_library() {
@@ -238,6 +248,7 @@ async fn analyze_selected(
         source_key,
         write_tags,
         cancelled: &cancelled,
+        failed,
     };
     let result = async {
         if scope == LoudnessNormalizationScope::Album {
@@ -257,6 +268,7 @@ struct Analysis<'a> {
     source_key: SourceKey,
     write_tags: bool,
     cancelled: &'a Arc<AtomicBool>,
+    failed: &'a Failed,
 }
 
 impl Analysis<'_> {
@@ -280,10 +292,9 @@ impl Analysis<'_> {
                 }
                 let mut playables = Vec::with_capacity(tracks.len());
                 for track in tracks {
-                    match hashed_playable(self.catalog, track).await {
+                    match self.playable(track).await {
                         Ok(playable) => playables.extend(playable),
-                        Err(error) => {
-                            warn!(%error, "skipping Album loudness");
+                        Err(()) => {
                             playables.clear();
                             break;
                         }
@@ -355,12 +366,8 @@ impl Analysis<'_> {
                 if self.cancelled.load(Ordering::Acquire) {
                     return Ok(());
                 }
-                let playable = match hashed_playable(self.catalog, track).await {
-                    Ok(playable) => playable,
-                    Err(error) => {
-                        warn!(%error, "skipping Track loudness");
-                        continue;
-                    }
+                let Ok(playable) = self.playable(track).await else {
+                    continue;
                 };
                 let Some(playable) = playable.filter(|playable| playable.gains.analysed.is_none())
                 else {
@@ -377,6 +384,45 @@ impl Analysis<'_> {
                 self.write_tags(&[(track, value.integrated_lufs, None)])
                     .await;
             }
+        }
+    }
+
+    /// The track's playable with its audio hash, None when it is gone. Err when its audio
+    /// failed before at this audio revision, or its hash cannot be read now.
+    async fn playable(&self, track: TrackKey) -> Result<Option<Playable>, ()> {
+        let playable = match self.catalog.playable(track).await {
+            Ok(Some(playable)) => playable,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                warn!(%error, %track, "could not read Track for loudness");
+                return Err(());
+            }
+        };
+        let revision = playable.audio_revision;
+        if self
+            .failed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&track)
+            == Some(&revision)
+        {
+            return Err(());
+        }
+        with_audio_hash(self.catalog, playable)
+            .await
+            .map_err(|error| {
+                warn!(%error, "skipping loudness");
+                self.failed(track, revision);
+            })
+    }
+
+    /// Remembers that the track's audio failed at `revision`, unless the pass was cancelled.
+    fn failed(&self, track: TrackKey, revision: Option<[u8; 32]>) {
+        if !self.cancelled.load(Ordering::Acquire) {
+            self.failed
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(track, revision);
         }
     }
 
@@ -440,6 +486,7 @@ impl Analysis<'_> {
             .await
             .inspect_err(|error| {
                 warn!(track = %playable.track, %error, "could not analyze Track loudness");
+                self.failed(playable.track, playable.audio_revision);
             })
             .ok()
     }
@@ -454,18 +501,29 @@ fn measurement(value: AnalyzedLoudness) -> LoudnessMeasurement {
     }
 }
 
-/// A track's playable with its audio hash. A Local file whose hash is not known is read once:
-/// its payload hash, with the CUE window, is recorded against the audio revision, and the
-/// playable is read again so it carries what is stored for that audio.
+/// A track's playable with its audio hash.
 pub(crate) async fn hashed_playable(
     catalog: &Catalog,
     track: TrackKey,
 ) -> Result<Option<Playable>, String> {
-    let playable = catalog
+    match catalog
         .playable(track)
         .await
-        .map_err(|error| error.to_string())?;
-    let Some((revision, path, window)) = playable.as_ref().and_then(|playable| {
+        .map_err(|error| error.to_string())?
+    {
+        Some(playable) => with_audio_hash(catalog, playable).await,
+        None => Ok(None),
+    }
+}
+
+/// `playable` with its audio hash. A Local file whose hash is not known is read once: its
+/// payload hash, with the CUE window, is recorded against the audio revision, and the playable
+/// is read again so it carries what is stored for that audio.
+async fn with_audio_hash(
+    catalog: &Catalog,
+    playable: Playable,
+) -> Result<Option<Playable>, String> {
+    let Some((revision, path, window)) = Some(&playable).and_then(|playable| {
         let path = url::Url::parse(&playable.local_uri()?)
             .ok()?
             .to_file_path()
@@ -475,8 +533,9 @@ pub(crate) async fn hashed_playable(
             .is_none()
             .then_some((playable.audio_revision?, path, playable.window))
     }) else {
-        return Ok(playable);
+        return Ok(Some(playable));
     };
+    let track = playable.track;
     let payload = tokio::task::spawn_blocking(move || audio_processing::payload_hash(&path))
         .await
         .map_err(|error| error.to_string())?
