@@ -282,49 +282,6 @@ impl Catalog {
         Ok(())
     }
 
-    /// The rows of an authority, all of them or those of `uris`, in URI order.
-    pub async fn lyrics_rows(
-        &self,
-        authority: &str,
-        uris: Option<&[String]>,
-    ) -> LibraryResult<Vec<LyricsCacheRow>> {
-        let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as(
-            "SELECT media_uri,authority,role,language,script,lyrics,updated_at FROM lyrics_cache
-             WHERE authority=?1 AND (?2 IS NULL OR media_uri IN(SELECT value FROM json_each(?2)))
-             ORDER BY media_uri,role,language,script",
-        )
-        .bind(authority)
-        .bind(uris.map(serde_json::to_string).transpose()?)
-        .fetch_all(&mut *connection)
-        .await?)
-    }
-
-    /// Makes an authority's rows of each URI the given ones, in one Write.
-    pub async fn replace_lyrics(
-        &self,
-        authority: &str,
-        tracks: &[(String, Vec<LyricsCacheRow>)],
-    ) -> LibraryResult<()> {
-        let mut write = self.write().await?;
-        for (uri, rows) in tracks {
-            let kept = rows
-                .iter()
-                .map(|row| (&row.role, &row.language, &row.script))
-                .collect::<Vec<_>>();
-            let kept = serde_json::to_string(&kept)?;
-            remove_lyrics_on(
-                &mut write,
-                "media_uri=?1 AND authority=?2 AND (role,language,script) NOT IN(SELECT value->>0,value->>1,value->>2 FROM json_each(?3))",
-                &[uri, authority, &kept],
-            )
-            .await?;
-            put_lyrics_on(&mut write, rows, "true").await?;
-        }
-        write.commit().await?;
-        Ok(())
-    }
-
     pub async fn lyrics_cache_for_role(
         &self,
         media_uri: &str,

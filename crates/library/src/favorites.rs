@@ -255,7 +255,9 @@ impl Catalog {
             return Ok(false);
         }
         write.keep();
-        if !keep_copy {
+        if keep_copy {
+            write.restated(&delivery.media_uri).await?;
+        } else {
             let uri = delivery.media_uri.as_str();
             let apply = |state: &mut NativeState| match delivery.kind {
                 DeliveryKind::Favorite => state.favorite = delivery.value.map(|value| value != 0),

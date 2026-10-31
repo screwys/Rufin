@@ -843,6 +843,44 @@ impl<'a> Write<'a> {
         }
     }
 
+    /// Stages the State scope of a favorite or rating whose shown value stays as it is, for
+    /// readers of which values Rufin holds: a delivery settled that Rufin keeps its copy.
+    pub(crate) async fn restated(&mut self, uri: &str) -> LibraryResult<()> {
+        fn item<R: Row>(row: Option<R>) -> Option<UserItem> {
+            row.and_then(|row| row.user_item().map(|(item, _)| item))
+        }
+        // Rated items with a server have URIs that name their kind.
+        let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
+        let item = match kind.as_deref() {
+            Some("album") => item(self.by_natural::<Album>(uri).await?),
+            Some("artist") => item(self.by_natural::<Artist>(uri).await?),
+            _ => item(self.by_natural::<Track>(uri).await?),
+        };
+        let Some(item) = item else {
+            return Ok(());
+        };
+        let favorite = self
+            .catalog
+            .snapshot()
+            .shown_state(item)
+            .and_then(|(favorite, _)| favorite)
+            .unwrap_or(false);
+        let uri = uri.to_owned();
+        let target = match item {
+            UserItem::Track(_) => crate::FavoriteTarget::Track(uri),
+            UserItem::Album(_) => crate::FavoriteTarget::Album(uri),
+            UserItem::Artist(_) => crate::FavoriteTarget::Artist(uri),
+        };
+        self.changed(Scope::State {
+            items: vec![StateChange {
+                target,
+                favorite,
+                rating: false,
+            }],
+        });
+        Ok(())
+    }
+
     /// The plays, skips and last play of a track, with what this Write staged.
     pub(crate) fn stats(&self, key: TrackKey) -> Stats {
         self.edits
