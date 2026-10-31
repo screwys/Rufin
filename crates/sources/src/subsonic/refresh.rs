@@ -212,10 +212,13 @@ impl SubsonicSource {
             self.acquire_navidrome_library(observation, progress, cancelled)
                 .await?;
         } else {
+            // Artists come first so that the albums and tracks crediting them are resolved
+            // once.
+            let mut listed = Vec::new();
             for (entity, read_stage) in [
+                ("artist", SourceReadStage::Artists),
                 ("album", SourceReadStage::Albums),
                 ("track", SourceReadStage::Tracks),
-                ("artist", SourceReadStage::Artists),
             ] {
                 progress(stage(read_stage, 0));
                 let result = async {
@@ -286,19 +289,25 @@ impl SubsonicSource {
                             break;
                         }
                     }
-                    if walk {
-                        check_cancelled(cancelled)?;
-                        observation
-                            .complete_source_observation(&[entity], None, None)
-                            .await?;
-                    }
                     Ok(())
                 }
                 .await;
-                if let Err(error) = result {
-                    complete = false;
-                    crate::source::optional_collection_error(error)?;
+                match result {
+                    Ok(()) => listed.push(entity),
+                    Err(error) => {
+                        complete = false;
+                        crate::source::optional_collection_error(error)?;
+                    }
                 }
+            }
+            if walk {
+                // Records that credit others go first: an artist stays while a track or album
+                // credits it.
+                listed.reverse();
+                check_cancelled(cancelled)?;
+                observation
+                    .complete_source_observation(&listed, None, None)
+                    .await?;
             }
         }
 
@@ -411,12 +420,6 @@ impl SubsonicSource {
                     .complete_source_folder_membership(&folder.object_id)
                     .await?;
             }
-        }
-        if walk {
-            check_cancelled(cancelled)?;
-            observation
-                .complete_source_observation(&["track"], None, None)
-                .await?;
         }
         Ok(())
     }

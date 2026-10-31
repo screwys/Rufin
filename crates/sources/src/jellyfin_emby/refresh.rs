@@ -215,15 +215,17 @@ impl JellyfinEmbySource {
         let walk = observation.is_walk();
         // The server's clock at the first page, from which the next catch-up asks.
         let mut started = None;
+        // Artists come first so that the albums and tracks crediting them are resolved once.
+        let mut listed = Vec::new();
 
         for (entity, stage_name, paths) in [
-            ("album", SourceReadStage::Albums, &["MusicAlbum"][..]),
-            ("track", SourceReadStage::Tracks, &["Audio"][..]),
             (
                 "artist",
                 SourceReadStage::Artists,
                 &["Artists", "Artists/AlbumArtists"][..],
             ),
+            ("album", SourceReadStage::Albums, &["MusicAlbum"][..]),
+            ("track", SourceReadStage::Tracks, &["Audio"][..]),
             ("genre", SourceReadStage::Genres, &["MusicGenres"][..]),
         ] {
             let mut complete = true;
@@ -231,30 +233,32 @@ impl JellyfinEmbySource {
                 let mut pages = PageState::default();
                 loop {
                     check_cancelled(cancelled)?;
-                    let response = match entity {
+                    let dated = match entity {
+                        "genre" => self
+                            .music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
+                            .await
+                            .map(|page| (page, None)),
                         "artist" => {
                             self.people_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
                                 .await
                         }
-                        "genre" => {
-                            self.music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
+                        _ => {
+                            self.item_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
                                 .await
                         }
-                        _ => self
-                            .item_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
-                            .await
-                            .map(|(page, date)| {
-                                started = started.or(date);
-                                page
-                            }),
-                    }
-                    .and_then(|page| {
-                        let finished = pages.advance(
-                            items(&page["Items"]).len(),
-                            field(&page, "TotalRecordCount"),
-                        )?;
-                        Ok((page, finished))
-                    });
+                    };
+                    let response = dated
+                        .map(|(page, date)| {
+                            started = started.or(date);
+                            page
+                        })
+                        .and_then(|page| {
+                            let finished = pages.advance(
+                                items(&page["Items"]).len(),
+                                field(&page, "TotalRecordCount"),
+                            )?;
+                            Ok((page, finished))
+                        });
                     check_cancelled(cancelled)?;
                     let (page, finished) = match response {
                         Ok(page) => page,
@@ -291,28 +295,28 @@ impl JellyfinEmbySource {
                     }
                 }
             }
-            if entity == "artist" {
-                self.acquire_missing_artists(observation, cancelled).await?;
-            }
-            if complete && walk {
-                check_cancelled(cancelled)?;
-                observation
-                    .complete_source_observation(&[entity], None, None)
-                    .await?;
+            if complete {
+                listed.push(entity);
             }
             if entity == "track" {
+                // Artists that albums and tracks credit but the artist listings left out.
+                self.acquire_missing_artists(observation, cancelled).await?;
                 let folders = self.acquire_music_folders(observation, cancelled).await?;
                 for folder in folders {
                     self.acquire_music_folder_memberships(observation, &folder, None, cancelled)
                         .await?;
                 }
-                if walk {
-                    check_cancelled(cancelled)?;
-                    observation
-                        .complete_source_observation(&["folder"], None, None)
-                        .await?;
-                }
+                listed.push("folder");
             }
+        }
+        if walk {
+            // Records that credit others go first: an artist stays while a track or album
+            // credits it.
+            listed.reverse();
+            check_cancelled(cancelled)?;
+            observation
+                .complete_source_observation(&listed, None, None)
+                .await?;
         }
 
         if let Err(error) = self

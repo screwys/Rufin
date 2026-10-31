@@ -237,10 +237,11 @@ impl SubsonicSource {
         let walk = observation.is_walk();
 
         use crate::SourceEntityKind::{Album, Artist, Track};
+        // Artists come first so that the albums and tracks crediting them are resolved once.
         for (kind, endpoint, stage) in [
+            (Artist, "artist", SourceReadStage::Artists),
             (Album, "album", SourceReadStage::Albums),
             (Track, "song", SourceReadStage::Tracks),
-            (Artist, "artist", SourceReadStage::Artists),
         ] {
             progress(SourceReadProgress {
                 stage,
@@ -288,14 +289,16 @@ impl SubsonicSource {
                     break;
                 }
             }
-            if walk {
-                if cancelled() {
-                    return Err(crate::SourceError::Cancelled);
-                }
-                observation
-                    .complete_source_observation(&[kind.as_str()], None, None)
-                    .await?;
+        }
+        if walk {
+            if cancelled() {
+                return Err(crate::SourceError::Cancelled);
             }
+            // Records that credit others go first: an artist stays while a track or album
+            // credits it.
+            observation
+                .complete_source_observation(&["track", "album", "artist"], None, None)
+                .await?;
         }
         Ok(())
     }
@@ -1403,12 +1406,8 @@ mod tests {
             })
         }));
         first_albums[1] = serde_json::json!({"name": "Missing ID"});
-        page_match("album", 0, "token-a")
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("x-nd-authorization", "token-b")
-                    .set_body_json(first_albums),
-            )
+        page_match("album", 0, "token-b")
+            .respond_with(ResponseTemplate::new(200).set_body_json(first_albums))
             .expect(1)
             .mount(&server)
             .await;
@@ -1478,13 +1477,15 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        page_match("artist", 0, "token-b")
+        page_match("artist", 0, "token-a")
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
-                    "id": "track-artist-one",
-                    "name": "Track Artist",
-                    "mbzArtistId": "track-artist-mbid"
-                }])),
+                ResponseTemplate::new(200)
+                    .insert_header("x-nd-authorization", "token-b")
+                    .set_body_json(serde_json::json!([{
+                        "id": "track-artist-one",
+                        "name": "Track Artist",
+                        "mbzArtistId": "track-artist-mbid"
+                    }])),
             )
             .expect(1)
             .mount(&server)

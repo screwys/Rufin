@@ -1018,7 +1018,7 @@ impl JellyfinEmbySource {
         path: &str,
         offset: usize,
         limit: usize,
-    ) -> SourceResult<Value> {
+    ) -> SourceResult<(Value, Option<i64>)> {
         let mut url = endpoint(&self.base_url, path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
@@ -1029,7 +1029,7 @@ impl JellyfinEmbySource {
                 "ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ImageBlurHashes,ProviderIds,SortName",
             );
 
-        self.get_json::<Value>(url).await
+        self.get_json_dated::<Value>(url).await
     }
 
     pub(super) async fn music_genre_page(
