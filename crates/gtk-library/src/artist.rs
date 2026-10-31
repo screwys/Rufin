@@ -96,7 +96,7 @@ impl CatalogUi {
                 context_id: format!(
                     "{}|favorites",
                     CollectionTarget::Artist {
-                        id: artist.to_string(),
+                        id: summary.row.media_uri.clone(),
                         album_artist,
                     }
                     .context_id()
