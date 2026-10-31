@@ -633,8 +633,9 @@ impl SidebarPinItem {
         };
         Some(
             collection_play_request(collection).with_context(
-                sidebar_pin_route_key(&self.route())
+                CollectionTarget::for_route(&self.route())
                     .expect("pin route")
+                    .context_id()
                     .into(),
             ),
         )
