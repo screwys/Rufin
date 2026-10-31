@@ -106,11 +106,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Remove Local and its cached library from Rufin? Your music files will not be "
-"deleted."
-msgstr ""
-
-msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
@@ -118,6 +113,17 @@ msgstr ""
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
+msgstr ""
+
+msgid ""
+"Remove everything Rufin keeps about Local, including its favorites, ratings "
+"and lyrics? Your music files will not be deleted."
+msgstr ""
+
+#, rust-format
+msgid ""
+"Remove everything Rufin keeps about {name}, including its favorites, ratings "
+"and lyrics?"
 msgstr ""
 
 #, rust-format
@@ -169,11 +175,6 @@ msgstr ""
 msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
-msgstr ""
-
-msgid ""
-"This removes the server, cached library metadata, queue snapshot, and saved "
-"token for"
 msgstr ""
 
 msgid ""
@@ -1047,6 +1048,9 @@ msgid "Couldn't connect to {service}"
 msgstr ""
 
 msgid "Couldn't decode this track"
+msgstr ""
+
+msgid "Couldn't load this folder"
 msgstr ""
 
 msgid "Couldn't search for lyrics"
@@ -3942,6 +3946,10 @@ msgid "This device was removed from the profile"
 msgstr ""
 
 msgid "This device"
+msgstr ""
+
+#, rust-format
+msgid "This is owned by {source} and synced to it."
 msgstr ""
 
 #, rust-format
