@@ -527,7 +527,9 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
-    /// Creates the playlist and writes it from the server's answer, which holds its entries.
+    /// Creates the playlist with the tracks one call can carry and returns how many it took.
+    /// When it took them all, the playlist is written from the server's answer, which holds
+    /// its entries.
     pub async fn create_playlist(
         &self,
         catalog: &library::Catalog,
@@ -535,9 +537,9 @@ impl SubsonicSource {
         name: &str,
         track_ids: &[String],
         public: Option<bool>,
-    ) -> SourceResult<PlaylistId> {
+    ) -> SourceResult<(PlaylistId, usize)> {
         let form = self.extension_version("formPost").await.unwrap_or_default() > 0;
-        // Without formPost the ids go in the URL, so the rest are added in bounded calls.
+        // Without formPost the ids go in the URL, so the caller adds the rest in bounded calls.
         let first = if form {
             track_ids.len()
         } else {
@@ -553,23 +555,18 @@ impl SubsonicSource {
         let playlist = json::id(&body["playlist"]["id"])
             .map(|id| self.id("playlist", &id))
             .ok_or(SourceError::NotFound)?;
-        for tracks in track_ids[first..].chunks(256) {
-            self.edit_playlist_entries(&playlist, &[], tracks).await?;
-        }
         if let Some(public) = public
             && json::boolean(&body["playlist"]["public"]) != Some(public)
         {
             self.update_playlist(&playlist, None, Some(public)).await?;
         }
-        let snapshot = if first == track_ids.len() {
-            playlist_snapshot(self, source_id, &body["playlist"])?
-        } else {
-            self.read_playlist(source_id, &playlist).await?
-        };
-        let mut observation = catalog.observe(source_id).await?;
-        self.write_playlist_snapshot(&mut observation, &snapshot)
-            .await?;
-        Ok(playlist)
+        if first == track_ids.len() {
+            let snapshot = playlist_snapshot(self, source_id, &body["playlist"])?;
+            let mut observation = catalog.observe(source_id).await?;
+            self.write_playlist_snapshot(&mut observation, &snapshot)
+                .await?;
+        }
+        Ok((playlist, first))
     }
     pub async fn update_playlist(
         &self,

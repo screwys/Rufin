@@ -420,38 +420,48 @@ pub async fn create_playlist(
                     .map(|(_, id)| id)
                     .collect::<Vec<_>>();
                 let first = &tracks[..tracks.len().min(256)];
-                let object = match &source.implementation {
-                    // Subsonic answers with the new playlist, which is written from it.
-                    Implementation::OpenSubsonic(provider) => provider
-                        .create_playlist(
-                            catalog,
-                            source.source_id().as_str(),
-                            &name,
-                            &tracks,
-                            public,
-                        )
-                        .await
-                        .map_err(string_error)?,
-                    _ => {
-                        let object = match &source.implementation {
-                            Implementation::Plex(provider) => {
-                                provider.create_playlist(&name, first).await
-                            }
-                            Implementation::JellyfinEmby(provider) => {
-                                provider.create_playlist(&name, first, public).await
-                            }
-                            _ => unreachable!(),
-                        }
-                        .map_err(string_error)?;
-                        append_native_tracks(&source, &object, &tracks[first.len()..])
+                // Subsonic answers with the new playlist, which is written from it when the
+                // create carried every track.
+                let (object, sent, written) = match &source.implementation {
+                    Implementation::OpenSubsonic(provider) => {
+                        let (object, sent) = provider
+                            .create_playlist(
+                                catalog,
+                                source.source_id().as_str(),
+                                &name,
+                                &tracks,
+                                public,
+                            )
                             .await
                             .map_err(string_error)?;
-                        refresh_playlist(&source, catalog, Some(object.clone()), None)
-                            .await
-                            .map_err(string_error)?;
-                        object
+                        (object, sent, sent == tracks.len())
                     }
+                    Implementation::Plex(provider) => (
+                        provider
+                            .create_playlist(&name, first)
+                            .await
+                            .map_err(string_error)?,
+                        first.len(),
+                        false,
+                    ),
+                    Implementation::JellyfinEmby(provider) => (
+                        provider
+                            .create_playlist(&name, first, public)
+                            .await
+                            .map_err(string_error)?,
+                        first.len(),
+                        false,
+                    ),
+                    _ => unreachable!(),
                 };
+                append_native_tracks(&source, &object, &tracks[sent..])
+                    .await
+                    .map_err(string_error)?;
+                if !written {
+                    refresh_playlist(&source, catalog, Some(object.clone()), None)
+                        .await
+                        .map_err(string_error)?;
+                }
                 let playlist = match catalog
                     .catalog_keys(
                         library::CatalogKind::Playlist,
