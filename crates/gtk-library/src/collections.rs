@@ -697,10 +697,7 @@ pub fn artist_grid(
         &fields,
         move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
         move |_, artist: ArtistRow| {
-            activate_shell.navigate(super::artist::artist_detail_route(
-                artist.media_uri.clone(),
-                album_artist,
-            ));
+            activate_shell.navigate(Route::of_artist(&artist));
         },
         move |position| demand.demand_positions([position as usize]),
     )
@@ -797,10 +794,7 @@ where
         |field| column_fit_width(field, column_width(field)),
         true,
         Some(Box::new(move |_, artist: ArtistRow| {
-            activate_shell.navigate(super::artist::artist_detail_route(
-                artist.media_uri.clone(),
-                album_artist,
-            ));
+            activate_shell.navigate(Route::of_artist(&artist));
         })),
         None,
         route_column_view_initial_width(shell),

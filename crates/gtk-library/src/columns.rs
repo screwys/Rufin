@@ -923,14 +923,7 @@ fn install_artist_list_item_context_menu(
             let Some(artist) = item.upgrade().and_then(|item| item_at_from_item(&item)) else {
                 return;
             };
-            present_artist_context_menu(
-                target,
-                &shell.media_menus,
-                artist,
-                album_artist,
-                None,
-                position,
-            );
+            present_artist_context_menu(target, &shell.media_menus, artist, None, position);
         }),
     );
 }

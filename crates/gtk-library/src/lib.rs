@@ -57,5 +57,4 @@ pub(crate) fn collection_download_change(
 use rufin_core::collection_context::CollectionTarget;
 use std::rc::Rc;
 
-pub use artist::artist_detail_route;
 pub use named_detail::NamedDetailId;

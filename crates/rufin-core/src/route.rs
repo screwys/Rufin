@@ -79,10 +79,7 @@ impl Route {
             Row::Album(album) | Row::AlbumHeading(album) => {
                 Self::AlbumDetail(album.media_uri.clone())
             }
-            Row::Artist(artist) if artist.album_artist => {
-                Self::AlbumArtistDetail(artist.media_uri.clone())
-            }
-            Row::Artist(artist) => Self::ArtistDetail(artist.media_uri.clone()),
+            Row::Artist(artist) => Self::of_artist(artist),
             Row::Tag(tag) if tag.kind == TagKind::Genre => {
                 Self::GenreDetail(GenreKey::from_raw(tag.key))
             }
@@ -99,6 +96,15 @@ impl Route {
             },
             Row::Track(_) | Row::AlbumTrack { .. } | Row::Folder(_) => return None,
         })
+    }
+
+    /// The page an artist row opens, in the role it was read with.
+    pub fn of_artist(artist: &library::ArtistRow) -> Self {
+        if artist.album_artist {
+            Self::AlbumArtistDetail(artist.media_uri.clone())
+        } else {
+            Self::ArtistDetail(artist.media_uri.clone())
+        }
     }
 
     pub fn requires_selected_source(&self) -> bool {

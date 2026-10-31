@@ -310,7 +310,7 @@ impl SearchItem {
                     present_album_context_menu(&target, &menus, row, None, None, position)
                 }
                 Self::Artist(row) => {
-                    present_artist_context_menu(&target, &menus, row, false, None, position)
+                    present_artist_context_menu(&target, &menus, row, None, position)
                 }
                 Self::Track(..) => unreachable!(),
             }

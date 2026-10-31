@@ -609,8 +609,7 @@ impl SidebarPinItem {
                     present_album_context_menu(&target, menus, row, None, None, position)
                 }
                 library::Row::Artist(row) => {
-                    let album_artist = row.album_artist;
-                    present_artist_context_menu(&target, menus, row, album_artist, None, position)
+                    present_artist_context_menu(&target, menus, row, None, position)
                 }
                 library::Row::Tag(row) => {
                     present_genre_context_menu(&target, menus, row, None, position)

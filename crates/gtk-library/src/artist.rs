@@ -40,14 +40,6 @@ const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Appears On"),
 ];
 
-pub fn artist_detail_route(artist: String, album_artist: bool) -> Route {
-    if album_artist {
-        Route::AlbumArtistDetail(artist)
-    } else {
-        Route::ArtistDetail(artist)
-    }
-}
-
 fn artist_discography_route(artist: String, album_artist: bool) -> Route {
     if album_artist {
         Route::AlbumArtistDiscography(artist)
@@ -702,7 +694,6 @@ fn artist_detail_header_restored(
             target,
             &menu_shell.media_menus,
             artist,
-            album_artist,
             Some(Rc::clone(&menu_play)),
             position,
         );
@@ -797,8 +788,6 @@ fn artist_count_button(icon_name: &str, text: &str) -> (gtk::Button, gtk::Label)
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn responsive_release_rows_preserve_complete_membership() {
         let albums = (0..17).collect::<Vec<_>>();
@@ -813,16 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn artist_and_album_artist_routes_keep_distinct_role_identity() {
-        let key = library::source_entity_uri(&library::SourceId::new("source"), "artist", "7");
-        assert_eq!(
-            artist_detail_route(key.clone(), false),
-            Route::ArtistDetail(key.clone())
-        );
-        assert_eq!(
-            artist_detail_route(key.clone(), true),
-            Route::AlbumArtistDetail(key)
-        );
+    fn artist_and_album_artist_play_requests_keep_distinct_role_identity() {
         let key = library::ArtistKey::from_raw(7);
         for album_artist in [false, true] {
             let request =

@@ -1046,14 +1046,13 @@ pub fn present_artist_context_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
     artist: ArtistRow,
-    album_artist: bool,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
     if present_collection_selection_menu(
         target,
         menus,
-        gtk_widgets::selection::artist_play_request(&artist, album_artist),
+        gtk_widgets::selection::artist_play_request(&artist, artist.album_artist),
         position,
     ) {
         return;
@@ -1068,7 +1067,7 @@ pub fn present_artist_context_menu(
         crate::media_details::MenuHeader {
             item: MediaDetailsItem::Artist {
                 media_uri: artist.media_uri.clone(),
-                album_artist,
+                album_artist: artist.album_artist,
             },
             title: &artist.name,
             subtitle: "",
@@ -1086,11 +1085,7 @@ pub fn present_artist_context_menu(
     append_context_menu_picker(
         &surface,
         menus,
-        if album_artist {
-            gtk_widgets::selection::artist_play_request(&artist, true)
-        } else {
-            gtk_widgets::selection::artist_play_request(&artist, false)
-        },
+        gtk_widgets::selection::artist_play_request(&artist, artist.album_artist),
     );
     surface.append_configurable_action(
         ContextMenuItem::EditMetadata,
@@ -1098,27 +1093,12 @@ pub fn present_artist_context_menu(
         "edit-metadata",
         EDIT_ICON,
     );
-    install_sidebar_pin_action(
-        &surface,
-        menus,
-        library::source_entity_parts(&artist.media_uri).map(|(source_id, _, _)| {
-            SidebarPin::Artist {
-                source_id,
-                artist_id: artist.object_id.clone(),
-                album_artist,
-            }
-        }),
-    );
-    let route = if album_artist {
-        Route::AlbumArtistDetail(artist.media_uri.clone())
-    } else {
-        Route::ArtistDetail(artist.media_uri.clone())
-    };
+    install_sidebar_pin_action(&surface, menus, artist.pin());
     let submenu = go_to_submenu(
         &surface,
         menus,
         "artist",
-        [(artist.name.as_str(), route)],
+        [(artist.name.as_str(), Route::of_artist(&artist))],
         None,
     );
     install_source_navigation(
@@ -1129,7 +1109,7 @@ pub fn present_artist_context_menu(
         &artist.media_uri,
         None,
         None,
-        album_artist,
+        artist.album_artist,
     );
     surface.append_configurable_submenu(
         ContextMenuItem::GoTo,
@@ -1137,11 +1117,7 @@ pub fn present_artist_context_menu(
         &submenu,
         GO_TO_ICON,
     );
-    let playback = if album_artist {
-        gtk_widgets::selection::artist_play_request(&artist, true)
-    } else {
-        gtk_widgets::selection::artist_play_request(&artist, false)
-    };
+    let playback = gtk_widgets::selection::artist_play_request(&artist, artist.album_artist);
     install_download_actions(
         &surface,
         menus,
@@ -1155,7 +1131,7 @@ pub fn present_artist_context_menu(
     install_radio_actions(
         &surface,
         menus,
-        if album_artist {
+        if artist.album_artist {
             RadioSeed::AlbumArtist(artist.artist_key)
         } else {
             RadioSeed::Artist(artist.artist_key)

@@ -980,14 +980,7 @@ impl ArtistGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_artist_context_menu(
-                    target,
-                    &shell.media_menus,
-                    row,
-                    album_artist,
-                    None,
-                    point,
-                )
+                present_artist_context_menu(target, &shell.media_menus, row, None, point)
             },
         );
         install_grid_play(
