@@ -1699,8 +1699,8 @@ impl Records {
         Ok(())
     }
 
-    /// Puts received source and integration configurations into the settings. Another
-    /// device's Local source becomes a peer source here.
+    /// Puts received source and integration configurations that differ from this device's
+    /// into the settings. Another device's Local source becomes a peer source here.
     async fn apply_sources(
         &self,
         owner: &Arc<ConnectOwner>,
@@ -1719,7 +1719,16 @@ impl Records {
                         .connections()
                         .find(|source| source.configuration.source_id == id)
                         .cloned();
-                    received_source(id, value, existing, &device, &names, secrets.as_ref())
+                    let received = received_source(
+                        id,
+                        value,
+                        existing.clone(),
+                        &device,
+                        &names,
+                        secrets.as_ref(),
+                    );
+                    received
+                        .map(|source| source.filter(|source| Some(source) != existing.as_ref()))
                         .transpose()
                         .map(|source| source.map(|source| (integration, source)))
                 })
@@ -1727,6 +1736,10 @@ impl Records {
         })
         .await
         .map_err(error)??;
+        // Only a source whose configuration changed sets the sources up again.
+        if prepared.is_empty() {
+            return Ok(());
+        }
         let catalog = Arc::clone(&self.catalog);
         let settings = owner.settings_apply.clone();
         owner
