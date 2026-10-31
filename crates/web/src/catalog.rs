@@ -255,6 +255,7 @@ pub(super) async fn home_data(
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
     use library::HomeBlockKind;
+    use rufin_core::view::HomeSection;
     let (source, folder) = scope(
         products,
         required(parameters, "source")?,
@@ -280,30 +281,38 @@ pub(super) async fn home_data(
         )
         .await
         .map_err(internal)?;
-    let mut sections = Vec::new();
-    for block in blocks {
-        let (title, items) = match block {
-            HomeBlockKind::Showcase => ("Showcase", page.showcase.iter().map(|row| home_album(products, row)).collect()),
-            HomeBlockKind::Explore => ("Explore", page.explore.iter().map(|row| home_album(products, row)).collect()),
-            HomeBlockKind::MostPlayed => ("Most played", home_rows(products, &page.most_played)),
-            HomeBlockKind::NewlyAdded => ("Newly added", home_rows(products, &page.newly_added)),
-            HomeBlockKind::RecentlyPlayed => ("Recently played", home_rows(products, &page.recently_played)),
-            HomeBlockKind::RecentlyReleased => ("Recently released", home_rows(products, &page.recently_released)),
-            HomeBlockKind::Genres => ("Featured genres", page.genres.iter().map(|row|json!({"kind":"genre","id":row.key,"object_id":row.object_id,"name":row.name,"track_count":row.summary.track_count})).collect()),
-        };
-        if !items.is_empty() {
-            sections.push(json!({"block":block,"title":title,"items":items}));
-        }
-    }
-    for section in page.provider_sections {
-        if parameters.contains_key("block") {
-            break;
-        }
-        let items = home_rows(products, &section.rows);
-        if !items.is_empty() {
-            sections.push(json!({"title":section.title.unwrap_or_else(||"From your server".into()),"items":items}));
-        }
-    }
+    // One Home block shows only that block, without the server's sections.
+    let single = parameters.contains_key("block");
+    let sections = rufin_core::view::home_sections(&page, &blocks, "")
+        .into_iter()
+        .filter_map(|section| {
+            Some(match section {
+                HomeSection::Showcase(row) => {
+                    json!({"block":HomeBlockKind::Showcase,"title":"Showcase","items":[home_album(products, &row)]})
+                }
+                HomeSection::Rows { block, rows } => {
+                    let title = match block {
+                        HomeBlockKind::Explore => "Explore",
+                        HomeBlockKind::MostPlayed => "Most played",
+                        HomeBlockKind::NewlyAdded => "Newly added",
+                        HomeBlockKind::RecentlyPlayed => "Recently played",
+                        HomeBlockKind::RecentlyReleased => "Recently released",
+                        HomeBlockKind::Showcase | HomeBlockKind::Genres => {
+                            unreachable!("Showcase and Genres have their own sections")
+                        }
+                    };
+                    json!({"block":block,"title":title,"items":home_rows(products, &rows)})
+                }
+                HomeSection::Genres(genres) => {
+                    json!({"block":HomeBlockKind::Genres,"title":"Featured genres","items":genres.iter().map(|row|json!({"kind":"genre","id":row.key,"object_id":row.object_id,"name":row.name,"track_count":row.summary.track_count})).collect::<Vec<_>>()})
+                }
+                HomeSection::Provider(_) if single => return None,
+                HomeSection::Provider(section) => {
+                    json!({"title":section.title.unwrap_or_else(||"From your server".into()),"items":home_rows(products, &section.rows)})
+                }
+            })
+        })
+        .collect::<Vec<_>>();
     Ok(json!({"sections":sections}))
 }
 
