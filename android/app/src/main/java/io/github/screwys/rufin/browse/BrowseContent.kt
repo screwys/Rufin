@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.Velocity
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
-import io.github.screwys.rufin.core.showState
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
@@ -355,20 +354,10 @@ internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shu
 
 private fun browseItemKey(item: BrowseItem): String = "${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
 
-/** The item showing the favorites and ratings committed while it is shown. */
+/** The item showing the favorites and ratings committed while the visible page is open. */
 @Composable
-internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem {
-    val kind = if (item.row.kind == "album_header") "album" else item.row.kind
-    val key = item.row.stateKey
-    if (kind !in setOf("track", "album", "artist") || key == null) return item
-    var effective by remember(item.row) { mutableStateOf(item.row) }
-    LaunchedEffect(model, item.row) {
-        model.favoriteStates.collect { state ->
-            if (state.kind == kind && state.key == key) showState(effective, state)?.let { effective = it }
-        }
-    }
-    return item.copy(row = effective)
-}
+internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem =
+    model.browse.visiblePage?.shown(item) ?: item
 
 @Composable
 internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
@@ -514,7 +503,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
     BoxWithConstraints(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
         val coverSize = ((maxWidth - 20.dp) * .35f).coerceIn(96.dp, 180.dp)
         val artwork = rememberBrowseArtwork(item, player, coverSize)
-        Surface(Modifier.fillMaxWidth().then(showcasePaint(item.row.key)).combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }), shape = RoundedCornerShape(8.dp),
+        Surface(Modifier.fillMaxWidth().then(showcasePaint(item.row.key)).combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(projected) }), shape = RoundedCornerShape(8.dp),
             color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

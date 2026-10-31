@@ -5,6 +5,7 @@ import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.library.StateChange
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -64,6 +65,9 @@ internal class BrowsePage(
     var downloadRevision by mutableStateOf<ULong?>(null)
         private set
     private var capturedLabelsVersion = browse.labelsVersion
+    /** The favorites and ratings committed while the page is open, by kind and key; rows it read
+     * before show them through [shown]. */
+    private val states = mutableStateMapOf<Pair<String, Long>, StateChange>()
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
 
@@ -99,6 +103,14 @@ internal class BrowsePage(
         val homeBlocks: String?,
         val parentPage: AndroidBrowsePage?,
     )
+
+    /** `item` showing the favorite and rating committed for it since the page read it. */
+    @Composable
+    fun shown(item: BrowseItem): BrowseItem {
+        val kind = if (item.row.kind == "album_header") "album" else item.row.kind
+        val change = item.row.stateKey?.let { states[kind to it] } ?: return item
+        return remember(item.row, change) { showState(item.row, change)?.let { item.copy(row = it) } ?: item }
+    }
 
     fun refresh() { loading = true; revision++ }
     suspend fun sourceUri(): String? = currentQuery?.detailSourceUri()
@@ -142,6 +154,7 @@ internal class BrowsePage(
             previous != null && previous == current
         launch {
             connection.changes.collect { changed ->
+                changed.items.forEach { states[it.kind to it.key] = it }
                 if (if (pins) browse.library?.pinsRefresh(changed) == true else currentQuery?.refresh(changed) == true) changes++
             }
         }

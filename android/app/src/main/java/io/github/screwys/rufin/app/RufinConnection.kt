@@ -26,7 +26,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import io.github.screwys.rufin.core.AndroidLibrary
 import io.github.screwys.rufin.core.AndroidLibraryEvents
-import io.github.screwys.rufin.shared.library.StateChange
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.SourceOperation
 import io.github.screwys.rufin.shared.rufin_core.SourceOwner
@@ -54,12 +53,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     internal fun showFeedback(failure: Throwable) = showFeedback(failure.userMessage())
     internal var libraryEvents: AndroidLibraryEvents? = null
         private set
-    /** Favorites as they were committed; rows that show them update in place. */
-    private val states = MutableSharedFlow<StateChange>(extraBufferCapacity = 32)
     private val feed = MutableSharedFlow<Changed>(extraBufferCapacity = 64)
     /** Committed library changes; each page asks its query whether one touches it. */
     internal val changes = feed.asSharedFlow()
-    internal val favoriteStates = states.asSharedFlow()
     internal var overviewExportName by mutableStateOf<String?>(null)
         private set
     private var overviewExportBytes: ByteArray? = null
@@ -187,7 +183,6 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                         launch {
                             while (isActive) {
                                 val changed = withContext(Dispatchers.Default) { catalog.next() } ?: break
-                                changed.items.forEach { states.emit(it) }
                                 catalogChanges++
                                 feed.emit(changed)
                             }
