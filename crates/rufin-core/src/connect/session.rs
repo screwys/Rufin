@@ -456,17 +456,6 @@ impl ConnectOwner {
         Ok(true)
     }
 
-    /// The queue another device recorded, as this device's queue.
-    pub(crate) async fn queue_from(&self, peer: &str) -> Result<library::QueueRestore, String> {
-        Ok(self
-            .active()?
-            .records
-            .queue_of(peer)
-            .await?
-            .map(|(queue, _)| queue)
-            .unwrap_or_default())
-    }
-
     /// Plays `queue` on another device: from its current entry at its position, or at
     /// `placement` in the receiver's queue.
     pub(crate) async fn cast(

@@ -246,9 +246,32 @@ impl RufinPlayback {
             .await
     }
 
-    /// The receiver's whole queue, as it recorded it.
+    /// The receiver's whole queue in play order, read as its queue panel reads it.
     pub(super) async fn queue(&self) -> Result<library::QueueRestore, String> {
-        self.connection()?.queue_from(&self.peer).await
+        let connect = self.connection()?;
+        let mut entries = Vec::new();
+        loop {
+            let (page, total, _) = connect
+                .queue_page(
+                    &self.peer,
+                    entries.len() as u64,
+                    library::QUEUE_CONTEXT_LIMIT as u32,
+                    String::new(),
+                )
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            entries.extend(page.into_iter().map(|(_, entry)| entry));
+            if entries.len() as u64 >= total {
+                break;
+            }
+        }
+        Ok(library::QueueRestore {
+            order: (0..entries.len() as u32).collect(),
+            entries: entries.into(),
+            ..Default::default()
+        })
     }
 }
 
