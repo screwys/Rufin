@@ -435,7 +435,6 @@ CREATE TABLE queue_state (
 CREATE TABLE downloads (
     media_uri TEXT NOT NULL,
     quality TEXT NOT NULL,
-    revision TEXT NOT NULL,
     size INTEGER,
     path TEXT NOT NULL,
     reason TEXT NOT NULL DEFAULT '[]',

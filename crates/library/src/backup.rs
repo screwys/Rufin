@@ -320,7 +320,7 @@ mod tests {
             (&target, "file:///current/song.flac"),
         ] {
             let mut writer = catalog.writer().await.unwrap();
-            sqlx::query("INSERT INTO main.downloads(media_uri,quality,revision,path,managed) VALUES('https://example.test/song','original','1',?1,1)").bind(path).execute(&mut *writer).await.unwrap();
+            sqlx::query("INSERT INTO main.downloads(media_uri,quality,path,managed) VALUES('https://example.test/song','original',?1,1)").bind(path).execute(&mut *writer).await.unwrap();
         }
         let (staged, playlist_count) = exported(&source).await;
         {

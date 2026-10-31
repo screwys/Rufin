@@ -1104,8 +1104,8 @@ async fn user_data(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
         }
     };
     if has_table(connection, "old_store", "connect_media_files").await? {
-        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,revision,size,path,source_id,root,relative_path,managed)
-            SELECT receipt.media_uri,receipt.encoding,receipt.revision,{},receipt.path,
+        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,size,path,source_id,root,relative_path,managed)
+            SELECT receipt.media_uri,receipt.encoding,{},receipt.path,
                 coalesce((SELECT object_id FROM sources WHERE source_key={source}),(SELECT source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=receipt.media_uri)),
                 coalesce({root},''),coalesce({relative},''),receipt.managed
             FROM old_store.connect_media_files receipt
@@ -1113,8 +1113,8 @@ async fn user_data(connection: &mut SqliteConnection, catalog: bool) -> LibraryR
             ORDER BY receipt.rowid ON CONFLICT DO NOTHING", size("receipt.path"))))
             .execute(&mut *connection).await?;
     }
-    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,revision,size,path,source_id,root,relative_path,managed)
-        SELECT locator.media_uri,'unknown','',{},locator.access_uri,(SELECT object_id FROM sources WHERE source_key={source}),{root},{relative},1
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO downloads(media_uri,quality,size,path,source_id,root,relative_path,managed)
+        SELECT locator.media_uri,'unknown',{},locator.access_uri,(SELECT object_id FROM sources WHERE source_key={source}),{root},{relative},1
         FROM old_store.local_locators locator WHERE locator.origin='download' AND NOT EXISTS(SELECT 1 FROM downloads WHERE downloads.media_uri=locator.media_uri)", size("locator.access_uri"))))
         .execute(&mut *connection).await?;
     Ok(())

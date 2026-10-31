@@ -631,7 +631,7 @@ pub(super) async fn merge_local_file_uris_on(
         if crate::cue_media_parts(current).is_some() {
             sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT source_key,?2,origin,path,root,relative_path,access_uri FROM local_locators WHERE media_uri=?1 ON CONFLICT(media_uri,origin) DO NOTHING")
                 .bind(previous).bind(current).execute(write.connection().await?).await?;
-            sqlx::query("INSERT INTO downloads(media_uri,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired) SELECT ?2,quality,revision,size,path,reason,source_id,root,relative_path,managed,retired FROM downloads WHERE media_uri=?1 ON CONFLICT DO NOTHING")
+            sqlx::query("INSERT INTO downloads(media_uri,quality,size,path,reason,source_id,root,relative_path,managed,retired) SELECT ?2,quality,size,path,reason,source_id,root,relative_path,managed,retired FROM downloads WHERE media_uri=?1 ON CONFLICT DO NOTHING")
                 .bind(previous).bind(current).execute(write.connection().await?).await?;
             write.read_downloads(&[current.as_str()]).await?;
         }

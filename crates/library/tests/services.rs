@@ -311,7 +311,7 @@ async fn source_artwork_pages_distinct_bindings() {
         assert!(actual.len() <= expected.len());
     }
     assert_eq!(actual, expected);
-    sqlx::query("INSERT INTO downloads(media_uri,quality,revision,path,managed) SELECT media_uri,'original','',media_uri,1 FROM tracks WHERE object_id LIKE 'artwork-%' AND CAST(substr(object_id,9) AS INTEGER)%2=0")
+    sqlx::query("INSERT INTO downloads(media_uri,quality,path,managed) SELECT media_uri,'original',media_uri,1 FROM tracks WHERE object_id LIKE 'artwork-%' AND CAST(substr(object_id,9) AS INTEGER)%2=0")
         .execute(&mut raw).await.unwrap();
     fixture.catalog = super::support::reopen(fixture.catalog, &fixture.path).await;
     let mut retention = fixture
@@ -524,7 +524,7 @@ async fn lyrics_cache_identity_and_evicts_bounded_rows() {
             .expect("remove lyrics")
     );
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO downloads(media_uri,quality,revision,path,managed) VALUES(?1,'original','',?1,1)")
+    sqlx::query("INSERT INTO downloads(media_uri,quality,path,managed) VALUES(?1,'original',?1,1)")
         .bind(&fixture.track_uris[0])
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'import',?1,'','',?1)")
