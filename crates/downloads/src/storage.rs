@@ -35,7 +35,7 @@ impl std::fmt::Display for DownloadDirectory {
     }
 }
 
-pub(super) async fn is_folder(path: &Path) -> bool {
+async fn is_folder(path: &Path) -> bool {
     tokio::fs::symlink_metadata(path)
         .await
         .is_ok_and(|metadata| metadata.is_dir())
