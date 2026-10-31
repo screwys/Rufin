@@ -9,7 +9,6 @@ pub struct PeerByteMetadata {
     pub length: Option<u64>,
     pub offset: u64,
     pub content_type: Option<String>,
-    #[serde(default)]
     pub validator: Option<String>,
 }
 
@@ -18,10 +17,8 @@ pub struct PeerByteResponse {
     pub reader: Pin<Box<dyn AsyncRead + Send + Unpin>>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FileMetadata {
     pub length: u64,
-    pub offset: u64,
     pub validator: Option<String>,
 }
 
@@ -34,14 +31,7 @@ pub async fn open_file(path: &Path, offset: u64) -> Result<(FileMetadata, tokio:
             .to_hex()
             .to_string()
     });
-    let offset = offset.min(length);
-    file.seek(std::io::SeekFrom::Start(offset)).await?;
-    Ok((
-        FileMetadata {
-            length,
-            offset,
-            validator,
-        },
-        file,
-    ))
+    file.seek(std::io::SeekFrom::Start(offset.min(length)))
+        .await?;
+    Ok((FileMetadata { length, validator }, file))
 }

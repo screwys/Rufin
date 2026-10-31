@@ -299,8 +299,8 @@ async fn enrollment_records_media_and_removal() {
             let body = serde_json::to_vec(&serde_json::json!({ "offset": offset })).unwrap();
             let transfer = tokio::spawn(async move {
                 let mut response = requester.stream_request(&host, body).await.unwrap();
-                let metadata: rufin_connect::media::FileMetadata = serde_json::from_value(response.metadata).unwrap();
-                assert_eq!((metadata.length, metadata.offset), (20, offset));
+                let metadata: rufin_connect::media::PeerByteMetadata = serde_json::from_value(response.metadata).unwrap();
+                assert_eq!((metadata.length, metadata.offset), (Some(20), offset));
                 let mut bytes = Vec::new();
                 response.reader.read_to_end(&mut bytes).await.unwrap();
                 bytes
@@ -311,7 +311,9 @@ async fn enrollment_records_media_and_removal() {
             }).await;
             assert_eq!(peer, b.identity());
             let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            let (metadata, reader) = rufin_connect::media::open_file(&original, request["offset"].as_u64().unwrap()).await.unwrap();
+            let offset = request["offset"].as_u64().unwrap();
+            let (file, reader) = rufin_connect::media::open_file(&original, offset).await.unwrap();
+            let metadata = rufin_connect::media::PeerByteMetadata { length: Some(file.length), offset, content_type: None, validator: file.validator };
             assert!(reply.send(Ok(rufin_connect::media::PeerByteResponse { metadata: serde_json::to_value(metadata).unwrap(), reader: Box::pin(reader) })).is_ok());
             assert_eq!(transfer.await.unwrap(), &b"original media bytes"[offset as usize..]);
         }
