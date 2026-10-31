@@ -2057,6 +2057,26 @@ fn received_source(
     }))
 }
 
+/// A digest of what the setting records read from the settings file, logins as they are
+/// sealed there: a save that leaves it as it was, such as the volume, needs no settings
+/// pass and no keyring reads.
+pub(super) fn shared_settings(stored: &crate::settings::StoredSettings) -> Option<String> {
+    let preferences = PREFERENCES
+        .iter()
+        .map(|name| preference(&stored.ui, name))
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    store::digest(&(
+        &stored.sources.configured,
+        &stored.sources.integrations,
+        preferences,
+        &stored.scrobbling,
+        &stored.scrobbling_credentials,
+        &stored.ui.lastfm_api_key,
+    ))
+    .ok()
+}
+
 fn preference(ui: &crate::settings::Settings, name: &str) -> Result<Value, String> {
     Ok(match name {
         "prefer_distinct_track_covers" => json!(ui.application.prefer_distinct_track_covers),
