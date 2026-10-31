@@ -21,7 +21,7 @@ use crate::settings::{
 
 const PAGE: usize = 512;
 /// Received rows apply kind by kind in this order, so parents come before their children.
-const ORDER: [&str; 15] = [
+const ORDER: [&str; 14] = [
     "device",
     "setting",
     "folder",
@@ -32,7 +32,6 @@ const ORDER: [&str; 15] = [
     "state",
     "listen",
     "legacy",
-    "lyrics",
     "analysis",
     "album-loudness",
     "session",
@@ -41,7 +40,7 @@ const ORDER: [&str; 15] = [
 /// Kinds a full pass compares item by item, and whether an item that is gone leaves a
 /// tombstone. Listens and analysis results are compared by id: their values do not change
 /// once recorded, and reading every waveform at each start costs too much.
-const COMPARED: [(&str, bool); 9] = [
+const COMPARED: [(&str, bool); 8] = [
     ("state", true),
     ("legacy", true),
     ("folder", true),
@@ -49,7 +48,6 @@ const COMPARED: [(&str, bool); 9] = [
     ("entry", true),
     ("smart", true),
     ("artwork", true),
-    ("lyrics", true),
     // A cleared cache is not a deletion.
     ("album-loudness", false),
 ];
@@ -68,15 +66,19 @@ const SCROBBLING: [&str; 3] = ["lastfm", "librefm", "listenbrainz"];
 pub(super) struct DeviceValue {
     pub(super) name: String,
     pub(super) trusted: bool,
+    /// When the device was last paired, unix milliseconds. Its own records carry it, so a
+    /// record from an earlier membership cannot trust it again.
+    pub(super) paired: i64,
 }
 
 /// One encoded item: its record id and parent, the digest the diff compares and the value
-/// that leaves the device.
+/// that leaves the device. A held item keeps its record as it is and sends no value.
 pub(super) struct Item {
     id: String,
     parent: Option<String>,
     digest: String,
     value: Value,
+    held: bool,
 }
 
 impl Item {
@@ -96,7 +98,18 @@ impl Item {
             parent,
             digest: store::digest(digest).map_err(error)?,
             value: serde_json::to_value(value).map_err(error)?,
+            held: false,
         })
+    }
+
+    fn held(id: String) -> Self {
+        Self {
+            id,
+            parent: None,
+            digest: String::new(),
+            value: Value::Null,
+            held: true,
+        }
     }
 }
 
@@ -161,14 +174,6 @@ struct ArtworkValue {
     mime: Option<String>,
     revision: String,
     bytes: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct LyricsValue {
-    role: String,
-    language: String,
-    script: String,
-    lyrics: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -305,6 +310,21 @@ impl Records {
         Ok(())
     }
 
+    /// This device's record as it writes it: its name, trusted, paired when it last joined.
+    fn own(&self) -> Result<DeviceValue, String> {
+        let paired = self
+            .devices
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&self.device)
+            .map_or(0, |value| value.paired);
+        Ok(DeviceValue {
+            name: self.owner()?.device_config().name,
+            trusted: true,
+            paired,
+        })
+    }
+
     pub(super) fn add_device(&self, device: &str, value: DeviceValue) {
         self.devices
             .lock()
@@ -387,14 +407,11 @@ impl Records {
 
     /// This device leaves the profile, and its session and queue with it.
     pub(super) async fn leave(&self) -> Result<Option<i64>, String> {
-        let name = self.owner()?.device_config().name;
-        self.add_device(
-            &self.device,
-            DeviceValue {
-                name,
-                trusted: false,
-            },
-        );
+        let own = DeviceValue {
+            trusted: false,
+            ..self.own()?
+        };
+        self.add_device(&self.device, own);
         let _work = self.work.lock().await;
         let mut changes = self.device_changes(&self.device).await?;
         let playback = [
@@ -436,7 +453,7 @@ impl Records {
         let mut changes = Vec::new();
         for item in items {
             seen.insert(item.id.clone());
-            if stored.get(&item.id) != Some(&item.digest) {
+            if !item.held && stored.get(&item.id) != Some(&item.digest) {
                 let body = BODIES.contains(&kind(&item.id));
                 changes.push(store::Change {
                     id: item.id,
@@ -511,7 +528,6 @@ impl Records {
         let mut kinds = Vec::new();
         let mut states = Vec::new();
         let mut entries = Vec::new();
-        let mut lyrics = Vec::new();
         let mut hashes = Vec::new();
         let mut heard = false;
         let mut queue = false;
@@ -538,7 +554,6 @@ impl Records {
                 Scope::Playlists => kinds.extend(["playlist", "entry", "artwork"]),
                 Scope::Smart { .. } => kinds.extend(["smart", "artwork"]),
                 Scope::Folders => kinds.extend(["folder", "smart"]),
-                Scope::Lyrics { uri } => lyrics.push(uri.clone()),
                 Scope::Analysis { hash } => hashes.push(*hash),
                 Scope::Queue => queue = true,
                 _ => {}
@@ -558,10 +573,6 @@ impl Records {
                 .collect::<Vec<_>>();
             let items = self.state_items(Some(&states), Some(portable)).await?;
             written.extend(self.diff(items, Select::Ids(&ids), true).await?);
-        }
-        if !lyrics.is_empty() {
-            let objects = self.portable_all(lyrics).await?;
-            written.extend(self.compare_ids("lyrics", objects).await?);
         }
         for key in entries {
             written.extend(self.playlist_entry_changes(key).await?);
@@ -597,10 +608,7 @@ impl Records {
 
     async fn settings_changes(&self) -> Result<Vec<store::Change>, String> {
         let mut changes = self.compare("setting", true).await?;
-        let own = DeviceValue {
-            name: self.owner()?.device_config().name,
-            trusted: true,
-        };
+        let own = self.own()?;
         self.add_device(&self.device, own.clone());
         let id = format!("device:{}", self.device);
         changes.extend(
@@ -758,13 +766,6 @@ impl Records {
             "entry" => self.entry_items(None, objects).await?,
             "smart" => self.smart_items().await?,
             "artwork" => self.artwork_items(objects).await?,
-            "lyrics" => {
-                let uris = match objects {
-                    Some(objects) => Some(self.local_all(objects).await?),
-                    None => None,
-                };
-                self.lyrics_items(uris.as_deref()).await?
-            }
             "analysis" => {
                 let hashes = objects
                     .unwrap_or_default()
@@ -867,29 +868,22 @@ impl Records {
             .collect())
     }
 
-    /// Favorites and ratings Rufin holds: no server delivery waits for them. `portable` names
-    /// the requested URIs when the caller already looked them up.
+    /// Favorites and ratings Rufin holds. One that waits for its server delivery is held: the
+    /// delivery settles whether it stays Rufin's. `portable` names the requested URIs when the
+    /// caller already looked them up.
     async fn state_items(
         &self,
         uris: Option<&[String]>,
         portable: Option<HashMap<String, String>>,
     ) -> Result<Vec<Item>, String> {
-        let states = self
-            .catalog
-            .user_states(uris)
-            .await
-            .map_err(error)?
-            .into_iter()
-            .filter(|(_, delivering)| !delivering)
-            .map(|(state, _)| state)
-            .collect::<Vec<_>>();
+        let states = self.catalog.user_states(uris).await.map_err(error)?;
         let portable = match portable {
             Some(portable) => portable,
             None => {
                 self.portable(
                     &states
                         .iter()
-                        .map(|state| state.media_uri.clone())
+                        .map(|(state, _)| state.media_uri.clone())
                         .collect::<Vec<_>>(),
                 )
                 .await?
@@ -897,8 +891,11 @@ impl Records {
         };
         states
             .into_iter()
-            .map(|state| {
+            .map(|(state, delivering)| {
                 let uri = portable.get(&state.media_uri).unwrap_or(&state.media_uri);
+                if delivering {
+                    return Ok(Item::held(format!("state:{uri}")));
+                }
                 // Two devices that set the same value at different times agree.
                 Item::digested(
                     format!("state:{uri}"),
@@ -1120,34 +1117,6 @@ impl Records {
             .collect()
     }
 
-    /// Lyrics a person picked or that were fetched for them, by track.
-    async fn lyrics_items(&self, uris: Option<&[String]>) -> Result<Vec<Item>, String> {
-        let mut tracks = BTreeMap::<String, Vec<LyricsValue>>::new();
-        for row in self
-            .catalog
-            .lyrics_rows("external", uris)
-            .await
-            .map_err(error)?
-        {
-            tracks.entry(row.media_uri).or_default().push(LyricsValue {
-                role: row.role,
-                language: row.language,
-                script: row.script,
-                lyrics: row.lyrics,
-            });
-        }
-        let portable = self
-            .portable(&tracks.keys().cloned().collect::<Vec<_>>())
-            .await?;
-        tracks
-            .into_iter()
-            .map(|(uri, rows)| {
-                let uri = portable.get(&uri).cloned().unwrap_or(uri);
-                Item::new(format!("lyrics:{uri}"), None, &rows)
-            })
-            .collect()
-    }
-
     async fn analysis_items(&self, hashes: &[[u8; 32]]) -> Result<Vec<Item>, String> {
         self.catalog
             .analysis(hashes)
@@ -1337,8 +1306,8 @@ impl Records {
 
     /// Splits rows into those that can apply now and those that wait for their parent. When
     /// settling, playlists apply without their folder and children of a gone playlist are
-    /// dropped. A device that another device removed cannot trust itself again; only pairing
-    /// again does.
+    /// dropped. A device that left or was removed cannot trust itself again; only a record of
+    /// a later pairing does.
     #[allow(clippy::type_complexity)]
     async fn parents(
         &self,
@@ -1353,13 +1322,16 @@ impl Records {
                     .into_iter()
                     .filter(|(_, row)| {
                         let device = row.id.strip_prefix("device:").unwrap_or_default();
-                        let trusting = row
-                            .value
-                            .as_ref()
-                            .is_some_and(|value| value["trusted"] == json!(true));
-                        !(trusting
+                        let Some(value) = row.value.as_ref().and_then(|value| {
+                            serde_json::from_value::<DeviceValue>(value.clone()).ok()
+                        }) else {
+                            return false;
+                        };
+                        !(value.trusted
                             && row.device == device
-                            && devices.get(device).is_some_and(|stored| !stored.trusted))
+                            && devices.get(device).is_some_and(|stored| {
+                                !stored.trusted && value.paired <= stored.paired
+                            }))
                     })
                     .collect();
                 return Ok((rows, Vec::new()));
@@ -1597,33 +1569,6 @@ impl Records {
                     .map(|key| legacy_key(key))
                     .collect::<Result<Vec<_>, String>>()?;
                 catalog.delete_legacy_activity(&keys).await.map_err(error)
-            }
-            "lyrics" => {
-                let mut tracks = Vec::new();
-                for row in rows {
-                    let uri = self.local_one(object(row, "lyrics:")?).await?;
-                    let values: Vec<LyricsValue> = match row.deleted {
-                        true => Vec::new(),
-                        false => decode(row)?,
-                    };
-                    let rows = values
-                        .into_iter()
-                        .map(|value| library::LyricsCacheRow {
-                            media_uri: uri.clone(),
-                            authority: "external".into(),
-                            role: value.role,
-                            language: value.language,
-                            script: value.script,
-                            lyrics: value.lyrics,
-                            updated_at: (row.clock >> 16) / 1000,
-                        })
-                        .collect();
-                    tracks.push((uri, rows));
-                }
-                catalog
-                    .replace_lyrics("external", &tracks)
-                    .await
-                    .map_err(error)
             }
             "analysis" => {
                 let copies = live
@@ -1915,6 +1860,9 @@ impl Records {
         let mut values = HashMap::new();
         for (kind, objects) in wanted {
             for mut item in self.items(&kind, Some(&objects)).await? {
+                if item.held {
+                    continue;
+                }
                 if kind == "setting" {
                     self.seal(&mut item.value)?;
                 }

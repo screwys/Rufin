@@ -16,7 +16,7 @@ pub enum StorageReset {
 pub struct StorageResetRequest {
     reset: StorageReset,
     stored: Box<StoredSettings>,
-    /// Connect's device identity and profile keys.
+    /// Connect's device identity.
     connect_keys: Vec<secrets::SecretKey>,
     secrets: Arc<dyn secrets::SecretStore>,
 }
@@ -70,7 +70,7 @@ impl StorageResetRequest {
             keep.extend(
                 ["secrets.json", "backup-password.json"].map(|name| paths.config_dir().join(name)),
             );
-            // The device keeps its name and identity; Connect's records go with the Store.
+            // The device keeps its name and identity; it left its Connect profile as storage closed.
             keep.push(paths.connect_dir().join("device.json"));
         }
         let retained = if reset == StorageReset::KeepCredentials {

@@ -156,7 +156,7 @@ async fn write_own(
     if last == written {
         return Ok(());
     }
-    let name = format!("{:012}-{last:012}{SUFFIX}", written + 1);
+    let name = format!("{:019}-{last:019}{SUFFIX}", written + 1);
     folder
         .write(owner, &directory, &name, seal(session, &rows)?)
         .await?;
@@ -164,7 +164,7 @@ async fn write_own(
     let segments = folder.list(&directory).await?;
     if segments.len() > SEGMENTS {
         let (rows, last) = own_rows(session, 0).await?;
-        let name = format!("{:012}-{last:012}{SUFFIX}", 0);
+        let name = format!("{:019}-{last:019}{SUFFIX}", 0);
         folder
             .write(owner, &directory, &name, seal(session, &rows)?)
             .await?;

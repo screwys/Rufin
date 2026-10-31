@@ -155,16 +155,23 @@ pub fn new_profile() -> String {
 
 impl Store {
     /// Connect's records when it is on. A file without its profile row is an aborted turn-on or
-    /// join and is deleted.
+    /// join, and one SQLite cannot read is damaged; either is deleted.
     pub async fn open(path: &Path) -> Result<Option<(Self, ProfileRow)>> {
         if !tokio::fs::try_exists(path).await? {
             return Ok(None);
         }
-        let pool = connect(path, false).await?;
-        let Some(profile) = read_profile(&pool).await? else {
-            pool.close().await;
-            remove(path).await?;
-            return Ok(None);
+        let pool = match connect(path, false).await {
+            Ok(pool) => pool,
+            Err(error) if damaged(&error) => return remove(path).await.map(|()| None),
+            Err(error) => return Err(error),
+        };
+        let profile = match read_profile(&pool).await {
+            Ok(Some(profile)) => profile,
+            Err(error) if !damaged(&error) => return Err(error),
+            _ => {
+                pool.close().await;
+                return remove(path).await.map(|()| None);
+            }
         };
         Ok(Some((
             Self {
@@ -201,11 +208,6 @@ impl Store {
 
     pub async fn profile(&self) -> Result<Option<ProfileRow>> {
         read_profile(&self.pool).await
-    }
-
-    /// Closes the file for a storage reset.
-    pub async fn close(&self) {
-        self.pool.close().await;
     }
 
     /// Turning off: the file and its journal go.
@@ -414,15 +416,6 @@ impl Store {
         Ok(())
     }
 
-    /// A device that joined again numbers its records from the start in its new file.
-    pub async fn restart_peer(&self, device: &str) -> Result<()> {
-        sqlx::query("UPDATE connect_peers SET pulled=0,read=0 WHERE device=?1")
-            .bind(device)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
     pub async fn set_folder(&self, folder: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE connect_profile SET folder=?1")
             .bind(folder)
@@ -475,11 +468,13 @@ async fn read_profile(pool: &SqlitePool) -> Result<Option<ProfileRow>> {
     )
 }
 
-/// Stores rows under new local sequences and returns the last one.
+/// Stores rows under new local sequences and returns the last one. Sequences follow the clock,
+/// so a device that turns Connect on again numbers above the cursors other devices keep for it.
 async fn insert(connection: &mut SqliteConnection, rows: &[Row]) -> Result<i64> {
-    let sequence: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence),0) FROM connect_records")
+    let last: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence),0) FROM connect_records")
         .fetch_one(&mut *connection)
         .await?;
+    let sequence = next_clock(last) - 1;
     let values = rows
         .iter()
         .zip(sequence + 1..)
@@ -521,6 +516,18 @@ fn row(row: &SqliteRow) -> Result<Row> {
     })
 }
 
+/// SQLite cannot read the file as a database.
+fn damaged(error: &anyhow::Error) -> bool {
+    const CORRUPT: i32 = 11;
+    const NOT_A_DATABASE: i32 = 26;
+    error
+        .downcast_ref::<sqlx::Error>()
+        .and_then(sqlx::Error::as_database_error)
+        .and_then(|error| error.code())
+        .and_then(|code| code.parse::<i32>().ok())
+        .is_some_and(|code| matches!(code & 0xff, CORRUPT | NOT_A_DATABASE))
+}
+
 /// Ids of a kind sort between `<kind>:` and `<kind>;`.
 fn kind_range(kind: &str) -> (String, String) {
     (format!("{kind}:"), format!("{kind};"))
@@ -553,7 +560,7 @@ mod tests {
             deleted: false,
             value: Some(serde_json::json!({"name": "Laptop", "trusted": true})),
         };
-        assert_eq!(store.write(vec![change], None).await.unwrap(), Some(1));
+        assert!(store.write(vec![change], None).await.unwrap().is_some());
         drop(store);
         assert!(Store::open(&path).await.unwrap().is_none());
         assert!(!path.exists());
@@ -565,6 +572,11 @@ mod tests {
         let (store, row) = Store::open(&path).await.unwrap().unwrap();
         assert_eq!((row.profile, row.device.as_str()), (profile, "device"));
         store.delete().await.unwrap();
+        assert!(!path.exists());
+
+        // A damaged file does not keep Connect from starting.
+        std::fs::write(&path, vec![7; 8192]).unwrap();
+        assert!(Store::open(&path).await.unwrap().is_none());
         assert!(!path.exists());
     }
 }

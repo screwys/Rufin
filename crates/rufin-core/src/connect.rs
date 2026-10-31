@@ -30,6 +30,8 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 const PRESENCE: Duration = Duration::from_secs(300);
+const KEYRING_UNAVAILABLE: &str =
+    "The system keyring is unavailable, so Rufin Connect cannot start now";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -95,7 +97,6 @@ pub struct Device {
     pub id: String,
     pub name: String,
     pub reachable: bool,
-    pub has_playback: bool,
     #[serde(default)]
     pub enrolled: bool,
     pub connection: String,
@@ -438,6 +439,10 @@ impl ConnectOwner {
             return Ok(());
         };
         let Some(key) = self.profile_key(&row.profile).await? else {
+            // A keyring that cannot be read now keeps the key for a later start.
+            if !self.secrets.is_persistent() {
+                return Err(KEYRING_UNAVAILABLE.into());
+            }
             store.delete().await.map_err(error)?;
             return Err(
                 "The Connect profile key is unavailable. Pair with a trusted device again".into(),
@@ -543,6 +548,10 @@ impl ConnectOwner {
                 let credentials = Credentials::generate();
                 self.save_secret(key, serde_json::to_string(&credentials).map_err(error)?)
                     .await?;
+                // An identity kept only for this run would make the device another one later.
+                if !self.secrets.is_persistent() {
+                    return Err(KEYRING_UNAVAILABLE.into());
+                }
                 Ok(credentials)
             }
         }
@@ -758,13 +767,11 @@ impl ConnectOwner {
             self.update_device(&peer, |device| match &answer {
                 Ok((route, presence)) => {
                     device.name = presence.name.clone();
-                    device.has_playback = presence.playing;
                     device.reachable = true;
                     device.connection = connection_label(route);
                 }
                 Err(_) => {
                     device.reachable = false;
-                    device.has_playback = false;
                     device.connection = localization::tr("Waiting for device");
                 }
             });
@@ -872,11 +879,13 @@ impl ConnectOwner {
                 .await
                 .map_err(error)?;
             let records = Records::new(self, store, network.identity(), identity.clone());
+            // Until the host's own record arrives.
             records.add_device(
                 &host,
                 DeviceValue {
                     name,
                     trusted: true,
+                    paired: 0,
                 },
             );
             network.set_devices(records.trusted());
@@ -1035,34 +1044,19 @@ impl ConnectOwner {
         self.leave(false).await
     }
 
-    /// The device identity and the profile key, for "Clear all data".
+    /// The device identity, for "Clear all data".
     pub(crate) fn secret_keys(&self) -> Vec<SecretKey> {
-        let Some(reference) = self.device_config().identity_ref else {
-            return Vec::new();
-        };
-        let mut keys = vec![identity_key(&reference)];
-        keys.extend(
-            self.session()
-                .map(|session| profile_key(&reference, &session.profile)),
-        );
-        keys
+        self.device_config()
+            .identity_ref
+            .map(|reference| identity_key(&reference))
+            .into_iter()
+            .collect()
     }
 
-    pub(crate) async fn close_storage(&self) -> Result<(), String> {
-        let _action = self.actions.lock().await;
-        let session = self
-            .session
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
-        if let Some(network) = self.network.lock().await.take() {
-            network.shutdown().await.map_err(error)?;
-        }
-        if let Some(session) = session {
-            session.stop.cancel();
-            session.records.store.close().await;
-        }
-        Ok(())
+    /// A storage reset clears the data Connect's records describe, so the device leaves the
+    /// profile first, as turning Connect off does.
+    pub(crate) async fn close_storage(self: &Arc<Self>) -> Result<(), String> {
+        self.turn_off().await
     }
 
     /// Creates a profile on this device. Connect is on once its row commits.
@@ -1123,7 +1117,6 @@ impl ConnectOwner {
                             id: id.clone(),
                             name: name.clone(),
                             reachable: false,
-                            has_playback: false,
                             enrolled: true,
                             connection: String::new(),
                         })
@@ -1368,11 +1361,15 @@ impl ConnectOwner {
                 let Some(session) = self.session() else {
                     return;
                 };
+                let paired = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_millis() as i64);
                 session.records.add_device(
                     &peer,
                     DeviceValue {
                         name,
                         trusted: true,
+                        paired,
                     },
                 );
                 network.set_devices(session.records.trusted());
@@ -1385,9 +1382,6 @@ impl ConnectOwner {
                 self.publish_devices();
                 let owner = Arc::clone(self);
                 self.runtime.spawn(async move {
-                    if let Err(error) = session.records.store.restart_peer(&peer).await {
-                        return owner.failed(self::error(error));
-                    }
                     match session.records.write_device(&peer).await {
                         Ok(Some(sequence)) => owner.changed(sequence).await,
                         Ok(None) => {}
@@ -1446,7 +1440,6 @@ impl ConnectOwner {
                             id: peer,
                             name,
                             reachable: true,
-                            has_playback: false,
                             enrolled: false,
                             connection: String::new(),
                         });
@@ -1648,9 +1641,6 @@ impl ConnectOwner {
                         Ok(route) => connection_label(route),
                         Err(_) => localization::tr("Waiting for device"),
                     };
-                    if result.is_err() {
-                        device.has_playback = false;
-                    }
                 });
                 result?;
             }
