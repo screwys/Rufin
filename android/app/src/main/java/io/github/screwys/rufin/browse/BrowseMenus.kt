@@ -612,7 +612,9 @@ internal fun PlaylistCreateSheet(
     initialCurrentSource: Boolean = true,
     save: suspend (String, String?, Boolean?) -> Unit,
 ) {
+    // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
+        ?.takeIf { it.ownsPlaylists }
     var name by remember { mutableStateOf("") }
     var currentSource by remember(source?.id) { mutableStateOf(initialCurrentSource && source != null) }
     var public by remember { mutableStateOf(false) }
@@ -622,15 +624,15 @@ internal fun PlaylistCreateSheet(
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text(translate("Playlist name")) }, singleLine = true,
                 colors = settingsTextFieldColors(),
-                modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                    IconToggleButton(currentSource, { currentSource = it }, enabled = source != null,
+                modifier = Modifier.fillMaxWidth(), trailingIcon = if (source == null) null else ({
+                    IconToggleButton(currentSource, { currentSource = it },
                         modifier = Modifier.semantics {
-                            contentDescription = if (currentSource) source?.name.orEmpty() else "Rufin"
+                            contentDescription = if (currentSource) source.name else "Rufin"
                         }) {
-                        if (currentSource && source != null) SourceIcon(source.kind)
+                        if (currentSource) SourceIcon(source.kind)
                         else Image(painterResource(R.drawable.app_icon), null, Modifier.size(24.dp))
                     }
-                })
+                }))
             if (supportsPublic) Row(Modifier.fillMaxWidth().toggleable(public, role = Role.Switch) { public = it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
