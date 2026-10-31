@@ -95,6 +95,8 @@ pub enum CatalogKind {
     Mood,
     Folder,
     Playlist,
+    SmartPlaylist,
+    PlaylistFolder,
 }
 
 impl Catalog {

@@ -152,7 +152,7 @@ impl Catalog {
                 report.skipped_playlist_entries += imported.skipped;
             }
             report.smart_playlists = crate::smart_playlists::import_smart_playlists_jsonl_on(
-                write.connection().await?,
+                &mut write,
                 open("smart.jsonl")?,
             )
             .await?;

@@ -1842,7 +1842,7 @@ mod tests {
             .unwrap();
         assert!(crate::published(&mut updates).is_none());
 
-        catalog.delete_playlist(playlist).await.unwrap();
+        catalog.delete_playlists(&[playlist]).await.unwrap();
         let edit = crate::Source::edit(
             configuration,
             None,
@@ -2078,7 +2078,10 @@ mod tests {
             folders.folders.is_empty() && folders.tracks.is_empty(),
             "outside-root imports remain outside library folders"
         );
-        catalog.delete_playlist(playlist.playlist).await.unwrap();
+        catalog
+            .delete_playlists(&[playlist.playlist])
+            .await
+            .unwrap();
         assert!(
             catalog
                 .tracks_by_uris(
@@ -2090,7 +2093,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        catalog.delete_playlist(second).await.unwrap();
+        catalog.delete_playlists(&[second]).await.unwrap();
         let key = {
             catalog.loaded().await;
             catalog.source_key(source.source_id())

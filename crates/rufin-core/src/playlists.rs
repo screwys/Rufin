@@ -805,8 +805,9 @@ pub async fn delete_playlist(
                 .map_err(SourceError::Other)?;
             let result = match target {
                 PlaylistOwner::Local => catalog
-                    .delete_playlist(playlist)
+                    .delete_playlists(&[playlist])
                     .await
+                    .map(|deleted| deleted > 0)
                     .map_err(SourceError::from),
                 PlaylistOwner::Server(source, _) => {
                     match &source.implementation {
@@ -1292,7 +1293,7 @@ pub async fn delete_playlist_folder(
 ) -> sources::SourceResult<()> {
     owner
         .reply(move |owner, catalog| async move {
-            let folder = catalog.delete_playlist_folder(key).await?;
+            let folder = catalog.delete_playlist_folders(&[key]).await?.pop();
             if let Some((folder_id, smart)) = folder {
                 let settings = owner.shared.settings.clone();
                 tokio::task::spawn_blocking(move || {
@@ -1385,7 +1386,7 @@ pub async fn apply_smart_playlist_change(
                     updated.then_some(key)
                 }
                 SmartPlaylistChange::Delete(key) => {
-                    catalog.delete_smart_playlist(key).await?.then_some(key)
+                    (catalog.delete_smart_playlists(&[key]).await? > 0).then_some(key)
                 }
             };
             Ok::<_, SourceError>(applied)

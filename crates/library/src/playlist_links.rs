@@ -246,7 +246,7 @@ mod tests {
             .await?;
         check_eq!(associated[0].playlist, Some(playlist));
         check!(associated[0].playlist_identity.is_some());
-        catalog.delete_playlist(playlist).await?;
+        catalog.delete_playlists(&[playlist]).await?;
         let deleted = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
@@ -317,7 +317,7 @@ mod tests {
                 .is_playlist_file_ignored(Some(&source), "0/ignored.pls")
                 .await?
         );
-        catalog.delete_playlist(playlist).await?;
+        catalog.delete_playlists(&[playlist]).await?;
         check!(catalog.get_playlist_file_link(playlist).await?.is_none());
         catalog.close().await
     }

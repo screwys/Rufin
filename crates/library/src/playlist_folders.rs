@@ -133,29 +133,35 @@ impl Catalog {
         write.commit().await?;
         Ok(())
     }
-    pub async fn delete_playlist_folder(
+    /// Deletes playlist folders in one Write; their members leave them first, so their rows
+    /// say so. The object id and kind of each folder that went.
+    pub async fn delete_playlist_folders(
         &self,
-        key: PlaylistFolderKey,
-    ) -> LibraryResult<Option<(String, bool)>> {
+        keys: &[PlaylistFolderKey],
+    ) -> LibraryResult<Vec<(String, bool)>> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let keys = serde_json::to_string(keys)?;
+        let folders = "(SELECT value FROM json_each(?1))";
         let mut write = self.write().await?;
-        // Members leave the folder first, so their rows say so.
         let playlists: Vec<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key=?1 RETURNING {PLAYLIST_COLUMNS}"
+            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {PLAYLIST_COLUMNS}"
         )))
-        .bind(key)
+        .bind(&keys)
         .fetch_all(write.connection().await?)
         .await?;
         let smart: Vec<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key=?1 RETURNING {SMART_COLUMNS}"
+            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {SMART_COLUMNS}"
         )))
-        .bind(key)
+        .bind(&keys)
         .fetch_all(write.connection().await?)
         .await?;
-        let deleted = sqlx::query_as(
-            "DELETE FROM playlist_folders WHERE folder_key=?1 RETURNING object_id,smart",
-        )
-        .bind(key)
-        .fetch_optional(write.connection().await?)
+        let deleted: Vec<(i64, String, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM playlist_folders WHERE folder_key IN{folders} RETURNING folder_key,object_id,smart"
+        )))
+        .bind(&keys)
+        .fetch_all(write.connection().await?)
         .await?;
         for playlist in playlists {
             write.put_playlist(playlist);
@@ -163,11 +169,14 @@ impl Catalog {
         for smart in smart {
             write.put_smart(smart);
         }
-        if deleted.is_some() {
-            write.remove_folder(key.raw());
+        for (key, _, _) in &deleted {
+            write.remove_folder(*key);
         }
         write.commit().await?;
-        Ok(deleted)
+        Ok(deleted
+            .into_iter()
+            .map(|(_, object, smart)| (object, smart))
+            .collect())
     }
     /// The folder a playlist or smart playlist is in.
     pub fn playlist_member_folder(
@@ -284,45 +293,6 @@ impl Catalog {
         .await?;
         for row in rows {
             write.put_folder(row);
-        }
-        write.commit().await?;
-        Ok(())
-    }
-
-    /// Deletes playlist folders by object id, in one Write. Their members leave them.
-    pub async fn delete_playlist_folders_by_object(&self, objects: &[String]) -> LibraryResult<()> {
-        if objects.is_empty() {
-            return Ok(());
-        }
-        let objects = serde_json::to_string(objects)?;
-        let folders = "(SELECT folder_key FROM playlist_folders WHERE object_id IN(SELECT value FROM json_each(?1)))";
-        let mut write = self.write().await?;
-        let playlists: Vec<PlaylistHeader> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {PLAYLIST_COLUMNS}"
-        )))
-        .bind(&objects)
-        .fetch_all(write.connection().await?)
-        .await?;
-        let smart: Vec<SmartRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "UPDATE smart_playlists SET playlist_folder_key=NULL WHERE playlist_folder_key IN{folders} RETURNING {SMART_COLUMNS}"
-        )))
-        .bind(&objects)
-        .fetch_all(write.connection().await?)
-        .await?;
-        let deleted: Vec<i64> = sqlx::query_scalar(
-            "DELETE FROM playlist_folders WHERE object_id IN(SELECT value FROM json_each(?1)) RETURNING folder_key",
-        )
-        .bind(&objects)
-        .fetch_all(write.connection().await?)
-        .await?;
-        for playlist in playlists {
-            write.put_playlist(playlist);
-        }
-        for smart in smart {
-            write.put_smart(smart);
-        }
-        for key in deleted {
-            write.remove_folder(key);
         }
         write.commit().await?;
         Ok(())

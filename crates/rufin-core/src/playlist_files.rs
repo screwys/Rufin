@@ -417,7 +417,7 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
         owner
             .shared
             .catalog
-            .delete_playlist(playlist)
+            .delete_playlists(&[playlist])
             .await
             .map_err(string_error)?;
         Ok(())

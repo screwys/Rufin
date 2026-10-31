@@ -1708,6 +1708,8 @@ impl CatalogKind {
             Self::Mood => Item::Mood(MoodKey::from_raw(key)),
             Self::Folder => Item::Folder(FolderKey::from_raw(key)),
             Self::Playlist => Item::Playlist(PlaylistKey::from_raw(key)),
+            Self::SmartPlaylist => Item::Smart(crate::SmartPlaylistKey::from_raw(key)),
+            Self::PlaylistFolder => Item::PlaylistFolder(crate::PlaylistFolderKey::from_raw(key)),
             Self::Track => return None,
         })
     }
@@ -1766,7 +1768,22 @@ impl Snapshot {
                     }
                 }
             }
-            CatalogKind::Track => {}
+            // Smart playlists and playlist folders belong to no source.
+            CatalogKind::SmartPlaylist if source == crate::catalog::snapshot::NO_SOURCE => {
+                for smart in self.smart_playlists.values() {
+                    if let Some(slot) = found.get_mut(smart.object.as_str()) {
+                        slot.get_or_insert(smart.key);
+                    }
+                }
+            }
+            CatalogKind::PlaylistFolder if source == crate::catalog::snapshot::NO_SOURCE => {
+                for folder in self.playlist_folders.values() {
+                    if let Some(slot) = found.get_mut(folder.object.as_str()) {
+                        slot.get_or_insert(folder.key);
+                    }
+                }
+            }
+            CatalogKind::SmartPlaylist | CatalogKind::PlaylistFolder | CatalogKind::Track => {}
         }
         objects.iter().map(|object| found[object]).collect()
     }

@@ -841,12 +841,13 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
             .await
             .expect("rename global Playlist")
     );
-    assert!(
+    assert_eq!(
         fixture
             .catalog
-            .delete_playlist(playlist)
+            .delete_playlists(&[playlist])
             .await
-            .expect("delete global Playlist")
+            .expect("delete global Playlist"),
+        1
     );
     assert_eq!(
         fixture

@@ -2928,7 +2928,10 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         SmartPlaylistRuleField::Played
     );
     assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
-    assert!(catalog.delete_smart_playlist(order[2]).await.unwrap());
+    assert_eq!(
+        catalog.delete_smart_playlists(&[order[2]]).await.unwrap(),
+        1
+    );
     catalog.close().await.unwrap();
     let catalog = library::Catalog::open(&path).await.unwrap();
     let mut raw = connection(&path).await;
@@ -2940,7 +2943,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         ["builtin:most_played", "builtin:never_played"]
     );
     for key in &order[..2] {
-        assert!(catalog.delete_smart_playlist(*key).await.unwrap());
+        assert_eq!(catalog.delete_smart_playlists(&[*key]).await.unwrap(), 1);
     }
     catalog.close().await.unwrap();
     let catalog = library::Catalog::open(&path).await.unwrap();

@@ -9,7 +9,7 @@ use std::{
 
 use base64::Engine as _;
 use futures_util::future::BoxFuture;
-use library::{Change, Scope, SourceId};
+use library::{CatalogKind, Change, Scope, SourceId};
 use rufin_connect::store::{self, Cursor, Row, Select, Store};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -1504,9 +1504,17 @@ impl Records {
                     .put_playlist_folders(&folders)
                     .await
                     .map_err(error)?;
+                let keys =
+                    resident_keys(catalog, CatalogKind::PlaylistFolder, &gone("folder:")).await?;
                 catalog
-                    .delete_playlist_folders_by_object(&gone("folder:"))
+                    .delete_playlist_folders(
+                        &keys
+                            .into_iter()
+                            .map(library::PlaylistFolderKey::from_raw)
+                            .collect::<Vec<_>>(),
+                    )
                     .await
+                    .map(drop)
                     .map_err(error)
             }
             "playlist" => {
@@ -1525,9 +1533,17 @@ impl Records {
                     .put_playlist_copies(&playlists)
                     .await
                     .map_err(error)?;
+                let keys =
+                    resident_keys(catalog, CatalogKind::Playlist, &gone("playlist:")).await?;
                 catalog
-                    .delete_playlists_by_object(&gone("playlist:"))
+                    .delete_playlists(
+                        &keys
+                            .into_iter()
+                            .map(library::PlaylistKey::from_raw)
+                            .collect::<Vec<_>>(),
+                    )
                     .await
+                    .map(drop)
                     .map_err(error)
             }
             "smart" => {
@@ -1546,9 +1562,17 @@ impl Records {
                     .put_smart_playlist_copies(&playlists)
                     .await
                     .map_err(error)?;
+                let keys =
+                    resident_keys(catalog, CatalogKind::SmartPlaylist, &gone("smart:")).await?;
                 catalog
-                    .delete_smart_playlists_by_object(&gone("smart:"))
+                    .delete_smart_playlists(
+                        &keys
+                            .into_iter()
+                            .map(library::SmartPlaylistKey::from_raw)
+                            .collect::<Vec<_>>(),
+                    )
                     .await
+                    .map(drop)
                     .map_err(error)
             }
             "artwork" => {
@@ -1565,7 +1589,7 @@ impl Records {
                     };
                     images.push((object(row, "artwork:")?, image));
                 }
-                catalog.put_playlist_images(&images).await.map_err(error)
+                catalog.put_playlist_images(images).await.map_err(error)
             }
             "entry" => {
                 let values = live
@@ -2058,6 +2082,21 @@ fn secret_item(id: String, value: &impl Serialize, key: &[u8; 32]) -> Result<Ite
 
 fn kind(id: &str) -> &str {
     id.split_once(':').map_or(id, |(kind, _)| kind)
+}
+
+/// The keys of the Rufin playlists, smart playlists or playlist folders these object ids name.
+async fn resident_keys(
+    catalog: &library::Catalog,
+    kind: CatalogKind,
+    objects: &[String],
+) -> Result<Vec<i64>, String> {
+    if objects.is_empty() {
+        return Ok(Vec::new());
+    }
+    catalog
+        .catalog_keys(kind, None, objects, &library::ReadCancellation::new())
+        .await
+        .map_err(error)
 }
 
 fn object(row: &Row, prefix: &str) -> Result<String, String> {
