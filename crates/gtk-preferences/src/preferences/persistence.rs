@@ -98,14 +98,15 @@ impl Preferences {
             .home_blocks
             .clone();
         let added = blocks.iter().any(|block| !previous.contains(block));
-        if self
-            .settings
-            .set_app_setting("home block settings", blocks, |settings| {
-                &mut settings.application.home_blocks
-            })
-            .is_none()
-        {
-            return;
+        match self.settings.persistence.set_home_blocks(blocks) {
+            Ok(true) => {
+                self.settings.sync();
+            }
+            Ok(false) => return,
+            Err(error) => {
+                warn!(%error, action = "home block settings", "failed to save settings");
+                return;
+            }
         }
         (self.effects)(crate::Effect::CatalogChanged);
         if added {

@@ -40,7 +40,7 @@ pub fn populate_home_block_rows(
             if requested {
                 let order = home_block_row_order(&blocks);
                 insert_home_block_in_order(&mut blocks, block, &order);
-            } else if blocks.len() > 1 {
+            } else {
                 blocks.retain(|candidate| *candidate != block);
             }
             visible_shell.set_home_blocks(blocks);
