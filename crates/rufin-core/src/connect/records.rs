@@ -822,21 +822,24 @@ impl Records {
     /// This device's URI of each portable URI that names a track of its own Local sources.
     async fn local(&self, uris: &[String]) -> Result<HashMap<String, String>, String> {
         let local = self.local_sources()?;
-        let mut found = HashMap::new();
+        let mut named = HashMap::new();
         for uri in uris {
             if let Some((source, kind, object)) = library::source_entity_parts(uri)
                 && kind == "track"
                 && local.contains(&source)
-                && let Some(track) = self
-                    .catalog
-                    .track_uri(&source, &object)
-                    .await
-                    .map_err(error)?
             {
-                found.insert(uri.clone(), track);
+                named.insert((source, object), uri.clone());
             }
         }
-        Ok(found)
+        let objects = named.keys().cloned().collect::<Vec<_>>();
+        Ok(self
+            .catalog
+            .track_uris(&objects)
+            .await
+            .map_err(error)?
+            .into_iter()
+            .filter_map(|(source, object, track)| Some((named.remove(&(source, object))?, track)))
+            .collect())
     }
 
     pub(super) async fn local_all(&self, uris: &[String]) -> Result<Vec<String>, String> {
@@ -845,14 +848,6 @@ impl Records {
             .iter()
             .map(|uri| local.get(uri).cloned().unwrap_or_else(|| uri.clone()))
             .collect())
-    }
-
-    async fn local_one(&self, uri: String) -> Result<String, String> {
-        Ok(self
-            .local(std::slice::from_ref(&uri))
-            .await?
-            .remove(&uri)
-            .unwrap_or(uri))
     }
 
     fn local_sources(&self) -> Result<HashSet<SourceId>, String> {
@@ -1494,15 +1489,25 @@ impl Records {
                 catalog.put_playlist_images(&images).await.map_err(error)
             }
             "entry" => {
+                let values = live
+                    .map(|row| Ok((object(row, "entry:")?, decode::<EntryValue>(row)?)))
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self
+                    .local(
+                        &values
+                            .iter()
+                            .map(|(_, value)| value.uri.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
                 let mut entries = Vec::new();
-                for row in live {
-                    let value: EntryValue = decode(row)?;
+                for (object_id, value) in values {
                     entries.push(library::PlaylistEntryCopy {
                         playlist: value.playlist,
-                        object_id: object(row, "entry:")?,
+                        object_id,
                         rank: unhex(&value.rank)?,
                         track: library::TrackReference::direct(
-                            self.local_one(value.uri).await?,
+                            local.get(&value.uri).cloned().unwrap_or(value.uri),
                             value.copy.title,
                             value.copy.artist,
                             value.copy.album,
@@ -1521,8 +1526,13 @@ impl Records {
                     .map_err(error)
             }
             "state" => {
+                let uris = rows
+                    .iter()
+                    .map(|row| object(row, "state:"))
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self.local(&uris).await?;
                 let mut states = Vec::new();
-                for row in rows {
+                for (row, uri) in rows.iter().zip(uris) {
                     let value = match row.deleted {
                         true => StateValue {
                             favorite: None,
@@ -1532,7 +1542,7 @@ impl Records {
                         false => decode(row)?,
                     };
                     states.push(library::UserMediaStateWrite {
-                        media_uri: self.local_one(object(row, "state:")?).await?,
+                        media_uri: local.get(&uri).cloned().unwrap_or(uri),
                         favorite: value.favorite,
                         rating: value.rating,
                         changed_at: value.changed_at,
@@ -1541,14 +1551,30 @@ impl Records {
                 catalog.put_user_states(&states).await.map_err(error)
             }
             "listen" => {
-                let mut listens = Vec::new();
-                for row in live {
-                    let mut listen: library::ActivityRecord = decode(row)?;
-                    listen.listen.media_uri = self.local_one(listen.listen.media_uri).await?;
-                    if let Some(uri) = listen.current_media_uri.take() {
-                        listen.current_media_uri = Some(self.local_one(uri).await?);
+                let mut listens = live
+                    .map(decode::<library::ActivityRecord>)
+                    .collect::<Result<Vec<_>, String>>()?;
+                let local = self
+                    .local(
+                        &listens
+                            .iter()
+                            .flat_map(|listen| {
+                                std::iter::once(listen.listen.media_uri.clone())
+                                    .chain(listen.current_media_uri.clone())
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
+                let map = |uri: &mut String| {
+                    if let Some(local) = local.get(uri) {
+                        uri.clone_from(local);
                     }
-                    listens.push(listen);
+                };
+                for listen in &mut listens {
+                    map(&mut listen.listen.media_uri);
+                    if let Some(uri) = &mut listen.current_media_uri {
+                        map(uri);
+                    }
                 }
                 catalog.import_listens(&listens).await.map_err(error)?;
                 catalog

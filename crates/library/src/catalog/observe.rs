@@ -120,20 +120,33 @@ impl Catalog {
             .collect()
     }
 
-    /// The URI of a source's track by its object id.
-    pub async fn track_uri(
+    /// The URIs of source tracks by source id and object id, in one read. A pair without a
+    /// track is left out.
+    pub async fn track_uris(
         &self,
-        source: &SourceId,
-        object: &str,
-    ) -> LibraryResult<Option<String>> {
+        objects: &[(SourceId, String)],
+    ) -> LibraryResult<Vec<(SourceId, String, String)>> {
+        if objects.is_empty() {
+            return Ok(Vec::new());
+        }
+        let requested = objects
+            .iter()
+            .map(|(source, object)| (source.as_str(), object.as_str()))
+            .collect::<Vec<_>>();
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT media_uri FROM tracks WHERE source_key={SOURCE_KEY} AND object_id=?2"
-        )))
-        .bind(source.as_str())
-        .bind(object)
-        .fetch_optional(&mut *connection)
-        .await?)
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT source.object_id,track.object_id,track.media_uri FROM json_each(?1) requested
+             JOIN sources source ON source.object_id=requested.value->>0
+             JOIN tracks track ON track.source_key=source.source_key
+                AND track.object_id=requested.value->>1",
+        )
+        .bind(serde_json::to_string(&requested)?)
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(source, object, uri)| (SourceId::new(source), object, uri))
+            .collect())
     }
 
     /// The source id and object id of each track of `uris` that has both, by URI.

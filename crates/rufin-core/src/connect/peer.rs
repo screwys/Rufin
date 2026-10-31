@@ -264,9 +264,11 @@ impl ConnectOwner {
     async fn local_track(&self, source: &SourceId, object: &str) -> Result<String, String> {
         self.local_source(source)?;
         self.catalog
-            .track_uri(source, object)
+            .track_uris(&[(source.clone(), object.to_owned())])
             .await
             .map_err(error)?
+            .pop()
+            .map(|(_, _, uri)| uri)
             .ok_or_else(|| "The requested track is unavailable on this device".into())
     }
 
