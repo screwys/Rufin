@@ -17,7 +17,7 @@ use iroh::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, Notify, RwLock, mpsc, oneshot, watch};
+use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -40,7 +40,6 @@ pub(crate) const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/4";
 pub(crate) const MAX_FRAME: usize = 16 * 1024 * 1024;
 // A device that removed this one closes its connections with this code.
 const REMOVED: VarInt = VarInt::from_u32(2);
-const NEARBY_WINDOW: Duration = Duration::from_secs(180);
 
 pub const INCOMPATIBLE: &str =
     "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
@@ -253,8 +252,7 @@ pub struct ConnectNetwork {
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
     addresses: MemoryLookup,
-    nearby: Option<Nearby>,
-    discover: Arc<Notify>,
+    nearby: bool,
     stop: CancellationToken,
     relay: RelayMode,
     router: Mutex<Option<Router>>,
@@ -275,12 +273,20 @@ impl ConnectNetwork {
         if let Some(resolver) = DNS_RESOLVER.get() {
             builder = builder.dns_resolver(resolver());
         }
-        let (nearby, discoveries) = if config.nearby {
-            let (nearby, discoveries) = Nearby::new(credentials.public(), addresses.clone());
-            builder = builder.address_lookup(nearby.clone());
-            (Some(nearby), Some(discoveries))
+        let mut nearby_error = None;
+        let discoveries = if config.nearby {
+            match Nearby::new(credentials.public(), addresses.clone()) {
+                Ok((nearby, discoveries)) => {
+                    builder = builder.address_lookup(nearby);
+                    Some(discoveries)
+                }
+                Err(error) => {
+                    nearby_error = Some(format!("Nearby discovery is unavailable: {error}"));
+                    None
+                }
+            }
         } else {
-            (None, None)
+            None
         };
         if let Ok(name) = config.name.parse() {
             builder = builder.user_data_for_address_lookup(name);
@@ -312,8 +318,7 @@ impl ConnectNetwork {
             approvals: Mutex::new(HashMap::new()),
             events,
             addresses,
-            nearby,
-            discover: Arc::new(Notify::new()),
+            nearby: config.nearby,
             stop: CancellationToken::new(),
             relay,
             router: Mutex::new(None),
@@ -328,8 +333,11 @@ impl ConnectNetwork {
             .accept(MEDIA_PROTOCOL, MediaProtocol(weak.clone()))
             .spawn();
         *network.router.lock().await = Some(router);
-        if let (Some(nearby), Some(discoveries)) = (network.nearby.clone(), discoveries) {
-            network.run_nearby(nearby, discoveries);
+        if let Some(error) = nearby_error {
+            let _ = network.events.send(NetworkEvent::Error(error)).await;
+        }
+        if let Some(discoveries) = discoveries {
+            network.run_nearby(discoveries);
         }
         let mut addresses = network.endpoint.watch_addr().stream();
         let stop = network.stop.clone();
@@ -351,8 +359,7 @@ impl ConnectNetwork {
         Ok((network, receiver))
     }
 
-    // Nearby discovery runs only for a while after each Discover.
-    fn run_nearby(self: &Arc<Self>, nearby: Nearby, mut discoveries: mpsc::Receiver<Discovery>) {
+    fn run_nearby(self: &Arc<Self>, mut discoveries: mpsc::Receiver<Discovery>) {
         let weak = Arc::downgrade(self);
         let stop = self.stop.clone();
         tokio::spawn(async move {
@@ -378,43 +385,10 @@ impl ConnectNetwork {
                 let _ = network.events.send(event).await;
             }
         });
-        let weak = Arc::downgrade(self);
-        let discover = self.discover.clone();
-        let stop = self.stop.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! { _ = stop.cancelled() => break, _ = discover.notified() => {} }
-                if let Err(error) = nearby.start() {
-                    let Some(network) = weak.upgrade() else { break };
-                    let _ = network
-                        .events
-                        .send(NetworkEvent::Error(format!(
-                            "Nearby discovery is unavailable: {error}"
-                        )))
-                        .await;
-                    continue;
-                }
-                loop {
-                    tokio::select! {
-                        _ = stop.cancelled() => break,
-                        _ = discover.notified() => {}
-                        _ = tokio::time::sleep(NEARBY_WINDOW) => break,
-                    }
-                }
-                nearby.stop();
-            }
-        });
     }
 
     pub fn identity(&self) -> String {
         self.endpoint.id().to_string()
-    }
-
-    /// Look for nearby devices for the next three minutes.
-    pub fn discover(&self) {
-        if self.nearby.is_some() {
-            self.discover.notify_one();
-        }
     }
 
     pub async fn rename(&self, name: String) {
@@ -429,7 +403,7 @@ impl ConnectNetwork {
         relay: Option<&str>,
         public: bool,
     ) -> Result<bool> {
-        Ok(self.nearby.is_some() == nearby && self.relay == relay_mode(relay, public)?)
+        Ok(self.nearby == nearby && self.relay == relay_mode(relay, public)?)
     }
 
     pub async fn invitation(&self) -> Result<String> {
@@ -742,9 +716,6 @@ impl ConnectNetwork {
         self.stop.cancel();
         self.cancel_pairing().await;
         self.approvals.lock().await.clear();
-        if let Some(nearby) = &self.nearby {
-            nearby.stop();
-        }
         *self.profile.write().await = None;
         if let Some(router) = self.router.lock().await.take() {
             router.shutdown().await?;

@@ -1623,7 +1623,10 @@ impl ConnectOwner {
                 }
                 self.refresh().await;
             }
-            Action::Discover => self.network().await?.discover(),
+            // Starting the network starts nearby discovery, which then keeps running.
+            Action::Discover => {
+                self.network().await?;
+            }
             Action::TestConnection { peer } => {
                 let result = self
                     .network()
