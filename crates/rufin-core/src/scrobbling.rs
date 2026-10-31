@@ -97,10 +97,14 @@ impl ScrobblingOwner {
         }
         self.scrobbler.wake();
         if credentials_changed {
-            let owner = self.clone();
-            self.runtime
-                .spawn_blocking(move || owner.load_credentials(true));
+            self.reload_credentials();
         }
+    }
+
+    fn reload_credentials(&self) {
+        let owner = self.clone();
+        self.runtime
+            .spawn_blocking(move || owner.load_credentials(true));
     }
 
     pub(crate) fn start(self: &Arc<Self>) {
@@ -302,6 +306,16 @@ impl ScrobblingOwner {
     }
 }
 
+/// The service switches `preferences` set.
+fn switches(settings: &mut scrobbling::Settings, preferences: &ScrobblingPreferences) {
+    settings.lastfm.enabled = preferences.lastfm.enabled;
+    settings.lastfm.now_playing_enabled = preferences.lastfm.now_playing_enabled;
+    settings.librefm.enabled = preferences.librefm.enabled;
+    settings.librefm.now_playing_enabled = preferences.librefm.now_playing_enabled;
+    settings.listenbrainz.enabled = preferences.listenbrainz.enabled;
+    settings.listenbrainz.now_playing_enabled = preferences.listenbrainz.now_playing_enabled;
+}
+
 fn preferences(settings: &scrobbling::Settings) -> ScrobblingPreferences {
     ScrobblingPreferences {
         lastfm: LastFmPreferences {
@@ -339,27 +353,24 @@ impl ScrobblingOwner {
     ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
         self.settings
             .edit(|stored| {
-                stored.scrobbling.lastfm.enabled = preferences.lastfm.enabled;
-                stored.scrobbling.lastfm.now_playing_enabled =
-                    preferences.lastfm.now_playing_enabled;
-                stored.scrobbling.librefm.enabled = preferences.librefm.enabled;
-                stored.scrobbling.librefm.now_playing_enabled =
-                    preferences.librefm.now_playing_enabled;
-                stored.scrobbling.listenbrainz.enabled = preferences.listenbrainz.enabled;
-                stored.scrobbling.listenbrainz.now_playing_enabled =
-                    preferences.listenbrainz.now_playing_enabled;
+                switches(&mut stored.scrobbling, &preferences);
                 Ok(())
             })
             .map_err(crate::settings::SettingsError::from)?;
-        let loaded = self.scrobbler.settings();
+        // The settings feed applies the switches; credentials it cannot see are read here.
+        let mut applied = self.scrobbler.settings();
         let stored = self.settings.load();
         let needs_credentials = (stored.scrobbling_secrets_present
             || !stored.scrobbling_credentials.is_empty())
-            && ((preferences.lastfm.enabled && loaded.lastfm.session_key.is_empty())
-                || (preferences.librefm.enabled && loaded.librefm.session_key.is_empty())
-                || (preferences.listenbrainz.enabled && loaded.listenbrainz.user_token.is_empty()));
-        self.settings_changed(needs_credentials);
-        Ok(self.preferences())
+            && ((preferences.lastfm.enabled && applied.lastfm.session_key.is_empty())
+                || (preferences.librefm.enabled && applied.librefm.session_key.is_empty())
+                || (preferences.listenbrainz.enabled
+                    && applied.listenbrainz.user_token.is_empty()));
+        if needs_credentials {
+            self.reload_credentials();
+        }
+        switches(&mut applied, &preferences);
+        Ok(self::preferences(&applied))
     }
 
     pub async fn connect_listenbrainz(

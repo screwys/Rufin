@@ -2062,9 +2062,6 @@ impl SourceOwner {
             .map_err(string_error)?;
         if created {
             self.shared
-                .downloads
-                .settings_changed(self.shared.settings.load().ui.downloads);
-            self.shared
                 .send(SourceEvent::Configured(
                     self.shared
                         .configured_sources(self.shared.selected().as_ref()),
