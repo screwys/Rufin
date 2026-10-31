@@ -229,6 +229,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     for state in &changed.items {
         shell.apply_favorite_state(&state.target, state.favorite);
     }
+    shell.search_session.show_states(&changed.items);
     shell.show_states_in_mounted_route(&changed.items);
     if changed.all
         || !changed.sources.is_empty()

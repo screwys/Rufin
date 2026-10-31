@@ -47,6 +47,19 @@ pub struct SearchSession {
 }
 
 impl SearchSession {
+    /// Shows committed favorites and ratings in the results the session keeps, also while no
+    /// Search route shows them.
+    pub fn show_states(&self, changes: &[library::StateChange]) {
+        use library::ShowsState;
+        for row in self.items.borrow_mut().iter_mut().flatten() {
+            for change in changes {
+                if let Some(state) = row.state_mut(change) {
+                    change.show_in(state);
+                }
+            }
+        }
+    }
+
     pub fn new(
         source: rufin_core::runtime::SourceHandle,
         catalog: Arc<library::Catalog>,

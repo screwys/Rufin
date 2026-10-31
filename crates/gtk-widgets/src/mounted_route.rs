@@ -55,6 +55,8 @@ pub type MountedDownloadChange = Rc<dyn Fn(&downloads::DownloadEvent)>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
 pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
+/// Shows committed favorites and ratings in a route's rows; true when it reads again instead.
+pub type MountedStates = Rc<dyn Fn(&[library::StateChange]) -> bool>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
 #[derive(Clone)]
@@ -458,8 +460,8 @@ pub struct MountedRoute {
     pub layout_cycle: Option<MountedRouteCommand>,
     pub tab_cycle: Option<MountedRouteCommand>,
     pub initial_demand: MountedRouteResume,
-    /// The view whose rows show committed favorites and ratings.
-    pub states: Option<RouteView>,
+    /// Shows committed favorites and ratings in the route's rows.
+    pub states: Option<MountedStates>,
     pub download_change: Option<MountedDownloadChange>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
@@ -535,8 +537,13 @@ impl MountedRoute {
         self
     }
 
-    pub fn with_states(mut self, view: &RouteView) -> Self {
-        self.states = Some(Rc::clone(view));
+    pub fn with_states(self, view: &RouteView) -> Self {
+        let view = Rc::clone(view);
+        self.with_shown_states(Rc::new(move |items| view.show(items)))
+    }
+
+    pub fn with_shown_states(mut self, states: MountedStates) -> Self {
+        self.states = Some(states);
         self
     }
 
@@ -559,7 +566,7 @@ impl MountedRoute {
     /// Shows committed favorites and ratings in the route's rows, or reads it again where they
     /// order or filter them.
     pub fn show_states(&self, items: &[library::StateChange]) {
-        if self.states.as_ref().is_some_and(|view| view.show(items)) {
+        if !items.is_empty() && self.states.as_ref().is_some_and(|show| show(items)) {
             (self.catalog_refresh)();
         }
     }

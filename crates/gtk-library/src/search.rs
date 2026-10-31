@@ -63,6 +63,23 @@ enum SearchItem {
     Artist(library::ArtistRow),
 }
 
+impl library::ShowsState for SearchItem {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        match self {
+            Self::Track(row, _) => row.state(change),
+            Self::Album(row) => row.state(change),
+            Self::Artist(row) => row.state(change),
+        }
+    }
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        match self {
+            Self::Track(row, _) => row.state_mut(change),
+            Self::Album(row) => row.state_mut(change),
+            Self::Artist(row) => row.state_mut(change),
+        }
+    }
+}
+
 impl SearchItem {
     fn lyrics(&self) -> Option<&library::LyricsSnippet> {
         match self {
@@ -675,6 +692,25 @@ impl SearchRouteProjection {
         }
     }
 
+    /// Shows committed favorites and ratings in the shown results; the session's own copy
+    /// follows them through `SearchSession::show_states`.
+    fn show_states(&self, items: &[library::StateChange]) {
+        use library::ShowsState;
+        for change in items {
+            self.update_matching(
+                |row| {
+                    row.state(change)
+                        .is_some_and(|state| !change.shown_in(state))
+                },
+                |row| {
+                    if let Some(state) = row.state_mut(change) {
+                        change.show_in(state);
+                    }
+                },
+            );
+        }
+    }
+
     fn apply(&self, mut items: [Vec<SearchItem>; 3]) {
         for index in 0..3 {
             if let Some(shell) = self.shell.upgrade() {
@@ -847,6 +883,7 @@ impl CatalogUi {
                 projection.cycle_category();
             }
         });
+        let states_projection = Rc::downgrade(&projection);
         let resume_projection = Rc::clone(&projection);
         let navigation_projection = Rc::downgrade(&projection);
         let navigation = Rc::new(move |direction| {
@@ -924,6 +961,12 @@ impl CatalogUi {
                     },
                 );
             }
+        }))
+        .with_shown_states(Rc::new(move |items| {
+            if let Some(projection) = states_projection.upgrade() {
+                projection.show_states(items);
+            }
+            false
         }))
         .with_search(projection.search.clone())
         .with_layout_cycle(layout_cycle)
