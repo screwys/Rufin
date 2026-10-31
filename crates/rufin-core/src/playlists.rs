@@ -1014,6 +1014,8 @@ pub fn remove_playlist_entries(
     })
 }
 
+/// Whether Remove unavailable tracks applies: a writable Rufin playlist that holds a track its
+/// source no longer lists.
 pub fn can_remove_unavailable(owner: &SourceOwner, playlist: &library::PlaylistRow) -> bool {
     !playlist.source_owned
         && playlist.writable
@@ -1022,6 +1024,10 @@ pub fn can_remove_unavailable(owner: &SourceOwner, playlist: &library::PlaylistR
                 .configuration(&SourceId::new(id))
                 .is_some_and(|source| source.is_file_library())
         })
+        && owner
+            .shared
+            .catalog
+            .playlist_holds_hidden(playlist.playlist_key)
 }
 
 pub fn remove_unavailable_tracks(

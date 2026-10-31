@@ -92,6 +92,19 @@ impl Catalog {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
+    /// Whether a playlist holds a track its source no longer lists, from its resident entries.
+    pub fn playlist_holds_hidden(&self, playlist: PlaylistKey) -> bool {
+        let snapshot = self.snapshot();
+        snapshot.playlists.get(playlist.raw()).is_some_and(|record| {
+            record.entries.iter().any(|entry| {
+                snapshot
+                    .tracks
+                    .live(entry.track)
+                    .is_some_and(|track| !track.indexed())
+            })
+        })
+    }
+
     /// URIs of a source's tracks that some playlist holds, by title.
     pub async fn all_playlist_track_order(
         &self,
