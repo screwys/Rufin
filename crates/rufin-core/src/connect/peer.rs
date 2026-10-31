@@ -437,7 +437,7 @@ fn blocking_reader(
     Box::pin(tokio_util::io::StreamReader::new(Box::pin(stream)))
 }
 
-/// Installed once at startup; the sources' peer source asks through it.
+/// Installed at each start; the sources' peer source asks through it.
 pub(super) fn install(owner: &Arc<ConnectOwner>) {
     sources::install_peer_link(Arc::new(Link(Arc::downgrade(owner))));
 }

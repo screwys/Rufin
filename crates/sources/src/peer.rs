@@ -1,7 +1,7 @@
 //! A paired device's Local library, read through Rufin Connect like a read-only server.
 use std::collections::HashSet;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock};
 
 use audio_processing::ResolvedStream;
 use futures_util::future::BoxFuture;
@@ -68,10 +68,12 @@ pub trait PeerLink: Send + Sync {
     ) -> BoxFuture<'a, SourceResult<PeerAudio>>;
 }
 
-static LINK: OnceLock<Arc<dyn PeerLink>> = OnceLock::new();
+/// The link of the running Connect. A runtime started again in the same process installs
+/// its own.
+static LINK: RwLock<Option<Arc<dyn PeerLink>>> = RwLock::new(None);
 
 pub fn install_peer_link(link: Arc<dyn PeerLink>) {
-    LINK.get_or_init(|| link);
+    *LINK.write().unwrap_or_else(|p| p.into_inner()) = Some(link);
 }
 
 #[derive(Deserialize)]
@@ -94,8 +96,9 @@ impl PeerSource {
             device: config.device,
             source: configuration.source_id.clone(),
             link: LINK
-                .get()
-                .cloned()
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone()
                 .ok_or_else(|| SourceError::InvalidConfig("Rufin Connect is unavailable".into()))?,
         })
     }
