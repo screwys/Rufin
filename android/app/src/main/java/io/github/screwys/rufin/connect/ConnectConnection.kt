@@ -54,8 +54,18 @@ internal class ConnectConnection(private val model: RufinConnection) {
                                 fileSources = withContext(Dispatchers.IO) { source.fileIntegrations() }
                             }
                         }
+                        // The document tree the sync folder uses; its grant goes once Connect stops
+                        // using it: the folder changed or cleared, Connect turned off, or this
+                        // device left or was removed. The Local source may still read that tree.
+                        var granted: String? = null
                         while (isActive) {
                             val next = withContext(Dispatchers.Default) { subscription.next() }
+                            val document = (next.settings.folder as? SyncFolder.Document)?.document
+                            if (granted != null && granted != document && !runtime.hasDocumentRoot(granted)) {
+                                service.contentResolver.releasePersistableUriPermission(Uri.parse(granted),
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            }
+                            granted = document
                             if (next.connecting && state?.connecting != true) operationActive = true
                             if (!next.connecting && next.error == null) operationActive = false
                             val offer = next.continuation?.let { it.device to it.at }
@@ -117,20 +127,6 @@ internal class ConnectConnection(private val model: RufinConnection) {
             }
             owner.execute(action)
         }, confirmed = confirmed, blocking = action != ConnectAction.Refresh)
-    }
-    /** Sets the sync folder, then gives up the grant of a document tree it no longer uses. */
-    fun folder(folder: SyncFolder?) {
-        val previous = (state?.settings?.folder as? SyncFolder.Document)?.document
-            ?.takeIf { it != (folder as? SyncFolder.Document)?.document }
-        request({ owner ->
-            owner.execute(ConnectAction.Folder(folder)).also {
-                val service = model.connectedService()
-                if (previous != null && service.runtime.value?.getOrNull()?.hasDocumentRoot(previous) != true) {
-                    service.contentResolver.releasePersistableUriPermission(Uri.parse(previous),
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                }
-            }
-        })
     }
     fun join(invitation: String) = request({ it.execute(ConnectAction.Join(invitation, false)) },
         { it.execute(ConnectAction.Join(invitation, true)) })
