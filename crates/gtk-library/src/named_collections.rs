@@ -162,28 +162,10 @@ impl CatalogUi {
                 &mut page,
             );
         }
-        let favorites = Rc::clone(&sparse);
-        let refresh = Rc::clone(&reread);
         let live = Rc::clone(&sparse);
-        let live_window = move || {
-            live.first_live_position().map_or_else(
-                library::RouteSeedWindow::top,
-                library::RouteSeedWindow::position,
-            )
-        };
-        let refresh_window = live_window.clone();
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || refresh.refresh(refresh_window())))
-            .with_favorite_state(Rc::new(move |state| {
-                if !R::FAVORITES {
-                    return;
-                }
-                favorites.update_matching(
-                    |row| row.matches_favorite(&state.target),
-                    |row| row.set_favorite(state.favorite),
-                );
-                reread.favorite_changed(live_window());
-            }))
+            .with_catalog_refresh(Rc::new(move || reread.refresh(live.live_window())))
+            .with_states(&view)
             .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
             .with_initial_demand({
@@ -193,9 +175,10 @@ impl CatalogUi {
     }
 }
 
-pub trait CollectionRow: Clone + PartialEq + Send + Sync + 'static {
+pub trait CollectionRow:
+    gtk_widgets::mounted_route::StateRow + Clone + PartialEq + Send + Sync + 'static
+{
     type Key: Clone + Eq + Send + Sync + 'static;
-    const FAVORITES: bool = false;
     /// The row of a list of these rows.
     fn row(row: Row) -> Option<Self>;
 
@@ -207,10 +190,6 @@ pub trait CollectionRow: Clone + PartialEq + Send + Sync + 'static {
         sparse: Rc<SparseRouteModel<Self::Key, Self>>,
         key: LibraryListKey,
     ) -> LibraryCollectionProjection;
-    fn matches_favorite(&self, _target: &library::FavoriteTarget) -> bool {
-        false
-    }
-    fn set_favorite(&mut self, _favorite: bool) {}
 }
 
 pub trait NamedCollectionRow: CollectionRow {
@@ -257,7 +236,6 @@ pub trait NamedCollectionRow: CollectionRow {
 
 impl CollectionRow for ArtistRow {
     type Key = ArtistKey;
-    const FAVORITES: bool = true;
     fn row(row: Row) -> Option<Self> {
         match row {
             Row::Artist(row) => Some(row),
@@ -286,12 +264,6 @@ impl CollectionRow for ArtistRow {
         key: LibraryListKey,
     ) -> LibraryCollectionProjection {
         super::collections::artist_collection_projection(shell, sparse, key)
-    }
-    fn matches_favorite(&self, target: &library::FavoriteTarget) -> bool {
-        matches!(target,library::FavoriteTarget::Artist(uri) if uri == &self.media_uri)
-    }
-    fn set_favorite(&mut self, favorite: bool) {
-        self.state.favorite = favorite;
     }
 }
 

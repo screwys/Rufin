@@ -1031,6 +1031,14 @@ where
         })
     }
 
+    /// Where a reread starts so the rows on screen stay: the first live row.
+    pub fn live_window(&self) -> library::RouteSeedWindow {
+        self.first_live_position().map_or_else(
+            library::RouteSeedWindow::top,
+            library::RouteSeedWindow::position,
+        )
+    }
+
     pub fn ready_position(&self, matches: impl Fn(&R) -> bool) -> Option<u32> {
         self.model
             .ready_position::<K, R>(matches)

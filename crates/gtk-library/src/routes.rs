@@ -98,13 +98,8 @@ impl TrackListProjection {
         self.model.live_window()
     }
 
-    pub fn replace_favorites(
-        &self,
-        members: library::MemberRead,
-        count: usize,
-        rows: Vec<library::Row>,
-    ) {
-        self.model.replace_favorites(members, count, rows);
+    pub fn replace_favorites(&self, count: usize, rows: Vec<library::Row>) {
+        self.model.replace_favorites(count, rows);
     }
 
     pub fn resume_initial_demand(&self) {
@@ -378,8 +373,6 @@ impl CatalogUi {
                 reread.resume(&shell.settings.current.borrow());
             })
         };
-        let favorite_models = models.clone();
-
         let download_models = models.clone();
         let downloads = crate::collection_download_change(move |target, downloaded| {
             let CollectionTarget::Album(uri) = target else {
@@ -406,12 +399,10 @@ impl CatalogUi {
         if favorites_only {
             self.install_favorite_category_tabs(CollectionCategory::Albums, &mut page);
         }
-        let refresh = Rc::clone(&reread);
         let refresh_models = models.clone();
-        let favorite_window = models.clone();
         page.mounted_route(resume)
             .with_catalog_refresh(Rc::new(move || {
-                refresh.refresh(refresh_models.borrow().live_window())
+                reread.refresh(refresh_models.borrow().live_window())
             }))
             .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
@@ -423,14 +414,7 @@ impl CatalogUi {
                     models.resume_initial_demand();
                 })
             })
-            .with_favorite_state(Rc::new(move |state| {
-                let library::FavoriteTarget::Album(album) = &state.target else {
-                    return;
-                };
-                let models = favorite_models.borrow().clone();
-                models.update_favorite(album, state.favorite);
-                reread.favorite_changed(favorite_window.borrow().live_window());
-            }))
+            .with_states(&view)
     }
 
     pub fn library_tracks_route(
@@ -690,12 +674,11 @@ impl CatalogUi {
                 reread.resume(&shell.settings.current.borrow());
             })
         };
-        let refresh = Rc::clone(&reread);
+        let states = Rc::clone(reread.route_view());
         let refresh_projection = projection.clone();
-        let favorite_projection = projection.clone();
         page.mounted_route(resume)
             .with_catalog_refresh(Rc::new(move || {
-                refresh.refresh(refresh_projection.live_window())
+                reread.refresh(refresh_projection.live_window())
             }))
             .with_download_change(projection.download_change())
             .with_item_navigation(projection.item_navigation())
@@ -703,14 +686,6 @@ impl CatalogUi {
                 let projection = projection.clone();
                 Rc::new(move || projection.resume_initial_demand())
             })
-            .with_favorite_state(Rc::new(move |state| {
-                let library::FavoriteTarget::Track(track) = &state.target else {
-                    return;
-                };
-                favorite_projection
-                    .model
-                    .update_favorite(track, state.favorite);
-                reread.favorite_changed(favorite_projection.live_window());
-            }))
+            .with_states(&states)
     }
 }

@@ -256,6 +256,7 @@ impl CatalogUi {
         });
         let refresh_projection = track_projection.clone();
         MountedRoute::new(route_stack.upcast(), resume)
+            .with_states(&view)
             .with_catalog_refresh(Rc::new(move || {
                 reread.refresh(refresh_projection.live_window())
             }))

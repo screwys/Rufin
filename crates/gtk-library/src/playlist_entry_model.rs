@@ -1,31 +1,13 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use library::{PlaylistEntryKey, PlaylistKey, Row, TrackRow};
 
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::settings::LibraryListSettings;
 
 use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 use rufin_core::view::Opened;
-
-/// The read the shown entries came from, and the list settings it read with.
-struct AppliedEntries {
-    query: library::MemberRead,
-    settings: LibraryListSettings,
-}
-
-impl AppliedEntries {
-    /// None when the read has no entries because the playlist is gone.
-    fn of(read: &Opened) -> Option<Self> {
-        Some(Self {
-            query: read.view.members().cloned()?,
-            settings: read.view.list_settings(),
-        })
-    }
-}
 
 /// A playlist row: a track with its entry.
 fn entry_row(row: Row) -> Option<TrackRow> {
@@ -47,7 +29,8 @@ pub struct PlaylistEntryModel {
 struct PlaylistEntryModelState {
     playlist_key: PlaylistKey,
     sparse: Rc<SparseRouteModel<(), TrackRow>>,
-    applied: RefCell<AppliedEntries>,
+    /// The view the shown entries come from.
+    view: RouteView,
 }
 
 impl PlaylistEntryModel {
@@ -57,15 +40,12 @@ impl PlaylistEntryModel {
         view: &RouteView,
         mut read: Opened,
     ) -> Self {
-        let applied = RefCell::new(
-            AppliedEntries::of(&read).expect("an open playlist page reads its entries"),
-        );
         let sparse = view_model(runtime, view, entry_row, &mut read);
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 playlist_key,
                 sparse,
-                applied,
+                view: Rc::clone(view),
             }),
         }
     }
@@ -84,9 +64,19 @@ impl PlaylistEntryModel {
             .ready_position(|row| entry_key(row) == Some(entry))
     }
 
+    /// The entries read the route shows; a page whose playlist is gone has none.
+    fn query(&self) -> library::MemberRead {
+        self.inner
+            .view
+            .borrow()
+            .members()
+            .cloned()
+            .expect("a shown playlist page reads its entries")
+    }
+
     pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
         library::MemberSelection::Members {
-            read: self.inner.applied.borrow().query.clone(),
+            read: self.query(),
             ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
         }
     }
@@ -99,18 +89,17 @@ impl PlaylistEntryModel {
         self.inner.sparse.len() == 0
     }
 
-    /// Where the shown window starts, to read it again in place.
-    pub fn first_live_position(&self) -> usize {
-        self.inner.sparse.first_live_position().unwrap_or(0)
+    /// Where a reread starts so the rows on screen stay.
+    pub fn live_window(&self) -> library::RouteSeedWindow {
+        self.inner.sparse.live_window()
     }
 
     /// Shows a reread's entries; false when it has none because the playlist is gone.
     pub fn replace_prepared(&self, read: Opened) -> bool {
-        let Some(applied) = AppliedEntries::of(&read) else {
+        if read.view.members().is_none() {
             return false;
-        };
+        }
         let count = read.view.len();
-        self.inner.applied.replace(applied);
         self.inner.sparse.replace_prepared_at(
             SparseSource::Query { count },
             read.first.min(count),
@@ -133,13 +122,14 @@ impl PlaylistEntryModel {
     }
 
     pub fn visible_context_id(&self) -> String {
-        let request = self.inner.applied.borrow();
+        let view = self.inner.view.borrow();
+        let settings = view.list_settings();
         format!(
             "{}|query={}|sort={:?}|descending={}|result={}",
             CollectionTarget::Playlist(self.inner.playlist_key).context_id(),
-            request.query.filter,
-            request.settings.sort_key,
-            request.settings.descending,
+            view.members().map_or("", |query| query.filter.as_str()),
+            settings.sort_key,
+            settings.descending,
             self.inner.sparse.order_id()
         )
     }
@@ -203,7 +193,7 @@ impl PlaylistEntryModel {
             rufin_core::playback::PlayRequest::captured
         };
         let mut request = constructor(
-            self.inner.applied.borrow().query.clone().selection(),
+            self.query().selection(),
             position,
             placement,
             collection_start,

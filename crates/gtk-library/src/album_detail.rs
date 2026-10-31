@@ -150,13 +150,9 @@ impl AlbumCollectionModels {
     /// Where a reread starts so the rows on screen stay.
     pub fn live_window(&self) -> library::RouteSeedWindow {
         match self {
-            Self::Rows(rows) => rows.first_live_position(),
-            Self::Detail(detail) => detail.inner.rows.first_live_position(),
+            Self::Rows(rows) => rows.live_window(),
+            Self::Detail(detail) => detail.inner.rows.live_window(),
         }
-        .map_or_else(
-            library::RouteSeedWindow::top,
-            library::RouteSeedWindow::position,
-        )
     }
     pub fn replace_prepared(&self, read: Opened) -> bool {
         let count = read.view.len();
@@ -185,22 +181,6 @@ impl AlbumCollectionModels {
                 replaced
             }
             _ => false,
-        }
-    }
-    pub fn update_favorite(&self, uri: &str, favorite: bool) {
-        match self {
-            Self::Rows(rows) => rows.update_matching(
-                |row| row.media_uri == uri,
-                |row| row.state.favorite = favorite,
-            ),
-            Self::Detail(detail) => detail.inner.rows.update_matching(
-                |row| matches!(row, Row::AlbumHeading(album) if album.media_uri == uri),
-                |row| {
-                    if let Row::AlbumHeading(album) = row {
-                        album.state.favorite = favorite;
-                    }
-                },
-            ),
         }
     }
 }

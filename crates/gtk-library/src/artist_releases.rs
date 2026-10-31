@@ -55,7 +55,6 @@ pub struct ArtistReleaseRoutePreamble {
 
 pub struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
-    query: Rc<RefCell<library::ListRead>>,
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
     pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
@@ -620,9 +619,6 @@ impl ArtistReleaseProjections {
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        let query = Rc::new(RefCell::new(
-            release_read(&read.view).expect("an open artist page reads its releases"),
-        ));
         let counts = Rc::new(Cell::new(counts));
         let sparse = view_model(shell.runtime.clone(), view, release_row, &mut read);
         let mut start = 0_usize;
@@ -691,7 +687,7 @@ impl ArtistReleaseProjections {
         let rows = gtk::FlattenListModel::new(Some(model_sections));
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
         let (list, apply_grid_fields, scroll) =
-            artist_route_list(shell, rows, Rc::clone(&grid_fields), Rc::clone(&query));
+            artist_route_list(shell, rows, Rc::clone(&grid_fields), Rc::clone(view));
         let selection = list.model().expect("Artist selection");
         let weak_selection = selection.downgrade();
         sparse
@@ -741,7 +737,6 @@ impl ArtistReleaseProjections {
         }
         Self {
             sections,
-            query,
             counts,
             selection,
             sparse,
@@ -775,10 +770,7 @@ impl ArtistReleaseProjections {
 
     /// Where a reread starts so the releases on screen stay.
     pub fn live_window(&self) -> library::RouteSeedWindow {
-        self.sparse.first_live_position().map_or_else(
-            library::RouteSeedWindow::top,
-            library::RouteSeedWindow::position,
-        )
+        self.sparse.live_window()
     }
 
     pub fn filters(&self) -> [String; 6] {
@@ -787,15 +779,13 @@ impl ArtistReleaseProjections {
 
     /// Shows a reread's releases; false when it has none because the artist is gone.
     pub fn replace_page(&self, read: Opened) -> bool {
-        let Some(query) = release_read(&read.view) else {
+        if release_read(&read.view).is_none() {
             return false;
-        };
+        }
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        if *self.query.borrow() != query || self.counts.get() != counts {
+        if self.counts.replace(counts) != counts {
             self.selection.unselect_all();
         }
-        self.query.replace(query);
-        self.counts.set(counts);
         self.sparse.replace_prepared_at(
             SparseSource::Query {
                 count: counts.iter().sum(),
@@ -897,7 +887,7 @@ fn artist_route_list(
     shell: &Rc<CatalogUi>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
-    query: Rc<RefCell<library::ListRead>>,
+    view: RouteView,
 ) -> (
     gtk::ListView,
     Rc<dyn Fn(&[LibraryField])>,
@@ -948,9 +938,8 @@ fn artist_route_list(
         if selected.size() < 2 || !selected.contains(dragged) {
             return None;
         }
-        let query = query.borrow().clone();
         Some(gtk_widgets::media_drag::CollectionTargets::Parents(vec![(
-            query,
+            release_read(&view.borrow())?,
             gtk_widgets::selection::selected_ranges(&selected),
         )]))
     }));

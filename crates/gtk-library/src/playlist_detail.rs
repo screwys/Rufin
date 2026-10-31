@@ -524,6 +524,7 @@ impl CatalogUi {
             }) as Rc<dyn Fn(Option<library::Header>)>
         };
         let (reread, refresh) = reread(apply_owner);
+        let states = Rc::clone(reread.route_view());
         let resume = {
             let shell = Rc::downgrade(self);
             Rc::new(move || {
@@ -558,6 +559,7 @@ impl CatalogUi {
             .with_item_navigation(item_navigation)
             .with_initial_demand(initial_demand)
             .with_catalog_refresh(refresh)
+            .with_states(&states)
     }
 
     fn append_playlist_detail_kind_controls(

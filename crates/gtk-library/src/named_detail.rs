@@ -151,6 +151,7 @@ impl CatalogUi {
         });
         let refresh_tracks = Rc::clone(&tracks);
         MountedRoute::new(grouped.widget(), resume)
+            .with_states(&view)
             .with_catalog_refresh(Rc::new(move || {
                 reread.refresh(refresh_tracks.live_window())
             }))

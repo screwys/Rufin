@@ -10,20 +10,28 @@ use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
 use rufin_core::view::Opened;
 
+/// What a track list plays and selects: the read of the view the route shows now, or keys.
 #[derive(Clone)]
 enum TrackRead {
-    Members(library::MemberRead),
+    Page(RouteView),
+    /// An artist page's favorite tracks.
+    Favorites(RouteView),
     Keys(Arc<[TrackKey]>),
 }
 
 impl TrackRead {
-    fn selection(&self, ranges: Option<Vec<std::ops::Range<usize>>>) -> library::MemberSelection {
+    fn members(&self) -> Option<library::MemberRead> {
         match self {
-            Self::Members(read) => library::MemberSelection::Members {
-                read: read.clone(),
-                ranges,
-            },
-            Self::Keys(keys) => library::MemberSelection::Keys {
+            Self::Page(view) => view.borrow().members().cloned(),
+            Self::Favorites(view) => view.borrow().favorites().cloned(),
+            Self::Keys(_) => None,
+        }
+    }
+
+    fn selection(&self, ranges: Option<Vec<std::ops::Range<usize>>>) -> library::MemberSelection {
+        match (self, self.members()) {
+            (_, Some(read)) => library::MemberSelection::Members { read, ranges },
+            (Self::Keys(keys), None) => library::MemberSelection::Keys {
                 source: None,
                 keys: ranges.map_or_else(
                     || keys.clone(),
@@ -34,6 +42,10 @@ impl TrackRead {
                             .collect()
                     },
                 ),
+            },
+            (Self::Page(_) | Self::Favorites(_), None) => library::MemberSelection::Keys {
+                source: None,
+                keys: Arc::new([]),
             },
         }
     }
@@ -51,7 +63,7 @@ struct TrackModelState {
     sparse: Rc<SparseRouteModel<TrackKey, TrackRow>>,
     /// The search the page wants; a page read for another search is stale.
     filter: RefCell<String>,
-    applied: Rc<RefCell<TrackRead>>,
+    read: TrackRead,
 }
 
 #[derive(Clone)]
@@ -72,18 +84,13 @@ impl TrackCollectionModel {
             .set_sections(read.view.disc_sections().to_vec());
         Self(Rc::new(TrackModelState {
             sparse,
-            applied: Rc::new(RefCell::new(TrackRead::Members(members))),
+            read: TrackRead::Page(Rc::clone(view)),
             filter,
         }))
     }
 
     /// An artist page's favorite tracks, which `members` lists.
-    pub fn favorites(
-        runtime: tokio::runtime::Handle,
-        view: &RouteView,
-        members: library::MemberRead,
-        rows: Vec<Row>,
-    ) -> Self {
+    pub fn favorites(runtime: tokio::runtime::Handle, view: &RouteView, rows: Vec<Row>) -> Self {
         let count = view.borrow().favorites_len().unwrap_or(0);
         let load_view = Rc::clone(view);
         let sparse = SparseRouteModel::new(
@@ -100,15 +107,20 @@ impl TrackCollectionModel {
             }),
         );
         sparse.seed_at(0, rows.into_iter().filter_map(track_row).collect());
+        view.show_states(&sparse);
         Self(Rc::new(TrackModelState {
             sparse,
-            filter: RefCell::new(members.filter.clone()),
-            applied: Rc::new(RefCell::new(TrackRead::Members(members))),
+            filter: RefCell::new(
+                view.borrow()
+                    .favorites()
+                    .map(|read| read.filter.clone())
+                    .unwrap_or_default(),
+            ),
+            read: TrackRead::Favorites(Rc::clone(view)),
         }))
     }
 
-    pub fn replace_favorites(&self, members: library::MemberRead, count: usize, rows: Vec<Row>) {
-        self.0.applied.replace(TrackRead::Members(members));
+    pub fn replace_favorites(&self, count: usize, rows: Vec<Row>) {
         self.0.sparse.replace_prepared_at(
             SparseSource::Query { count },
             0,
@@ -145,7 +157,7 @@ impl TrackCollectionModel {
         sparse.seed_matching_at(0, rows, |row| row.track_key);
         Self(Rc::new(TrackModelState {
             sparse,
-            applied: Rc::new(RefCell::new(TrackRead::Keys(keys))),
+            read: TrackRead::Keys(keys),
             filter: RefCell::default(),
         }))
     }
@@ -164,18 +176,14 @@ impl TrackCollectionModel {
             .ready_position(|row| row.media_uri() == media_uri)
     }
 
-    /// Where a reread starts so the rows on screen stay: the first live row.
+    /// Where a reread starts so the rows on screen stay.
     pub fn live_window(&self) -> library::RouteSeedWindow {
-        self.0.sparse.first_live_position().map_or_else(
-            library::RouteSeedWindow::top,
-            library::RouteSeedWindow::position,
-        )
+        self.0.sparse.live_window()
     }
 
     pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
         self.0
-            .applied
-            .borrow()
+            .read
             .selection(Some(gtk_widgets::selection::selected_ranges(positions)))
     }
 
@@ -193,13 +201,13 @@ impl TrackCollectionModel {
 
     /// Takes a reread of the page; a read for another search is stale.
     pub fn replace_page(&self, read: Opened) -> bool {
-        let Some(members) = read.view.members().cloned() else {
-            return false;
-        };
-        if members.filter != *self.0.filter.borrow() {
+        if read
+            .view
+            .members()
+            .is_none_or(|members| members.filter != *self.0.filter.borrow())
+        {
             return false;
         }
-        self.0.applied.replace(TrackRead::Members(members));
         self.0.sparse.replace_prepared_at(
             SparseSource::Query {
                 count: read.view.len(),
@@ -213,13 +221,6 @@ impl TrackCollectionModel {
 
     pub fn resume_initial_demand(&self) {
         self.0.sparse.resume_initial_demand();
-    }
-
-    pub fn update_favorite(&self, media_uri: &str, favorite: bool) {
-        self.0.sparse.update_matching(
-            |row| row.media_uri() == media_uri,
-            |row| row.set_favorite(favorite),
-        );
     }
 
     pub fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
@@ -242,7 +243,7 @@ impl TrackCollectionModel {
         if anchor_index >= order.len() {
             return;
         }
-        let selection = self.0.applied.borrow().selection(None);
+        let selection = self.0.read.selection(None);
         let constructor = if collection_start {
             PlayRequest::ordered
         } else {
@@ -268,15 +269,15 @@ impl TrackCollectionModel {
     }
 
     pub fn visible_context_id(&self, context_base: &str) -> String {
-        match &*self.0.applied.borrow() {
-            TrackRead::Members(query) => format!(
+        match self.0.read.members() {
+            Some(query) => format!(
                 "{context_base}|query={}|sort={:?}|descending={}|result={}",
                 query.filter,
                 query.sort,
                 query.descending,
                 self.0.sparse.order_id()
             ),
-            TrackRead::Keys(_) => format!("{context_base}|result={}", self.0.sparse.order_id()),
+            None => format!("{context_base}|result={}", self.0.sparse.order_id()),
         }
     }
 

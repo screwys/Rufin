@@ -503,11 +503,16 @@ fn entity_uri(snapshot: &Snapshot, source: u16, kind: &str, object: StrId) -> St
         .unwrap_or_default()
 }
 
+/// A stored rating on the 0-10 scale rows show it in.
+pub(crate) fn shown_rating(rating: Option<u8>) -> Option<i64> {
+    rating.map(|rating| i64::from(rating / 10))
+}
+
 /// The state a row shows: its favorite and rating, user's first, and its plays.
 fn state(flags: u16, user: u8, native: u8, played: Played) -> TrackState {
     TrackState {
         favorite: favorite(flags).unwrap_or(false),
-        rating: rating(user, native).map(|rating| i64::from(rating / 10)),
+        rating: shown_rating(rating(user, native)),
         last_played: played.last.map(i64::from),
         play_count: i64::from(played.plays),
         skip_count: i64::from(played.skips),

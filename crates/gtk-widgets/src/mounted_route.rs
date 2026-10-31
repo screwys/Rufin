@@ -5,8 +5,6 @@ use playback::TransportStatus;
 use rufin_core::view::{OpenOptions, Opened, Reread, View};
 use std::{
     cell::{Cell, RefCell},
-    future::Future,
-    pin::Pin,
     rc::Rc,
     sync::Arc,
 };
@@ -56,7 +54,6 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedDownloadChange = Rc<dyn Fn(&downloads::DownloadEvent)>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
-pub type MountedFavoriteState = Rc<dyn Fn(&library::StateChange)>;
 pub type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
@@ -94,114 +91,135 @@ pub fn item_navigation_entry_position(
     }
 }
 
-/// Runs at most one mounted-route read at a time and retains only the newest
-/// request while the route still owns this value.
-pub struct LatestMountedRouteRead<T: Send + 'static, R: Send + 'static = ()> {
-    apply: Rc<dyn Fn(R, T)>,
-    load: Arc<
-        dyn Fn(R, library::ReadCancellation) -> Pin<Box<dyn Future<Output = T> + Send>>
-            + Send
-            + Sync,
-    >,
-    runtime: tokio::runtime::Handle,
-    context: &'static str,
-    generation: Cell<u64>,
-    running: RefCell<Option<(library::ReadCancellation, tokio::task::AbortHandle)>>,
-    pending: RefCell<Option<(u64, R)>>,
+/// A row that shows a track's, album's or artist's favorite and rating.
+pub trait StateRow {
+    /// The state this row shows of the item `change` names, if it shows that item.
+    fn state(&self, _change: &library::StateChange) -> Option<&library::TrackState> {
+        None
+    }
+    fn state_mut(&mut self, _change: &library::StateChange) -> Option<&mut library::TrackState> {
+        None
+    }
 }
 
-impl<T: Send + 'static, R: Clone + Send + 'static> LatestMountedRouteRead<T, R> {
-    pub fn new_with_request(
-        runtime: tokio::runtime::Handle,
-        apply: Rc<dyn Fn(R, T)>,
-        load: Arc<
-            dyn Fn(R, library::ReadCancellation) -> Pin<Box<dyn Future<Output = T> + Send>>
-                + Send
-                + Sync,
-        >,
-        context: &'static str,
-    ) -> Rc<Self> {
-        Rc::new(Self {
-            apply,
-            load,
-            runtime,
-            context,
-            generation: Cell::new(0),
-            running: RefCell::new(None),
-            pending: RefCell::new(None),
-        })
+impl StateRow for library::TrackRow {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        (change.track() == Some(self.track_key)).then_some(&self.state)
     }
-
-    pub fn request_with(self: &Rc<Self>, request: R) {
-        self.queue(request);
-        self.start();
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        (change.track() == Some(self.track_key)).then_some(&mut self.state)
     }
+}
 
-    fn queue(&self, request: R) {
-        let generation = self.generation.get().wrapping_add(1);
-        self.generation.set(generation);
-        self.pending.replace(Some((generation, request)));
-        if let Some((cancellation, _)) = self.running.borrow().as_ref() {
-            cancellation.cancel();
+impl StateRow for library::AlbumRow {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        (change.album() == Some(self.album_key)).then_some(&self.state)
+    }
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        (change.album() == Some(self.album_key)).then_some(&mut self.state)
+    }
+}
+
+impl StateRow for library::ArtistRow {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        (change.artist() == Some(self.artist_key)).then_some(&self.state)
+    }
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        (change.artist() == Some(self.artist_key)).then_some(&mut self.state)
+    }
+}
+
+impl StateRow for library::Row {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state(change),
+            Self::Album(album) | Self::AlbumHeading(album) => album.state(change),
+            Self::Artist(artist) => artist.state(change),
+            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
         }
     }
-
-    fn start(self: &Rc<Self>) {
-        if self.running.borrow().is_some() {
-            return;
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.state_mut(change),
+            Self::Album(album) | Self::AlbumHeading(album) => album.state_mut(change),
+            Self::Artist(artist) => artist.state_mut(change),
+            Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
         }
-        let Some((generation, request)) = self.pending.borrow_mut().take() else {
-            return;
-        };
-        let cancellation = library::ReadCancellation::new();
-        let task = self
-            .runtime
-            .spawn((self.load)(request.clone(), cancellation.clone()));
-        self.running
-            .replace(Some((cancellation, task.abort_handle())));
-        let read = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let result = task.await;
-            let Some(read) = read.upgrade() else {
-                return;
+    }
+}
+
+impl StateRow for library::TagRow {}
+impl StateRow for library::PlaylistListRow {}
+
+/// The view a mounted route reads, which its models read their windows from, and the models
+/// that show committed favorites and ratings in their rows.
+pub struct RouteViewState {
+    view: RefCell<Arc<View>>,
+    rows: RefCell<Vec<Box<dyn Fn(&library::StateChange) -> bool>>>,
+}
+
+pub type RouteView = Rc<RouteViewState>;
+
+impl RouteViewState {
+    /// The view the route shows now.
+    pub fn borrow(&self) -> std::cell::Ref<'_, Arc<View>> {
+        self.view.borrow()
+    }
+
+    fn replace(&self, view: Arc<View>) -> Arc<View> {
+        self.view.replace(view)
+    }
+
+    /// Keeps `model`'s rows showing the favorites and ratings committed while it lives.
+    pub fn show_states<K, R>(&self, model: &Rc<SparseRouteModel<K, R>>)
+    where
+        K: Clone + Eq + Send + Sync + 'static,
+        R: StateRow + Clone + Send + Sync + 'static,
+    {
+        let model = Rc::downgrade(model);
+        self.rows.borrow_mut().push(Box::new(move |change| {
+            let Some(model) = model.upgrade() else {
+                return false;
             };
-            read.running.borrow_mut().take();
-            let value = match result {
-                Ok(value) => value,
-                Err(_) => {
-                    warn!(context = read.context, "route projection task panicked");
-                    read.start();
-                    return;
-                }
-            };
-            if read.generation.get() != generation {
-                read.start();
-                return;
-            }
-            (read.apply)(request, value);
-        });
+            model.update_matching(
+                |row| {
+                    row.state(change)
+                        .is_some_and(|state| !change.shown_in(state))
+                },
+                |row| {
+                    if let Some(state) = row.state_mut(change) {
+                        change.show_in(state);
+                    }
+                },
+            );
+            true
+        }));
     }
-}
 
-impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R> {
-    fn drop(&mut self) {
-        if let Some((cancellation, task)) = self.running.get_mut().take() {
-            cancellation.cancel();
-            task.abort();
+    /// Shows committed favorites and ratings in the rows; true when the page reads again
+    /// instead, because they order or filter its rows.
+    pub fn show(&self, items: &[library::StateChange]) -> bool {
+        if items.is_empty() {
+            return false;
         }
+        self.rows
+            .borrow_mut()
+            .retain(|rows| items.iter().all(|change| rows(change)));
+        self.view.borrow().states_reorder()
     }
 }
-
-/// The view a mounted route reads; its models read their windows from the view it holds now.
-pub type RouteView = Rc<RefCell<Arc<View>>>;
 
 /// The view holder of a route opened with `read`.
 pub fn route_view(read: &Opened) -> RouteView {
-    Rc::new(RefCell::new(Arc::clone(&read.view)))
+    Rc::new(RouteViewState {
+        view: RefCell::new(Arc::clone(&read.view)),
+        rows: RefCell::default(),
+    })
 }
 
 /// A sparse model of the rows `view` lists, seeded with the window `read` took with it. The
-/// seed and every later window keep the rows `map` takes.
+/// seed and every later window keep the rows `map` takes, and they show committed favorites
+/// and ratings.
 pub fn view_model<K, R>(
     runtime: tokio::runtime::Handle,
     view: &RouteView,
@@ -210,7 +228,7 @@ pub fn view_model<K, R>(
 ) -> Rc<SparseRouteModel<K, R>>
 where
     K: Clone + Eq + Send + Sync + 'static,
-    R: Clone + Send + Sync + 'static,
+    R: StateRow + Clone + Send + Sync + 'static,
 {
     let load_view = Rc::clone(view);
     let model = SparseRouteModel::new(
@@ -235,18 +253,24 @@ where
             .filter_map(map)
             .collect(),
     );
+    view.show_states(&model);
     model
 }
 
-/// A mounted route's view and the reads that replace it; the latest request wins. The route
-/// says what it wants read and how a new read applies; a read the route rejects is not kept.
+/// A mounted route's view and the reads that replace it. One read runs at a time and only the
+/// latest request is read next. The route says what it wants read and how a new read applies;
+/// a read the route rejects is not kept.
 pub struct PageReread {
     view: RouteView,
     inputs: Box<dyn Fn(&OpenOptions) -> OpenOptions>,
-    read: Rc<LatestMountedRouteRead<Result<Opened, String>, PageRequest>>,
+    apply: Box<dyn Fn(Opened) -> bool>,
+    runtime: tokio::runtime::Handle,
+    context: &'static str,
+    generation: Cell<u64>,
+    running: RefCell<Option<(library::ReadCancellation, tokio::task::AbortHandle)>>,
+    pending: RefCell<Option<(u64, PageRequest)>>,
 }
 
-#[derive(Clone)]
 struct PageRequest {
     view: Arc<View>,
     read: Reread,
@@ -262,42 +286,21 @@ impl PageReread {
         inputs: impl Fn(&OpenOptions) -> OpenOptions + 'static,
         apply: impl Fn(Opened) -> bool + 'static,
     ) -> Rc<Self> {
-        let current = Rc::downgrade(view);
-        let apply = Rc::new(move |_, result: Result<Opened, String>| {
-            let read = match result {
-                Ok(read) => read,
-                Err(error) => {
-                    warn!(%error, context, "failed to read page again");
-                    return;
-                }
-            };
-            let Some(current) = current.upgrade() else {
-                return;
-            };
-            // Models read windows of the new view as soon as they take its rows.
-            let previous = current.replace(Arc::clone(&read.view));
-            if !apply(read) {
-                current.replace(previous);
-            }
-        });
-        let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
-            Box::pin(async move {
-                let view = &request.view;
-                match request.read {
-                    Reread::Page => view.reread(request.options, request.window, &cancel).await,
-                    Reread::Releases => {
-                        view.reread_releases(request.options, request.window, &cancel)
-                            .await
-                    }
-                }
-                .map_err(|error| error.to_string())
-            }) as Pin<Box<dyn Future<Output = _> + Send>>
-        });
         Rc::new(Self {
             view: Rc::clone(view),
             inputs: Box::new(inputs),
-            read: LatestMountedRouteRead::new_with_request(runtime, apply, load, context),
+            apply: Box::new(apply),
+            runtime,
+            context,
+            generation: Cell::new(0),
+            running: RefCell::new(None),
+            pending: RefCell::new(None),
         })
+    }
+
+    /// The route's view holder.
+    pub fn route_view(&self) -> &RouteView {
+        &self.view
     }
 
     /// The view last applied.
@@ -311,18 +314,18 @@ impl PageReread {
     }
 
     /// Reads from the top, for a new search or filter.
-    pub fn reread(&self) {
+    pub fn reread(self: &Rc<Self>) {
         self.reread_at(library::RouteSeedWindow::top());
     }
 
     /// Reads where the list is, for a change to what it shows.
-    pub fn reread_at(&self, window: library::RouteSeedWindow) {
+    pub fn reread_at(self: &Rc<Self>, window: library::RouteSeedWindow) {
         self.request(Reread::Page, window);
     }
 
     /// Reads again for a committed change: from `live`, where the list is, unless its search
     /// moved since the read it shows.
-    pub fn refresh(&self, live: library::RouteSeedWindow) {
+    pub fn refresh(self: &Rc<Self>, live: library::RouteSeedWindow) {
         let window = if self.wanted().filter == self.view.borrow().options().filter {
             live
         } else {
@@ -332,130 +335,91 @@ impl PageReread {
     }
 
     /// Reads an artist page's releases again.
-    pub fn reread_releases(&self) {
+    pub fn reread_releases(self: &Rc<Self>) {
         self.request(Reread::Releases, library::RouteSeedWindow::top());
     }
 
-    fn request(&self, read: Reread, window: library::RouteSeedWindow) {
-        self.read.request_with(PageRequest {
-            view: self.view(),
-            read,
-            options: self.wanted(),
-            window,
-        });
-    }
-
     /// Reads again what `settings` change.
-    pub fn resume(&self, settings: &rufin_core::settings::app::Settings) {
+    pub fn resume(self: &Rc<Self>, settings: &rufin_core::settings::app::Settings) {
         let read = self.view.borrow().settings_reread(settings);
         if let Some(read) = read {
             self.request(read, library::RouteSeedWindow::top());
         }
     }
 
-    /// Reads again where the list is when a favorite change can move or drop its rows.
-    pub fn favorite_changed(&self, live: library::RouteSeedWindow) {
-        if self.view.borrow().states_reorder() {
-            self.refresh(live);
+    fn request(self: &Rc<Self>, read: Reread, window: library::RouteSeedWindow) {
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        self.pending.replace(Some((
+            generation,
+            PageRequest {
+                view: self.view(),
+                read,
+                options: self.wanted(),
+                window,
+            },
+        )));
+        if let Some((cancellation, _)) = self.running.borrow().as_ref() {
+            cancellation.cancel();
         }
+        self.start();
+    }
+
+    fn start(self: &Rc<Self>) {
+        if self.running.borrow().is_some() {
+            return;
+        }
+        let Some((generation, request)) = self.pending.borrow_mut().take() else {
+            return;
+        };
+        let cancel = library::ReadCancellation::new();
+        let task = self.runtime.spawn({
+            let cancel = cancel.clone();
+            async move {
+                let view = &request.view;
+                match request.read {
+                    Reread::Page => view.reread(request.options, request.window, &cancel).await,
+                    Reread::Releases => {
+                        view.reread_releases(request.options, request.window, &cancel)
+                            .await
+                    }
+                }
+                .map_err(|error| error.to_string())
+            }
+        });
+        self.running.replace(Some((cancel, task.abort_handle())));
+        let reread = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = task.await;
+            let Some(reread) = reread.upgrade() else {
+                return;
+            };
+            reread.running.borrow_mut().take();
+            match result {
+                Ok(_) if reread.generation.get() != generation => {}
+                Ok(Ok(read)) => {
+                    // Models read windows of the new view as soon as they take its rows.
+                    let previous = reread.view.replace(Arc::clone(&read.view));
+                    if !(reread.apply)(read) {
+                        reread.view.replace(previous);
+                    }
+                }
+                Ok(Err(error)) => {
+                    warn!(%error, context = reread.context, "failed to read page again");
+                }
+                Err(_) => warn!(context = reread.context, "page reread task panicked"),
+            }
+            reread.start();
+        });
     }
 }
 
-#[cfg(test)]
-mod latest_mounted_route_read_tests {
-    use super::*;
-
-    #[test]
-    fn latest_route_read_applies_only_the_newest_request() {
-        let runtime = tokio::runtime::Runtime::new().expect("route test runtime");
-        let context = gtk::glib::MainContext::new();
-        context
-            .with_thread_default(|| {
-                context.block_on(async {
-                    let (started_sender, started_receiver) = async_channel::bounded(2);
-                    let (release_sender, release_receiver) = async_channel::bounded(2);
-                    let (applied_sender, applied_receiver) = async_channel::bounded(2);
-                    let load = Arc::new(move |request: usize, _| {
-                        let started = started_sender.clone();
-                        let release = release_receiver.clone();
-                        Box::pin(async move {
-                            started.send(request).await.expect("publish started read");
-                            release.recv().await.expect("release route read");
-                            request
-                        }) as Pin<Box<dyn Future<Output = usize> + Send>>
-                    });
-                    let apply = Rc::new(move |request: usize, value: usize| {
-                        assert_eq!(request, value);
-                        applied_sender
-                            .try_send(value)
-                            .expect("publish applied route read");
-                    });
-                    let read = LatestMountedRouteRead::new_with_request(
-                        runtime.handle().clone(),
-                        apply,
-                        load,
-                        "test route",
-                    );
-
-                    read.request_with(0);
-                    assert_eq!(started_receiver.recv().await.unwrap(), 0);
-                    read.request_with(1);
-                    read.request_with(2);
-                    release_sender.send(()).await.unwrap();
-                    assert_eq!(started_receiver.recv().await.unwrap(), 2);
-                    assert!(applied_receiver.is_empty());
-                    release_sender.send(()).await.unwrap();
-                    assert_eq!(applied_receiver.recv().await.unwrap(), 2);
-                    assert!(applied_receiver.is_empty());
-                })
-            })
-            .expect("install route test MainContext");
-    }
-
-    #[test]
-    fn detached_route_read_does_not_publish() {
-        struct DropNotice(async_channel::Sender<()>);
-        impl Drop for DropNotice {
-            fn drop(&mut self) {
-                let _ = self.0.try_send(());
-            }
+impl Drop for PageReread {
+    fn drop(&mut self) {
+        if let Some((cancellation, task)) = self.running.get_mut().take() {
+            cancellation.cancel();
+            task.abort();
         }
-
-        let runtime = tokio::runtime::Runtime::new().expect("route test runtime");
-        let context = gtk::glib::MainContext::new();
-        context
-            .with_thread_default(|| {
-                context.block_on(async {
-                    let (started_sender, started_receiver) = async_channel::bounded(1);
-                    let (dropped_sender, dropped_receiver) = async_channel::bounded(1);
-                    let applied = Rc::new(Cell::new(false));
-                    let load = Arc::new(move |(): (), _| {
-                        let started = started_sender.clone();
-                        let dropped = dropped_sender.clone();
-                        Box::pin(async move {
-                            let notice = DropNotice(dropped);
-                            started.send(()).await.expect("publish started read");
-                            std::future::pending::<()>().await;
-                            notice
-                        })
-                            as Pin<Box<dyn Future<Output = DropNotice> + Send>>
-                    });
-                    let apply_flag = Rc::clone(&applied);
-                    let read = LatestMountedRouteRead::new_with_request(
-                        runtime.handle().clone(),
-                        Rc::new(move |(), _| apply_flag.set(true)),
-                        load,
-                        "detached test route",
-                    );
-
-                    read.request_with(());
-                    started_receiver.recv().await.unwrap();
-                    drop(read);
-                    dropped_receiver.recv().await.unwrap();
-                    assert!(!applied.get());
-                })
-            })
-            .expect("install route test MainContext");
     }
 }
 
@@ -554,7 +518,8 @@ pub struct MountedRoute {
     pub layout_cycle: Option<MountedRouteCommand>,
     pub tab_cycle: Option<MountedRouteCommand>,
     pub initial_demand: MountedRouteResume,
-    pub favorite_state: Option<MountedFavoriteState>,
+    /// The view whose rows show committed favorites and ratings.
+    pub states: Option<RouteView>,
     pub download_change: Option<MountedDownloadChange>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
@@ -571,7 +536,7 @@ impl MountedRoute {
             layout_cycle: None,
             tab_cycle: None,
             initial_demand: Rc::new(|| {}),
-            favorite_state: None,
+            states: None,
             download_change: None,
             home_page_apply: None,
         }
@@ -630,8 +595,8 @@ impl MountedRoute {
         self
     }
 
-    pub fn with_favorite_state(mut self, apply: MountedFavoriteState) -> Self {
-        self.favorite_state = Some(apply);
+    pub fn with_states(mut self, view: &RouteView) -> Self {
+        self.states = Some(Rc::clone(view));
         self
     }
 
@@ -651,9 +616,11 @@ impl MountedRoute {
         self
     }
 
-    pub fn apply_favorite_state(&self, state: &library::StateChange) {
-        if let Some(apply) = &self.favorite_state {
-            apply(state);
+    /// Shows committed favorites and ratings in the route's rows, or reads it again where they
+    /// order or filter them.
+    pub fn show_states(&self, items: &[library::StateChange]) {
+        if self.states.as_ref().is_some_and(|view| view.show(items)) {
+            (self.catalog_refresh)();
         }
     }
 

@@ -1705,6 +1705,23 @@ pub(crate) enum UserItem {
     Artist(i64),
 }
 
+impl UserItem {
+    pub(crate) fn key(self) -> i64 {
+        match self {
+            Self::Track(key) | Self::Album(key) | Self::Artist(key) => key,
+        }
+    }
+
+    /// The favorite target of this item at `uri`.
+    pub(crate) fn target(self, uri: String) -> crate::FavoriteTarget {
+        match self {
+            Self::Track(_) => crate::FavoriteTarget::Track(uri),
+            Self::Album(_) => crate::FavoriteTarget::Album(uri),
+            Self::Artist(_) => crate::FavoriteTarget::Artist(uri),
+        }
+    }
+}
+
 #[cfg(test)]
 #[derive(Debug, PartialEq)]
 pub(crate) struct Export {

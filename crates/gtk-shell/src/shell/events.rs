@@ -230,8 +230,8 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     }
     for state in &changed.items {
         shell.apply_favorite_state(&state.target, state.favorite);
-        shell.apply_favorite_state_to_mounted_route(state);
     }
+    shell.show_states_in_mounted_route(&changed.items);
     if changed.all
         || !changed.sources.is_empty()
         || changed.scope.is_some()

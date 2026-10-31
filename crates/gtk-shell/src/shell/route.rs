@@ -682,7 +682,7 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(false);
     }
 
-    pub(crate) fn apply_favorite_state_to_mounted_route(&self, state: &library::StateChange) {
+    pub(crate) fn show_states_in_mounted_route(&self, items: &[library::StateChange]) {
         if let Some(view) = self
             .route_viewport
             .mounted_route
@@ -690,7 +690,7 @@ impl Shell {
             .as_ref()
             .map(|entry| entry.view.clone())
         {
-            view.apply_favorite_state(state);
+            view.show_states(items);
         }
     }
 

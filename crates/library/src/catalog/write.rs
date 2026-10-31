@@ -114,12 +114,45 @@ pub enum Scope {
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct StateChange {
     pub target: crate::FavoriteTarget,
+    /// The target's row key: a TrackKey, AlbumKey or ArtistKey by its kind.
+    pub key: i64,
     /// The favorite it shows now.
     pub favorite: bool,
     /// The rating it shows now.
     pub rating: Option<u8>,
     /// Whether the rating it shows changed.
     pub rating_changed: bool,
+}
+
+impl StateChange {
+    /// The track it names.
+    pub fn track(&self) -> Option<crate::TrackKey> {
+        matches!(self.target, crate::FavoriteTarget::Track(_))
+            .then(|| crate::TrackKey::from_raw(self.key))
+    }
+
+    /// The album it names.
+    pub fn album(&self) -> Option<crate::AlbumKey> {
+        matches!(self.target, crate::FavoriteTarget::Album(_))
+            .then(|| crate::AlbumKey::from_raw(self.key))
+    }
+
+    /// The artist it names.
+    pub fn artist(&self) -> Option<crate::ArtistKey> {
+        matches!(self.target, crate::FavoriteTarget::Artist(_))
+            .then(|| crate::ArtistKey::from_raw(self.key))
+    }
+
+    /// Whether a row's `state` already shows this favorite and rating.
+    pub fn shown_in(&self, state: &crate::TrackState) -> bool {
+        state.favorite == self.favorite && state.rating == crate::read::shown_rating(self.rating)
+    }
+
+    /// Shows this favorite and rating in a row's `state`.
+    pub fn show_in(&self, state: &mut crate::TrackState) {
+        state.favorite = self.favorite;
+        state.rating = crate::read::shown_rating(self.rating);
+    }
 }
 
 /// One committed Write, as clients and features see it.
@@ -867,15 +900,10 @@ impl<'a> Write<'a> {
             .snapshot()
             .shown_state(item)
             .unwrap_or_default();
-        let uri = uri.to_owned();
-        let target = match item {
-            UserItem::Track(_) => crate::FavoriteTarget::Track(uri),
-            UserItem::Album(_) => crate::FavoriteTarget::Album(uri),
-            UserItem::Artist(_) => crate::FavoriteTarget::Artist(uri),
-        };
         self.changed(Scope::State {
             items: vec![StateChange {
-                target,
+                target: item.target(uri.to_owned()),
+                key: item.key(),
                 favorite: favorite.unwrap_or(false),
                 rating,
                 rating_changed: false,
@@ -1179,11 +1207,8 @@ impl<'a> Write<'a> {
             .filter_map(|(item, uri, before)| {
                 let after = snapshot.shown_state(item)?;
                 (after != before).then(|| StateChange {
-                    target: match item {
-                        UserItem::Track(_) => crate::FavoriteTarget::Track(uri),
-                        UserItem::Album(_) => crate::FavoriteTarget::Album(uri),
-                        UserItem::Artist(_) => crate::FavoriteTarget::Artist(uri),
-                    },
+                    target: item.target(uri),
+                    key: item.key(),
                     favorite: after.0.unwrap_or(false),
                     rating: after.1,
                     rating_changed: after.1 != before.1,

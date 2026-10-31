@@ -78,10 +78,10 @@ impl CatalogUi {
         album_artist: bool,
         mut read: Opened,
     ) -> MountedRoute {
-        let (Some(summary), Some(favorite_rows), Some(favorite_read)) = (
+        let (Some(summary), Some(favorite_rows), true) = (
             artist_header(&mut read),
             read.favorites.take(),
-            read.view.favorites().cloned(),
+            read.view.favorites().is_some(),
         ) else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Artist",
@@ -95,7 +95,6 @@ impl CatalogUi {
         let favorite_model = crate::track_model::TrackCollectionModel::favorites(
             self.runtime.clone(),
             &view,
-            favorite_read,
             favorite_rows,
         );
         let favorite = self.track_projection(
@@ -171,16 +170,12 @@ impl CatalogUi {
                     shell.reapply_current_track();
                     return true;
                 };
-                let (Some(summary), Some(favorite_read)) =
-                    (artist_header(&mut read), read.view.favorites().cloned())
+                let Some(summary) =
+                    artist_header(&mut read).filter(|_| read.view.favorites().is_some())
                 else {
                     return false;
                 };
-                favorite.replace_favorites(
-                    favorite_read,
-                    read.view.favorites_len().unwrap_or(0),
-                    favorite_rows,
-                );
+                favorite.replace_favorites(read.view.favorites_len().unwrap_or(0), favorite_rows);
                 header.replace(&shell, summary);
                 let present = !favorite.source_is_empty();
                 releases.set_favorite_present(present);
@@ -266,6 +261,7 @@ impl CatalogUi {
             _ => {}
         });
         MountedRoute::new(releases.widget(), resume)
+            .with_states(&view)
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || releases.upgrade().map(|releases| releases.item_scroll()))
@@ -404,6 +400,7 @@ impl CatalogUi {
             }
         });
         MountedRoute::new(releases.widget(), resume)
+            .with_states(&view)
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || releases.upgrade().map(|releases| releases.item_scroll()))
@@ -484,6 +481,7 @@ impl CatalogUi {
         };
         let refresh_tracks = Rc::clone(&tracks);
         MountedRoute::new(root.upcast(), resume)
+            .with_states(&view)
             .with_catalog_refresh(Rc::new(move || {
                 reread.refresh(refresh_tracks.live_window())
             }))

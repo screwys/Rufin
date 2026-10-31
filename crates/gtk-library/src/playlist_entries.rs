@@ -93,7 +93,7 @@ impl PlaylistEntriesView {
 
     /// Where a reread starts so the rows on screen stay.
     pub fn live_window(&self) -> library::RouteSeedWindow {
-        library::RouteSeedWindow::position(self.model.first_live_position())
+        self.model.live_window()
     }
 
     pub fn replace_prepared(&self, read: Opened) -> bool {

@@ -9,7 +9,7 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
+use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, StateRow, route_view};
 use rufin_core::view::Opened;
 
 use gtk_widgets::route::{FolderPathItem, Route};
@@ -51,7 +51,7 @@ impl CatalogUi {
             .imp()
             .breadcrumb_host
             .append(&folder_path_switcher(self, &path));
-        let (content, resume, refresh, download_change, initial_demand) =
+        let (content, view, resume, refresh, download_change, initial_demand) =
             folder_page(self, path, search.clone(), read);
         wrapper.append(&content);
         let shell = Rc::downgrade(self);
@@ -72,6 +72,7 @@ impl CatalogUi {
             .with_search(search)
             .with_download_change(download_change)
             .with_initial_demand(initial_demand)
+            .with_states(&view)
     }
 }
 
@@ -83,6 +84,21 @@ impl CatalogUi {
 enum FolderTableRow {
     Folder(library::FolderRow),
     Track(library::TrackRow),
+}
+
+impl StateRow for FolderTableRow {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        match self {
+            Self::Track(track) => track.state(change),
+            Self::Folder(_) => None,
+        }
+    }
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        match self {
+            Self::Track(track) => track.state_mut(change),
+            Self::Folder(_) => None,
+        }
+    }
 }
 
 impl FolderTableRow {
@@ -130,6 +146,7 @@ fn folder_page(
     read: Opened,
 ) -> (
     gtk::Widget,
+    RouteView,
     FolderResume,
     FolderResume,
     gtk_widgets::mounted_route::MountedDownloadChange,
@@ -148,6 +165,7 @@ fn folder_page(
         shell.runtime.clone(),
         folder_rows(&view, true),
     );
+    view.show_states(&track_sparse);
     let filter = read.view.options().filter.clone();
     let initial_empty = read.view.is_empty();
     let seed = {
@@ -329,6 +347,7 @@ fn folder_page(
     });
     (
         table_stack.upcast(),
+        view,
         resume,
         refresh,
         download_change,

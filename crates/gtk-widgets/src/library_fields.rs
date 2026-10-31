@@ -20,7 +20,6 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn artist(&self) -> &str;
     fn artwork(&self) -> Option<&[u8]>;
     fn favorite(&self) -> bool;
-    fn set_favorite(&mut self, value: bool);
     fn downloaded(&self) -> bool;
     fn download_badge(&self) -> bool {
         crate::downloads::media_download_badge(self.media_uri(), self.downloaded())
@@ -51,9 +50,6 @@ impl TrackPresentation for TrackRow {
     }
     fn favorite(&self) -> bool {
         self.state.favorite
-    }
-    fn set_favorite(&mut self, value: bool) {
-        self.state.favorite = value;
     }
     fn downloaded(&self) -> bool {
         self.is_downloaded
@@ -96,9 +92,6 @@ impl TrackPresentation for std::sync::Arc<QueueRow> {
     }
     fn favorite(&self) -> bool {
         self.track.state.favorite
-    }
-    fn set_favorite(&mut self, value: bool) {
-        std::sync::Arc::make_mut(self).track.state.favorite = value;
     }
     fn downloaded(&self) -> bool {
         self.track.access.is_downloaded
