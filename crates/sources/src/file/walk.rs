@@ -19,8 +19,6 @@ const PAGE: usize = 8192;
 const BATCH: usize = 128;
 /// Identities kept per walk to follow renamed files.
 const IDENTITIES: usize = 65_536;
-/// Above this many changed directories the artwork pass reads every album.
-const ARTWORK_DIRECTORIES: usize = 256;
 
 /// One listed directory entry, or a stat of one path.
 #[derive(Clone, Debug, Default)]
@@ -1079,19 +1077,20 @@ impl<F: FileSource> Walker<'_, '_, F> {
     }
 }
 
-/// The folder artwork a source's walks owe: the distinct-covers setting its last full pass ran
-/// with, since a resync reads every album's artwork again only when it changed, and the
-/// directories of a cancelled walk.
+/// The directories a cancelled walk left without their folder artwork, for the next pass.
 #[derive(Default)]
-pub(crate) struct ArtworkState(Mutex<(Option<bool>, BTreeSet<String>)>);
+pub(crate) struct ArtworkState(Mutex<BTreeSet<String>>);
 
 impl ArtworkState {
     fn defer(&self, mut directories: BTreeSet<String>) {
-        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        state.1.append(&mut directories);
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .append(&mut directories);
     }
 
-    /// The folder-artwork pass for the directories a walk changed and those still owed.
+    /// The folder-artwork pass for the directories a walk changed and those still owed. A
+    /// resync reads every album's artwork again.
     async fn pass(
         &self,
         files: crate::file::artwork::ArtworkFiles<'_>,
@@ -1100,25 +1099,16 @@ impl ArtworkState {
         resync: bool,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let distinct = observation.catalog.distinct_track_covers();
-        let every = {
-            let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-            directories.append(&mut state.1);
-            resync && state.0 != Some(distinct) || directories.len() > ARTWORK_DIRECTORIES
-        };
-        if !every && directories.is_empty() {
+        directories.append(&mut self.0.lock().unwrap_or_else(|error| error.into_inner()));
+        if !resync && directories.is_empty() {
             return Ok(());
         }
-        let scope = (!every).then(|| directories.iter().cloned().collect::<Vec<_>>());
+        let scope = (!resync).then(|| directories.iter().cloned().collect::<Vec<_>>());
         let read = files
             .acquire(observation, scope.as_deref(), cancelled)
             .await;
-        match &read {
-            Ok(()) if every => {
-                self.0.lock().unwrap_or_else(|error| error.into_inner()).0 = Some(distinct);
-            }
-            Err(SourceError::Cancelled) => self.defer(directories),
-            _ => {}
+        if matches!(read, Err(SourceError::Cancelled)) {
+            self.defer(directories);
         }
         read
     }

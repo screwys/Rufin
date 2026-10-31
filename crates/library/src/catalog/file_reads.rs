@@ -26,11 +26,11 @@ impl Catalog {
     }
 
     /// Albums with an indexed track in one of `directories` or the directory below it, or
-    /// every album with an indexed file track when `directories` is None.
-    pub async fn source_artwork_album_page(
+    /// every album with an indexed file track when `directories` is None, in one statement
+    /// so the scope is matched once.
+    pub async fn source_artwork_albums(
         &self,
         source_id: &str,
-        after: &str,
         directories: Option<&[String]>,
     ) -> LibraryResult<Vec<String>> {
         let held = match directories {
@@ -38,16 +38,15 @@ impl Catalog {
             Some(_) => format!("album.album_key IN(SELECT track.album_key FROM scope CROSS JOIN track_details details ON details.source_path>=scope.prefix AND details.source_path<scope.prefix||char(1114111) CROSS JOIN tracks track USING(track_key) WHERE track.indexed AND {TWO_LEVELS})"),
         };
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?3)) SELECT album.object_id FROM albums album JOIN sources source USING(source_key) WHERE source.object_id=?1 AND album.object_id>?2 AND {held} ORDER BY album.object_id LIMIT 128")))
-            .bind(source_id).bind(after).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?2)) SELECT album.object_id FROM albums album JOIN sources source USING(source_key) WHERE source.object_id=?1 AND {held}")))
+            .bind(source_id).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
     }
 
     /// Artists credited by an indexed track under one of `directories`, whose portraits can
     /// sit in any folder above the track, or every such artist when `directories` is None.
-    pub async fn source_artwork_artist_page(
+    pub async fn source_artwork_artists(
         &self,
         source_id: &str,
-        after: &str,
         directories: Option<&[String]>,
     ) -> LibraryResult<Vec<(String, String)>> {
         let held = match directories {
@@ -59,8 +58,8 @@ impl Catalog {
             }
         };
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?3)) SELECT artist.object_id,artist.name FROM artists artist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND artist.object_id>?2 AND {held} ORDER BY artist.object_id LIMIT 128")))
-            .bind(source_id).bind(after).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH scope(prefix) AS(SELECT value FROM json_each(?2)) SELECT artist.object_id,artist.name FROM artists artist JOIN sources source USING(source_key) WHERE source.object_id=?1 AND {held}")))
+            .bind(source_id).bind(directories.map(serde_json::to_string).transpose()?).fetch_all(&mut *connection).await?)
     }
 
     pub async fn file_artwork_image_page(

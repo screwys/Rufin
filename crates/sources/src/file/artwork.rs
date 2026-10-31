@@ -300,18 +300,15 @@ impl<'a> ArtworkFiles<'a> {
         // Folder lookups, shared by the pass: a folder's cover, and whether it holds one album.
         let mut covers = HashMap::new();
         let mut single = HashMap::new();
-        let mut after = String::new();
-        loop {
-            let albums = catalog
-                .source_artwork_album_page(source_id, &after, directories)
-                .await?;
-            let Some(last) = albums.last() else { break };
-            after.clone_from(last);
+        let albums = catalog
+            .source_artwork_albums(source_id, directories)
+            .await?;
+        for albums in albums.chunks(128) {
             let tracks = catalog
-                .source_artwork_album_tracks(source_id, &albums)
+                .source_artwork_album_tracks(source_id, albums)
                 .await?;
             let (mut images, mut track_art, mut album_art) = (Vec::new(), Vec::new(), Vec::new());
-            for album in &albums {
+            for album in albums {
                 check_cancelled(cancelled)?;
                 let tracks = owned(&tracks, album);
                 let mut cover = None;
@@ -367,19 +364,11 @@ impl<'a> ArtworkFiles<'a> {
             observation
                 .set_source_artwork(&images, &[("track", &track_art), ("album", &album_art)])
                 .await?;
-            if albums.len() < 128 {
-                break;
-            }
         }
-        let mut after = String::new();
-        loop {
-            let artists = catalog
-                .source_artwork_artist_page(source_id, &after, directories)
-                .await?;
-            let Some((last, _)) = artists.last() else {
-                break;
-            };
-            after.clone_from(last);
+        let artists = catalog
+            .source_artwork_artists(source_id, directories)
+            .await?;
+        for artists in artists.chunks(128) {
             let ids = artists
                 .iter()
                 .map(|(id, _)| id.as_str())
@@ -388,7 +377,7 @@ impl<'a> ArtworkFiles<'a> {
                 .source_artwork_artist_tracks(source_id, &ids)
                 .await?;
             let (mut images, mut artist_art) = (Vec::new(), Vec::new());
-            for (artist, name) in &artists {
+            for (artist, name) in artists {
                 check_cancelled(cancelled)?;
                 let tracks = owned(&tracks, artist);
                 // Folder portraits in any folder above a track come before embedded pictures.
@@ -427,9 +416,6 @@ impl<'a> ArtworkFiles<'a> {
             observation
                 .set_source_artwork(&images, &[("artist", &artist_art)])
                 .await?;
-            if artists.len() < 128 {
-                break;
-            }
         }
         if matches!(self, Self::Local) && directories.is_none() {
             observation.clear_partial_file_image_observations().await?;
