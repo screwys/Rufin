@@ -62,7 +62,10 @@ impl Controller {
         let mut changes = settings.changes();
         // The controller starts again when its settings or its token change.
         let wanted = |stored: &rufin_core::settings::StoredSettings| {
-            (stored.ui.web_controller.clone(), stored.secrets_revision)
+            (
+                stored.ui.web_controller.clone(),
+                stored.web_controller_token_revision,
+            )
         };
         let (status, receiver) = watch::channel(ControllerStatus {
             settings: changes.borrow().ui.web_controller.clone(),

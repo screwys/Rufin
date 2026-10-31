@@ -101,7 +101,7 @@ impl SettingsOwner {
             .save_secret(&key, &token)
             .map_err(|error| error.to_string())?;
         if regenerate {
-            self.file.secrets_replaced()?;
+            self.file.web_controller_token_replaced()?;
         }
         Ok(token)
     }

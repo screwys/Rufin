@@ -155,9 +155,14 @@ pub struct StoredSettings {
     pub(crate) jellyfin_device_id: String,
     #[serde(default)]
     visualizer_preset_bar_counts_updated: bool,
-    /// Rises when secrets kept outside the settings are replaced, so the feed tells it.
+    /// Rises when a restore replaces the credentials kept outside the settings, so the feed
+    /// tells it.
     #[serde(skip)]
     pub secrets_revision: u64,
+    /// Rises when the web controller's token is replaced or the secret store switches, so the
+    /// controller starts again with its token.
+    #[serde(skip)]
+    pub web_controller_token_revision: u64,
 }
 
 impl Default for StoredSettings {
@@ -173,6 +178,7 @@ impl Default for StoredSettings {
             jellyfin_device_id: String::new(),
             visualizer_preset_bar_counts_updated: true,
             secrets_revision: 0,
+            web_controller_token_revision: 0,
         }
     }
 }
@@ -493,15 +499,21 @@ impl SettingsOwner {
     }
 
     /// Writes restored settings. `credentials_changed` says the secrets they name were
-    /// replaced, which the feed tells by a new `secrets_revision`.
+    /// replaced, which the feed tells by a new `secrets_revision`. The revisions count on
+    /// whatever the restore puts in their place.
     pub(crate) fn restore(
         &self,
         restore: impl FnOnce(&mut StoredSettings) -> Result<(), String>,
         credentials_changed: bool,
     ) -> Result<(), String> {
         self.file.update(|stored| {
+            let revisions = (
+                stored.secrets_revision,
+                stored.web_controller_token_revision,
+            );
             restore(stored)?;
-            stored.secrets_revision += u64::from(credentials_changed);
+            stored.secrets_revision = revisions.0 + u64::from(credentials_changed);
+            stored.web_controller_token_revision = revisions.1;
             Ok(())
         })
     }
@@ -518,10 +530,10 @@ impl SettingsFile {
         });
     }
 
-    /// Tells the feed that secrets kept outside the settings were replaced.
-    pub(crate) fn secrets_replaced(&self) -> Result<(), String> {
+    /// Tells the feed that the web controller's token was replaced.
+    pub(crate) fn web_controller_token_replaced(&self) -> Result<(), String> {
         self.edit(|stored| {
-            stored.secrets_revision += 1;
+            stored.web_controller_token_revision += 1;
             Ok(())
         })
     }

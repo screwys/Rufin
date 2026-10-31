@@ -1972,7 +1972,7 @@ impl SourceOwner {
                         Ok(())
                     })?;
                     secrets.replace(platform_secret_store(&settings));
-                    settings.secrets_replaced()?;
+                    settings.web_controller_token_replaced()?;
                     Ok(())
                 })
                 .await
