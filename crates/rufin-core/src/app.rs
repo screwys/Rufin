@@ -285,7 +285,14 @@ where
                 settings_playback
                     .waveform_setting_changed(current.ui.player_display.seekbar_waveform_enabled);
             }
-            if previous.ui.playback != current.ui.playback {
+            // The player saves its own volume and mute; only an edit of the rest, the output
+            // included, concerns it.
+            let edited = playback::PlaybackSettings {
+                volume: current.ui.playback.volume,
+                muted: current.ui.playback.muted,
+                ..previous.ui.playback.clone()
+            };
+            if edited != current.ui.playback {
                 settings_playback
                     .playback_settings_changed(&previous.ui.playback, current.ui.playback.clone());
             }
