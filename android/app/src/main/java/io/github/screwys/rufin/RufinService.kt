@@ -182,6 +182,25 @@ class RufinService : MediaSessionService() {
                 }
             }
             launch {
+                // The document tree the sync folder uses; its grant goes once Connect stops
+                // using it: the folder changed or cleared, Connect turned off, or this device
+                // left or was removed. The Local source may still read that tree, and other
+                // grants (downloads, backup, playlist files, opened documents) are their own.
+                val connect = started.connect()
+                val status = connect.changes()
+                var folder: String? = null
+                try {
+                    while (isActive) {
+                        val next = withContext(Dispatchers.Default) { status.next() }
+                        val document = (next.settings.folder as? io.github.screwys.rufin.shared.rufin_core.SyncFolder.Document)?.document
+                        val dropped = folder?.takeIf { it != document }
+                        folder = document
+                        if (dropped != null) try { releaseSyncFolder(started, dropped) }
+                        catch (error: Exception) { Log.w("Rufin", "Could not release the old sync folder", error) }
+                    }
+                } finally { status.destroy(); connect.destroy() }
+            }
+            launch {
                 val source = started.source()
                 val sources = source.subscribe()
                 var documentSource: String? = null
@@ -245,6 +264,15 @@ class RufinService : MediaSessionService() {
             withContext(NonCancellable + Dispatchers.IO) { core?.destroy() }
         }
 
+    }
+
+    private fun releaseSyncFolder(started: AndroidRuntime, document: String) {
+        val uri = android.net.Uri.parse(document)
+        val held = contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri } ?: return
+        if (started.hasDocumentRoot(document)) return
+        contentResolver.releasePersistableUriPermission(uri,
+            (if (held.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                (if (held.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0))
     }
 
     private fun runtimeFailed(error: Exception) {

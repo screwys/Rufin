@@ -1,7 +1,5 @@
 package io.github.screwys.rufin.connect
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
@@ -54,18 +52,8 @@ internal class ConnectConnection(private val model: RufinConnection) {
                                 fileSources = withContext(Dispatchers.IO) { source.fileIntegrations() }
                             }
                         }
-                        // The document tree the sync folder uses; its grant goes once Connect stops
-                        // using it: the folder changed or cleared, Connect turned off, or this
-                        // device left or was removed. The Local source may still read that tree.
-                        var granted: String? = null
                         while (isActive) {
                             val next = withContext(Dispatchers.Default) { subscription.next() }
-                            val document = (next.settings.folder as? SyncFolder.Document)?.document
-                            if (granted != null && granted != document && !runtime.hasDocumentRoot(granted)) {
-                                service.contentResolver.releasePersistableUriPermission(Uri.parse(granted),
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                            }
-                            granted = document
                             if (next.connecting && state?.connecting != true) operationActive = true
                             if (!next.connecting && next.error == null) operationActive = false
                             val offer = next.continuation?.let { it.device to it.at }
