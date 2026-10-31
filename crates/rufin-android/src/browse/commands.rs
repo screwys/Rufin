@@ -73,11 +73,23 @@ impl AndroidLibrary {
             .as_ref()
             .map(|route| self.target_query(route.clone()))
             .transpose()?;
+        // A download takes a collection in every music folder; a folder's tracks and a smart
+        // playlist's members are the ones of the folder they are read in.
+        let every_music_folder = !matches!(route, Some(Route::Folders { .. }));
         let source = self.source.clone();
         self.runtime
             .spawn(async move {
                 let selection = match query {
-                    Some(query) => query.selection().await?.as_ref().clone(),
+                    Some(query) => {
+                        let mut selection = query.selection().await?.as_ref().clone();
+                        if let MemberSelection::Members { read, .. } = &mut selection
+                            && every_music_folder
+                            && !matches!(read.collection, Collection::Smart { .. })
+                        {
+                            read.folder = None;
+                        }
+                        selection
+                    }
                     None => MemberSelection::Uris(vec![media_uri].into()),
                 };
                 let result = if remove {
