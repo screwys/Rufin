@@ -263,8 +263,8 @@ impl Shell {
             } else {
                 None
             };
-            match (read.view.home(), apply_home) {
-                (Some(home), Some(apply)) => apply(home.clone()),
+            match (read.view.home_sections(), apply_home) {
+                (Some(sections), Some(apply)) => apply(sections),
                 _ => {
                     shell.replace_mounted_route(route, source_id, render_started, move |catalog| {
                         catalog.opened_collection_view(read)

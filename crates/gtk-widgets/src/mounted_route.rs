@@ -54,7 +54,7 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedDownloadChange = Rc<dyn Fn(&downloads::DownloadEvent)>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
-pub type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
+pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
 #[derive(Clone)]

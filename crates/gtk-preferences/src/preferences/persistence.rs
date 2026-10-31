@@ -89,15 +89,8 @@ impl Preferences {
         });
     }
 
+    /// Saves Home's blocks; Home reads again to show them in core's order.
     pub(super) fn set_home_blocks(self: &Rc<Self>, blocks: Vec<HomeBlockKind>) {
-        let previous = self
-            .settings
-            .current
-            .borrow()
-            .application
-            .home_blocks
-            .clone();
-        let added = blocks.iter().any(|block| !previous.contains(block));
         match self.settings.persistence.set_home_blocks(blocks) {
             Ok(true) => {
                 self.settings.sync();
@@ -108,9 +101,6 @@ impl Preferences {
                 return;
             }
         }
-        (self.effects)(crate::Effect::CatalogChanged);
-        if added {
-            (self.effects)(crate::Effect::RefreshHome);
-        }
+        (self.effects)(crate::Effect::RefreshHome);
     }
 }

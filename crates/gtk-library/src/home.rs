@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use library::{HomeAlbumRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow};
+use library::{
+    HomeAlbumRow, HomeProviderSection, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow,
+};
 use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -20,6 +22,7 @@ use gtk_widgets::layout::{configure_fill_width_clip, width_allocation_owner};
 use gtk_widgets::localization::{bind_label_text_with, localized_label};
 use gtk_widgets::mounted_route::MountedRoute;
 use rufin_core::settings::{HomeBlockKind, HomeSectionKind};
+use rufin_core::view::HomeSection;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -172,265 +175,144 @@ struct HomeSectionView {
     mounted: MountedHomeSection,
 }
 
+/// Which section a shown Home section is, so a new read updates it in place.
+#[derive(Clone, PartialEq)]
+enum HomeSectionId {
+    Showcase,
+    Genres,
+    Rows(HomeBlockKind),
+    Provider(String),
+}
+
+fn home_section_id(section: &HomeSection) -> HomeSectionId {
+    match section {
+        HomeSection::Showcase(_) => HomeSectionId::Showcase,
+        HomeSection::Genres(_) => HomeSectionId::Genres,
+        HomeSection::Rows { block, .. } => HomeSectionId::Rows(*block),
+        HomeSection::Provider(provider) => HomeSectionId::Provider(provider.section_id.clone()),
+    }
+}
+
+/// A shown Home section: a row of items, or a widget built from the section it shows.
+#[derive(Clone)]
+enum ShownHomeSection {
+    Rows(HomeSectionView),
+    Built(gtk::Widget, HomeSection),
+}
+
+impl ShownHomeSection {
+    fn root(&self) -> &gtk::Widget {
+        match self {
+            Self::Rows(view) => &view.root,
+            Self::Built(widget, _) => widget,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct HomeRouteProjection {
     shell: std::rc::Weak<CatalogUi>,
-    home: Rc<RefCell<HomePage>>,
-    slots: Rc<std::collections::HashMap<HomeBlockKind, gtk::Box>>,
-    sections: Rc<RefCell<std::collections::HashMap<HomeSectionKind, HomeSectionView>>>,
-    provider_sections: Rc<RefCell<std::collections::HashMap<String, HomeSectionView>>>,
+    /// The showcase album, for its menu and download counts.
+    showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
+    shown: Rc<RefCell<Vec<(HomeSectionId, ShownHomeSection)>>>,
     content: gtk::Box,
-    provider_slot: gtk::Box,
     empty: gtk::Widget,
-    applied_blocks: Rc<RefCell<Vec<HomeBlockKind>>>,
 }
 
 impl HomeRouteProjection {
-    fn apply(&self, home: HomePage) {
+    /// Shows Home's sections in the order core composed them.
+    fn apply(&self, sections: Vec<HomeSection>) {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let blocks = shell
-            .settings
-            .current
-            .borrow()
-            .application
-            .home_blocks
-            .clone();
-        let previous = self.home.replace(home.clone());
-        if previous.showcase != home.showcase
-            && blocks.contains(&HomeBlockKind::Showcase)
-            && let Some(slot) = self.slots.get(&HomeBlockKind::Showcase)
-        {
-            while let Some(child) = slot.first_child() {
-                slot.remove(&child);
+        let mut previous = self.shown.take();
+        let mut shown = Vec::with_capacity(sections.len());
+        let mut after = None::<gtk::Widget>;
+        self.showcase.replace(None);
+        for section in sections {
+            let id = home_section_id(&section);
+            let kept = previous
+                .iter()
+                .position(|(shown, _)| *shown == id)
+                .map(|index| previous.remove(index).1);
+            if let HomeSection::Showcase(row) = &section {
+                self.showcase.replace(Some(HomeAlbumRow::clone(row)));
             }
-            if let Some(showcase) = home.showcase.as_ref() {
-                slot.append(&shell.home_showcase(showcase, Rc::clone(&self.home)));
-            }
-        }
-        for (block, kind, rows) in [
-            (
-                HomeBlockKind::Explore,
-                HomeSectionKind::Explore,
-                HomeSectionRows {
-                    tracks: Vec::new(),
-                    albums: home.explore.clone(),
-                },
-            ),
-            (
-                HomeBlockKind::MostPlayed,
-                HomeSectionKind::MostPlayed,
-                home.most_played.clone(),
-            ),
-            (
-                HomeBlockKind::NewlyAdded,
-                HomeSectionKind::NewlyAdded,
-                home.newly_added.clone(),
-            ),
-            (
-                HomeBlockKind::RecentlyPlayed,
-                HomeSectionKind::RecentlyPlayed,
-                home.recently_played.clone(),
-            ),
-            (
-                HomeBlockKind::RecentlyReleased,
-                HomeSectionKind::RecentlyReleased,
-                home.recently_released.clone(),
-            ),
-        ] {
-            if !blocks.contains(&block) {
-                continue;
-            }
-            let items = home_items(&rows);
-            if let Some(view) = self.sections.borrow().get(&kind).cloned() {
-                view.root.set_visible(!items.is_empty());
-                view.mounted.replace(items);
-            } else if !items.is_empty()
-                && let Some(slot) = self.slots.get(&block)
-            {
-                let view = shell.home_section_view(
-                    &tr(gtk_widgets::settings::home_block_title(block)),
-                    items,
-                    Some(kind),
-                );
-                slot.append(&view.root);
-                self.sections.borrow_mut().insert(kind, view);
-            }
-        }
-        if previous.genres != home.genres
-            && blocks.contains(&HomeBlockKind::Genres)
-            && let Some(slot) = self.slots.get(&HomeBlockKind::Genres)
-        {
-            while let Some(child) = slot.first_child() {
-                slot.remove(&child);
-            }
-            if let Some(genres) = shell.home_genres(&home.genres) {
-                slot.append(&genres);
-            }
-        }
-        let mut live_provider_ids = Vec::new();
-        let mut previous_provider = None::<gtk::Widget>;
-        for provider in &home.provider_sections {
-            live_provider_ids.push(provider.section_id.clone());
-            let title = rufin_core::settings::presentation::home_provider_title(
-                &provider.section_id,
-                provider.title.as_deref(),
-            );
-            let items = home_items(&provider.rows);
-            if !items.is_empty() {
-                let existing = self
-                    .provider_sections
-                    .borrow()
-                    .get(&provider.section_id)
-                    .cloned();
-                let view = existing.unwrap_or_else(|| {
-                    let view = shell.home_section_view(&title, Vec::new(), None);
-                    self.provider_slot.append(&view.root);
-                    self.provider_sections
-                        .borrow_mut()
-                        .insert(provider.section_id.clone(), view.clone());
-                    view
-                });
-                view.root.set_visible(true);
-                view.header.set_title(&title);
-                view.mounted.replace(items);
-                self.provider_slot
-                    .reorder_child_after(&view.root, previous_provider.as_ref());
-                previous_provider = Some(view.root.clone());
-            } else if let Some(view) = self
-                .provider_sections
-                .borrow()
-                .get(&provider.section_id)
-                .cloned()
-            {
-                view.mounted.replace(Vec::new());
-                view.root.set_visible(false);
-            }
-        }
-        let stale = self
-            .provider_sections
-            .borrow()
-            .keys()
-            .filter(|id| !live_provider_ids.contains(id))
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in stale {
-            if let Some(view) = self.provider_sections.borrow_mut().remove(&id) {
-                self.provider_slot.remove(&view.root);
-            }
-        }
-        self.empty.set_visible(
-            self.slots.values().all(|slot| !slot_has_content(slot))
-                && !slot_has_content(&self.provider_slot),
-        );
-        self.apply_block_settings();
-    }
-
-    fn reconcile_block_settings(&self) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        let blocks = shell
-            .settings
-            .current
-            .borrow()
-            .application
-            .home_blocks
-            .clone();
-        if *self.applied_blocks.borrow() != blocks {
-            self.apply_block_settings();
-        }
-    }
-
-    fn apply_block_settings(&self) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        let blocks = shell
-            .settings
-            .current
-            .borrow()
-            .application
-            .home_blocks
-            .clone();
-        let showcase = self.slots.get(&HomeBlockKind::Showcase).filter(|_| {
-            blocks.contains(&HomeBlockKind::Showcase) && slot_has_content(&self.provider_slot)
-        });
-        if let Some(showcase) = showcase {
-            showcase.set_visible(slot_has_content(showcase));
-            self.content
-                .reorder_child_after(showcase, None::<&gtk::Widget>);
-        }
-        self.content
-            .reorder_child_after(&self.provider_slot, showcase);
-        let mut previous = Some(self.provider_slot.clone().upcast::<gtk::Widget>());
-        for block in &blocks {
-            if *block == HomeBlockKind::Showcase && showcase.is_some() {
-                continue;
-            }
-            let Some(slot) = self.slots.get(block) else {
-                continue;
-            };
-            slot.set_visible(slot_has_content(slot));
-            self.content.reorder_child_after(slot, previous.as_ref());
-            previous = Some(slot.clone().upcast());
-        }
-        for block in HomeBlockKind::all() {
-            if !blocks.contains(&block)
-                && let Some(slot) = self.slots.get(&block)
-            {
-                while let Some(child) = slot.first_child() {
-                    slot.remove(&child);
+            let next = match (kept, section) {
+                (Some(ShownHomeSection::Rows(view)), HomeSection::Rows { rows, .. }) => {
+                    view.mounted.replace(home_items(&rows));
+                    ShownHomeSection::Rows(view)
                 }
-                if let Some(kind) = block.section_kind() {
-                    self.sections.borrow_mut().remove(&kind);
+                (Some(ShownHomeSection::Rows(view)), HomeSection::Provider(provider)) => {
+                    view.header.set_title(&home_provider_title(&provider));
+                    view.mounted.replace(home_items(&provider.rows));
+                    ShownHomeSection::Rows(view)
                 }
-                {
-                    let home = &mut *self.home.borrow_mut();
-                    match block {
-                        HomeBlockKind::Showcase => home.showcase = None,
-                        HomeBlockKind::Explore => home.explore = Vec::new(),
-                        HomeBlockKind::MostPlayed => home.most_played = HomeSectionRows::default(),
-                        HomeBlockKind::NewlyAdded => home.newly_added = HomeSectionRows::default(),
-                        HomeBlockKind::RecentlyPlayed => {
-                            home.recently_played = HomeSectionRows::default()
-                        }
-                        HomeBlockKind::RecentlyReleased => {
-                            home.recently_released = HomeSectionRows::default()
-                        }
-                        HomeBlockKind::Genres => home.genres = Vec::new(),
+                (Some(ShownHomeSection::Built(widget, built)), section) if built == section => {
+                    ShownHomeSection::Built(widget, built)
+                }
+                (kept, section) => {
+                    if let Some(kept) = kept {
+                        self.content.remove(kept.root());
                     }
+                    let next = self.build(&shell, section);
+                    self.content.append(next.root());
+                    next
                 }
-                slot.set_visible(false);
+            };
+            self.content
+                .reorder_child_after(next.root(), after.as_ref());
+            after = Some(next.root().clone());
+            shown.push((id, next));
+        }
+        for (_, stale) in previous {
+            self.content.remove(stale.root());
+        }
+        self.empty.set_visible(shown.is_empty());
+        self.content
+            .reorder_child_after(&self.empty, after.as_ref());
+        self.shown.replace(shown);
+    }
+
+    fn build(&self, shell: &Rc<CatalogUi>, section: HomeSection) -> ShownHomeSection {
+        match section {
+            HomeSection::Rows { block, rows } => ShownHomeSection::Rows(shell.home_section_view(
+                &tr(gtk_widgets::settings::home_block_title(block)),
+                home_items(&rows),
+                block.section_kind(),
+            )),
+            HomeSection::Provider(provider) => ShownHomeSection::Rows(shell.home_section_view(
+                &home_provider_title(&provider),
+                home_items(&provider.rows),
+                None,
+            )),
+            HomeSection::Showcase(row) => ShownHomeSection::Built(
+                shell.home_showcase(&row, Rc::clone(&self.showcase)),
+                HomeSection::Showcase(row),
+            ),
+            HomeSection::Genres(genres) => {
+                ShownHomeSection::Built(shell.home_genres(&genres), HomeSection::Genres(genres))
             }
         }
-        self.provider_slot
-            .set_visible(slot_has_content(&self.provider_slot));
-        self.content
-            .reorder_child_after(&self.empty, previous.as_ref());
-        self.empty.set_visible(
-            blocks.iter().all(|block| {
-                self.slots
-                    .get(block)
-                    .is_none_or(|slot| !slot_has_content(slot))
-            }) && !slot_has_content(&self.provider_slot),
-        );
-        self.applied_blocks.replace(blocks);
+    }
+
+    fn sections(&self) -> Vec<HomeSectionView> {
+        self.shown
+            .borrow()
+            .iter()
+            .filter_map(|(_, shown)| match shown {
+                ShownHomeSection::Rows(view) => Some(view.clone()),
+                ShownHomeSection::Built(..) => None,
+            })
+            .collect()
     }
 }
 
-fn slot_has_content(slot: &gtk::Box) -> bool {
-    let mut child = slot.first_child();
-    visible_section_exists(std::iter::from_fn(move || {
-        let current = child.take()?;
-        child = current.next_sibling();
-        Some(current.get_visible())
-    }))
-}
-
-fn visible_section_exists(visibility: impl IntoIterator<Item = bool>) -> bool {
-    visibility.into_iter().any(|visible| visible)
+fn home_provider_title(provider: &HomeProviderSection) -> String {
+    rufin_core::settings::presentation::home_provider_title(
+        &provider.section_id,
+        provider.title.as_deref(),
+    )
 }
 
 fn home_items(rows: &HomeSectionRows) -> Vec<HomeItem> {
@@ -451,7 +333,7 @@ fn clamped_page_start(start: usize, page_size: usize, count: usize) -> usize {
 }
 
 impl CatalogUi {
-    pub fn home_route(self: &Rc<Self>, home: HomePage) -> MountedRoute {
+    pub fn home_route(self: &Rc<Self>, sections: Vec<HomeSection>) -> MountedRoute {
         let scroller = gtk::ScrolledWindow::new();
         configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
         scroller.set_vexpand(true);
@@ -462,17 +344,6 @@ impl CatalogUi {
         content.set_halign(gtk::Align::Fill);
         content.set_width_request(1);
         content.set_margin_top(ROUTE_TOP_MARGIN);
-
-        let mut slots = std::collections::HashMap::new();
-        for block in HomeBlockKind::all() {
-            let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            slot.set_hexpand(true);
-            content.append(&slot);
-            slots.insert(block, slot);
-        }
-        let provider_slot = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        provider_slot.set_hexpand(true);
-        content.append(&provider_slot);
         let empty = crate::route_layout::route_empty_view(msgid("Nothing here yet"));
         content.append(&empty);
         let inset_content = library_route_inset(content.clone().upcast());
@@ -480,19 +351,14 @@ impl CatalogUi {
 
         let projection = HomeRouteProjection {
             shell: Rc::downgrade(self),
-            home: Rc::new(RefCell::new(HomePage::default())),
-            slots: Rc::new(slots),
-            sections: Rc::new(RefCell::new(std::collections::HashMap::new())),
-            provider_sections: Rc::new(RefCell::new(std::collections::HashMap::new())),
+            showcase: Rc::new(RefCell::new(None)),
+            shown: Rc::new(RefCell::new(Vec::new())),
             content,
-            provider_slot,
             empty,
-            applied_blocks: Rc::new(RefCell::new(Vec::new())),
         };
-        projection.apply(home);
+        projection.apply(sections);
         let widget = route_scroller_widget(scroller);
         let apply = projection.clone();
-        let resume = projection.clone();
         let download = projection.clone();
 
         let download_counts = projection.clone();
@@ -501,7 +367,7 @@ impl CatalogUi {
             let rufin_core::collection_context::CollectionTarget::Album(uri) = target else {
                 return;
             };
-            if let Some(showcase) = &mut download_counts.home.borrow_mut().showcase
+            if let Some(showcase) = &mut *download_counts.showcase.borrow_mut()
                 && showcase.album.media_uri == *uri
             {
                 showcase.album.summary.downloaded_count = if downloaded {
@@ -510,14 +376,7 @@ impl CatalogUi {
                     0
                 };
             }
-            let views = download_counts
-                .sections
-                .borrow()
-                .values()
-                .chain(download_counts.provider_sections.borrow().values())
-                .cloned()
-                .collect::<Vec<_>>();
-            for view in views {
+            for view in download_counts.sections() {
                 view.mounted.update(|item| {
                     if let HomeItem::Album(item) = item
                         && item.album.media_uri == *uri
@@ -536,8 +395,8 @@ impl CatalogUi {
                 });
             }
         });
-        MountedRoute::new(widget, Rc::new(move || resume.reconcile_block_settings()))
-            .with_home_page_apply(Rc::new(move |home| apply.apply(home)))
+        MountedRoute::new(widget, Rc::new(|| {}))
+            .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
             .with_download_change(Rc::new(move |event| {
                 let downloads::DownloadEvent::Changed {
                     media_uri: uri,
@@ -547,14 +406,7 @@ impl CatalogUi {
                     return;
                 };
                 let (uri, downloaded) = (uri.as_str(), *downloaded);
-                let views = download
-                    .sections
-                    .borrow()
-                    .values()
-                    .chain(download.provider_sections.borrow().values())
-                    .cloned()
-                    .collect::<Vec<_>>();
-                for view in views {
+                for view in download.sections() {
                     view.mounted.update(|item| {
                         if let HomeItem::Track(item) = item
                             && item.track.media_uri == uri
@@ -641,7 +493,7 @@ impl CatalogUi {
     fn home_showcase(
         self: &Rc<Self>,
         item: &HomeAlbumRow,
-        home: Rc<RefCell<HomePage>>,
+        showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
     ) -> gtk::Widget {
         let width = crate::route_layout::home_album_content_width_for((self.route_width)());
         let mut album = item.album.clone();
@@ -716,11 +568,7 @@ impl CatalogUi {
 
         let menu_shell = Rc::clone(self);
         let context_menu = Rc::new(move |target: &gtk::Widget, position| {
-            let album = home
-                .borrow()
-                .showcase
-                .as_ref()
-                .map(|item| item.album.clone());
+            let album = showcase.borrow().as_ref().map(|item| item.album.clone());
             let Some(album) = album else {
                 return;
             };
@@ -772,10 +620,7 @@ impl CatalogUi {
         showcase.upcast()
     }
 
-    fn home_genres(self: &Rc<Self>, genres: &[TagRow]) -> Option<gtk::Widget> {
-        if genres.is_empty() {
-            return None;
-        }
+    fn home_genres(self: &Rc<Self>, genres: &[TagRow]) -> gtk::Widget {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
         let heading = localized_label(gtk_widgets::settings::home_block_title(
@@ -797,7 +642,7 @@ impl CatalogUi {
             flow.insert(&self.home_genre_chip(genre), -1);
         }
         section.append(&flow);
-        Some(section.upcast())
+        section.upcast()
     }
 
     fn home_genre_chip(self: &Rc<Self>, genre: &TagRow) -> gtk::Widget {
@@ -907,13 +752,6 @@ mod tests {
         assert_eq!(clamped_page_start(12, 6, 14), 12);
         assert_eq!(clamped_page_start(18, 6, 14), 12);
         assert_eq!(clamped_page_start(10, 6, 0), 0);
-    }
-
-    #[test]
-    fn emptied_provider_section_no_longer_suppresses_the_home_empty_state() {
-        assert!(visible_section_exists([true]));
-        assert!(!visible_section_exists([false]));
-        assert!(!visible_section_exists([]));
     }
 }
 

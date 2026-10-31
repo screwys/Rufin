@@ -254,7 +254,7 @@ impl CatalogUi {
                 self.library_smart_playlists_route(read)
             }
             Route::Folders { path } => self.folders_route(path, read),
-            Route::Home => self.home_route(read.view.home().cloned().unwrap_or_default()),
+            Route::Home => self.home_route(read.view.home_sections().unwrap_or_default()),
             Route::Search => self.search_route(),
         }
     }
