@@ -845,6 +845,11 @@ impl Context<'_> {
             return Vec::new();
         };
         let members = self.collection_members(&read.collection, folder, inputs);
+        self.sort_members(read, members)
+    }
+
+    /// Members in a member read's order.
+    fn sort_members(&self, read: &MemberRead, members: Vec<Member>) -> Vec<Member> {
         if matches!(read.collection, Collection::Smart { .. }) && read.sort.is_none() {
             return members;
         }
@@ -2549,6 +2554,46 @@ impl Catalog {
     }
 
     /// A member read's tracks in order.
+    /// The tracks of each of these genres and moods in Title order, as their pages list them,
+    /// from one pass over the tracks.
+    pub(crate) fn tag_members(&self, tags: &[i64]) -> HashMap<i64, Vec<crate::TrackKey>> {
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot);
+        let wanted: HashMap<u32, i64> = tags
+            .iter()
+            .filter_map(|key| Some((snapshot.tags.slot(*key)?, *key)))
+            .collect();
+        let mut members = HashMap::<i64, Vec<Member>>::new();
+        let mut owned = Vec::new();
+        for (slot, record) in snapshot.tracks.iter() {
+            if !record.indexed() {
+                continue;
+            }
+            context.tags_of(record, &mut owned);
+            for tag in &owned {
+                if let Some(key) = wanted.get(tag) {
+                    members.entry(*key).or_default().push((slot, 0, 0));
+                }
+            }
+        }
+        members
+            .into_iter()
+            .map(|(key, members)| {
+                let read = MemberRead {
+                    sort: Some(crate::LibraryField::Title),
+                    ..MemberRead::new(Collection::Genre(crate::GenreKey::from_raw(key)))
+                };
+                let keys = context
+                    .sort_members(&read, members)
+                    .into_iter()
+                    .filter_map(|(slot, ..)| snapshot.tracks.key_of(slot))
+                    .map(crate::TrackKey::from_raw)
+                    .collect();
+                (key, keys)
+            })
+            .collect()
+    }
+
     pub(crate) async fn members(
         &self,
         connection: &mut SqliteConnection,

@@ -89,6 +89,15 @@ impl Catalog {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
+        // Every genre and mood from one pass over the tracks, not one pass each.
+        let tags = owners
+            .iter()
+            .filter_map(|owner| match owner {
+                MosaicOwner::Tag(key) => Some(*key),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut tag_members = self.tag_members(&tags);
         let mut incomplete = Vec::new();
         let mut revisions = Vec::new();
         for batch in owners.chunks(PICK_BATCH) {
@@ -113,17 +122,19 @@ impl Catalog {
                 if picks.len() >= COVERS {
                     continue;
                 }
-                let read = match *owner {
-                    MosaicOwner::Playlist(key) => MemberRead::new(Collection::Playlist(key)),
-                    MosaicOwner::Smart(key) => MemberRead::new(Collection::Smart { key, now }),
-                    // A mood's tracks hold it as they hold a genre. Its covers come from
-                    // across its tracks, by title.
-                    MosaicOwner::Tag(key) => MemberRead {
-                        sort: Some(crate::LibraryField::Title),
-                        ..MemberRead::new(Collection::Genre(crate::GenreKey::from_raw(key)))
-                    },
+                // A mood's tracks hold it as they hold a genre. Its covers come from across its
+                // tracks, by title.
+                let members = match *owner {
+                    MosaicOwner::Playlist(key) => {
+                        let read = MemberRead::new(Collection::Playlist(key));
+                        self.members(&mut connection, read).await?
+                    }
+                    MosaicOwner::Smart(key) => {
+                        let read = MemberRead::new(Collection::Smart { key, now });
+                        self.members(&mut connection, read).await?
+                    }
+                    MosaicOwner::Tag(key) => tag_members.remove(&key).unwrap_or_default(),
                 };
-                let members = self.members(&mut connection, read).await?;
                 let next = crate::artwork::playlist_artwork_choices_on(
                     self,
                     &mut connection,
