@@ -7313,7 +7313,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "uniffi",
  "url",
  "vodozemac",
 ]

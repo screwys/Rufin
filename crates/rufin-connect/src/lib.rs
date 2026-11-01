@@ -1,7 +1,4 @@
 //! Shared Connect transport, verified enrollment, record sync and media.
-#[cfg(feature = "bindings")]
-uniffi::setup_scaffolding!();
-
 pub mod media;
 mod nearby;
 pub mod network;
