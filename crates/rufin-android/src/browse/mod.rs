@@ -89,15 +89,6 @@ fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> Androi
     }
 }
 
-fn queue_placement(value: &str) -> Result<rufin_core::playback::QueuePlacement, AndroidError> {
-    match value {
-        "now" => Ok(rufin_core::playback::QueuePlacement::Now),
-        "next" => Ok(rufin_core::playback::QueuePlacement::Next),
-        "append" => Ok(rufin_core::playback::QueuePlacement::Last),
-        _ => Err(error("Unknown queue placement")),
-    }
-}
-
 fn context_caption(
     route: &Route,
     title: Option<String>,

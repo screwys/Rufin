@@ -94,14 +94,13 @@ impl AndroidBrowseQuery {
     pub async fn play_section(
         self: Arc<Self>,
         section_id: String,
-        placement: String,
+        placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
         if !matches!(self.route, Route::Home) {
             return Err(error("Sections belong to Home"));
         }
-        let placement = queue_placement(&placement)?;
         let title = context_caption(&self.route, context_title);
         let runtime = self.runtime.clone();
         runtime
@@ -290,11 +289,10 @@ impl AndroidBrowseQuery {
     /// Plays or queues the page whole, as its header does.
     pub async fn play_all(
         self: Arc<Self>,
-        placement: String,
+        placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let placement = queue_placement(&placement)?;
         let selection = self.clone().selection().await?;
         self.playback.play_selection(
             PlayRequest::ordered(Arc::unwrap_or_clone(selection), 0, placement, true)

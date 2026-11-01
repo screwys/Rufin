@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.app.RufinConnection
@@ -65,7 +66,7 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
     }
     val valid = settings != null && limit.toULongOrNull() != null &&
         (!minEnabled || minYear.toUShortOrNull() != null) && (!maxEnabled || maxYear.toUShortOrNull() != null)
-    fun play(placement: String) {
+    fun play(placement: QueuePlacement) {
         model.runAction {
             val saved = settings!!.copy(limit = limit.toULong(),
                 minYear = if (minEnabled) minYear.toUShort() else null,
@@ -98,15 +99,15 @@ internal fun RandomPlaySheet(model: RufinConnection, browse: BrowseConnection, o
                 modifier = Modifier.clickable(enabled = settings != null) { playedFilter = true })
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ play("next") }, enabled = valid && model.pendingActions == 0) {
+                OutlinedButton({ play(QueuePlacement.AfterCurrent) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-mail-forward-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Next"))
                 }
-                Button({ play("now") }, enabled = valid && model.pendingActions == 0) {
+                Button({ play(QueuePlacement.Replace(0UL)) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-media-playback-start-symbolic", null, Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(translate("Play"))
                 }
-                OutlinedButton({ play("append") }, enabled = valid && model.pendingActions == 0) {
+                OutlinedButton({ play(QueuePlacement.End) }, enabled = valid && model.pendingActions == 0) {
                     RufinIcon("rufin-go-last-symbolic", null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(translate("Play Later"))
                 }
             }

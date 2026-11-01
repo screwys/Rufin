@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.Changed
 import io.github.screwys.rufin.shared.library.sourceIdForUri
@@ -297,7 +298,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
             sourceIdForUri(mediaUri)?.takeIf { it != sources?.selectedSourceId }?.let { sourceOwner?.selectSource(it) }
             browse.openRoute(route, title, kind)
         } else connectedService().playRequest {
-            library.playRows("overview:$period:$mediaUri", listOf(mediaUri), 0UL, "now", false, translate("Listening overview"))
+            library.playRows("overview:$period:$mediaUri", listOf(mediaUri), 0UL, QueuePlacement.Replace(0UL), false, translate("Listening overview"))
         }
     }
 

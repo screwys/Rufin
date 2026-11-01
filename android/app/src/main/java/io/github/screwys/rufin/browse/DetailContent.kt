@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
@@ -63,7 +64,7 @@ internal fun DetailContent(
     summary: AndroidDetailSummary?, page: BrowsePage, rows: LazyPagingItems<BrowseItem>, player: PlayerConnection,
     favoritesPage: BrowsePage?, releaseGroups: List<AndroidArtistReleaseGroup>,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
-    onPlay: (BrowseItem, String, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
+    onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (Route, String) -> Unit,
     onLink: (AndroidDetailLink) -> Unit, onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
 ) {
@@ -185,7 +186,7 @@ internal fun DetailContent(
 @Composable
 private fun DetailHeader(
     summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
-    onPlay: (BrowseItem, String, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
+    onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onOpenRoute: (Route, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
     onRadio: (BrowseItem) -> Unit,
 ) {
@@ -269,9 +270,9 @@ private fun DetailHeader(
                 }
                 FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(item, "now", false) }, { onPlay(item, "now", true) })
-                    ShowcaseAction("rufin-mail-forward-symbolic", "Play Next", { onPlay(item, "next", false) }, { onPlay(item, "next", true) })
-                    ShowcaseAction("rufin-go-last-symbolic", "Play Later", { onPlay(item, "append", false) }, { onPlay(item, "append", true) })
+                    ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) })
+                    ShowcaseAction("rufin-mail-forward-symbolic", "Play Next", { onPlay(item, QueuePlacement.AfterCurrent, false) }, { onPlay(item, QueuePlacement.AfterCurrent, true) })
+                    ShowcaseAction("rufin-go-last-symbolic", "Play Later", { onPlay(item, QueuePlacement.End, false) }, { onPlay(item, QueuePlacement.End, true) })
                     if (item.row.kind in setOf("album", "artist"))
                         ShowcaseAction(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
                             { onFavorite(projected) }, tint = if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)

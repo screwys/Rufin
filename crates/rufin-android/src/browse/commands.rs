@@ -301,7 +301,7 @@ impl AndroidLibrary {
         kind: String,
         media_uri: String,
         route: Option<Route>,
-        placement: String,
+        placement: rufin_core::playback::QueuePlacement,
     ) -> Result<(), AndroidError> {
         let seed = if kind == "track" {
             library::RadioSeed::Track(media_uri)
@@ -330,10 +330,7 @@ impl AndroidLibrary {
             .ok_or_else(|| error("This item has no radio action"))?
         };
         self.playback
-            .play_radio(rufin_core::playback::RadioPlayRequest {
-                seed,
-                placement: queue_placement(&placement)?,
-            });
+            .play_radio(rufin_core::playback::RadioPlayRequest { seed, placement });
         Ok(())
     }
 
@@ -430,11 +427,10 @@ impl AndroidLibrary {
         context: String,
         media_uris: Vec<String>,
         index: u64,
-        placement: String,
+        placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let placement = queue_placement(&placement)?;
         self.playback.play_selection(
             rufin_core::playback::PlayRequest::uris(media_uris, placement)
                 .with_context(context.into())
@@ -516,9 +512,8 @@ impl AndroidLibrary {
     pub async fn random_play(
         &self,
         settings: rufin_core::settings::RandomPlaySettings,
-        placement: String,
+        placement: rufin_core::playback::QueuePlacement,
     ) -> Result<bool, AndroidError> {
-        let placement = queue_placement(&placement)?;
         let owner = self.settings.clone();
         let settings = self
             .runtime

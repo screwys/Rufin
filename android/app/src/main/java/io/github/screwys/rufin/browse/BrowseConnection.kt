@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
@@ -271,7 +272,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val bridge = library ?: return@runAction
         if (withContext(Dispatchers.IO) { bridge.clearSearchResults() }) recentSearchRows = emptyList()
     }
-    fun play(item: BrowseItem, placement: String = "now", shuffled: Boolean = false) = connection.runAction {
+    fun play(item: BrowseItem, placement: QueuePlacement = QueuePlacement.Replace(0UL), shuffled: Boolean = false) = connection.runAction {
         val service = connection.connectedService()
         service.playRequest {
         if (item.row.kind != "track") {
@@ -282,9 +283,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             library?.playRows("pin:${item.row.key}", listOf(item.row.mediaUri), 0UL, placement, shuffled, translate("Pins"))
             return@playRequest
         }
-        if (item.query != null && placement == "now") item.query.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
+        if (item.query != null && placement is QueuePlacement.Replace) item.query.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
         else {
-            val order = item.searchOrder?.takeIf { placement == "now" } ?: listOf(item.row.mediaUri)
+            val order = item.searchOrder?.takeIf { placement is QueuePlacement.Replace } ?: listOf(item.row.mediaUri)
             library?.playRows(item.searchContext ?: "track:${item.row.mediaUri}", order,
                 order.indexOf(item.row.mediaUri).toULong(), placement, shuffled, item.contextTitle ?: item.row.title)
         }
@@ -297,7 +298,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             connection.sourceOwner?.setFavoriteWithResult(favoriteTarget(item.row.kind, item.row.mediaUri), value)
         }
     }
-    fun radio(item: BrowseItem, placement: String) = connection.runAction {
+    fun radio(item: BrowseItem, placement: QueuePlacement) = connection.runAction {
         connection.connectedService().playRequest {
             library?.playRadio(item.row.kind, item.row.mediaUri, item.row.route, placement)
         }
@@ -323,7 +324,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun playSection(id: String, shuffled: Boolean = false) = connection.runAction {
         val query = visiblePage?.homeRows?.firstOrNull { it.row.sectionId == id }?.query ?: return@runAction
-        connection.connectedService().playRequest { query.playSection(id, "now", shuffled,
+        connection.connectedService().playRequest { query.playSection(id, QueuePlacement.Replace(0UL), shuffled,
             visiblePage?.homeRows?.firstOrNull { it.row.sectionId == id }?.row?.section) }
     }
     fun refreshSection(id: String) = connection.runAction {

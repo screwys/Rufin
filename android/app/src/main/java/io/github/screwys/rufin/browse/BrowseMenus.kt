@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
@@ -295,13 +296,13 @@ internal fun BrowseMenuSheet(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BrowsePrimaryAction("rufin-media-playback-start-symbolic", "Play", Modifier.weight(1f),
-                        shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, "now", true); onDismiss() }) {
+                        shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, QueuePlacement.Replace(0UL), true); onDismiss() }) {
                             onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
                         }
                     BrowsePrimaryAction("rufin-mail-forward-symbolic", "Play Next", Modifier.weight(1f),
-                        shuffle = { browse.play(item, "next", true); onDismiss() }) { browse.play(item, "next"); onDismiss() }
+                        shuffle = { browse.play(item, QueuePlacement.AfterCurrent, true); onDismiss() }) { browse.play(item, QueuePlacement.AfterCurrent); onDismiss() }
                     BrowsePrimaryAction("rufin-go-last-symbolic", "Play Later", Modifier.weight(1f),
-                        shuffle = { browse.play(item, "append", true); onDismiss() }) { browse.play(item, "append"); onDismiss() }
+                        shuffle = { browse.play(item, QueuePlacement.End, true); onDismiss() }) { browse.play(item, QueuePlacement.End); onDismiss() }
                 }
                 val radioLabel = when (item.row.kind) {
                     "track" -> "Track radio"
@@ -317,10 +318,10 @@ internal fun BrowseMenuSheet(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         trailingContent = {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf("now" to "Play", "next" to "Play Next", "append" to "Play Later").forEach { (placement, title) ->
+                        listOf(Triple(QueuePlacement.Replace(0UL), "Play", "rufin-media-playback-start-symbolic"), Triple(QueuePlacement.AfterCurrent, "Play Next", "rufin-mail-forward-symbolic"),
+                            Triple(QueuePlacement.End, "Play Later", "rufin-go-last-symbolic")).forEach { (placement, title, icon) ->
                             OutlinedIconButton({ browse.radio(item, placement); onDismiss() }, Modifier.size(40.dp), shape = RoundedCornerShape(8.dp)) {
-                                RufinIcon(when (placement) { "now" -> "rufin-media-playback-start-symbolic"; "next" -> "rufin-mail-forward-symbolic"; else -> "rufin-go-last-symbolic" },
-                                    translate(title), Modifier.size(20.dp))
+                                RufinIcon(icon, translate(title), Modifier.size(20.dp))
                             }
                         }
                         }

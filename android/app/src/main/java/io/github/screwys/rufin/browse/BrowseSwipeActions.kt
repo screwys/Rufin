@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -82,12 +83,12 @@ internal fun BrowseGestureSettings(left: BrowseSwipeAction, right: BrowseSwipeAc
         BrowseGestureActions(left, right) { item, action ->
             when (action) {
                 BrowseSwipeAction.Favorite -> browse.favorite(item)
-                BrowseSwipeAction.PlayLater -> browse.play(item, "append")
-                BrowseSwipeAction.PlayNext -> browse.play(item, "next")
+                BrowseSwipeAction.PlayLater -> browse.play(item, QueuePlacement.End)
+                BrowseSwipeAction.PlayNext -> browse.play(item, QueuePlacement.AfterCurrent)
                 BrowseSwipeAction.AddToPlaylist -> playlist(item)
-                BrowseSwipeAction.PlayRadio -> browse.radio(item, "now")
-                BrowseSwipeAction.PlayRadioNext -> browse.radio(item, "next")
-                BrowseSwipeAction.PlayRadioLater -> browse.radio(item, "append")
+                BrowseSwipeAction.PlayRadio -> browse.radio(item, QueuePlacement.Replace(0UL))
+                BrowseSwipeAction.PlayRadioNext -> browse.radio(item, QueuePlacement.AfterCurrent)
+                BrowseSwipeAction.PlayRadioLater -> browse.radio(item, QueuePlacement.End)
                 BrowseSwipeAction.Download -> browse.download(item)
             }
         }

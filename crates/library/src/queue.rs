@@ -198,6 +198,7 @@ pub struct QueueEntries {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum QueuePlacement {
     Replace { anchor_index: usize },
     AfterCurrent,

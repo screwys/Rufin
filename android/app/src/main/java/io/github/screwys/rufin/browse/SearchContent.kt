@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.library.SearchMode
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -134,7 +135,7 @@ private fun SearchResults(
         val rows = searchFlow.collectAsLazyPagingItems()
         BrowseContent(rows, emptyList(), player, false, false, false, browse::open, onMenu,
             browse::playSection, browse::refreshSection, browse::favorite, onPlaylist, onScrolled,
-            loading = browse.loading, onRadio = { browse.radio(it, "now") })
+            loading = browse.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
         return
     }
     val state = rememberLazyListState()

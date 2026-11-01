@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
@@ -153,14 +154,14 @@ internal class BrowsePage(
         else options.displaySettings = display
     }
 
-    fun play(placement: String, shuffled: Boolean, title: String) = connection.runAction {
+    fun play(placement: QueuePlacement, shuffled: Boolean, title: String) = connection.runAction {
         val query = currentQuery ?: return@runAction
         connection.connectedService().playRequest { query.playAll(placement, shuffled, title) }
     }
 
     fun playSection(id: String, shuffled: Boolean = false) = connection.runAction {
         val query = homeRows.firstOrNull { it.row.sectionId == id }?.query ?: return@runAction
-        connection.connectedService().playRequest { query.playSection(id, "now", shuffled,
+        connection.connectedService().playRequest { query.playSection(id, QueuePlacement.Replace(0UL), shuffled,
             homeRows.firstOrNull { it.row.sectionId == id }?.row?.section) }
     }
 

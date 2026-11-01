@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.app
 
+import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.library.LibraryField
@@ -629,7 +630,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
                 onLink = { link -> model.runAction {
                     openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
-                } }, onScrolled, onRadio = { browse.radio(it, "now") })
+                } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
             return@Column
         }
         if (choices.isNotEmpty()) LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 8.dp),
@@ -647,7 +648,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
                 display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.fields,
                 page.supportsLetterIndex, page::letterPosition, page.sortSelection?.descending ?: false,
-                page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, "now") },
+                page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
                 emptyIcon = if (location.kind in listOf("Folders", "folder")) "rufin-folders-symbolic" else null)
         }
     }
