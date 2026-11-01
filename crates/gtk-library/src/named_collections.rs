@@ -96,7 +96,7 @@ impl CatalogUi {
             let page = page.clone();
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
-            move |read: Opened, _: &View| {
+            move |read: Opened, previous: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
@@ -104,6 +104,7 @@ impl CatalogUi {
                     return false;
                 }
                 let row_key = Rc::clone(&row_key);
+                let refresh = read.view.same_list(previous);
                 if !sparse.replace_prepared_at(
                     SparseSource::Query {
                         count: read.view.len(),
@@ -111,6 +112,7 @@ impl CatalogUi {
                     read.first,
                     read.rows.into_iter().filter_map(R::row).collect(),
                     Vec::new(),
+                    refresh,
                     move |row| row_key(row),
                 ) {
                     tracing::warn!("rejected a mismatched prepared named page");

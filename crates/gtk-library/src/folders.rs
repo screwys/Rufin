@@ -172,7 +172,7 @@ fn folder_page(
     let seed = {
         let folder_sparse = Rc::clone(&folder_sparse);
         let track_sparse = Rc::clone(&track_sparse);
-        move |read: Opened| {
+        move |read: Opened, refresh: bool| {
             let folder_len = read.view.folder_len().unwrap_or(0);
             let track_len = read.view.len() - folder_len;
             let (folders, tracks) = read
@@ -187,6 +187,7 @@ fn folder_page(
                     .filter_map(FolderTableRow::folder)
                     .collect(),
                 Vec::new(),
+                refresh,
                 |_| (),
             );
             track_sparse.replace_prepared_at(
@@ -197,11 +198,12 @@ fn folder_page(
                     .filter_map(FolderTableRow::track)
                     .collect(),
                 Vec::new(),
+                refresh,
                 |_| (),
             );
         }
     };
-    seed(read);
+    seed(read, false);
     let settings = shell
         .settings
         .current
@@ -244,13 +246,14 @@ fn folder_page(
 
     let apply = {
         let stack = table_stack.clone();
-        move |read: Opened, _: &View| {
+        move |read: Opened, previous: &View| {
+            let refresh = read.view.same_list(previous);
             stack.set_visible_child_name(if read.view.is_empty() {
                 "empty"
             } else {
                 "content"
             });
-            seed(read);
+            seed(read, refresh);
             true
         }
     };

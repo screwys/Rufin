@@ -633,6 +633,14 @@ impl View {
         &self.options
     }
 
+    /// Whether this view lists what `previous` listed: read again for a committed change,
+    /// not for another search, filter, order or setting.
+    pub fn same_list(&self, previous: &View) -> bool {
+        self.route == previous.route
+            && self.options == previous.options
+            && self.settings == previous.settings
+    }
+
     /// The context id a play of this page carries, in the order it reads.
     pub fn context_id(&self) -> String {
         let (sort, descending, _) = read_order(&self.route, &self.options, &self.settings);

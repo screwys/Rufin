@@ -756,12 +756,17 @@ impl SparseObjectModel {
         self.items_changed(0, old_len, self.n_items());
     }
 
+    /// Takes a reread's order and its rows from `first`. A `refresh` reads the same list again,
+    /// so its items and shown rows stay by position until their windows are read again, and a
+    /// list that grew or shrank changes only at its tail. Another list keeps its items only
+    /// when its keys or count stay, and shows only its new rows.
     fn replace_prepared<K, R>(
         &self,
         order: SparseSource<K>,
         first: usize,
         rows: Vec<R>,
         sections: Vec<(u32, i64)>,
+        refresh: bool,
     ) where
         K: Clone + Eq + 'static,
         R: Clone + PartialEq + 'static,
@@ -772,11 +777,11 @@ impl SparseObjectModel {
         let sections_changed = *self.imp().sections.borrow() != sections;
         self.imp().sections.replace(sections);
         let (preserve_items, updates) = self.with_typed_mut::<K, R, _>(|state| {
-            // A query reread keeps its items by position, so a list that grew or shrank
-            // changes only at its tail; other keys are another list.
             let preserve_items = match (&state.sparse.order, &order) {
                 (SparseSource::Keys(previous), SparseSource::Keys(next)) => previous == next,
-                (SparseSource::Query { .. }, SparseSource::Query { .. }) => true,
+                (SparseSource::Query { count: previous }, SparseSource::Query { count: next }) => {
+                    refresh || previous == next
+                }
                 _ => false,
             };
             state.sparse.replace_order(order);
@@ -798,8 +803,8 @@ impl SparseObjectModel {
                 .filter_map(|position| {
                     let item = state.objects.get(&position)?.upgrade()?;
                     let value = state.sparse.item(position)?;
-                    // A shown row stays until its window is read again.
-                    if item.is_ready() && matches!(value, SparseItem::Placeholder(_)) {
+                    // A refreshed row stays until its window is read again.
+                    if refresh && item.is_ready() && matches!(value, SparseItem::Placeholder(_)) {
                         return None;
                     }
                     (item.typed_value::<K, R>().as_ref() != Some(&value)).then(|| {
@@ -1036,21 +1041,15 @@ where
         self.model.replace_order::<K, R>(order);
     }
 
-    pub fn replace_prepared(
-        &self,
-        order: impl Into<SparseSource<K>>,
-        rows: Vec<R>,
-        key: impl Fn(&R) -> K,
-    ) -> bool {
-        self.replace_prepared_at(order, 0, rows, Vec::new(), key)
-    }
-
+    /// Takes a reread's order and its rows from `first`; a `refresh` reads the same list
+    /// again and keeps its shown rows until their windows are read again.
     pub fn replace_prepared_at(
         &self,
         order: impl Into<SparseSource<K>>,
         first: usize,
         rows: Vec<R>,
         sections: Vec<(u32, i64)>,
+        refresh: bool,
         key: impl Fn(&R) -> K,
     ) -> bool {
         let order = order.into();
@@ -1064,7 +1063,7 @@ where
         }
         self.cancel();
         self.model
-            .replace_prepared::<K, R>(order, first, rows, sections);
+            .replace_prepared::<K, R>(order, first, rows, sections, refresh);
         true
     }
 
@@ -1607,6 +1606,7 @@ mod tests {
                 .map(|value| format!("filtered {value}"))
                 .collect::<Vec<_>>(),
             Vec::new(),
+            false,
         );
         assert!(model.hydrate::<u64, String>(64..100).is_none());
         assert!(
@@ -1827,6 +1827,7 @@ mod tests {
             0,
             vec!["ten".to_string(), "eleven".to_string()],
             Vec::new(),
+            false,
         );
 
         let first = model
@@ -1850,7 +1851,13 @@ mod tests {
             assert_eq!(model.section(0), (0, 3));
             assert_eq!(model.section(3), (3, u32::MAX));
         });
-        model.replace_prepared::<u64, String>(vec![0, 1, 2].into(), 0, Vec::new(), Vec::new());
+        model.replace_prepared::<u64, String>(
+            vec![0, 1, 2].into(),
+            0,
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
         assert_eq!(notifications.get(), 0);
         assert_eq!(model.section_value(0), None);
         model.replace_prepared::<u64, String>(
@@ -1858,6 +1865,7 @@ mod tests {
             0,
             Vec::new(),
             vec![(0, 1), (2, 2)],
+            false,
         );
         assert_eq!(notifications.get(), 1);
         assert_eq!(model.section(2), (2, 3));
@@ -1866,6 +1874,7 @@ mod tests {
             0,
             Vec::new(),
             vec![(0, 1), (2, 2)],
+            false,
         );
         assert_eq!(notifications.get(), 1);
     }
@@ -1890,6 +1899,7 @@ mod tests {
             0,
             vec!["one".to_string(), "two".to_string()],
             Vec::new(),
+            false,
         );
 
         let current = model
@@ -1925,6 +1935,7 @@ mod tests {
             0,
             vec!["one".to_string(), "changed".to_string()],
             Vec::new(),
+            false,
         );
 
         assert_eq!(first_renders.get(), 0);
@@ -1936,9 +1947,11 @@ mod tests {
     }
 
     #[test]
-    fn prepared_replacement_keeps_and_rereads_a_live_row_outside_the_seed_window() {
-        let order = (0..128_u64).collect::<Vec<_>>();
-        let model = SparseObjectModel::new::<u64, String>(order.clone(), SPARSE_WINDOW_SIZE);
+    fn prepared_refresh_keeps_and_rereads_a_live_row_outside_the_seed_window() {
+        let model = SparseObjectModel::new::<u64, String>(
+            SparseSource::Query { count: 128 },
+            SPARSE_WINDOW_SIZE,
+        );
         let page = model
             .hydrate::<u64, String>(64..65)
             .expect("second sparse page");
@@ -1956,10 +1969,11 @@ mod tests {
         });
 
         model.replace_prepared::<u64, String>(
-            order.into(),
+            SparseSource::Query { count: 128 },
             0,
             (0..64).map(|value| value.to_string()).collect::<Vec<_>>(),
             Vec::new(),
+            true,
         );
 
         assert!(matches!(

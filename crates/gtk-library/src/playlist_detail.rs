@@ -308,9 +308,9 @@ impl CatalogUi {
                     "mounted Playlist route",
                     &view,
                     crate::routes::list_inputs(&reread_search),
-                    move |mut read, _| {
+                    move |mut read, previous| {
                         let header = read.header.take();
-                        if !apply_entries.replace_prepared(read) {
+                        if !apply_entries.replace_prepared(previous, read) {
                             return false;
                         }
                         apply_owner(header);

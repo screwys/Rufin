@@ -1124,6 +1124,7 @@ fn add_download_queue(
                     offset,
                     page.jobs,
                     Vec::new(),
+                    true,
                     |job| job.id.clone(),
                 );
                 rows.resume_initial_demand();

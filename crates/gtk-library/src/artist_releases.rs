@@ -795,6 +795,7 @@ impl ArtistReleaseProjections {
             read.first,
             read.rows.into_iter().filter_map(release_row).collect(),
             Vec::new(),
+            read.view.same_list(previous),
             |row| row.album_key,
         );
         let mut start = 0;

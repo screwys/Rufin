@@ -7,7 +7,7 @@ use rufin_core::collection_context::CollectionTarget;
 
 use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 /// A playlist row: a track with its entry.
 fn entry_row(row: Row) -> Option<TrackRow> {
@@ -94,8 +94,9 @@ impl PlaylistEntryModel {
         self.inner.sparse.live_window()
     }
 
-    /// Shows a reread's entries; false when it has none because the playlist is gone.
-    pub fn replace_prepared(&self, read: Opened) -> bool {
+    /// Shows a reread's entries over the view it replaces; false when it has none because the
+    /// playlist is gone.
+    pub fn replace_prepared(&self, previous: &View, read: Opened) -> bool {
         if read.view.members().is_none() {
             return false;
         }
@@ -105,6 +106,7 @@ impl PlaylistEntryModel {
             read.first.min(count),
             read.rows.into_iter().filter_map(entry_row).collect(),
             Vec::new(),
+            read.view.same_list(previous),
             |_| (),
         );
         true

@@ -24,7 +24,7 @@ use gtk_widgets::mounted_route::{ItemScrollPosition, NativeListScroll, RouteView
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseObjectModel, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;
 
@@ -152,14 +152,17 @@ impl AlbumCollectionModels {
             Self::Detail(detail) => detail.inner.rows.live_window(),
         }
     }
-    pub fn replace_prepared(&self, read: Opened) -> bool {
+    /// Takes a reread over the view it replaces.
+    pub fn replace_prepared(&self, previous: &View, read: Opened) -> bool {
         let count = read.view.len();
+        let refresh = read.view.same_list(previous);
         match (self, read.view.album_spans().cloned()) {
             (Self::Rows(rows), None) => rows.replace_prepared_at(
                 SparseSource::Query { count },
                 read.first,
                 read.rows.into_iter().filter_map(album_row).collect(),
                 Vec::new(),
+                refresh,
                 |row| row.album_key,
             ),
             (Self::Detail(detail), Some(spans)) => {
@@ -173,6 +176,7 @@ impl AlbumCollectionModels {
                     read.first,
                     read.rows.into_iter().filter_map(detail_row).collect(),
                     Vec::new(),
+                    refresh,
                     |_| (),
                 );
                 inner.native.changed(previous.count);

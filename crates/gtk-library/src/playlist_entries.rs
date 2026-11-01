@@ -42,7 +42,7 @@ use gtk_widgets::recycled_cells::{
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
 use rufin_core::settings::presentation::track_row_field;
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
@@ -94,9 +94,9 @@ impl PlaylistEntriesView {
         self.model.live_window()
     }
 
-    pub fn replace_prepared(&self, read: Opened) -> bool {
+    pub fn replace_prepared(&self, previous: &View, read: Opened) -> bool {
         let empty = read.view.is_empty();
-        if !self.model.replace_prepared(read) {
+        if !self.model.replace_prepared(previous, read) {
             return false;
         }
         self.toolbar_widget.set_visible(!empty);

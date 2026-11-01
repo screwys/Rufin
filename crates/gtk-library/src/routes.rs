@@ -97,8 +97,8 @@ impl TrackListProjection {
         self.model.live_window()
     }
 
-    pub fn replace_favorites(&self, count: usize, rows: Vec<library::Row>) {
-        self.model.replace_favorites(count, rows);
+    pub fn replace_favorites(&self, count: usize, rows: Vec<library::Row>, refresh: bool) {
+        self.model.replace_favorites(count, rows, refresh);
     }
 
     pub fn resume_initial_demand(&self) {
@@ -145,10 +145,10 @@ impl TrackListProjection {
                 scope(&mut options);
                 options
             },
-            move |mut read, _| {
+            move |mut read, previous| {
                 let header = read.header.take();
                 let replaced = current.upgrade().is_some_and(|shell| (shell.is_current)())
-                    && model.replace_page(read);
+                    && model.replace_page(previous, read);
                 if replaced {
                     changed(header);
                 }
@@ -321,7 +321,7 @@ impl CatalogUi {
             let content = content.clone();
             let page = page.clone();
             let view = Rc::clone(&view);
-            move |read: Opened, _: &View| {
+            move |read: Opened, previous: &View| {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
@@ -333,7 +333,7 @@ impl CatalogUi {
                 let replace_model = current_models.is_detail() != read.view.album_spans().is_some();
                 if replace_model {
                     models.replace(AlbumCollectionModels::new(&shell.runtime, &view, read));
-                } else if !current_models.replace_prepared(read) {
+                } else if !current_models.replace_prepared(previous, read) {
                     tracing::warn!("rejected a mismatched prepared Albums page");
                     return false;
                 }

@@ -8,7 +8,7 @@ use rufin_core::playback::{PlayRequest, QueuePlacement};
 use gtk_widgets::library_fields::TrackPresentation;
 use gtk_widgets::mounted_route::{RouteView, view_model};
 use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSource};
-use rufin_core::view::Opened;
+use rufin_core::view::{Opened, View};
 
 /// What a track list plays and selects: the read of the view the route shows now, or keys.
 #[derive(Clone)]
@@ -120,12 +120,14 @@ impl TrackCollectionModel {
         }))
     }
 
-    pub fn replace_favorites(&self, count: usize, rows: Vec<Row>) {
+    /// Takes reread favorites; a `refresh` reads the same list again.
+    pub fn replace_favorites(&self, count: usize, rows: Vec<Row>, refresh: bool) {
         self.0.sparse.replace_prepared_at(
             SparseSource::Query { count },
             0,
             rows.into_iter().filter_map(track_row).collect(),
             Vec::new(),
+            refresh,
             |row| row.track_key,
         );
     }
@@ -199,8 +201,9 @@ impl TrackCollectionModel {
         self.0.filter.replace(query.trim().to_string());
     }
 
-    /// Takes a reread of the page; a read for another search is stale.
-    pub fn replace_page(&self, read: Opened) -> bool {
+    /// Takes a reread of the page over the view it replaces; a read for another search is
+    /// stale.
+    pub fn replace_page(&self, previous: &View, read: Opened) -> bool {
         if read
             .view
             .members()
@@ -215,6 +218,7 @@ impl TrackCollectionModel {
             read.first,
             read.rows.into_iter().filter_map(track_row).collect(),
             read.view.disc_sections().to_vec(),
+            read.view.same_list(previous),
             |row| row.track_key,
         )
     }

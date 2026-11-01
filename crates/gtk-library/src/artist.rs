@@ -167,7 +167,11 @@ impl CatalogUi {
                 else {
                     return false;
                 };
-                favorite.replace_favorites(read.view.favorites_len().unwrap_or(0), favorite_rows);
+                favorite.replace_favorites(
+                    read.view.favorites_len().unwrap_or(0),
+                    favorite_rows,
+                    read.view.same_list(previous),
+                );
                 header.replace(&shell, summary);
                 let present = !favorite.source_is_empty();
                 releases.set_favorite_present(present);
