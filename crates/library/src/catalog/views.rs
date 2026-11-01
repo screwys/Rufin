@@ -2710,7 +2710,7 @@ impl Context<'_> {
                 .collect(),
             _ => parents.iter().map(|key| snapshot.tags.slot(*key)).collect(),
         };
-        let sort = LibraryField::TrackNumber;
+        let sort = crate::query::ALBUM_ORDER;
         let mut index = HashMap::<u32, Vec<usize>>::new();
         for (position, slot) in slots.iter().enumerate() {
             if let Some(slot) = slot {

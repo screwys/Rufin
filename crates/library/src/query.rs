@@ -136,6 +136,9 @@ impl Catalog {
     }
 }
 
+/// The order an album, artist, genre or mood plays in whole: album order.
+pub(crate) const ALBUM_ORDER: LibraryField = LibraryField::TrackNumber;
+
 impl MemberRead {
     pub fn new(collection: Collection) -> Self {
         Self {
@@ -157,7 +160,7 @@ impl MemberRead {
                 Collection::Album(_)
                 | Collection::Artist { .. }
                 | Collection::Genre(_)
-                | Collection::Mood(_) => LibraryField::TrackNumber,
+                | Collection::Mood(_) => ALBUM_ORDER,
                 Collection::Playlist(_) => LibraryField::RowIndex,
                 Collection::History { .. } => LibraryField::LastPlayed,
                 _ => LibraryField::Title,
