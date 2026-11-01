@@ -634,11 +634,11 @@ impl View {
     }
 
     /// Whether this view lists what `previous` listed: read again for a committed change,
-    /// not for another search, filter, order or setting.
+    /// not for another search, filter, order or list setting.
     pub fn same_list(&self, previous: &View) -> bool {
         self.route == previous.route
             && self.options == previous.options
-            && self.settings == previous.settings
+            && previous.settings_reread(&self.settings).is_none()
     }
 
     /// The context id a play of this page carries, in the order it reads.
@@ -952,35 +952,30 @@ impl View {
         }
     }
 
-    /// What `current` settings make the page read again. Named lists read again on every
-    /// settings change.
+    /// What `current` settings make the page read again: the settings its order, rows and
+    /// home blocks were read with.
     pub fn settings_reread(&self, current: &Settings) -> Option<Reread> {
         let lists = |key| (self.settings.library_list(key), current.library_list(key));
         let order = |key| {
             let (read, current) = lists(key);
             read.sort_key != current.sort_key || read.descending != current.descending
         };
+        let key = library_list_key(&self.route, self.options.category);
         let changed = match &self.body {
             Body::Rows {
-                read:
-                    Read::AlbumTracks(_)
-                    | Read::List(ListRead {
-                        kind: ListKind::Albums,
-                        ..
-                    }),
+                read: Read::List(_) | Read::AlbumTracks(_),
                 ..
             } => {
-                let (read, current) = lists(LibraryListKey::Albums);
-                (read.layout == LibraryLayout::Detail) != (current.layout == LibraryLayout::Detail)
-                    || read.sort_key != current.sort_key
-                    || read.descending != current.descending
-                    || uses_activity(&Route::Albums, &read)
-                        != uses_activity(&Route::Albums, &current)
+                let (read, current) = lists(key);
+                order(key)
+                    || uses_activity(&self.route, &read) != uses_activity(&self.route, &current)
+                    || key == LibraryListKey::Albums
+                        && (read.layout == LibraryLayout::Detail)
+                            != (current.layout == LibraryLayout::Detail)
             }
-            Body::Rows {
-                read: Read::List(_),
-                ..
-            } => true,
+            Body::Home(_) => {
+                self.settings.application.home_blocks != current.application.home_blocks
+            }
             _ if matches!(
                 self.route,
                 Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
@@ -991,7 +986,7 @@ impl View {
                 }
                 return order(LibraryListKey::ArtistAlbums).then_some(Reread::Releases);
             }
-            _ => order(library_list_key(&self.route, self.options.category)),
+            _ => order(key),
         };
         changed.then_some(Reread::Page)
     }
