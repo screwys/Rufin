@@ -619,6 +619,10 @@ pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
         })
         .collect()
 }
+/// The labels under the title of a Home album card.
+pub const HOME_ALBUM_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
+/// The labels under the title of a Home track card.
+pub const HOME_TRACK_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
 /// The fields `layout` can show for `key`.
 pub fn available_fields(key: LibraryListKey, layout: LibraryLayout) -> &'static [LibraryField] {
     match layout {

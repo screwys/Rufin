@@ -11,7 +11,6 @@ use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
 use crate::CatalogUi;
-use crate::LibraryField;
 use gtk_widgets::artwork::presentation::stable_seed;
 use gtk_widgets::controls::{ActionButtonVariant, configure_action_button};
 use gtk_widgets::favorites::{
@@ -42,8 +41,6 @@ use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, TrackPresentation};
 use rufin_core::route::Route;
 
-const HOME_ALBUM_GRID_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
-const HOME_TRACK_GRID_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
 const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
 
 #[derive(Clone, PartialEq)]
@@ -698,7 +695,13 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let field = Rc::new(move |_, track: &library::TrackRow, field| {
                 TrackPresentation::links(track, field)
             });
-            let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
+            let cell = TrackGridCell::new(
+                shell,
+                &rufin_core::settings::layout::HOME_TRACK_FIELDS,
+                play,
+                field,
+                None,
+            );
             cell.follow_favorites();
             cell.bind(0, track);
             (
@@ -715,7 +718,11 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
         HomeItem::Album(item) => {
             let mut album = item.album;
             album.title = item.title;
-            let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
+            let cell = AlbumGridCell::new(
+                shell,
+                &rufin_core::settings::layout::HOME_ALBUM_FIELDS,
+                None,
+            );
             cell.follow_favorites();
             cell.bind(0, album);
             (

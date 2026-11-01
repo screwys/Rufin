@@ -352,31 +352,42 @@ impl AndroidBrowseQuery {
         use rufin_core::view::HomeSection;
         self.home
             .get_or_init(|| {
-                let block = |row: Row, block| {
-                    let mut row: AndroidBrowseRow = row.into();
+                use rufin_core::settings::layout::{HOME_ALBUM_FIELDS, HOME_TRACK_FIELDS};
+                // Home cards show GTK's Home labels.
+                let album_card = |album: library::HomeAlbumRow| AndroidBrowseRow {
+                    display_title: Some(album.title),
+                    ..Self::shown_row(Row::Album(album.album), &HOME_ALBUM_FIELDS, 0)
+                };
+                let track_card = |track: library::HomeTrackRow| AndroidBrowseRow {
+                    display_title: Some(track.title),
+                    ..Self::shown_row(Row::Track(track.track), &HOME_TRACK_FIELDS, 0)
+                };
+                let in_block = |mut row: AndroidBrowseRow, block| {
                     home_section(&mut row, block);
                     row
-                };
-                let album = |album: library::HomeAlbumRow, kind| AndroidBrowseRow {
-                    display_title: Some(album.title),
-                    ..block(Row::Album(album.album), kind)
-                };
-                let track = |track: library::HomeTrackRow, kind| AndroidBrowseRow {
-                    display_title: Some(track.title),
-                    ..block(Row::Track(track.track), kind)
                 };
                 let mut rows = Vec::new();
                 for section in view.home_sections()? {
                     match section {
                         HomeSection::Showcase(row) => {
-                            rows.push(album(*row, HomeBlockKind::Showcase))
+                            rows.push(in_block(album_card(*row), HomeBlockKind::Showcase))
                         }
                         HomeSection::Rows {
                             block,
                             rows: section,
                         } => {
-                            rows.extend(section.tracks.into_iter().map(|row| track(row, block)));
-                            rows.extend(section.albums.into_iter().map(|row| album(row, block)));
+                            rows.extend(
+                                section
+                                    .tracks
+                                    .into_iter()
+                                    .map(|row| in_block(track_card(row), block)),
+                            );
+                            rows.extend(
+                                section
+                                    .albums
+                                    .into_iter()
+                                    .map(|row| in_block(album_card(row), block)),
+                            );
                         }
                         HomeSection::Provider(section) => {
                             let id = format!("provider:{}", section.section_id);
@@ -390,18 +401,20 @@ impl AndroidBrowseQuery {
                                 section_kind: "section".into(),
                                 ..row
                             };
-                            rows.extend(section.rows.tracks.into_iter().map(|row| {
-                                provider(AndroidBrowseRow {
-                                    display_title: Some(row.title),
-                                    ..Row::Track(row.track).into()
-                                })
-                            }));
-                            rows.extend(section.rows.albums.into_iter().map(|row| {
-                                provider(AndroidBrowseRow {
-                                    display_title: Some(row.title),
-                                    ..Row::Album(row.album).into()
-                                })
-                            }));
+                            rows.extend(
+                                section
+                                    .rows
+                                    .tracks
+                                    .into_iter()
+                                    .map(|row| provider(track_card(row))),
+                            );
+                            rows.extend(
+                                section
+                                    .rows
+                                    .albums
+                                    .into_iter()
+                                    .map(|row| provider(album_card(row))),
+                            );
                         }
                         HomeSection::Genres(genres) => {
                             rows.extend(genres.into_iter().map(|row| AndroidBrowseRow {

@@ -75,7 +75,7 @@ internal val AndroidBrowseRow.album: String
     get() = track?.album ?: albumRow?.title ?: ""
 
 internal val AndroidBrowseRow.subtitle: String
-    get() = track?.let { if (displayTitle != null) "${it.artist}\n${it.album}" else "${it.artist} · ${it.album}" }
+    get() = track?.let { "${it.artist} · ${it.album}" }
         ?: albumRow?.artist
         ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · ${browseDuration(durationMillis)}" }
         ?: recent?.subtitle ?: ""

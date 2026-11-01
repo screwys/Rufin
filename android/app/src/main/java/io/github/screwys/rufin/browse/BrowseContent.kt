@@ -332,9 +332,7 @@ private fun HomeContent(
                             if (header.sectionKind == "genres") {
                                 AssistChip(onClick = { onActivate(item) }, label = { Text(item.row.title) },
                                     leadingIcon = { RufinIcon("rufin-audio-x-generic-symbolic", null, Modifier.size(20.dp)) })
-                            } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true,
-                                lines = listOf(listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
-                                    .filter(String::isNotBlank).joinToString(" · ")))
+                            } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true)
                         }
                     }
                 }
@@ -460,8 +458,6 @@ private fun BrowseCover(item: BrowseItem, artwork: PlayerArtwork?, modifier: Mod
 internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Modifier,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     marquee: Boolean = false,
-    /** The labels under the title: the list's grid fields, one per line. */
-    lines: List<String> = item.row.fields.map { it.text },
 ) {
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
@@ -479,7 +475,8 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                     PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(32.dp), iconSize = 18.dp)
                 }
             }
-            lines.filter(String::isNotBlank).forEach { line ->
+            // The labels under the title: the list's grid fields, one per line.
+            item.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
                 Text(line, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
