@@ -19,7 +19,7 @@ uniffi = { workspace = true, optional = true }
 chrono.workspace = true
 tempfile.workspace = true
 futures-util.workspace = true
-futures-executor = "0.3"
+futures-executor.workspace = true
 blake3.workspace = true
 bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }
 md5_digest.workspace = true

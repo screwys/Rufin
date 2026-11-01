@@ -76,6 +76,7 @@ hyper-util = { version = "0.1", features = ["tokio", "service"] }
 directories = "6.0.0"
 ebur128 = "0.1.10"
 fcast-sender-sdk = { version = "0.3.0", default-features = false, features = ["chromecast"] }
+futures-executor = "0.3.33"
 futures-util = "0.3.32"
 getrandom = "0.4.0"
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
