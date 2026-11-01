@@ -28,8 +28,9 @@ function setIcon(node, name) {
 }
 
 function showFavorite(node, favorite) {
-  if (node.getAttribute("aria-pressed") === String(favorite)) return;
-  node.setAttribute("aria-pressed", String(favorite));
+  if (node.getAttribute("aria-pressed") !== String(favorite)) {
+    node.setAttribute("aria-pressed", String(favorite));
+  }
   setIcon(node.firstElementChild, favorite ? "favorite-filled" : "favorite");
 }
 
