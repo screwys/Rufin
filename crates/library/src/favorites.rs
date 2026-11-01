@@ -193,9 +193,9 @@ impl Catalog {
             .execute(&mut *connection)
             .await?;
         }
-        // A URI the Catalog holds no track for stages nothing resident, so keep its row.
+        // A URI the Catalog holds no row for shows nothing; Rufin still holds its value.
         if deliver || !changed.is_empty() {
-            write.keep();
+            write.held(vec![uri.to_owned()]);
         }
         write.set_states(changed);
         write.commit().await?;
@@ -254,10 +254,8 @@ impl Catalog {
         if !removed {
             return Ok(false);
         }
-        write.keep();
-        if keep_copy {
-            write.restated(&delivery.media_uri).await?;
-        } else {
+        write.held(vec![delivery.media_uri.clone()]);
+        if !keep_copy {
             let uri = delivery.media_uri.as_str();
             let apply = |state: &mut NativeState| match delivery.kind {
                 DeliveryKind::Favorite => state.favorite = delivery.value.map(|value| value != 0),
@@ -326,7 +324,7 @@ impl Catalog {
                 .rows_affected()
                 > 0;
         if removed {
-            write.keep();
+            write.held(vec![delivery.media_uri.clone()]);
         }
         if removed && !keep_copy {
             drop_copy(&mut write, &delivery.media_uri, delivery.kind).await?;
@@ -361,7 +359,7 @@ async fn drop_copy(
         .fetch_all(&mut *connection)
         .await?;
     }
-    write.set_states(states);
+    write.states_changed(states);
     Ok(())
 }
 
@@ -501,6 +499,6 @@ pub(crate) async fn write_user_media_state(
         .await?
     };
     let changed = !states.is_empty();
-    write.set_states(states);
+    write.states_changed(states);
     Ok(changed)
 }

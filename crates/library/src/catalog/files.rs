@@ -617,7 +617,7 @@ pub(super) async fn merge_local_file_uris_on(
             .fetch_all(write.connection().await?)
             .await?,
         );
-        write.set_states(states);
+        write.states_changed(states);
         sqlx::query("UPDATE listens SET media_uri=?2 WHERE media_uri=?1")
             .bind(previous)
             .bind(current)

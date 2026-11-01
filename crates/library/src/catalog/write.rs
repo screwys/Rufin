@@ -69,6 +69,11 @@ pub enum Scope {
     State {
         items: Vec<StateChange>,
     },
+    /// The favorites and ratings Rufin holds for these URIs changed, or whether one waits for
+    /// its server. A URI no track, album or artist row has counts too.
+    Held {
+        uris: Vec<String>,
+    },
     Listened {
         track: TrackKey,
     },
@@ -921,8 +926,21 @@ impl<'a> Write<'a> {
         self.reload = true;
     }
 
-    /// Stages the favorites and ratings user_state statements returned with STATE_RETURNING
-    /// or STATE_DELETED.
+    /// Stages user_state rows a statement changed and returned with STATE_RETURNING or
+    /// STATE_DELETED: what rows show, and the values Rufin holds.
+    pub(crate) fn states_changed(&mut self, rows: Vec<StateRow>) {
+        self.held(rows.iter().map(|row| row.0.clone()).collect());
+        self.set_states(rows);
+    }
+
+    /// Stages the Held scope of these URIs.
+    pub(crate) fn held(&mut self, uris: Vec<String>) {
+        if !uris.is_empty() {
+            self.changed(Scope::Held { uris });
+        }
+    }
+
+    /// Stages what user_state rows read with STATE_RETURNING show.
     pub(crate) fn set_states(&mut self, rows: Vec<StateRow>) {
         for (uri, favorite, rating, track, album, artist) in rows {
             let state = user_state(favorite, rating);
@@ -937,39 +955,6 @@ impl<'a> Write<'a> {
                 self.edits.states.insert(item, (state, uri.clone()));
             }
         }
-    }
-
-    /// Stages the State scope of a favorite or rating whose shown value stays as it is, for
-    /// readers of which values Rufin holds: a delivery settled that Rufin keeps its copy.
-    pub(crate) async fn restated(&mut self, uri: &str) -> LibraryResult<()> {
-        fn item<R: Row>(row: Option<R>) -> Option<UserItem> {
-            row.and_then(|row| row.user_item().map(|(item, _)| item))
-        }
-        // Rated items with a server have URIs that name their kind.
-        let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
-        let item = match kind.as_deref() {
-            Some("album") => item(self.by_natural::<Album>(uri).await?),
-            Some("artist") => item(self.by_natural::<Artist>(uri).await?),
-            _ => item(self.by_natural::<Track>(uri).await?),
-        };
-        let Some(item) = item else {
-            return Ok(());
-        };
-        let (favorite, rating) = self
-            .catalog
-            .snapshot()
-            .shown_state(item)
-            .unwrap_or_default();
-        self.changed(Scope::State {
-            items: vec![StateChange {
-                target: item.target(uri.to_owned()),
-                key: item.key(),
-                favorite: favorite.unwrap_or(false),
-                rating,
-                rating_changed: false,
-            }],
-        });
-        Ok(())
     }
 
     /// The plays, skips and last play of a track, with what this Write staged.

@@ -1486,7 +1486,7 @@ impl Catalog {
         .bind(key)
         .fetch_all(write.connection().await?)
         .await?;
-        write.set_states(states);
+        write.states_changed(states);
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM outbox WHERE {owned}"
         )))

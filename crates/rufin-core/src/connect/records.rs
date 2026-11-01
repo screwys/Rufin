@@ -546,13 +546,7 @@ impl Records {
         let mut queue = false;
         for scope in scopes {
             match scope {
-                Scope::State { items } => {
-                    states.extend(items.iter().map(|item| match &item.target {
-                        library::FavoriteTarget::Track(uri)
-                        | library::FavoriteTarget::Album(uri)
-                        | library::FavoriteTarget::Artist(uri) => uri.clone(),
-                    }))
-                }
+                Scope::Held { uris } => states.extend(uris.iter().cloned()),
                 Scope::Listened { .. } => heard = true,
                 Scope::Lyrics { uri } => lyrics.push(uri.clone()),
                 Scope::Playlist {
@@ -580,6 +574,8 @@ impl Records {
             written.extend(self.compare(kind, true).await?);
         }
         if !states.is_empty() {
+            states.sort_unstable();
+            states.dedup();
             let portable = self.portable(&states).await?;
             let ids = states
                 .iter()

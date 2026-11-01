@@ -162,6 +162,7 @@ impl Pending {
                 Scope::Tracks { source: None, .. }
                 | Scope::Rekey { .. }
                 | Scope::Queue
+                | Scope::Held { .. }
                 | Scope::Downloads { .. }
                 | Scope::Lyrics { .. }
                 | Scope::Analysis { .. } => {}
