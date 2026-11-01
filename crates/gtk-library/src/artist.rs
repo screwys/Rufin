@@ -30,15 +30,7 @@ use super::routes::SearchableTrackOptions;
 use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
 use gtk_media_menus::media_menus::present_artist_context_menu;
 use rufin_core::route::Route;
-
-const ARTIST_RELEASE_TITLES: [&str; 6] = [
-    msgid("Albums"),
-    msgid("EPs"),
-    msgid("Singles"),
-    msgid("Collections"),
-    msgid("Other releases"),
-    msgid("Appears On"),
-];
+use rufin_core::settings::presentation::ARTIST_RELEASE_TITLES;
 
 fn artist_discography_route(artist: String, album_artist: bool) -> Route {
     if album_artist {

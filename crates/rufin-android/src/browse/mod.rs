@@ -20,7 +20,7 @@ use rufin_core::{
     runtime::SelectedLibrary,
     settings::{
         LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, SidebarPin,
-        SidebarRouteItem, layout::DisplaySize,
+        SidebarRouteItem, layout::DisplaySize, presentation::ARTIST_RELEASE_TITLES,
     },
 };
 
@@ -57,15 +57,6 @@ where
     };
     task.await.map_err(error)?
 }
-
-const ARTIST_RELEASE_GROUPS: [(&str, &str); 6] = [
-    ("Album", "Albums"),
-    ("Ep", "EPs"),
-    ("Single", "Singles"),
-    ("Collection", "Collections"),
-    ("Other", "Other releases"),
-    ("AppearsOn", "Appears On"),
-];
 
 fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> AndroidBrowseDisplay {
     use rufin_core::settings::presentation::{library_field_title, library_fields_title};
@@ -344,11 +335,10 @@ impl AndroidBrowseQuery {
                             end += count;
                             position < end
                         })
-                        .unwrap_or(ARTIST_RELEASE_GROUPS.len() - 1);
-                    let (id, title) = ARTIST_RELEASE_GROUPS[class];
+                        .unwrap_or(ARTIST_RELEASE_TITLES.len() - 1);
                     AndroidBrowseRow {
-                        section_id: id.into(),
-                        section: localization::tr(title),
+                        section_id: class.to_string(),
+                        section: localization::tr(ARTIST_RELEASE_TITLES[class]),
                         section_kind: "artist_release".into(),
                         ..Self::shown_row(row, fields, position)
                     }

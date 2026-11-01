@@ -25,7 +25,6 @@ use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, album_external_links, detail_playback_controls,
     detail_radio_button, detail_showcase_frame, media_cover_projection, media_showcase,
 };
-use crate::release_kind::album_release_kind_label;
 use crate::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_wrapper, detail_showcase_cover_size,
 };
@@ -33,6 +32,7 @@ use crate::track_model::TrackCollectionModel;
 use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::detail_links::DetailLinkBinding;
 use rufin_core::route::detail_links::album_artist_links;
+use rufin_core::settings::presentation::album_release_title;
 
 impl CatalogUi {
     pub fn album_detail_view(self: &Rc<Self>, mut read: Opened) -> MountedRoute {
@@ -82,7 +82,7 @@ impl CatalogUi {
         let showcase_view = DetailShowcaseView::new(
             "album-detail-showcase",
             gtk_widgets::artwork::presentation::stable_seed(&album.row.object_id),
-            album_release_kind_label(&album),
+            album_release_title(album.row.release_class),
             true,
             &album.metadata.title,
         );

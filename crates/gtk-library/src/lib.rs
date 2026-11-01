@@ -2,7 +2,6 @@ pub mod activity;
 mod catalog;
 mod home_layout;
 mod playlist_entry_model;
-mod release_kind;
 mod track_model;
 mod track_selection;
 pub use catalog::CatalogUi;

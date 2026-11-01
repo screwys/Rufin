@@ -55,9 +55,10 @@ impl AndroidBrowseQuery {
             let mut groups = Vec::new();
             if let Some((counts, _)) = view.release_counts() {
                 let mut index = 0;
-                for ((id, title), total) in ARTIST_RELEASE_GROUPS.iter().zip(counts) {
+                for (class, (title, total)) in ARTIST_RELEASE_TITLES.iter().zip(counts).enumerate()
+                {
                     groups.push(AndroidArtistReleaseGroup {
-                        id: (*id).into(),
+                        id: class.to_string(),
                         title: (*title).into(),
                         total: total as u64,
                         index,

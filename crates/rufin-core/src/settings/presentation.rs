@@ -185,6 +185,27 @@ pub fn library_list_title(value: LibraryListKey) -> &'static str {
     }
 }
 
+/// An album page's name for its release kind.
+pub fn album_release_title(value: library::AlbumReleaseClass) -> &'static str {
+    match value {
+        library::AlbumReleaseClass::Album => msgid("Album"),
+        library::AlbumReleaseClass::Ep => msgid("EP"),
+        library::AlbumReleaseClass::Single => msgid("Single"),
+        library::AlbumReleaseClass::Collection => msgid("Collection"),
+        library::AlbumReleaseClass::Other => msgid("Release"),
+    }
+}
+
+/// An artist page's release groups in their order: each release class, then Appears On.
+pub const ARTIST_RELEASE_TITLES: [&str; 6] = [
+    msgid("Albums"),
+    msgid("EPs"),
+    msgid("Singles"),
+    msgid("Collections"),
+    msgid("Other releases"),
+    msgid("Appears On"),
+];
+
 /// The title of the fields a layout shows.
 pub fn library_fields_title(layout: super::LibraryLayout) -> &'static str {
     match layout {
