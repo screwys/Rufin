@@ -823,10 +823,14 @@ impl Downloads {
             commands,
             status: changes,
         };
-        runtime.spawn(follow_catalog(
-            catalog.clone(),
-            downloads.commands.downgrade(),
-        ));
+        // The rules hear every Change; the follow ends with the download actor.
+        let commands = downloads.commands.downgrade();
+        runtime.spawn(catalog.follow(move |heard| {
+            let sent = commands
+                .upgrade()
+                .is_some_and(|commands| commands.try_send(Command::LibraryChanged(heard)).is_ok());
+            std::future::ready(sent)
+        }));
         runtime.spawn(run(
             Actor {
                 artwork,
@@ -987,41 +991,6 @@ impl Downloads {
     fn send(&self, command: Command) {
         if self.commands.try_send(command).is_err() {
             warn!("download operation lane is unavailable");
-        }
-    }
-}
-
-/// Hands the rules every Change heard once the Catalog loaded: a full pass first and after the
-/// feed lagged, then one per batch. It ends with the download actor.
-async fn follow_catalog(catalog: Catalog, commands: async_channel::WeakSender<Command>) {
-    use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-    let mut changes = catalog.changes();
-    catalog.loaded().await;
-    drop(catalog);
-    let mut full = true;
-    loop {
-        let mut heard = Vec::new();
-        if !full {
-            match changes.recv().await {
-                Ok(change) => heard.push(change),
-                Err(RecvError::Lagged(_)) => full = true,
-                Err(RecvError::Closed) => return,
-            }
-        }
-        loop {
-            match changes.try_recv() {
-                Ok(change) => heard.push(change),
-                Err(TryRecvError::Lagged(_)) => full = true,
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Closed) => return,
-            }
-        }
-        let heard = (!std::mem::take(&mut full)).then_some(heard);
-        let Some(commands) = commands.upgrade() else {
-            return;
-        };
-        if commands.try_send(Command::LibraryChanged(heard)).is_err() {
-            return;
         }
     }
 }

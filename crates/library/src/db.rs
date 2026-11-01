@@ -242,6 +242,46 @@ impl Catalog {
         self.inner.changes.subscribe()
     }
 
+    /// Runs `pass` once the Catalog loaded: a full pass (`None`) first and after the feed
+    /// lagged, then one per batch of Changes heard since the previous pass. It ends when
+    /// `pass` answers false or the feed closes, and does not keep the Catalog open.
+    pub fn follow<Pass, Done>(&self, mut pass: Pass) -> impl Future<Output = ()> + Send + 'static
+    where
+        Pass: FnMut(Option<Vec<Arc<Change>>>) -> Done + Send + 'static,
+        Done: Future<Output = bool> + Send,
+    {
+        use broadcast::error::{RecvError, TryRecvError};
+        let mut changes = self.changes();
+        let catalog = self.clone();
+        async move {
+            catalog.loaded().await;
+            drop(catalog);
+            let (mut full, mut heard) = (true, Vec::new());
+            loop {
+                loop {
+                    match changes.try_recv() {
+                        Ok(change) => heard.push(change),
+                        Err(TryRecvError::Lagged(_)) => full = true,
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Closed) => return,
+                    }
+                }
+                if full || !heard.is_empty() {
+                    let heard = std::mem::take(&mut heard);
+                    if !pass((!std::mem::take(&mut full)).then_some(heard)).await {
+                        return;
+                    }
+                    continue;
+                }
+                match changes.recv().await {
+                    Ok(change) => heard.push(change),
+                    Err(RecvError::Lagged(_)) => full = true,
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        }
+    }
+
     /// Starts a walk of a source: a listing whose completion hides what it did not see.
     pub(crate) fn open_walk(&self, source: SourceKey) -> u64 {
         let mut walks = self.walks();
