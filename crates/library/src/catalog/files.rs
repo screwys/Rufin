@@ -560,6 +560,12 @@ pub(super) async fn merge_local_file_uris_on(
                     }
                 }
             }
+            // The track has been in the library since the old row was first seen.
+            canonical.first_seen = canonical
+                .first_seen
+                .into_iter()
+                .chain(previous_track.first_seen)
+                .min();
             write.put(canonical);
             let entries: Vec<(i64, i64, Vec<u8>)> = sqlx::query_as(
                 "UPDATE playlist_entries SET track_key=?2 WHERE track_key=?1 RETURNING playlist_key,playlist_entry_key,rank",
