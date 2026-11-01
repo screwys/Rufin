@@ -119,17 +119,16 @@ pub fn append_folder_actions(
         move || present_folder_picker(&picker, picker_members.clone()),
     );
     if in_folder {
+        let menus = Rc::clone(menus);
         surface.append_fixed_action(
             msgid("Remove from folder"),
-            "remove-from-folder",
             gtk_widgets::controls::REMOVE_ICON,
+            move || {
+                for member in &members {
+                    move_member(&menus, member.clone(), None);
+                }
+            },
         );
-        let menus = Rc::clone(menus);
-        surface.add_action("remove-from-folder", move || {
-            for member in &members {
-                move_member(&menus, member.clone(), None);
-            }
-        });
     }
 }
 
@@ -199,61 +198,59 @@ pub fn present_folder_context_menu(
 ) {
     let surface = ContextMenuSurface::new(target, "playlist-folder", position);
     crate::media_menus::install_sidebar_pin_action(&surface, menus, Some(folder.pin()));
-    surface.append_fixed_action(
-        msgid("Rename folder"),
-        "rename",
-        gtk_widgets::controls::EDIT_ICON,
-    );
     let rename_menus = Rc::clone(menus);
     let rename_folder = folder.clone();
-    surface.add_action("rename", move || {
-        let source = rename_menus.source.clone();
-        let menus = Rc::downgrade(&rename_menus);
-        let key = rename_folder.folder_key;
-        let dialog = folder_name_dialog(Some(&rename_folder.name), move |name| {
-            let source = source.clone();
-            let menus = menus.clone();
-            gtk::glib::spawn_future_local(async move {
-                if let Err(error) =
-                    rufin_core::playlists::rename_playlist_folder(&source, key, name).await
-                    && let Some(menus) = menus.upgrade()
-                {
-                    (menus.show_error)(error.to_string());
-                }
-            });
-        });
-        (rename_menus.present_dialog)(&dialog);
-    });
     surface.append_fixed_action(
-        msgid("Delete folder"),
-        "delete",
-        gtk_widgets::controls::DELETE_ICON,
+        msgid("Rename folder"),
+        gtk_widgets::controls::EDIT_ICON,
+        move || {
+            let source = rename_menus.source.clone();
+            let menus = Rc::downgrade(&rename_menus);
+            let key = rename_folder.folder_key;
+            let dialog = folder_name_dialog(Some(&rename_folder.name), move |name| {
+                let source = source.clone();
+                let menus = menus.clone();
+                gtk::glib::spawn_future_local(async move {
+                    if let Err(error) =
+                        rufin_core::playlists::rename_playlist_folder(&source, key, name).await
+                        && let Some(menus) = menus.upgrade()
+                    {
+                        (menus.show_error)(error.to_string());
+                    }
+                });
+            });
+            (rename_menus.present_dialog)(&dialog);
+        },
     );
     let delete_menus = Rc::clone(menus);
-    surface.add_action("delete", move || {
-        let source = delete_menus.source.clone();
-        let menus = Rc::downgrade(&delete_menus);
-        let key = folder.folder_key;
-        let smart = folder.smart;
-        gtk::glib::spawn_future_local(async move {
-            let result = rufin_core::playlists::delete_playlist_folder(&source, key).await;
-            let Some(menus) = menus.upgrade() else { return };
-            match result {
-                Ok(()) => {
-                    if (menus.current_route)()
-                        == (rufin_core::route::Route::PlaylistFolder { key, smart })
-                    {
-                        (menus.navigate)(if smart {
-                            rufin_core::route::Route::SmartPlaylists
-                        } else {
-                            rufin_core::route::Route::Playlists
-                        });
+    surface.append_fixed_action(
+        msgid("Delete folder"),
+        gtk_widgets::controls::DELETE_ICON,
+        move || {
+            let source = delete_menus.source.clone();
+            let menus = Rc::downgrade(&delete_menus);
+            let key = folder.folder_key;
+            let smart = folder.smart;
+            gtk::glib::spawn_future_local(async move {
+                let result = rufin_core::playlists::delete_playlist_folder(&source, key).await;
+                let Some(menus) = menus.upgrade() else { return };
+                match result {
+                    Ok(()) => {
+                        if (menus.current_route)()
+                            == (rufin_core::route::Route::PlaylistFolder { key, smart })
+                        {
+                            (menus.navigate)(if smart {
+                                rufin_core::route::Route::SmartPlaylists
+                            } else {
+                                rufin_core::route::Route::Playlists
+                            });
+                        }
                     }
+                    Err(error) => (menus.show_error)(error.to_string()),
                 }
-                Err(error) => (menus.show_error)(error.to_string()),
-            }
-        });
-    });
+            });
+        },
+    );
     surface.popup(&menus.settings.current.borrow().application.context_menu);
 }
 

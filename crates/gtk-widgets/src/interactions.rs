@@ -4,9 +4,10 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use localization::tr;
+use localization::{msgid, tr};
 
 use crate::controls::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
+use rufin_core::playback::QueuePlacement;
 use rufin_core::settings::context_menu::{ContextMenuItem, ContextMenuSettings};
 
 const NATIVE_MENU_SELECTION_CLASS: &str = "rufin-menu-selection";
@@ -102,7 +103,9 @@ pub struct ContextMenuSurface {
     position: Option<(f64, f64)>,
     entries: RefCell<Vec<ContextMenuEntry<gio::MenuItem>>>,
     custom_children: RefCell<Vec<ContextMenuCustomChild>>,
-    submenu_actions: RefCell<Vec<(String, &'static str)>>,
+    /// Submenu rows whose body runs an action, by label: Play and the radio.
+    submenu_actions: RefCell<Vec<(String, String)>>,
+    next_action: Cell<usize>,
 }
 
 struct ContextMenuCustomChild {
@@ -161,6 +164,7 @@ impl ContextMenuSurface {
             entries: RefCell::new(Vec::new()),
             custom_children: RefCell::new(Vec::new()),
             submenu_actions: RefCell::new(Vec::new()),
+            next_action: Cell::new(0),
         }
     }
 
@@ -168,62 +172,146 @@ impl ContextMenuSurface {
         &self.popover
     }
 
-    pub fn append_play_actions(&self, settings: &ContextMenuSettings) {
+    /// The Play submenu: Play, Play Next and Play Later as settings show them, each also
+    /// shuffled. Its row body plays.
+    pub fn append_play_actions(
+        &self,
+        settings: &ContextMenuSettings,
+        run: impl Fn(QueuePlacement, bool) + 'static,
+    ) {
         let placements = [
-            ContextMenuItem::Play,
-            ContextMenuItem::PlayNext,
-            ContextMenuItem::PlayLater,
+            (ContextMenuItem::Play, QueuePlacement::Now, PLAY_ICON),
+            (
+                ContextMenuItem::PlayNext,
+                QueuePlacement::Next,
+                PLAY_NEXT_ICON,
+            ),
+            (
+                ContextMenuItem::PlayLater,
+                QueuePlacement::Last,
+                PLAY_LATER_ICON,
+            ),
         ];
         let Some(first) = placements
             .iter()
-            .copied()
+            .map(|(item, _, _)| *item)
             .find(|item| settings.is_visible(*item))
         else {
             return;
         };
-        let resource = crate::ui_resource::PLAY_MENU_RESOURCE;
-        let builder = crate::ui_resource::builder(resource);
-        crate::objects!(builder, resource, {
-            play_menu: gio::Menu,
-            regular: gio::Menu,
-            shuffled: gio::Menu,
-        });
-        for section in [regular, shuffled] {
-            for (index, setting) in placements.iter().enumerate().rev() {
-                let item = gio::MenuItem::from_model(&section, index as i32);
-                let action = item
-                    .attribute_value("action", None)
-                    .unwrap()
-                    .get::<String>()
-                    .unwrap();
-                section.remove(index as i32);
+        let run = Rc::new(run);
+        let submenu = gio::Menu::new();
+        for (shuffled, labels) in [
+            (
+                false,
+                [msgid("Play"), msgid("Play Next"), msgid("Play Later")],
+            ),
+            (
+                true,
+                [
+                    msgid("Play (shuffled)"),
+                    msgid("Play Next (shuffled)"),
+                    msgid("Play Later (shuffled)"),
+                ],
+            ),
+        ] {
+            let section = gio::Menu::new();
+            for ((setting, placement, icon), label) in placements.iter().zip(labels) {
                 if settings.is_visible(*setting) {
-                    item.set_detailed_action(&format!("{}.{}", self.group_name, action));
-                    item.set_icon(&gio::ThemedIcon::new(
-                        [PLAY_ICON, PLAY_NEXT_ICON, PLAY_LATER_ICON][index],
-                    ));
-                    section.insert_item(index as i32, &item);
+                    let run = Rc::clone(&run);
+                    let (placement, item) = (*placement, *setting);
+                    let entry = self.item(&tr(label), icon, move || run(placement, shuffled));
+                    if item == ContextMenuItem::Play && !shuffled {
+                        self.submenu_default(&tr(msgid("Play")), &entry);
+                    }
+                    section.append_item(&entry);
                 }
             }
+            submenu.append_section(None, &section);
         }
-        let item = gio::MenuItem::from_model(&play_menu, 0);
+        let item = gio::MenuItem::new_submenu(Some(&tr(msgid("Play"))), &submenu);
         item.set_icon(&gio::ThemedIcon::new(PLAY_ICON));
-        if settings.is_visible(ContextMenuItem::Play) {
-            self.submenu_actions.borrow_mut().push((tr("Play"), "play"));
-        }
         self.entries
             .borrow_mut()
             .push(ContextMenuEntry::Configurable(first, item));
     }
 
-    pub fn append_fixed_action(&self, label: &str, action: &str, icon_name: &str) {
+    /// The radio submenu: Play, Play Next and Play Later of a radio. Its row body plays it.
+    pub fn append_radio(&self, label: &str, run: impl Fn(QueuePlacement) + 'static) {
+        let run = Rc::new(run);
+        let submenu = gio::Menu::new();
+        for (placement, title, icon) in [
+            (QueuePlacement::Now, msgid("Play"), PLAY_ICON),
+            (QueuePlacement::Next, msgid("Play Next"), PLAY_NEXT_ICON),
+            (QueuePlacement::Last, msgid("Play Later"), PLAY_LATER_ICON),
+        ] {
+            let run = Rc::clone(&run);
+            let entry = self.item(&tr(title), icon, move || run(placement));
+            if placement == QueuePlacement::Now {
+                self.submenu_default(&tr(label), &entry);
+            }
+            submenu.append_item(&entry);
+        }
+        self.append_configurable_submenu(ContextMenuItem::PlayRadio, label, &submenu, RADIO_ICON);
+    }
+
+    /// An item, for a submenu, that runs `run`. `label` is already translated.
+    pub fn item(&self, label: &str, icon_name: &str, run: impl Fn() + 'static) -> gio::MenuItem {
+        menu_action_item(label, &self.action(true, run), icon_name)
+    }
+
+    /// Lets `button`, inside the menu, run `run` and close the menu.
+    pub fn bind_button(&self, button: &gtk::Button, run: impl Fn() + 'static) {
+        button.set_action_name(Some(&self.action(true, run)));
+    }
+
+    pub fn append_fixed_action(&self, label: &str, icon_name: &str, run: impl Fn() + 'static) {
+        self.append_fixed_action_enabled(label, icon_name, true, run);
+    }
+
+    pub fn append_fixed_action_enabled(
+        &self,
+        label: &str,
+        icon_name: &str,
+        enabled: bool,
+        run: impl Fn() + 'static,
+    ) {
+        let item = menu_action_item(&tr(label), &self.action(enabled, run), icon_name);
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Fixed(menu_action_item(
-                &tr(label),
-                &format!("{}.{}", self.group_name, action),
-                icon_name,
-            )));
+            .push(ContextMenuEntry::Fixed(item));
+    }
+
+    /// An action under a generated name that closes the menu before it runs. Returns its
+    /// detailed name in this menu's group.
+    fn action(&self, enabled: bool, run: impl Fn() + 'static) -> String {
+        let name = format!("item-{}", self.next_action.get());
+        self.next_action.set(self.next_action.get() + 1);
+        let action = gio::SimpleAction::new(&name, None);
+        action.set_enabled(enabled);
+        let popover = self.popover.downgrade();
+        let action_activated = Rc::clone(&self.action_activated);
+        action.connect_activate(move |_, _| {
+            action_activated.set(true);
+            if let Some(popover) = popover.upgrade() {
+                popdown_native_menu(&popover);
+            }
+            run();
+        });
+        self.actions.add_action(&action);
+        format!("{}.{name}", self.group_name)
+    }
+
+    /// The submenu row titled `label` runs `item`'s action when its body is clicked.
+    fn submenu_default(&self, label: &str, item: &gio::MenuItem) {
+        if let Some(action) = item
+            .attribute_value("action", None)
+            .and_then(|value| value.get::<String>())
+        {
+            self.submenu_actions
+                .borrow_mut()
+                .push((label.to_owned(), action));
+        }
     }
 
     pub fn append_fixed_widget(&self, id: &str, widget: &impl IsA<gtk::Widget>) {
@@ -246,19 +334,13 @@ impl ContextMenuSurface {
         &self,
         item: ContextMenuItem,
         label: &str,
-        action: &str,
         icon_name: &str,
+        run: impl Fn() + 'static,
     ) {
+        let entry = menu_action_item(&tr(label), &self.action(true, run), icon_name);
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Configurable(
-                item,
-                menu_action_item(
-                    &tr(label),
-                    &format!("{}.{}", self.group_name, action),
-                    icon_name,
-                ),
-            ));
+            .push(ContextMenuEntry::Configurable(item, entry));
     }
 
     pub fn append_configurable_submenu(
@@ -270,11 +352,6 @@ impl ContextMenuSurface {
     ) {
         let item = gio::MenuItem::new_submenu(Some(&tr(label)), submenu);
         item.set_icon(&gio::ThemedIcon::new(icon_name));
-        if setting == ContextMenuItem::PlayRadio {
-            self.submenu_actions
-                .borrow_mut()
-                .push((tr(label), "play-radio"));
-        }
         self.entries
             .borrow_mut()
             .push(ContextMenuEntry::Configurable(setting, item));
@@ -329,25 +406,6 @@ impl ContextMenuSurface {
                 widget: widget.as_ref().clone(),
                 primary_click: Some(Rc::new(primary_click)),
             });
-    }
-
-    pub fn add_action(&self, name: &str, run: impl Fn() + 'static) {
-        self.add_action_enabled(name, true, run);
-    }
-
-    pub fn add_action_enabled(&self, name: &str, enabled: bool, run: impl Fn() + 'static) {
-        let action = gio::SimpleAction::new(name, None);
-        action.set_enabled(enabled);
-        let popover = self.popover.downgrade();
-        let action_activated = Rc::clone(&self.action_activated);
-        action.connect_activate(move |_, _| {
-            action_activated.set(true);
-            if let Some(popover) = popover.upgrade() {
-                popdown_native_menu(&popover);
-            }
-            run();
-        });
-        self.actions.add_action(&action);
     }
 
     pub fn popup(self, settings: &ContextMenuSettings) {
@@ -593,28 +651,6 @@ fn menu_action_item(label: &str, action: &str, icon_name: &str) -> gio::MenuItem
     item
 }
 
-fn append_menu_action(menu: &gio::Menu, label: &str, action: &str, icon_name: &str) {
-    menu.append_item(&menu_action_item(&tr(label), action, icon_name));
-}
-
-pub fn radio_context_submenu(group: &str) -> gio::Menu {
-    let menu = gio::Menu::new();
-    append_menu_action(&menu, "Play", &format!("{group}.play-radio"), PLAY_ICON);
-    append_menu_action(
-        &menu,
-        "Play Next",
-        &format!("{group}.play-radio-next"),
-        PLAY_NEXT_ICON,
-    );
-    append_menu_action(
-        &menu,
-        "Play Later",
-        &format!("{group}.play-radio-last"),
-        PLAY_LATER_ICON,
-    );
-    menu
-}
-
 pub fn show_native_menu_icons(popover: &gtk::PopoverMenu) {
     show_native_menu_icons_from(popover.upcast_ref());
 }
@@ -704,7 +740,7 @@ fn install_native_submenu_primary_click(
 fn install_submenu_actions(
     container: &gtk::Widget,
     actions: &gio::SimpleActionGroup,
-    defaults: &[(String, &'static str)],
+    defaults: &[(String, String)],
 ) {
     let mut child = container.first_child();
     while let Some(owner) = child {
@@ -718,7 +754,10 @@ fn install_submenu_actions(
                 .find(|(label, _)| *label == owner.property::<String>("text"))
         {
             let actions = actions.clone();
-            let action = *action;
+            let action = action
+                .split_once('.')
+                .map_or(action.as_str(), |(_, name)| name)
+                .to_owned();
             let click = owner
                 .observe_controllers()
                 .iter::<glib::Object>()
@@ -754,7 +793,7 @@ fn install_submenu_actions(
                         }
                     }
                 }
-                actions.activate_action(action, None);
+                actions.activate_action(&action, None);
                 None
             });
         }

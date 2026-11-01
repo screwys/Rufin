@@ -100,7 +100,6 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     DISPLAY_SETTINGS_RESOURCE,
     "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
     TRACK_ROW_INDEX_RESOURCE,
-    PLAY_MENU_RESOURCE,
     MANAGE_SERVER_RESOURCE,
     PLAYLIST_NAME_DIALOG_RESOURCE,
     PLAYLIST_DELETE_DIALOG_RESOURCE,
@@ -124,8 +123,6 @@ pub const DISPLAY_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/prefere
 pub const TEXT_SLIDE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/text_slide.ui";
 
 pub const TRACK_ROW_INDEX_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/track_row_index.ui";
-
-pub const PLAY_MENU_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/play_menu.ui";
 
 pub const PLAYLIST_NAME_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_name.ui";

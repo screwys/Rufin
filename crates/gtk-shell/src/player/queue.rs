@@ -46,26 +46,30 @@ pub(crate) fn present_queue_selection_context_menu(
     position: Option<(f64, f64)>,
 ) {
     let surface = ContextMenuSurface::new(target, "queue-selection", position);
-    surface.append_fixed_action(msgid("Remove from Queue"), "remove-from-queue", REMOVE_ICON);
-    surface.append_configurable_action(ContextMenuItem::Play, msgid("Play"), "play", PLAY_ICON);
-    append_context_menu_picker_media_uris(&surface, shell, selection.media_uris.iter().cloned());
     let queue = shell.products.playback.clone();
     let remove = selection.selection.clone();
-    surface.add_action("remove-from-queue", move || {
+    surface.append_fixed_action(msgid("Remove from Queue"), REMOVE_ICON, move || {
         queue.remove_many(remove.clone())
     });
     let queue = shell.products.playback.clone();
-    surface.add_action("play", move || match &selection.selection {
-        QueueSelection::Occurrences(ids) => {
-            if let Some(id) = ids.first() {
-                queue.activate_occurrence(*id);
+    let play = selection.selection.clone();
+    surface.append_configurable_action(
+        ContextMenuItem::Play,
+        msgid("Play"),
+        PLAY_ICON,
+        move || match &play {
+            QueueSelection::Occurrences(ids) => {
+                if let Some(id) = ids.first() {
+                    queue.activate_occurrence(*id);
+                }
             }
-        }
-        QueueSelection::Positions(positions) => {
-            if let Some(position) = positions.first() {
-                queue.activate(*position);
+            QueueSelection::Positions(positions) => {
+                if let Some(position) = positions.first() {
+                    queue.activate(*position);
+                }
             }
-        }
-    });
+        },
+    );
+    append_context_menu_picker_media_uris(&surface, shell, selection.media_uris.iter().cloned());
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }

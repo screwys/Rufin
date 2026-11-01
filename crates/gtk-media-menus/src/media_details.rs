@@ -13,14 +13,14 @@ pub(crate) struct MenuHeader<'a> {
     pub title: &'a str,
     pub subtitle: &'a str,
     pub artwork: Option<&'a [u8]>,
-    pub favorite: bool,
+    /// What the favorite button marks, and whether it is a favorite now.
+    pub favorite: (library::FavoriteTarget, bool),
 }
 
 pub(crate) fn append_header(
     surface: &ContextMenuSurface,
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
-    group: &str,
     identity: MenuHeader<'_>,
 ) {
     let resource = crate::ui_resource::MEDIA_MENU_HEADER_RESOURCE;
@@ -37,7 +37,8 @@ pub(crate) fn append_header(
     subtitle.set_text(identity.subtitle);
     subtitle_host.set_visible(!identity.subtitle.is_empty());
     bind_cover(&cover, menus, identity.artwork, 48);
-    gtk_widgets::favorites::set_favorite_button_active(&favorite, identity.favorite);
+    let (favorite_target, favorited) = identity.favorite;
+    gtk_widgets::favorites::set_favorite_button_active(&favorite, favorited);
     favorite.set_visible(
         menus
             .settings
@@ -47,14 +48,16 @@ pub(crate) fn append_header(
             .context_menu
             .is_visible(rufin_core::settings::ContextMenuItem::Favorites),
     );
-    favorite.set_action_name(Some(&format!("{group}.favorite")));
-    details.set_action_name(Some(&format!("{group}.details")));
+    let favorite_menus = Rc::clone(menus);
+    surface.bind_button(&favorite, move || {
+        (favorite_menus.set_favorite)(favorite_target.clone(), !favorited);
+    });
     let parent = target
         .root()
         .and_downcast::<gtk::Window>()
         .map(|parent| parent.downgrade());
     let menus = menus.clone();
-    surface.add_action("details", move || {
+    surface.bind_button(&details, move || {
         if let Some(parent) = parent.as_ref().and_then(glib::WeakRef::upgrade) {
             present(&parent, &menus, identity.item.clone());
         }

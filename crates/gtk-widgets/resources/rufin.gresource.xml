@@ -143,7 +143,6 @@
     <file compressed="true">lyrics_editor.ui</file>
     <file compressed="true">preferences/display.ui</file>
     <file compressed="true">routes/text_slide.ui</file>
-    <file compressed="true">routes/play_menu.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>
     <file compressed="true">preferences/source/picker.ui</file>
     <file compressed="true">routes/recycled_artwork_cell.ui</file>
