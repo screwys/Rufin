@@ -114,11 +114,20 @@ where
     let (waveform_events, waveform_receiver) = unbounded();
     let (lyrics_events, lyrics_receiver) = unbounded();
     let (release_update_events, release_update_receiver) = unbounded();
-    let artwork = match artwork::Artwork::new(paths.artwork_dir(), runtime.clone()) {
+    let artwork = match artwork::Artwork::new(
+        paths.artwork_dir(),
+        runtime.clone(),
+        Arc::clone(&library),
+    ) {
         Ok(artwork) => artwork,
         Err(error) => {
             warn!(%error, "could not use the artwork cache; startup will continue with a temporary cache");
-            artwork::Artwork::new(temporary_artwork_dir(), runtime.clone()).map_err(string_error)?
+            artwork::Artwork::new(
+                temporary_artwork_dir(),
+                runtime.clone(),
+                Arc::clone(&library),
+            )
+            .map_err(string_error)?
         }
     };
     let downloads = downloads::Downloads::new(
@@ -150,7 +159,6 @@ where
             discovery: discovery_events,
         },
     );
-    artwork.install_catalog(Arc::clone(&library));
     if !stored.ui.recent_search_results.is_empty() {
         let uris = stored
             .ui

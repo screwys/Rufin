@@ -63,11 +63,17 @@ pub(in crate::playback) async fn seeded(
     catalog.save_queue(&sequence.snapshot()).await.unwrap();
     let runtime = tokio::runtime::Handle::current();
     let settings = SettingsFile::open(directory.path().join("settings.json")).unwrap();
-    let artwork = artwork::Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap();
+    let artwork = artwork::Artwork::new(
+        directory.path().join("artwork"),
+        runtime.clone(),
+        Arc::new(catalog.clone()),
+    )
+    .unwrap();
     let downloads = downloads::Downloads::new(
         artwork::Artwork::new(
             (directory.path().join("downloads")).join("artwork"),
             (runtime.clone()).clone(),
+            Arc::new(catalog.clone()),
         )
         .unwrap(),
         directory.path().join("downloads"),
@@ -1124,12 +1130,17 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     secrets.save_secret(&crate::settings::provider_secret_key(&credential),
         &serde_json::json!({"client_id":"gapless","token":"fixture","account_id":"user","profiles":{},"resources":{"user":{"server":"fixture"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string()).unwrap();
     let runtime = tokio::runtime::Handle::current();
-    let artwork =
-        artwork::Artwork::new(directory.path().join("report-artwork"), runtime.clone()).unwrap();
+    let artwork = artwork::Artwork::new(
+        directory.path().join("report-artwork"),
+        runtime.clone(),
+        Arc::new(catalog.clone()),
+    )
+    .unwrap();
     let downloads = downloads::Downloads::new(
         artwork::Artwork::new(
             (directory.path().join("report-downloads")).join("artwork"),
             (runtime.clone()).clone(),
+            Arc::new(catalog.clone()),
         )
         .unwrap(),
         directory.path().join("report-downloads"),

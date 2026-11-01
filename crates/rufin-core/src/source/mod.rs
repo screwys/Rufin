@@ -3283,11 +3283,20 @@ mod source_tests {
             })
             .unwrap();
         let owner = SourceOwner::open_dormant(
-            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            Artwork::new(
+                directory.path().join("artwork"),
+                runtime.clone(),
+                Arc::clone(&catalog),
+            )
+            .unwrap(),
             Arc::clone(&catalog),
             Downloads::new(
-                artwork::Artwork::new(directory.path().join("downloads/artwork"), runtime.clone())
-                    .unwrap(),
+                artwork::Artwork::new(
+                    directory.path().join("downloads/artwork"),
+                    runtime.clone(),
+                    Arc::clone(&catalog),
+                )
+                .unwrap(),
                 directory.path().join("downloads"),
                 catalog.as_ref().clone(),
                 runtime.clone(),
@@ -3385,11 +3394,20 @@ mod source_tests {
         let runtime = tokio::runtime::Handle::current();
         let (events, receiver) = async_channel::unbounded();
         let owner = SourceOwner::open_dormant(
-            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            Artwork::new(
+                directory.path().join("artwork"),
+                runtime.clone(),
+                Arc::clone(&catalog),
+            )
+            .unwrap(),
             Arc::clone(&catalog),
             Downloads::new(
-                artwork::Artwork::new(directory.path().join("downloads/artwork"), runtime.clone())
-                    .unwrap(),
+                artwork::Artwork::new(
+                    directory.path().join("downloads/artwork"),
+                    runtime.clone(),
+                    Arc::clone(&catalog),
+                )
+                .unwrap(),
                 directory.path().join("downloads"),
                 catalog.as_ref().clone(),
                 runtime.clone(),
@@ -3608,12 +3626,18 @@ mod source_tests {
             let runtime = tokio::runtime::Handle::current();
             let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
-                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Artwork::new(
+                    directory.path().join("artwork"),
+                    runtime.clone(),
+                    Arc::clone(&catalog),
+                )
+                .unwrap(),
                 Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
                         runtime.clone(),
+                        Arc::clone(&catalog),
                     )
                     .unwrap(),
                     directory.path().join("downloads"),
@@ -3821,12 +3845,18 @@ mod source_tests {
             })));
             let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
-                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Artwork::new(
+                    directory.path().join("artwork"),
+                    runtime.clone(),
+                    Arc::clone(&catalog),
+                )
+                .unwrap(),
                 Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
                         runtime.clone(),
+                        Arc::clone(&catalog),
                     )
                     .unwrap(),
                     directory.path().join("downloads"),
@@ -4146,12 +4176,18 @@ mod source_tests {
             let (events, receiver) = async_channel::unbounded();
             let receiver = keep_receiver.then_some(receiver);
             let owner = SourceOwner::open_dormant(
-                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Artwork::new(
+                    directory.path().join("artwork"),
+                    runtime.clone(),
+                    Arc::clone(&catalog),
+                )
+                .unwrap(),
                 Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
                         runtime.clone(),
+                        Arc::clone(&catalog),
                     )
                     .unwrap(),
                     directory.path().join("downloads"),

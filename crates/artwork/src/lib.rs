@@ -343,13 +343,15 @@ impl Artwork {
         self.pipeline.cache_revision()
     }
 
-    pub fn install_catalog(&self, catalog: Arc<library::Catalog>) {
-        self.pipeline.install_catalog(catalog);
-    }
-    pub fn new(cache_root: impl AsRef<Path>, runtime: Handle) -> Result<Self, ArtworkError> {
+    pub fn new(
+        cache_root: impl AsRef<Path>,
+        runtime: Handle,
+        catalog: Arc<library::Catalog>,
+    ) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
         let source_resolver = Arc::new(Mutex::new(None));
-        let pipeline = pipeline::Pipeline::new(&cache_root, runtime, Arc::clone(&source_resolver))?;
+        let pipeline =
+            pipeline::Pipeline::new(&cache_root, runtime, Arc::clone(&source_resolver), catalog)?;
         Ok(Self {
             pipeline: Arc::new(pipeline),
             source_resolver,
@@ -425,11 +427,24 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
 
+    async fn catalog(directory: &tempfile::TempDir) -> Arc<library::Catalog> {
+        Arc::new(
+            library::Catalog::open(directory.path().join("library.sqlite3"))
+                .await
+                .unwrap(),
+        )
+    }
+
     #[test]
     fn refreshed_artwork_keeps_its_asset_but_requests_the_new_revision() {
         let directory = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let artwork = Artwork::new(directory.path(), runtime.handle().clone()).unwrap();
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            runtime.handle().clone(),
+            runtime.block_on(catalog(&directory)),
+        )
+        .unwrap();
         let key = |encoded: Vec<u8>| {
             artwork.key(&ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64))
         };
@@ -493,8 +508,12 @@ mod tests {
     fn identifying_a_binding_does_not_construct_its_source() {
         let directory = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let artwork =
-            Artwork::new(directory.path().join("covers"), runtime.handle().clone()).unwrap();
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            runtime.handle().clone(),
+            runtime.block_on(catalog(&directory)),
+        )
+        .unwrap();
         let encoded =
             sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
                 .unwrap();
@@ -561,11 +580,8 @@ mod tests {
     async fn cached_native_artwork_reuses_pixels_without_resolving_a_provider() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("covers");
-        let artwork = Artwork::new(&root, Handle::current()).unwrap();
-        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
-            .await
-            .unwrap();
-        artwork.install_catalog(Arc::new(catalog.clone()));
+        let catalog = catalog(&directory).await;
+        let artwork = Artwork::new(&root, Handle::current(), Arc::clone(&catalog)).unwrap();
         let encoded = sources::native_artwork_binding(
             "source",
             &sources::NativeImageRef::new("cover", Some("revision".into())),
@@ -758,8 +774,7 @@ mod tests {
         assert_eq!(artwork.key(&request), key);
         artwork.clear_cache(&catalog, &[]).await.unwrap();
         assert!(!original.exists());
-        let reopened = Artwork::new(&root, Handle::current()).unwrap();
-        reopened.install_catalog(Arc::new(catalog.clone()));
+        let reopened = Artwork::new(&root, Handle::current(), Arc::clone(&catalog)).unwrap();
         let restored = catalog
             .artwork_bindings(
                 &[library::source_entity_uri(
@@ -792,7 +807,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_native_cache_miss_resolves_its_source_in_the_worker() {
         let directory = tempfile::tempdir().unwrap();
-        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            Handle::current(),
+            catalog(&directory).await,
+        )
+        .unwrap();
         let resolutions = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&resolutions);
         artwork.install_source_resolver(move |_| {
@@ -821,7 +841,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_cache_only_miss_never_resolves_a_source() {
         let directory = tempfile::tempdir().unwrap();
-        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            Handle::current(),
+            catalog(&directory).await,
+        )
+        .unwrap();
         let resolutions = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&resolutions);
         artwork.install_source_resolver(move |_| {
@@ -853,7 +878,12 @@ mod tests {
         .write_to(&mut encoded_image, image::ImageFormat::Jpeg)
         .unwrap();
         std::fs::write(&image, encoded_image.into_inner()).unwrap();
-        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            Handle::current(),
+            catalog(&directory).await,
+        )
+        .unwrap();
         let resolutions = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&resolutions);
         artwork.install_source_resolver(move |_| {
@@ -903,10 +933,22 @@ mod tests {
             panic!("changed image must be read again");
         };
         assert!(matches!(pending.finish().await, ArtworkOutcome::Ready(_)));
-
+        // A changed file comes back from the scan with a new revision, and so a new preview.
+        let changed = sources::LocalImageRef::File {
+            source_id: SourceId::new("configured-local"),
+            path: image.to_string_lossy().into_owned(),
+            revision: "changed".to_string(),
+        }
+        .artwork_binding();
+        let ArtworkLoad::Pending(pending) =
+            artwork.load(ArtworkRequest::new(ArtworkBinding::opaque(&changed), 64))
+        else {
+            panic!("a new revision must be read");
+        };
+        assert!(matches!(pending.finish().await, ArtworkOutcome::Ready(_)));
         assert_ne!(
             artwork
-                .preview(ArtworkBinding::opaque(&prepared), false)
+                .preview(ArtworkBinding::opaque(&changed), false)
                 .unwrap()
                 .image
                 .rgba(),

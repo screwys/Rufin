@@ -1809,12 +1809,18 @@ mod tests {
         let (events, received) = async_channel::unbounded();
         let runtime = tokio::runtime::Handle::current();
         let source_owner = crate::source::SourceOwner::open_dormant(
-            artwork::Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            artwork::Artwork::new(
+                directory.path().join("artwork"),
+                runtime.clone(),
+                Arc::new(catalog.clone()),
+            )
+            .unwrap(),
             Arc::new(catalog.clone()),
             downloads::Downloads::new(
                 artwork::Artwork::new(
                     (directory.path().join("downloads")).join("artwork"),
                     (runtime.clone()).clone(),
+                    Arc::new(catalog.clone()),
                 )
                 .unwrap(),
                 directory.path().join("downloads"),

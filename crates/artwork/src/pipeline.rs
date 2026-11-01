@@ -142,16 +142,14 @@ impl Pipeline {
         lock_state(&self.shared).cache_epoch
     }
 
-    pub(crate) fn install_catalog(&self, catalog: Arc<library::Catalog>) {
-        self.shared.fetch.install_catalog(catalog);
-    }
     pub(crate) fn new(
         cache_root: &Path,
         runtime: Handle,
         source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+        catalog: Arc<library::Catalog>,
     ) -> Result<Self, ArtworkError> {
         let cache = FilesystemCache::new(cache_root.to_path_buf())?;
-        let fetch = FetchContext::new(source_resolver);
+        let fetch = FetchContext::new(source_resolver, catalog);
         let shared = Arc::new(Shared {
             runtime,
             cache,
@@ -663,13 +661,14 @@ fn resolve_request(
         ..
     } = &candidate.image
     {
-        let catalog = shared
-            .fetch
-            .catalog()
-            .ok_or("Playlist artwork storage is unavailable")?;
         let recipes = shared
             .runtime
-            .block_on(catalog.track_artwork_bindings(picks, &library::ReadCancellation::new()))
+            .block_on(
+                shared
+                    .fetch
+                    .catalog()
+                    .track_artwork_bindings(picks, &library::ReadCancellation::new()),
+            )
             .map_err(|error| error.to_string())?
             .iter()
             .map(|binding| serde_json::from_slice::<Vec<Candidate>>(binding))
@@ -921,17 +920,13 @@ fn cache_preview(
     }
     let catalog = shared.fetch.catalog();
     let result: Result<String, ArtworkError> = shared.runtime.block_on(async {
-        if let Some(catalog) = &catalog {
-            if !refresh && let Some(hash) = catalog.artwork_preview(&candidate.key).await? {
-                return Ok(hash);
-            }
+        if !refresh && let Some(hash) = catalog.artwork_preview(&candidate.key).await? {
+            return Ok(hash);
         }
         let hash = encode()?;
-        if let Some(catalog) = catalog {
-            catalog
-                .write_artwork_preview(&candidate.key, &hash, refresh)
-                .await?;
-        }
+        catalog
+            .write_artwork_preview(&candidate.key, &hash, refresh)
+            .await?;
         Ok(hash)
     });
     match result {
@@ -1081,7 +1076,14 @@ mod tests {
         let shared = Shared {
             runtime: Handle::current(),
             cache,
-            fetch: FetchContext::new(Arc::new(Mutex::new(None))),
+            fetch: FetchContext::new(
+                Arc::new(Mutex::new(None)),
+                Arc::new(
+                    library::Catalog::open(directory.path().join("library.sqlite3"))
+                        .await
+                        .unwrap(),
+                ),
+            ),
             cache_commit: Mutex::new(()),
             previews: Mutex::new(VecDeque::new()),
             state: Mutex::new(state),
@@ -1138,9 +1140,14 @@ mod tests {
         let directory = tempfile::tempdir().expect("cache");
         let pipeline = Arc::new(
             Pipeline::new(
-                directory.path(),
+                &directory.path().join("covers"),
                 Handle::current(),
                 Arc::new(Mutex::new(None)),
+                Arc::new(
+                    library::Catalog::open(directory.path().join("library.sqlite3"))
+                        .await
+                        .unwrap(),
+                ),
             )
             .expect("pipeline"),
         );

@@ -236,7 +236,15 @@ mod tests {
         KEYS.get_or_init(|| {
             let root = tempfile::tempdir().unwrap();
             let runtime = tokio::runtime::Runtime::new().unwrap();
-            let artwork = artwork::Artwork::new(root.path(), runtime.handle().clone()).unwrap();
+            let catalog = runtime
+                .block_on(library::Catalog::open(root.path().join("library.sqlite3")))
+                .unwrap();
+            let artwork = artwork::Artwork::new(
+                root.path().join("covers"),
+                runtime.handle().clone(),
+                std::sync::Arc::new(catalog),
+            )
+            .unwrap();
             std::array::from_fn(|index| {
                 let binding = sources::native_artwork_binding(
                     "texture-test",

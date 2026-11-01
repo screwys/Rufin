@@ -143,11 +143,17 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         .save_secret(&crate::settings::provider_secret_key(&credential), &login)
         .unwrap();
     let secrets = Arc::new(secrets::SwitchableSecretStore::new(memory));
-    let artwork = artwork::Artwork::new(root.path().join("artwork"), runtime.clone()).unwrap();
+    let artwork = artwork::Artwork::new(
+        root.path().join("artwork"),
+        runtime.clone(),
+        Arc::clone(&catalog),
+    )
+    .unwrap();
     let downloads = downloads::Downloads::new(
         artwork::Artwork::new(
             (root.path().join("downloads")).join("artwork"),
             (runtime.clone()).clone(),
+            Arc::clone(&catalog),
         )
         .unwrap(),
         root.path().join("downloads"),

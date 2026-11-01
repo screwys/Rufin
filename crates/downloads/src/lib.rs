@@ -3687,8 +3687,12 @@ mod tests {
         let (events, _) = async_channel::unbounded();
         let (prepared_rules, _) = async_channel::unbounded();
         Actor {
-            artwork: artwork::Artwork::new(root.join("artwork"), tokio::runtime::Handle::current())
-                .unwrap(),
+            artwork: artwork::Artwork::new(
+                root.join("artwork"),
+                tokio::runtime::Handle::current(),
+                Arc::new(catalog.clone()),
+            )
+            .unwrap(),
             root: Arc::new(root.to_path_buf()),
             catalog,
             events: DownloadEvents {
