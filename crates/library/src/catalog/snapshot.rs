@@ -510,9 +510,13 @@ fn latin(name: &str) -> bool {
     })
 }
 
-/// A name as it sorts without sort tags: lowercase, past a leading article.
+/// A name as it sorts without sort tags: lowercase with Latin letters on their base letter,
+/// past a leading article.
 fn plain_sort(name: &str) -> std::borrow::Cow<'_, str> {
-    let lower = name.to_lowercase();
+    let mut lower = String::with_capacity(name.len());
+    for character in name.chars() {
+        crate::lyrics_search::fold(character, &mut lower);
+    }
     match lower.split_once(' ') {
         Some((article, rest)) if ARTICLES.contains(&article) && !rest.trim().is_empty() => {
             rest.trim_start().to_owned().into()

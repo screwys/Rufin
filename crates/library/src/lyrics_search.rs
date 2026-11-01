@@ -178,7 +178,7 @@ fn diacritic(character: char) -> bool {
 
 /// Folds a word character as `unicode61 remove_diacritics=2` does: lower case, and a Latin
 /// letter with diacritics becomes its base letter.
-fn fold(character: char, folded: &mut String) {
+pub(crate) fn fold(character: char, folded: &mut String) {
     for lower in character.to_lowercase() {
         let mut base = None;
         let mut marks = true;
