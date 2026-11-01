@@ -295,17 +295,18 @@ impl ConnectNetwork {
             builder = builder.user_data_for_address_lookup(name);
         }
         let endpoint = builder.bind().await?;
-        let dns = endpoint.dns_resolver()?.clone();
-        endpoint.address_lookup()?.add(CanonicalRelays(
-            PkarrResolver::n0_dns()
-                .dns_resolver(dns.clone())
-                .build(endpoint.tls_config().clone()),
-        ));
-        endpoint.address_lookup()?.add(CanonicalRelays(
-            DnsAddressLookup::n0_dns().dns_resolver(dns.clone()).build(),
-        ));
-        // Only public relays publish this device's address to n0's directory.
+        // Only the public relay publishes and looks up addresses in n0's directory; without it
+        // Connect contacts no public server.
         if config.public_relay && config.relay.is_none() {
+            let dns = endpoint.dns_resolver()?.clone();
+            endpoint.address_lookup()?.add(CanonicalRelays(
+                PkarrResolver::n0_dns()
+                    .dns_resolver(dns.clone())
+                    .build(endpoint.tls_config().clone()),
+            ));
+            endpoint.address_lookup()?.add(CanonicalRelays(
+                DnsAddressLookup::n0_dns().dns_resolver(dns.clone()).build(),
+            ));
             endpoint.address_lookup()?.add(PublicAddressPublisher(
                 PkarrPublisher::n0_dns()
                     .dns_resolver(dns)
