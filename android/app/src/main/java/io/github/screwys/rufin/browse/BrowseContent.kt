@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.LibraryField
+import io.github.screwys.rufin.shared.library.LyricsSnippet
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 
@@ -162,10 +163,13 @@ internal fun BrowseContent(
                     if (item == null) Spacer(Modifier.fillMaxWidth().height(60.dp))
                     else if (item.row.kind == "album_header") HomeShowcase(item, player, onActivate, onMenu, onFavorite,
                         { _, shuffled -> onPlayItem(item, shuffled) }, onRadio)
-                    else if (fields.isNotEmpty() && item.row.fields.isNotEmpty())
+                    else if (item.row.fields.isNotEmpty()) {
+                        // A list without a header (search) shows each row's own fields.
+                        val columns = fields.ifEmpty { item.row.fields.map { AndroidSortField(it.id, "") } }
                         FieldRow(item.copy(displaySettings = item.displaySettings?.let { it.copy(settings = it.settings.copy(display = it.settings.display.copy(size = displaySize))) }), player,
-                            fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, fields,
+                            columns.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, columns,
                             onActivate, onMenu, onFavorite, onAddToPlaylist)
+                    }
                     else BrowseTrackRow(item, player, onActivate, onMenu, onFavorite, onAddToPlaylist, displaySize)
                 }
                 if (append is LoadState.Loading || append is LoadState.Error) item { BrowseLoadFooter(append, items::retry) }
@@ -566,16 +570,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
             BrowseTitle(item, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            item.row.lyricsSnippet?.let { snippet ->
-                val accent = MaterialTheme.colorScheme.primary
-                Text(buildAnnotatedString {
-                    snippet.parts.forEach { part ->
-                        if (part.highlighted) withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) { append(part.text) }
-                        else append(part.text)
-                    }
-                }, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
                 if (item.row.kind == "track" && item.row.durationMillis > 0UL) Text(browseDuration(item.row.durationMillis),
@@ -585,6 +580,19 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     }
     }
 }
+/** The lyrics lines a search by lyrics matched, the match highlighted. */
+@Composable
+internal fun LyricsSnippetText(snippet: LyricsSnippet) {
+    val accent = MaterialTheme.colorScheme.primary
+    Text(buildAnnotatedString {
+        snippet.parts.forEach { part ->
+            if (part.highlighted) withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) { append(part.text) }
+            else append(part.text)
+        }
+    }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
 
 internal fun browseDuration(millis: ULong): String {
     val seconds = millis / 1000UL

@@ -370,8 +370,11 @@ internal fun FieldRow(
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                else -> if (field.id == LibraryField.TITLE) BrowseTitle(item, detailColumn(field.id), maxLines = 2,
-                    style = MaterialTheme.typography.bodyMedium, player = player, title = value)
+                        item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
+                else -> if (field.id == LibraryField.TITLE) Column(detailColumn(field.id)) {
+                    BrowseTitle(item, maxLines = 2, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
+                    item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
+                }
                 else Text(value, detailColumn(field.id), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }

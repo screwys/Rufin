@@ -190,15 +190,35 @@ pub struct AndroidBrowseQuery {
     home: std::sync::OnceLock<Option<Vec<AndroidBrowseRow>>>,
 }
 
-fn search_rows(mut rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
+/// Search results; each row shows the row fields of its category's list (`fields`, in
+/// `CollectionCategory::ALL` order), as GTK's search does.
+fn search_rows(
+    mut rows: library::SearchResults,
+    fields: [Vec<LibraryField>; 3],
+) -> Vec<AndroidBrowseRow> {
+    let [tracks, albums, artists] = fields;
+    let shown = |rows: Vec<Row>, fields: &[LibraryField]| {
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, row)| AndroidBrowseQuery::shown_row(row, fields, index))
+            .collect::<Vec<_>>()
+    };
+    let lyrics = &mut rows.lyrics;
     rows.tracks
         .into_iter()
-        .map(|track| AndroidBrowseRow {
-            lyrics_snippet: rows.lyrics.remove(&track.track_key),
-            ..Row::Track(track).into()
+        .enumerate()
+        .map(|(index, track)| AndroidBrowseRow {
+            lyrics_snippet: lyrics.remove(&track.track_key),
+            ..AndroidBrowseQuery::shown_row(Row::Track(track), &tracks, index)
         })
-        .chain(rows.albums.into_iter().map(|row| Row::Album(row).into()))
-        .chain(rows.artists.into_iter().map(|row| Row::Artist(row).into()))
+        .chain(shown(
+            rows.albums.into_iter().map(Row::Album).collect(),
+            &albums,
+        ))
+        .chain(shown(
+            rows.artists.into_iter().map(Row::Artist).collect(),
+            &artists,
+        ))
         .collect()
 }
 

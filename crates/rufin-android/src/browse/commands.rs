@@ -569,6 +569,12 @@ impl AndroidLibrary {
         let selected = self.source.selected_library();
         let source = self.source.clone();
         let catalog = self.catalog.clone();
+        let fields = {
+            let stored = self.settings.changes();
+            let stored = stored.borrow();
+            CollectionCategory::ALL
+                .map(|category| stored.ui.library_list(category.key()).row_fields)
+        };
         self.runtime
             .spawn(async move {
                 rufin_core::source::search::acquire_search(
@@ -584,7 +590,7 @@ impl AndroidLibrary {
             })
             .await
             .map_err(error)?
-            .map(search_rows)
+            .map(|rows| search_rows(rows, fields))
             .map_err(error)
     }
 
