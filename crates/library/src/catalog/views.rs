@@ -2545,15 +2545,13 @@ impl Catalog {
             .collect()
     }
 
-    /// A collection's members in its own order.
+    /// A member read's tracks in order.
     pub(crate) async fn members(
         &self,
         connection: &mut SqliteConnection,
-        collection: Collection,
+        read: MemberRead,
     ) -> LibraryResult<Vec<crate::TrackKey>> {
-        let order = self
-            .order_on(connection, &Read::Members(MemberRead::new(collection)))
-            .await?;
+        let order = self.order_on(connection, &Read::Members(read)).await?;
         Ok(order
             .items(0..order.len())
             .into_iter()
@@ -2660,8 +2658,8 @@ impl Context<'_> {
 }
 
 impl Context<'_> {
-    /// The members of each parent of a list, parent by parent: an album's tracks in disc order,
-    /// an artist's, genre's or mood's by title, a playlist's entries in place.
+    /// The members of each parent of a list, parent by parent: an album's, artist's, genre's or
+    /// mood's tracks in album order, a playlist's entries in place.
     pub(crate) fn parent_members(
         &self,
         kind: &ListKind,
@@ -2695,26 +2693,18 @@ impl Context<'_> {
             }
             _ => {}
         }
-        let (slots, sort) = match kind {
-            ListKind::Albums | ListKind::ArtistAlbums { .. } => (
-                parents
-                    .iter()
-                    .map(|key| snapshot.albums.slot(*key))
-                    .collect::<Vec<_>>(),
-                LibraryField::TrackNumber,
-            ),
-            ListKind::Artists { .. } => (
-                parents
-                    .iter()
-                    .map(|key| snapshot.artists.slot(*key))
-                    .collect(),
-                LibraryField::Title,
-            ),
-            _ => (
-                parents.iter().map(|key| snapshot.tags.slot(*key)).collect(),
-                LibraryField::Title,
-            ),
+        let slots = match kind {
+            ListKind::Albums | ListKind::ArtistAlbums { .. } => parents
+                .iter()
+                .map(|key| snapshot.albums.slot(*key))
+                .collect::<Vec<_>>(),
+            ListKind::Artists { .. } => parents
+                .iter()
+                .map(|key| snapshot.artists.slot(*key))
+                .collect(),
+            _ => parents.iter().map(|key| snapshot.tags.slot(*key)).collect(),
         };
+        let sort = LibraryField::TrackNumber;
         let mut index = HashMap::<u32, Vec<usize>>::new();
         for (position, slot) in slots.iter().enumerate() {
             if let Some(slot) = slot {

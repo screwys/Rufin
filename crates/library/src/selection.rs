@@ -115,7 +115,7 @@ pub(crate) async fn selected_tracks_on(
                 for collection in collections {
                     rows.extend(
                         catalog
-                            .members(connection, collection.clone())
+                            .members(connection, MemberRead::new(collection.clone()))
                             .await?
                             .into_iter()
                             .map(|key| (key, None)),

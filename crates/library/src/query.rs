@@ -149,12 +149,15 @@ impl MemberRead {
             activity: false,
         }
     }
-    /// The sort it orders by: its own, else its collection's. A field no list sorts by
-    /// orders by title.
+    /// The sort it orders by: its own, else its collection's. Albums, artists, genres and
+    /// moods play in album order. A field no list sorts by orders by title.
     pub fn effective_sort(&self) -> LibraryField {
         self.sort
             .unwrap_or(match self.collection {
-                Collection::Album(_) => LibraryField::TrackNumber,
+                Collection::Album(_)
+                | Collection::Artist { .. }
+                | Collection::Genre(_)
+                | Collection::Mood(_) => LibraryField::TrackNumber,
                 Collection::Playlist(_) => LibraryField::RowIndex,
                 Collection::History { .. } => LibraryField::LastPlayed,
                 _ => LibraryField::Title,

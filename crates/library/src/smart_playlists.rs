@@ -501,7 +501,10 @@ impl Catalog {
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
         let members = self
-            .members(&mut connection, crate::Collection::Smart { key, now })
+            .members(
+                &mut connection,
+                crate::MemberRead::new(crate::Collection::Smart { key, now }),
+            )
             .await?;
         let choices =
             crate::artwork::playlist_artwork_choices_on(self, &mut connection, &members, &[], true)
@@ -892,7 +895,10 @@ impl Catalog {
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
         let members = self
-            .members(&mut connection, crate::Collection::Smart { key, now })
+            .members(
+                &mut connection,
+                crate::MemberRead::new(crate::Collection::Smart { key, now }),
+            )
             .await?;
         let mut output =
             crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;

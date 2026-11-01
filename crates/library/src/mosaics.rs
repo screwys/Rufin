@@ -5,7 +5,9 @@
 
 use crate::catalog::views::Context;
 use crate::catalog::write::Scope;
-use crate::{Catalog, Collection, LibraryResult, PlaylistKey, SmartPlaylistKey, TrackKey};
+use crate::{
+    Catalog, Collection, LibraryResult, MemberRead, PlaylistKey, SmartPlaylistKey, TrackKey,
+};
 
 const COVERS: usize = 4;
 /// Owners picked between Writes; about a fifth of a second of picking at 120k tracks.
@@ -111,13 +113,17 @@ impl Catalog {
                 if picks.len() >= COVERS {
                     continue;
                 }
-                let collection = match *owner {
-                    MosaicOwner::Playlist(key) => Collection::Playlist(key),
-                    MosaicOwner::Smart(key) => Collection::Smart { key, now },
-                    // A mood's tracks hold it as they hold a genre.
-                    MosaicOwner::Tag(key) => Collection::Genre(crate::GenreKey::from_raw(key)),
+                let read = match *owner {
+                    MosaicOwner::Playlist(key) => MemberRead::new(Collection::Playlist(key)),
+                    MosaicOwner::Smart(key) => MemberRead::new(Collection::Smart { key, now }),
+                    // A mood's tracks hold it as they hold a genre. Its covers come from
+                    // across its tracks, by title.
+                    MosaicOwner::Tag(key) => MemberRead {
+                        sort: Some(crate::LibraryField::Title),
+                        ..MemberRead::new(Collection::Genre(crate::GenreKey::from_raw(key)))
+                    },
                 };
-                let members = self.members(&mut connection, collection).await?;
+                let members = self.members(&mut connection, read).await?;
                 let next = crate::artwork::playlist_artwork_choices_on(
                     self,
                     &mut connection,
