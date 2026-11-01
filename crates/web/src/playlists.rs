@@ -363,8 +363,9 @@ pub(super) async fn entries_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = catalog::track_query(products, parameters, "entries").await?;
+    let query = catalog::page_query(products, parameters, "entries").await?;
     let activity_sensitive = query.activity_sensitive();
+    let (sort, descending) = (sort_name(&query), query.descending);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(256);
     let (order, total) =
@@ -389,7 +390,7 @@ pub(super) async fn entries_data(
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries}),
     )
 }
 

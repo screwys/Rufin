@@ -178,6 +178,9 @@ struct Library<'a> {
     total: String,
     album_tracks: bool,
     activity_sensitive: bool,
+    /// The order a track page lists in, for the client to show; empty for other lists.
+    sort: &'a str,
+    descending: bool,
     disc_headers: HashMap<usize, String>,
     /// The collection's name as this read found it.
     name: &'a str,
@@ -328,6 +331,8 @@ pub(super) fn render(
                 .unwrap_or_default(),
             album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
             activity_sensitive: value["activity_sensitive"].as_bool().unwrap_or(false),
+            sort: value["sort"].as_str().unwrap_or_default(),
+            descending: value["descending"].as_bool().unwrap_or(false),
             name: value["name"].as_str().unwrap_or_default(),
             disc_headers: value["disc_sections"]
                 .as_array()
@@ -767,15 +772,7 @@ impl Page {
             .unwrap_or("")
     }
     pub fn sort(&self) -> &str {
-        self.parameters
-            .get("sort")
-            .map(String::as_str)
-            .unwrap_or(match self.view() {
-                "album" => "track_number",
-                "playlist" => "position",
-                "smart-playlist" => "definition",
-                _ => "title",
-            })
+        self.parameters.get("sort").map_or("title", String::as_str)
     }
     pub fn descending(&self) -> bool {
         self.parameters
@@ -957,6 +954,14 @@ async fn index(
                     if count == 48 {
                         target.insert("offset".into(), offset.saturating_add(48).to_string());
                         page.next = Some(link(&target));
+                    }
+                    // The selector shows the order a track page read in.
+                    if let Some(sort) = value["sort"].as_str() {
+                        page.parameters.insert("sort".into(), sort.into());
+                        page.parameters.insert(
+                            "descending".into(),
+                            value["descending"].as_bool().unwrap_or(false).to_string(),
+                        );
                     }
                     page.content = render(&parameters, &value, &page.csrf)?;
                 }

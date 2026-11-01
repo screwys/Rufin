@@ -50,6 +50,9 @@ let detail = null;
 
 let offset = 0;
 
+// Whether the reader picked the order; otherwise the server lists in the list's saved order.
+let orderChosen = false;
+
 let searchTimer;
 
 const rowsByNode = new WeakMap();
@@ -138,6 +141,11 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
       signal.throwIfAborted();
       const data = node.matches("[data-page]") ? node : node.querySelector("[data-page]");
       if (data.dataset.name && detail) $("title").textContent = detail.title = data.dataset.name;
+      if (data.dataset.sort) {
+        parameters.set("sort", data.dataset.sort);
+        parameters.set("descending", data.dataset.descending);
+        showOrder(data.dataset.sort, data.dataset.descending === "true");
+      }
       if (data.dataset.total !== "") {
         total = Number(data.dataset.total);
         libraryTotal = total;
@@ -277,6 +285,7 @@ function restoreView() {
   offset = Math.max(0, Number(parameters.get("offset")) || 0);
   setSort();
   $("search").value = parameters.get("q") || "";
+  orderChosen = parameters.has("sort") || parameters.has("descending");
   if (parameters.has("sort")) $("sort").value = parameters.get("sort");
   $("descending").setAttribute("aria-pressed", String(parameters.get("descending") === "true"));
   document.querySelectorAll("[data-route]").forEach((node) => {
@@ -290,6 +299,7 @@ function navigate(next, selected = null) {
   detail = selected;
   markPins();
   offset = 0;
+  orderChosen = false;
   $("search").value = "";
   $("descending").setAttribute("aria-pressed", "false");
   $("descending").firstElementChild.dataset.icon = "sort-ascending";
@@ -341,7 +351,13 @@ function setSort() {
   $("sort").replaceChildren(
     ...options.map(([value, label]) => new Option(label, value)),
   );
-  if (route === "albums" && detail) $("sort").value = "track_number";
+}
+
+function showOrder(sort, descending) {
+  $("sort").value = sort;
+  $("descending").setAttribute("aria-pressed", String(descending));
+  $("descending").firstElementChild.dataset.icon = descending ? "sort-descending" : "sort-ascending";
+  $("descending").hidden = sort === "definition";
 }
 
 function query() {
@@ -349,9 +365,11 @@ function query() {
     offset,
     limit: pageSize,
     q: $("search").value,
-    sort: $("sort").value,
-    descending: $("descending").getAttribute("aria-pressed"),
   });
+  if (orderChosen) {
+    params.set("sort", $("sort").value);
+    params.set("descending", $("descending").getAttribute("aria-pressed"));
+  }
   if (state.source) params.set("source", state.source);
   if (state.selectedLibrary) params.set("folder", state.selectedLibrary);
   if (route === "favorites") params.set("favorites", "true");
@@ -762,18 +780,13 @@ function init() {
     }, 200);
   });
   $("sort").addEventListener("change", () => {
+    orderChosen = true;
     offset = 0;
     run(() => loadView(false, libraryTotal));
   });
   $("descending").addEventListener("click", () => {
-    $("descending").setAttribute(
-      "aria-pressed",
-      String($("descending").getAttribute("aria-pressed") !== "true"),
-    );
-    $("descending").firstElementChild.dataset.icon =
-      $("descending").getAttribute("aria-pressed") === "true"
-        ? "sort-descending"
-        : "sort-ascending";
+    orderChosen = true;
+    showOrder($("sort").value, $("descending").getAttribute("aria-pressed") !== "true");
     offset = 0;
     run(() => loadView(false, libraryTotal));
   });

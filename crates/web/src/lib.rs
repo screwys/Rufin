@@ -668,6 +668,17 @@ fn sort(
         .ok_or_else(|| bad_request("Unknown sort"))
 }
 
+/// The documented name of the order a track read lists in. Only a smart playlist reads in its
+/// own order, `definition`, without a field.
+fn sort_name(read: &library::MemberRead) -> &'static str {
+    read.sort.map_or("definition", |sort| {
+        SORTS
+            .iter()
+            .find(|(_, field)| *field == sort)
+            .map_or("title", |(name, _)| name)
+    })
+}
+
 fn track_json(
     products: &ProductHandles,
     track: &library::TrackView,

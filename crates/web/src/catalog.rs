@@ -50,20 +50,44 @@ pub(super) async fn track_query(
         },
         _ => return Err(bad_request("Unknown media kind")),
     };
-    let list = match scope {
+    let mut query = MemberRead::new(scope);
+    query.folder = folder;
+    query.filter = parameters.get("q").cloned().unwrap_or_default();
+    query.descending = boolean(parameters, "descending")?;
+    query.favorites_only = boolean(parameters, "favorites")?;
+    query.sort = sort(parameters, list_key(&query))?;
+    Ok(query)
+}
+
+/// The list a track read shows as, by the key the other clients save its settings under.
+fn list_key(read: &library::MemberRead) -> LibraryListKey {
+    use library::Collection;
+    match read.collection {
         Collection::Album(_) => LibraryListKey::AlbumDetailTracks,
         Collection::Artist { .. } => LibraryListKey::ArtistTracks,
         Collection::Genre(_) => LibraryListKey::GenreTracks,
         Collection::Playlist(_) => LibraryListKey::PlaylistTracks,
         Collection::Smart { .. } => LibraryListKey::SmartPlaylistTracks,
+        _ if read.favorites_only => LibraryListKey::FavoriteTracks,
         _ => LibraryListKey::Tracks,
-    };
-    let mut query = MemberRead::new(scope);
-    query.folder = folder;
-    query.filter = parameters.get("q").cloned().unwrap_or_default();
-    query.sort = sort(parameters, list)?;
-    query.descending = boolean(parameters, "descending")?;
-    query.favorites_only = boolean(parameters, "favorites")?;
+    }
+}
+
+/// A track page's read. Without `sort` or `descending` it lists in its list's saved order, as
+/// the other clients show it; a whole play without them keeps the collection's own order.
+pub(super) async fn page_query(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+    kind: &str,
+) -> Result<library::MemberRead, Error> {
+    let mut query = track_query(products, parameters, kind).await?;
+    let list = products.settings.load().library_list(list_key(&query));
+    if !parameters.contains_key("sort") {
+        query.sort = Some(list.sort_key);
+    }
+    if !parameters.contains_key("descending") {
+        query.descending = list.descending;
+    }
     Ok(query)
 }
 
@@ -109,8 +133,9 @@ pub(super) async fn tracks_page(
     (default_limit, cap): (usize, usize),
     list: &str,
 ) -> Result<(Order, Value), Error> {
-    let query = track_query(products, parameters, kind).await?;
+    let query = page_query(products, parameters, kind).await?;
     let activity_sensitive = query.activity_sensitive();
+    let (sort, descending) = (sort_name(&query), query.descending);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", default_limit)?.min(cap);
     let (order, total) = self::order(products, parameters, Read::Members(query)).await?;
@@ -122,7 +147,7 @@ pub(super) async fn tracks_page(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let mut value = json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit});
+    let mut value = json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"total":total,"offset":offset,"limit":limit});
     value[list] = tracks.into();
     Ok((order, value))
 }
