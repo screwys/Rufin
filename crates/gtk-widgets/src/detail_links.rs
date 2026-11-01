@@ -4,29 +4,7 @@ use rufin_core::route::Route;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use rufin_core::route::detail_links::{DetailLinks, metadata_links};
-use rufin_core::settings::LibraryField;
-
-/// An album row's album artist links, as `album_artist_links` gives them for a full album.
-pub fn album_row_artist_links(album: &library::AlbumRow) -> DetailLinks {
-    let credits = album
-        .links
-        .album_artists
-        .iter()
-        .map(|credit| library::TrackArtistLink {
-            artist_key: credit.artist_key,
-            media_uri: credit.media_uri.clone(),
-            name: credit.name.clone(),
-        })
-        .collect::<Vec<_>>();
-    metadata_links(
-        LibraryField::AlbumArtist,
-        &album.artist,
-        None,
-        &[],
-        &credits,
-    )
-}
+use rufin_core::route::detail_links::DetailLinks;
 
 fn markup(links: &DetailLinks) -> String {
     let mut markup = String::new();
@@ -123,7 +101,8 @@ impl DetailLinkBinding {
 mod tests {
     use super::*;
     use rufin_core::route::detail_links::{
-        track_album_artist_links, track_artist_album_links, track_artist_links,
+        album_row_artist_links, track_album_artist_links, track_artist_album_links,
+        track_artist_links,
     };
 
     use library::{

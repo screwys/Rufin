@@ -149,30 +149,11 @@ function playlistMenu(target) {
   ];
 }
 
-// The album and artists a row links to: track rows carry their links, albums ask the server.
+// The album and artists a row links to: track rows carry them, albums ask the server.
 async function mediaLinks(row, kind = "track") {
   if (kind !== "track")
     return api(`/media?${new URLSearchParams({ uri: row.uri })}`);
-  const { links } = row,
-    album_artists = !links.artists.length;
-  return {
-    album:
-      links.album_media_uri && links.album_key != null
-        ? {
-            id: links.album_key,
-            uri: links.album_media_uri,
-            title: row.album,
-            source: row.source_id,
-          }
-        : null,
-    artists: (album_artists ? links.album_artists : links.artists).map((link) => ({
-      id: link.artist_key,
-      uri: link.media_uri,
-      name: link.name,
-      source: row.source_id,
-      album_artists,
-    })),
-  };
+  return row.media;
 }
 
 async function goToMenu(row, kind = "track") {

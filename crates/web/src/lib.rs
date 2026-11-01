@@ -684,7 +684,7 @@ fn track_json(
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"links":track.links});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"media":media::media_links(&track.links, &track.metadata.album)});
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }
@@ -704,7 +704,7 @@ fn field_texts(row: &library::Row, fields: &[LibraryField]) -> Value {
 fn track_row_json(row: &library::TrackRow) -> Value {
     json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
         "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
-        "year":row.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"links":row.links})
+        "year":row.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"media":media::media_links(&row.links, &row.album)})
 }
 
 fn playback_json(

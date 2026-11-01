@@ -37,9 +37,10 @@ use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::selection::track_play_request;
 
 use crate::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
-use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
+use gtk_widgets::detail_links::DetailLinkBinding;
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, TrackPresentation};
 use rufin_core::route::Route;
+use rufin_core::route::detail_links::album_row_artist_links;
 
 const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
 

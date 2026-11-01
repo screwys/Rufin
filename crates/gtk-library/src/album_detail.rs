@@ -1225,7 +1225,9 @@ impl AlbumSidePanel {
         if let Some(album) = album {
             self.title.set_text(&album.title);
             self.artist
-                .bind(gtk_widgets::detail_links::album_row_artist_links(album));
+                .bind(rufin_core::route::detail_links::album_row_artist_links(
+                    album,
+                ));
             self.release
                 .set_text(&album.year.map(|year| year.to_string()).unwrap_or_default());
             let facts = [

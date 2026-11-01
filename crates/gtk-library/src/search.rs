@@ -41,7 +41,6 @@ use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
 use super::table_sizing::route_column_view_initial_width;
-use gtk_widgets::detail_links::album_row_artist_links;
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, TrackPresentation, add_field_skeleton_class, column_width,
 };
@@ -50,6 +49,7 @@ use gtk_widgets::sparse_model::{SparseObjectItem, connect_sparse_bind};
 use rufin_core::route::CollectionCategory;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
+use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::track_row_field;
 use rufin_core::settings::presentation::{album_field, artist_field};
 

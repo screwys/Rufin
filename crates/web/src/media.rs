@@ -29,7 +29,12 @@ async fn metadata(
             .map_err(internal)?
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "Album unavailable"))?
             .row;
-        let artists = row.links.album_artists.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":true})).collect::<Vec<_>>();
+        let artists = row
+            .links
+            .album_artists
+            .iter()
+            .map(|link| artist_link(link.artist_key, &link.media_uri, &link.name, true))
+            .collect::<Vec<_>>();
         return Ok(json_response(
             StatusCode::OK,
             json!({"favorite":row.state.favorite,"album":null,"artists":artists}),
@@ -40,33 +45,38 @@ async fn metadata(
         .track(uri, &cancel)
         .await
         .map_err(internal)?;
-    let mut album = None;
-    let mut artists = Vec::new();
-    let favorite = if let Some(row) = row {
-        if let (Some(uri), Some(id)) = (&row.links.album_media_uri, row.links.album_key) {
-            album = Some(
-                json!({"id":id,"uri":uri,"title":row.metadata.album,"source":library::source_entity_parts(uri).map(|(source,_,_)|source)}),
-            );
-        }
-        let album_artist = row.links.artists.is_empty();
-        let links = if album_artist {
-            row.links.album_artists
-        } else {
-            row.links.artists
-        };
-        artists = links.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":album_artist})).collect();
-        row.state.favorite
+    let (favorite, mut links) = if let Some(row) = row {
+        (
+            row.state.favorite,
+            media_links(&row.links, &row.metadata.album),
+        )
     } else {
-        products
+        let favorite = products
             .library
             .favorite(&library::FavoriteTarget::Track(uri.into()))
             .await
-            .map_err(internal)?
+            .map_err(internal)?;
+        (favorite, json!({"album":null,"artists":[]}))
     };
-    Ok(json_response(
-        StatusCode::OK,
-        json!({"favorite":favorite,"album":album,"artists":artists}),
-    ))
+    links["favorite"] = json!(favorite);
+    Ok(json_response(StatusCode::OK, links))
+}
+
+/// The album and artists a track's Go to menu opens, as `{album, artists}`.
+pub(super) fn media_links(links: &library::TrackLinks, album: &str) -> Value {
+    let (artists, album_artists) = rufin_core::route::detail_links::go_to_artists(links);
+    let album = links.album_media_uri.as_ref().zip(links.album_key).map(|(uri, id)| {
+        json!({"id":id,"uri":uri,"title":album,"source":library::source_entity_parts(uri).map(|(source,_,_)|source)})
+    });
+    let artists = artists
+        .iter()
+        .map(|link| artist_link(link.artist_key, &link.media_uri, &link.name, album_artists))
+        .collect::<Vec<_>>();
+    json!({"album":album,"artists":artists})
+}
+
+fn artist_link(id: library::ArtistKey, uri: &str, name: &str, album_artists: bool) -> Value {
+    json!({"id":id,"uri":uri,"name":name,"source":library::source_entity_parts(uri).map(|(source,_,_)|source),"album_artists":album_artists})
 }
 
 pub(super) async fn favorite(

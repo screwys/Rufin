@@ -281,15 +281,8 @@ fn install_track_navigation(
     media_uri: &str,
     source_id: Option<&str>,
 ) {
-    let track_artists = &links.artists;
-    let album_artists = &links.album_artists;
     let album_media_uri = links.album_media_uri.as_deref();
-    let artists = if track_artists.is_empty() {
-        album_artists
-    } else {
-        track_artists
-    };
-    let album_artist = track_artists.is_empty();
+    let (artists, album_artist) = rufin_core::route::detail_links::go_to_artists(links);
     let submenu = go_to_submenu(
         surface,
         menus,

@@ -1,5 +1,5 @@
 use super::Route;
-use library::{AlbumArtistLink, AlbumView, TrackArtistLink, TrackView};
+use library::{AlbumArtistLink, AlbumRow, AlbumView, TrackArtistLink, TrackLinks, TrackView};
 use std::ops::Range;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -147,13 +147,18 @@ impl DetailLinks {
     }
 }
 
-pub fn track_artist_links(track: &TrackView) -> DetailLinks {
-    let album_artist = track.links.artists.is_empty();
-    let credits = if track.links.artists.is_empty() {
-        &track.links.album_artists
+/// The artists a track goes to: its own, or its album artists when it credits none. The flag
+/// says whether they are album artists.
+pub fn go_to_artists(links: &TrackLinks) -> (&[TrackArtistLink], bool) {
+    if links.artists.is_empty() {
+        (&links.album_artists, true)
     } else {
-        &track.links.artists
-    };
+        (&links.artists, false)
+    }
+}
+
+pub fn track_artist_links(track: &TrackView) -> DetailLinks {
+    let (credits, album_artist) = go_to_artists(&track.links);
     DetailLinks::artist_text(
         &track.metadata.artist,
         credits,
@@ -224,10 +229,19 @@ pub fn track_artist_album_links(track: &TrackView) -> DetailLinks {
 }
 
 pub fn album_artist_links(album: &AlbumView) -> DetailLinks {
+    album_credit_links(&album.metadata.artist, &album.row.links.album_artists)
+}
+
+/// An album row's album artist links, as `album_artist_links` gives them for a full album.
+pub fn album_row_artist_links(album: &AlbumRow) -> DetailLinks {
+    album_credit_links(&album.artist, &album.links.album_artists)
+}
+
+fn album_credit_links(text: &str, credits: &[AlbumArtistLink]) -> DetailLinks {
     DetailLinks::artist_text(
-        &album.metadata.artist,
-        &album.row.links.album_artists,
-        |credit: &AlbumArtistLink| credit.media_uri.clone(),
+        text,
+        credits,
+        |credit| credit.media_uri.clone(),
         |credit| credit.name.as_str(),
         true,
     )
