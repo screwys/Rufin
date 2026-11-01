@@ -2,7 +2,7 @@ use super::queue::Sequence;
 use super::{PlaybackStoreWork, enqueue_queue_save, save_pending_queue};
 use crate::playback::QueueSelection;
 use library::{Catalog, QueueRestore};
-use playback::RepeatMode;
+use playback::QueueRepeatMode;
 use std::sync::Mutex;
 
 async fn replace_queue(
@@ -116,7 +116,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     enqueue_queue_save(&pending, &sender, update);
 
     sequence.advance_index(false);
-    sequence.set_repeat_mode(RepeatMode::All);
+    sequence.set_repeat_mode(QueueRepeatMode::All);
     let update = sequence.take_persistence().unwrap();
     assert!(update.entries.is_empty());
     enqueue_queue_save(&pending, &sender, update);
@@ -131,7 +131,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         assert!(update.replace);
         assert_eq!(update.current_index, Some(1));
         assert_eq!(update.progress_millis, 42_000);
-        assert_eq!(update.repeat_mode, RepeatMode::All);
+        assert_eq!(update.repeat_mode, QueueRepeatMode::All);
         assert!(update.shuffled);
     }
     let expected = sequence.snapshot();
@@ -146,7 +146,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
 
     sequence.shuffle(false, 0);
     enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
-    sequence.set_repeat_mode(RepeatMode::One);
+    sequence.set_repeat_mode(QueueRepeatMode::One);
     enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
     {
         let pending = pending.lock().unwrap();
@@ -187,7 +187,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         .queue_entries(
             library::QueueLoad::media_uris(
                 ["failed", "later"].map(|suffix| format!("https://example.test/{suffix}")),
-                playback::Provenance::Manual,
+                playback::QueueProvenance::Manual,
             ),
             None,
         )

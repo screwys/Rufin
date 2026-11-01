@@ -3,7 +3,7 @@ use std::sync::Arc;
 pub use library::{QueuePlacement as Placement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
-use playback::{Provenance, TrackReference};
+use playback::{QueueProvenance, TrackReference};
 
 pub type QueuePlacement = Placement;
 
@@ -25,7 +25,7 @@ impl PlayRequest {
             library::QueueLoad::items(
                 items
                     .into_iter()
-                    .map(|item| (item, Provenance::Manual))
+                    .map(|item| (item, QueueProvenance::Manual))
                     .collect(),
             ),
             placement,
@@ -33,7 +33,7 @@ impl PlayRequest {
     }
     pub fn uris(uris: Vec<String>, placement: QueuePlacement) -> Self {
         Self::from_input(
-            library::QueueLoad::media_uris(uris, Provenance::Manual),
+            library::QueueLoad::media_uris(uris, QueueProvenance::Manual),
             placement,
         )
     }
@@ -99,7 +99,7 @@ impl PlayRequest {
         let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;
         };
-        let (_, Provenance::Context { context_id, .. }) = groups.first()? else {
+        let (_, QueueProvenance::Context { context_id, .. }) = groups.first()? else {
             return None;
         };
         Some(context_id)
@@ -108,7 +108,7 @@ impl PlayRequest {
         match &mut self.input {
             library::QueueLoad::Tracks(groups) => {
                 for (_, provenance) in groups {
-                    *provenance = Provenance::Context {
+                    *provenance = QueueProvenance::Context {
                         context_id: context.clone(),
                         context_title: None,
                         source_rank: 0,
@@ -117,7 +117,7 @@ impl PlayRequest {
             }
             library::QueueLoad::Items(items) => {
                 for (index, (_, provenance)) in items.iter_mut().enumerate() {
-                    *provenance = Provenance::Context {
+                    *provenance = QueueProvenance::Context {
                         context_id: context.clone(),
                         context_title: None,
                         source_rank: index,
@@ -125,7 +125,7 @@ impl PlayRequest {
                 }
             }
             library::QueueLoad::Uris(_, provenance) => {
-                *provenance = Provenance::Context {
+                *provenance = QueueProvenance::Context {
                     context_id: context,
                     context_title: None,
                     source_rank: 0,
@@ -160,7 +160,7 @@ impl PlayRequest {
         };
         let (
             selection,
-            Provenance::Context {
+            QueueProvenance::Context {
                 context_id,
                 source_rank,
                 ..
@@ -193,8 +193,8 @@ impl PlayRequest {
         self
     }
     pub fn with_context_title(mut self, title: Option<Arc<library::QueueContextTitle>>) -> Self {
-        let set = |provenance: &mut Provenance| {
-            if let Provenance::Context { context_title, .. } = provenance {
+        let set = |provenance: &mut QueueProvenance| {
+            if let QueueProvenance::Context { context_title, .. } = provenance {
                 *context_title = title.clone();
             }
         };

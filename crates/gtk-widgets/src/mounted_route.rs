@@ -25,7 +25,7 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
     let player = player?;
     let entry = player.transport.current.as_ref()?;
     let context = match &entry.row.provenance {
-        playback::Provenance::Context {
+        playback::QueueProvenance::Context {
             context_id,
             source_rank,
             ..
@@ -33,11 +33,11 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
             context_id: context_id.to_string(),
             source_rank: *source_rank,
         }),
-        playback::Provenance::Manual
-        | playback::Provenance::Random
-        | playback::Provenance::Radio
-        | playback::Provenance::AutoDj
-        | playback::Provenance::Legacy => None,
+        playback::QueueProvenance::Manual
+        | playback::QueueProvenance::Random
+        | playback::QueueProvenance::Radio
+        | playback::QueueProvenance::AutoDj
+        | playback::QueueProvenance::Legacy => None,
     };
     Some(RouteCurrentTrack {
         track_key: Some(entry.row.track.track_key),

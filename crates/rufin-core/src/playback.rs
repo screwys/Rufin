@@ -32,7 +32,7 @@ use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::QueueUpdate;
 use library::{Catalog, Change, ListenWrite, ReadCancellation};
 use playback::{
-    PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
+    PlaybackBackend, PlaybackProjection, PreparedStream, QueueRepeatMode, RunId, StreamRequest,
 };
 use queue::Sequence;
 use scrobbling::Scrobbler;
@@ -927,11 +927,11 @@ impl PlaybackOwner {
             Ok(repeat) => self.send(Command::SetRepeat(repeat)),
             Err(error) => {
                 warn!(%error, "could not save repeat setting");
-                self.set_repeat(RepeatMode::Off);
+                self.set_repeat(QueueRepeatMode::Off);
             }
         }
     }
-    pub fn set_repeat(&self, repeat: RepeatMode) {
+    pub fn set_repeat(&self, repeat: QueueRepeatMode) {
         if let Err(error) = self.settings.edit(|stored| {
             stored.ui.repeat_mode = repeat;
             Ok(())
@@ -1325,11 +1325,11 @@ pub(crate) fn audio_mime(source_format: &str) -> Option<String> {
     Some(mime.to_string())
 }
 
-const fn next_repeat(value: RepeatMode) -> RepeatMode {
+const fn next_repeat(value: QueueRepeatMode) -> QueueRepeatMode {
     match value {
-        RepeatMode::Off => RepeatMode::All,
-        RepeatMode::All => RepeatMode::One,
-        RepeatMode::One => RepeatMode::Off,
+        QueueRepeatMode::Off => QueueRepeatMode::All,
+        QueueRepeatMode::All => QueueRepeatMode::One,
+        QueueRepeatMode::One => QueueRepeatMode::Off,
     }
 }
 pub(crate) fn random_u64() -> u64 {
@@ -1405,7 +1405,7 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            provenance: playback::Provenance::Manual,
+            provenance: playback::QueueProvenance::Manual,
             track: {
                 let reference = test_media(source_format);
                 library::TrackView {

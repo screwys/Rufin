@@ -15,8 +15,8 @@ use gtk_widgets::{
 };
 use localization::{msgid, tr, tr_with};
 use playback::{
-    CurrentMediaId, PlaybackOutput, PlaybackView, RemoteOutput, RemoteOutputProtocol, RepeatMode,
-    TransportStatus,
+    CurrentMediaId, PlaybackOutput, PlaybackView, QueueRepeatMode, RemoteOutput,
+    RemoteOutputProtocol, TransportStatus,
 };
 use std::time::Duration;
 use std::{
@@ -1109,7 +1109,7 @@ impl crate::PlayerUi {
             .unwrap_or_default();
         let repeat_mode = player
             .map(|player| player.controls.repeat_mode)
-            .unwrap_or(RepeatMode::Off);
+            .unwrap_or(QueueRepeatMode::Off);
         let controls = &self.views.player_controls;
         self.controls.updating_controls.set(true);
 
@@ -1133,7 +1133,7 @@ impl crate::PlayerUi {
         let shuffle_enabled = player.is_some_and(|player| player.controls.shuffle_enabled);
         let auto_dj_enabled = player.is_some_and(|player| player.controls.auto_dj_enabled);
         set_active_class(&controls.shuffle_button, shuffle_enabled);
-        set_active_class(&controls.repeat_button, repeat_mode != RepeatMode::Off);
+        set_active_class(&controls.repeat_button, repeat_mode != QueueRepeatMode::Off);
         set_repeat_button_icon(&controls.repeat_button, repeat_mode);
         set_active_class(&controls.dj_button, auto_dj_enabled);
         controls.dj_button.set_tooltip_text(Some(&tr("Auto DJ")));
@@ -1337,11 +1337,11 @@ fn playback_state_label(state: TransportStatus) -> String {
     }
 }
 
-fn repeat_label(repeat_mode: RepeatMode) -> String {
+fn repeat_label(repeat_mode: QueueRepeatMode) -> String {
     match repeat_mode {
-        RepeatMode::Off => tr("Repeat off"),
-        RepeatMode::One => tr("Repeat one"),
-        RepeatMode::All => tr("Repeat all"),
+        QueueRepeatMode::Off => tr("Repeat off"),
+        QueueRepeatMode::One => tr("Repeat one"),
+        QueueRepeatMode::All => tr("Repeat all"),
     }
 }
 

@@ -1883,7 +1883,7 @@ mod tests {
                         artwork_binding: None,
                     },
                     position: index,
-                    provenance: playback::Provenance::Manual,
+                    provenance: playback::QueueProvenance::Manual,
                 }),
             })));
             service.handle().load(media_id.clone());
@@ -1999,7 +1999,7 @@ mod tests {
                     artwork_binding: None,
                 },
                 position: 0,
-                provenance: playback::Provenance::Manual,
+                provenance: playback::QueueProvenance::Manual,
             }),
         })));
         service.handle().load(cue_media_id.clone());

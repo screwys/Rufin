@@ -83,7 +83,7 @@ async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
                         "plex:track:42",
                     ),
                 ],
-                playback::Provenance::Manual,
+                playback::QueueProvenance::Manual,
             ),
             None,
         )

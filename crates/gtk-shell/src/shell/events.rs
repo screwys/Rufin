@@ -772,7 +772,8 @@ fn playback_error_toast(error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use playback::{
-        ControlsView, PlaybackView, QueueSummaryView, RepeatMode, TransportStatus, TransportView,
+        ControlsView, PlaybackView, QueueRepeatMode, QueueSummaryView, TransportStatus,
+        TransportView,
     };
     use sources::SourceId;
 
@@ -951,7 +952,7 @@ mod tests {
                 error: None,
             },
             controls: ControlsView {
-                repeat_mode: RepeatMode::Off,
+                repeat_mode: QueueRepeatMode::Off,
                 shuffle_enabled: false,
                 auto_dj_enabled: false,
                 volume: 1.0,

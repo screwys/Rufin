@@ -2404,7 +2404,7 @@ mod tests {
         playback::QueueRow {
             occurrence_id: None,
             position: 0,
-            provenance: playback::Provenance::Manual,
+            provenance: playback::QueueProvenance::Manual,
             track: {
                 let reference = playback::TrackReference {
                     media_uri: library::source_entity_uri(

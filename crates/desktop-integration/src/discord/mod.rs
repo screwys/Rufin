@@ -402,8 +402,8 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, Provenance, QueueRow,
-        QueueSummaryView, RepeatMode, RunId, TrackReference, TransportStatus, TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, QueueProvenance, QueueRepeatMode,
+        QueueRow, QueueSummaryView, RunId, TrackReference, TransportStatus, TransportView,
     };
 
     pub(crate) fn test_view(
@@ -423,7 +423,7 @@ pub(crate) mod tests {
             row: Arc::new(QueueRow {
                 occurrence_id: None,
                 position: 0,
-                provenance: Provenance::Manual,
+                provenance: QueueProvenance::Manual,
                 track: {
                     let reference = TrackReference {
                         media_uri: library::source_entity_uri(
@@ -495,7 +495,7 @@ pub(crate) mod tests {
                 error: None,
             },
             controls: ControlsView {
-                repeat_mode: RepeatMode::Off,
+                repeat_mode: QueueRepeatMode::Off,
                 shuffle_enabled: false,
                 auto_dj_enabled: false,
                 volume: 1.0,

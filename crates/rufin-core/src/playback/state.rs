@@ -16,8 +16,9 @@ use tokio::task::JoinHandle;
 use crate::playback::Placement;
 use playback::{
     BackendCommand, BackendEvent, BackendState, NextTransition, PlaybackOutput, PlaybackSettings,
-    PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueRow, RepeatMode,
-    RunEndReason, RunId, StreamRequest, manual_end_is_skip, qualified_play_threshold_millis,
+    PlaybackTransitionMode, PreparedNext, PreparedStream, QueueProvenance, QueueRepeatMode,
+    QueueRow, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
+    qualified_play_threshold_millis,
 };
 
 /// The listen of a run another device continues: that device carries it on, so one play
@@ -50,7 +51,7 @@ pub struct ExternalPlayback {
     pub duration_millis: u64,
     pub volume: f64,
     pub muted: bool,
-    pub repeat: RepeatMode,
+    pub repeat: QueueRepeatMode,
     pub shuffle: bool,
 }
 
@@ -98,7 +99,7 @@ pub enum Command {
     SetVolume(f64),
     SetMuted(bool),
     PersistVolume(f64),
-    SetRepeat(RepeatMode),
+    SetRepeat(QueueRepeatMode),
     SetShuffle {
         enabled: bool,
         seed: u64,
@@ -785,7 +786,7 @@ impl Player {
             .unwrap_or_else(|p| p.into_inner())
             .clone();
         let selected = source.upgrade().and_then(|owner| owner.selected_library());
-        self.start_candidates(request.placement, Provenance::Radio, async move {
+        self.start_candidates(request.placement, QueueProvenance::Radio, async move {
             crate::radio::radio_candidates(
                 &catalog,
                 source,
@@ -813,7 +814,7 @@ impl Player {
             .map(|entry| entry.track.track_key)
             .into_iter()
             .collect::<Vec<_>>();
-        self.start_candidates(request.placement, Provenance::Random, async move {
+        self.start_candidates(request.placement, QueueProvenance::Random, async move {
             catalog
                 .random_candidates(
                     selected.source_key,
@@ -831,7 +832,7 @@ impl Player {
     fn start_candidates(
         &mut self,
         placement: Placement,
-        provenance: Provenance,
+        provenance: QueueProvenance,
         candidates: impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>>
         + Send
         + 'static,
@@ -861,7 +862,7 @@ impl Player {
         &mut self,
         id: u64,
         result: Result<Vec<library::TrackKey>, String>,
-        provenance: Provenance,
+        provenance: QueueProvenance,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
         let was_loading = self.queue_loading();
@@ -1364,7 +1365,7 @@ impl Player {
         self.complete_auto_dj(
             seed_run,
             seed_media_uri,
-            library::QueueLoad::track_keys(candidates, Provenance::AutoDj),
+            library::QueueLoad::track_keys(candidates, QueueProvenance::AutoDj),
             sample,
         )
     }
@@ -2042,7 +2043,7 @@ impl Player {
         self.dirty = true;
     }
 
-    fn set_repeat(&mut self, repeat: RepeatMode) {
+    fn set_repeat(&mut self, repeat: QueueRepeatMode) {
         if self.sequence.repeat_mode() == repeat {
             return;
         }
@@ -2421,7 +2422,7 @@ impl Player {
     fn skip_unplayable(&mut self, failure: FailureKind, desired_playing: bool) -> bool {
         if !failure.skippable()
             || !self.settings.skip_unplayable_tracks
-            || self.sequence.repeat_mode() == RepeatMode::One
+            || self.sequence.repeat_mode() == QueueRepeatMode::One
             || self.consecutive_skips >= MAX_CONSECUTIVE_SKIPS
         {
             return false;
@@ -2828,7 +2829,7 @@ impl Player {
             summary.current_index = summary.current_index.map(|index| index + offset);
             summary.next_index = summary.next_index.map(|index| index + offset);
             summary.can_next = summary.current_index.is_some_and(|index| index + 1 < total)
-                || sequence.repeat_mode() != RepeatMode::Off;
+                || sequence.repeat_mode() != QueueRepeatMode::Off;
         }
         PlaybackView {
             queue_loading: self.queue_loading(),

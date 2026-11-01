@@ -282,15 +282,15 @@ impl PlexClient {
             ],
         )
     }
-    pub fn repeat(&self, mode: playback::RepeatMode) -> Result<(), String> {
+    pub fn repeat(&self, mode: playback::QueueRepeatMode) -> Result<(), String> {
         self.command(
             "setParameters",
             &[(
                 "repeat",
                 match mode {
-                    playback::RepeatMode::Off => "0",
-                    playback::RepeatMode::All => "1",
-                    playback::RepeatMode::One => "2",
+                    playback::QueueRepeatMode::Off => "0",
+                    playback::QueueRepeatMode::All => "1",
+                    playback::QueueRepeatMode::One => "2",
                 }
                 .into(),
             )],
@@ -582,7 +582,7 @@ mod tests {
         client.previous().unwrap();
         client.skip_to("/library/metadata/42", 501).unwrap();
         clone.skip_to("/library/metadata/42", 502).unwrap();
-        client.repeat(playback::RepeatMode::One).unwrap();
+        client.repeat(playback::QueueRepeatMode::One).unwrap();
         client.shuffle(true).unwrap();
         client.refresh_queue(99).unwrap();
         let server_url = Url::parse("http://[2001:db8::1]:32400/").unwrap();

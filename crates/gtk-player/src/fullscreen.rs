@@ -1126,8 +1126,9 @@ fn update_fullscreen_meta_row(row: &gtk::FlowBox, parts: &[String]) {
 mod playback_refresh_tests {
     use super::*;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, PlaybackOutput, Provenance, QueueRow,
-        QueueSummaryView, RepeatMode, RunId, TrackReference, TransportStatus, TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackOutput, QueueProvenance,
+        QueueRepeatMode, QueueRow, QueueSummaryView, RunId, TrackReference, TransportStatus,
+        TransportView,
     };
     use std::sync::Arc;
 
@@ -1235,7 +1236,7 @@ mod playback_refresh_tests {
             row: Arc::new(QueueRow {
                 occurrence_id: None,
                 position: 0,
-                provenance: Provenance::Manual,
+                provenance: QueueProvenance::Manual,
                 track: {
                     let reference = TrackReference {
                         media_uri: library::source_entity_uri(
@@ -1313,7 +1314,7 @@ mod playback_refresh_tests {
                 error: None,
             },
             controls: ControlsView {
-                repeat_mode: RepeatMode::Off,
+                repeat_mode: QueueRepeatMode::Off,
                 shuffle_enabled: false,
                 auto_dj_enabled: false,
                 volume: 1.0,

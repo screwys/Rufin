@@ -1,4 +1,4 @@
-use crate::{RepeatMode, RunId};
+use crate::{QueueRepeatMode, RunId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceReportPhase {
@@ -25,7 +25,7 @@ pub struct SourceReportFact {
     pub muted: bool,
     pub volume: f64,
     pub shuffle: bool,
-    pub repeat_mode: RepeatMode,
+    pub repeat_mode: QueueRepeatMode,
     pub failed: bool,
 }
 

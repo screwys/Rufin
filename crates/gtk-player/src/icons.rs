@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use playback::RepeatMode;
+use playback::QueueRepeatMode;
 
 use localization::tr;
 
@@ -38,8 +38,8 @@ pub fn set_volume_icon(icon: &gtk::Image, state: VolumeIcon) {
     icon.set_icon_name(Some(name));
 }
 
-pub fn set_repeat_button_icon(button: &gtk::Button, repeat_mode: RepeatMode) {
-    let name = if repeat_mode == RepeatMode::One {
+pub fn set_repeat_button_icon(button: &gtk::Button, repeat_mode: QueueRepeatMode) {
+    let name = if repeat_mode == QueueRepeatMode::One {
         "rufin-repeat-one-symbolic"
     } else {
         "rufin-repeat-symbolic"

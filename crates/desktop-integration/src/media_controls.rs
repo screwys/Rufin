@@ -8,7 +8,7 @@ mod freedesktop {
     use mpris_server::{
         LoopStatus, Metadata, PlaybackStatus, Player as MprisPlayer, Time, TrackId as MprisTrackId,
     };
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode, RunId, TransportStatus};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode, RunId, TransportStatus};
     use tracing::warn;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -365,9 +365,9 @@ mod freedesktop {
             playback_status: playback.map_or(PlaybackStatus::Stopped, |playback| {
                 mpris_playback_status(playback.transport.effective_state())
             }),
-            loop_status: mpris_loop_status(
-                playback.map_or(RepeatMode::Off, |playback| playback.controls.repeat_mode),
-            ),
+            loop_status: mpris_loop_status(playback.map_or(QueueRepeatMode::Off, |playback| {
+                playback.controls.repeat_mode
+            })),
             shuffle: playback.is_some_and(|playback| playback.controls.shuffle_enabled),
             metadata: mpris_metadata(playback, art_url),
             volume: playback.map_or(1.0, |playback| playback.controls.volume.clamp(0.0, 1.0)),
@@ -428,19 +428,19 @@ mod freedesktop {
         Time::from_millis(position_millis.min(i64::MAX as u64) as i64)
     }
 
-    fn mpris_loop_status(repeat_mode: RepeatMode) -> LoopStatus {
+    fn mpris_loop_status(repeat_mode: QueueRepeatMode) -> LoopStatus {
         match repeat_mode {
-            RepeatMode::Off => LoopStatus::None,
-            RepeatMode::One => LoopStatus::Track,
-            RepeatMode::All => LoopStatus::Playlist,
+            QueueRepeatMode::Off => LoopStatus::None,
+            QueueRepeatMode::One => LoopStatus::Track,
+            QueueRepeatMode::All => LoopStatus::Playlist,
         }
     }
 
-    fn repeat_mode_from_mpris(status: LoopStatus) -> RepeatMode {
+    fn repeat_mode_from_mpris(status: LoopStatus) -> QueueRepeatMode {
         match status {
-            LoopStatus::None => RepeatMode::Off,
-            LoopStatus::Track => RepeatMode::One,
-            LoopStatus::Playlist => RepeatMode::All,
+            LoopStatus::None => QueueRepeatMode::Off,
+            LoopStatus::Track => QueueRepeatMode::One,
+            LoopStatus::Playlist => QueueRepeatMode::All,
         }
     }
 
@@ -457,8 +457,9 @@ mod freedesktop {
     #[cfg(test)]
     mod tests {
         use super::{
-            RepeatMode, TransportStatus, mpris_desired_state, mpris_loop_status, mpris_metadata,
-            mpris_set_position_matches, mpris_time, mpris_track_id, repeat_mode_from_mpris,
+            QueueRepeatMode, TransportStatus, mpris_desired_state, mpris_loop_status,
+            mpris_metadata, mpris_set_position_matches, mpris_time, mpris_track_id,
+            repeat_mode_from_mpris,
         };
         use crate::discord::tests::test_view;
         use playback::{CurrentMediaId, RunId};
@@ -498,7 +499,11 @@ mod freedesktop {
 
         #[test]
         fn mpris_exact_repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(repeat_mode_from_mpris(mpris_loop_status(repeat)), repeat);
             }
         }
@@ -552,7 +557,7 @@ mod windows {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode, TransportStatus};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode, TransportStatus};
     use tracing::warn;
     use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
     use windows::Media::Playback::MediaPlayer;
@@ -662,7 +667,7 @@ mod windows {
         position_millis: u64,
         art_url: Option<String>,
         playback: WindowsPlaybackState,
-        repeat: RepeatMode,
+        repeat: QueueRepeatMode,
         shuffle: bool,
         can_play: bool,
         can_pause: bool,
@@ -715,7 +720,7 @@ mod windows {
         Previous,
         Stop,
         SetPosition(u64),
-        SetRepeat(RepeatMode),
+        SetRepeat(QueueRepeatMode),
         SetShuffle(bool),
     }
 
@@ -1007,30 +1012,38 @@ mod windows {
         milliseconds.min(i64::MAX as u64 / 10_000) as i64 * 10_000
     }
 
-    const fn repeat_mode_to_windows(repeat: RepeatMode) -> MediaPlaybackAutoRepeatMode {
+    const fn repeat_mode_to_windows(repeat: QueueRepeatMode) -> MediaPlaybackAutoRepeatMode {
         match repeat {
-            RepeatMode::Off => MediaPlaybackAutoRepeatMode::None,
-            RepeatMode::One => MediaPlaybackAutoRepeatMode::Track,
-            RepeatMode::All => MediaPlaybackAutoRepeatMode::List,
+            QueueRepeatMode::Off => MediaPlaybackAutoRepeatMode::None,
+            QueueRepeatMode::One => MediaPlaybackAutoRepeatMode::Track,
+            QueueRepeatMode::All => MediaPlaybackAutoRepeatMode::List,
         }
     }
 
-    const fn repeat_mode_from_windows(repeat: MediaPlaybackAutoRepeatMode) -> Option<RepeatMode> {
+    const fn repeat_mode_from_windows(
+        repeat: MediaPlaybackAutoRepeatMode,
+    ) -> Option<QueueRepeatMode> {
         match repeat {
-            MediaPlaybackAutoRepeatMode::None => Some(RepeatMode::Off),
-            MediaPlaybackAutoRepeatMode::Track => Some(RepeatMode::One),
-            MediaPlaybackAutoRepeatMode::List => Some(RepeatMode::All),
+            MediaPlaybackAutoRepeatMode::None => Some(QueueRepeatMode::Off),
+            MediaPlaybackAutoRepeatMode::Track => Some(QueueRepeatMode::One),
+            MediaPlaybackAutoRepeatMode::List => Some(QueueRepeatMode::All),
             _ => None,
         }
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{RepeatMode, repeat_mode_from_windows, repeat_mode_to_windows, windows_time};
+        use super::{
+            QueueRepeatMode, repeat_mode_from_windows, repeat_mode_to_windows, windows_time,
+        };
 
         #[test]
         fn repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(
                     repeat_mode_from_windows(repeat_mode_to_windows(repeat)),
                     Some(repeat)
@@ -1056,7 +1069,7 @@ mod macos {
         Artwork, CommandToken, HandlerStatus, NowPlayingInfo, NowPlayingInfoCenter,
         NowPlayingMediaType, PlaybackState, RemoteCommandCenter, RepeatType, ShuffleType,
     };
-    use playback::{PlaybackView, PositionDiscontinuity, RepeatMode};
+    use playback::{PlaybackView, PositionDiscontinuity, QueueRepeatMode};
 
     pub struct MediaControls {
         center: NowPlayingInfoCenter,
@@ -1242,19 +1255,19 @@ mod macos {
         commands.change_shuffle_mode_command().set_enabled(false);
     }
 
-    const fn repeat_type(repeat: RepeatMode) -> RepeatType {
+    const fn repeat_type(repeat: QueueRepeatMode) -> RepeatType {
         match repeat {
-            RepeatMode::Off => RepeatType::Off,
-            RepeatMode::One => RepeatType::One,
-            RepeatMode::All => RepeatType::All,
+            QueueRepeatMode::Off => RepeatType::Off,
+            QueueRepeatMode::One => RepeatType::One,
+            QueueRepeatMode::All => RepeatType::All,
         }
     }
 
-    const fn repeat_mode(repeat: RepeatType) -> RepeatMode {
+    const fn repeat_mode(repeat: RepeatType) -> QueueRepeatMode {
         match repeat {
-            RepeatType::Off => RepeatMode::Off,
-            RepeatType::One => RepeatMode::One,
-            RepeatType::All => RepeatMode::All,
+            RepeatType::Off => QueueRepeatMode::Off,
+            RepeatType::One => QueueRepeatMode::One,
+            RepeatType::All => QueueRepeatMode::All,
         }
     }
 
@@ -1334,11 +1347,15 @@ mod macos {
 
     #[cfg(test)]
     mod tests {
-        use super::{RepeatMode, repeat_mode, repeat_type};
+        use super::{QueueRepeatMode, repeat_mode, repeat_type};
 
         #[test]
         fn repeat_mapping_round_trips() {
-            for repeat in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            for repeat in [
+                QueueRepeatMode::Off,
+                QueueRepeatMode::One,
+                QueueRepeatMode::All,
+            ] {
                 assert_eq!(repeat_mode(repeat_type(repeat)), repeat);
             }
         }

@@ -5,7 +5,8 @@ use super::super::{
 use super::*;
 use crate::playback::{Placement, PlayRequest, RadioPlayRequest};
 use playback::{
-    BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, Provenance, TrackReference,
+    BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, QueueProvenance,
+    TrackReference,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -152,7 +153,7 @@ async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
                 "Album",
                 180_000,
             ),
-            Provenance::Manual,
+            QueueProvenance::Manual,
         )])
         .await;
         let (playback, receiver) = super::channel();
@@ -248,7 +249,7 @@ fn replace_queue(owner: &PlaybackOwner, prefix: &str, count: usize) {
                             "Album",
                             180_000,
                         ),
-                        Provenance::Manual,
+                        QueueProvenance::Manual,
                     )
                 })
                 .collect(),

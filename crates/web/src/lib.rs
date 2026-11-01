@@ -536,9 +536,9 @@ async fn playback_command(
                     .ok_or_else(|| bad_request("enabled must be true or false"))?,
             ),
             "repeat" => transport.set_repeat(match value.get("mode").and_then(Value::as_str) {
-                Some("off") => playback::RepeatMode::Off,
-                Some("one") => playback::RepeatMode::One,
-                Some("all") => playback::RepeatMode::All,
+                Some("off") => playback::QueueRepeatMode::Off,
+                Some("one") => playback::QueueRepeatMode::One,
+                Some("all") => playback::QueueRepeatMode::All,
                 _ => return Err(bad_request("Repeat mode must be off, one or all")),
             }),
             _ => return Err(error(StatusCode::NOT_FOUND, "Route not found")),
@@ -716,7 +716,7 @@ fn playback_json(
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
         "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &current.row.track, include_preview)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
-        "repeat":match state.controls.repeat_mode {playback::RepeatMode::Off=>"off",playback::RepeatMode::One=>"one",playback::RepeatMode::All=>"all"},
+        "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"refilling":state.transport.refilling(),"error":state.transport.error,
         "queue_revision":state.queue.revision
     })

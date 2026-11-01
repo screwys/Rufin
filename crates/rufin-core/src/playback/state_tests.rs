@@ -8,7 +8,7 @@ use crate::{
     lyrics::LyricsService, settings::SettingsFile, source::SourceOwner, waveform::WaveformOwner,
 };
 use playback::{BackendError, PlaybackBackend};
-use playback::{Provenance, TrackReference};
+use playback::{QueueProvenance, TrackReference};
 use std::sync::Mutex;
 
 pub(in crate::playback) struct IdleBackend(pub(in crate::playback) Arc<Mutex<Vec<BackendCommand>>>);
@@ -23,7 +23,7 @@ impl PlaybackBackend for IdleBackend {
 }
 
 pub(in crate::playback) async fn seeded(
-    items: Vec<(TrackReference, Provenance)>,
+    items: Vec<(TrackReference, QueueProvenance)>,
 ) -> (
     tempfile::TempDir,
     library::Catalog,
@@ -179,7 +179,7 @@ fn restored_item() -> TrackReference {
     item
 }
 
-fn batch_item(track: i64, provenance: Provenance) -> (TrackReference, Provenance) {
+fn batch_item(track: i64, provenance: QueueProvenance) -> (TrackReference, QueueProvenance) {
     let mut item = restored_item();
     item.media_uri = format!("https://example.test/track-{track}");
     (item, provenance)
@@ -195,8 +195,8 @@ async fn active_two_track_session() -> (
     std::sync::mpsc::Receiver<Message>,
 ) {
     let (_directory, _catalog, sequence, owner, commands, playback, inbox) = seeded(vec![
-        batch_item(1, Provenance::Manual),
-        batch_item(2, Provenance::Manual),
+        batch_item(1, QueueProvenance::Manual),
+        batch_item(2, QueueProvenance::Manual),
     ])
     .await;
     let mut session = Player::new(
@@ -231,7 +231,7 @@ async fn loaded_advancement_reuses_positions_without_a_store_read() {
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(
                     (0..240)
-                        .map(|index| batch_item(index, Provenance::Manual))
+                        .map(|index| batch_item(index, QueueProvenance::Manual))
                         .collect(),
                 ),
                 Placement::Now,
@@ -280,7 +280,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     session
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
-                library::QueueLoad::items(vec![batch_item(10, Provenance::Manual)]),
+                library::QueueLoad::items(vec![batch_item(10, QueueProvenance::Manual)]),
                 Placement::Now,
             )),
             &sample,
@@ -303,7 +303,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     session
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
-                library::QueueLoad::items(vec![batch_item(20, Provenance::Manual)]),
+                library::QueueLoad::items(vec![batch_item(20, QueueProvenance::Manual)]),
                 Placement::Now,
             )),
             &sample,
@@ -321,7 +321,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
 async fn refill_preserves_live_progress_and_prepared_positions() {
     let (_directory, _catalog, sequence, owner, commands, playback, inbox) = seeded(
         (0..240)
-            .map(|index| batch_item(index, Provenance::Manual))
+            .map(|index| batch_item(index, QueueProvenance::Manual))
             .collect(),
     )
     .await;
@@ -403,7 +403,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
                 "",
                 120_000,
             ),
-            Provenance::Manual,
+            QueueProvenance::Manual,
         )]);
         session
             .handle_command(
@@ -441,7 +441,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(
                     (0..240)
-                        .map(|index| batch_item(index, Provenance::Manual))
+                        .map(|index| batch_item(index, QueueProvenance::Manual))
                         .collect(),
                 ),
                 Placement::Now,
@@ -477,7 +477,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     session
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
-                library::QueueLoad::items(vec![batch_item(999, Provenance::Manual)]),
+                library::QueueLoad::items(vec![batch_item(999, QueueProvenance::Manual)]),
                 Placement::Now,
             )),
             &sample,
@@ -744,7 +744,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     session
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
-                library::QueueLoad::items(vec![batch_item(10, Provenance::Manual)]),
+                library::QueueLoad::items(vec![batch_item(10, QueueProvenance::Manual)]),
                 Placement::End,
             )),
             &sample,
@@ -773,7 +773,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restored_media_stays_paused_until_first_play_starts_one_resolution() {
     let (_directory, _catalog, mut sequence, owner, commands, playback, _inbox) =
-        seeded(vec![batch_item(1, Provenance::Manual)]).await;
+        seeded(vec![batch_item(1, QueueProvenance::Manual)]).await;
     sequence.set_progress_millis(42_000);
     let mut session = Player::new(
         sequence,
@@ -843,12 +843,12 @@ async fn playback_modes_publish_their_state_without_an_active_run() {
     finish_queue(&mut session, &inbox, &sample).await;
     assert!(owner.updates.current().unwrap().controls.shuffle_enabled);
     session
-        .handle_command(Command::SetRepeat(RepeatMode::One), &sample)
+        .handle_command(Command::SetRepeat(QueueRepeatMode::One), &sample)
         .unwrap();
     session.publish(&sample);
     assert_eq!(
         owner.updates.current().unwrap().controls.repeat_mode,
-        RepeatMode::One
+        QueueRepeatMode::One
     );
     session
         .handle_command(
@@ -874,7 +874,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
         for placement in [Placement::Now, Placement::Next, Placement::Last] {
             for count in [1, 12] {
                 let existing = (1..=4)
-                    .map(|id| batch_item(id, Provenance::Manual))
+                    .map(|id| batch_item(id, QueueProvenance::Manual))
                     .collect();
                 let (_directory, catalog, sequence, owner, commands, playback, inbox) =
                     seeded(existing).await;
@@ -905,7 +905,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                     .map(|rank| {
                         batch_item(
                             100 + rank / 2,
-                            Provenance::Context {
+                            QueueProvenance::Context {
                                 context_title: None,
                                 context_id: "selected-collection".into(),
                                 source_rank: rank as usize,
@@ -928,7 +928,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                     .entries
                     .iter()
                     .filter_map(|entry| match &entry.provenance {
-                        Provenance::Context { source_rank, .. } => Some(*source_rank),
+                        QueueProvenance::Context { source_rank, .. } => Some(*source_rank),
                         _ => None,
                     })
                     .collect::<Vec<_>>();
@@ -982,7 +982,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 .map(|rank| {
                     batch_item(
                         rank as i64 + 1,
-                        Provenance::Context {
+                        QueueProvenance::Context {
                             context_title: None,
                             context_id: "collection".into(),
                             source_rank: rank,
@@ -1052,7 +1052,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             }
             assert!(matches!(
                 selected.provenance,
-                Provenance::Context {
+                QueueProvenance::Context {
                     source_rank: 0..4,
                     ..
                 }
@@ -1102,7 +1102,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     let source_id = sources::SourceId::new("gapless");
     let items = (1..=2)
         .map(|number| {
-            let mut item = batch_item(number, Provenance::Manual);
+            let mut item = batch_item(number, QueueProvenance::Manual);
             item.0.media_uri =
                 library::source_entity_uri(&source_id, "track", &format!("plex:track:{number}"));
             item
@@ -1333,7 +1333,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
 async fn receiver_window_survives_local_hydration_ticks() {
     let (_directory, _catalog, sequence, owner, commands, playback, _inbox) = seeded(
         (0..30)
-            .map(|id| batch_item(id, Provenance::Manual))
+            .map(|id| batch_item(id, QueueProvenance::Manual))
             .collect(),
     )
     .await;
@@ -1371,7 +1371,7 @@ async fn receiver_window_survives_local_hydration_ticks() {
                 duration_millis: 180000,
                 volume: 1.0,
                 muted: false,
-                repeat: RepeatMode::Off,
+                repeat: QueueRepeatMode::Off,
                 shuffle: false,
             },
             &sample,
@@ -1389,8 +1389,8 @@ async fn receiver_window_survives_local_hydration_ticks() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn receiver_observation_keeps_global_queue_facts_without_commands_or_duplicate_reports() {
     let (_directory, catalog, sequence, owner, commands, playback, inbox) = seeded(vec![
-        batch_item(1, Provenance::Manual),
-        batch_item(1, Provenance::Manual),
+        batch_item(1, QueueProvenance::Manual),
+        batch_item(1, QueueProvenance::Manual),
     ])
     .await;
     let mut queue = sequence.snapshot();
@@ -1432,7 +1432,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
         duration_millis: 180000,
         volume: 0.4,
         muted: false,
-        repeat: RepeatMode::All,
+        repeat: QueueRepeatMode::All,
         shuffle: true,
     };
     session
@@ -1539,7 +1539,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             .complete_auto_dj(
                 None,
                 &session.sequence.selected().unwrap().track.media_uri.clone(),
-                library::QueueLoad::items(vec![batch_item(9, Provenance::AutoDj)]),
+                library::QueueLoad::items(vec![batch_item(9, QueueProvenance::AutoDj)]),
                 &sample
             )
             .unwrap(),
@@ -1605,15 +1605,15 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
         local_period: "1970-01".into(),
     };
     for (repeat, queue_length, request_position, delayed_completion) in [
-        (RepeatMode::Off, 1, 0, true),
-        (RepeatMode::Off, 4, 3, false),
-        (RepeatMode::All, 4, 3, false),
-        (RepeatMode::Off, 4, 2, false),
-        (RepeatMode::All, 4, 2, false),
+        (QueueRepeatMode::Off, 1, 0, true),
+        (QueueRepeatMode::Off, 4, 3, false),
+        (QueueRepeatMode::All, 4, 3, false),
+        (QueueRepeatMode::Off, 4, 2, false),
+        (QueueRepeatMode::All, 4, 2, false),
     ] {
         let (_directory, catalog, mut sequence, owner, commands, playback, inbox) = seeded(
             (1..=queue_length)
-                .map(|track| batch_item(track as i64, Provenance::Manual))
+                .map(|track| batch_item(track as i64, QueueProvenance::Manual))
                 .collect(),
         )
         .await;
@@ -1685,10 +1685,10 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
                     &request.seed_media_uri,
                     catalog
                         .remember_media_uris(&[
-                            batch_item(queue_length as i64 + 1, Provenance::AutoDj)
+                            batch_item(queue_length as i64 + 1, QueueProvenance::AutoDj)
                                 .0
                                 .media_uri,
-                            batch_item(queue_length as i64 + 2, Provenance::AutoDj)
+                            batch_item(queue_length as i64 + 2, QueueProvenance::AutoDj)
                                 .0
                                 .media_uri,
                         ])
@@ -1744,7 +1744,7 @@ async fn unavailable_auto_dj_keeps_the_ready_queue_visible() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_stream_preserves_selected_media_and_player_controls() {
     let (_directory, _catalog, sequence, owner, commands, playback, _inbox) =
-        seeded(vec![batch_item(1, Provenance::Manual)]).await;
+        seeded(vec![batch_item(1, QueueProvenance::Manual)]).await;
     let mut session = Player::new(
         sequence,
         "failure-law",
@@ -1775,7 +1775,7 @@ async fn failed_stream_preserves_selected_media_and_player_controls() {
 async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() {
     let (_directory, _catalog, sequence, owner, commands, playback, inbox) = seeded(
         (0..500)
-            .map(|rank| batch_item(rank, Provenance::Manual))
+            .map(|rank| batch_item(rank, QueueProvenance::Manual))
             .collect(),
     )
     .await;
@@ -1796,7 +1796,7 @@ async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() 
         local_period: "1970-01".into(),
     };
     session
-        .handle_command(Command::SetRepeat(RepeatMode::All), &sample)
+        .handle_command(Command::SetRepeat(QueueRepeatMode::All), &sample)
         .unwrap();
     session.set_playing(true);
     for rank in 0..500 {
@@ -1825,7 +1825,7 @@ async fn backend_advancing_during_removal_uses_the_exact_surviving_successor() {
     for removed_rank in [1, 2] {
         let (_directory, _catalog, sequence, owner, commands, playback, inbox) = seeded(
             (0..3)
-                .map(|rank| batch_item(rank, Provenance::Manual))
+                .map(|rank| batch_item(rank, QueueProvenance::Manual))
                 .collect(),
         )
         .await;
@@ -1882,7 +1882,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
         session
             .apply_batch(
                 crate::playback::PlayRequest::from_input(
-                    library::QueueLoad::items(vec![batch_item(99, Provenance::Manual)]),
+                    library::QueueLoad::items(vec![batch_item(99, QueueProvenance::Manual)]),
                     Placement::Now,
                 ),
                 &sample,
@@ -1911,7 +1911,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
     let (_directory, catalog, mut sequence, owner, commands, playback, inbox) =
-        seeded(vec![batch_item(0, Provenance::Manual)]).await;
+        seeded(vec![batch_item(0, QueueProvenance::Manual)]).await;
     let uris = (0..100)
         .map(|i| format!("https://example.test/{i}"))
         .collect::<Vec<_>>();
@@ -1950,7 +1950,7 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         unix_seconds: 0,
         local_period: "1970-01".into(),
     };
-    session.set_repeat(RepeatMode::All);
+    session.set_repeat(QueueRepeatMode::All);
     session.set_playing(true);
     for _ in 0..100 {
         session.handle_command(Command::Next, &sample).unwrap();
@@ -1967,7 +1967,7 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
 async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
     let (_directory, _db, sequence, owner, commands, playback, inbox) = seeded(
         (0..101)
-            .map(|i| batch_item(i, Provenance::Manual))
+            .map(|i| batch_item(i, QueueProvenance::Manual))
             .collect(),
     )
     .await;
@@ -2016,7 +2016,7 @@ async fn skip_session(
 ) -> (Player, Arc<Mutex<Vec<BackendCommand>>>, impl Sized) {
     let (directory, catalog, sequence, owner, commands, playback, inbox) = seeded(
         (0..8)
-            .map(|track| batch_item(track, Provenance::Manual))
+            .map(|track| batch_item(track, QueueProvenance::Manual))
             .collect(),
     )
     .await;
@@ -2072,10 +2072,10 @@ async fn unplayable_tracks_are_skipped_until_the_failure_cap() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_failures_disabled_skipping_and_repeat_one_stop_playback() {
     for (kind, skip, repeat) in [
-        (FailureKind::Output, true, RepeatMode::Off),
-        (FailureKind::DeniedAccess, true, RepeatMode::Off),
-        (FailureKind::Decode, false, RepeatMode::Off),
-        (FailureKind::Decode, true, RepeatMode::One),
+        (FailureKind::Output, true, QueueRepeatMode::Off),
+        (FailureKind::DeniedAccess, true, QueueRepeatMode::Off),
+        (FailureKind::Decode, false, QueueRepeatMode::Off),
+        (FailureKind::Decode, true, QueueRepeatMode::One),
     ] {
         let settings = PlaybackSettings {
             skip_unplayable_tracks: skip,

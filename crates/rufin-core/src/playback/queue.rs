@@ -1,7 +1,7 @@
 //! Compact live queue entries, two orders with their saved ranks, and nearby resolved metadata.
 //! The play order differs from the queue's order only while shuffle is on.
 use crate::playback::{QueueReorderTarget, QueueSelection};
-use playback::{Provenance, QueueRow, RepeatMode};
+use playback::{QueueProvenance, QueueRepeatMode, QueueRow};
 use std::{collections::HashMap, ops::Range, sync::Arc};
 use thiserror::Error;
 
@@ -32,13 +32,13 @@ pub(super) struct Sequence {
     rows: Vec<Arc<QueueRow>>,
     selected_index: Option<usize>,
     next_id: u64,
-    repeat_mode: RepeatMode,
+    repeat_mode: QueueRepeatMode,
     shuffle_enabled: bool,
     revision: u64,
     progress_millis: u64,
     dirty: Option<library::QueueUpdate>,
     /// The current index, repeat and shuffle last saved.
-    saved: Option<(Option<usize>, RepeatMode, bool)>,
+    saved: Option<(Option<usize>, QueueRepeatMode, bool)>,
     metadata_read: Option<MetadataRead>,
 }
 
@@ -52,7 +52,7 @@ impl Sequence {
             rows: Vec::new(),
             selected_index: None,
             next_id: 0,
-            repeat_mode: RepeatMode::Off,
+            repeat_mode: QueueRepeatMode::Off,
             shuffle_enabled: false,
             revision: 0,
             progress_millis: 0,
@@ -289,10 +289,10 @@ impl Sequence {
     ) -> Option<usize> {
         self.order.iter().position(|id| {
             let e = &self.members[id];
-            e.track_key == key && matches!(&e.provenance, Provenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
+            e.track_key == key && matches!(&e.provenance, QueueProvenance::Context { context_id: c, source_rank, .. } if c.as_ref() == context_id && *source_rank == rank)
         })
     }
-    pub(super) fn repeat_mode(&self) -> RepeatMode {
+    pub(super) fn repeat_mode(&self) -> QueueRepeatMode {
         self.repeat_mode
     }
     pub(super) fn shuffle_enabled(&self) -> bool {
@@ -327,7 +327,7 @@ impl Sequence {
     pub(super) fn set_progress_millis(&mut self, value: u64) {
         self.progress_millis = value;
     }
-    pub(super) fn set_repeat_mode(&mut self, value: RepeatMode) {
+    pub(super) fn set_repeat_mode(&mut self, value: QueueRepeatMode) {
         if self.repeat_mode != value {
             self.repeat_mode = value;
             self.changed(false);
@@ -339,13 +339,13 @@ impl Sequence {
     }
     pub(super) fn next_index(&self, eos: bool) -> Option<usize> {
         let current = self.selected_index?;
-        if eos && self.repeat_mode == RepeatMode::One {
+        if eos && self.repeat_mode == QueueRepeatMode::One {
             return Some(current);
         }
         if current + 1 < self.total() {
             return Some(current + 1);
         }
-        (self.repeat_mode == RepeatMode::All && self.total() > 0).then_some(self.total())
+        (self.repeat_mode == QueueRepeatMode::All && self.total() > 0).then_some(self.total())
     }
     pub(super) fn next_index_eos(&self) -> Option<usize> {
         self.next_index(true)
@@ -355,7 +355,7 @@ impl Sequence {
     }
     pub(super) fn previous_index(&self) -> Option<usize> {
         let current = self.selected_index?;
-        if current == 0 && self.repeat_mode == RepeatMode::All {
+        if current == 0 && self.repeat_mode == QueueRepeatMode::All {
             self.total().checked_sub(1)
         } else {
             current.checked_sub(1)
@@ -826,7 +826,7 @@ mod tests {
         let entries = (start..start + count)
             .map(|i| library::QueueEntry {
                 track_key: library::TrackKey::from_raw((i / 2 + 1) as i64),
-                provenance: Provenance::Manual,
+                provenance: QueueProvenance::Manual,
             })
             .collect::<Vec<_>>();
         let rows = entries
@@ -946,7 +946,7 @@ mod tests {
         assert_eq!(s.order, s.ordinary);
         assert_eq!(s.id_at(s.selected_index().unwrap()), current);
         assert!(s.take_persistence().unwrap().unshuffled);
-        s.set_repeat_mode(RepeatMode::All);
+        s.set_repeat_mode(QueueRepeatMode::All);
         s.activate_index(9);
         s.take_persistence();
         let members = s.members.clone();

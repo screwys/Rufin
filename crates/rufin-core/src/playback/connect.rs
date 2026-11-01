@@ -534,7 +534,10 @@ impl PlaybackOwner {
                 receiver
                     .input(
                         PlayRequest::from_input(
-                            library::QueueLoad::track_keys(candidates, playback::Provenance::Radio),
+                            library::QueueLoad::track_keys(
+                                candidates,
+                                playback::QueueProvenance::Radio,
+                            ),
                             request.placement,
                         ),
                         None,
@@ -584,7 +587,7 @@ impl PlaybackOwner {
                         PlayRequest::from_input(
                             library::QueueLoad::track_keys(
                                 candidates,
-                                playback::Provenance::Random,
+                                playback::QueueProvenance::Random,
                             ),
                             request.placement,
                         ),

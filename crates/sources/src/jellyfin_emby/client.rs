@@ -1162,9 +1162,9 @@ impl PlaybackReportDto {
                 "DirectPlay"
             },
             repeat_mode: match report.repeat_mode {
-                RepeatMode::Off => "RepeatNone",
-                RepeatMode::One => "RepeatOne",
-                RepeatMode::All => "RepeatAll",
+                QueueRepeatMode::Off => "RepeatNone",
+                QueueRepeatMode::One => "RepeatOne",
+                QueueRepeatMode::All => "RepeatAll",
             },
             playback_order: if report.shuffle { "Shuffle" } else { "Default" },
             failed: report.failed,

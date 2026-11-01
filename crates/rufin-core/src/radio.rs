@@ -4,7 +4,7 @@ use std::sync::Weak;
 
 use crate::playback::RandomPlayRequest;
 use library::{Catalog, RadioSeed, ReadCancellation, SourceKey};
-use playback::Provenance;
+use playback::QueueProvenance;
 use sources::{Source, SourceRadioSeed};
 
 use crate::playback::random_u64;
@@ -122,7 +122,7 @@ pub async fn queue_random(
         return Ok(true);
     }
     queue.play_selection(crate::playback::PlayRequest::from_input(
-        library::QueueLoad::track_keys(order, Provenance::Random),
+        library::QueueLoad::track_keys(order, QueueProvenance::Random),
         request.placement,
     ));
     Ok(false)

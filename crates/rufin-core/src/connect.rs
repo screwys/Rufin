@@ -273,7 +273,7 @@ pub enum Control {
         muted: bool,
     },
     Repeat {
-        mode: playback::RepeatMode,
+        mode: playback::QueueRepeatMode,
     },
     Shuffle {
         enabled: bool,

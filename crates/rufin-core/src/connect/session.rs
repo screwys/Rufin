@@ -83,7 +83,7 @@ pub(crate) struct Observed {
     pub(crate) duration_ms: u64,
     pub(crate) volume: f64,
     pub(crate) muted: bool,
-    pub(crate) repeat: playback::RepeatMode,
+    pub(crate) repeat: playback::QueueRepeatMode,
     pub(crate) shuffle: bool,
     pub(crate) auto_dj: bool,
     pub(crate) revision: u64,

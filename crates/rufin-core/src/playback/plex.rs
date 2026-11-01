@@ -441,7 +441,7 @@ impl PlexPlayback {
             .queue_entries(
                 library::QueueLoad::media_uris(
                     window.items.iter().map(|item| item.media_uri.clone()),
-                    playback::Provenance::Manual,
+                    playback::QueueProvenance::Manual,
                 ),
                 None,
             )
@@ -913,11 +913,11 @@ fn status(timeline: &Timeline) -> TransportStatus {
         _ => TransportStatus::Stopped,
     }
 }
-fn repeat(timeline: &Timeline) -> RepeatMode {
+fn repeat(timeline: &Timeline) -> QueueRepeatMode {
     match timeline.repeat {
-        Some(1) => RepeatMode::All,
-        Some(2) => RepeatMode::One,
-        _ => RepeatMode::Off,
+        Some(1) => QueueRepeatMode::All,
+        Some(2) => QueueRepeatMode::One,
+        _ => QueueRepeatMode::Off,
     }
 }
 
@@ -973,7 +973,10 @@ impl PlaybackOwner {
                 }
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::track_keys(candidates, playback::Provenance::AutoDj),
+                        library::QueueLoad::track_keys(
+                            candidates,
+                            playback::QueueProvenance::AutoDj,
+                        ),
                         crate::playback::QueuePlacement::Last,
                     ),
                     None,
@@ -1012,7 +1015,10 @@ impl PlaybackOwner {
                 let _guard = plex.commands.lock().await;
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::track_keys(candidates, playback::Provenance::Radio),
+                        library::QueueLoad::track_keys(
+                            candidates,
+                            playback::QueueProvenance::Radio,
+                        ),
                         request.placement,
                     ),
                     None,
@@ -1055,7 +1061,10 @@ impl PlaybackOwner {
                 let _guard = plex.commands.lock().await;
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::track_keys(candidates, playback::Provenance::Random),
+                        library::QueueLoad::track_keys(
+                            candidates,
+                            playback::QueueProvenance::Random,
+                        ),
                         request.placement,
                     ),
                     None,
@@ -1398,7 +1407,7 @@ impl PlaybackOwner {
                 .queue_entries(
                     library::QueueLoad::media_uris(
                         window.items.iter().map(|item| item.media_uri.clone()),
-                        playback::Provenance::Manual,
+                        playback::QueueProvenance::Manual,
                     ),
                     None,
                 )

@@ -283,9 +283,9 @@ impl PlexSource {
             (
                 "repeat",
                 match report.repeat_mode {
-                    playback::RepeatMode::Off => "0",
-                    playback::RepeatMode::All => "1",
-                    playback::RepeatMode::One => "2",
+                    playback::QueueRepeatMode::Off => "0",
+                    playback::QueueRepeatMode::All => "1",
+                    playback::QueueRepeatMode::One => "2",
                 }
                 .into(),
             ),
@@ -398,7 +398,7 @@ mod tests {
             muted: false,
             volume: 0.5,
             shuffle: false,
-            repeat_mode: playback::RepeatMode::Off,
+            repeat_mode: playback::QueueRepeatMode::Off,
             failed: false,
         };
         source

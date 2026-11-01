@@ -7,7 +7,7 @@ use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
-    PlaybackSettings, RepeatMode,
+    PlaybackSettings, QueueRepeatMode,
 };
 use presence::Settings as RichPresenceSettings;
 use secrets::SecretStorageMode;
@@ -316,7 +316,7 @@ pub struct Settings {
     #[serde(default)]
     pub shuffle_enabled: bool,
     #[serde(default)]
-    pub repeat_mode: RepeatMode,
+    pub repeat_mode: QueueRepeatMode,
     #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default)]
@@ -363,7 +363,7 @@ impl Default for Settings {
             lastfm_api_key: String::new(),
             auto_dj_enabled: false,
             shuffle_enabled: false,
-            repeat_mode: RepeatMode::Off,
+            repeat_mode: QueueRepeatMode::Off,
             playback: PlaybackSettings::default(),
             random_play: RandomPlaySettings::default(),
             window_width: None,
