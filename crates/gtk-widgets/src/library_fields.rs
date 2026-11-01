@@ -3,11 +3,10 @@ use std::{cell::RefCell, rc::Rc};
 use ::library::{PlaylistRow, QueueRow, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-#[cfg(test)]
-use gtk::glib;
 
 use localization::{msgid, tr};
 use rufin_core::settings::layout::{LibraryField, LibraryLayout, LibraryListKey};
+use rufin_core::settings::presentation::{track_field, track_row_field};
 
 pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn track_key(&self) -> Option<library::TrackKey>;
@@ -131,8 +130,6 @@ pub fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryFi
     widget.add_css_class(class);
 }
 
-pub use rufin_core::playlists::smart_playlist_display_name;
-
 pub fn playlist_artwork(playlist: &PlaylistRow) -> Vec<ArtworkBinding> {
     playlist
         .artwork_binding
@@ -140,9 +137,6 @@ pub fn playlist_artwork(playlist: &PlaylistRow) -> Vec<ArtworkBinding> {
         .map(|binding| ArtworkBinding::opaque(binding))
         .collect()
 }
-pub use rufin_core::settings::presentation::{
-    audio_property_field, optional_track_number, track_field, track_row_field,
-};
 pub fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
 }
@@ -264,20 +258,4 @@ pub fn play_count_column_width() -> i32 {
 }
 pub fn compact_header_column_width(header: &str, min_width: i32) -> i32 {
     crate::table_sizing::compact_header_text_width(&tr(header), min_width)
-}
-pub use rufin_core::settings::presentation::{
-    count, display_unix_date, favorite_text, optional_year, stored_rating,
-};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_unix_date_shows_date_and_time() {
-        let dt = glib::DateTime::from_local(2026, 9, 22, 14, 30, 0.0).unwrap();
-        let timestamp = dt.to_unix();
-        assert_eq!(display_unix_date(Some(timestamp)), "2026-09-22 14:30");
-        assert_eq!(display_unix_date(None), "");
-    }
 }

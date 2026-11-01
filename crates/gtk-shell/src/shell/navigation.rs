@@ -27,9 +27,9 @@ use gtk_widgets::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
     replace_native_menu_checkmarks, show_native_menu_icons,
 };
-use gtk_widgets::library_fields::smart_playlist_display_name;
 use library::SmartPlaylistRow;
 use rufin_core::playback::QueuePlacement;
+use rufin_core::playlists::smart_playlist_display_name;
 use rufin_core::route::{CollectionCategory, Route};
 use tracing::warn;
 

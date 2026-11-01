@@ -19,11 +19,12 @@ use gtk_widgets::favorites::{
 use gtk_widgets::interactions::install_context_menu_openers;
 
 use super::collection_context::present_track_context_menu;
-use gtk_widgets::library_fields::{opaque_artwork, track_row_field};
+use gtk_widgets::library_fields::opaque_artwork;
 use gtk_widgets::mounted_route::{ItemScrollPosition, NativeListScroll, RouteView, view_model};
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseObjectModel, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
+use rufin_core::settings::presentation::track_row_field;
 use rufin_core::view::{Opened, View};
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;

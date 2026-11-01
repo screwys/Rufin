@@ -513,6 +513,16 @@ pub fn joined_credits(credits: &[TrackArtistLink]) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn display_unix_date_shows_date_and_time() {
+        let dt = glib::DateTime::from_local(2026, 9, 22, 14, 30, 0.0).unwrap();
+        assert_eq!(
+            super::display_unix_date(Some(dt.to_unix())),
+            "2026-09-22 14:30"
+        );
+        assert_eq!(super::display_unix_date(None), "");
+    }
+
+    #[test]
     fn formats_track_duration() {
         assert_eq!(super::format_duration(0), "0:00");
         assert_eq!(super::format_duration(185), "3:05");
