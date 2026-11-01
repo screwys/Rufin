@@ -780,12 +780,8 @@ impl Player {
     fn play_radio(&mut self, request: crate::playback::RadioPlayRequest) {
         let owner = self.owner();
         let catalog = owner.catalog.clone();
-        let source = owner
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        let selected = source.upgrade().and_then(|owner| owner.selected_library());
+        let source = Arc::clone(&owner.source);
+        let selected = source.selected_library();
         self.start_candidates(request.placement, QueueProvenance::Radio, async move {
             crate::radio::radio_candidates(
                 &catalog,
@@ -801,10 +797,7 @@ impl Player {
 
     fn play_random(&mut self, request: crate::playback::RandomPlayRequest) {
         let owner = self.owner();
-        let Some(selected) = owner
-            .source_owner()
-            .and_then(|owner| owner.selected_library())
-        else {
+        let Some(selected) = owner.source.selected_library() else {
             return;
         };
         let catalog = owner.catalog.clone();

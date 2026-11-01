@@ -394,7 +394,7 @@ impl PlaybackOwner {
     }
 
     pub(super) fn discover_rufin(&self) -> Vec<playback::RemoteOutput> {
-        let Some(connect) = self.source_owner().and_then(|source| source.connect()) else {
+        let Some(connect) = self.source.connect() else {
             return Vec::new();
         };
         let status = connect.status();
@@ -425,10 +425,7 @@ impl PlaybackOwner {
         let PlaybackOutput::Remote(remote) = &output else {
             unreachable!();
         };
-        let connect = self
-            .source_owner()
-            .and_then(|source| source.connect())
-            .ok_or("Connect is unavailable")?;
+        let connect = self.source.connect().ok_or("Connect is unavailable")?;
         let active = self.active().ok_or("Playback is unavailable")?;
         let receiver = Arc::new(RufinPlayback {
             peer: remote.id.clone(),
@@ -512,12 +509,8 @@ impl PlaybackOwner {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let source = self
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        let selected = source.upgrade().and_then(|owner| owner.selected_library());
+        let source = Arc::clone(&self.source);
+        let selected = source.selected_library();
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
@@ -556,10 +549,7 @@ impl PlaybackOwner {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let Some(selected) = self
-            .source_owner()
-            .and_then(|source| source.selected_library())
-        else {
+        let Some(selected) = self.source.selected_library() else {
             return true;
         };
         let excluded = self

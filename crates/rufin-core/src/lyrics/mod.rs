@@ -13,6 +13,8 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
+use crate::settings::{SettingsFile, StoredSettings};
+
 use ::lyrics::{
     LyricsBundle, LyricsDocument, LyricsOrigin, LyricsQuery, LyricsRole, LyricsSearchResult,
     Settings, lyrics_from_search_result, lyrics_to_lrc_text, save_current_lyrics, search_lyrics,
@@ -74,8 +76,6 @@ impl CurrentDocument {
 }
 
 struct State {
-    settings: Settings,
-    private_mode: bool,
     current: Option<CurrentDocument>,
     current_task: Option<JoinHandle<()>>,
     search: Option<u64>,
@@ -129,6 +129,7 @@ pub struct LyricsService {
     source_owner: Arc<crate::source::SourceOwner>,
     runtime: tokio::runtime::Handle,
     events: Sender<LyricsEvent>,
+    committed: tokio::sync::watch::Receiver<Arc<StoredSettings>>,
     current: tokio::sync::watch::Sender<CurrentLyrics>,
     state: Mutex<State>,
     next_request: AtomicU64,
@@ -147,22 +148,20 @@ impl LyricsService {
         catalog: Catalog,
         source_owner: Arc<crate::source::SourceOwner>,
         runtime: tokio::runtime::Handle,
-        settings: Settings,
-        private_mode: bool,
+        settings: &SettingsFile,
         events: Sender<LyricsEvent>,
         dictionary_directory: PathBuf,
     ) -> Arc<Self> {
-        Arc::new(Self {
+        let service = Arc::new(Self {
             dictionary_directory,
             dictionary_status: Mutex::new(::lyrics::JapaneseDictionaryStatus::Idle),
             catalog,
             source_owner,
             runtime,
             events,
+            committed: settings.changes(),
             current: tokio::sync::watch::channel(CurrentLyrics::Cleared).0,
             state: Mutex::new(State {
-                settings,
-                private_mode,
                 current: None,
                 current_task: None,
                 search: None,
@@ -170,7 +169,30 @@ impl LyricsService {
             next_request: AtomicU64::new(1),
             search_lane: Arc::new(Semaphore::new(1)),
             write_lane: Arc::new(Semaphore::new(1)),
-        })
+        });
+        let mut committed = settings.changes();
+        let owner = Arc::downgrade(&service);
+        service.runtime.spawn(async move {
+            let mut previous = Arc::clone(&committed.borrow_and_update());
+            while committed.changed().await.is_ok() {
+                let current = Arc::clone(&committed.borrow_and_update());
+                let Some(service) = owner.upgrade() else {
+                    return;
+                };
+                if previous.ui.lyrics != current.ui.lyrics
+                    || previous.ui.application.private_mode != current.ui.application.private_mode
+                {
+                    service.settings_changed(&previous, &current);
+                }
+                previous = current;
+            }
+        });
+        service
+    }
+
+    /// The committed settings: the lyrics ones and private mode.
+    fn settings(&self) -> Arc<StoredSettings> {
+        Arc::clone(&self.committed.borrow())
     }
 
     pub fn handle(self: &Arc<Self>) -> LyricsHandle {
@@ -264,10 +286,9 @@ impl LyricsService {
         self.runtime.spawn(async move {
             context.playable = service.playable(&context).await;
             let sidecar = service
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .settings
+                .settings()
+                .ui
+                .lyrics
                 .preferences
                 .save_lyrics_as_sidecar;
             let writable = match (service.source(&context).await, context.playable.clone()) {
@@ -283,7 +304,14 @@ impl LyricsService {
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if state.settings.preferences.save_lyrics_as_sidecar != sidecar {
+                if service
+                    .settings()
+                    .ui
+                    .lyrics
+                    .preferences
+                    .save_lyrics_as_sidecar
+                    != sidecar
+                {
                     return;
                 }
                 let Some(current) = state.current.as_mut().filter(|current| {
@@ -314,15 +342,18 @@ impl LyricsService {
         }
     }
 
-    pub fn settings_changed(self: &Arc<Self>, settings: Settings, private_mode: bool) {
-        let readings_changed = {
-            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            reading_preferences(&state.settings.preferences)
-                != reading_preferences(&settings.preferences)
-        };
+    fn settings_changed(self: &Arc<Self>, previous: &StoredSettings, current: &StoredSettings) {
+        let (before, settings) = (&previous.ui.lyrics, &current.ui.lyrics);
+        let readings_changed =
+            reading_preferences(&before.preferences) != reading_preferences(&settings.preferences);
         let release_reader =
             !settings.preferences.show_furigana && !settings.preferences.show_romanization;
-        self.apply_settings(settings, private_mode);
+        self.apply_settings(
+            before,
+            previous.ui.application.private_mode,
+            settings,
+            current.ui.application.private_mode,
+        );
         if readings_changed {
             self.refresh_current();
             if release_reader {
@@ -332,7 +363,13 @@ impl LyricsService {
         }
     }
 
-    fn apply_settings(self: &Arc<Self>, settings: Settings, private_mode: bool) {
+    fn apply_settings(
+        self: &Arc<Self>,
+        before: &Settings,
+        was_private: bool,
+        settings: &Settings,
+        private_mode: bool,
+    ) {
         let restart = {
             let mut state = self
                 .state
@@ -350,16 +387,14 @@ impl LyricsService {
                         .is_some_and(|document| document.has_word_timing()),
                 )
             });
-            let selection_changed = lyrics_selection_changed(&state.settings, &settings);
+            let selection_changed = lyrics_selection_changed(before, settings);
             let karaoke_enabled =
-                !state.settings.preferences.karaoke_mode && settings.preferences.karaoke_mode;
+                !before.preferences.karaoke_mode && settings.preferences.karaoke_mode;
             let acquisition_changed = current.as_ref().is_some_and(|(_, track_id, ..)| {
-                lyrics_acquisition_changed(&state.settings, &settings, track_id)
+                lyrics_acquisition_changed(before, settings, track_id)
             });
             let settings_changed = selection_changed || acquisition_changed || karaoke_enabled;
-            let private_changed = state.private_mode != private_mode;
-            state.settings = settings;
-            state.private_mode = private_mode;
+            let private_changed = was_private != private_mode;
             if !settings_changed && !private_changed {
                 return;
             }
@@ -377,9 +412,7 @@ impl LyricsService {
             if !restart {
                 return;
             }
-            let plan = state
-                .settings
-                .configured_lyrics_plan(private_mode, &track_id);
+            let plan = settings.configured_lyrics_plan(private_mode, &track_id);
             self.begin_current(&mut state, &media_id, plan, false, selection_changed)
                 .map(|prepared| {
                     (
@@ -410,6 +443,7 @@ impl LyricsService {
 
     fn load(self: &Arc<Self>, media_id: CurrentMediaId) {
         let prepared = {
+            let settings = self.settings();
             let mut state = self
                 .state
                 .lock()
@@ -422,9 +456,10 @@ impl LyricsService {
             else {
                 return;
             };
-            let plan = state
-                .settings
-                .automatic_lyrics_plan(state.private_mode, &track_id);
+            let plan = settings
+                .ui
+                .lyrics
+                .automatic_lyrics_plan(settings.ui.application.private_mode, &track_id);
             self.begin_current(&mut state, &media_id, plan, true, false)
         };
         if let Some(prepared) = prepared {
@@ -793,6 +828,7 @@ impl LyricsService {
         lyrics: &LyricsBundle,
     ) -> Option<LyricsWriteTarget> {
         {
+            let settings = self.settings();
             let state = self
                 .state
                 .lock()
@@ -804,18 +840,18 @@ impl LyricsService {
             else {
                 return None;
             };
-            if !state.settings.preferences.save_lyrics_to_source
-                || !state.settings.preferences.save_lyrics_automatically
+            if !settings.ui.lyrics.preferences.save_lyrics_to_source
+                || !settings.ui.lyrics.preferences.save_lyrics_automatically
             {
                 return None;
             }
-            let Some(document) = lyrics.selected_document(&state.settings.preferences) else {
+            let Some(document) = lyrics.selected_document(&settings.ui.lyrics.preferences) else {
                 return None;
             };
             Some(LyricsWriteTarget {
                 context: current.context.clone(),
                 content: lyrics_to_lrc_text(document, 0),
-                sidecar: state.settings.preferences.save_lyrics_as_sidecar,
+                sidecar: settings.ui.lyrics.preferences.save_lyrics_as_sidecar,
             })
         }
     }
@@ -888,6 +924,7 @@ impl LyricsService {
             };
             loop {
                 let (preferences, previous) = {
+                    let settings = service.settings();
                     let state = service.state.lock().unwrap_or_else(|p| p.into_inner());
                     let Some(current) = state.current.as_ref().filter(|current| matches(current))
                     else {
@@ -901,7 +938,7 @@ impl LyricsService {
                         return;
                     }
                     (
-                        state.settings.preferences.clone(),
+                        settings.ui.lyrics.preferences.clone(),
                         current.document().cloned(),
                     )
                 };
@@ -934,7 +971,7 @@ impl LyricsService {
                         || {
                             let state = service.state.lock().unwrap_or_else(|p| p.into_inner());
                             state.current.as_ref().is_some_and(&matches)
-                                && reading_preferences(&state.settings.preferences)
+                                && reading_preferences(&service.settings().ui.lyrics.preferences)
                                     == reading_preferences(&preferences)
                         },
                     ) else {
@@ -948,8 +985,9 @@ impl LyricsService {
                 } else {
                     None
                 };
+                let settings = service.settings();
                 let mut state = service.state.lock().unwrap_or_else(|p| p.into_inner());
-                let current_preferences = &state.settings.preferences;
+                let current_preferences = &settings.ui.lyrics.preferences;
                 if reading_preferences(current_preferences) != reading_preferences(&preferences)
                     || current_preferences.prefer_translations != preferences.prefer_translations
                     || current_preferences.preferred_translation_language
@@ -1020,6 +1058,7 @@ impl LyricsService {
             return;
         }
         let (request, providers) = {
+            let settings = self.settings();
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if !state
                 .current
@@ -1028,12 +1067,18 @@ impl LyricsService {
             {
                 return;
             }
-            let allowed = state
-                .settings
+            let allowed = settings
+                .ui
+                .lyrics
                 .preferences
-                .external_lyrics_network_allowed(state.private_mode);
+                .external_lyrics_network_allowed(settings.ui.application.private_mode);
             let providers = if allowed {
-                state.settings.preferences.external_lyrics_providers.clone()
+                settings
+                    .ui
+                    .lyrics
+                    .preferences
+                    .external_lyrics_providers
+                    .clone()
             } else {
                 Vec::new()
             };
@@ -1194,13 +1239,16 @@ impl LyricsService {
         result: &LyricsSearchResult,
     ) -> Option<(LyricsRequest, bool)> {
         let request = {
+            let settings = self.settings();
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            if !state
-                .settings
+            if !settings
+                .ui
+                .lyrics
                 .preferences
-                .external_lyrics_network_allowed(state.private_mode)
-                || !state
-                    .settings
+                .external_lyrics_network_allowed(settings.ui.application.private_mode)
+                || !settings
+                    .ui
+                    .lyrics
                     .preferences
                     .external_lyrics_providers
                     .contains(&result.provider)
@@ -1213,9 +1261,10 @@ impl LyricsService {
                 .filter(|current| &current.context.media.id == media_id)?
                 .context
                 .clone();
-            let plan = state
-                .settings
-                .configured_lyrics_plan(state.private_mode, &context.media.id.media_uri);
+            let plan = settings.ui.lyrics.configured_lyrics_plan(
+                settings.ui.application.private_mode,
+                &context.media.id.media_uri,
+            );
             cancel_current_work(&mut state);
             let current = state.current.as_mut()?;
             current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
@@ -1270,6 +1319,7 @@ impl LyricsService {
     }
 
     fn begin_edited(&self, media_id: &CurrentMediaId) -> Option<(LyricsRequest, bool)> {
+        let settings = self.settings();
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let context = state
             .current
@@ -1277,10 +1327,11 @@ impl LyricsService {
             .filter(|current| &current.context.media.id == media_id)?
             .context
             .clone();
-        let plan = state
-            .settings
-            .configured_lyrics_plan(state.private_mode, &context.media.id.media_uri);
-        let sidecar = state.settings.preferences.save_lyrics_as_sidecar;
+        let plan = settings.ui.lyrics.configured_lyrics_plan(
+            settings.ui.application.private_mode,
+            &context.media.id.media_uri,
+        );
+        let sidecar = settings.ui.lyrics.preferences.save_lyrics_as_sidecar;
         cancel_current_work(&mut state);
         let current = state.current.as_mut()?;
         current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
@@ -1371,13 +1422,14 @@ impl LyricsService {
 
     fn refresh_current(self: &Arc<Self>) {
         let current = {
+            let settings = self.settings();
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .current
                 .as_ref()
                 .filter(|current| {
-                    (state.settings.preferences.show_furigana
-                        || state.settings.preferences.show_romanization)
+                    (settings.ui.lyrics.preferences.show_furigana
+                        || settings.ui.lyrics.preferences.show_romanization)
                         && current
                             .document()
                             .is_some_and(|document| document.is_japanese_for_readings())
@@ -1808,6 +1860,13 @@ mod tests {
             .expect("download record");
         let (events, received) = async_channel::unbounded();
         let runtime = tokio::runtime::Handle::current();
+        let settings = crate::settings::SettingsFile::memory();
+        settings
+            .update(|stored| {
+                stored.ui.lyrics.preferences.external_lyrics_enabled = false;
+                Ok(())
+            })
+            .unwrap();
         let source_owner = crate::source::SourceOwner::open_dormant(
             artwork::Artwork::new(
                 directory.path().join("artwork"),
@@ -1829,7 +1888,7 @@ mod tests {
                 async_channel::unbounded().0,
                 Vec::new(),
             ),
-            crate::settings::SettingsFile::memory(),
+            settings.clone(),
             Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
                 secrets::MemorySecretStore::new(),
             ))),
@@ -1843,15 +1902,7 @@ mod tests {
             catalog.clone(),
             source_owner,
             tokio::runtime::Handle::current(),
-            Settings {
-                preferences: lyrics::UserPreferences {
-                    external_lyrics_enabled: false,
-                    ..lyrics::UserPreferences::default()
-                },
-
-                ..Settings::default()
-            },
-            false,
+            &settings,
             events,
             directory.path().join("japanese-readings"),
         );

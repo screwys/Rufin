@@ -5,8 +5,8 @@
 //! work from a replaced Track or source session. The UI only receives matching peaks.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::runtime::WaveformProjection;
 use async_channel::Sender;
@@ -53,7 +53,7 @@ impl Drop for CurrentWaveform {
 pub(crate) struct WaveformOwner {
     runtime: tokio::runtime::Handle,
     events: Sender<WaveformProjection>,
-    enabled: AtomicBool,
+    committed: tokio::sync::watch::Receiver<Arc<crate::settings::StoredSettings>>,
     current: Mutex<Option<CurrentWaveform>>,
     next_request: AtomicU64,
 }
@@ -61,7 +61,7 @@ pub(crate) struct WaveformOwner {
 #[derive(Clone)]
 pub(crate) struct WaveformMedia {
     pub(crate) media: Arc<CurrentMedia>,
-    pub(crate) source: Weak<crate::source::SourceOwner>,
+    pub(crate) source: Arc<crate::source::SourceOwner>,
     pub(crate) catalog: Arc<library::Catalog>,
     pub(crate) request: StreamRequest,
 }
@@ -71,7 +71,7 @@ impl WaveformOwner {
         runtime: tokio::runtime::Handle,
         events: Sender<WaveformProjection>,
         cache_root: &Path,
-        enabled: bool,
+        settings: &crate::settings::SettingsFile,
     ) -> Arc<Self> {
         // Waveforms were once JSON files here; the Store holds them now.
         let legacy = cache_root.join("waveforms");
@@ -85,21 +85,23 @@ impl WaveformOwner {
         Arc::new(Self {
             runtime,
             events,
-            enabled: AtomicBool::new(enabled),
+            committed: settings.changes(),
             current: Mutex::new(None),
             next_request: AtomicU64::new(1),
         })
     }
 
-    pub(crate) fn settings_changed(
-        self: &Arc<Self>,
-        enabled: bool,
-        current: Option<WaveformMedia>,
-    ) {
-        if self.enabled.swap(enabled, Ordering::AcqRel) == enabled {
-            return;
-        }
-        if enabled {
+    fn enabled(&self) -> bool {
+        self.committed
+            .borrow()
+            .ui
+            .player_display
+            .seekbar_waveform_enabled
+    }
+
+    /// The seekbar waveform setting changed: the current track's waveform starts or goes.
+    pub(crate) fn settings_changed(self: &Arc<Self>, current: Option<WaveformMedia>) {
+        if self.enabled() {
             self.current_changed(current);
         } else {
             self.clear();
@@ -107,7 +109,7 @@ impl WaveformOwner {
     }
 
     pub(crate) fn current_changed(self: &Arc<Self>, input: Option<WaveformMedia>) {
-        let Some(input) = input.filter(|_| self.enabled.load(Ordering::Acquire)) else {
+        let Some(input) = input.filter(|_| self.enabled()) else {
             self.clear();
             return;
         };
@@ -171,7 +173,7 @@ impl WaveformOwner {
         let owner = Arc::downgrade(self);
         let task_key = key.clone();
         let task = self.runtime.spawn(async move {
-            let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
+            let local = input.source.shared.settings.local_configuration();
             let playable = match crate::loudness::hashed_playable(&input.catalog, input.media.row.track.track_key).await {
                 Ok(Some(playable)) => playable,
                 result => {
@@ -196,11 +198,9 @@ impl WaveformOwner {
                 }
             }
             let catalog = Arc::clone(&input.catalog);
-            let downloads = input.source.upgrade().map(|owner| owner.downloads().clone());
-            let stream = match prepare_stream(&playable, input.request, local.as_ref(), downloads.as_ref(), move |source_id| async move {
-                tokio::task::spawn_blocking(move || {
-                    input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
-                }).await.map_err(|error| error.to_string())?
+            let downloads = input.source.downloads().clone();
+            let stream = match prepare_stream(&playable, input.request, local.as_ref(), Some(&downloads), move |source_id| async move {
+                tokio::task::spawn_blocking(move || input.source.client(&source_id)).await.map_err(|error| error.to_string())?
             }).await {
                 Ok(stream) => stream,
                 Err(error) => {

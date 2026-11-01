@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 use audio_processing::{
     AnalyzedLoudness, DecodeError, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
@@ -22,7 +22,6 @@ use crate::source::SourceOwner;
 
 struct ActiveAnalysis {
     source_key: SourceKey,
-    source_owner: Weak<SourceOwner>,
     cancelled: Arc<AtomicBool>,
     task: Option<tokio::task::AbortHandle>,
     restart: bool,
@@ -40,6 +39,7 @@ impl ActiveAnalysis {
 pub(crate) struct LoudnessAnalysisOwner {
     runtime: tokio::runtime::Handle,
     settings: SettingsFile,
+    source: Arc<SourceOwner>,
     active: Mutex<Option<ActiveAnalysis>>,
     /// Tracks whose audio itself could not be decoded, at the audio revision that failed: a
     /// pass skips them until their audio changes.
@@ -55,13 +55,12 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
         return;
     }
     let Some(changes) = changes else {
-        playback.loudness.start(playback.source_owner());
+        playback.loudness.start();
         return;
     };
-    let source = playback.source_owner();
-    let selected = source
-        .as_ref()
-        .and_then(|source| source.selected_library())
+    let selected = playback
+        .source
+        .selected_library()
         .map(|selected| selected.source_key);
     let changed = changes
         .iter()
@@ -81,26 +80,28 @@ pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc
             _ => false,
         });
     if changed {
-        playback.loudness.library_changed(source);
+        playback.loudness.library_changed();
     }
 }
 
 impl LoudnessAnalysisOwner {
-    pub(crate) fn new(runtime: tokio::runtime::Handle, settings: SettingsFile) -> Arc<Self> {
+    pub(crate) fn new(
+        runtime: tokio::runtime::Handle,
+        settings: SettingsFile,
+        source: Arc<SourceOwner>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             runtime,
             settings,
+            source,
             active: Mutex::new(None),
             failed: Arc::default(),
         })
     }
 
     /// Analyzes what the selected source misses, unless that runs already.
-    pub(crate) fn start(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
-        let Some(source_owner) = source_owner else {
-            self.cancel();
-            return;
-        };
+    pub(crate) fn start(self: &Arc<Self>) {
+        let source_owner = Arc::clone(&self.source);
         let Some(selected) = source_owner.selected_library() else {
             self.cancel();
             return;
@@ -129,7 +130,6 @@ impl LoudnessAnalysisOwner {
             }
             *active = Some(ActiveAnalysis {
                 source_key,
-                source_owner: Arc::downgrade(&source_owner),
                 cancelled: Arc::clone(&cancelled),
                 task: None,
                 restart: false,
@@ -168,11 +168,8 @@ impl LoudnessAnalysisOwner {
 
     /// A source was selected, tracks were added to it or a listing changed it: a pass starts,
     /// or the running one runs again when it ends.
-    pub(crate) fn library_changed(self: &Arc<Self>, source_owner: Option<Arc<SourceOwner>>) {
-        let Some(selected) = source_owner
-            .as_ref()
-            .and_then(|source_owner| source_owner.selected_library())
-        else {
+    pub(crate) fn library_changed(self: &Arc<Self>) {
+        let Some(selected) = self.source.selected_library() else {
             self.cancel();
             return;
         };
@@ -185,7 +182,7 @@ impl LoudnessAnalysisOwner {
             return;
         }
         drop(active);
-        self.start(source_owner);
+        self.start();
     }
 
     pub(crate) fn cancel(&self) {
@@ -201,15 +198,10 @@ impl LoudnessAnalysisOwner {
             .is_some_and(|current| Arc::ptr_eq(&current.cancelled, cancelled))
             .then(|| active.take())
             .flatten();
-        let restart = completed.as_ref().and_then(|current| {
-            current
-                .restart
-                .then(|| current.source_owner.upgrade())
-                .flatten()
-        });
+        let restart = completed.is_some_and(|current| current.restart);
         drop(active);
-        if let Some(source_owner) = restart {
-            self.start(Some(source_owner));
+        if restart {
+            self.start();
         }
     }
 }

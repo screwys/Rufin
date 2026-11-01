@@ -197,14 +197,13 @@ where
         runtime.clone(),
         waveform_events,
         &paths.playback_dir(),
-        stored.ui.player_display.seekbar_waveform_enabled,
+        &settings,
     );
     let lyrics = crate::lyrics::LyricsService::new(
         library.as_ref().clone(),
         Arc::clone(&source),
         runtime.clone(),
-        stored.ui.lyrics.clone(),
-        stored.ui.application.private_mode,
+        &settings,
         lyrics_events,
         paths.data_dir().join("japanese-readings"),
     );
@@ -220,6 +219,7 @@ where
         observe_playback,
         audio_outputs,
         Arc::clone(&scrobbler),
+        Arc::clone(&source),
         start_backend,
     );
     let observed_playback = Arc::clone(&playback);
@@ -228,7 +228,6 @@ where
             observe_settings(settings, observed_playback.current_projection().as_ref())
         });
     settings_committed(&stored.ui);
-    playback.install_source_owner(&source);
     playback.start();
     let scrobbling = ScrobblingOwner::new(
         settings.clone(),
@@ -243,8 +242,6 @@ where
     source.attach_playback(&playback);
 
     let owners = (
-        Arc::downgrade(&playback),
-        Arc::downgrade(&lyrics),
         Arc::downgrade(&source),
         Arc::downgrade(&scrobbling),
         Arc::downgrade(&library),
@@ -257,19 +254,8 @@ where
         let mut previous = Arc::clone(&committed.borrow_and_update());
         while committed.changed().await.is_ok() {
             let current = Arc::clone(&committed.borrow_and_update());
-            let (
-                Some(settings_playback),
-                Some(settings_lyrics),
-                Some(settings_source),
-                Some(settings_scrobbling),
-                Some(settings_library),
-            ) = (
-                owners.0.upgrade(),
-                owners.1.upgrade(),
-                owners.2.upgrade(),
-                owners.3.upgrade(),
-                owners.4.upgrade(),
-            )
+            let (Some(settings_source), Some(settings_scrobbling), Some(settings_library)) =
+                (owners.0.upgrade(), owners.1.upgrade(), owners.2.upgrade())
             else {
                 return;
             };
@@ -287,54 +273,11 @@ where
             {
                 settings_committed(&current.ui);
             }
-            if previous.ui.player_display.seekbar_waveform_enabled
-                != current.ui.player_display.seekbar_waveform_enabled
-            {
-                settings_playback
-                    .waveform_setting_changed(current.ui.player_display.seekbar_waveform_enabled);
-            }
-            // The player saves its own volume and mute; only an edit of the rest, the output
-            // included, concerns it.
-            let edited = playback::PlaybackSettings {
-                volume: current.ui.playback.volume,
-                muted: current.ui.playback.muted,
-                ..previous.ui.playback.clone()
-            };
-            if edited != current.ui.playback {
-                settings_playback
-                    .playback_settings_changed(&previous.ui.playback, current.ui.playback.clone());
-            }
-            if previous.ui.application.cast_proxy_enabled
-                != current.ui.application.cast_proxy_enabled
-            {
-                settings_playback
-                    .cast_proxy_setting_changed(current.ui.application.cast_proxy_enabled);
-            }
-            if previous.ui.cast_network_interface != current.ui.cast_network_interface {
-                settings_playback
-                    .cast_network_setting_changed(current.ui.cast_network_interface.clone());
-            }
-            if previous.ui.application.auto_dj_refill_threshold
-                != current.ui.application.auto_dj_refill_threshold
-            {
-                settings_playback.auto_dj_threshold_changed(
-                    current.ui.auto_dj_enabled,
-                    current.ui.application.auto_dj_refill_threshold,
-                );
-            }
             if previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.scrobbling != current.scrobbling
                 || credentials_changed
             {
                 settings_scrobbling.settings_changed(credentials_changed);
-            }
-            if previous.ui.lyrics != current.ui.lyrics
-                || previous.ui.application.private_mode != current.ui.application.private_mode
-            {
-                settings_lyrics.settings_changed(
-                    current.ui.lyrics.clone(),
-                    current.ui.application.private_mode,
-                );
             }
             if previous.ui.application.download_artwork_automatically
                 != current.ui.application.download_artwork_automatically

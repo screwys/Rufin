@@ -51,8 +51,8 @@ impl PlaybackOwner {
             (&occurrence.track).media_uri.clone(),
             self.settings.playback_stream_quality(),
         );
-        let source = self.source_owner();
-        let downloads = source.as_ref().map(|owner| owner.downloads().clone());
+        let source = Arc::clone(&self.source);
+        let downloads = source.downloads().clone();
         let local = self.settings.local_configuration();
         let playable = self
             .catalog
@@ -64,15 +64,11 @@ impl PlaybackOwner {
             &playable,
             request,
             local.as_ref(),
-            downloads.as_ref(),
+            Some(&downloads),
             move |source_id| async move {
-                tokio::task::spawn_blocking(move || {
-                    source
-                        .ok_or_else(crate::source::source_access_unavailable)?
-                        .client(&source_id)
-                })
-                .await
-                .map_err(string_error)?
+                tokio::task::spawn_blocking(move || source.client(&source_id))
+                    .await
+                    .map_err(string_error)?
             },
         )
         .await

@@ -100,15 +100,20 @@ pub(in crate::playback) async fn seeded(
         runtime.clone(),
         async_channel::unbounded().0,
         &directory.path().join("playback"),
-        false,
+        &settings,
     );
+    settings
+        .update(|stored| {
+            stored.ui.lyrics.preferences.external_lyrics_enabled = false;
+            Ok(())
+        })
+        .unwrap();
     let stored = settings.load();
     let lyrics = LyricsService::new(
         catalog.clone(),
         source.clone(),
         runtime.clone(),
-        stored.ui.lyrics.clone(),
-        true,
+        &settings,
         async_channel::unbounded().0,
         directory.path().join("dictionary"),
     );
@@ -136,13 +141,13 @@ pub(in crate::playback) async fn seeded(
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
+        source,
         // Like the GStreamer backend, a start spawns on the runtime of the calling thread.
         move |_| {
             tokio::runtime::Handle::try_current().map_err(|error| error.to_string())?;
             Ok(Box::new(IdleBackend(backend_commands.clone())))
         },
     );
-    owner.install_source_owner(&source);
     let (playback, inbox) = actor::channel();
     (
         directory, catalog, sequence, owner, commands, playback, inbox,
@@ -1114,7 +1119,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
             item
         })
         .collect();
-    let (directory, catalog, sequence, owner, commands, playback, _inbox) = seeded(items).await;
+    let (_directory, _catalog, sequence, owner, commands, playback, _inbox) = seeded(items).await;
     let credential = crate::settings::Credential::new("gapless");
     owner.settings.update(|stored| {
         stored.sources.configured = vec![crate::settings::ConfiguredSource {
@@ -1126,42 +1131,8 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         }];
         Ok(())
     }).unwrap();
-    let secrets = Arc::new(secrets::MemorySecretStore::new());
-    secrets.save_secret(&crate::settings::provider_secret_key(&credential),
+    owner.source.shared.secrets.save_secret(&crate::settings::provider_secret_key(&credential),
         &serde_json::json!({"client_id":"gapless","token":"fixture","account_id":"user","profiles":{},"resources":{"user":{"server":"fixture"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string()).unwrap();
-    let runtime = tokio::runtime::Handle::current();
-    let artwork = artwork::Artwork::new(
-        directory.path().join("report-artwork"),
-        runtime.clone(),
-        Arc::new(catalog.clone()),
-    )
-    .unwrap();
-    let downloads = downloads::Downloads::new(
-        artwork::Artwork::new(
-            (directory.path().join("report-downloads")).join("artwork"),
-            (runtime.clone()).clone(),
-            Arc::new(catalog.clone()),
-        )
-        .unwrap(),
-        directory.path().join("report-downloads"),
-        catalog.clone(),
-        runtime.clone(),
-        async_channel::unbounded().0,
-        Vec::new(),
-    );
-    let source = SourceOwner::open_dormant(
-        artwork,
-        Arc::new(catalog.clone()),
-        downloads,
-        owner.settings.clone(),
-        Arc::new(secrets::SwitchableSecretStore::new(secrets)),
-        runtime,
-        crate::source::SourceOutputs {
-            events: async_channel::unbounded().0,
-            discovery: async_channel::unbounded().0,
-        },
-    );
-    owner.install_source_owner(&source);
     let mut session = Player::new(
         sequence,
         "gapless-law",

@@ -1,6 +1,6 @@
 //! Provider-first Radio/AutoDJ with bounded Catalog fallback; Random is Catalog-owned.
 
-use std::sync::Weak;
+use std::sync::Arc;
 
 use crate::playback::RandomPlayRequest;
 use library::{Catalog, RadioSeed, ReadCancellation, SourceKey};
@@ -130,14 +130,13 @@ pub async fn queue_random(
 
 pub(crate) async fn radio_candidates(
     catalog: &Catalog,
-    source_owner: Weak<SourceOwner>,
+    source_owner: Arc<SourceOwner>,
     selected: Option<SelectedLibrary>,
     seed: RadioSeed,
     requested: usize,
     cancellation: &ReadCancellation,
 ) -> Result<Vec<library::TrackKey>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
-    let owner = source_owner.upgrade();
     let seed_source = catalog
         .radio_source(&seed, cancellation)
         .await
@@ -146,8 +145,8 @@ pub(crate) async fn radio_candidates(
     let seed_source_key = seed_source.as_ref().map(|(key, _, _)| *key);
     let mut fallback_sources = Vec::new();
     if let Some((source_key, source_id, object_id)) = seed_source {
-        let seed_owner = owner.clone();
-        let source = tokio::task::spawn_blocking(move || seed_owner?.client(&source_id).ok())
+        let seed_owner = Arc::clone(&source_owner);
+        let source = tokio::task::spawn_blocking(move || seed_owner.client(&source_id).ok())
             .await
             .map_err(|error| error.to_string())?;
         let native_seed = source_seed(source.as_deref(), &seed, object_id);
@@ -167,9 +166,10 @@ pub(crate) async fn radio_candidates(
         && Some(selected.source_key) != seed_source_key
     {
         let source_key = selected.source_key;
-        let source = tokio::task::spawn_blocking(move || owner?.client(&selected.source_id).ok())
-            .await
-            .map_err(|error| error.to_string())?;
+        let source =
+            tokio::task::spawn_blocking(move || source_owner.client(&selected.source_id).ok())
+                .await
+                .map_err(|error| error.to_string())?;
         fallback_sources.push((source_key, source.is_none()));
     }
     candidates.truncate(requested);

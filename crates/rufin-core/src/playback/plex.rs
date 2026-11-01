@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) struct PlexPlayback {
     client: PlexClient,
     connection: Mutex<(Arc<Source>, PlexCompanionContext)>,
-    source_owner: std::sync::Weak<SourceOwner>,
+    source_owner: Arc<SourceOwner>,
     settings: SettingsFile,
     output: PlaybackOutput,
     playback: Playback,
@@ -59,10 +59,7 @@ impl PlexPlayback {
         {
             return Ok(());
         }
-        let owner = self
-            .source_owner
-            .upgrade()
-            .ok_or("Sources are unavailable")?;
+        let owner = &self.source_owner;
         let stored = self.settings.load();
         let preferred = stored.sources.selected_source_id;
         let mut configured = stored
@@ -926,10 +923,7 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let selected = plex
-            .source_owner
-            .upgrade()
-            .and_then(|owner| owner.selected_library());
+        let selected = plex.source_owner.selected_library();
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
@@ -996,10 +990,7 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let selected = plex
-            .source_owner
-            .upgrade()
-            .and_then(|owner| owner.selected_library());
+        let selected = plex.source_owner.selected_library();
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
@@ -1037,10 +1028,7 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let Some(selected) = self
-            .source_owner()
-            .and_then(|owner| owner.selected_library())
-        else {
+        let Some(selected) = self.source.selected_library() else {
             return true;
         };
         let request = request.clone();
@@ -1171,10 +1159,7 @@ impl PlaybackOwner {
         let plex = Arc::new(PlexPlayback {
             client,
             connection: Mutex::new((source, context)),
-            source_owner: self
-                .source_owner()
-                .map(|owner| Arc::downgrade(&owner))
-                .unwrap_or_default(),
+            source_owner: Arc::clone(&self.source),
             settings: self.settings.clone(),
             output: output.clone(),
             playback: active.clone(),
@@ -1314,11 +1299,7 @@ impl PlaybackOwner {
                             tokio::time::Instant::now()
                         });
                         if since.elapsed() >= std::time::Duration::from_secs(5) {
-                            if let Some(owner) = observed
-                                .source_owner
-                                .upgrade()
-                                .and_then(|source| source.shared.playback().ok())
-                            {
+                            if let Ok(owner) = observed.source_owner.shared.playback() {
                                 let observed = observed.clone();
                                 tokio::task::spawn_blocking(move || {
                                     if !observed.cancelled.load(Ordering::Acquire)
@@ -1480,7 +1461,7 @@ impl PlaybackOwner {
         Ok(())
     }
     fn plex_sources(&self) -> Result<Vec<(Arc<Source>, PlexCompanionContext)>, String> {
-        let owner = self.source_owner().ok_or("Sources are unavailable")?;
+        let owner = &self.source;
         self.settings
             .load()
             .sources

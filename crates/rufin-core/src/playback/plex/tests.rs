@@ -178,15 +178,20 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         runtime.clone(),
         async_channel::unbounded().0,
         &root.path().join("playback"),
-        false,
+        &settings,
     );
+    settings
+        .update(|stored| {
+            stored.ui.lyrics.preferences.external_lyrics_enabled = false;
+            Ok(())
+        })
+        .unwrap();
     let stored = settings.load();
     let lyrics = LyricsService::new(
         catalog.as_ref().clone(),
         source.clone(),
         runtime.clone(),
-        stored.ui.lyrics.clone(),
-        true,
+        &settings,
         async_channel::unbounded().0,
         root.path().join("dictionary"),
     );
@@ -212,9 +217,9 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::new(|_| {}),
         Vec::new,
         scrobbler,
+        source,
         |_| Ok(Box::new(Idle)),
     );
-    owner.install_source_owner(&source);
     owner.start();
     owner
         .settings
@@ -228,7 +233,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             Ok(())
         })
         .unwrap();
-    let source_owner = owner.source_owner().unwrap();
+    let source_owner = &owner.source;
     let source = source_owner.client(&first.source_id).unwrap();
     let context = source.plex_companion_context().await.unwrap();
     let client = tokio::task::spawn_blocking(|| {
@@ -249,7 +254,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let plex = PlexPlayback {
         client,
         connection: Mutex::new((source, context)),
-        source_owner: Arc::downgrade(&source_owner),
+        source_owner: Arc::clone(source_owner),
         settings: owner.settings.clone(),
         output: PlaybackOutput::Remote(RemoteOutput {
             id: "receiver".into(),
