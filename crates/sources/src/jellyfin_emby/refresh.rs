@@ -262,7 +262,8 @@ impl JellyfinEmbySource {
                     check_cancelled(cancelled)?;
                     let (page, finished) = match response {
                         Ok(page) => page,
-                        Err(error) if entity == "genre" => {
+                        // Credited artists come later from acquire_missing_artists.
+                        Err(error) if matches!(entity, "artist" | "genre") => {
                             crate::source::optional_collection_error(error)?;
                             complete = false;
                             break;

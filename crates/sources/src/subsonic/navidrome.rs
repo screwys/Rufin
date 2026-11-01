@@ -232,9 +232,10 @@ impl SubsonicSource {
         observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
+    ) -> SourceResult<bool> {
         let source_id = observation.source_id;
         let walk = observation.is_walk();
+        let mut listed = vec!["track", "album", "artist"];
 
         use crate::SourceEntityKind::{Album, Artist, Track};
         // Artists come first so that the albums and tracks crediting them are resolved once.
@@ -253,7 +254,16 @@ impl SubsonicSource {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
                 }
-                let page = self.navidrome_page(endpoint, offset).await?;
+                let page = match self.navidrome_page(endpoint, offset).await {
+                    Ok(page) => page,
+                    // Albums and tracks still list; their credits make the artists.
+                    Err(error) if kind == Artist => {
+                        crate::source::optional_collection_error(error)?;
+                        listed.pop();
+                        break;
+                    }
+                    Err(error) => return Err(error),
+                };
                 let page_len = page.len();
                 if page_len == 0 {
                     break;
@@ -297,10 +307,10 @@ impl SubsonicSource {
             // Records that credit others go first: an artist stays while a track or album
             // credits it.
             observation
-                .complete_source_observation(&["track", "album", "artist"], None, None)
+                .complete_source_observation(&listed, None, None)
                 .await?;
         }
-        Ok(())
+        Ok(listed.len() == 3)
     }
 
     async fn navidrome_page(&self, kind: &str, offset: usize) -> SourceResult<Vec<Value>> {
@@ -1313,6 +1323,67 @@ mod tests {
                     .query_pairs()
                     .any(|(key, value)| key == "id" && value == "track")
         }));
+    }
+
+    #[tokio::test]
+    async fn failed_artist_pages_still_list_albums_and_tracks() {
+        let server = MockServer::start().await;
+        page_match("artist", 0, "token")
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        page_match("album", 0, "token")
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": "album", "name": "Album", "albumArtist": "Artist", "albumArtistId": "artist"
+            }])))
+            .mount(&server)
+            .await;
+        page_match("song", 0, "token")
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "song", "title": "Song", "albumId": "album", "album": "Album",
+                    "participants": {"artist": [{"id": "artist", "name": "Artist"}]}
+                }])),
+            )
+            .mount(&server)
+            .await;
+        let source = navidrome_source_with_token(&server, "token");
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
+            .await
+            .unwrap();
+        let source_id = "navidrome:test".to_string();
+        catalog
+            .reconcile_source(
+                &library::SourceId::new(&source_id),
+                "navidrome",
+                "Navidrome",
+            )
+            .await
+            .unwrap();
+        let mut observation = catalog.observe(&source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        let complete = source
+            .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        assert!(!complete);
+        // The artist exists through the track's credit, unindexed until its page lists it.
+        for (entity, raw, indexed) in [
+            ("album", "album", true),
+            ("track", "song", true),
+            ("artist", "artist", false),
+        ] {
+            let object = String::from(source.id(entity, raw));
+            assert!(
+                catalog
+                    .source_contains_entity(&source_id, entity, &object, indexed)
+                    .await
+                    .unwrap(),
+                "{object}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -209,7 +209,8 @@ impl SubsonicSource {
         observation.apply_catalog(&batch, true).await?;
         check_cancelled(cancelled)?;
         if self.has_navidrome_library() {
-            self.acquire_navidrome_library(observation, progress, cancelled)
+            complete &= self
+                .acquire_navidrome_library(observation, progress, cancelled)
                 .await?;
         } else {
             // Artists come first so that the albums and tracks crediting them are resolved

@@ -364,6 +364,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_artist_listings_still_list_albums_and_tracks() {
+        let server = MockServer::start().await;
+        let source = source(server.uri());
+        let album = json!({"Id":"10","Type":"MusicAlbum","Name":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}]});
+        let track = json!({"Id":"11","Type":"Audio","Name":"Song","AlbumId":"10","Album":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}]});
+        for (kind, item) in [("MusicAlbum", album), ("Audio", track)] {
+            Mock::given(path("/emby/Items"))
+                .and(query_param("IncludeItemTypes", kind))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"Items":[item],"TotalRecordCount":1})),
+                )
+                .mount(&server)
+                .await;
+        }
+        for route in ["Artists", "Artists/AlbumArtists"] {
+            Mock::given(path(format!("/emby/{route}")))
+                .respond_with(ResponseTemplate::new(500))
+                .mount(&server)
+                .await;
+        }
+        Mock::given(path("/emby/Users/listener/Views"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"Items":[]})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/emby/Users/listener/Items/artist"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"Id":"artist","Type":"MusicArtist","Name":"Artist"})),
+            )
+            .mount(&server)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        catalog
+            .reconcile_source(&library::SourceId::new("source"), "music", "Music")
+            .await
+            .unwrap();
+        let source_id = "source".to_string();
+        let mut observation = catalog.observe(&source_id).await.unwrap();
+        observation.start_observation().await.unwrap();
+
+        source
+            .acquire_catalog(&mut observation, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        for (entity, object) in [
+            ("album", "emby:album:10"),
+            ("track", "emby:track:11"),
+            ("artist", "emby:artist:artist"),
+        ] {
+            assert!(
+                catalog
+                    .source_contains_entity(&source_id, entity, object, true)
+                    .await
+                    .unwrap(),
+                "{object}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn overlapping_streams_and_downloads_release_only_their_own_encoding() {
         let server = MockServer::start().await;
         let source = source(server.uri());
