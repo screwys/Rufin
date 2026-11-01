@@ -92,23 +92,14 @@ impl Shell {
         self.chrome.window.set_visible(false);
         self.shutdown_tray();
 
-        let transport = self.products.playback.clone();
-        let scrobbling = self.products.scrobbling.clone();
-        let settings = self.products.settings.clone();
+        let products = self.products.clone();
         let storage_reset = Rc::clone(&self.storage_reset);
         let resetting = storage_reset.borrow().is_some();
-        let products = resetting.then(|| self.products.clone());
         let (completed, completion) = channel();
         if let Err(error) = std::thread::Builder::new()
             .name("rufin-shutdown".to_string())
             .spawn(move || {
-                transport.shutdown();
-                scrobbling.shutdown();
-                let result = match products {
-                    Some(products) => products.runtime.block_on(products.close_storage()),
-                    None => settings.flush(),
-                };
-                let _ = completed.send(result);
+                let _ = completed.send(products.shutdown(resetting));
             })
         {
             if resetting {

@@ -24,6 +24,15 @@ mod visualizer;
 
 pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
+
+/// Starts the GStreamer backend that every Rufin host plays through.
+pub fn start_backend(
+    processing: tokio::sync::watch::Receiver<ProcessingRequest>,
+) -> Result<Box<dyn PlaybackBackend>, String> {
+    GStreamerPlaybackBackend::new(processing)
+        .map(|backend| Box::new(backend) as Box<dyn PlaybackBackend>)
+        .map_err(|error| error.to_string())
+}
 #[cfg(unix)]
 pub use process::restart_with_http1;
 

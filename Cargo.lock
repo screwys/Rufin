@@ -7255,8 +7255,8 @@ dependencies = [
  "desktop-integration",
  "gtk-shell",
  "localization",
- "playback",
  "playback-gstreamer",
+ "process-memory",
  "rufin-controller",
  "rufin-core",
  "tracing",
@@ -7323,7 +7323,6 @@ version = "0.16.6"
 dependencies = [
  "app-identity",
  "localization",
- "playback",
  "playback-gstreamer",
  "process-memory",
  "rufin-core",

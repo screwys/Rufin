@@ -5,8 +5,6 @@ use std::sync::Arc;
 
 use rufin_core::{app, diagnostics::Diagnostics, paths};
 
-pub use process_memory::configure_allocator;
-
 pub fn discovery_worker_argument() -> Option<ExitCode> {
     let mut arguments = std::env::args_os().skip(1);
     if arguments.next().as_deref() != Some(std::ffi::OsStr::new("--discovery-worker")) {
@@ -96,11 +94,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
             false,
             settings,
             paths,
-            |processing| {
-                playback_gstreamer::GStreamerPlaybackBackend::new(processing)
-                    .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                    .map_err(|error| error.to_string())
-            },
+            playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
             Arc::new(|_| {}),
             Arc::new(|_, _| {}),
@@ -132,10 +126,8 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
                 wait_for_shutdown().await
             }
         });
-        inputs.products.playback.shutdown();
-        inputs.products.scrobbling.shutdown();
-        let settings_result = inputs.products.settings.flush();
-        result.map_err(|error| error.to_string()).and(settings_result)
+        let stopped = inputs.products.shutdown(false);
+        result.map_err(|error| error.to_string()).and(stopped)
     })
     .map_err(|error| error.to_string())?
 }

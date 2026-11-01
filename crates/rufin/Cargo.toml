@@ -26,8 +26,8 @@ rufin-core.workspace = true
 app-identity.workspace = true
 desktop-integration.workspace = true
 localization.workspace = true
-playback.workspace = true
 playback-gstreamer.workspace = true
+process-memory.workspace = true
 tracing.workspace = true
 gtk-shell.workspace = true
 

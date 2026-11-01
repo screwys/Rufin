@@ -155,11 +155,7 @@ impl AndroidRuntime {
                 false,
                 settings,
                 paths.clone(),
-                |processing| {
-                    playback_gstreamer::GStreamerPlaybackBackend::new(processing)
-                        .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                        .map_err(|error| error.to_string())
-                },
+                playback_gstreamer::start_backend,
                 playback_gstreamer::available_audio_outputs,
                 Arc::new(|_| {}),
                 Arc::new(|_, _| {}),
@@ -341,15 +337,13 @@ impl AndroidRuntime {
     ) -> Result<(), AndroidError> {
         let request = self.products.prepare_storage_reset(kind).map_err(error)?;
         self.controller_owner.stop();
-        self.products.playback.shutdown();
-        self.products.scrobbling.shutdown();
         let runtime = self
             .runtime
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .take()
             .ok_or_else(|| error("Rufin is shutting down"))?;
-        let closed = runtime.block_on(self.products.close_storage());
+        let closed = self.products.shutdown(true);
         // File workers must finish before the reset can remove their output.
         drop(runtime);
         closed.map_err(error)?;
@@ -363,9 +357,7 @@ impl AndroidRuntime {
 impl Drop for AndroidRuntime {
     fn drop(&mut self) {
         self.controller_owner.stop();
-        self.products.playback.shutdown();
-        self.products.scrobbling.shutdown();
-        if let Err(error) = self.products.settings.flush() {
+        if let Err(error) = self.products.shutdown(false) {
             tracing::warn!(%error, "could not finish saving settings");
         }
         if let Some(runtime) = self

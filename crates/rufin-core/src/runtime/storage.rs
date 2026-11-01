@@ -100,6 +100,18 @@ impl ProductHandles {
             .prepare_storage_reset(reset, self.connect.secret_keys())
     }
 
+    /// Stops playback and scrobbling, then saves the settings, or with `close_storage` closes
+    /// every store so a reset can remove them. It blocks, so it runs off the async runtime.
+    pub fn shutdown(&self, close_storage: bool) -> Result<(), String> {
+        self.playback.shutdown();
+        self.scrobbling.shutdown();
+        if close_storage {
+            self.runtime.block_on(self.close_storage())
+        } else {
+            self.settings.flush()
+        }
+    }
+
     pub async fn close_storage(&self) -> Result<(), String> {
         self.connect.close_storage().await?;
         self.source.close_storage().await;

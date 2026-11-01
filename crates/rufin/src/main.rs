@@ -16,7 +16,7 @@ use tracing::info;
 const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
 
 fn main() -> ExitCode {
-    rufin_controller::configure_allocator();
+    process_memory::configure_allocator();
     let headless = env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless"));
     #[cfg(target_os = "windows")]
     if headless {
@@ -67,11 +67,7 @@ fn main() -> ExitCode {
             !updated_restart,
             settings,
             paths::roots(),
-            |processing| {
-                playback_gstreamer::GStreamerPlaybackBackend::new(processing)
-                    .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
-                    .map_err(|error| error.to_string())
-            },
+            playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
             Arc::new(move |projection| presence.observe(projection)),
             Arc::new(move |settings, projection| {
