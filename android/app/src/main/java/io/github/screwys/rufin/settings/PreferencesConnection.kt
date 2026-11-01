@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.settings
 
 import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferences
+import io.github.screwys.rufin.shared.rufin_core.SecretStorageMode
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.ThemePreference
 import io.github.screwys.rufin.shared.rufin_core.AccentPreference
@@ -143,11 +144,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
     fun changeSecretStorage(mode: String) = connection.runAction {
         val source = connection.connectedService().runtime.value!!.getOrThrow().source()
         try {
-            source.changeSecretStorage(when (mode) {
-                "system-keyring" -> io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING
-                "config-file" -> io.github.screwys.rufin.shared.secrets.SecretStorageMode.CONFIG_FILE
-                else -> error("Unknown secret storage")
-            })
+            source.changeSecretStorage(SecretStorageMode.valueOf(mode))
         } finally { source.destroy() }
     }
     fun selectThemeAccent(theme: String, id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setThemeAccent(theme, id) } }

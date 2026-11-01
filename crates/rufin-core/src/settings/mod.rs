@@ -14,7 +14,7 @@ mod storage_reset;
 pub(crate) use storage_reset::device_secrets;
 pub use storage_reset::{StorageReset, StorageResetRequest};
 mod secret_storage;
-pub use secret_storage::KeyringSecretStore;
+pub use secret_storage::{KeyringSecretStore, SecretStorageMode};
 pub mod sidebar;
 pub mod visualizer;
 mod web_controller;
@@ -49,8 +49,7 @@ use app::Settings as UiSettings;
 use playback::StreamQuality;
 use scrobbling::Settings as ScrobblingSettings;
 use secrets::{
-    CachedSecretStore, ConfigSecretStore, SecretKey, SecretStorageMode, SecretStore,
-    SwitchableSecretStore,
+    CachedSecretStore, ConfigSecretStore, SecretKey, SecretStore, SwitchableSecretStore,
 };
 use serde::{Deserialize, Serialize};
 use sources::{SourceConfiguration, SourceId};

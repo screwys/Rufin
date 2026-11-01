@@ -24,11 +24,12 @@ use crate::runtime::source::{
     SourceProgressStage, SourceSummary,
 };
 use crate::runtime::{SelectedLibrary, SourceEvent};
+use crate::settings::SecretStorageMode;
 use artwork::Artwork;
 use async_channel::{Receiver, Sender};
 use downloads::Downloads;
 use library::{Catalog, FavoriteTarget, ReadCancellation, SourceKey};
-use secrets::{SecretStorageMode, SwitchableSecretStore};
+use secrets::SwitchableSecretStore;
 use sources::{
     CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceError,
     SourceId, SourceReadProgress, SourceReadStage, SourceSettingsChange, SourceSetup,

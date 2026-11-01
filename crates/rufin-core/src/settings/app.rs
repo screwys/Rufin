@@ -10,14 +10,13 @@ use playback::{
     PlaybackSettings, QueueRepeatMode,
 };
 use presence::Settings as RichPresenceSettings;
-use secrets::SecretStorageMode;
 use serde::{Deserialize, Serialize};
 use sources::SourceId;
 
 use super::{
     AccentPreference, ContextMenuSettings, LayoutSettings, LibraryListKey, LibraryListSettings,
-    LibraryListSettingsEntry, SettingsError, SettingsOwner, SidebarRouteItem, SidebarSettings,
-    ThemePreference, default_library_list_settings, sanitized_window_size,
+    LibraryListSettingsEntry, SecretStorageMode, SettingsError, SettingsOwner, SidebarRouteItem,
+    SidebarSettings, ThemePreference, default_library_list_settings, sanitized_window_size,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

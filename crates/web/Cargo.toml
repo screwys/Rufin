@@ -46,7 +46,6 @@ url.workspace = true
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json"] }
-secrets.workspace = true
 tempfile.workspace = true
 
 [lints]

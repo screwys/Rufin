@@ -3247,7 +3247,6 @@ dependencies = [
  "pulldown-cmark",
  "roxmltree 0.21.1",
  "rufin-core",
- "secrets",
  "sources",
  "tempfile",
  "tracing",
@@ -3278,7 +3277,6 @@ dependencies = [
  "playback",
  "proptest",
  "rufin-core",
- "secrets",
  "serde_json",
  "sources",
  "tempfile",
@@ -7730,7 +7728,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "uniffi",
  "windows-native-keyring-store",
 ]
 
@@ -9842,7 +9839,6 @@ dependencies = [
  "playback-cast",
  "reqwest 0.13.5",
  "rufin-core",
- "secrets",
  "serde",
  "serde_json",
  "sources",

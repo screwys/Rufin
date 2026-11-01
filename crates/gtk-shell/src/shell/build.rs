@@ -623,8 +623,8 @@ pub async fn build(
                 .secret_storage_mode = mode;
             if let Some(row) = shell.preferences.state.secret_storage_row.upgrade() {
                 row.set_selected(match mode {
-                    secrets::SecretStorageMode::ConfigFile => 0,
-                    secrets::SecretStorageMode::SystemKeyring => 1,
+                    rufin_core::settings::SecretStorageMode::ConfigFile => 0,
+                    rufin_core::settings::SecretStorageMode::SystemKeyring => 1,
                 });
             }
         }

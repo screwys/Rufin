@@ -29,8 +29,7 @@ impl SettingsOwner {
     ) -> Result<StorageResetRequest, String> {
         let stored = self.file.load();
         let secrets = if reset == StorageReset::AllData
-            && stored.ui.application.secret_storage_mode
-                == secrets::SecretStorageMode::SystemKeyring
+            && stored.ui.application.secret_storage_mode == super::SecretStorageMode::SystemKeyring
         {
             // A reset must report a locked keyring instead of accepting the session fallback.
             super::system_keyring_secret_store(&stored.secret_scope_id)

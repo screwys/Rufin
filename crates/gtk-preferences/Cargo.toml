@@ -18,7 +18,6 @@ presence.workspace = true
 pulldown-cmark.workspace = true
 tempfile.workspace = true
 directories.workspace = true
-secrets.workspace = true
 backup.workspace = true
 gtk-player.workspace = true
 gtk-widgets.workspace = true

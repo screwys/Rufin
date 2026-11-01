@@ -74,7 +74,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     inputs
         .products
         .source
-        .change_secret_storage(secrets::SecretStorageMode::ConfigFile)
+        .change_secret_storage(rufin_core::settings::SecretStorageMode::ConfigFile)
         .await
         .unwrap();
     let controller = Controller::new(inputs.products.clone());

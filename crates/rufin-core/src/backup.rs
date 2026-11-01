@@ -861,8 +861,9 @@ fn restore_logins(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::SecretStorageMode;
     use crate::settings::{ConfiguredSource, Credential, provider_secret_key};
-    use secrets::{ConfigSecretStore, MemorySecretStore, SecretStorageMode};
+    use secrets::{ConfigSecretStore, MemorySecretStore};
 
     fn source(id: &str, reference: &str) -> ConfiguredSource {
         ConfiguredSource {

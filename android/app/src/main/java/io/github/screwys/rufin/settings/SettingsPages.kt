@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
+import io.github.screwys.rufin.shared.rufin_core.SecretStorageMode
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.core.translate
@@ -160,7 +161,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     PreferenceChoice(translate("Casting network"), preferences.castNetworkInterface.orEmpty(),
                         listOf("" to translate("Automatic")) + castNetworks.map { it.id to "${it.name} (${it.address})" },
                         select = { network -> preferences.changePreference { setCastNetworkInterface(network.takeIf { it.isNotEmpty() }) } })
-                    PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
+                    PreferenceChoice(translate("Secret storage"), state.secretStorageMode.name, listOf(SecretStorageMode.SYSTEM_KEYRING.name to translate("System keyring"), SecretStorageMode.CONFIG_FILE.name to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
                 BackupsPage(model, preferences, embedded = true) { navigate(MoreDestination.BackupSettings) }
             }

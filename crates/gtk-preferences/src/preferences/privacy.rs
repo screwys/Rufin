@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use adw::prelude::*;
 use gtk_player::outputs::casting_network_dropdown;
 use localization::tr;
-use secrets::SecretStorageMode;
+use rufin_core::settings::SecretStorageMode;
 
 use crate::Preferences;
 

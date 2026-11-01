@@ -2,7 +2,7 @@ use crate::Preferences;
 use adw::prelude::*;
 use rufin_core::runtime::ScrobblingPreferences;
 use rufin_core::settings::HomeBlockKind;
-use secrets::SecretStorageMode;
+use rufin_core::settings::SecretStorageMode;
 use std::rc::Rc;
 use tracing::warn;
 
