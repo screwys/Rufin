@@ -248,7 +248,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .acquire_catalog(
             &catalog,
             &move |progress| {
-                if progress.stage == sources::SourceReadStage::Tracks {
+                if progress.stage == sources::SourceProgressStage::Tracks {
                     stop.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             },
@@ -404,10 +404,10 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .expect("restart catch-up");
     let progress = progress.into_inner().unwrap();
     assert!(progress.iter().any(|update| {
-        update.stage == sources::SourceReadStage::Tracks && update.completed > 0
+        update.stage == sources::SourceProgressStage::Tracks && update.completed > 0
     }));
     assert!(progress.iter().all(|update| {
-        update.stage == sources::SourceReadStage::Tracks && update.total.is_none()
+        update.stage == sources::SourceProgressStage::Tracks && update.total.is_none()
     }));
     assert_eq!(progress.last().unwrap().completed, 1);
     let changed = sources::published(&mut updates).expect("catalog update");
@@ -599,7 +599,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
             .acquire_catalog(
                 &catalog,
                 &move |progress| {
-                    if progress.stage == sources::SourceReadStage::Tracks {
+                    if progress.stage == sources::SourceProgressStage::Tracks {
                         stop.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                 },
@@ -2033,7 +2033,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
                 .unwrap();
             let progress = progress.into_inner().unwrap();
             assert!(progress.iter().all(|update| {
-                update.stage == sources::SourceReadStage::Tracks && update.total.is_none()
+                update.stage == sources::SourceProgressStage::Tracks && update.total.is_none()
             }));
             assert!(
                 progress

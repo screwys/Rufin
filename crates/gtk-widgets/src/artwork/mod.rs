@@ -9,8 +9,6 @@ use gtk::glib;
 use sources::ImageSize;
 use tracing::warn;
 
-use rufin_core::settings::app::Settings as UiSettings;
-
 use crate::settings::SettingsState;
 
 pub const THUMB_COVER_SIZE: u32 = 96;
@@ -124,7 +122,7 @@ impl ArtworkState {
         let external = if cache_only {
             cache_only_artwork_external_policy()
         } else {
-            artwork_external_policy(&self.settings.current.borrow())
+            self.settings.current.borrow().artwork_policy()
         };
         let request = if refresh_desktop_on_ready {
             ArtworkRequest::original(artwork, render_size)
@@ -313,7 +311,7 @@ impl ArtworkState {
             fetch_size: ImageSize::Thumbnail(cover_fetch_size(render_size)),
             ..ArtworkRequest::new(binding, render_size)
         }
-        .with_external(artwork_external_policy(&self.settings.current.borrow()));
+        .with_external(self.settings.current.borrow().artwork_policy());
         let outcome = match self.service.load(request) {
             artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
             artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
@@ -346,19 +344,11 @@ impl ArtworkState {
             .map(ArtworkBinding::opaque)
             .unwrap_or_default();
         let settings = self.settings.current.borrow().clone();
-        let external = artwork_external_policy(&settings);
+        let external = settings.artwork_policy();
         let request = ArtworkRequest::new(candidates, preferred_size).with_external(external);
         let path = self.service.cache_only_file(&request)?;
         Some(PlaybackArtworkPath { path })
     }
-}
-
-fn artwork_external_policy(settings: &UiSettings) -> artwork::ExternalPolicy {
-    artwork::ExternalPolicy::new(
-        settings.application.external_metadata_enabled,
-        settings.allows_external_metadata_lookup(),
-        settings.lastfm_api_key.clone(),
-    )
 }
 
 fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {

@@ -413,14 +413,7 @@ async fn artwork(
             .flatten()
     }
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
-    let external = {
-        let settings = products.settings.load();
-        artwork::ExternalPolicy::new(
-            settings.application.external_metadata_enabled,
-            settings.allows_external_metadata_lookup(),
-            settings.lastfm_api_key.clone(),
-        )
-    };
+    let external = products.settings.load().artwork_policy();
     let binding = artwork::ArtworkBinding::opaque(&binding);
     let size = parameters
         .get("size")

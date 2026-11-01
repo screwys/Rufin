@@ -537,11 +537,7 @@ impl AndroidPlayer {
         let stored = self.products.settings.load();
         let request =
             artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size)
-                .with_external(artwork::ExternalPolicy::new(
-                    stored.application.external_metadata_enabled,
-                    stored.allows_external_metadata_lookup(),
-                    stored.lastfm_api_key,
-                ));
+                .with_external(stored.artwork_policy());
         let artwork = self.products.artwork.clone();
         self.products
             .runtime

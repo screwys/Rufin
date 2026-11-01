@@ -3,28 +3,29 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::source::{SourceReadProgress, SourceReadStage};
+use crate::source::{SourceProgress, SourceProgressStage};
 
 impl JellyfinEmbySource {
     pub(crate) async fn home_section(
         &self,
-        section: crate::SourceHomeSection,
+        section: library::HomeSectionKind,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         let (item_type, sort_by, kind) = match section {
-            crate::SourceHomeSection::MostPlayed => {
+            library::HomeSectionKind::Explore => return Ok(Vec::new()),
+            library::HomeSectionKind::MostPlayed => {
                 ("Audio", "PlayCount,SortName", library::HomeEntryKind::Track)
             }
-            crate::SourceHomeSection::NewlyAdded => (
+            library::HomeSectionKind::NewlyAdded => (
                 "MusicAlbum",
                 "DateCreated,SortName",
                 library::HomeEntryKind::Album,
             ),
-            crate::SourceHomeSection::RecentlyPlayed => (
+            library::HomeSectionKind::RecentlyPlayed => (
                 "Audio",
                 "DatePlayed,SortName",
                 library::HomeEntryKind::Track,
             ),
-            crate::SourceHomeSection::RecentlyReleased => (
+            library::HomeSectionKind::RecentlyReleased => (
                 "MusicAlbum",
                 "ProductionYear,PremiereDate,SortName",
                 library::HomeEntryKind::Album,
@@ -208,7 +209,7 @@ impl JellyfinEmbySource {
     pub(crate) async fn acquire_catalog(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<Option<i64>> {
         let source_id = observation.source_id;
@@ -221,12 +222,12 @@ impl JellyfinEmbySource {
         for (entity, stage_name, paths) in [
             (
                 "artist",
-                SourceReadStage::Artists,
+                SourceProgressStage::Artists,
                 &["Artists", "Artists/AlbumArtists"][..],
             ),
-            ("album", SourceReadStage::Albums, &["MusicAlbum"][..]),
-            ("track", SourceReadStage::Tracks, &["Audio"][..]),
-            ("genre", SourceReadStage::Genres, &["MusicGenres"][..]),
+            ("album", SourceProgressStage::Albums, &["MusicAlbum"][..]),
+            ("track", SourceProgressStage::Tracks, &["Audio"][..]),
+            ("genre", SourceProgressStage::Genres, &["MusicGenres"][..]),
         ] {
             let mut complete = true;
             for path in paths {
@@ -329,7 +330,7 @@ impl JellyfinEmbySource {
         crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
 
-        progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
+        progress(stage(SourceProgressStage::Finalizing, 1, Some(1)));
         Ok(started)
     }
 
@@ -638,7 +639,7 @@ impl JellyfinEmbySource {
     async fn acquire_playlists(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
@@ -695,7 +696,7 @@ impl JellyfinEmbySource {
                     .await?;
             }
             progress(stage(
-                SourceReadStage::Playlists,
+                SourceProgressStage::Playlists,
                 pages.offset(),
                 pages.total(),
             ));
@@ -1257,7 +1258,7 @@ mod tests {
         .expect("Jellyfin source");
 
         let entries = source
-            .home_section(crate::SourceHomeSection::NewlyAdded)
+            .home_section(library::HomeSectionKind::NewlyAdded)
             .await
             .expect("Jellyfin Newly Added");
 
@@ -1340,8 +1341,8 @@ mod tests {
     }
 }
 
-fn stage(stage: SourceReadStage, completed: usize, total: Option<usize>) -> SourceReadProgress {
-    SourceReadProgress {
+fn stage(stage: SourceProgressStage, completed: usize, total: Option<usize>) -> SourceProgress {
+    SourceProgress {
         stage,
         completed,
         total,

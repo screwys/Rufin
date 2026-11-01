@@ -4,7 +4,7 @@ use library::Freshness;
 
 use super::*;
 use crate::remote_json as json;
-use crate::source::{SourceReadProgress, SourceReadStage};
+use crate::source::{SourceProgress, SourceProgressStage};
 use serde_json::Value;
 
 const ALBUM_REQUEST_SIZE: usize = 500;
@@ -68,7 +68,7 @@ impl SubsonicSource {
     pub(crate) async fn acquire_user_collections(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         if !observation.is_walk() {
@@ -78,7 +78,7 @@ impl SubsonicSource {
             crate::source::optional_collection_error(error)?;
         }
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Playlists, 0));
+        progress(stage(SourceProgressStage::Playlists, 0));
         match self
             .acquire_playlists(observation, progress, cancelled)
             .await
@@ -142,13 +142,14 @@ impl SubsonicSource {
 
     pub(crate) async fn home_section(
         &self,
-        section: crate::SourceHomeSection,
+        section: library::HomeSectionKind,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         let (list_type, extra) = match section {
-            crate::SourceHomeSection::MostPlayed => ("frequent", Vec::new()),
-            crate::SourceHomeSection::NewlyAdded => ("newest", Vec::new()),
-            crate::SourceHomeSection::RecentlyPlayed => ("recent", Vec::new()),
-            crate::SourceHomeSection::RecentlyReleased => (
+            library::HomeSectionKind::Explore => return Ok(Vec::new()),
+            library::HomeSectionKind::MostPlayed => ("frequent", Vec::new()),
+            library::HomeSectionKind::NewlyAdded => ("newest", Vec::new()),
+            library::HomeSectionKind::RecentlyPlayed => ("recent", Vec::new()),
+            library::HomeSectionKind::RecentlyReleased => (
                 "byYear",
                 vec![
                     ("fromYear", current_year().to_string()),
@@ -187,7 +188,7 @@ impl SubsonicSource {
     pub(crate) async fn acquire_catalog(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<bool> {
         let source_id = observation.source_id;
@@ -217,9 +218,9 @@ impl SubsonicSource {
             // once.
             let mut listed = Vec::new();
             for (entity, read_stage) in [
-                ("artist", SourceReadStage::Artists),
-                ("album", SourceReadStage::Albums),
-                ("track", SourceReadStage::Tracks),
+                ("artist", SourceProgressStage::Artists),
+                ("album", SourceProgressStage::Albums),
+                ("track", SourceProgressStage::Tracks),
             ] {
                 progress(stage(read_stage, 0));
                 let result = async {
@@ -313,7 +314,7 @@ impl SubsonicSource {
         }
 
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Genres, 0));
+        progress(stage(SourceProgressStage::Genres, 0));
         match self.read_genres().await {
             Ok(genres) => {
                 check_cancelled(cancelled)?;
@@ -342,7 +343,7 @@ impl SubsonicSource {
 
         check_cancelled(cancelled)?;
 
-        progress(stage(SourceReadStage::Finalizing, 0));
+        progress(stage(SourceProgressStage::Finalizing, 0));
         Ok(complete)
     }
 
@@ -350,7 +351,7 @@ impl SubsonicSource {
         &self,
         observation: &mut library::Observation<'_>,
         music_folders: &[library::FolderObservation],
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let source_id = observation.source_id;
@@ -411,7 +412,7 @@ impl SubsonicSource {
                 batch.tracks = tracks;
                 check_cancelled(cancelled)?;
                 observation.apply_catalog(&batch, true).await?;
-                progress(stage(SourceReadStage::Tracks, emitted));
+                progress(stage(SourceProgressStage::Tracks, emitted));
             }
             if let Some(folder) = folder
                 && walk
@@ -469,7 +470,7 @@ impl SubsonicSource {
     async fn acquire_playlists(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let catalog = observation.catalog;
@@ -514,8 +515,8 @@ impl SubsonicSource {
                 self.acquire_playlist_snapshot(observation, &playlist.header.object_id, cancelled)
                     .await?;
             }
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Playlists,
+            progress(SourceProgress {
+                stage: SourceProgressStage::Playlists,
                 completed: position + 1,
                 total: Some(total),
             });
@@ -591,8 +592,8 @@ fn completed_freshness(status: ScanStatus) -> Option<Vec<u8>> {
     .then(|| freshness(status))
 }
 
-fn stage(stage: SourceReadStage, completed: usize) -> SourceReadProgress {
-    SourceReadProgress {
+fn stage(stage: SourceProgressStage, completed: usize) -> SourceProgress {
+    SourceProgress {
         stage,
         completed,
         total: None,
@@ -1196,7 +1197,7 @@ mod tests {
                     .lock()
                     .unwrap()
                     .iter()
-                    .filter(|progress| progress.stage == crate::SourceReadStage::Tracks)
+                    .filter(|progress| progress.stage == crate::SourceProgressStage::Tracks)
                     .map(|progress| progress.completed)
                     .max(),
                 Some(if folders_available { 4 } else { 2 })
@@ -1353,7 +1354,7 @@ mod tests {
                     .lock()
                     .unwrap()
                     .iter()
-                    .any(|value| value.stage == crate::SourceReadStage::Tracks)
+                    .any(|value| value.stage == crate::SourceProgressStage::Tracks)
             );
         }
     }
@@ -1390,7 +1391,7 @@ mod tests {
         .expect("OpenSubsonic source");
 
         let entries = source
-            .home_section(crate::SourceHomeSection::NewlyAdded)
+            .home_section(library::HomeSectionKind::NewlyAdded)
             .await
             .expect("OpenSubsonic Newly Added");
 

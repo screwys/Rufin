@@ -13,7 +13,7 @@ uniffi::custom_type!(PathBuf, String, {
 });
 use std::sync::Arc;
 
-use sources::{CredentialPreset, SourceId};
+use sources::{CredentialPreset, SourceId, SourceProgress, SourceProgressStage};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -96,30 +96,6 @@ pub struct EditableSource {
     pub credentials: CredentialPreset,
     pub use_instant_mix: Option<bool>,
     pub emby_connect: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum SourceProgressStage {
-    Connecting,
-    Albums,
-    Tracks,
-    Artists,
-    Genres,
-    Playlists,
-    Home,
-    Artwork,
-    Lyrics,
-    Finalizing,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct SourceProgress {
-    pub stage: SourceProgressStage,
-    pub completed: usize,
-    pub total: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -271,6 +247,7 @@ pub enum PlexLoginMethod {
     },
 }
 
+#[derive(Clone, Copy)]
 pub enum PlaylistExport {
     Playlist(library::PlaylistKey),
     Smart(library::SmartPlaylistKey),

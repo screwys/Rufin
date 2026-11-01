@@ -46,9 +46,11 @@ pub(crate) const TRUSTED_FRAME: usize = u32::MAX as usize;
 // A device that removed this one closes its connections with this code.
 const REMOVED: VarInt = VarInt::from_u32(2);
 
-pub const INCOMPATIBLE: &str =
-    "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
-pub const REMOVED_FROM_PROFILE: &str = "This device was removed from the profile";
+pub const INCOMPATIBLE: &str = localization::msgid(
+    "Devices using Rufin Connect are no longer compatible. Please update Rufin.",
+);
+pub const REMOVED_FROM_PROFILE: &str =
+    localization::msgid("This device was removed from the profile");
 
 static DNS_RESOLVER: OnceLock<fn() -> iroh::dns::DnsResolver> = OnceLock::new();
 
@@ -565,7 +567,7 @@ impl ConnectNetwork {
                     peer: connection.remote_id().to_string(),
                 })
                 .await;
-            bail!(REMOVED_FROM_PROFILE);
+            bail!(localization::tr(REMOVED_FROM_PROFILE));
         }
         if result.is_ok() {
             self.reached(connection, false).await;
@@ -689,7 +691,7 @@ impl ConnectNetwork {
                     .await?;
                 if connection.alpn() != protocol {
                     connection.close(1u32.into(), b"incompatible");
-                    bail!(INCOMPATIBLE);
+                    bail!(localization::tr(INCOMPATIBLE));
                 }
                 Ok(connection)
             };
@@ -791,26 +793,25 @@ impl ConnectNetwork {
                 .iter()
                 .find(|path| path.is_selected())
                 .map(|path| match path.remote_addr() {
-                    iroh::TransportAddr::Relay(_) => "Via relay",
+                    iroh::TransportAddr::Relay(_) => localization::msgid("Via relay"),
                     iroh::TransportAddr::Ip(address) => match address.ip() {
                         std::net::IpAddr::V4(ip)
                             if ip.is_private() || ip.is_loopback() || ip.is_link_local() =>
                         {
-                            "Local network"
+                            localization::msgid("Local network")
                         }
                         std::net::IpAddr::V6(ip)
                             if ip.is_unique_local()
                                 || ip.is_loopback()
                                 || ip.is_unicast_link_local() =>
                         {
-                            "Local network"
+                            localization::msgid("Local network")
                         }
-                        _ => "Direct",
+                        _ => localization::msgid("Direct"),
                     },
-                    _ => "Direct",
+                    _ => localization::msgid("Direct"),
                 })
-                .unwrap_or("Waiting for device")
-                .to_owned();
+                .map_or_else(|| localization::tr("Waiting for device"), localization::tr);
             connection.close(0u32.into(), b"connection test complete");
             Ok((route, response))
         })

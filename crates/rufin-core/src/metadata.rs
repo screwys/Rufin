@@ -415,11 +415,7 @@ pub fn current_artwork(
         let stored = owner.shared.settings.load();
         let request =
             artwork::ArtworkRequest::original(artwork::ArtworkBinding::opaque(&binding), 512)
-                .with_external(artwork::ExternalPolicy::new(
-                    stored.ui.application.external_metadata_enabled,
-                    stored.ui.allows_external_metadata_lookup(),
-                    stored.ui.lastfm_api_key.clone(),
-                ));
+                .with_external(stored.ui.artwork_policy());
         let bytes = owner.shared.artwork.image_bytes(request).await?;
         tokio::task::spawn_blocking(move || bytes.map(checked_artwork).transpose())
             .await

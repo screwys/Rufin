@@ -11,7 +11,7 @@ use futures_util::{StreamExt, stream};
 use library::{FileBatch, LocalFileKind, LocalFileState, LocalFileWrite, StoredFile, walk_key};
 
 use crate::file::media::{self, MediaRead, Worker};
-use crate::{SourceError, SourceReadProgress, SourceReadStage, SourceResult};
+use crate::{SourceError, SourceProgress, SourceProgressStage, SourceResult};
 
 /// Stored rows read per SELECT: one SELECT covers most libraries, and memory stays bounded.
 const PAGE: usize = 8192;
@@ -114,7 +114,7 @@ pub(crate) async fn walk<F: FileSource>(
     configured: &[String],
     scope: WalkScope<'_>,
     artwork: &ArtworkState,
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    progress: &(dyn Fn(SourceProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<()> {
     let roots = files.roots()?;
@@ -230,7 +230,7 @@ struct Walker<'w, 'o, F: FileSource> {
     accepted: usize,
     reported: Option<Instant>,
     workers: Vec<Arc<Mutex<Worker>>>,
-    progress: &'w (dyn Fn(SourceReadProgress) + Send + Sync),
+    progress: &'w (dyn Fn(SourceProgress) + Send + Sync),
     cancelled: &'w (dyn Fn() -> bool + Send + Sync),
 }
 
@@ -489,8 +489,8 @@ impl<F: FileSource> Walker<'_, '_, F> {
     /// Progress, once something is read: an unchanged walk reports none.
     fn report(&mut self, force: bool) {
         if self.reported.is_none() {
-            (self.progress)(SourceReadProgress {
-                stage: SourceReadStage::Tracks,
+            (self.progress)(SourceProgress {
+                stage: SourceProgressStage::Tracks,
                 completed: 0,
                 total: None,
             });
@@ -500,8 +500,8 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 .reported
                 .is_none_or(|reported| reported.elapsed() >= Duration::from_millis(100))
         {
-            (self.progress)(SourceReadProgress {
-                stage: SourceReadStage::Tracks,
+            (self.progress)(SourceProgress {
+                stage: SourceProgressStage::Tracks,
                 completed: self.accepted,
                 total: None,
             });

@@ -2,8 +2,9 @@ use super::item::{ItemResponse, read_items};
 use super::{PlexSource, plex_id};
 use crate::policy::raw_item_id;
 use crate::remote_json::{field, id, items};
-use crate::source::{SourceReadProgress, SourceReadStage};
-use crate::{SourceError, SourceHomeSection, SourceResult};
+use crate::source::{SourceProgress, SourceProgressStage};
+use crate::{SourceError, SourceResult};
+use library::HomeSectionKind;
 use library::{FolderObservation, HomeEntryInput, HomeEntryKind};
 use serde_json::Value;
 
@@ -13,7 +14,7 @@ impl PlexSource {
     pub(crate) async fn acquire_catalog(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<Option<i64>> {
         let walk = observation.is_walk();
@@ -51,9 +52,9 @@ impl PlexSource {
             }
             observation.apply_catalog(&batch, true).await?;
             for (kind, stage) in [
-                ("8", SourceReadStage::Artists),
-                ("9", SourceReadStage::Albums),
-                ("10", SourceReadStage::Tracks),
+                ("8", SourceProgressStage::Artists),
+                ("9", SourceProgressStage::Albums),
+                ("10", SourceProgressStage::Tracks),
             ] {
                 self.section_pages(
                     observation,
@@ -61,7 +62,7 @@ impl PlexSource {
                     kind,
                     None,
                     &|completed, total| {
-                        progress(SourceReadProgress {
+                        progress(SourceProgress {
                             stage,
                             completed,
                             total,
@@ -100,8 +101,8 @@ impl PlexSource {
         crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
 
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
+        progress(SourceProgress {
+            stage: SourceProgressStage::Finalizing,
             completed: 1,
             total: Some(1),
         });
@@ -569,13 +570,14 @@ impl PlexSource {
 
     pub(crate) async fn home_section(
         &self,
-        section: SourceHomeSection,
+        section: HomeSectionKind,
     ) -> SourceResult<Vec<HomeEntryInput>> {
         let (kind, sort) = match section {
-            SourceHomeSection::MostPlayed => ("10", "viewCount:desc"),
-            SourceHomeSection::RecentlyPlayed => ("10", "lastViewedAt:desc"),
-            SourceHomeSection::NewlyAdded => ("9", "addedAt:desc"),
-            SourceHomeSection::RecentlyReleased => ("9", "originallyAvailableAt:desc"),
+            HomeSectionKind::Explore => return Ok(Vec::new()),
+            HomeSectionKind::MostPlayed => ("10", "viewCount:desc"),
+            HomeSectionKind::RecentlyPlayed => ("10", "lastViewedAt:desc"),
+            HomeSectionKind::NewlyAdded => ("9", "addedAt:desc"),
+            HomeSectionKind::RecentlyReleased => ("9", "originallyAvailableAt:desc"),
         };
         let page = self
             .get(

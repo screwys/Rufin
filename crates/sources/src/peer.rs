@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::{
-    ImageBytes, SourceConfiguration, SourceError, SourceReadProgress, SourceReadStage, SourceResult,
+    ImageBytes, SourceConfiguration, SourceError, SourceProgress, SourceProgressStage, SourceResult,
 };
 
 /// Observations asked of the owner at a time.
@@ -113,7 +113,7 @@ impl PeerSource {
         &self,
         observation: &mut library::Observation<'_>,
         since: Option<i64>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<i64> {
         let (ids, clock) = self.link.ids(&self.device, &self.source).await?;
@@ -166,8 +166,8 @@ impl PeerSource {
                 )
                 .await?;
             completed += page.len();
-            progress(SourceReadProgress {
-                stage: SourceReadStage::Tracks,
+            progress(SourceProgress {
+                stage: SourceProgressStage::Tracks,
                 completed,
                 total: Some(wanted.len()),
             });

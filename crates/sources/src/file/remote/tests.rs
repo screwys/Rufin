@@ -120,7 +120,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             let updates = progress.lock().unwrap();
             let counts = updates
                 .iter()
-                .filter(|p| p.stage == crate::SourceReadStage::Tracks)
+                .filter(|p| p.stage == crate::SourceProgressStage::Tracks)
                 .map(|p| p.completed)
                 .collect::<Vec<_>>();
             assert_eq!(counts.first(), Some(&0));
@@ -157,14 +157,14 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let progress = progress.lock().unwrap();
         let counts = progress
             .iter()
-            .filter(|p| p.stage == crate::SourceReadStage::Tracks)
+            .filter(|p| p.stage == crate::SourceProgressStage::Tracks)
             .map(|p| p.completed)
             .collect::<Vec<_>>();
         assert_eq!(counts.first(), Some(&0));
         assert_eq!(counts.last(), Some(&2));
         assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
         assert!(progress.iter().all(|update| {
-            update.stage == crate::SourceReadStage::Tracks && update.total.is_none()
+            update.stage == crate::SourceProgressStage::Tracks && update.total.is_none()
         }));
     }
 }
@@ -468,7 +468,7 @@ async fn dav_inventory_reuses_tags_and_follows_native_file_identity() {
                     &mut observation,
                     walk::WalkScope::All { resync: false },
                     &|progress| {
-                        if progress.stage == crate::SourceReadStage::Tracks {
+                        if progress.stage == crate::SourceProgressStage::Tracks {
                             cancelled.store(true, Ordering::Relaxed);
                         }
                     },

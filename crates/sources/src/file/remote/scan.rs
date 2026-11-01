@@ -108,7 +108,7 @@ impl FileSource {
         &self,
         observation: &mut library::Observation<'_>,
         scope: walk::WalkScope<'_>,
-        progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(crate::SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         walk::walk(

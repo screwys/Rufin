@@ -20,8 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::runtime::source::{
     ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, EditableSource, LocalAccessStatus,
-    LocalFolder, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourceProgress,
-    SourceProgressStage, SourceSummary,
+    LocalFolder, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourceSummary,
 };
 use crate::runtime::{SelectedLibrary, SourceEvent};
 use crate::settings::SecretStorageMode;
@@ -32,7 +31,7 @@ use library::{Catalog, FavoriteTarget, ReadCancellation, SourceKey};
 use secrets::SwitchableSecretStore;
 use sources::{
     CredentialPreset, LiveFolderPage, SelectedFeed, Source, SourceConfiguration, SourceError,
-    SourceId, SourceReadProgress, SourceReadStage, SourceSettingsChange, SourceSetup,
+    SourceId, SourceProgress, SourceProgressStage, SourceSettingsChange, SourceSetup,
 };
 use tracing::{info, warn};
 
@@ -352,9 +351,8 @@ impl Shared {
         &self,
         source_id: &SourceId,
         token: &Arc<AtomicBool>,
-        value: SourceReadProgress,
+        progress: SourceProgress,
     ) {
-        let progress = source_progress(value);
         {
             let mut clients = self.clients.lock().unwrap_or_else(|p| p.into_inner());
             let Some(refresh) = clients
@@ -2617,13 +2615,7 @@ impl SourceOwner {
                 return Ok(());
             }
             let source = owner.open_client(source_id.clone()).await?;
-            let section = match kind {
-                HomeSectionKind::MostPlayed => sources::SourceHomeSection::MostPlayed,
-                HomeSectionKind::RecentlyPlayed => sources::SourceHomeSection::RecentlyPlayed,
-                HomeSectionKind::RecentlyReleased => sources::SourceHomeSection::RecentlyReleased,
-                HomeSectionKind::Explore | HomeSectionKind::NewlyAdded => unreachable!(),
-            };
-            if let Err(error) = source.refresh_home_section(&catalog, section).await {
+            if let Err(error) = source.refresh_home_section(&catalog, kind).await {
                 warn!(%error,"could not refresh Home section");
             }
             Ok(())
@@ -3228,22 +3220,6 @@ fn local_roots(configuration: &SourceConfiguration) -> Result<Vec<PathBuf>, Stri
     }
 }
 
-fn source_progress(progress: SourceReadProgress) -> SourceProgress {
-    SourceProgress {
-        stage: match progress.stage {
-            SourceReadStage::Albums => SourceProgressStage::Albums,
-            SourceReadStage::Tracks => SourceProgressStage::Tracks,
-            SourceReadStage::Artists => SourceProgressStage::Artists,
-            SourceReadStage::Genres => SourceProgressStage::Genres,
-            SourceReadStage::Playlists => SourceProgressStage::Playlists,
-            SourceReadStage::Home => SourceProgressStage::Home,
-            SourceReadStage::Finalizing => SourceProgressStage::Finalizing,
-        },
-        completed: progress.completed,
-        total: progress.total,
-    }
-}
-
 fn initial_progress() -> SourceProgress {
     SourceProgress {
         stage: SourceProgressStage::Connecting,
@@ -3492,8 +3468,8 @@ mod source_tests {
         owner.shared.refresh_progress(
             &other_id,
             &second,
-            SourceReadProgress {
-                stage: SourceReadStage::Tracks,
+            SourceProgress {
+                stage: SourceProgressStage::Tracks,
                 completed: 128,
                 total: None,
             },
@@ -3536,8 +3512,8 @@ mod source_tests {
             owner.shared.refresh_progress(
                 &source_id,
                 &token,
-                SourceReadProgress {
-                    stage: SourceReadStage::Tracks,
+                SourceProgress {
+                    stage: SourceProgressStage::Tracks,
                     completed: 128,
                     total: None,
                 },

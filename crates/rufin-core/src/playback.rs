@@ -171,10 +171,10 @@ impl PlaybackOwner {
         let artwork_settings = settings.clone();
         let cast_artwork = artwork.clone();
         let cast_artwork_path = move |stream: &playback::PreparedStream| {
-            cached_cast_artwork(
-                &cast_artwork,
-                &artwork_settings,
-                stream.row.as_ref()?.track.artwork_binding.as_deref(),
+            let binding = stream.row.as_ref()?.track.artwork_binding.as_deref()?;
+            cast_artwork.cache_only_file(
+                &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(binding), 512)
+                    .with_external(artwork_settings.load().ui.artwork_policy()),
             )
         };
         let owner = Arc::new(Self {
@@ -1305,21 +1305,6 @@ fn prepare_media_stream(
         .as_deref()
         .and_then(audio_mime);
     PreparedStream::new(stream, Some(loudness)).with_row(occurrence, content_type)
-}
-
-fn cached_cast_artwork(
-    artwork: &artwork::Artwork,
-    settings: &SettingsFile,
-    binding: Option<&[u8]>,
-) -> Option<std::path::PathBuf> {
-    let stored = settings.load();
-    let binding = artwork::ArtworkBinding::opaque(binding?);
-    let external = artwork::ExternalPolicy::new(
-        stored.ui.application.external_metadata_enabled,
-        stored.ui.allows_external_metadata_lookup(),
-        stored.ui.lastfm_api_key.clone(),
-    );
-    artwork.cache_only_file(&artwork::ArtworkRequest::new(binding, 512).with_external(external))
 }
 
 pub(crate) fn audio_mime(source_format: &str) -> Option<String> {

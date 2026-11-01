@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
-use rufin_core::runtime::source::{SourceOperation, SourceProgressStage, source_download_text};
+use rufin_core::runtime::source::{SourceOperation, source_download_text};
 use rufin_core::runtime::{CacheKind, CacheUsage, ProductHandles, StorageSummary};
+use sources::SourceProgressStage;
 
 use crate::Preferences;
 

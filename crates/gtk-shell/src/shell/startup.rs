@@ -65,7 +65,8 @@ fn library_loading_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rufin_core::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
+    use rufin_core::runtime::source::SourceOperation;
+    use sources::{SourceProgress, SourceProgressStage};
 
     #[test]
     fn launch_is_preparing_while_an_explicit_change_is_switching() {

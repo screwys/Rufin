@@ -362,20 +362,27 @@ impl SelectedFeed {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceReadStage {
+/// How far a source's read or download has come.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum SourceProgressStage {
+    Connecting,
     Albums,
     Tracks,
     Artists,
     Genres,
     Playlists,
     Home,
+    Artwork,
+    Lyrics,
     Finalizing,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SourceReadProgress {
-    pub stage: SourceReadStage,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct SourceProgress {
+    pub stage: SourceProgressStage,
     pub completed: usize,
     pub total: Option<usize>,
 }
@@ -517,25 +524,6 @@ pub enum SourceCollection {
     Artist(String),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceHomeSection {
-    MostPlayed,
-    NewlyAdded,
-    RecentlyPlayed,
-    RecentlyReleased,
-}
-
-impl SourceHomeSection {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::MostPlayed => "most-played",
-            Self::NewlyAdded => "newly-added",
-            Self::RecentlyPlayed => "recently-played",
-            Self::RecentlyReleased => "recently-released",
-        }
-    }
-}
-
 pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> {
     if matches!(error, SourceError::Cancelled | SourceError::Library(_)) {
         return Err(error);
@@ -550,22 +538,20 @@ pub(crate) async fn acquire_home<F, Work>(
     mut read: F,
 ) -> SourceResult<()>
 where
-    F: FnMut(SourceHomeSection) -> Work,
+    F: FnMut(library::HomeSectionKind) -> Work,
     Work: std::future::Future<Output = SourceResult<Vec<library::HomeEntryInput>>>,
 {
-    for section in [
-        SourceHomeSection::MostPlayed,
-        SourceHomeSection::NewlyAdded,
-        SourceHomeSection::RecentlyPlayed,
-        SourceHomeSection::RecentlyReleased,
-    ] {
+    for section in library::HomeSectionKind::SOURCE_SECTIONS {
+        let Some(id) = section.source_section() else {
+            continue;
+        };
         match read(section).await {
             Ok(entries) => {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
                 }
                 changes
-                    .replace_source_home_section(section.id(), None, &(entries))
+                    .replace_source_home_section(id, None, &(entries))
                     .await?;
             }
             Err(error) => optional_collection_error(error)?,
@@ -1161,7 +1147,7 @@ impl Source {
     pub async fn acquire_catalog(
         &self,
         catalog: &Catalog,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
         refresh: Refresh,
     ) -> SourceResult<bool> {
@@ -1783,7 +1769,7 @@ impl Source {
         catalog: &Catalog,
         paths: Vec<std::path::PathBuf>,
         name: &str,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
     ) -> SourceResult<library::PlaylistKey> {
         let Implementation::Local(local) = &self.implementation else {
             return Err(SourceError::InvalidRequest("Only Local imports files"));
@@ -2106,7 +2092,8 @@ impl Source {
     ) -> SourceResult<()> {
         let catalog = changes.catalog;
         let source_id = self.source_id.as_str();
-        let section = SourceHomeSection::NewlyAdded;
+        let section = library::HomeSectionKind::NewlyAdded;
+        let id = section.source_section().unwrap_or_default();
         match self.home_section(section).await {
             Ok(entries) => {
                 let mut missing = Vec::new();
@@ -2132,7 +2119,7 @@ impl Source {
                     return Err(SourceError::Cancelled);
                 }
                 changes
-                    .replace_source_home_section(section.id(), None, &(entries))
+                    .replace_source_home_section(id, None, &(entries))
                     .await?;
             }
             Err(error) => optional_collection_error(error)?,
@@ -2191,15 +2178,18 @@ impl Source {
     pub async fn refresh_home_section(
         &self,
         catalog: &Catalog,
-        section: SourceHomeSection,
+        section: library::HomeSectionKind,
     ) -> SourceResult<()> {
+        let Some(id) = section.source_section() else {
+            return Ok(());
+        };
         self.catalog_operation(catalog, async |observation| {
             let entries = self.home_section(section).await?;
             if self.is_retired() {
                 return Err(SourceError::Cancelled);
             }
             observation
-                .replace_source_home_section(section.id(), None, &entries)
+                .replace_source_home_section(id, None, &entries)
                 .await?;
             Ok(())
         })
@@ -2208,7 +2198,7 @@ impl Source {
 
     pub async fn home_section(
         &self,
-        section: SourceHomeSection,
+        section: library::HomeSectionKind,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         match &self.implementation {
             Implementation::Plex(source) => source.home_section(section).await,

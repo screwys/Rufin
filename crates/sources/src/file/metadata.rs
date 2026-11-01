@@ -1713,8 +1713,8 @@ mod tests {
         };
         let (configuration, source, _) = (*connected).into_parts();
         let first_tracks = tokio::sync::Notify::new();
-        let progress = |progress: crate::SourceReadProgress| {
-            if progress.stage == crate::SourceReadStage::Tracks {
+        let progress = |progress: crate::SourceProgress| {
+            if progress.stage == crate::SourceProgressStage::Tracks {
                 first_tracks.notify_one();
             }
         };

@@ -13,10 +13,8 @@ use crate::{
 use age::secrecy::ExposeSecret;
 use records::{DeviceValue, Receiving, Records};
 use rufin_connect::{
-    ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, Store,
-    network::{INCOMPATIBLE, REMOVED_FROM_PROFILE},
-    store::Cursor,
-    sync::Frame,
+    ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, Store, network::REMOVED_FROM_PROFILE,
+    store::Cursor, sync::Frame,
 };
 use secrets::{SecretKey, SecretStore, SwitchableSecretStore};
 use serde::{Deserialize, Serialize};
@@ -801,7 +799,7 @@ impl ConnectOwner {
                 self.update_device(peer, |device| match &answer {
                     Ok((route, _)) => {
                         device.reachable = true;
-                        device.connection = connection_label(route);
+                        device.connection = route.clone();
                     }
                     Err(_) => {
                         device.reachable = false;
@@ -1243,7 +1241,7 @@ impl ConnectOwner {
         if let Err(error) = self.leave(true).await {
             tracing::warn!(%error, "Could not turn Connect off");
         }
-        self.failed(error(REMOVED_FROM_PROFILE));
+        self.failed(localization::tr(REMOVED_FROM_PROFILE));
     }
 
     /// The relay record changed the shared relay choice.
@@ -1811,23 +1809,7 @@ fn profile_key(identity_ref: &str, profile: &str) -> SecretKey {
 }
 
 fn error(error: impl std::fmt::Display) -> String {
-    let message = error.to_string();
-    match message.as_str() {
-        INCOMPATIBLE => localization::tr(
-            "Devices using Rufin Connect are no longer compatible. Please update Rufin.",
-        ),
-        REMOVED_FROM_PROFILE => localization::tr("This device was removed from the profile"),
-        _ => message,
-    }
-}
-
-fn connection_label(value: &str) -> String {
-    match value {
-        "Local network" => localization::tr("Local network"),
-        "Via relay" => localization::tr("Via relay"),
-        "Direct" => localization::tr("Direct"),
-        other => other.into(),
-    }
+    error.to_string()
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]

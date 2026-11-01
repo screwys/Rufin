@@ -402,6 +402,16 @@ impl Settings {
         self.application.external_metadata_enabled && !self.application.private_mode
     }
 
+    /// What artwork reads may use beyond the source: cached and online covers as these
+    /// settings allow.
+    pub fn artwork_policy(&self) -> artwork::ExternalPolicy {
+        artwork::ExternalPolicy::new(
+            self.application.external_metadata_enabled,
+            self.allows_external_metadata_lookup(),
+            self.lastfm_api_key.clone(),
+        )
+    }
+
     pub fn sanitize(&mut self) {
         self.recent_search_results.truncate(20);
         if ![1, 6, 12, 24].contains(&self.application.release_check_interval_hours) {
@@ -553,15 +563,7 @@ impl SettingsOwner {
 }
 
 pub fn default_home_blocks() -> Vec<HomeBlockKind> {
-    vec![
-        HomeBlockKind::Showcase,
-        HomeBlockKind::Explore,
-        HomeBlockKind::MostPlayed,
-        HomeBlockKind::NewlyAdded,
-        HomeBlockKind::RecentlyPlayed,
-        HomeBlockKind::RecentlyReleased,
-        HomeBlockKind::Genres,
-    ]
+    HomeBlockKind::all().to_vec()
 }
 
 fn default_starting_page() -> SidebarRouteItem {

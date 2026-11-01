@@ -8,7 +8,7 @@ use super::media::read_media;
 use crate::file::cue::{CueSheet, cue_track, parse_cue_sheet};
 use crate::file::media::{self as media, MediaRead, ScannedTrack};
 use crate::file::walk;
-use crate::source::SourceReadProgress;
+use crate::source::SourceProgress;
 use crate::{SourceError, SourceResult};
 
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
@@ -128,7 +128,7 @@ pub(crate) async fn import_paths(
     local: &LocalSource,
     paths: Vec<PathBuf>,
     name: &str,
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    progress: &(dyn Fn(SourceProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<library::PlaylistKey> {
     let paths = paths

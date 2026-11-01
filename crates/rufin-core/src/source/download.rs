@@ -7,7 +7,8 @@ use sources::{SourceConfiguration, SourceError};
 
 use super::{Shared, SourceOwner};
 use crate::features::follow;
-use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
+use crate::runtime::source::SourceOperation;
+use sources::{SourceProgress, SourceProgressStage};
 
 impl SourceOwner {
     /// Installs automatic artwork and lyrics downloads while either is on: one pass over every

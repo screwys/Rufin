@@ -13,13 +13,12 @@ use crate::shell::playlist_picker::refresh_context_playlist_picker;
 use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
 use rufin_core::runtime::source::source_progress_text;
-use rufin_core::runtime::source::{
-    DiscoveryStatus, DiscoveryUpdate, SourceOperation, SourceProgress,
-};
+use rufin_core::runtime::source::{DiscoveryStatus, DiscoveryUpdate, SourceOperation};
 use rufin_core::runtime::{
     ProductReceivers, SourceEvent, SourceNotice, SourceNoticeKind, WaveformProjection,
 };
 use rufin_core::source::feed::Changed;
+use sources::SourceProgress;
 
 use super::Shell;
 use super::navigation::update_sidebar_pin_playback;
@@ -781,7 +780,8 @@ mod tests {
         bottom_player_can_update_position_only, media_controls_static_state_changed,
         queue_panel_refresh_needed, source_operation_started_blocking, source_progress_fraction,
     };
-    use rufin_core::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
+    use rufin_core::runtime::source::SourceOperation;
+    use sources::{SourceProgress, SourceProgressStage};
 
     #[test]
     fn playback_toasts_omit_backend_diagnostics() {

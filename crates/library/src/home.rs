@@ -60,6 +60,27 @@ impl HomeBlockKind {
     }
 }
 
+impl HomeSectionKind {
+    /// The sections a source provides, in the order it lists them.
+    pub const SOURCE_SECTIONS: [Self; 4] = [
+        Self::MostPlayed,
+        Self::NewlyAdded,
+        Self::RecentlyPlayed,
+        Self::RecentlyReleased,
+    ];
+
+    /// The id a source's own section of this kind is stored under. Explore is Rufin's only.
+    pub const fn source_section(self) -> Option<&'static str> {
+        match self {
+            Self::Explore => None,
+            Self::MostPlayed => Some("most-played"),
+            Self::NewlyAdded => Some("newly-added"),
+            Self::RecentlyPlayed => Some("recently-played"),
+            Self::RecentlyReleased => Some("recently-released"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HomeEntryKind {
     Track,
@@ -351,21 +372,22 @@ impl Catalog {
         };
         let mut sections = sections;
         // A provider section replaces Rufin's own block when it has rows.
-        let mut provided = |kind: HomeBlockKind, section: &str| {
-            sections
-                .remove(section)
+        let mut provided = |kind: HomeBlockKind| {
+            kind.section_kind()
+                .and_then(HomeSectionKind::source_section)
+                .and_then(|section| sections.remove(section))
                 .filter(|(_, tracks, albums)| {
                     blocks.contains(&kind) && (!tracks.is_empty() || !albums.is_empty())
                 })
                 .map(|(_, tracks, albums)| (tracks, albums))
         };
-        let most_played = provided(HomeBlockKind::MostPlayed, "most-played")
-            .unwrap_or((chosen.most_played, Vec::new()));
-        let newly_added = provided(HomeBlockKind::NewlyAdded, "newly-added")
-            .unwrap_or((Vec::new(), chosen.newly_added));
-        let recently_played = provided(HomeBlockKind::RecentlyPlayed, "recently-played")
-            .unwrap_or((chosen.recently_played, Vec::new()));
-        let recently_released = provided(HomeBlockKind::RecentlyReleased, "recently-released")
+        let most_played =
+            provided(HomeBlockKind::MostPlayed).unwrap_or((chosen.most_played, Vec::new()));
+        let newly_added =
+            provided(HomeBlockKind::NewlyAdded).unwrap_or((Vec::new(), chosen.newly_added));
+        let recently_played =
+            provided(HomeBlockKind::RecentlyPlayed).unwrap_or((chosen.recently_played, Vec::new()));
+        let recently_released = provided(HomeBlockKind::RecentlyReleased)
             .unwrap_or((Vec::new(), chosen.recently_released));
         let genres = if genres {
             let read = crate::ListRead {

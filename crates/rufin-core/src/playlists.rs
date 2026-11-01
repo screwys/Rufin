@@ -615,11 +615,7 @@ async fn generate_artwork(
     bindings: Vec<Vec<u8>>,
 ) -> Result<Option<Arc<sources::ImageBytes>>, String> {
     let stored = owner.shared.settings.load();
-    let policy = artwork::ExternalPolicy::new(
-        stored.ui.application.external_metadata_enabled,
-        stored.ui.allows_external_metadata_lookup(),
-        stored.ui.lastfm_api_key.clone(),
-    );
+    let policy = stored.ui.artwork_policy();
     let mut images = futures_util::stream::iter(bindings)
         .map(|binding| {
             let request =

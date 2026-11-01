@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use crate::policy::normalized_date;
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
 use crate::remote_json::{boolean, field, id, items, strings};
-use crate::source::{SourceReadProgress, SourceReadStage};
+use crate::source::{SourceProgress, SourceProgressStage};
 use crate::{SourceError, SourceResult};
 
 use super::{ImageRef, SubsonicSource, normalize_release_types};
@@ -230,7 +230,7 @@ impl SubsonicSource {
     pub(super) async fn acquire_navidrome_library(
         &self,
         observation: &mut library::Observation<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<bool> {
         let source_id = observation.source_id;
@@ -240,11 +240,11 @@ impl SubsonicSource {
         use crate::SourceEntityKind::{Album, Artist, Track};
         // Artists come first so that the albums and tracks crediting them are resolved once.
         for (kind, endpoint, stage) in [
-            (Artist, "artist", SourceReadStage::Artists),
-            (Album, "album", SourceReadStage::Albums),
-            (Track, "song", SourceReadStage::Tracks),
+            (Artist, "artist", SourceProgressStage::Artists),
+            (Album, "album", SourceProgressStage::Albums),
+            (Track, "song", SourceProgressStage::Tracks),
         ] {
-            progress(SourceReadProgress {
+            progress(SourceProgress {
                 stage,
                 completed: 0,
                 total: None,
@@ -290,7 +290,7 @@ impl SubsonicSource {
                     return Err(crate::SourceError::Cancelled);
                 }
                 observation.apply_catalog(&batch, true).await?;
-                progress(SourceReadProgress {
+                progress(SourceProgress {
                     stage,
                     completed: offset,
                     total: None,

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::file::walk::{self, Entry, Root, WalkScope};
-use crate::source::SourceReadProgress;
+use crate::source::SourceProgress;
 use crate::{
     ConnectedSource, ImageBytes, SourceConfiguration, SourceEditResult, SourceError, SourceResult,
 };
@@ -205,7 +205,7 @@ impl LocalSource {
         &self,
         observation: &mut library::Observation<'_>,
         scope: WalkScope<'_>,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        progress: &(dyn Fn(SourceProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let configured = self.configured_file_roots()?;
