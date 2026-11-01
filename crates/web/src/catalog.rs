@@ -75,11 +75,12 @@ fn list_key(read: &library::MemberRead) -> LibraryListKey {
 
 /// A track page's read. Without `sort` or `descending` it lists in its list's saved order, as
 /// the other clients show it; a whole play without them keeps the collection's own order.
+/// The read comes with the fields its rows show.
 pub(super) async fn page_query(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
     kind: &str,
-) -> Result<library::MemberRead, Error> {
+) -> Result<(library::MemberRead, Vec<LibraryField>), Error> {
     let mut query = track_query(products, parameters, kind).await?;
     let list = products.settings.load().library_list(list_key(&query));
     if !parameters.contains_key("sort") {
@@ -88,7 +89,32 @@ pub(super) async fn page_query(
     if !parameters.contains_key("descending") {
         query.descending = list.descending;
     }
-    Ok(query)
+    Ok((query, list.row_fields))
+}
+
+/// The track rows among `rows`, each showing `fields`; `entry` adds a playlist entry's id
+/// and position, and leaves out tracks that are not entries.
+pub(super) fn track_rows(rows: &[Row], fields: &[LibraryField], entry: bool) -> Vec<Value> {
+    rows.iter()
+        .filter_map(|row| {
+            let Row::Track(track) = row else {
+                return None;
+            };
+            let mut value = track_row_json(track);
+            if entry {
+                let entry = track.entry.as_ref()?;
+                value["id"] = json!(entry.key);
+                value["position"] = json!(entry.position);
+            }
+            value["fields"] = field_texts(row, fields);
+            Some(value)
+        })
+        .collect()
+}
+
+/// The fields a list's cards show under their title.
+pub(super) fn grid_fields(products: &ProductHandles, key: LibraryListKey) -> Vec<LibraryField> {
+    products.settings.load().library_list(key).grid_fields
 }
 
 /// A list's order, and its length when `total` is asked.
@@ -133,21 +159,18 @@ pub(super) async fn tracks_page(
     (default_limit, cap): (usize, usize),
     list: &str,
 ) -> Result<(Order, Value), Error> {
-    let query = page_query(products, parameters, kind).await?;
+    let (query, fields) = page_query(products, parameters, kind).await?;
     let activity_sensitive = query.activity_sensitive();
     let (sort, descending) = (sort_name(&query), query.descending);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", default_limit)?.min(cap);
     let (order, total) = self::order(products, parameters, Read::Members(query)).await?;
-    let tracks = rows(products, &order, offset, limit, false)
-        .await?
-        .iter()
-        .filter_map(|row| match row {
-            Row::Track(track) => Some(track_row_json(track)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let mut value = json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"total":total,"offset":offset,"limit":limit});
+    let tracks = track_rows(
+        &rows(products, &order, offset, limit, false).await?,
+        &fields,
+        false,
+    );
+    let mut value = json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"total":total,"offset":offset,"limit":limit,"columns":fields});
     value[list] = tracks.into();
     Ok((order, value))
 }
@@ -243,15 +266,19 @@ async fn refresh_home(
 }
 
 fn home_album(products: &ProductHandles, row: &library::HomeAlbumRow) -> Value {
+    use rufin_core::settings::layout::HOME_ALBUM_FIELDS;
     let album = &row.album;
-    json!({"kind":"album","id":album.album_key,"object_id":album.object_id,"uri":album.media_uri,"title":row.title,"artist":album.artist,"favorite":album.state.favorite,"track_count":album.summary.track_count,"year":album.year,"duration_ms":album.summary.duration_millis,"artwork_previews":artwork_previews(products, album.artwork_binding.iter())})
+    let fields = field_texts(&Row::Album(album.clone()), &HOME_ALBUM_FIELDS);
+    json!({"kind":"album","id":album.album_key,"object_id":album.object_id,"uri":album.media_uri,"title":row.title,"artist":album.artist,"favorite":album.state.favorite,"track_count":album.summary.track_count,"year":album.year,"duration_ms":album.summary.duration_millis,"artwork_previews":artwork_previews(products, album.artwork_binding.iter()),"fields":fields})
 }
 
 fn home_track(products: &ProductHandles, row: &library::HomeTrackRow) -> Value {
+    use rufin_core::settings::layout::HOME_TRACK_FIELDS;
     let mut value = track_row_json(&row.track);
     value["artwork_previews"] = json!(artwork_previews(products, row.track.artwork_binding.iter()));
     value["kind"] = "track".into();
     value["title"] = row.title.clone().into();
+    value["fields"] = field_texts(&Row::Track(row.track.clone()), &HOME_TRACK_FIELDS);
     value
 }
 
@@ -404,12 +431,20 @@ pub(super) async fn artists_data(
         )
     };
     let activity_sensitive = query.activity_sensitive();
+    let fields = grid_fields(
+        products,
+        if album_artists {
+            LibraryListKey::AlbumArtists
+        } else {
+            LibraryListKey::Artists
+        },
+    );
     let (order, total) = order(products, parameters, Read::List(query)).await?;
     let artists = rows(products, &order, offset, limit, true)
         .await?
-        .into_iter()
-        .filter_map(|row| match row {
-            Row::Artist(row) => Some(json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":album_artists,"uri":row.media_uri,"name":row.name,"favorite":row.state.favorite,"album_count":row.summary.album_count,"track_count":row.summary.track_count,"artwork_previews":artwork_previews(products, row.artwork_binding.iter())})),
+        .iter()
+        .filter_map(|shown| match shown {
+            Row::Artist(row) => Some(json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":album_artists,"uri":row.media_uri,"name":row.name,"favorite":row.state.favorite,"album_count":row.summary.album_count,"track_count":row.summary.track_count,"artwork_previews":artwork_previews(products, row.artwork_binding.iter()),"fields":field_texts(shown, &fields)})),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -488,12 +523,13 @@ pub(super) async fn smart_playlists_data(
         )
     };
     let activity_sensitive = query.activity_sensitive();
+    let fields = grid_fields(products, LibraryListKey::SmartPlaylists);
     let (order, total) = order(products, parameters, Read::List(query)).await?;
     let smart_playlists = rows(products, &order, offset, limit, true)
         .await?
-        .into_iter()
-        .filter_map(|row| match row {
-            Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => Some(json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row.object_id, &row.name),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})),
+        .iter()
+        .filter_map(|shown| match shown {
+            Row::Playlist(PlaylistListRow::SmartPlaylist(row)) => Some(json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row.object_id, &row.name),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice()),"fields":field_texts(shown, &fields)})),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -558,14 +594,16 @@ pub(super) async fn albums_data(
         ..library::ListRead::new(library::ListKind::Albums, Some(source), sort)
     };
     let activity_sensitive = query.activity_sensitive();
+    let fields = grid_fields(products, LibraryListKey::Albums);
     let (order, total) = order(products, parameters, Read::List(query)).await?;
     let albums = rows(products, &order, offset, limit, true)
         .await?
-        .into_iter()
-        .filter_map(|row| match row {
+        .iter()
+        .filter_map(|shown| match shown {
             Row::Album(row) => Some(json!({
                 "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.title,"artist":row.artist,
-                "year":row.year,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"favorite":row.state.favorite,"rating":row.state.rating,"artwork_previews":artwork_previews(products, row.artwork_binding.iter())
+                "year":row.year,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"favorite":row.state.favorite,"rating":row.state.rating,"artwork_previews":artwork_previews(products, row.artwork_binding.iter()),
+                "fields":field_texts(shown, &fields)
             })),
             _ => None,
         })

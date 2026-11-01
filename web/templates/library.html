@@ -2,18 +2,21 @@
 <div data-page data-activity-sensitive="{{ activity_sensitive }}" data-sort="{{ sort }}" data-descending="{{ descending }}" data-name="{{ name }}" data-count="{{ rows.len() }}" data-total="{{ total }}">
 {% if kind == "track" %}
   <table class="track-list" role="presentation">
-    <thead role="rowgroup"><tr role="row"><th role="columnheader">#</th><th role="columnheader">{{ localization::tr("Title") }}</th><th role="columnheader">{{ localization::tr("Album") }}</th><th role="columnheader" class="duration" aria-label="{{ localization::tr("Duration") }}" title="{{ localization::tr("Duration") }}">{% call m::icon("duration") %}{% endcall %}</th><th role="columnheader" class="favorite" aria-label="{{ localization::tr("Favorite") }}" title="{{ localization::tr("Favorite") }}">{% call m::icon("favorite") %}{% endcall %}</th><th role="columnheader" class="actions" aria-label="{{ localization::tr("Actions") }}"></th></tr></thead>
+    <thead role="rowgroup"><tr role="row">{% for column in columns %}{% if column.icon != "" %}<th role="columnheader" class="{{ column.class }}" aria-label="{{ column.title }}" title="{{ column.title }}">{% call m::icon(column.icon) %}{% endcall %}</th>{% else if column.field == "Tools" %}<th role="columnheader" class="actions" aria-label="{{ localization::tr("Actions") }}"></th>{% else %}<th role="columnheader"{% if column.class != "" %} class="{{ column.class }}"{% endif %}>{{ column.title }}</th>{% endif %}{% endfor %}</tr></thead>
     <tbody role="rowgroup">{% for row in rows %}
       {% if let Some(heading) = self.disc_heading(loop.index0) %}
-      <tr role="row" class="disc-header"><th role="rowheader" colspan="6">{{ heading }}</th></tr>
+      <tr role="row" class="disc-header"><th role="rowheader" colspan="{{ columns.len() }}">{{ heading }}</th></tr>
       {% endif %}
+      {% let position = offset + loop.index %}
       <tr role="row" data-row="{{ row.data }}" data-uri="{{ row.text("uri") }}" tabindex="0" aria-selected="false">
-        <td role="gridcell" class="number">{% if album_tracks && row.number("track_number") > 0 %}{{ row.number("track_number") }}{% else %}{{ offset + loop.index }}{% endif %}</td>
-        <td role="gridcell"><span class="track-title">{{ row.title() }}</span><button type="button" class="metadata-link track-artist" data-action="artists">{{ row.text("artist") }}</button></td>
-        <td role="gridcell"><button type="button" class="metadata-link" data-action="albums">{{ row.text("album") }}</button></td>
-        <td role="gridcell" class="duration">{{ row.duration() }}</td>
-        <td role="gridcell" class="favorite">{% call m::favorite(row, "track", "icon-button", false) %}{% endcall %}</td>
-        <td role="gridcell" class="actions"><form method="post" action="/api/queue" data-enhanced-form>
+        {% for column in columns %}{% if column.field == "RowIndex" %}<td role="gridcell" class="number">{% if album_tracks && row.number("track_number") > 0 %}{{ row.number("track_number") }}{% else %}{{ position }}{% endif %}</td>
+        {% else if column.field == "TitleMerged" %}<td role="gridcell"><span class="track-title">{{ row.title() }}</span><button type="button" class="metadata-link track-artist" data-action="artists">{{ row.text("artist") }}</button></td>
+        {% else if column.field == "Title" %}<td role="gridcell"><span class="track-title">{{ row.title() }}</span></td>
+        {% else if column.field == "Album" %}<td role="gridcell" class="album"><button type="button" class="metadata-link" data-action="albums">{{ row.field_text(column.field) }}</button></td>
+        {% else if column.field == "Artist" || column.field == "AlbumArtist" %}<td role="gridcell"><button type="button" class="metadata-link" data-action="artists">{{ row.field_text(column.field) }}</button></td>
+        {% else if column.field == "Duration" %}<td role="gridcell" class="duration">{{ row.duration() }}</td>
+        {% else if column.field == "Favorite" %}<td role="gridcell" class="favorite">{% call m::favorite(row, "track", "icon-button", false) %}{% endcall %}</td>
+        {% else if column.field == "Tools" %}<td role="gridcell" class="actions"><form method="post" action="/api/queue" data-enhanced-form>
           <input type="hidden" name="csrf" value="{{ row.csrf }}" />
           <input type="hidden" name="return" value="{{ row.return_to() }}" />
           <input type="hidden" name="payload" value="{{ row.selection("track") }}" />
@@ -22,6 +25,7 @@
           {% call m::menu_button(row, "icon-button") %}{% endcall %}
           {% call m::media_menu(row, "track") %}{% endcall %}
         </form></td>
+        {% else %}<td role="gridcell">{{ row.field_text(column.field) }}</td>{% endif %}{% endfor %}
       </tr>
     {% endfor %}</tbody>
   </table>

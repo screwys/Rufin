@@ -54,7 +54,75 @@ struct Row<'a> {
     menu_id: String,
 }
 
+/// A field a card shows under its title, with its text.
+struct Label<'a> {
+    field: &'a str,
+    text: &'a str,
+}
+
+/// A column of a track list: its field, and its header's title, class and icon.
+struct Column<'a> {
+    field: &'a str,
+    title: String,
+    class: &'static str,
+    icon: &'static str,
+}
+
+impl<'a> Column<'a> {
+    fn new(field: &'a str) -> Self {
+        let parsed = serde_json::from_value::<LibraryField>(Value::String(field.into())).ok();
+        let (class, icon) = match parsed {
+            Some(LibraryField::RowIndex) => ("number", ""),
+            Some(LibraryField::Album) => ("album", ""),
+            Some(LibraryField::Duration) => ("duration", "duration"),
+            Some(LibraryField::Favorite) => ("favorite", "favorite"),
+            Some(LibraryField::Tools) => ("actions", ""),
+            _ => ("", ""),
+        };
+        let title = match parsed {
+            Some(LibraryField::RowIndex) => "#".into(),
+            Some(LibraryField::TitleMerged) => localization::tr("Title"),
+            Some(field) => localization::tr(
+                rufin_core::settings::presentation::library_field_title(field),
+            ),
+            None => String::new(),
+        };
+        Self {
+            field,
+            title,
+            class,
+            icon,
+        }
+    }
+}
+
 impl Row<'_> {
+    /// The row's fields with text, in its list's order.
+    fn labels(&self) -> Vec<Label<'_>> {
+        self.data["fields"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|label| {
+                Some(Label {
+                    field: label["field"].as_str()?,
+                    text: label["text"].as_str().filter(|text| !text.is_empty())?,
+                })
+            })
+            .collect()
+    }
+
+    /// The row's text for `field`.
+    fn field_text(&self, field: &str) -> &str {
+        self.data["fields"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|label| label["field"] == field)
+            .and_then(|label| label["text"].as_str())
+            .unwrap_or_default()
+    }
+
     fn preview_tiles(&self) -> Vec<&str> {
         let previews = &self.data["artwork_previews"];
         let count = self.number("artwork_count").max(1) as usize;
@@ -173,6 +241,9 @@ impl Row<'_> {
 #[template(path = "library.html")]
 struct Library<'a> {
     rows: Vec<Row<'a>>,
+    /// A track list's columns: its list's row fields. Track rows carry no artwork, so an
+    /// Image field shows no column.
+    columns: Vec<Column<'a>>,
     kind: &'a str,
     offset: usize,
     total: String,
@@ -214,6 +285,7 @@ mod disc_tests {
                 &parameters,
                 json!({
                     "album_tracks": true, "disc_sections": sections,
+                    "columns": ["RowIndex", "Title"],
                     "tracks": [{"uri":"file:///track", "title":"Track", "track_number":7}]
                 }),
             )
@@ -322,6 +394,14 @@ pub(super) fn render(
                     csrf,
                     menu_id: format!("media-menu-library-{}", offset + index),
                 })
+                .collect(),
+            columns: value["columns"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|field| *field != "Image")
+                .map(Column::new)
                 .collect(),
             kind,
             offset,

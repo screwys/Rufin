@@ -333,12 +333,13 @@ pub(super) async fn list_data(
         ..library::ListRead::new(library::ListKind::Playlists, source, sort)
     };
     let activity_sensitive = query.activity_sensitive();
+    let fields = catalog::grid_fields(products, LibraryListKey::Playlists);
     let (order, total) = catalog::order(products, parameters, library::Read::List(query)).await?;
     let playlists = catalog::rows(products, &order, offset, limit, true)
         .await?
-        .into_iter()
-        .filter_map(|row| match row {
-            library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => Some(json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, &row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})),
+        .iter()
+        .filter_map(|shown| match shown {
+            library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => Some(json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice()),"fields":field_texts(shown, &fields)})),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -363,7 +364,7 @@ pub(super) async fn entries_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = catalog::page_query(products, parameters, "entries").await?;
+    let (query, fields) = catalog::page_query(products, parameters, "entries").await?;
     let activity_sensitive = query.activity_sensitive();
     let (sort, descending) = (sort_name(&query), query.descending);
     let offset = number(parameters, "offset", 0)?;
@@ -376,21 +377,9 @@ pub(super) async fn entries_data(
         _ => None,
     };
     let rows = catalog::rows(products, &order, offset, limit, false).await?;
-    let entries = rows
-        .iter()
-        .filter_map(|row| match row {
-            library::Row::Track(track) => {
-                let entry = track.entry.as_ref()?;
-                let mut value = track_row_json(track);
-                value["id"] = json!(entry.key);
-                value["position"] = json!(entry.position);
-                Some(value)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let entries = catalog::track_rows(&rows, &fields, true);
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries,"columns":fields}),
     )
 }
 

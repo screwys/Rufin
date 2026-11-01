@@ -690,6 +690,17 @@ fn track_json(
     }
     row
 }
+/// What `row` shows for `fields`, the fields its list shows on the other clients, as
+/// `[{field, text}]`.
+fn field_texts(row: &library::Row, fields: &[LibraryField]) -> Value {
+    fields
+        .iter()
+        .map(|field| {
+            json!({"field":field,"text":rufin_core::settings::presentation::row_field(row, *field)})
+        })
+        .collect()
+}
+
 fn track_row_json(row: &library::TrackRow) -> Value {
     json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
         "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
