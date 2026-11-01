@@ -2710,7 +2710,7 @@ impl SourceOwner {
             .filter(|(_, kind, _)| kind == target.kind())
             .and_then(|(source_id, _, _)| self.configuration(&source_id))
             .is_some_and(|configuration| {
-                outbox::delivers(&configuration.kind, library::DeliveryKind::Favorite)
+                configuration.is(|kind| kind.delivers(library::DeliveryKind::Favorite))
             });
         self.shared
             .catalog
@@ -2734,7 +2734,7 @@ impl SourceOwner {
             .as_ref()
             .and_then(|source_id| self.configuration(source_id))
             .is_some_and(|configuration| {
-                outbox::delivers(&configuration.kind, library::DeliveryKind::Rating)
+                configuration.is(|kind| kind.delivers(library::DeliveryKind::Rating))
             });
         if let Err(error) = self
             .shared
@@ -3007,10 +3007,7 @@ fn configured_source(
 }
 
 fn half_stars_enabled(configured: &ConfiguredSource) -> bool {
-    matches!(
-        configured.configuration.kind.as_str(),
-        "jellyfin" | "emby" | "plex"
-    ) || configured.enable_half_stars
+    configured.configuration.is(library::SourceKind::half_stars) || configured.enable_half_stars
 }
 
 fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + Send + 'static) {
@@ -3055,8 +3052,12 @@ fn configured_sources(
             kind: configured.configuration.kind.clone(),
             name: configured.configuration.name.clone(),
             half_stars_enabled: half_stars_enabled(configured),
-            owns_playlists: configured.configuration.owns_playlists(),
-            supports_playlist_public: configured.configuration.supports_playlist_public(),
+            owns_playlists: configured
+                .configuration
+                .is(library::SourceKind::owns_playlists),
+            supports_playlist_public: configured
+                .configuration
+                .is(library::SourceKind::playlist_public),
         })
         .collect::<Vec<_>>();
     let local_folders = stored
@@ -3162,9 +3163,9 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             id: configuration.source_id.clone(),
             kind: configuration.kind.clone(),
             name: configuration.name.clone(),
-            half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby" | "plex"),
-            owns_playlists: configuration.owns_playlists(),
-            supports_playlist_public: configuration.supports_playlist_public(),
+            half_stars_enabled: configuration.is(library::SourceKind::half_stars),
+            owns_playlists: configuration.is(library::SourceKind::owns_playlists),
+            supports_playlist_public: configuration.is(library::SourceKind::playlist_public),
         },
         credentials: CredentialPreset {
             source_name: configuration.name.clone(),

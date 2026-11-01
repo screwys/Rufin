@@ -933,7 +933,7 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
 pub(crate) async fn discover(owner: &SourceOwner, source_id: &SourceId) {
     let Some(configuration) = owner
         .configuration(source_id)
-        .filter(|source| source.is_file_library())
+        .filter(|source| source.is(library::SourceKind::file_library))
     else {
         return;
     };

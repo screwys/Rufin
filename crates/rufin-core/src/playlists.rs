@@ -866,11 +866,12 @@ pub async fn add_playlist_tracks(
                 .map_err(sources::SourceError::from),
             Ok((PlaylistOwner::Server(source, source_key), id)) => {
                 async {
-                    let skip =
-                        skip_duplicates
-                            || owner.configuration(source.source_id()).is_some_and(
-                                |configuration| !configuration.playlist_tracks_can_repeat(),
-                            );
+                    let skip = skip_duplicates
+                        || owner
+                            .configuration(source.source_id())
+                            .is_some_and(|configuration| {
+                                !configuration.is(library::SourceKind::playlist_tracks_can_repeat)
+                            });
                     let catalog = &owner.shared.catalog;
                     let (tracks, ids): (Vec<_>, Vec<_>) = catalog
                         .source_playlist_track_ids(source_key, Some(playlist), &songs, skip)
@@ -1022,7 +1023,7 @@ pub fn can_remove_unavailable(owner: &SourceOwner, playlist: &library::PlaylistR
         && playlist.source_id.as_ref().is_none_or(|id| {
             owner
                 .configuration(&SourceId::new(id))
-                .is_some_and(|source| source.is_file_library())
+                .is_some_and(|source| source.is(library::SourceKind::file_library))
         })
         && owner
             .shared
@@ -1228,7 +1229,7 @@ fn configured_playlist_owner(
 ) -> Result<PlaylistOwner, String> {
     if !owner
         .configuration(id)
-        .is_some_and(|configuration| configuration.owns_playlists())
+        .is_some_and(|configuration| configuration.is(library::SourceKind::owns_playlists))
     {
         Ok(PlaylistOwner::Local)
     } else {

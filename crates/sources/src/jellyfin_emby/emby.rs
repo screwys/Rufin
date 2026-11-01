@@ -248,7 +248,7 @@ mod tests {
                 .provider_payload
                 .contains("use_jellyfin_instant_mix")
         );
-        assert!(configuration.playlist_tracks_can_repeat());
+        assert!(configuration.is(library::SourceKind::playlist_tracks_can_repeat));
         let source = super::super::open(&configuration, credential, Some("device".into())).unwrap();
         let owner = crate::Source::new(
             crate::SourceId::new("source"),

@@ -298,28 +298,13 @@ impl SourceConfiguration {
         self.kind == crate::file::local::LOCAL_SOURCE_ID
     }
 
-    pub fn is_file_library(&self) -> bool {
-        matches!(self.kind.as_str(), "local" | "smb" | "webdav")
+    pub fn source_kind(&self) -> Option<library::SourceKind> {
+        library::SourceKind::parse(&self.kind)
     }
 
-    /// Whether a playlist can belong to this source: its server stores it. Playlists made for
-    /// any other source are Rufin playlists.
-    pub fn owns_playlists(&self) -> bool {
-        matches!(
-            self.kind.as_str(),
-            "jellyfin" | "emby" | "plex" | "navidrome" | "subsonic"
-        )
-    }
-
-    pub fn supports_playlist_public(&self) -> bool {
-        matches!(
-            self.kind.as_str(),
-            "jellyfin" | "emby" | "navidrome" | "subsonic"
-        )
-    }
-
-    pub fn playlist_tracks_can_repeat(&self) -> bool {
-        playlist_tracks_can_repeat(&self.kind)
+    /// See [`library::SourceKind`]; an unknown kind has none of its abilities.
+    pub fn is(&self, ability: impl FnOnce(library::SourceKind) -> bool) -> bool {
+        self.source_kind().is_some_and(ability)
     }
 
     /// Encode an already configured Local source without touching its folders.
@@ -420,10 +405,6 @@ impl SourceConfiguration {
             ))),
         }
     }
-}
-
-pub(crate) fn playlist_tracks_can_repeat(kind: &str) -> bool {
-    !matches!(kind, "jellyfin" | "plex")
 }
 
 pub(crate) fn decode_provider_payload<T: DeserializeOwned>(
@@ -598,10 +579,14 @@ mod tests {
 
     #[test]
     fn jellyfin_playlist_adds_do_not_offer_repeated_tracks() {
-        assert!(!migrated_source("jellyfin", serde_json::Value::Null).playlist_tracks_can_repeat());
-        assert!(!migrated_source("plex", serde_json::Value::Null).playlist_tracks_can_repeat());
-        assert!(migrated_source("subsonic", serde_json::Value::Null).playlist_tracks_can_repeat());
-        assert!(migrated_source("local", serde_json::Value::Null).playlist_tracks_can_repeat());
+        let repeats = |kind| {
+            migrated_source(kind, serde_json::Value::Null)
+                .is(library::SourceKind::playlist_tracks_can_repeat)
+        };
+        assert!(!repeats("jellyfin"));
+        assert!(!repeats("plex"));
+        assert!(repeats("subsonic"));
+        assert!(repeats("local"));
     }
 }
 
@@ -646,7 +631,7 @@ impl SourceConfiguration {
                 return None;
             }
             format!("{}:track:{id}", self.kind)
-        } else if matches!(self.kind.as_str(), "subsonic" | "navidrome") {
+        } else if self.is(library::SourceKind::subsonic) {
             if !matches!(
                 path,
                 "/rest/stream" | "/rest/stream.view" | "/rest/download" | "/rest/download.view"

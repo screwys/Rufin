@@ -799,7 +799,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         .execute(&mut raw)
         .await
         .unwrap();
-    for kind in ["local", "files", "webdav", "smb", "documents", "subsonic"] {
+    for kind in ["local", "webdav", "smb", "subsonic"] {
         sqlx::query("UPDATE sources SET kind=?2 WHERE source_key=?1")
             .bind(fixture.source)
             .bind(kind)

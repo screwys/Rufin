@@ -122,7 +122,10 @@ pub(crate) struct Source {
 impl Source {
     /// Whether the source reads files: its albums come from file tags.
     pub(crate) fn file_source(&self) -> bool {
-        matches!(self.kind.as_deref(), Some("local" | "webdav" | "smb"))
+        self.kind
+            .as_deref()
+            .and_then(crate::SourceKind::parse)
+            .is_some_and(crate::SourceKind::file_library)
     }
 }
 

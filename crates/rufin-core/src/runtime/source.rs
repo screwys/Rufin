@@ -316,31 +316,31 @@ mod tests {
 }
 
 pub fn source_kind_title(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "jellyfin" => localization::msgid("Jellyfin"),
-        "emby" => localization::msgid("Emby"),
-        "plex" => localization::msgid("Plex"),
-        "navidrome" => localization::msgid("Navidrome"),
-        "subsonic" => localization::msgid("OpenSubsonic"),
-        "local" => localization::msgid("Local"),
-        "webdav" => localization::msgid("WebDAV"),
-        "smb" => localization::msgid("SMB / Samba"),
-        "peer" => localization::msgid("Rufin Connect"),
-        _ => return None,
+    use library::SourceKind;
+    Some(match SourceKind::parse(kind)? {
+        SourceKind::Jellyfin => localization::msgid("Jellyfin"),
+        SourceKind::Emby => localization::msgid("Emby"),
+        SourceKind::Plex => localization::msgid("Plex"),
+        SourceKind::Navidrome => localization::msgid("Navidrome"),
+        SourceKind::Subsonic => localization::msgid("OpenSubsonic"),
+        SourceKind::Local => localization::msgid("Local"),
+        SourceKind::Webdav => localization::msgid("WebDAV"),
+        SourceKind::Smb => localization::msgid("SMB / Samba"),
+        SourceKind::Peer => localization::msgid("Rufin Connect"),
     })
 }
 
 pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "jellyfin" => "io.github.screwys.Rufin.source.jellyfin",
-        "emby" => "io.github.screwys.Rufin.source.emby",
-        "plex" => "io.github.screwys.Rufin.source.plex",
-        "navidrome" => "io.github.screwys.Rufin.source.navidrome",
-        "subsonic" => "io.github.screwys.Rufin.source.opensubsonic",
-        "local" => "io.github.screwys.Rufin-symbolic",
-        "webdav" => "io.github.screwys.Rufin.source.webdav",
-        "smb" => "io.github.screwys.Rufin.source.smb",
-        "peer" => "rufin-phonelink-symbolic",
-        _ => return None,
+    use library::SourceKind;
+    Some(match SourceKind::parse(kind)? {
+        SourceKind::Jellyfin => "io.github.screwys.Rufin.source.jellyfin",
+        SourceKind::Emby => "io.github.screwys.Rufin.source.emby",
+        SourceKind::Plex => "io.github.screwys.Rufin.source.plex",
+        SourceKind::Navidrome => "io.github.screwys.Rufin.source.navidrome",
+        SourceKind::Subsonic => "io.github.screwys.Rufin.source.opensubsonic",
+        SourceKind::Local => "io.github.screwys.Rufin-symbolic",
+        SourceKind::Webdav => "io.github.screwys.Rufin.source.webdav",
+        SourceKind::Smb => "io.github.screwys.Rufin.source.smb",
+        SourceKind::Peer => "rufin-phonelink-symbolic",
     })
 }

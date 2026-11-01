@@ -81,7 +81,7 @@ impl SourceOwner {
             if kind != "track"
                 || !self
                     .configuration(&source)
-                    .is_some_and(|source| source.is_file_library())
+                    .is_some_and(|source| source.is(library::SourceKind::file_library))
             {
                 continue;
             }

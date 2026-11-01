@@ -74,6 +74,8 @@ mod search;
 mod selection;
 pub use selection::MemberSelection;
 mod smart_playlists;
+mod source_kind;
+pub use source_kind::SourceKind;
 mod storage;
 pub use storage::CacheUsage;
 mod tags;

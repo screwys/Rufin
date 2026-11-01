@@ -24,9 +24,6 @@ const ORDER_BUDGET: usize = 8 << 20;
 #[cfg(not(target_os = "android"))]
 const ORDER_BUDGET: usize = 32 << 20;
 
-/// Kinds whose play counts come from Rufin's listens; servers report their own.
-const LISTENED_KINDS: [&str; 5] = ["local", "files", "webdav", "smb", "documents"];
-
 /// What a reader needs besides the Snapshot: which sources count Rufin's listens.
 pub(crate) struct Context<'a> {
     pub(crate) snapshot: &'a Snapshot,
@@ -76,10 +73,10 @@ impl<'a> Context<'a> {
             .iter()
             .map(|key| {
                 snapshot.source(*key).is_none_or(|source| {
-                    source
-                        .kind
-                        .as_deref()
-                        .is_none_or(|kind| LISTENED_KINDS.contains(&kind))
+                    source.kind.as_deref().is_none_or(|kind| {
+                        // File libraries count Rufin's listens; servers report their own.
+                        crate::SourceKind::parse(kind).is_some_and(crate::SourceKind::file_library)
+                    })
                 })
             })
             .collect();

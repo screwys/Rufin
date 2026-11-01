@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use library::{Delivery, DeliveryKind};
+use library::{Delivery, DeliveryKind, SourceKind};
 use sources::{SourceEntityKind, SourceError, SourceId};
 use tracing::info;
 
@@ -17,21 +17,8 @@ use crate::runtime::{SourceEvent, SourceNotice, SourceNoticeKind};
 const RETRY_SECONDS: i64 = 30;
 const PAGE: usize = 64;
 
-/// Whether a source kind takes favorites, and whether it takes ratings. Plex has no favorites
-/// and Emby no numeric ratings; Rufin holds those values itself.
-pub(super) fn delivers(kind: &str, delivery: DeliveryKind) -> bool {
-    match delivery {
-        DeliveryKind::Favorite => matches!(kind, "jellyfin" | "emby" | "subsonic" | "navidrome"),
-        DeliveryKind::Rating => matches!(kind, "jellyfin" | "subsonic" | "navidrome" | "plex"),
-    }
-}
-
-/// Rufin keeps its copy of an accepted rating that the server holds differently: Plex
-/// ratings, and half stars on a server that stores whole stars.
-fn keeps_copy(kind: &str, delivery: &Delivery) -> bool {
-    delivery.kind == DeliveryKind::Rating
-        && (kind == "plex"
-            || (matches!(kind, "subsonic" | "navidrome") && delivery.value.unwrap_or(0) % 20 != 0))
+fn keeps_copy(kind: SourceKind, delivery: &Delivery) -> bool {
+    delivery.kind == DeliveryKind::Rating && kind.keeps_rating(delivery.value.unwrap_or(0))
 }
 
 /// Delivers what is due, then waits for the next due time or for a delivery just queued.
@@ -100,7 +87,7 @@ impl SourceOwner {
                     if let Err(error) = self
                         .shared
                         .catalog
-                        .delivered(&delivery, keeps_copy(&kind, &delivery))
+                        .delivered(&delivery, keeps_copy(kind, &delivery))
                         .await
                     {
                         self.shared.warn_nonfatal(&error.to_string());
@@ -125,8 +112,8 @@ impl SourceOwner {
     ) -> Sent {
         let Some(kind) = self
             .configuration(source_id)
-            .map(|configuration| configuration.kind)
-            .filter(|kind| delivers(kind, delivery.kind))
+            .and_then(|configuration| configuration.source_kind())
+            .filter(|kind| kind.delivers(delivery.kind))
         else {
             return Sent::Undeliverable;
         };
@@ -210,7 +197,7 @@ impl SourceOwner {
 
 enum Sent {
     /// The server took it; the source's kind decides whether Rufin keeps its copy.
-    Accepted(String),
+    Accepted(SourceKind),
     /// The server cannot take it now.
     Later,
     /// The server refused it.

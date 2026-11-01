@@ -1,4 +1,4 @@
-use library::{AlbumView, ArtistView};
+use library::{AlbumView, ArtistView, SourceKind};
 use localization::msgid;
 
 use crate::settings::ExternalSiteLinkSettings;
@@ -16,7 +16,7 @@ pub fn navigation_source_link(
 ) -> Option<DetailLink> {
     let folder = source.map_or_else(
         || media_uri.starts_with("file:"),
-        |source| matches!(source.kind.as_str(), "local" | "webdav" | "smb"),
+        |source| source.is(SourceKind::file_library),
     );
     if folder {
         return Some(DetailLink {
@@ -27,7 +27,7 @@ pub fn navigation_source_link(
     }
     let source = source?;
     // Navidrome's player links tracks to their album page.
-    let uri = if source.kind == "navidrome"
+    let uri = if source.source_kind() == Some(SourceKind::Navidrome)
         && library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
     {
         album_uri?
@@ -41,15 +41,16 @@ pub fn navigation_source_link(
 
 pub fn source_link(source: &sources::SourceConfiguration, media_uri: &str) -> Option<DetailLink> {
     let (_, kind, object_id) = library::source_entity_parts(media_uri)?;
-    let folder = matches!(source.kind.as_str(), "local" | "webdav" | "smb");
-    let title = match source.kind.as_str() {
-        "local" | "webdav" | "smb" => msgid("Open Folder"),
-        "jellyfin" => msgid("Open on Jellyfin"),
-        "emby" => msgid("Open on Emby"),
-        "plex" => msgid("Open on Plex"),
-        "navidrome" => msgid("Open on Navidrome"),
-        "subsonic" => msgid("Open on server"),
-        _ => return None,
+    let source_kind = source.source_kind()?;
+    let folder = source_kind.file_library();
+    let title = match source_kind {
+        SourceKind::Local | SourceKind::Webdav | SourceKind::Smb => msgid("Open Folder"),
+        SourceKind::Jellyfin => msgid("Open on Jellyfin"),
+        SourceKind::Emby => msgid("Open on Emby"),
+        SourceKind::Plex => msgid("Open on Plex"),
+        SourceKind::Navidrome => msgid("Open on Navidrome"),
+        SourceKind::Subsonic => msgid("Open on server"),
+        SourceKind::Peer => return None,
     };
     Some(DetailLink {
         title,

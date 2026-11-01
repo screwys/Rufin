@@ -224,7 +224,7 @@ async fn analyze_selected(
     failed: &Failed,
 ) {
     let catalog = Arc::clone(&source_owner.shared.catalog);
-    if write_tags && configuration.is_file_library() {
+    if write_tags && configuration.is(library::SourceKind::file_library) {
         let owner = Arc::clone(&source_owner);
         let source_id = configuration.source_id.clone();
         let source = tokio::task::spawn_blocking(move || owner.client(&source_id)).await;
@@ -422,7 +422,7 @@ impl Analysis<'_> {
     }
 
     async fn write_tags(&self, measurements: &[(TrackKey, Option<f64>, Option<f64>)]) {
-        if !self.write_tags || !self.configuration.is_file_library() {
+        if !self.write_tags || !self.configuration.is(library::SourceKind::file_library) {
             return;
         }
         let owner = Arc::clone(self.source_owner);

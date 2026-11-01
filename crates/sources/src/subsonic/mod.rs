@@ -90,7 +90,7 @@ pub struct SubsonicSourceConfig {
 
 impl SubsonicSourceConfig {
     pub fn from_configuration(stored: &crate::SourceConfiguration) -> SourceResult<Self> {
-        if !matches!(stored.kind.as_str(), "navidrome" | "subsonic") {
+        if !stored.is(library::SourceKind::subsonic) {
             return Err(SourceError::InvalidConfig(format!(
                 "expected a Subsonic source, found {}",
                 stored.kind
