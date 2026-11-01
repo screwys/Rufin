@@ -1,7 +1,3 @@
-pub use rufin_core::route::{
-    CollectionCategory, FolderPathItem, Route, SidebarRouteDescriptor, sidebar_route_descriptor,
-};
-
 pub fn sidebar_route_css_class(item: rufin_core::settings::SidebarRouteItem) -> &'static str {
     use rufin_core::settings::SidebarRouteItem;
     match item {

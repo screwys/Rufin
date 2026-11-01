@@ -29,7 +29,7 @@ use super::detail_showcase::{
 use super::routes::SearchableTrackOptions;
 use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
 use gtk_media_menus::media_menus::present_artist_context_menu;
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 
 const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Albums"),

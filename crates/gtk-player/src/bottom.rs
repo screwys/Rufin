@@ -1031,7 +1031,9 @@ pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64)
 }
 
 use crate::{progress::seekbar_target_seconds, state::NowPlayingPresentation};
-use gtk_widgets::{controls::set_active_class, format_duration, route::Route};
+use gtk_widgets::controls::set_active_class;
+use rufin_core::route::Route;
+use rufin_core::settings::presentation::format_duration;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},

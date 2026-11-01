@@ -41,15 +41,16 @@ use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
 use super::table_sizing::route_column_view_initial_width;
-use gtk_widgets::detail_links::{DetailLinks, album_row_artist_links};
+use gtk_widgets::detail_links::album_row_artist_links;
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, TrackPresentation, add_field_skeleton_class, album_field,
     artist_field, column_width, track_row_field,
 };
 use gtk_widgets::recycled_cells::{RecycledMergedCell, RecycledTextCell, list_cell};
-use gtk_widgets::route::CollectionCategory;
-use gtk_widgets::route::Route;
 use gtk_widgets::sparse_model::{SparseObjectItem, connect_sparse_bind};
+use rufin_core::route::CollectionCategory;
+use rufin_core::route::Route;
+use rufin_core::route::detail_links::DetailLinks;
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 pub mod session;
@@ -1083,7 +1084,7 @@ fn search_column(
     if field == LibraryField::Image {
         return super::columns::artwork_column::<SearchItem, _>(
             shell,
-            gtk_widgets::settings::library_field_title(field),
+            rufin_core::settings::presentation::library_field_title(field),
             column_width(field),
             SearchItem::artwork,
             None,
@@ -1179,7 +1180,9 @@ fn search_column(
         }
     });
     gtk::ColumnViewColumn::new(
-        Some(gtk_widgets::settings::library_field_title(field)),
+        Some(rufin_core::settings::presentation::library_field_title(
+            field,
+        )),
         Some(factory),
     )
 }

@@ -473,7 +473,7 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         }
     });
     let column = gtk::ColumnViewColumn::new(
-        Some(gtk_widgets::settings::library_field_title(
+        Some(rufin_core::settings::presentation::library_field_title(
             LibraryField::RowIndex,
         )),
         Some(factory),
@@ -600,8 +600,9 @@ fn queue_duration_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
-        let text =
-            gtk_widgets::format_duration((row.track.metadata.duration_millis.max(0) / 1000) as u32);
+        let text = rufin_core::settings::presentation::format_duration(
+            (row.track.metadata.duration_millis.max(0) / 1000) as u32,
+        );
         label.label().set_text(&text);
     });
     factory.connect_unbind(|_, item| {
@@ -912,7 +913,9 @@ fn queue_text_column(shell: &Rc<crate::PlayerUi>, field: LibraryField) -> gtk::C
         }
     });
     gtk::ColumnViewColumn::new(
-        Some(&tr(gtk_widgets::settings::library_field_title(field))),
+        Some(&tr(
+            rufin_core::settings::presentation::library_field_title(field),
+        )),
         Some(factory),
     )
 }

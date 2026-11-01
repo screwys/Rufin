@@ -1,8 +1,8 @@
-use crate::format_duration;
 use adw::prelude::*;
 use gtk::glib;
 use localization::tr;
 use lyrics::{LyricsSearchContent, LyricsSearchResult};
+use rufin_core::settings::presentation::format_duration;
 use std::{cell::Cell, rc::Rc};
 
 pub struct LyricsEditor {

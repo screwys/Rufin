@@ -13,7 +13,7 @@ pub(super) fn build(
             Rc::new(move || {
                 weak.upgrade()
                     .map(|shell| shell.navigation.routes.borrow().current().clone())
-                    .unwrap_or(gtk_widgets::route::Route::Home)
+                    .unwrap_or(rufin_core::route::Route::Home)
             })
         },
         present_dialog: {

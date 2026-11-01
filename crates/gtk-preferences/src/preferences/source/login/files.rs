@@ -81,7 +81,7 @@ impl Draft {
     ) -> Result<sources::SourceId, String> {
         let (settings, credentials) = self.input()?;
         let name = if source_id.is_none() && self.name.trim().is_empty() {
-            gtk_widgets::source_labels::source_kind_title(kind)
+            rufin_core::runtime::source::source_kind_title(kind)
                 .map(tr)
                 .unwrap_or_default()
         } else {

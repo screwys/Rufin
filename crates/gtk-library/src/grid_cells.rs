@@ -25,12 +25,13 @@ use gtk_widgets::selection::track_play_request;
 use rufin_core::playback::PlayRequest;
 
 use crate::track_selection::TrackSelection;
-use gtk_widgets::detail_links::{DetailLinkBinding, DetailLinks, album_row_artist_links};
+use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MAX_CARD_WIDTH, COLLECTION_GRID_MIN_CARD_WIDTH,
     album_field, artist_field, opaque_artwork,
 };
 use gtk_widgets::sparse_model::{bind_sparse_item, unbind_sparse_item};
+use rufin_core::route::detail_links::DetailLinks;
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
     track_count > 0 && downloaded_count == track_count
@@ -849,7 +850,7 @@ impl AlbumGridCell {
                 && let Some(uri) = uri
             {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                shell.navigate(gtk_widgets::route::Route::AlbumDetail(uri));
+                shell.navigate(rufin_core::route::Route::AlbumDetail(uri));
             }
         });
         self.body.card.add_controller(click);

@@ -106,7 +106,7 @@ pub fn populate_home_block_rows(
 
         let row = reorder_row(
             ReorderRowPresentation {
-                title: tr(gtk_widgets::settings::home_block_title(block)),
+                title: tr(rufin_core::settings::presentation::home_block_title(block)),
                 subtitle: visibility_position_subtitle(active, position),
                 visible: active,
                 visible_sensitive: !active || visible_blocks.len() > 1,

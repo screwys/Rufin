@@ -6,12 +6,12 @@ use artwork::ArtworkBinding;
 #[cfg(test)]
 use gtk::glib;
 
-use crate::format_duration_units;
 use localization::{album_count_text, track_count_text};
 use localization::{msgid, tr};
 use rufin_core::settings::layout::{
     LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings,
 };
+use rufin_core::settings::presentation::format_duration_units;
 
 pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn track_key(&self) -> Option<library::TrackKey>;
@@ -27,8 +27,8 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn set_downloaded(&mut self, value: bool);
     fn field(&self, field: LibraryField) -> String;
     fn track_number(&self) -> Option<i64>;
-    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
-        crate::detail_links::DetailLinks::text(&self.field(field))
+    fn links(&self, field: LibraryField) -> rufin_core::route::detail_links::DetailLinks {
+        rufin_core::route::detail_links::DetailLinks::text(&self.field(field))
     }
 }
 
@@ -63,8 +63,8 @@ impl TrackPresentation for TrackRow {
     fn field(&self, field: LibraryField) -> String {
         track_row_field(self, field)
     }
-    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
-        crate::detail_links::metadata_links(
+    fn links(&self, field: LibraryField) -> rufin_core::route::detail_links::DetailLinks {
+        rufin_core::route::detail_links::metadata_links(
             field,
             &self.field(field),
             self.links.album_media_uri.as_deref(),
@@ -105,8 +105,8 @@ impl TrackPresentation for std::sync::Arc<QueueRow> {
     fn field(&self, field: LibraryField) -> String {
         track_field(&self.track, field)
     }
-    fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
-        crate::detail_links::metadata_links(
+    fn links(&self, field: LibraryField) -> rufin_core::route::detail_links::DetailLinks {
+        rufin_core::route::detail_links::metadata_links(
             field,
             &self.field(field),
             self.track.links.album_media_uri.as_deref(),
@@ -161,9 +161,9 @@ pub fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
 pub fn album_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
         LibraryField::SongCount => track_count_text(album.summary.track_count.max(0) as u64),
-        LibraryField::Duration => {
-            crate::format_duration((album.summary.duration_millis.max(0) / 1_000) as u32)
-        }
+        LibraryField::Duration => rufin_core::settings::presentation::format_duration(
+            (album.summary.duration_millis.max(0) / 1_000) as u32,
+        ),
         _ => album_item_field(album, field),
     }
 }

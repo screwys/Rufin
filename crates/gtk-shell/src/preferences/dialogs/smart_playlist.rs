@@ -79,7 +79,7 @@ impl Shell {
     ) {
         let folder = if playlist.is_none() {
             match self.navigation.routes.borrow().current() {
-                gtk_widgets::route::Route::PlaylistFolder { key, smart: true } => Some(*key),
+                rufin_core::route::Route::PlaylistFolder { key, smart: true } => Some(*key),
                 _ => None,
             }
         } else {

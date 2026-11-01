@@ -1,7 +1,7 @@
-use gtk_widgets::format_duration_units;
 use gtk_widgets::media_drag::{
     MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider, media_drag_source,
 };
+use rufin_core::settings::presentation::format_duration_units;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -28,9 +28,9 @@ use gtk_widgets::interactions::{
     replace_native_menu_checkmarks, show_native_menu_icons,
 };
 use gtk_widgets::library_fields::smart_playlist_display_name;
-use gtk_widgets::route::{CollectionCategory, Route};
 use library::SmartPlaylistRow;
 use rufin_core::playback::QueuePlacement;
+use rufin_core::route::{CollectionCategory, Route};
 use tracing::warn;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};
@@ -94,7 +94,7 @@ pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
         .iter()
         .filter(|entry| entry.visible)
     {
-        let descriptor = gtk_widgets::route::sidebar_route_descriptor(entry.item);
+        let descriptor = rufin_core::route::sidebar_route_descriptor(entry.item);
         let sidebar_item = adw::SidebarItem::new(&tr(descriptor.title));
         sidebar_item.set_icon_name(Some(descriptor.icon_name));
         section.append(sidebar_item);
@@ -297,13 +297,13 @@ fn update_native_route_selection(shell: &Shell, active_route: &Route, pin_is_sel
         items
             .clone()
             .position(|entry| {
-                gtk_widgets::route::sidebar_route_descriptor(entry.item).root_route == *active_route
+                rufin_core::route::sidebar_route_descriptor(entry.item).root_route == *active_route
             })
             .map(|index| index as u32)
     };
     for (index, entry) in items.enumerate() {
         if let Some(item) = shell.navigation_view.normal_nav_routes.item(index as u32) {
-            let descriptor = gtk_widgets::route::sidebar_route_descriptor(entry.item);
+            let descriptor = rufin_core::route::sidebar_route_descriptor(entry.item);
             let icon_name = if selected_index == Some(index as u32) {
                 descriptor.selected_icon_name()
             } else {
@@ -343,7 +343,7 @@ fn update_button_navigation_selection(container: &gtk::Box, active_route: &Route
         let Some(item) = SidebarRouteItem::from_stable_id(widget.widget_name().as_str()) else {
             continue;
         };
-        let descriptor = gtk_widgets::route::sidebar_route_descriptor(item);
+        let descriptor = rufin_core::route::sidebar_route_descriptor(item);
         let selected = descriptor.root_route == *active_route;
         if selected {
             widget.add_css_class(NAV_SELECTED_CLASS);
@@ -1589,11 +1589,11 @@ fn sidebar_route_at_position_in(
         .iter()
         .filter(|entry| entry.visible)
         .nth(position.checked_sub(1)?)?;
-    Some(gtk_widgets::route::sidebar_route_descriptor(item.item).root_route)
+    Some(rufin_core::route::sidebar_route_descriptor(item.item).root_route)
 }
 
 fn rail_button(shell: &Rc<Shell>, item: SidebarRouteItem) -> gtk::Button {
-    let descriptor = gtk_widgets::route::sidebar_route_descriptor(item);
+    let descriptor = rufin_core::route::sidebar_route_descriptor(item);
     let button = gtk::Button::new();
     button.add_css_class("nav-button");
     button.add_css_class("flat");
@@ -1688,7 +1688,7 @@ mod tests {
             let value = serde_json::to_value(item).expect("sidebar item serializes");
             assert_eq!(
                 value.as_str(),
-                Some(gtk_widgets::route::sidebar_route_descriptor(item).stable_id)
+                Some(rufin_core::route::sidebar_route_descriptor(item).stable_id)
             );
             assert_eq!(
                 serde_json::from_value::<SidebarRouteItem>(value)
@@ -1707,7 +1707,7 @@ mod tests {
             Route::GenreDetail(library::GenreKey::from_raw(1)),
             Route::MoodDetail(library::MoodKey::from_raw(1)),
             Route::Folders {
-                path: vec![gtk_widgets::route::FolderPathItem {
+                path: vec![rufin_core::route::FolderPathItem {
                     id: String::new(),
                     name: String::new(),
                 }],
@@ -1717,7 +1717,7 @@ mod tests {
         ];
         for route in routes {
             assert!(SidebarRouteItem::all().into_iter().all(|item| {
-                gtk_widgets::route::sidebar_route_descriptor(item).root_route != route
+                rufin_core::route::sidebar_route_descriptor(item).root_route != route
             }));
         }
     }

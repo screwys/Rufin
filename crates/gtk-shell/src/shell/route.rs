@@ -24,8 +24,8 @@ use super::route_position::{
 };
 use gtk_library::route_layout::{primary_route_scroll_adjustment, route_boundary};
 use gtk_widgets::mounted_route::*;
-use gtk_widgets::route::{CollectionCategory, Route};
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
+use rufin_core::route::{CollectionCategory, Route};
 
 const SLOW_ROUTE_LOAD_MS: u64 = 250;
 
@@ -68,7 +68,7 @@ mod route_stack_tests {
     fn folder_routes_keep_history() {
         let root = Route::Folders { path: Vec::new() };
         let child = Route::Folders {
-            path: vec![gtk_widgets::route::FolderPathItem {
+            path: vec![rufin_core::route::FolderPathItem {
                 id: "folder".to_string(),
                 name: "Folder".to_string(),
             }],

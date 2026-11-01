@@ -540,7 +540,7 @@ fn subsonic_settings_group_for(
     let host = credential_host_view(&snapshot, true, authentication);
     host.fields_group.set_title(&tr("Server Settings"));
     host.fields_group
-        .set_description(Some(&tr(gtk_widgets::source_labels::source_kind_title(
+        .set_description(Some(&tr(rufin_core::runtime::source::source_kind_title(
             presentation.kind,
         )
         .expect("registered source presentation"))));
@@ -813,10 +813,10 @@ fn setup_scaffold(
         content.add_css_class("add-server-compact-content");
     }
     source_icon.set_icon_name(Some(
-        gtk_widgets::source_labels::source_kind_icon_name(registration.kind)
+        rufin_core::runtime::source::source_kind_icon_name(registration.kind)
             .expect("registered source presentation"),
     ));
-    source_title.set_label(&tr(gtk_widgets::source_labels::source_kind_title(
+    source_title.set_label(&tr(rufin_core::runtime::source::source_kind_title(
         registration.kind,
     )
     .expect("registered source presentation")));
@@ -859,16 +859,16 @@ fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -
         gtk_widgets::objects!(builder, resource, {
             row: adw::ActionRow, icon: gtk::Image,
         });
-        row.set_title(&tr(gtk_widgets::source_labels::source_kind_title(
+        row.set_title(&tr(rufin_core::runtime::source::source_kind_title(
             presentation.kind,
         )
         .expect("registered source presentation")));
         icon.set_icon_name(Some(
-            gtk_widgets::source_labels::source_kind_icon_name(presentation.kind)
+            rufin_core::runtime::source::source_kind_icon_name(presentation.kind)
                 .expect("registered source presentation"),
         ));
         row.update_property(&[gtk::accessible::Property::Label(&tr(
-            gtk_widgets::source_labels::source_kind_title(presentation.kind)
+            rufin_core::runtime::source::source_kind_title(presentation.kind)
                 .expect("registered source presentation"),
         ))]);
         let weak = Rc::downgrade(shell);
@@ -1361,7 +1361,7 @@ fn refresh_discovered_servers_view(shell: &Rc<Preferences>, view: &DiscoveredSer
                 .subtitle(server.address.clone())
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(
-                gtk_widgets::source_labels::source_kind_icon_name(view.kind)
+                rufin_core::runtime::source::source_kind_icon_name(view.kind)
                     .unwrap_or("rufin-network-server-symbolic"),
             ));
             row.set_activatable(true);
@@ -1399,7 +1399,7 @@ fn discovery_status_label(status: &DiscoveryStatus, kind: &str) -> String {
             "Searching for {provider} servers on the local network...",
             &[(
                 "provider",
-                &tr(gtk_widgets::source_labels::source_kind_title(kind).unwrap_or(kind)),
+                &tr(rufin_core::runtime::source::source_kind_title(kind).unwrap_or(kind)),
             )],
         ),
         DiscoveryStatus::Empty => tr("No servers found, add one manually or try again"),

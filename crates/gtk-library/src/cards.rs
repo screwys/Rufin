@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MIN_CARD_WIDTH};
 use gtk_widgets::localization::{bind_widget_accessible_label, bind_widget_tooltip};
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 
 pub struct AlbumCover {
     pub widget: gtk::Overlay,

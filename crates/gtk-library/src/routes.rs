@@ -18,7 +18,7 @@ use super::collections::{
 };
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use crate::track_model::TrackCollectionModel;
-use gtk_widgets::route::{CollectionCategory, Route};
+use rufin_core::route::{CollectionCategory, Route};
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 

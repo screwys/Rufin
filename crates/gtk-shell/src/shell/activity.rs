@@ -3,10 +3,11 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use gtk_library::activity::ActivityCollections;
 use gtk_player::fullscreen_background::FullscreenBackground;
-use gtk_widgets::{mounted_route::route_current_track, route::Route};
+use gtk_widgets::mounted_route::route_current_track;
 use library::{ActivityOverview, CalendarActivityPeriod};
 use localization::{tr, tr_with};
 use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
+use rufin_core::route::Route;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},

@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
-use gtk_widgets::route::Route;
 use localization::tr_with;
+use rufin_core::route::Route;
 
 use super::Shell;
 

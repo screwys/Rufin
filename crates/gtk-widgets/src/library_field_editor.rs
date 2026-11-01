@@ -70,7 +70,9 @@ pub fn library_field_config_row(
 ) -> adw::ActionRow {
     let enabled = active.contains(&field);
     let row = adw::ActionRow::builder()
-        .title(tr(crate::settings::library_field_title(field)))
+        .title(tr(rufin_core::settings::presentation::library_field_title(
+            field,
+        )))
         .subtitle(if enabled { tr("Visible") } else { tr("Hidden") })
         .build();
 

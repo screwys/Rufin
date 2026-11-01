@@ -448,7 +448,9 @@ fn album_table_title(field: LibraryField) -> Option<&'static str> {
     match field {
         LibraryField::Tools => None,
         LibraryField::TitleMerged => Some("Title"),
-        _ => Some(gtk_widgets::settings::library_field_title(field)),
+        _ => Some(rufin_core::settings::presentation::library_field_title(
+            field,
+        )),
     }
 }
 
@@ -1149,9 +1151,7 @@ fn artist_route_list(
             .upgrade()
             .and_then(|section| section.sparse.peek_ready(position))
         {
-            shell.navigate(gtk_widgets::route::Route::AlbumDetail(
-                row.media_uri.clone(),
-            ));
+            shell.navigate(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()));
         }
     });
     list.set_hexpand(true);

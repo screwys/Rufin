@@ -17,10 +17,10 @@ use gtk_widgets::controls::{ActionButtonVariant, configure_action_button};
 use gtk_widgets::favorites::{
     favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
-use gtk_widgets::format_duration_units;
 use gtk_widgets::layout::{configure_fill_width_clip, width_allocation_owner};
 use gtk_widgets::localization::{bind_label_text_with, localized_label};
 use gtk_widgets::mounted_route::MountedRoute;
+use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::settings::{HomeBlockKind, HomeSectionKind};
 use rufin_core::view::HomeSection;
 
@@ -40,7 +40,7 @@ use gtk_widgets::selection::track_play_request;
 use crate::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
 use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
 use gtk_widgets::library_fields::{COLLECTION_GRID_CARD_MARGIN, TrackPresentation};
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 
 const HOME_ALBUM_GRID_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
 const HOME_TRACK_GRID_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
@@ -277,7 +277,7 @@ impl HomeRouteProjection {
     fn build(&self, shell: &Rc<CatalogUi>, section: HomeSection) -> ShownHomeSection {
         match section {
             HomeSection::Rows { block, rows } => ShownHomeSection::Rows(shell.home_section_view(
-                &tr(gtk_widgets::settings::home_block_title(block)),
+                &tr(rufin_core::settings::presentation::home_block_title(block)),
                 home_items(&rows),
                 block.section_kind(),
             )),
@@ -621,7 +621,7 @@ impl CatalogUi {
     fn home_genres(self: &Rc<Self>, genres: &[TagRow]) -> gtk::Widget {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
-        let heading = localized_label(gtk_widgets::settings::home_block_title(
+        let heading = localized_label(rufin_core::settings::presentation::home_block_title(
             HomeBlockKind::Genres,
         ));
         heading.add_css_class("section-heading");

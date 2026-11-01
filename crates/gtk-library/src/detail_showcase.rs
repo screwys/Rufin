@@ -25,7 +25,7 @@ use gtk_media_menus::media_menus::CollectionPlay;
 use gtk_widgets::cover_controls::{
     CoverHoverControls, cover_hover_controls, cover_play_hover_controls, showcase_cover_overlay,
 };
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 
 const DETAIL_HEADER_SPACING: i32 = 18;
 mod showcase_imp {

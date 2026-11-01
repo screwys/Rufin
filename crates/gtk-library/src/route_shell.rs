@@ -505,7 +505,9 @@ impl CatalogUi {
             fields_group: adw::PreferencesGroup,
             display_host: gtk::Box,
         });
-        title.set_subtitle(&tr(gtk_widgets::settings::library_list_title(key)));
+        title.set_subtitle(&tr(rufin_core::settings::presentation::library_list_title(
+            key,
+        )));
         configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
         dialog.set_content_width(large_popup_content_width(LIBRARY_CONFIG_DIALOG_WIDTH));
         dialog.set_content_height(large_popup_content_height(
@@ -721,7 +723,7 @@ fn library_sort_title(key: LibraryListKey, field: LibraryField) -> &'static str 
     if key == LibraryListKey::PlaylistTracks && field == LibraryField::RowIndex {
         msgid("Playlist order")
     } else {
-        gtk_widgets::settings::library_field_title(field)
+        rufin_core::settings::presentation::library_field_title(field)
     }
 }
 

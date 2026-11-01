@@ -114,9 +114,6 @@ impl SettingsState {
     }
 }
 
-mod presentation;
-pub use presentation::{home_block_title, library_field_title, library_list_title};
-
 impl SettingsState {
     pub fn update_library_list_settings(
         &self,

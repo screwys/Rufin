@@ -1,10 +1,9 @@
-pub use rufin_core::runtime::source::{source_kind_icon_name, source_kind_title};
-
 use adw::prelude::*;
 use app_identity::{DISPLAY_NAME, STABLE_APP_ID};
 use gtk::gio;
 use localization::{tr, tr_with};
 use rufin_core::runtime::source::SourceSummary;
+use rufin_core::runtime::source::{source_kind_icon_name, source_kind_title};
 use sources::SourceId;
 use std::rc::Rc;
 

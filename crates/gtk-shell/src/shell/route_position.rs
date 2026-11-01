@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use gtk::prelude::*;
 
 use gtk_widgets::mounted_route::{ItemScrollPosition, NativeListScroll};
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 
 const ROUTE_POSITION_CAPACITY: usize = 64;
 
@@ -224,7 +224,7 @@ pub(super) fn mount_route_surface(
 
 #[cfg(test)]
 mod tests {
-    use gtk_widgets::route::Route;
+    use rufin_core::route::Route;
 
     use super::{RoutePosition, RoutePositionKey, RoutePositionMemory, clamp_route_position};
 

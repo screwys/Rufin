@@ -34,13 +34,13 @@ use gtk_widgets::library_fields::column_fit_width;
 use super::route_shell::LibraryPageShellOptions;
 use super::table_sizing::route_column_view_initial_width;
 use crate::LibraryField;
-use gtk_widgets::detail_links::DetailLinks;
-use gtk_widgets::format_duration_units;
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::library_fields::{playlist_artwork, playlist_field, smart_playlist_field};
 use gtk_widgets::recycled_cells::{RecycledBadgedTextCell, list_cell};
-use gtk_widgets::route::Route;
 use gtk_widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
+use rufin_core::route::Route;
+use rufin_core::route::detail_links::DetailLinks;
+use rufin_core::settings::presentation::format_duration_units;
 
 impl CatalogUi {
     pub fn library_tags_route(self: &Rc<Self>, read: Opened, genres: bool) -> MountedRoute {
@@ -798,7 +798,7 @@ fn named_collection_column<T: NamedCollectionRow>(
         }
         LibraryField::Image => artwork_column::<T, _>(
             shell,
-            gtk_widgets::settings::library_field_title(field),
+            rufin_core::settings::presentation::library_field_title(field),
             named_column_width(key, field),
             move |item| item.artwork().into_iter().next().unwrap_or_default(),
             Some(Rc::new(move |item| {
@@ -849,7 +849,9 @@ fn named_collection_column<T: NamedCollectionRow>(
                 }
             });
             gtk::ColumnViewColumn::new(
-                Some(gtk_widgets::settings::library_field_title(field)),
+                Some(rufin_core::settings::presentation::library_field_title(
+                    field,
+                )),
                 Some(factory),
             )
         }

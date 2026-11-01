@@ -32,7 +32,6 @@ use super::route_shell::LibraryToolbarProjection;
 use super::table_sizing::route_column_view_initial_width_with_inset;
 use crate::playlist_entry_model::entry_key;
 use crate::track_selection::PlaylistEntrySelection;
-use gtk_widgets::detail_links::DetailLinks;
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, opaque_artwork,
 };
@@ -41,6 +40,7 @@ use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
+use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::settings::presentation::track_row_field;
 use rufin_core::view::{Opened, View};
 
@@ -870,7 +870,7 @@ fn playlist_entry_grid(
 }
 
 fn playlist_entry_field_links(entry: &TrackRow, field: LibraryField) -> DetailLinks {
-    gtk_widgets::detail_links::metadata_links(
+    rufin_core::route::detail_links::metadata_links(
         field,
         &track_row_field(&entry, field),
         entry.links.album_media_uri.as_deref(),

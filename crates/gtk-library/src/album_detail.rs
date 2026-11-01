@@ -1229,7 +1229,7 @@ impl AlbumSidePanel {
                 .set_text(&album.year.map(|year| year.to_string()).unwrap_or_default());
             let facts = [
                 track_count_text(album.summary.track_count.max(0) as u64),
-                gtk_widgets::format_duration_units(
+                rufin_core::settings::presentation::format_duration_units(
                     (album.summary.duration_millis.max(0) / 1000) as u32,
                 ),
             ];
@@ -1520,14 +1520,16 @@ fn album_track_header(fields: &[LibraryField]) -> (gtk::Box, Vec<gtk::Widget>) {
                 };
                 let image = gtk::Image::from_icon_name(icon);
                 image.set_tooltip_text(Some(&localization::tr(
-                    gtk_widgets::settings::library_field_title(*field),
+                    rufin_core::settings::presentation::library_field_title(*field),
                 )));
                 image.upcast()
             } else if *field == LibraryField::Tools {
                 gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
             } else {
                 let label = album_track_label(
-                    &localization::tr(gtk_widgets::settings::library_field_title(*field)),
+                    &localization::tr(rufin_core::settings::presentation::library_field_title(
+                        *field,
+                    )),
                     *field,
                     1,
                 );

@@ -241,12 +241,12 @@ pub fn present_folder_context_menu(
             match result {
                 Ok(()) => {
                     if (menus.current_route)()
-                        == (gtk_widgets::route::Route::PlaylistFolder { key, smart })
+                        == (rufin_core::route::Route::PlaylistFolder { key, smart })
                     {
                         (menus.navigate)(if smart {
-                            gtk_widgets::route::Route::SmartPlaylists
+                            rufin_core::route::Route::SmartPlaylists
                         } else {
-                            gtk_widgets::route::Route::Playlists
+                            rufin_core::route::Route::Playlists
                         });
                     }
                 }

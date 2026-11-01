@@ -7,10 +7,12 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
 
 use crate::artwork::{ArtworkTile, ArtworkTileWeak};
-use crate::{downloads::DownloadsState, route::Route};
+use crate::downloads::DownloadsState;
+use rufin_core::route::Route;
 
-use crate::detail_links::{DetailLinkBinding, DetailLinks};
+use crate::detail_links::DetailLinkBinding;
 use crate::lyrics_snippet::LyricsSnippetView;
+use rufin_core::route::detail_links::DetailLinks;
 
 pub const ROW_ACTIONS_WIDTH: i32 = 44;
 
@@ -46,7 +48,7 @@ pub fn row_action_column(
 ) -> gtk::ColumnViewColumn {
     if field == rufin_core::settings::LibraryField::Favorite {
         let column = crate::localization::localized_column(
-            crate::settings::library_field_title(field),
+            rufin_core::settings::presentation::library_field_title(field),
             factory,
         );
         column.set_fixed_width(crate::favorites::FAVORITE_COLUMN_WIDTH);

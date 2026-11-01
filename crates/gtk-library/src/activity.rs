@@ -6,9 +6,10 @@ use crate::{
 };
 use adw::prelude::*;
 use gtk::{gio, glib};
+use gtk_widgets::mounted_route::RouteCurrentTrack;
 use gtk_widgets::selection::track_play_request;
-use gtk_widgets::{mounted_route::RouteCurrentTrack, route::Route};
 use library::{ActivityOverview, TrackRow};
+use rufin_core::route::Route;
 use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{cell::RefCell, rc::Rc};
 

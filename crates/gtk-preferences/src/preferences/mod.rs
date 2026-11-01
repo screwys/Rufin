@@ -902,7 +902,7 @@ fn general_page(
     let starting_pages = SidebarRouteItem::all();
     let starting_page_titles = starting_pages
         .iter()
-        .map(|item| tr(gtk_widgets::route::sidebar_route_descriptor(*item).title))
+        .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title))
         .collect::<Vec<_>>();
     starting_page_row.set_model(Some(&gtk::StringList::new(
         &starting_page_titles
@@ -1315,7 +1315,7 @@ fn sidebar_item_row(
     entry: SidebarRouteItemSettings,
     position: usize,
 ) -> adw::ActionRow {
-    let descriptor = gtk_widgets::route::sidebar_route_descriptor(entry.item);
+    let descriptor = rufin_core::route::sidebar_route_descriptor(entry.item);
     let visible_shell = Rc::clone(shell);
     let visible_expander = expander.downgrade();
     let visible_rows = Rc::clone(rows);

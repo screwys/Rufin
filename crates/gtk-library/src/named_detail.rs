@@ -10,8 +10,8 @@ use rufin_core::playback::RadioPlayRequest;
 use crate::CatalogUi;
 use crate::LibraryListKey;
 use gtk_widgets::artwork::presentation::stable_seed;
-use gtk_widgets::format_duration_units;
 use gtk_widgets::mounted_route::{MountedRoute, route_view};
+use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
 use super::detail_showcase::detail_radio_button;

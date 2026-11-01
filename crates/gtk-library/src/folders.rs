@@ -13,8 +13,8 @@ use gtk_widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view
 use library::ShowsState;
 use rufin_core::view::{Opened, View};
 
-use gtk_widgets::route::{FolderPathItem, Route};
 use gtk_widgets::sparse_model::{SparseSource, connect_sparse_bind};
+use rufin_core::route::{FolderPathItem, Route};
 
 type FolderResume = Rc<dyn Fn()>;
 
@@ -631,9 +631,9 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
         }
     });
     let column = gtk::ColumnViewColumn::new(
-        Some(&tr(gtk_widgets::settings::library_field_title(
-            LibraryField::Title,
-        ))),
+        Some(&tr(
+            rufin_core::settings::presentation::library_field_title(LibraryField::Title),
+        )),
         Some(factory),
     );
     configure_folder_column(
@@ -658,7 +658,7 @@ fn folder_column(
         LibraryField::Image => {
             return super::columns::mapped_track_image_column::<FolderTableRow, _, _>(
                 shell,
-                gtk_widgets::settings::library_field_title(field),
+                rufin_core::settings::presentation::library_field_title(field),
                 width,
                 |row| match row {
                     FolderTableRow::Track(track) => Some(track.media_uri.clone()),
@@ -753,7 +753,7 @@ fn folder_text_column(
     max_width_chars: i32,
     tabular_numeric: bool,
     value: impl Fn(&FolderTableRow) -> String + 'static,
-    links: impl Fn(&FolderTableRow) -> Option<gtk_widgets::detail_links::DetailLinks> + 'static,
+    links: impl Fn(&FolderTableRow) -> Option<rufin_core::route::detail_links::DetailLinks> + 'static,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
@@ -809,7 +809,8 @@ fn folder_text_column(
         };
         let text = value(&row);
         cell.bind_links(
-            links(&row).unwrap_or_else(|| gtk_widgets::detail_links::DetailLinks::text(&text)),
+            links(&row)
+                .unwrap_or_else(|| rufin_core::route::detail_links::DetailLinks::text(&text)),
         );
     });
     factory.connect_unbind(|_, item| {

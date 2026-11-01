@@ -34,8 +34,8 @@ const PLAY_ACTIONS: [(&str, QueuePlacement, bool); 6] = [
 ];
 pub type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
 
-use gtk_widgets::route::Route;
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
+use rufin_core::route::Route;
 
 pub fn add_drag_to_playlist(
     menus: &Rc<MediaMenus>,

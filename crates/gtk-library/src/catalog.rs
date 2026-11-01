@@ -37,7 +37,7 @@ pub struct CatalogUi {
     >,
     pub update_smart_playlist_pin: Rc<dyn Fn(&library::SmartPlaylistRow)>,
     pub refresh_home_section: Rc<dyn Fn(rufin_core::settings::HomeSectionKind)>,
-    pub set_favorite_category: Rc<dyn Fn(gtk_widgets::route::CollectionCategory)>,
+    pub set_favorite_category: Rc<dyn Fn(rufin_core::route::CollectionCategory)>,
     pub cycle_favorite_category: Rc<dyn Fn()>,
     pub history_source_name: Option<String>,
     pub history_source_id: Rc<dyn Fn() -> Option<sources::SourceId>>,
@@ -134,10 +134,10 @@ impl CatalogUi {
     pub fn selected_library(&self) -> Option<&rufin_core::runtime::SelectedLibrary> {
         self.selected.as_ref()
     }
-    pub fn route_navigation(&self) -> Rc<dyn Fn(gtk_widgets::route::Route)> {
+    pub fn route_navigation(&self) -> Rc<dyn Fn(rufin_core::route::Route)> {
         Rc::clone(&self.media_menus.navigate)
     }
-    pub fn navigate(&self, route: gtk_widgets::route::Route) {
+    pub fn navigate(&self, route: rufin_core::route::Route) {
         (self.media_menus.navigate)(route);
     }
     pub fn update_library_list_settings(

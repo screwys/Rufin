@@ -1,4 +1,4 @@
-use gtk_widgets::source_labels::source_kind_title;
+use rufin_core::runtime::source::source_kind_title;
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;

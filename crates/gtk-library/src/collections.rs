@@ -31,9 +31,9 @@ use gtk_widgets::library_fields::TrackPresentation;
 use gtk_widgets::library_fields::{
     column_fit_width, column_width, compact_header_column_width, grid_label_with_label,
 };
-use gtk_widgets::route::Route;
 use gtk_widgets::table_header::{ColumnViewHeader, TableFrame};
 use gtk_widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
+use rufin_core::route::Route;
 
 struct TrackTablePlayingStateInner {
     model: TrackCollectionModel,
@@ -800,12 +800,14 @@ where
 }
 pub fn collection_column_width(field: LibraryField) -> i32 {
     match field {
-        LibraryField::AlbumCount | LibraryField::SongCount => {
-            compact_header_column_width(gtk_widgets::settings::library_field_title(field), 96)
-        }
-        LibraryField::Duration => {
-            compact_header_column_width(gtk_widgets::settings::library_field_title(field), 128)
-        }
+        LibraryField::AlbumCount | LibraryField::SongCount => compact_header_column_width(
+            rufin_core::settings::presentation::library_field_title(field),
+            96,
+        ),
+        LibraryField::Duration => compact_header_column_width(
+            rufin_core::settings::presentation::library_field_title(field),
+            128,
+        ),
         _ => column_width(field),
     }
 }

@@ -22,7 +22,7 @@ use gtk_widgets::localization::localized_column;
 use rufin_core::playback::PlayRequest;
 
 use super::table_links::mapped_track_link_column;
-use gtk_widgets::detail_links::{DetailLinks, album_row_artist_links};
+use gtk_widgets::detail_links::album_row_artist_links;
 use gtk_widgets::library_fields::{
     add_field_skeleton_class, album_field, artist_field, column_fit_width, column_width,
     opaque_artwork,
@@ -31,6 +31,7 @@ use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
+use rufin_core::route::detail_links::DetailLinks;
 
 const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 
@@ -222,7 +223,7 @@ pub fn album_column(
     let title = if field == LibraryField::TitleMerged {
         "Title"
     } else {
-        gtk_widgets::settings::library_field_title(field)
+        rufin_core::settings::presentation::library_field_title(field)
     };
     let column = localized_column(title, &factory);
     column.set_fixed_width(column_width(field));
@@ -499,7 +500,7 @@ pub fn artist_column(
         _ => artist_text_column(
             shell,
             field,
-            gtk_widgets::settings::library_field_title(field),
+            rufin_core::settings::presentation::library_field_title(field),
             column_width(field),
             album_artist,
             move |artist| artist_field(artist, field),
@@ -596,7 +597,7 @@ pub fn track_column_for_key<T: gtk_widgets::library_fields::TrackPresentation>(
         ),
         LibraryField::AlbumArtist => mapped_track_link_column(
             shell,
-            gtk_widgets::settings::library_field_title(LibraryField::AlbumArtist),
+            rufin_core::settings::presentation::library_field_title(LibraryField::AlbumArtist),
             width,
             |item: &T| Some(item.media_uri().to_string()),
             |item: &T| item.links(LibraryField::AlbumArtist),
@@ -634,7 +635,7 @@ pub fn track_column_title(field: LibraryField) -> &'static str {
     if field == LibraryField::Duration {
         "◷"
     } else {
-        gtk_widgets::settings::library_field_title(field)
+        rufin_core::settings::presentation::library_field_title(field)
     }
 }
 
@@ -754,7 +755,10 @@ where
             label.set_text("");
         }
     });
-    let column = localized_column(gtk_widgets::settings::library_field_title(field), &factory);
+    let column = localized_column(
+        rufin_core::settings::presentation::library_field_title(field),
+        &factory,
+    );
     column.set_fixed_width(width);
     column
 }

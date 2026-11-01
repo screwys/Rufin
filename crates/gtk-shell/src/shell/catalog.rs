@@ -1,6 +1,6 @@
 use super::Shell;
 use adw::prelude::*;
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 use std::{cell::RefCell, rc::Rc};
 impl Shell {
     pub(super) fn build_catalog(

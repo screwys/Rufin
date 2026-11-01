@@ -123,14 +123,14 @@ pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
             "sidebar_items",
             crate::SidebarRouteItem::all()
                 .iter()
-                .map(|item| tr(gtk_widgets::route::sidebar_route_descriptor(*item).title))
+                .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title))
                 .collect::<Vec<_>>(),
         ),
         (
             "home_blocks",
             rufin_core::settings::HomeBlockKind::all()
                 .iter()
-                .map(|item| tr(gtk_widgets::settings::home_block_title(*item)))
+                .map(|item| tr(rufin_core::settings::presentation::home_block_title(*item)))
                 .collect(),
         ),
     ] {

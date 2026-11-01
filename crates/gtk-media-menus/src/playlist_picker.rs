@@ -400,7 +400,7 @@ fn replace_picker_rows(
             ));
         row.imp()
             .duration
-            .set_label(&gtk_widgets::format_duration_units(
+            .set_label(&rufin_core::settings::presentation::format_duration_units(
                 (playlist.duration_millis.max(0) / 1_000) as u32,
             ));
         for genre in playlist.genres.iter().take(2) {
@@ -418,7 +418,7 @@ fn replace_picker_rows(
                 "{} {} {}",
                 playlist.name,
                 playlist.track_count,
-                gtk_widgets::format_duration_units(
+                rufin_core::settings::presentation::format_duration_units(
                     (playlist.duration_millis.max(0) / 1_000) as u32
                 )
             )

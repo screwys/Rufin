@@ -11,8 +11,8 @@ use localization::{msgid, track_count_text};
 use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
 use gtk_widgets::artwork::presentation::stable_seed;
-use gtk_widgets::format_duration_units;
 use gtk_widgets::mounted_route::{MountedRoute, PageReread, route_view};
+use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;

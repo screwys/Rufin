@@ -7,7 +7,7 @@ use gtk::glib;
 use localization::tr;
 
 use crate::shell::Shell;
-use gtk_widgets::route::Route;
+use rufin_core::route::Route;
 use rufin_core::runtime::source::PlaylistExport;
 
 fn playlist_export_filename(name: &str) -> String {

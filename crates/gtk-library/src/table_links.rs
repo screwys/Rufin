@@ -7,10 +7,10 @@ use crate::collection_context::present_track_context_menu;
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::localization::localized_column;
 
-use gtk_widgets::detail_links::DetailLinks;
 use gtk_widgets::recycled_cells::{RecycledTextCell, list_cell};
 use gtk_widgets::sparse_model::connect_sparse_bind;
 use gtk_widgets::sparse_model::object_item;
+use rufin_core::route::detail_links::DetailLinks;
 
 pub fn mapped_track_link_column<T, TrackValue, Value>(
     shell: &Rc<CatalogUi>,

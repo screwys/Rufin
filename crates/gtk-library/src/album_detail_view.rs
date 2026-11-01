@@ -14,10 +14,10 @@ use gtk_widgets::controls::{ActionButtonVariant, configure_action_button};
 use gtk_widgets::favorites::{
     album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
-use gtk_widgets::format_duration_units;
 use gtk_widgets::mounted_route::{MountedRoute, route_view};
 use localization::{msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
+use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
 use super::collections::library_route_inset;
@@ -31,7 +31,8 @@ use crate::route_layout::{
 };
 use crate::track_model::TrackCollectionModel;
 use gtk_media_menus::media_menus::present_album_context_menu;
-use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
+use gtk_widgets::detail_links::DetailLinkBinding;
+use rufin_core::route::detail_links::album_artist_links;
 
 impl CatalogUi {
     pub fn album_detail_view(self: &Rc<Self>, mut read: Opened) -> MountedRoute {

@@ -4,7 +4,7 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::{gdk, glib, subclass::prelude::ObjectSubclassIsExt};
 use gtk_widgets::artwork::ArtworkTile;
-use gtk_widgets::route::{CollectionCategory, Route};
+use rufin_core::route::{CollectionCategory, Route};
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::Shell;
