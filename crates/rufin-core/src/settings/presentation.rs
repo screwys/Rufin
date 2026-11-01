@@ -249,6 +249,85 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
     }
 }
 
+use library::{
+    SmartPlaylistActivityPeriod, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
+    SmartPlaylistSort,
+};
+
+pub fn smart_rule_field_title(field: SmartPlaylistRuleField) -> &'static str {
+    match field {
+        SmartPlaylistRuleField::Title => msgid("Title"),
+        SmartPlaylistRuleField::Artist => msgid("Artist"),
+        SmartPlaylistRuleField::Album => msgid("Album"),
+        SmartPlaylistRuleField::Comment => msgid("Comment"),
+        SmartPlaylistRuleField::Genre => msgid("Genre"),
+        SmartPlaylistRuleField::Mood => msgid("Mood"),
+        SmartPlaylistRuleField::Bpm => msgid("BPM"),
+        SmartPlaylistRuleField::Rating => msgid("Rating"),
+        SmartPlaylistRuleField::Year => msgid("Year"),
+        SmartPlaylistRuleField::Favorite => msgid("Favorite"),
+        SmartPlaylistRuleField::Played => msgid("Ever played"),
+        SmartPlaylistRuleField::PlayCount => msgid("Play count"),
+        SmartPlaylistRuleField::SkipCount => msgid("Skip count"),
+        SmartPlaylistRuleField::LastPlayed => msgid("Last played"),
+        SmartPlaylistRuleField::DateAdded => msgid("Date added"),
+    }
+}
+
+pub fn smart_sort_title(field: SmartPlaylistSort) -> &'static str {
+    match field {
+        SmartPlaylistSort::Title => msgid("Title"),
+        SmartPlaylistSort::Artist => msgid("Artist"),
+        SmartPlaylistSort::Album => msgid("Album"),
+        SmartPlaylistSort::Year => msgid("Year"),
+        SmartPlaylistSort::DateAdded => msgid("Date added"),
+        SmartPlaylistSort::LastPlayed => msgid("Last played"),
+        SmartPlaylistSort::PlayCount => msgid("Play count"),
+        SmartPlaylistSort::SkipCount => msgid("Skip count"),
+        SmartPlaylistSort::Bpm => msgid("BPM"),
+        SmartPlaylistSort::Rating => msgid("Rating"),
+        SmartPlaylistSort::Duration => msgid("Duration"),
+    }
+}
+
+pub fn smart_operator_title(
+    field: SmartPlaylistRuleField,
+    operator: SmartPlaylistRuleOperator,
+) -> &'static str {
+    match (field, operator) {
+        (
+            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
+            SmartPlaylistRuleOperator::NotContains,
+        ) => msgid("excludes"),
+        (
+            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
+            SmartPlaylistRuleOperator::NotEquals,
+        ) => msgid("is not"),
+        (_, SmartPlaylistRuleOperator::Contains) => msgid("contains"),
+        (_, SmartPlaylistRuleOperator::NotContains) => msgid("does not contain"),
+        (_, SmartPlaylistRuleOperator::Equals) => msgid("equals"),
+        (_, SmartPlaylistRuleOperator::NotEquals) => msgid("does not equal"),
+        (_, SmartPlaylistRuleOperator::Above) => msgid("above"),
+        (_, SmartPlaylistRuleOperator::Below) => msgid("below"),
+        (_, SmartPlaylistRuleOperator::Between) => msgid("range"),
+        (_, SmartPlaylistRuleOperator::Is) => msgid("is"),
+        (_, SmartPlaylistRuleOperator::IsNot) => msgid("is not"),
+        (_, SmartPlaylistRuleOperator::Before) => msgid("before"),
+        (_, SmartPlaylistRuleOperator::After) => msgid("after"),
+        (_, SmartPlaylistRuleOperator::IsEmpty) => msgid("is empty"),
+        (_, SmartPlaylistRuleOperator::IsNotEmpty) => msgid("is not empty"),
+    }
+}
+
+pub fn smart_period_title(period: SmartPlaylistActivityPeriod) -> &'static str {
+    match period {
+        SmartPlaylistActivityPeriod::Weekly => msgid("Last 7 days"),
+        SmartPlaylistActivityPeriod::Monthly => msgid("Last 30 days"),
+        SmartPlaylistActivityPeriod::Yearly => msgid("Last 365 days"),
+        SmartPlaylistActivityPeriod::Lifetime => msgid("All time"),
+    }
+}
+
 use library::{TrackArtistLink, TrackRow, TrackView};
 use localization::{album_count_text, track_count_text};
 

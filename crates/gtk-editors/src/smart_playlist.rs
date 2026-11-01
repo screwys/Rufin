@@ -17,6 +17,9 @@ const SMART_PLAYLIST_DIALOG_WIDTH: i32 = 700;
 const SMART_PLAYLIST_ARTWORK_WIDTH: i32 = 320;
 
 use rufin_core::playlists::SmartPlaylistChange;
+use rufin_core::settings::presentation::{
+    smart_operator_title, smart_period_title, smart_rule_field_title, smart_sort_title,
+};
 
 #[derive(Clone)]
 struct SmartPlaylistTemplate {
@@ -144,15 +147,10 @@ impl SmartPlaylistEditor {
             match_any: self.match_any.borrow().clone(),
             sort_field,
             descending: self.descending.is_active(),
-            activity_period: [
-                SmartPlaylistActivityPeriod::Weekly,
-                SmartPlaylistActivityPeriod::Monthly,
-                SmartPlaylistActivityPeriod::Yearly,
-                SmartPlaylistActivityPeriod::Lifetime,
-            ]
-            .get(self.activity_period.selected() as usize)
-            .copied()
-            .unwrap_or(SmartPlaylistActivityPeriod::Lifetime),
+            activity_period: SmartPlaylistActivityPeriod::ALL
+                .get(self.activity_period.selected() as usize)
+                .copied()
+                .unwrap_or(SmartPlaylistActivityPeriod::Lifetime),
             limit,
         };
         Some((name, definition))
@@ -218,12 +216,11 @@ fn smart_playlist_dialog(
     set_dropdown_labels(&source, &labels, selected);
     set_dropdown_labels(&sort, &sort_labels(), sort_index(definition.sort_field));
     descending.set_active(definition.descending);
-    activity_period.set_selected(match definition.activity_period {
-        SmartPlaylistActivityPeriod::Weekly => 0,
-        SmartPlaylistActivityPeriod::Monthly => 1,
-        SmartPlaylistActivityPeriod::Yearly => 2,
-        SmartPlaylistActivityPeriod::Lifetime => 3,
-    });
+    set_dropdown_labels(
+        &activity_period,
+        &SmartPlaylistActivityPeriod::ALL.map(|period| tr(smart_period_title(period))),
+        period_index(definition.activity_period),
+    );
     if let Some(value) = definition.limit {
         limit.set_text(&value.to_string());
     }
@@ -393,12 +390,7 @@ fn configure_smart_playlist_editor(
             editor.descending.set_active(template.definition.descending);
             editor
                 .activity_period
-                .set_selected(match template.definition.activity_period {
-                    SmartPlaylistActivityPeriod::Weekly => 0,
-                    SmartPlaylistActivityPeriod::Monthly => 1,
-                    SmartPlaylistActivityPeriod::Yearly => 2,
-                    SmartPlaylistActivityPeriod::Lifetime => 3,
-                });
+                .set_selected(period_index(template.definition.activity_period) as u32);
             editor.limit.set_text(
                 &template
                     .definition
@@ -783,14 +775,14 @@ fn remove_rule(
 fn field_labels() -> Vec<String> {
     SmartPlaylistRuleField::ALL
         .iter()
-        .map(|field| tr(field_title(*field)))
+        .map(|field| tr(smart_rule_field_title(*field)))
         .collect()
 }
 
 fn sort_labels() -> Vec<String> {
     SmartPlaylistSort::ALL
         .iter()
-        .map(|field| tr(sort_title(*field)))
+        .map(|field| tr(smart_sort_title(*field)))
         .collect()
 }
 
@@ -800,70 +792,8 @@ fn op_labels(
 ) -> Vec<String> {
     operators
         .iter()
-        .map(|operator| tr(op_title(field, *operator)))
+        .map(|operator| tr(smart_operator_title(field, *operator)))
         .collect()
-}
-
-fn field_title(field: SmartPlaylistRuleField) -> &'static str {
-    match field {
-        SmartPlaylistRuleField::Title => msgid("Title"),
-        SmartPlaylistRuleField::Artist => msgid("Artist"),
-        SmartPlaylistRuleField::Album => msgid("Album"),
-        SmartPlaylistRuleField::Comment => msgid("Comment"),
-        SmartPlaylistRuleField::Genre => msgid("Genre"),
-        SmartPlaylistRuleField::Mood => msgid("Mood"),
-        SmartPlaylistRuleField::Bpm => msgid("BPM"),
-        SmartPlaylistRuleField::Rating => msgid("Rating"),
-        SmartPlaylistRuleField::Year => msgid("Year"),
-        SmartPlaylistRuleField::Favorite => msgid("Favorite"),
-        SmartPlaylistRuleField::Played => msgid("Ever played"),
-        SmartPlaylistRuleField::PlayCount => msgid("Play count"),
-        SmartPlaylistRuleField::SkipCount => msgid("Skip count"),
-        SmartPlaylistRuleField::LastPlayed => msgid("Last played"),
-        SmartPlaylistRuleField::DateAdded => msgid("Date added"),
-    }
-}
-
-fn sort_title(field: SmartPlaylistSort) -> &'static str {
-    match field {
-        SmartPlaylistSort::Title => msgid("Title"),
-        SmartPlaylistSort::Artist => msgid("Artist"),
-        SmartPlaylistSort::Album => msgid("Album"),
-        SmartPlaylistSort::Year => msgid("Year"),
-        SmartPlaylistSort::DateAdded => msgid("Date added"),
-        SmartPlaylistSort::LastPlayed => msgid("Last played"),
-        SmartPlaylistSort::PlayCount => msgid("Play count"),
-        SmartPlaylistSort::SkipCount => msgid("Skip count"),
-        SmartPlaylistSort::Bpm => msgid("BPM"),
-        SmartPlaylistSort::Rating => msgid("Rating"),
-        SmartPlaylistSort::Duration => msgid("Duration"),
-    }
-}
-
-fn op_title(field: SmartPlaylistRuleField, operator: SmartPlaylistRuleOperator) -> &'static str {
-    match (field, operator) {
-        (
-            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
-            SmartPlaylistRuleOperator::NotContains,
-        ) => msgid("excludes"),
-        (
-            SmartPlaylistRuleField::Genre | SmartPlaylistRuleField::Mood,
-            SmartPlaylistRuleOperator::NotEquals,
-        ) => msgid("is not"),
-        (_, SmartPlaylistRuleOperator::Contains) => msgid("contains"),
-        (_, SmartPlaylistRuleOperator::NotContains) => msgid("does not contain"),
-        (_, SmartPlaylistRuleOperator::Equals) => msgid("equals"),
-        (_, SmartPlaylistRuleOperator::NotEquals) => msgid("does not equal"),
-        (_, SmartPlaylistRuleOperator::Above) => msgid("above"),
-        (_, SmartPlaylistRuleOperator::Below) => msgid("below"),
-        (_, SmartPlaylistRuleOperator::Between) => msgid("range"),
-        (_, SmartPlaylistRuleOperator::Is) => msgid("is"),
-        (_, SmartPlaylistRuleOperator::IsNot) => msgid("is not"),
-        (_, SmartPlaylistRuleOperator::Before) => msgid("before"),
-        (_, SmartPlaylistRuleOperator::After) => msgid("after"),
-        (_, SmartPlaylistRuleOperator::IsEmpty) => msgid("is empty"),
-        (_, SmartPlaylistRuleOperator::IsNotEmpty) => msgid("is not empty"),
-    }
 }
 
 fn dropdown_from_titles(titles: &[&str], selected: usize) -> gtk::DropDown {
@@ -905,6 +835,13 @@ fn operator_index(
         .iter()
         .position(|candidate| *candidate == operator)
         .unwrap_or(0)
+}
+
+fn period_index(period: SmartPlaylistActivityPeriod) -> usize {
+    SmartPlaylistActivityPeriod::ALL
+        .iter()
+        .position(|value| *value == period)
+        .unwrap_or(SmartPlaylistActivityPeriod::ALL.len() - 1)
 }
 
 fn sort_index(sort: SmartPlaylistSort) -> usize {

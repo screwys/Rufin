@@ -198,14 +198,7 @@
                                 <style><class name="muted"/></style>
                               </object>
                             </child>
-                            <child><object class="GtkDropDown" id="activity_period">
-                              <property name="model"><object class="GtkStringList"><items>
-                                <item translatable="yes">Last 7 days</item>
-                                <item translatable="yes">Last 30 days</item>
-                                <item translatable="yes">Last 365 days</item>
-                                <item translatable="yes">All time</item>
-                              </items></object></property>
-                            </object></child>
+                            <child><object class="GtkDropDown" id="activity_period"/></child>
                           </object>
                         </child>
                         <child>

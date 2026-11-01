@@ -5,7 +5,7 @@ use crate::{
     library::AndroidLibrary,
 };
 use library::{PlaylistKey, PlaylistPathMode, SourceId};
-use rufin_core::{playlist_files, playlists};
+use rufin_core::{playlist_files, playlists, settings::presentation};
 
 #[derive(uniffi::Record)]
 pub struct AndroidPlaylistChoices {
@@ -304,4 +304,27 @@ impl AndroidLibrary {
             value: field.default_value(operator),
         }
     }
+}
+
+#[uniffi::export]
+pub fn smart_rule_field_title(field: library::SmartPlaylistRuleField) -> String {
+    localization::tr(presentation::smart_rule_field_title(field))
+}
+
+#[uniffi::export]
+pub fn smart_operator_title(
+    field: library::SmartPlaylistRuleField,
+    operator: library::SmartPlaylistRuleOperator,
+) -> String {
+    localization::tr(presentation::smart_operator_title(field, operator))
+}
+
+#[uniffi::export]
+pub fn smart_sort_title(field: library::SmartPlaylistSort) -> String {
+    localization::tr(presentation::smart_sort_title(field))
+}
+
+#[uniffi::export]
+pub fn smart_period_title(period: library::SmartPlaylistActivityPeriod) -> String {
+    localization::tr(presentation::smart_period_title(period))
 }

@@ -258,6 +258,8 @@ pub enum SmartPlaylistActivityPeriod {
 }
 
 impl SmartPlaylistActivityPeriod {
+    pub const ALL: [Self; 4] = [Self::Weekly, Self::Monthly, Self::Yearly, Self::Lifetime];
+
     pub(crate) fn seconds(self) -> Option<i64> {
         match self {
             Self::Weekly => Some(604800),
