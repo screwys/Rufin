@@ -7210,8 +7210,8 @@ dependencies = [
  "desktop-integration",
  "gtk-shell",
  "localization",
- "playback",
  "playback-gstreamer",
+ "process-memory",
  "rufin-controller",
  "rufin-core",
  "tracing",
@@ -7237,7 +7237,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "uniffi",
  "url",
  "vodozemac",
 ]
@@ -7248,7 +7247,6 @@ version = "0.16.6"
 dependencies = [
  "app-identity",
  "localization",
- "playback",
  "playback-gstreamer",
  "process-memory",
  "rufin-core",
