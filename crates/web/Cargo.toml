@@ -19,6 +19,7 @@ downloads.workspace = true
 uniffi = { workspace = true, optional = true }
 artwork.workspace = true
 askama.workspace = true
+rust-embed = { workspace = true, features = ["include-exclude"] }
 async-channel.workspace = true
 axum.workspace = true
 base64.workspace = true

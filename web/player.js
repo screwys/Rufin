@@ -52,7 +52,7 @@ function showPlayback(value) {
     "aria-label",
     playing ? tr("Pause") : tr("Play"),
   );
-  setIcon($("play-pause").firstElementChild, playing ? "pause" : "play");
+  setIcon($("play-pause").firstElementChild, playing ? "rufin-media-playback-pause-symbolic" : "rufin-media-playback-start-symbolic");
   $("play-pause").lastElementChild.hidden = !value?.refilling;
   $("shuffle").setAttribute("aria-pressed", String(value?.shuffle || false));
   $("repeat").setAttribute(
@@ -61,7 +61,7 @@ function showPlayback(value) {
   );
   setIcon(
     $("repeat").firstElementChild,
-    value?.repeat === "one" ? "repeat-one" : "repeat",
+    value?.repeat === "one" ? "rufin-repeat-one-symbolic" : "rufin-repeat-symbolic",
   );
   const repeatLabel = {
     off: tr("Repeat off"),
@@ -95,7 +95,7 @@ function showPlayback(value) {
     coverRequest?.abort();
     coverRequest = new AbortController();
     if (!track) {
-      $("mini-cover").replaceChildren(icon("cover-fallback"));
+      $("mini-cover").replaceChildren(icon("rufin-symbolic"));
       delete $("mini-cover").dataset.coverIdentity;
       delete $("mini-cover").dataset.coverFull;
     }
@@ -109,7 +109,7 @@ function showPlayback(value) {
           track.artwork_previews?.[0],
         );
         if (!shown && !signal.aborted)
-          $("mini-cover").replaceChildren(icon("cover-fallback"));
+          $("mini-cover").replaceChildren(icon("rufin-symbolic"));
       });
       run(async () => {
         await api("/lyrics", "POST", {});
@@ -284,12 +284,12 @@ function updateVolumeIcon() {
   setIcon(
     $("mute").firstElementChild,
     state.playback?.muted || volume <= 0
-      ? "muted"
+      ? "rufin-audio-volume-muted-symbolic"
       : volume <= 1 / 3
-        ? "volume-low"
+        ? "rufin-audio-volume-low-symbolic"
         : volume <= 2 / 3
-          ? "volume-medium"
-          : "volume",
+          ? "rufin-audio-volume-medium-symbolic"
+          : "rufin-audio-volume-high-symbolic",
   );
 }
 

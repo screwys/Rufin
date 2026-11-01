@@ -16,22 +16,25 @@ const el = (tag, className = "", text = "") => {
   return node;
 };
 
+// An icon from /icons by its file name, as GTK names it.
 const icon = (name) => {
   const node = el("span", "icon");
-  node.dataset.icon = name;
+  setIcon(node, name);
   node.ariaHidden = "true";
   return node;
 };
 
 function setIcon(node, name) {
-  if (node.dataset.icon !== name) node.dataset.icon = name;
+  if (node.dataset.icon === name) return;
+  node.dataset.icon = name;
+  node.style.setProperty("--icon", `url("/icons/${name}.svg")`);
 }
 
 function showFavorite(node, favorite) {
   if (node.getAttribute("aria-pressed") !== String(favorite)) {
     node.setAttribute("aria-pressed", String(favorite));
   }
-  setIcon(node.firstElementChild, favorite ? "favorite-filled" : "favorite");
+  setIcon(node.firstElementChild, favorite ? "rufin-heart-filled-symbolic" : "rufin-heart-outline-symbolic");
 }
 
 const button = (label, action, name, className = "icon-button") => {
@@ -163,7 +166,7 @@ async function cover(node, uri, signal, preview = null) {
     image.src = preview;
     node.replaceChildren(image);
   } else if (!fullReady && !preview && node.dataset.coverIdentity && node.dataset.coverIdentity !== identity) {
-    node.replaceChildren(icon("cover-fallback"));
+    node.replaceChildren(icon("rufin-symbolic"));
   }
   node.dataset.coverIdentity = identity;
   node.dataset.coverFull = String(fullReady);
@@ -232,7 +235,7 @@ async function coverGroup(node, query, count, signal, previews = []) {
     node.replaceChildren();
     tiles = Array.from({ length: 4 }, () => {
       const tile = el("span", "cover-quadrant");
-      tile.append(icon("cover-fallback"));
+      tile.append(icon("rufin-symbolic"));
       node.append(tile);
       return tile;
     });
@@ -275,15 +278,16 @@ function initLayout() {
     event.preventDefault();
     const hidden = $("app").classList.toggle("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", String(!hidden));
-    $("toggle-right").firstElementChild.dataset.icon = hidden
-      ? "expand-right"
-      : "collapse-right";
+    setIcon(
+      $("toggle-right").firstElementChild,
+      hidden ? "rufin-sidebar-expand-right-symbolic" : "rufin-sidebar-collapse-right-symbolic",
+    );
   });
   $("close-right").addEventListener("click", (event) => {
     event.preventDefault();
     $("app").classList.add("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", "false");
-    $("toggle-right").firstElementChild.dataset.icon = "expand-right";
+    setIcon($("toggle-right").firstElementChild, "rufin-sidebar-expand-right-symbolic");
   });
   $("open-navigation").addEventListener("click", (event) => {
     event.preventDefault();
@@ -311,7 +315,7 @@ function initLayout() {
   if (matchMedia("(max-width:860px)").matches) {
     $("app").classList.add("right-hidden");
     $("toggle-right").setAttribute("aria-expanded", "false");
-    $("toggle-right").firstElementChild.dataset.icon = "expand-right";
+    setIcon($("toggle-right").firstElementChild, "rufin-sidebar-expand-right-symbolic");
   }
 }
 

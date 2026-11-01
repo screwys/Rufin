@@ -73,7 +73,7 @@ function pinAction(kind, row, source = state.source) {
       await api("/pins", "POST", { pin, pinned: !pinned });
       await refreshPins();
     },
-    pinned ? "remove" : "add",
+    pinned ? "rufin-list-remove-symbolic" : "rufin-list-add-symbolic",
   ];
 }
 
@@ -117,7 +117,7 @@ function render() {
     const title = item.title || item.name;
     const openButton = button(title, () => open(item), null, "pin-open");
     const artwork = el("span", "pin-cover");
-    artwork.append(icon("cover-fallback"));
+    artwork.append(icon("rufin-symbolic"));
     const label = el("span", "pin-label");
     const metadata = el("span", "pin-metadata");
     const seconds = Math.floor(Math.max(0, item.duration_ms) / 1000);
@@ -125,9 +125,9 @@ function render() {
     const durationLabel = el("span", "pin-duration", duration);
     durationLabel.title = duration;
     metadata.append(
-      icon("tracks"),
+      icon("rufin-tracks-symbolic"),
       document.createTextNode(String(item.track_count)),
-      icon("duration"),
+      icon("rufin-preferences-system-time-symbolic"),
       durationLabel,
     );
     if (["playlist", "smart-playlist"].includes(item.kind)) {
@@ -143,9 +143,9 @@ function render() {
     openButton.replaceChildren(artwork, label);
     const controls = el("div", "pin-controls");
     for (const [label, name, action] of [
-      [tr("Play"), "play", "replace"],
-      [tr("Play Next"), "play-next", "next"],
-      [tr("Play Later"), "play-last", "append"],
+      [tr("Play"), "rufin-media-playback-start-symbolic", "replace"],
+      [tr("Play Next"), "rufin-mail-forward-symbolic", "next"],
+      [tr("Play Later"), "rufin-go-last-symbolic", "append"],
     ]) {
       const control = el("button", "icon-button");
       control.type = "button";

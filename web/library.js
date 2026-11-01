@@ -5,6 +5,7 @@ import {
   button,
   el,
   icon,
+  setIcon,
   notice,
   run,
   showFavorite,
@@ -302,7 +303,7 @@ function navigate(next, selected = null) {
   orderChosen = false;
   $("search").value = "";
   $("descending").setAttribute("aria-pressed", "false");
-  $("descending").firstElementChild.dataset.icon = "sort-ascending";
+  setIcon($("descending").firstElementChild, "rufin-sort-name-symbolic");
   document.querySelectorAll("[data-route]").forEach((node) => {
     if (node.dataset.route === route) node.setAttribute("aria-current", "page");
     else node.removeAttribute("aria-current");
@@ -356,7 +357,7 @@ function setSort() {
 function showOrder(sort, descending) {
   $("sort").value = sort;
   $("descending").setAttribute("aria-pressed", String(descending));
-  $("descending").firstElementChild.dataset.icon = descending ? "sort-descending" : "sort-ascending";
+  setIcon($("descending").firstElementChild, descending ? "rufin-sort-name-descending-symbolic" : "rufin-sort-name-symbolic");
   $("descending").hidden = sort === "definition";
 }
 
@@ -384,7 +385,7 @@ function query() {
 function empty(title, description, action) {
   const node = el("div", "empty");
   node.append(
-    icon(route === "sources" ? "server" : route),
+    icon(route === "sources" ? "rufin-network-server-symbolic" : `rufin-${route}-symbolic`),
     el("h2", "", title),
     el("p", "", description),
   );
@@ -866,7 +867,7 @@ function bindCards(host) {
         ]);
       const pin = pinAction(kind, row, row.source ?? state.source);
       if (pin) actions.push(pin);
-      if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "export"]);
+      if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
       if (kind === "playlist" && row.can_remove_unavailable)
         actions.push([
           tr("Remove unavailable tracks"),
@@ -874,7 +875,7 @@ function bindCards(host) {
             const result = await api(`/playlists/remove-unavailable?id=${row.id}`, "POST");
             if (result.removed) await loadView();
           },
-          "trash",
+          "rufin-user-trash-symbolic",
         ]);
       if (row.metadata_writable)
         actions.push(

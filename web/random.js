@@ -62,7 +62,7 @@ async function loadRandom(reset = false) {
     option.setAttribute("role", "option");
     option.dataset.genreId = String(row.id);
     option.setAttribute("aria-selected", String(row.id === selectedGenre?.id));
-    if (row.id === selectedGenre?.id) option.append(icon("check"));
+    if (row.id === selectedGenre?.id) option.append(icon("rufin-object-select-symbolic"));
     window.append(option);
     if (focused === String(row.id)) option.focus({ preventScroll: true });
   }
@@ -132,7 +132,7 @@ function init() {
       await loadRandom();
       $("any-genre").replaceChildren(document.createTextNode(tr("Any genre")));
       $("any-genre").setAttribute("aria-selected", String(!selectedGenre));
-      if (!selectedGenre) $("any-genre").append(icon("check"));
+      if (!selectedGenre) $("any-genre").append(icon("rufin-object-select-symbolic"));
       openPopup($("genre-menu"), $("random-genre"));
       $("genre-search").focus();
     }),

@@ -21,7 +21,7 @@
           <input type="hidden" name="return" value="{{ row.return_to() }}" />
           <input type="hidden" name="payload" value="{{ row.selection("track") }}" />
 
-          <button name="mode" value="replace" data-action="replace" class="icon-button" aria-label="{{ localization::tr("Play") }}">{% call m::icon("play") %}{% endcall %}</button>
+          <button name="mode" value="replace" data-action="replace" class="icon-button" aria-label="{{ localization::tr("Play") }}">{% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
           {% call m::menu_button(row, "icon-button") %}{% endcall %}
           {% call m::media_menu(row, "track") %}{% endcall %}
         </form></td>

@@ -36,16 +36,16 @@ function menuItems(menu, actions) {
     const name =
       itemIcon ||
       {
-        [tr("Play")]: "play",
-        [tr("Play Next")]: "play-next",
-        [tr("Play Later")]: "play-last",
-        [tr("Remove from Queue")]: "remove",
-        [tr("Remove from Playlist")]: "remove",
-        [tr("Edit")]: "edit",
-        [tr("Delete Playlist")]: "delete",
-        [tr("Favorite")]: "favorite",
-        [tr("Add to Favorites")]: "favorite",
-        [tr("Remove from Favorites")]: "favorite-filled",
+        [tr("Play")]: "rufin-media-playback-start-symbolic",
+        [tr("Play Next")]: "rufin-mail-forward-symbolic",
+        [tr("Play Later")]: "rufin-go-last-symbolic",
+        [tr("Remove from Queue")]: "rufin-list-remove-symbolic",
+        [tr("Remove from Playlist")]: "rufin-list-remove-symbolic",
+        [tr("Edit")]: "rufin-document-edit-symbolic",
+        [tr("Delete Playlist")]: "rufin-process-stop-symbolic",
+        [tr("Favorite")]: "rufin-heart-outline-symbolic",
+        [tr("Add to Favorites")]: "rufin-heart-outline-symbolic",
+        [tr("Remove from Favorites")]: "rufin-heart-filled-symbolic",
       }[label];
     const item = button(
       label,
@@ -64,7 +64,7 @@ function menuItems(menu, actions) {
     item.setAttribute("role", "menuitem");
     if (children) {
       item.setAttribute("aria-haspopup", "menu");
-      item.append(icon("forward"));
+      item.append(icon("rufin-go-next-symbolic"));
       item.addEventListener("pointerenter", () =>
         run(() => openSubmenu(children, item, false)),
       );
@@ -131,7 +131,7 @@ function radioMenu(row, kind = "track") {
   return [
     title,
     null,
-    "radio",
+    "rufin-audio-only-symbolic",
     [
       [tr("Play"), () => playRadio(row, kind, "replace")],
       [tr("Play Next"), () => playRadio(row, kind, "next")],
@@ -144,7 +144,7 @@ function playlistMenu(target) {
   return [
     tr("Add to Playlist"),
     null,
-    "add-playlist",
+    "rufin-playlists-compact-symbolic",
     { playlistTarget: target },
   ];
 }
@@ -161,12 +161,12 @@ async function goToMenu(row, kind = "track") {
     return [
       tr("Go to"),
       null,
-      "go-to",
+      "rufin-external-link-compact-symbolic",
       [
         [
           tr("Go to {artist}", { artist: row.name }),
           () => openMediaLink("artists", row),
-          "artists",
+          "rufin-artists-symbolic",
         ],
       ],
     ];
@@ -174,16 +174,16 @@ async function goToMenu(row, kind = "track") {
   const items = metadata.artists.map((artist) => [
     tr("Go to {artist}", { artist: artist.name }),
     () => openMediaLink("artists", artist),
-    "artists",
+    "rufin-artists-symbolic",
   ]);
   const album = kind === "album" ? row : metadata.album;
   if (album)
     items.push([
       tr("Go to Album"),
       () => openMediaLink("albums", album),
-      "albums",
+      "rufin-albums-symbolic",
     ]);
-  return items.length ? [tr("Go to"), null, "go-to", items] : null;
+  return items.length ? [tr("Go to"), null, "rufin-external-link-compact-symbolic", items] : null;
 }
 
 function renderPlaylistSubmenu(menu, target, signal) {
@@ -203,7 +203,7 @@ function renderPlaylistSubmenu(menu, target, signal) {
         closeMenus();
         return openName(null, target);
       },
-      "add",
+      "rufin-list-add-symbolic",
       "menu-item",
     ),
   );

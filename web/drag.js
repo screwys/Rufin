@@ -34,7 +34,7 @@ function bindDrag(node, read, pinnable = true) {
     const artwork =
       node.querySelector(".cover, .pin-cover") ||
       node.closest(".home-showcase")?.querySelector(".cover");
-    cover.append(artwork ? artwork.cloneNode(true) : icon("tracks"));
+    cover.append(artwork ? artwork.cloneNode(true) : icon("rufin-tracks-symbolic"));
     const row = media.row || JSON.parse(node.dataset.row);
     preview.append(
       cover,

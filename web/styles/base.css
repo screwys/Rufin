@@ -111,6 +111,7 @@ button[aria-pressed="true"] {
   mask-position: center;
   mask-repeat: no-repeat;
   mask-size: contain;
+  mask-image: var(--icon);
 }
 
 input:not([type="range"], [type="checkbox"]),

@@ -23,12 +23,12 @@ function updateSources(configured) {
 
 function sourceIcon(kind) {
   if (kind === "local") {
-    const node = icon("cover-fallback");
+    const node = icon("rufin-symbolic");
     node.classList.add("source-icon");
     return node;
   }
   if (kind === "peer") {
-    const node = icon("device");
+    const node = icon("rufin-phonelink-symbolic");
     node.classList.add("source-icon");
     return node;
   }
@@ -43,7 +43,7 @@ function sourceIcon(kind) {
       "smb",
     ].includes(kind)
   )
-    return icon("server");
+    return icon("rufin-network-server-symbolic");
   const image = el("img", "source-icon");
   image.alt = "";
   image.src = `/source-icons/${kind}`;
@@ -66,7 +66,7 @@ function renderSources(configured) {
     const edit = button(
       tr("Edit"),
       () => openSource(item),
-      "edit",
+      "rufin-document-edit-symbolic",
       "source-edit",
     );
     edit.append(el("span", "", tr("Edit")));
@@ -80,13 +80,13 @@ function renderSources(configured) {
           updateSources(await api("/sources"));
           navigate("tracks");
         },
-        "check",
+        "rufin-object-select-symbolic",
         "",
       ),
       button(
         tr("Resync Library"),
         () => api("/sources/refresh", "POST", { id: item.id }),
-        "refresh",
+        "rufin-view-refresh-symbolic",
       ),
       button(
         tr("Forget Source"),
@@ -106,7 +106,7 @@ function renderSources(configured) {
             await loadView();
           }
         },
-        "close",
+        "rufin-window-close-symbolic",
       ),
     );
     for (const action of actions.children)
@@ -290,7 +290,7 @@ async function renderIntegrations(host) {
   host.append(actions);
   for (const item of connections) {
     const card = el("div", "list-card");
-    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "edit"));
+    card.append(sourceIcon(item.kind), el("strong", "label", item.name), button(tr("Edit"), () => openSource(item, {kind: item.kind, saved}), "rufin-document-edit-symbolic"));
     host.append(card);
   }
 }
@@ -352,7 +352,7 @@ function init() {
           sourceIcon(item.kind),
           document.createTextNode(item.name),
         );
-        if (item.id === state.source) choose.append(icon("check"));
+        if (item.id === state.source) choose.append(icon("rufin-object-select-symbolic"));
         choose.setAttribute("role", "menuitemradio");
         choose.setAttribute("aria-checked", String(item.id === state.source));
         menu.append(choose);
@@ -363,7 +363,7 @@ function init() {
           menu.hidePopover();
           navigate("sources");
         },
-        "edit",
+        "rufin-document-edit-symbolic",
         "menu-item",
       );
       manage.append(document.createTextNode(tr("Manage")));
@@ -373,7 +373,7 @@ function init() {
           menu.hidePopover();
           openSource();
         },
-        "add",
+        "rufin-list-add-symbolic",
         "menu-item",
       );
       add.append(document.createTextNode(tr("Add a new source")));
@@ -399,7 +399,7 @@ function init() {
             "menu-item",
           );
           if (library.id === state.selectedLibrary)
-            choose.append(icon("check"));
+            choose.append(icon("rufin-object-select-symbolic"));
           choose.setAttribute("role", "menuitemradio");
           choose.setAttribute(
             "aria-checked",

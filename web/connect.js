@@ -1,6 +1,6 @@
 import { chooseFileIntegration } from "./sources.js";
 import { api } from "./connection.js";
-import { tr, notice } from "./ui.js";
+import { icon, setIcon, tr, notice } from "./ui.js";
 
 const element = (id) => document.getElementById(`connect-${id}`);
 const progressInteger = new Intl.NumberFormat();
@@ -116,11 +116,9 @@ function button(title, callback, className = "") {
   return node;
 }
 function flashSuccess(button, original) {
-  const icon = button.querySelector(".icon");
-  icon.dataset.icon = "check";
-  setTimeout(() => {
-    icon.dataset.icon = original;
-  }, 1500);
+  const node = button.querySelector(".icon");
+  setIcon(node, "rufin-object-select-symbolic");
+  setTimeout(() => setIcon(node, original), 1500);
 }
 function textNode(tag, text, className = "") {
   const node = document.createElement(tag);
@@ -227,18 +225,14 @@ function show(value) {
     const test = button(tr("Test connection"), async () => {
       try {
         await action({ action: "test_connection", peer: device.id });
-        flashSuccess(test, "refresh");
+        flashSuccess(test, "rufin-view-refresh-symbolic");
       } catch {
         notice(tr("Connection test has failed"));
       }
     }, "icon-button");
     test.title = tr("Test connection");
     test.setAttribute("aria-label", test.title);
-    const testIcon = document.createElement("span");
-    testIcon.className = "icon";
-    testIcon.dataset.icon = "refresh";
-    testIcon.setAttribute("aria-hidden", "true");
-    test.replaceChildren(testIcon);
+    test.replaceChildren(icon("rufin-view-refresh-symbolic"));
     options.append(
       test,
       button(tr("Remove device"), () => action({ action: "remove", peer: device.id }), "connect-destructive"),

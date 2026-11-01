@@ -135,7 +135,7 @@ function showQueue(value) {
       open.click();
       run(() => showActions(li, event));
     });
-    const menu = button(tr("More actions"), () => showActions(menu), "more");
+    const menu = button(tr("More actions"), () => showActions(menu), "rufin-view-more-symbolic");
     menu.setAttribute("aria-haspopup", "menu");
     li.append(
       el(
