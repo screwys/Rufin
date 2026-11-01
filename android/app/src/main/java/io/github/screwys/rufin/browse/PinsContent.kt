@@ -54,10 +54,11 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
                         Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))
                     },
                     trailingContent = {
-                        PlayerIconButton("rufin-view-more-symbolic", "More", { action = item })
+                        item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
+                            ?: PlayerIconButton("rufin-view-more-symbolic", "More", { action = item })
                     },
-                    modifier = Modifier.playlistFolderDrag(item, model).combinedClickable(onClick = { browse.open(item) },
-                        onLongClick = if (item.row.playlistFolderMember == null) ({ action = item }) else null))
+                    modifier = Modifier.playlistFolderDrop(item, model).combinedClickable(onClick = { browse.open(item) },
+                        onLongClick = { action = item }))
                 }
             }
         }

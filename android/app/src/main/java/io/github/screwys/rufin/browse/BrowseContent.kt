@@ -466,8 +466,8 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !marquee) {
-        Column(Modifier.fillMaxWidth().playlistFolderDrag(item, player.model).combinedClickable(onClick = { onActivate(item) },
-            onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null),
+        Column(Modifier.fillMaxWidth().playlistFolderDrop(item, player.model).combinedClickable(onClick = { onActivate(item) },
+            onLongClick = { onMenu(item) }),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
@@ -475,9 +475,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 BrowseTitle(item, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
                     style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
-                if (item.row.playlistFolderMember != null) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
-                    PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(32.dp), iconSize = 18.dp)
-                }
+                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
             // The labels under the title: the list's grid fields, one per line.
             item.row.fields.map { it.text }.filter(String::isNotBlank).forEach { line ->
@@ -562,8 +560,8 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     val artwork = rememberBrowseArtwork(item, player, imageSize)
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (displaySize == DisplaySize.COMPACT) 48.dp else 64.dp)
-        .playlistFolderDrag(item, player.model)
-        .combinedClickable(onClick = { onActivate(item) }, onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
+        .playlistFolderDrop(item, player.model)
+        .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -575,11 +573,13 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
         Row(verticalAlignment = Alignment.CenterVertically) {
                 if (item.row.kind == "track" && item.row.durationMillis > 0UL) Text(browseDuration(item.row.durationMillis),
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })
+                item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
+                    ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })
         }
     }
     }
 }
+
 /** The lyrics lines a search by lyrics matched, the match highlighted. */
 @Composable
 internal fun LyricsSnippetText(snippet: LyricsSnippet) {
@@ -592,7 +592,6 @@ internal fun LyricsSnippetText(snippet: LyricsSnippet) {
     }, maxLines = 2, overflow = TextOverflow.Ellipsis,
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
-
 
 internal fun browseDuration(millis: ULong): String {
     val seconds = millis / 1000UL

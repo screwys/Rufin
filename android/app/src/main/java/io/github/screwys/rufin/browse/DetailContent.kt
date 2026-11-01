@@ -346,15 +346,17 @@ internal fun FieldRow(
     val baseHeight = when (size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> if (merged) 64.dp else 56.dp }
     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
     BrowseSwipeActions(item, allowSwipe) {
-    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrag(item, player.model)
-        .combinedClickable(onClick = { activate(item) }, onLongClick = if (item.row.playlistFolderMember == null) ({ menu(projected) }) else null)
+    val member = item.row.playlistFolderMember
+    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrop(item, player.model)
+        .combinedClickable(onClick = { activate(item) }, onLongClick = { menu(projected) })
         .padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         fields.forEach { field ->
             val value = projected.row.fields.firstOrNull { it.id == field.id }?.text.orEmpty()
             when (field.id) {
                 LibraryField.IMAGE -> if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
-                LibraryField.TOOLS -> PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) })
+                LibraryField.TOOLS -> if (member != null) PlaylistDragHandle(member, detailColumn(field.id))
+                    else PlayerIconButton("rufin-view-more-symbolic", "More", { menu(projected) })
                 LibraryField.FAVORITE -> IconButton({ favorite(projected) }) {
                     RufinIcon(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(24.dp),
                         if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
@@ -368,9 +370,9 @@ internal fun FieldRow(
                         BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                         Text(item.row.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
                     }
                 }
-                        item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
                 else -> if (field.id == LibraryField.TITLE) Column(detailColumn(field.id)) {
                     BrowseTitle(item, maxLines = 2, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                     item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
@@ -379,6 +381,7 @@ internal fun FieldRow(
                     style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }
         }
+        if (member != null && fields.none { it.id == LibraryField.TOOLS }) PlaylistDragHandle(member)
     }
     }
 }
