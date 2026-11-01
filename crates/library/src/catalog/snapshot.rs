@@ -510,13 +510,18 @@ fn latin(name: &str) -> bool {
     })
 }
 
-/// A name as it sorts without sort tags: lowercase with Latin letters on their base letter,
-/// past a leading article.
-fn plain_sort(name: &str) -> std::borrow::Cow<'_, str> {
-    let mut lower = String::with_capacity(name.len());
-    for character in name.chars() {
+/// Text lowercase with Latin letters on their base letter, as names and sort tags sort.
+fn folded(text: &str) -> String {
+    let mut lower = String::with_capacity(text.len());
+    for character in text.chars() {
         crate::lyrics_search::fold(character, &mut lower);
     }
+    lower
+}
+
+/// A name as it sorts without sort tags: folded, past a leading article.
+fn plain_sort(name: &str) -> std::borrow::Cow<'_, str> {
+    let lower = folded(name);
     match lower.split_once(' ') {
         Some((article, rest)) if ARTICLES.contains(&article) && !rest.trim().is_empty() => {
             rest.trim_start().to_owned().into()
@@ -674,12 +679,14 @@ impl Snapshot {
         }
     }
 
-    /// An artist's sort text: its sort tag when sort tags are on or its name has no Latin
-    /// letters to sort by, else its name as it sorts.
+    /// An artist's sort text: its sort tag as is when its name has no Latin letters to sort by,
+    /// its folded sort tag when sort tags are on, else its name as it sorts.
     pub(crate) fn artist_sort(&self, artist: &ArtistRec) -> std::borrow::Cow<'_, str> {
         let name = self.text(artist.name);
-        if self.sort_tags || !latin(name) {
+        if !latin(name) {
             self.name_sort(artist.name, artist.sort)
+        } else if self.sort_tags {
+            folded(&self.name_sort(artist.name, artist.sort)).into()
         } else {
             plain_sort(name)
         }
@@ -688,8 +695,10 @@ impl Snapshot {
     /// An album's sort text, by the same rule as an artist's.
     pub(crate) fn album_sort(&self, album: &AlbumRec) -> std::borrow::Cow<'_, str> {
         let title = self.text(album.title);
-        if self.sort_tags || !latin(title) {
+        if !latin(title) {
             self.text(album.sort).into()
+        } else if self.sort_tags {
+            folded(self.text(album.sort)).into()
         } else {
             plain_sort(title)
         }
