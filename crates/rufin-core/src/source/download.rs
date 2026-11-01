@@ -9,41 +9,6 @@ use super::{Shared, SourceOwner};
 use crate::features::follow;
 use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
 
-/// Download rules: the download queue reconciles the rules of the sources a Change touched.
-pub(super) async fn follow_rules(shared: Arc<Shared>, changes: Option<Vec<Arc<Change>>>) {
-    let ruled = shared
-        .settings
-        .load()
-        .ui
-        .downloads
-        .iter()
-        .any(|settings| !settings.rules.is_empty());
-    let heard = |change: &Arc<Change>| {
-        change.scopes.iter().any(|scope| {
-            matches!(
-                scope,
-                Scope::Reload
-                    | Scope::Tracks {
-                        source: Some(_),
-                        ..
-                    }
-                    | Scope::Collections { .. }
-                    | Scope::Source { .. }
-                    | Scope::State { .. }
-                    | Scope::Playlist { entries: true, .. }
-                    | Scope::Playlists
-            )
-        })
-    };
-    if ruled
-        && changes
-            .as_ref()
-            .is_none_or(|changes| changes.iter().any(heard))
-    {
-        shared.downloads.library_changed(changes);
-    }
-}
-
 impl SourceOwner {
     /// Installs automatic artwork and lyrics downloads while either is on: one pass over every
     /// source when installed, then fetches for the tracks the change feed reports as added.

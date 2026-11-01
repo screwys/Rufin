@@ -473,7 +473,6 @@ impl SourceOwner {
             weak.clone(),
             crate::playlist_files::follow,
         );
-        follow(runtime, catalog, weak.clone(), download::follow_rules);
         mosaics::follow(shared);
         runtime.spawn(outbox::run(weak.clone()));
         runtime.spawn(crate::playlist_files::check_links(weak));
