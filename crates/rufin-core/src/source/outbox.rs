@@ -21,8 +21,8 @@ const PAGE: usize = 64;
 /// and Emby no numeric ratings; Rufin holds those values itself.
 pub(super) fn delivers(kind: &str, delivery: DeliveryKind) -> bool {
     match delivery {
-        DeliveryKind::Favorite => matches!(kind, "jellyfin" | "emby" | "subsonic"),
-        DeliveryKind::Rating => matches!(kind, "jellyfin" | "subsonic" | "plex"),
+        DeliveryKind::Favorite => matches!(kind, "jellyfin" | "emby" | "subsonic" | "navidrome"),
+        DeliveryKind::Rating => matches!(kind, "jellyfin" | "subsonic" | "navidrome" | "plex"),
     }
 }
 
@@ -30,7 +30,8 @@ pub(super) fn delivers(kind: &str, delivery: DeliveryKind) -> bool {
 /// ratings, and half stars on a server that stores whole stars.
 fn keeps_copy(kind: &str, delivery: &Delivery) -> bool {
     delivery.kind == DeliveryKind::Rating
-        && (kind == "plex" || (kind == "subsonic" && delivery.value.unwrap_or(0) % 20 != 0))
+        && (kind == "plex"
+            || (matches!(kind, "subsonic" | "navidrome") && delivery.value.unwrap_or(0) % 20 != 0))
 }
 
 /// Delivers what is due, then waits for the next due time or for a delivery just queued.
