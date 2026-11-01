@@ -113,8 +113,7 @@ impl Nearby {
 
 impl AddressLookup for Nearby {
     fn resolve(&self, id: EndpointId) -> Option<BoxStream<'static, Result<Item, Error>>> {
-        // MemoryLookup supplies known addresses. Keep receiving new routes as long as a dial
-        // waits, so a dial that began before the device was found still reaches it.
+        // MemoryLookup supplies known addresses. Keep receiving new routes while connecting.
         let changes = stream::unfold(self.changes.subscribe(), |mut receiver| async {
             loop {
                 match receiver.recv().await {
@@ -126,7 +125,7 @@ impl AddressLookup for Nearby {
         });
         Some(
             changes
-                .take_until(tokio::time::sleep(Duration::from_secs(30)))
+                .take_until(tokio::time::sleep(Duration::from_secs(10)))
                 .filter_map(move |info| async move {
                     (info.endpoint_id == id).then(|| Ok(Item::new(info, "nearby", None)))
                 })

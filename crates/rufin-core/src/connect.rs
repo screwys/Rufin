@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 pub use session::Continuation;
 pub(crate) use session::{Observed, Observing};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -375,6 +376,9 @@ pub struct ConnectOwner {
     session: Mutex<Option<Arc<Session>>>,
     /// Turning on and off, joining and network changes run one at a time.
     actions: tokio::sync::Mutex<()>,
+    /// The number of each device's latest presence probe. Only the latest shows: an earlier
+    /// one can still be waiting on an address the device left.
+    probes: Mutex<HashMap<String, u64>>,
 }
 
 impl ConnectOwner {
@@ -429,6 +433,7 @@ impl ConnectOwner {
             network: tokio::sync::Mutex::new(None),
             session: Mutex::new(None),
             actions: tokio::sync::Mutex::new(()),
+            probes: Mutex::new(HashMap::new()),
         })
     }
 
@@ -777,6 +782,12 @@ impl ConnectOwner {
         Box::pin(async move {
             let network = self.network().await?;
             let presence = serde_json::to_vec(&Request::Presence).map_err(error)?;
+            let probe = {
+                let mut probes = self.probes.lock().unwrap();
+                let latest = probes.entry(peer.to_owned()).or_default();
+                *latest += 1;
+                *latest
+            };
             let answer = network
                 .test_connection(peer, presence)
                 .await
@@ -786,16 +797,18 @@ impl ConnectOwner {
                         .map(|presence| (route, presence))
                         .map_err(error)
                 });
-            self.update_device(peer, |device| match &answer {
-                Ok((route, _)) => {
-                    device.reachable = true;
-                    device.connection = connection_label(route);
-                }
-                Err(_) => {
-                    device.reachable = false;
-                    device.connection = localization::tr("Waiting for device");
-                }
-            });
+            if self.probes.lock().unwrap().get(peer) == Some(&probe) {
+                self.update_device(peer, |device| match &answer {
+                    Ok((route, _)) => {
+                        device.reachable = true;
+                        device.connection = connection_label(route);
+                    }
+                    Err(_) => {
+                        device.reachable = false;
+                        device.connection = localization::tr("Waiting for device");
+                    }
+                });
+            }
             let (_, presence) = answer?;
             for learned in network.learn(presence.addresses).await {
                 self.met(learned);
