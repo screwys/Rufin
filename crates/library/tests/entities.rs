@@ -659,7 +659,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             ..source.clone()
         })
         .await,
-        fixture.track_uris.iter().cloned().rev().collect::<Vec<_>>()
+        [1, 0, 3, 2].map(|index| fixture.track_uris[index].clone())
     );
     assert_eq!(
         selected(library::MemberRead {

@@ -601,7 +601,7 @@ impl Context<'_> {
         use LibraryField as S;
         let snapshot = self.snapshot;
         let record = &snapshot.tracks.records[member.0 as usize];
-        let album = matches!(sort, S::Artist | S::AlbumArtist | S::Album)
+        let album = matches!(sort, S::Artist | S::AlbumArtist | S::Album | S::TrackNumber)
             .then(|| snapshot.albums.live(record.album))
             .flatten();
         Sorted {
@@ -669,7 +669,7 @@ fn compare_tracks(
     fn album_key(row: &Sorted<'_>) -> Option<i64> {
         row.album.as_ref().map(|album| album.key)
     }
-    let album_tail = || {
+    let album_order = || {
         nulls_last(
             a.album.as_ref().and_then(|album| album.year),
             b.album.as_ref().and_then(|album| album.year),
@@ -677,12 +677,11 @@ fn compare_tracks(
         )
         .then_with(|| album_sort(a).cmp(&album_sort(b)))
         .then_with(|| nulls_last(album_key(a), album_key(b), false))
-        .then(disc)
-        .then(number)
     };
+    let album_tail = || album_order().then(disc).then(number);
     let order = match sort {
         S::RowIndex => return first(a.position.cmp(&b.position)),
-        S::TrackNumber => first(disc).then(first(number)),
+        S::TrackNumber => album_order().then(first(disc)).then(first(number)),
         S::Artist => first(a.artist.cmp(b.artist)).then_with(album_tail),
         S::AlbumArtist => {
             nulls_last(a.text.as_deref(), b.text.as_deref(), descending).then_with(album_tail)
