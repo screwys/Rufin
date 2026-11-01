@@ -942,12 +942,8 @@ impl ConnectOwner {
                     .await
                     .map_err(error)?;
                 let result = async {
-                    for source in &stored.sources.configured {
-                        self.source
-                            .forget_source(source.configuration.source_id.clone())
-                            .await
-                            .map_err(error)?;
-                    }
+                    // Playlists go first, so forgetting a source finds no entries holding its
+                    // tracks and deletes them all.
                     self.catalog
                         .clear_state(library::StateGroups {
                             playlists: true,
@@ -958,6 +954,12 @@ impl ConnectOwner {
                         })
                         .await
                         .map_err(error)?;
+                    for source in &stored.sources.configured {
+                        self.source
+                            .forget_source(source.configuration.source_id.clone())
+                            .await
+                            .map_err(error)?;
+                    }
                     for kind in crate::runtime::CacheKind::ALL {
                         kind.clear(&self.catalog, self.source.downloads(), &self.lyrics)
                             .await?;
@@ -980,7 +982,7 @@ impl ConnectOwner {
                                 cleared.secret_scope_id =
                                     std::mem::take(&mut current.secret_scope_id);
                                 cleared.jellyfin_device_id =
-                                    std::mem::take(&mut current.jellyfin_device_id);
+                                    crate::settings::random_identity("rufin-")?;
                                 cleared.ui.application.secret_storage_mode =
                                     current.ui.application.secret_storage_mode;
                                 *current = cleared;

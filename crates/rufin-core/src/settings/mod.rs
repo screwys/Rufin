@@ -994,7 +994,7 @@ fn migrate_source_credentials(
     Ok(())
 }
 
-fn random_identity(prefix: &str) -> Result<String, String> {
+pub(crate) fn random_identity(prefix: &str) -> Result<String, String> {
     use std::fmt::Write as _;
 
     let mut bytes = [0_u8; 16];
