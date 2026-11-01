@@ -1940,6 +1940,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_playlist_entry_waits_while_the_others_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let (present, missing) = (root.join("present.wav"), root.join("missing.wav"));
+        fs::write(&present, silent_wav()).unwrap();
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let connected = crate::Source::connect(
+            crate::SourceId::new("import-local"),
+            crate::SourceSetup::Local { roots: Vec::new() },
+            "",
+        )
+        .await
+        .unwrap();
+        let (configuration, source, _) = connected.into_parts();
+        catalog
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        let key = {
+            catalog.loaded().await;
+            catalog.source_key(source.source_id())
+        }
+        .unwrap();
+        let path = root.join("mix.m3u");
+        fs::write(
+            &path,
+            format!("{}\n{}\n", present.display(), missing.display()),
+        )
+        .unwrap();
+        let playlist = crate::import_local_playlist_file(&catalog, &path, None, |_| None)
+            .await
+            .unwrap()
+            .playlist;
+        for (appeared, listed) in [(false, 1), (false, 1), (true, 2)] {
+            if appeared {
+                fs::write(&missing, silent_wav()).unwrap();
+            }
+            crate::import_local_playlist_file(&catalog, &path, Some(playlist), |_| None)
+                .await
+                .unwrap();
+            source
+                .import_playlist_files(&catalog, playlist)
+                .await
+                .unwrap();
+            assert_eq!(
+                crate::listed_tracks(
+                    &catalog,
+                    library::MemberRead::new(library::Collection::Source(key))
+                )
+                .await
+                .len(),
+                listed
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn imported_local_files_survive_rescan_and_playlist_deletion() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();

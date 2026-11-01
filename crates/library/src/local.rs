@@ -665,7 +665,7 @@ pub(crate) async fn import_local_locators_jsonl_on(
 
 impl Catalog {
     /// A playlist's local entries by URI, with the path a walk reads each from: the CUE sheet
-    /// or file its track was read from, else the import locator's access path.
+    /// or file its track was read from, else the import locator's path.
     pub async fn playlist_import_page(
         &self,
         playlist: crate::PlaylistKey,
@@ -673,7 +673,7 @@ impl Catalog {
     ) -> LibraryResult<Vec<(String, Option<String>)>> {
         let mut connection = self.acquire_cancellable(&ReadCancellation::new()).await?;
         Ok(sqlx::query_as(
-            "SELECT DISTINCT track.media_uri,coalesce(details.cue_path,details.source_path,(SELECT locator.access_uri FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import'))
+            "SELECT DISTINCT track.media_uri,coalesce(details.cue_path,details.source_path,(SELECT locator.path FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import'))
              FROM playlist_entries entry JOIN tracks track USING(track_key) LEFT JOIN track_details details USING(track_key)
              WHERE entry.playlist_key=?1 AND track.media_uri>?2
                AND(track.media_uri LIKE 'file:%' OR track.media_uri LIKE 'rufin:cue/%' OR track.media_uri LIKE 'rufin:document/%' OR track.media_uri LIKE 'content:%')

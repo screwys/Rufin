@@ -273,7 +273,7 @@ impl LocalSource {
     }
 
     /// A playlist's local entries: each file outside the folders is an import root and stays
-    /// listed.
+    /// listed. A missing file stays a reference until a later reload finds it.
     pub(crate) async fn import_playlist_files(
         &self,
         observation: &mut library::Observation<'_>,
@@ -305,9 +305,9 @@ impl LocalSource {
         }
         let configured = self.configured_file_roots()?;
         paths.retain(|path| {
-            !configured
-                .iter()
-                .any(|root| std::path::Path::new(path).starts_with(root))
+            let path_ref = std::path::Path::new(path);
+            !configured.iter().any(|root| path_ref.starts_with(root))
+                && (path.starts_with("content:") || path_ref.exists())
         });
         if !paths.is_empty() {
             walk::walk(
