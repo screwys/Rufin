@@ -1,17 +1,13 @@
 use std::{cell::RefCell, rc::Rc};
 
-use ::library::{AlbumRow, ArtistRow, PlaylistRow, QueueRow, SmartPlaylistRow, TrackRow};
+use ::library::{PlaylistRow, QueueRow, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 #[cfg(test)]
 use gtk::glib;
 
-use localization::{album_count_text, track_count_text};
 use localization::{msgid, tr};
-use rufin_core::settings::layout::{
-    LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings,
-};
-use rufin_core::settings::presentation::format_duration_units;
+use rufin_core::settings::layout::{LibraryField, LibraryLayout, LibraryListKey};
 
 pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn track_key(&self) -> Option<library::TrackKey>;
@@ -137,84 +133,12 @@ pub fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryFi
 
 pub use rufin_core::playlists::smart_playlist_display_name;
 
-pub fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
-        LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
-        LibraryField::Year => optional_year(album.year),
-        LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(album.state.last_played),
-        LibraryField::PlayCount => count(album.state.play_count),
-        LibraryField::UserRating => stored_rating(album.state.rating),
-        LibraryField::Genre => album
-            .links
-            .genres
-            .iter()
-            .map(|genre| genre.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        LibraryField::Favorite => favorite_text(album.state.favorite),
-        _ => String::new(),
-    }
-}
-pub fn album_field(album: &AlbumRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::SongCount => track_count_text(album.summary.track_count.max(0) as u64),
-        LibraryField::Duration => rufin_core::settings::presentation::format_duration(
-            (album.summary.duration_millis.max(0) / 1_000) as u32,
-        ),
-        _ => album_item_field(album, field),
-    }
-}
-pub fn artist_item_field(artist: &ArtistRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Title | LibraryField::TitleMerged => artist.name.clone(),
-        LibraryField::LastPlayed => display_unix_date(artist.state.last_played),
-        LibraryField::PlayCount => count(artist.state.play_count),
-        LibraryField::UserRating => stored_rating(artist.state.rating),
-        LibraryField::Favorite => favorite_text(artist.state.favorite),
-        _ => String::new(),
-    }
-}
-pub fn artist_field(artist: &ArtistRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::AlbumCount => album_count_text(artist.summary.album_count.max(0) as u64),
-        LibraryField::SongCount => track_count_text(artist.summary.track_count.max(0) as u64),
-        _ => artist_item_field(artist, field),
-    }
-}
-pub fn playlist_field(playlist: &PlaylistRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Title | LibraryField::TitleMerged => playlist.name.clone(),
-        LibraryField::SongCount => track_count_text(playlist.track_count.max(0) as u64),
-        LibraryField::Duration => {
-            format_duration_units((playlist.duration_millis.max(0) / 1_000) as u32)
-        }
-        _ => String::new(),
-    }
-}
-
 pub fn playlist_artwork(playlist: &PlaylistRow) -> Vec<ArtworkBinding> {
     playlist
         .artwork_binding
         .iter()
         .map(|binding| ArtworkBinding::opaque(binding))
         .collect()
-}
-pub fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Title | LibraryField::TitleMerged => {
-            smart_playlist_display_name(&playlist.object_id, &playlist.name)
-        }
-        LibraryField::SongCount if playlist.track_count > 0 => {
-            track_count_text(playlist.track_count as u64)
-        }
-        LibraryField::Duration if playlist.duration_millis > 0 => {
-            format_duration_units((playlist.duration_millis / 1_000) as u32)
-        }
-        _ => String::new(),
-    }
 }
 pub use rufin_core::settings::presentation::{
     audio_property_field, optional_track_number, track_field, track_row_field,
@@ -254,13 +178,6 @@ fn configure_collection_grid_label(label: &gtk::Label) {
     label.set_vexpand(false);
     label.set_yalign(0.5);
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum LibraryFieldSet {
-    Row,
-    Grid,
-    Detail,
-}
-
 pub fn layout_button_content(layout: LibraryLayout) -> gtk::Widget {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     content.append(&gtk::Image::from_icon_name(layout_icon(layout)));
@@ -281,132 +198,6 @@ pub fn supported_layouts(key: LibraryListKey) -> Vec<LibraryLayout> {
         layouts.push(LibraryLayout::Detail);
     }
     layouts
-}
-pub fn field_group_title(field_set: LibraryFieldSet) -> &'static str {
-    match field_set {
-        LibraryFieldSet::Row => msgid("Columns"),
-        LibraryFieldSet::Grid => msgid("Grid labels"),
-        LibraryFieldSet::Detail => msgid("Detail track columns"),
-    }
-}
-pub fn field_set_for_layout(layout: LibraryLayout) -> LibraryFieldSet {
-    match layout {
-        LibraryLayout::Grid => LibraryFieldSet::Grid,
-        LibraryLayout::Detail => LibraryFieldSet::Detail,
-        LibraryLayout::Row => LibraryFieldSet::Row,
-    }
-}
-pub fn active_fields_for_set(
-    settings: &LibraryListSettings,
-    field_set: LibraryFieldSet,
-) -> &[LibraryField] {
-    match field_set {
-        LibraryFieldSet::Grid => &settings.grid_fields,
-        LibraryFieldSet::Detail => &settings.detail_track_fields,
-        LibraryFieldSet::Row => &settings.row_fields,
-    }
-}
-pub fn active_fields_for_set_mut(
-    settings: &mut LibraryListSettings,
-    field_set: LibraryFieldSet,
-) -> &mut Vec<LibraryField> {
-    match field_set {
-        LibraryFieldSet::Grid => &mut settings.grid_fields,
-        LibraryFieldSet::Detail => &mut settings.detail_track_fields,
-        LibraryFieldSet::Row => &mut settings.row_fields,
-    }
-}
-pub fn available_fields_for_set(
-    key: LibraryListKey,
-    field_set: LibraryFieldSet,
-) -> &'static [LibraryField] {
-    match field_set {
-        LibraryFieldSet::Grid => rufin_core::settings::layout::available_grid_fields(key),
-        LibraryFieldSet::Detail => rufin_core::settings::available_detail_track_fields(),
-        LibraryFieldSet::Row => rufin_core::settings::layout::available_row_fields(key),
-    }
-}
-pub fn set_field_enabled(
-    settings: &mut LibraryListSettings,
-    field_set: LibraryFieldSet,
-    field: LibraryField,
-    enabled: bool,
-) {
-    let fields = active_fields_for_set_mut(settings, field_set);
-    if enabled {
-        if !fields.contains(&field) {
-            let position = fields.len() - usize::from(fields.last() == Some(&LibraryField::Tools));
-            fields.insert(position, field);
-        }
-    } else {
-        fields.retain(|candidate| *candidate != field);
-    }
-}
-pub fn move_visible_field(
-    settings: &mut LibraryListSettings,
-    field_set: LibraryFieldSet,
-    field: LibraryField,
-    delta: isize,
-) {
-    let fields = active_fields_for_set_mut(settings, field_set);
-    let Some(index) = fields.iter().position(|candidate| *candidate == field) else {
-        return;
-    };
-    let new_index = if delta < 0 {
-        index.saturating_sub(1)
-    } else {
-        (index + 1).min(fields.len().saturating_sub(1))
-    };
-    fields.swap(index, new_index);
-}
-pub fn reorder_visible_field(
-    settings: &mut LibraryListSettings,
-    field_set: LibraryFieldSet,
-    source: LibraryField,
-    target: LibraryField,
-    after: bool,
-) {
-    let fields = active_fields_for_set_mut(settings, field_set);
-    let Some(source_index) = fields.iter().position(|field| *field == source) else {
-        return;
-    };
-    let field = fields.remove(source_index);
-    let Some(mut target_index) = fields.iter().position(|field| *field == target) else {
-        fields.insert(source_index.min(fields.len()), field);
-        return;
-    };
-    if after {
-        target_index += 1;
-    }
-    fields.insert(target_index.min(fields.len()), field);
-}
-pub fn can_toggle_field(
-    active: &[LibraryField],
-    field_set: LibraryFieldSet,
-    field: LibraryField,
-) -> bool {
-    if !active.contains(&field) {
-        return true;
-    }
-    if field_set == LibraryFieldSet::Grid {
-        return true;
-    }
-    !row_field_is_usable(field)
-        || active
-            .iter()
-            .filter(|field| row_field_is_usable(**field))
-            .count()
-            > 1
-}
-pub fn row_field_is_usable(field: LibraryField) -> bool {
-    !matches!(
-        field,
-        LibraryField::RowIndex
-            | LibraryField::Image
-            | LibraryField::TrackNumber
-            | LibraryField::DiscNumber
-            | LibraryField::Favorite
-    )
 }
 pub fn next_layout(key: LibraryListKey, layout: LibraryLayout) -> LibraryLayout {
     if key.supports_layout(LibraryLayout::Detail) {

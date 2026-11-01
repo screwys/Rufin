@@ -85,7 +85,7 @@ internal fun BrowseContent(
     onFavorite: (BrowseItem) -> Unit, onAddToPlaylist: (BrowseItem) -> Unit,
     onScrolled: (Boolean) -> Unit, scrollSections: List<AndroidScrollSection> = emptyList(),
     displaySize: DisplaySize = DisplaySize.DEFAULT, gridSpacing: DisplaySize = DisplaySize.DEFAULT, onPlayItem: (BrowseItem, Boolean) -> Unit = { item, _ -> onActivate(item) },
-    detailFields: List<AndroidSortField> = emptyList(),
+    fields: List<AndroidSortField> = emptyList(),
     letterIndex: Boolean = false,
     onLetterPosition: suspend (String) -> ULong? = { null },
     letterDescending: Boolean = false,
@@ -154,17 +154,17 @@ internal fun BrowseContent(
             }
             Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(end = indexInset)) {
-                if (detailFields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.kind == "track" && it.displaySettings?.showHeader != false })
-                    DetailTrackHeader(detailFields, displaySize)
+                if (fields.isNotEmpty() && items.itemSnapshotList.items.any { it.row.fields.isNotEmpty() && it.displaySettings?.showHeader != false })
+                    FieldHeader(fields, displaySize)
             LazyColumn(Modifier.fillMaxWidth().weight(1f), state = state, contentPadding = PaddingValues(bottom = 8.dp + LocalPlayerBottomPadding.current)) {
                 items(items.itemCount, key = items.itemKey(::browseItemKey)) { index ->
                     val item = items[index]
                     if (item == null) Spacer(Modifier.fillMaxWidth().height(60.dp))
                     else if (item.row.kind == "album_header") HomeShowcase(item, player, onActivate, onMenu, onFavorite,
                         { _, shuffled -> onPlayItem(item, shuffled) }, onRadio)
-                    else if (detailFields.isNotEmpty() && item.row.kind == "track")
-                        DetailTrackRow(item.copy(displaySettings = item.displaySettings?.let { it.copy(settings = it.settings.copy(display = it.settings.display.copy(size = displaySize))) }), player,
-                            detailFields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, detailFields,
+                    else if (fields.isNotEmpty() && item.row.fields.isNotEmpty())
+                        FieldRow(item.copy(displaySettings = item.displaySettings?.let { it.copy(settings = it.settings.copy(display = it.settings.display.copy(size = displaySize))) }), player,
+                            fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, fields,
                             onActivate, onMenu, onFavorite, onAddToPlaylist)
                     else BrowseTrackRow(item, player, onActivate, onMenu, onFavorite, onAddToPlaylist, displaySize)
                 }
@@ -332,7 +332,9 @@ private fun HomeContent(
                             if (header.sectionKind == "genres") {
                                 AssistChip(onClick = { onActivate(item) }, label = { Text(item.row.title) },
                                     leadingIcon = { RufinIcon("rufin-audio-x-generic-symbolic", null, Modifier.size(20.dp)) })
-                            } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true)
+                            } else CoverCard(item, player, Modifier.width(150.dp), onActivate, onMenu, marquee = true,
+                                lines = listOf(listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
+                                    .filter(String::isNotBlank).joinToString(" · ")))
                         }
                     }
                 }
@@ -458,6 +460,8 @@ private fun BrowseCover(item: BrowseItem, artwork: PlayerArtwork?, modifier: Mod
 internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Modifier,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     marquee: Boolean = false,
+    /** The labels under the title: the list's grid fields, one per line. */
+    lines: List<String> = item.row.fields.map { it.text },
 ) {
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
@@ -475,11 +479,11 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                     PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(32.dp), iconSize = 18.dp)
                 }
             }
-            val subtitle = listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
-                .filter(String::isNotBlank).joinToString(" · ")
-            if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (marquee) 1 else 2,
-                overflow = TextOverflow.Ellipsis)
+            lines.filter(String::isNotBlank).forEach { line ->
+                Text(line, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
         }
         }
     }

@@ -28,8 +28,8 @@ use gtk_widgets::popup::present_light_dismiss_dialog;
 use localization::{msgid, tr};
 
 use gtk_widgets::library_fields::{
-    field_set_for_layout, layout_button_content, layout_icon, layout_title, next_layout,
-    supported_layouts, sync_layout_buttons,
+    layout_button_content, layout_icon, layout_title, next_layout, supported_layouts,
+    sync_layout_buttons,
 };
 const LIBRARY_CONFIG_DIALOG_WIDTH: i32 = 620;
 const LIBRARY_CONFIG_DIALOG_HEIGHT: i32 = 560;
@@ -632,7 +632,7 @@ impl CatalogUi {
                 &self.settings,
                 self.library_settings_changed(),
                 key,
-                field_set_for_layout(current_layout),
+                current_layout,
                 &fields_group,
                 &rows,
             );

@@ -3,8 +3,9 @@ use super::*;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    pub fn detail_track_fields(&self) -> Vec<AndroidSortField> {
-        self.selected_track_fields()
+    /// The fields the page's rows show, by title.
+    pub fn fields(&self) -> Vec<AndroidSortField> {
+        self.shown_fields()
             .iter()
             .map(|field| AndroidSortField {
                 id: *field,
@@ -69,13 +70,7 @@ impl AndroidBrowseQuery {
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
-                .map(|(index, row)| match row {
-                    Row::Track(ref track) => AndroidBrowseRow {
-                        fields: self.track_fields(track, index),
-                        ..row.into()
-                    },
-                    row => row.into(),
-                })
+                .map(|(index, row)| Self::shown_row(row, &self.artist_tracks.row_fields, index))
                 .collect();
             let favorite_total = view.favorites_len().unwrap_or(0) as u64;
             let count = view.len() as u64;

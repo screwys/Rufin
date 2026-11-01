@@ -185,6 +185,15 @@ pub fn library_list_title(value: LibraryListKey) -> &'static str {
     }
 }
 
+/// The title of the fields a layout shows.
+pub fn library_fields_title(layout: super::LibraryLayout) -> &'static str {
+    match layout {
+        super::LibraryLayout::Row => msgid("Columns"),
+        super::LibraryLayout::Grid => msgid("Grid labels"),
+        super::LibraryLayout::Detail => msgid("Detail track columns"),
+    }
+}
+
 pub fn library_field_title(value: LibraryField) -> &'static str {
     match value {
         LibraryField::RowIndex => "#",
@@ -220,6 +229,7 @@ pub fn library_field_title(value: LibraryField) -> &'static str {
 }
 
 use library::{TrackArtistLink, TrackRow, TrackView};
+use localization::{album_count_text, track_count_text};
 
 pub fn format_duration(seconds: u32) -> String {
     let minutes = seconds / 60;
@@ -320,6 +330,116 @@ pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
             .join(", "),
         LibraryField::Duration => format_duration((row.duration_millis.max(0) / 1_000) as u32),
         LibraryField::Favorite => favorite_text(row.state.favorite),
+        _ => String::new(),
+    }
+}
+
+/// A list row's text for one field: what its card label or column shows.
+pub fn row_field(row: &library::Row, field: LibraryField) -> String {
+    use library::{PlaylistListRow, Row};
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => track_row_field(track, field),
+        Row::Album(album) | Row::AlbumHeading(album) => album_field(album, field),
+        Row::Artist(artist) => artist_field(artist, field),
+        Row::Tag(tag) => tag_field(tag, field),
+        Row::Playlist(PlaylistListRow::Playlist(playlist)) => playlist_field(playlist, field),
+        Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
+            smart_playlist_field(playlist, field)
+        }
+        Row::Playlist(PlaylistListRow::Folder(folder)) => playlist_folder_field(folder, field),
+        Row::Folder(folder) => match field {
+            LibraryField::Title | LibraryField::TitleMerged => folder.name.clone(),
+            _ => String::new(),
+        },
+    }
+}
+
+pub fn album_field(album: &library::AlbumRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
+        LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
+        LibraryField::Year => optional_year(album.year),
+        LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
+        LibraryField::LastPlayed => display_unix_date(album.state.last_played),
+        LibraryField::PlayCount => count(album.state.play_count),
+        LibraryField::UserRating => stored_rating(album.state.rating),
+        LibraryField::Genre => album
+            .links
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        LibraryField::Favorite => favorite_text(album.state.favorite),
+        LibraryField::SongCount => track_count_text(album.summary.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration((album.summary.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn artist_field(artist: &library::ArtistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => artist.name.clone(),
+        LibraryField::LastPlayed => display_unix_date(artist.state.last_played),
+        LibraryField::PlayCount => count(artist.state.play_count),
+        LibraryField::UserRating => stored_rating(artist.state.rating),
+        LibraryField::Favorite => favorite_text(artist.state.favorite),
+        LibraryField::AlbumCount => album_count_text(artist.summary.album_count.max(0) as u64),
+        LibraryField::SongCount => track_count_text(artist.summary.track_count.max(0) as u64),
+        _ => String::new(),
+    }
+}
+
+pub fn tag_field(tag: &library::TagRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => tag.name.clone(),
+        LibraryField::AlbumCount if tag.kind == library::TagKind::Genre => {
+            album_count_text(tag.summary.album_count.max(0) as u64)
+        }
+        LibraryField::SongCount => track_count_text(tag.summary.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((tag.summary.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn playlist_field(playlist: &library::PlaylistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => playlist.name.clone(),
+        LibraryField::SongCount => track_count_text(playlist.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((playlist.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn smart_playlist_field(playlist: &library::SmartPlaylistRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => {
+            crate::playlists::smart_playlist_display_name(&playlist.object_id, &playlist.name)
+        }
+        LibraryField::SongCount if playlist.track_count > 0 => {
+            track_count_text(playlist.track_count as u64)
+        }
+        LibraryField::Duration if playlist.duration_millis > 0 => {
+            format_duration_units((playlist.duration_millis / 1_000) as u32)
+        }
+        _ => String::new(),
+    }
+}
+
+pub fn playlist_folder_field(folder: &library::PlaylistFolderRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => folder.name.clone(),
+        LibraryField::SongCount => track_count_text(folder.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((folder.duration_millis.max(0) / 1_000) as u32)
+        }
         _ => String::new(),
     }
 }

@@ -28,10 +28,11 @@ use crate::track_selection::TrackSelection;
 use gtk_widgets::detail_links::{DetailLinkBinding, album_row_artist_links};
 use gtk_widgets::library_fields::{
     COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MAX_CARD_WIDTH, COLLECTION_GRID_MIN_CARD_WIDTH,
-    album_field, artist_field, opaque_artwork,
+    opaque_artwork,
 };
 use gtk_widgets::sparse_model::{bind_sparse_item, unbind_sparse_item};
 use rufin_core::route::detail_links::DetailLinks;
+use rufin_core::settings::presentation::{album_field, artist_field};
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
     track_count > 0 && downloaded_count == track_count

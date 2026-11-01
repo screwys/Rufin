@@ -1,8 +1,7 @@
-use crate::library_fields::*;
 use crate::settings::SettingsState;
 use adw::prelude::*;
 use localization::tr;
-use rufin_core::settings::layout::{LibraryField, LibraryListKey};
+use rufin_core::settings::layout::{LibraryField, LibraryLayout, LibraryListKey, available_fields};
 use std::{cell::RefCell, rc::Rc};
 pub fn populate_library_field_rows(
     settings: &Rc<SettingsState>,
@@ -12,20 +11,13 @@ pub fn populate_library_field_rows(
     rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
 ) {
     let config = settings.current.borrow().library_list(key);
-    populate_library_field_rows_for_set(
-        settings,
-        changed,
-        key,
-        field_set_for_layout(config.layout),
-        group,
-        rows,
-    );
+    populate_library_field_rows_for_set(settings, changed, key, config.layout, group, rows);
 }
 pub fn populate_library_field_rows_for_set(
     settings: &Rc<SettingsState>,
     changed: Rc<dyn Fn()>,
     key: LibraryListKey,
-    field_set: LibraryFieldSet,
+    layout: LibraryLayout,
     group: &adw::PreferencesGroup,
     rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
 ) {
@@ -34,11 +26,13 @@ pub fn populate_library_field_rows_for_set(
     }
 
     let config = settings.current.borrow().library_list(key);
-    group.set_title(&tr(field_group_title(field_set)));
+    group.set_title(&tr(
+        rufin_core::settings::presentation::library_fields_title(layout),
+    ));
 
-    let active = active_fields_for_set(&config, field_set).to_vec();
+    let active = config.fields(layout).to_vec();
     let mut order = active.clone();
-    for field in available_fields_for_set(key, field_set) {
+    for field in available_fields(key, layout) {
         if !order.contains(field) {
             order.push(*field);
         }
@@ -48,9 +42,9 @@ pub fn populate_library_field_rows_for_set(
             settings,
             Rc::clone(&changed),
             key,
-            field_set,
+            layout,
             field,
-            &active,
+            &config,
             group,
             rows,
         );
@@ -62,13 +56,13 @@ pub fn library_field_config_row(
     settings: &Rc<SettingsState>,
     changed: Rc<dyn Fn()>,
     key: LibraryListKey,
-    field_set: LibraryFieldSet,
+    layout: LibraryLayout,
     field: LibraryField,
-    active: &[LibraryField],
+    config: &rufin_core::settings::LibraryListSettings,
     group: &adw::PreferencesGroup,
     rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
 ) -> adw::ActionRow {
-    let enabled = active.contains(&field);
+    let enabled = config.fields(layout).contains(&field);
     let row = adw::ActionRow::builder()
         .title(tr(rufin_core::settings::presentation::library_field_title(
             field,
@@ -83,7 +77,7 @@ pub fn library_field_config_row(
 
     let check = gtk::CheckButton::new();
     check.set_active(enabled);
-    check.set_sensitive(can_toggle_field(active, field_set, field));
+    check.set_sensitive(config.can_toggle_field(layout, field));
     check.set_valign(gtk::Align::Center);
     row.add_prefix(&check);
     row.set_activatable_widget(Some(&check));
@@ -112,16 +106,7 @@ pub fn library_field_config_row(
                 return;
             };
             if settings.update_library_list_settings(key, |settings| {
-                if key == LibraryListKey::Queue
-                    && field == LibraryField::RowIndex
-                    && check.is_active()
-                {
-                    let fields = active_fields_for_set_mut(settings, field_set);
-                    fields.retain(|candidate| *candidate != field);
-                    fields.insert(0, field);
-                } else {
-                    set_field_enabled(settings, field_set, field, check.is_active());
-                }
+                settings.show_field(key, layout, field, check.is_active());
             }) {
                 changed();
             }
@@ -129,7 +114,7 @@ pub fn library_field_config_row(
                 &settings,
                 Rc::clone(&changed),
                 key,
-                field_set,
+                layout,
                 &group,
                 &rows,
             );
@@ -145,7 +130,7 @@ pub fn library_field_config_row(
                 return;
             };
             if settings.update_library_list_settings(key, |settings| {
-                move_visible_field(settings, field_set, field, -1);
+                settings.move_field(layout, field, -1);
             }) {
                 changed();
             }
@@ -153,7 +138,7 @@ pub fn library_field_config_row(
                 &settings,
                 Rc::clone(&changed),
                 key,
-                field_set,
+                layout,
                 &group,
                 &rows,
             );
@@ -169,7 +154,7 @@ pub fn library_field_config_row(
                 return;
             };
             if settings.update_library_list_settings(key, |settings| {
-                move_visible_field(settings, field_set, field, 1);
+                settings.move_field(layout, field, 1);
             }) {
                 changed();
             }
@@ -177,7 +162,7 @@ pub fn library_field_config_row(
                 &settings,
                 Rc::clone(&changed),
                 key,
-                field_set,
+                layout,
                 &group,
                 &rows,
             );
@@ -187,7 +172,7 @@ pub fn library_field_config_row(
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::MOVE)
         .build();
-    let field_position = available_fields_for_set(key, field_set)
+    let field_position = available_fields(key, layout)
         .iter()
         .position(|candidate| *candidate == field)
         .expect("configured field is available") as u32;
@@ -208,7 +193,7 @@ pub fn library_field_config_row(
         let Ok(source_position) = value.get::<u32>() else {
             return false;
         };
-        let Some(source_field) = available_fields_for_set(key, field_set)
+        let Some(source_field) = available_fields(key, layout)
             .get(source_position as usize)
             .copied()
         else {
@@ -225,7 +210,7 @@ pub fn library_field_config_row(
         };
         let after = y > f64::from(row.height()) / 2.0;
         if settings.update_library_list_settings(key, |settings| {
-            reorder_visible_field(settings, field_set, source_field, field, after);
+            settings.reorder_field(layout, source_field, field, after);
         }) {
             changed();
         }
@@ -233,7 +218,7 @@ pub fn library_field_config_row(
             &settings,
             Rc::clone(&changed),
             key,
-            field_set,
+            layout,
             &group,
             &rows,
         );

@@ -95,7 +95,7 @@ internal fun DetailContent(
             if (artist && favorites != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))
-                    if (summary.showTrackHeader) DetailTrackHeader(favoritesPage.detailTrackFields, favoritesPage.displaySettings?.size)
+                    if (summary.showTrackHeader) FieldHeader(favoritesPage.fields, favoritesPage.displaySettings?.size)
                     val visibleRows = if (favorites.loadState.refresh is LoadState.Loading)
                         minOf(summary.favoriteTotal, 4UL).toInt() else minOf(favorites.itemCount, 4)
                     val baseHeight = when (favoritesPage.displaySettings?.size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> 64.dp }
@@ -105,8 +105,8 @@ internal fun DetailContent(
                     } else LazyColumn(Modifier.fillMaxWidth().height(rowHeight * visibleRows.coerceAtLeast(1))) {
                         items(favorites.itemCount, key = favorites.itemKey { "${it.row.key}:${it.index}" }) { index ->
                             val item = favorites[index]
-                            if (item == null) Spacer(Modifier.height(64.dp)) else DetailTrackRow(item.copy(displaySettings = favoritesPage.options.displaySettings ?: favoritesPage.displaySettings), player,
-                                summary.showTrackImages, favoritesPage.detailTrackFields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                            if (item == null) Spacer(Modifier.height(64.dp)) else FieldRow(item.copy(displaySettings = favoritesPage.options.displaySettings ?: favoritesPage.displaySettings), player,
+                                summary.showTrackImages, favoritesPage.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                         }
                         item { DetailLoadState(favorites.loadState.append, favorites::retry) }
                     }
@@ -132,7 +132,9 @@ internal fun DetailContent(
                                         Box(Modifier.weight(1f)) {
                                             if (item == null) Spacer(Modifier.height(if (grid) cardSize + 64.dp else 76.dp))
                                             else if (grid) CoverCard(item.copy(displaySettings = display), player, Modifier.fillMaxWidth().padding(bottom = 12.dp), onActivate, onMenu)
-                                            else DetailAlbumRow(item.copy(displaySettings = display), player, onActivate, onMenu, onFavorite)
+                                            else FieldRow(item.copy(displaySettings = display), player,
+                                                page.fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }, page.fields,
+                                                onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                                         }
                                     }
                                 }
@@ -162,12 +164,12 @@ internal fun DetailContent(
                         }
                     }
                 } else {
-                    if (summary.showTrackHeader) item("detail-track-header") { DetailTrackHeader(page.detailTrackFields, display?.size) }
+                    if (summary.showTrackHeader) item("detail-track-header") { FieldHeader(page.fields, display?.size) }
                     items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
                         val item = rows[index]
                         if (item == null) Spacer(Modifier.height(48.dp))
-                        else DetailTrackRow(item.copy(displaySettings = display), player,
-                            summary.showTrackImages, page.detailTrackFields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                        else FieldRow(item.copy(displaySettings = display), player,
+                            summary.showTrackImages, page.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                     }
                 }
                 item { DetailLoadState(rows.loadState.refresh, rows::retry); DetailLoadState(rows.loadState.append, rows::retry) }
@@ -328,9 +330,10 @@ private fun DetailCover(artwork: PlayerArtwork?, modifier: Modifier,
     }
 }
 
+/** A list row showing the fields its list shows, as columns. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun DetailTrackRow(
+internal fun FieldRow(
     item: BrowseItem, player: PlayerConnection, showImage: Boolean, fields: List<AndroidSortField>,
     activate: (BrowseItem) -> Unit, menu: (BrowseItem) -> Unit,
     favorite: (BrowseItem) -> Unit, playlist: (BrowseItem) -> Unit, allowSwipe: Boolean = true,
@@ -343,7 +346,9 @@ internal fun DetailTrackRow(
     val baseHeight = when (size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> if (merged) 64.dp else 56.dp }
     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
     BrowseSwipeActions(item, allowSwipe) {
-    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).combinedClickable(onClick = { activate(item) }, onLongClick = { menu(projected) }).padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
+    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).playlistFolderDrag(item, player.model)
+        .combinedClickable(onClick = { activate(item) }, onLongClick = if (item.row.playlistFolderMember == null) ({ menu(projected) }) else null)
+        .padding(start = 8.dp, end = 4.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         fields.forEach { field ->
             val value = projected.row.fields.firstOrNull { it.id == field.id }?.text.orEmpty()
@@ -386,7 +391,7 @@ private fun RowScope.detailColumn(id: LibraryField, imageSize: Dp = 48.dp): Modi
 }
 
 @Composable
-internal fun DetailTrackHeader(fields: List<AndroidSortField>, displaySize: DisplaySize?) {
+internal fun FieldHeader(fields: List<AndroidSortField>, displaySize: DisplaySize?) {
     val imageSize = when (displaySize) { DisplaySize.COMPACT -> 36.dp; DisplaySize.LARGE -> 64.dp; else -> 48.dp }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -401,29 +406,6 @@ internal fun DetailTrackHeader(fields: List<AndroidSortField>, displaySize: Disp
     }
     HorizontalDivider(Modifier.padding(horizontal = 8.dp))
 }
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun DetailAlbumRow(item: BrowseItem, player: PlayerConnection, activate: (BrowseItem) -> Unit,
-    menu: (BrowseItem) -> Unit, favorite: (BrowseItem) -> Unit,
-) {
-    val compact = item.displaySettings?.size == DisplaySize.COMPACT
-    val imageSize = when (item.displaySettings?.size) { DisplaySize.COMPACT -> 36.dp; DisplaySize.LARGE -> 64.dp; else -> 48.dp }
-    val padding = if (compact) 0.dp else 6.dp
-    BrowseSwipeActions(item, true) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).combinedClickable(onClick = { activate(item) }, onLongClick = { menu(item) }).padding(start = 16.dp, end = 8.dp, top = padding, bottom = padding), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
-        Column(Modifier.weight(1f)) {
-            BrowseTitle(item, style = MaterialTheme.typography.bodyMedium, player = player)
-            Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-            item.row.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall) }
-        }
-        PlayerIconButton("rufin-view-more-symbolic", "More", { menu(item) })
-    }
-    }
-}
-
 
 @Composable
 private fun DetailLoadState(state: LoadState, retry: () -> Unit) {

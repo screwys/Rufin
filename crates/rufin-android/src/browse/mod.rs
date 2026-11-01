@@ -8,9 +8,9 @@ mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
     AndroidBrowseItem, AndroidBrowsePage, AndroidBrowseRow, AndroidCollectionCategory,
-    AndroidDetailLink, AndroidDetailSummary, AndroidFieldValue, AndroidMusicFolder,
-    AndroidMusicFolderState, AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor,
-    AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
+    AndroidDetailLink, AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue,
+    AndroidMusicFolder, AndroidMusicFolderState, AndroidPinPage, AndroidPlaylistImport,
+    AndroidRouteDescriptor, AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{Collection, MemberSelection, ReadCancellation, Row};
@@ -68,7 +68,24 @@ const ARTIST_RELEASE_GROUPS: [(&str, &str); 6] = [
 ];
 
 fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> AndroidBrowseDisplay {
+    use rufin_core::settings::presentation::{library_field_title, library_fields_title};
+    let layout = settings.layout;
+    let shown = settings.fields(layout);
+    let hidden = rufin_core::settings::layout::available_fields(key, layout)
+        .iter()
+        .filter(|field| !shown.contains(field));
     AndroidBrowseDisplay {
+        fields_title: localization::tr(library_fields_title(layout)),
+        field_choices: shown
+            .iter()
+            .chain(hidden)
+            .map(|field| AndroidFieldChoice {
+                id: *field,
+                title: localization::tr(library_field_title(*field)),
+                shown: shown.contains(field),
+                can_toggle: settings.can_toggle_field(layout, *field),
+            })
+            .collect(),
         settings: settings.clone(),
         layouts: [
             LibraryLayout::Row,
@@ -192,13 +209,6 @@ impl AndroidBrowseQuery {
             .expect("Source-scoped query has a selected library")
     }
 
-    fn detail_track_settings(&self) -> &LibraryListSettings {
-        if self.detail_identity().is_some() && !matches!(self.route, Route::AlbumDetail(_)) {
-            &self.artist_tracks
-        } else {
-            &self.display
-        }
-    }
     fn detail_identity(&self) -> Option<(&str, bool)> {
         match &self.route {
             Route::AlbumDetail(uri)
@@ -238,44 +248,51 @@ impl AndroidBrowseQuery {
             .map(Arc::as_ref)
     }
 
-    fn selected_track_fields(&self) -> &[LibraryField] {
-        if self.album_detail_layout() {
-            &self.display.detail_track_fields
+    /// The fields the page's rows show in its layout. An artist's favorite tracks show as rows.
+    fn shown_fields(&self) -> &[LibraryField] {
+        if matches!(
+            self.route,
+            Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
+        ) {
+            &self.display.row_fields
         } else {
-            &self.detail_track_settings().row_fields
+            self.display.fields(self.display.layout)
         }
     }
 
-    /// The configured columns of a track row; `index` is its place among the page's tracks.
-    fn track_fields(&self, track: &library::TrackRow, index: usize) -> Vec<AndroidFieldValue> {
-        self.selected_track_fields()
-            .iter()
-            .map(|field| AndroidFieldValue {
-                id: *field,
-                text: if *field == LibraryField::RowIndex {
-                    (index + 1).to_string()
-                } else {
-                    rufin_core::settings::presentation::track_row_field(track, *field)
-                },
-            })
-            .collect()
+    /// `row` showing `fields`; `index` is its place among the page's rows of its kind.
+    fn shown_row(row: Row, fields: &[LibraryField], index: usize) -> AndroidBrowseRow {
+        let fields = if matches!(row, Row::AlbumHeading(_)) {
+            Vec::new()
+        } else {
+            fields
+                .iter()
+                .map(|field| AndroidFieldValue {
+                    id: *field,
+                    text: if *field == LibraryField::RowIndex {
+                        (index + 1).to_string()
+                    } else {
+                        rufin_core::settings::presentation::row_field(&row, *field)
+                    },
+                })
+                .collect()
+        };
+        AndroidBrowseRow {
+            fields,
+            ..row.into()
+        }
     }
 
     /// The rows of `view` that start at `first`.
     fn browse_rows(&self, view: &View, rows: Vec<Row>, first: usize) -> Vec<AndroidBrowseRow> {
         let folders = view.folder_len().unwrap_or(0);
         let releases = view.release_counts().map(|(counts, _)| counts);
+        let fields = self.shown_fields();
         rows.into_iter()
             .zip(first..)
             .map(|(row, position)| match row {
-                Row::Track(ref track) => AndroidBrowseRow {
-                    fields: self.track_fields(track, position.saturating_sub(folders)),
-                    ..row.into()
-                },
-                Row::AlbumTrack { ref track, index } => AndroidBrowseRow {
-                    fields: self.track_fields(track, index as usize),
-                    ..row.into()
-                },
+                Row::Track(_) => Self::shown_row(row, fields, position.saturating_sub(folders)),
+                Row::AlbumTrack { index, .. } => Self::shown_row(row, fields, index as usize),
                 Row::Folder(folder) => {
                     let Route::Folders { path } = &self.route else {
                         unreachable!("Folder rows belong to a folder route")
@@ -307,10 +324,10 @@ impl AndroidBrowseQuery {
                         section_id: id.into(),
                         section: localization::tr(title),
                         section_kind: "artist_release".into(),
-                        ..row.into()
+                        ..Self::shown_row(row, fields, position)
                     }
                 }
-                row => row.into(),
+                row => Self::shown_row(row, fields, position),
             })
             .collect()
     }

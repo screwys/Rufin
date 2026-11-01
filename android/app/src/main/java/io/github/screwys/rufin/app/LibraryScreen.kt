@@ -26,7 +26,7 @@ import io.github.screwys.rufin.connect.ConnectPairingPrompt
 import io.github.screwys.rufin.connect.ConnectProgressScreen
 import io.github.screwys.rufin.browse.BrowsePage
 import io.github.screwys.rufin.browse.DetailContent
-import io.github.screwys.rufin.browse.DetailTrackRow
+import io.github.screwys.rufin.browse.FieldRow
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.RufinIcon
@@ -645,7 +645,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
             BrowseContent(rows, page.homeRows, player, location.kind == "Home", location in browse.details, covers,
                 browse::open, onMenu, { id, shuffled -> page.playSection(id, shuffled) }, browse::refreshSection,
                 browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
-                display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.detailTrackFields,
+                display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.fields,
                 page.supportsLetterIndex, page::letterPosition, page.sortSelection?.descending ?: false,
                 page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, "now") },
                 emptyIcon = if (location.kind in listOf("Folders", "folder")) "rufin-folders-symbolic" else null)
@@ -691,13 +691,13 @@ private fun HistoryRows(rows: LazyPagingItems<BrowseItem>, page: BrowsePage, pla
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }.collect(onScrolled)
     }
-    val fields = page.detailTrackFields
+    val fields = page.fields
     val images = fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }
     LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
         items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
             val item = rows[index]
             if (item == null) Spacer(Modifier.height(64.dp))
-            else DetailTrackRow(item.copy(displaySettings = page.options.displaySettings ?: page.displaySettings),
+            else FieldRow(item.copy(displaySettings = page.options.displaySettings ?: page.displaySettings),
                 player, images, fields, browse::open, onMenu, browse::favorite, onPlaylist)
         }
         if (rows.itemCount == 0 && rows.loadState.refresh is LoadState.NotLoading) item {

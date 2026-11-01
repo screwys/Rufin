@@ -25,6 +25,7 @@ import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.player.PlayerConnection
+import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -161,6 +162,18 @@ internal fun BrowseSortSheet(browse: BrowseConnection, onDismiss: () -> Unit, pa
                                 DisplaySize.COMPACT -> "Small"; DisplaySize.DEFAULT -> "Default"; DisplaySize.LARGE -> "Wide"
                             }) }) { spacing ->
                                 page?.chooseDisplay(display.layout, display.size, spacing)
+                            }
+                            if (display.fieldChoices.isNotEmpty()) {
+                                Text(display.fieldsTitle, Modifier.padding(top = 12.dp, bottom = 4.dp), style = MaterialTheme.typography.titleSmall)
+                                display.fieldChoices.forEach { field ->
+                                    ListItem(headlineContent = { Text(field.title) },
+                                        leadingContent = { Checkbox(field.shown, null, enabled = field.canToggle) },
+                                        trailingContent = { Row {
+                                            PlayerIconButton("rufin-go-up-symbolic", "Move up", { page?.moveField(field.id, true) }, enabled = field.shown)
+                                            PlayerIconButton("rufin-go-down-symbolic", "Move down", { page?.moveField(field.id, false) }, enabled = field.shown)
+                                        } },
+                                        modifier = Modifier.toggleable(field.shown, field.canToggle, Role.Checkbox) { page?.showField(field.id, it) })
+                                }
                             }
                         }
                     }

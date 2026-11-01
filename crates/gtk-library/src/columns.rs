@@ -24,14 +24,14 @@ use rufin_core::playback::PlayRequest;
 use super::table_links::mapped_track_link_column;
 use gtk_widgets::detail_links::album_row_artist_links;
 use gtk_widgets::library_fields::{
-    add_field_skeleton_class, album_field, artist_field, column_fit_width, column_width,
-    opaque_artwork,
+    add_field_skeleton_class, column_fit_width, column_width, opaque_artwork,
 };
 use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
 use rufin_core::route::detail_links::DetailLinks;
+use rufin_core::settings::presentation::{album_field, artist_field};
 
 const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 

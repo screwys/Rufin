@@ -52,7 +52,8 @@ internal class BrowsePage(
             summary?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) && options.category == "albums")
     var summary by mutableStateOf<AndroidDetailSummary?>(null)
         private set
-    var detailTrackFields by mutableStateOf<List<AndroidSortField>>(emptyList())
+    /** The fields the page's rows show, in its layout. */
+    var fields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
     var loading by mutableStateOf(true)
         private set
@@ -129,10 +130,26 @@ internal class BrowsePage(
         val display = withContext(Dispatchers.IO) {
             browse.library?.setBrowseDisplay(location.route, options.category, layout, size, spacing)
         } ?: return@runAction
+        showDisplay(display, previous != display.layout)
+    }
+    fun showField(field: LibraryField, shown: Boolean) = connection.runAction {
+        val display = withContext(Dispatchers.IO) {
+            browse.library?.showBrowseField(location.route, options.category, field, shown)
+        } ?: return@runAction
+        showDisplay(display, true)
+    }
+    fun moveField(field: LibraryField, up: Boolean) = connection.runAction {
+        val display = withContext(Dispatchers.IO) {
+            browse.library?.moveBrowseField(location.route, options.category, field, up)
+        } ?: return@runAction
+        showDisplay(display, true)
+    }
+    /** Shows `display`; rows read again when the fields they show changed. */
+    private fun showDisplay(display: AndroidBrowseDisplay, fieldsChanged: Boolean) {
         if (artistAlbums) {
             options.displaySettings = null
-            browse.artistAlbumsChanged(display)
-        } else if ((previous == LibraryLayout.DETAIL) != (display.layout == LibraryLayout.DETAIL)) { options.displaySettings = null; refresh() }
+            browse.artistAlbumsChanged(display, orderChanged = fieldsChanged)
+        } else if (fieldsChanged) { options.displaySettings = null; refresh() }
         else options.displaySettings = display
     }
 
@@ -164,16 +181,16 @@ internal class BrowsePage(
                 .collectLatest { (active, labelsVersion, query) ->
                     if (!active || query == null || labelsVersion == capturedLabelsVersion) return@collectLatest
                     try {
-                    val fields = query.sortFields()
+                    val sorts = query.sortFields()
                     val display = query.displaySettings()
-                    val trackFields = query.detailTrackFields()
+                    val shownFields = query.fields()
                     val homeTitles = homeRows.map { it.row.sectionId }.distinct().associateWith(query::homeSectionTitle)
                     if (currentQuery !== query) return@collectLatest
                     Snapshot.withMutableSnapshot {
                         capturedLabelsVersion = labelsVersion
-                        sortFields = fields
+                        sortFields = sorts
                         capturedDisplay = display
-                        detailTrackFields = trackFields
+                        fields = shownFields
                         summary = preparedPage?.summary?.let { detail ->
                             detail.copy(label = translate(detail.label), links = detail.links.map { it.copy(title = translate(it.title)) })
                         }
@@ -212,10 +229,10 @@ internal class BrowsePage(
                 val prepared = if (favoriteSeed != null) null else query?.initialPage(embedded)
                 val count = favoriteSeed?.summary?.favoriteTotal?.toInt() ?: prepared?.count?.toInt()
                 val seedRows = if (context.sort == null) favoriteSeed?.favoriteRows ?: prepared?.rows else prepared?.rows
-                val fields = query?.sortFields().orEmpty()
+                val sorts = query?.sortFields().orEmpty()
                 val display = query?.displaySettings()
                 val detail = prepared?.summary
-                val trackFields = query?.detailTrackFields().orEmpty()
+                val shownFields = query?.fields().orEmpty()
                 val crumbs = if (embedded) emptyList() else query?.breadcrumbs().orEmpty()
                 val folders = if (kind == "Folders") library.musicFolders() else null
                 val isHome = !pins && routeId == "Home"
@@ -248,10 +265,10 @@ internal class BrowsePage(
                     scrollSections = emptyList()
                     supportsFavoriteFilter = favoriteFilter
                     supportsDownloadedFilter = downloadedFilter
-                    sortFields = fields
+                    sortFields = sorts
                     capturedDisplay = display
                     summary = detail
-                    detailTrackFields = trackFields
+                    fields = shownFields
                     breadcrumbs = crumbs
                     musicFolders = folders
                     homeRows = home

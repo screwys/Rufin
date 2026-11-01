@@ -182,6 +182,19 @@ impl AndroidLibrary {
     }
 }
 
+impl AndroidLibrary {
+    fn update_browse_fields(
+        &self,
+        key: LibraryListKey,
+        update: impl FnOnce(&mut LibraryListSettings),
+    ) -> Result<AndroidBrowseDisplay, AndroidError> {
+        self.settings
+            .update_library_list_settings(key, update)
+            .map_err(error)?;
+        Ok(browse_display(key, &self.settings.load().library_list(key)))
+    }
+}
+
 #[uniffi::export]
 impl AndroidLibrary {
     pub fn music_folders(&self) -> AndroidMusicFolderState {
@@ -238,6 +251,34 @@ impl AndroidLibrary {
             .map_err(error)?;
         Ok(browse_display(key, &self.settings.load().library_list(key)))
     }
+    /// Shows or hides `field` in the page's layout.
+    pub fn show_browse_field(
+        &self,
+        route: Route,
+        category: String,
+        field: LibraryField,
+        shown: bool,
+    ) -> Result<AndroidBrowseDisplay, AndroidError> {
+        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        self.update_browse_fields(key, |settings| {
+            settings.show_field(key, settings.layout, field, shown);
+        })
+    }
+
+    /// Moves a shown `field` one place earlier (`up`) or later in the page's layout.
+    pub fn move_browse_field(
+        &self,
+        route: Route,
+        category: String,
+        field: LibraryField,
+        up: bool,
+    ) -> Result<AndroidBrowseDisplay, AndroidError> {
+        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        self.update_browse_fields(key, |settings| {
+            settings.move_field(settings.layout, field, if up { -1 } else { 1 });
+        })
+    }
+
     pub fn set_browse_sort(
         &self,
         route: Route,

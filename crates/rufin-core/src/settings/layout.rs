@@ -340,6 +340,94 @@ impl LibraryListSettings {
         self.layout_version = LIBRARY_LIST_LAYOUT_VERSION;
     }
 
+    /// The fields `layout` shows: row columns, grid labels or detail track columns.
+    pub fn fields(&self, layout: LibraryLayout) -> &[LibraryField] {
+        match layout {
+            LibraryLayout::Row => &self.row_fields,
+            LibraryLayout::Grid => &self.grid_fields,
+            LibraryLayout::Detail => &self.detail_track_fields,
+        }
+    }
+
+    fn fields_mut(&mut self, layout: LibraryLayout) -> &mut Vec<LibraryField> {
+        match layout {
+            LibraryLayout::Row => &mut self.row_fields,
+            LibraryLayout::Grid => &mut self.grid_fields,
+            LibraryLayout::Detail => &mut self.detail_track_fields,
+        }
+    }
+
+    /// Whether `field` can be shown or hidden in `layout`. A row keeps one field with text.
+    pub fn can_toggle_field(&self, layout: LibraryLayout, field: LibraryField) -> bool {
+        let fields = self.fields(layout);
+        layout == LibraryLayout::Grid
+            || !fields.contains(&field)
+            || !row_field_is_usable(field)
+            || fields
+                .iter()
+                .filter(|field| row_field_is_usable(**field))
+                .count()
+                > 1
+    }
+
+    /// Shows or hides `field` in `layout`. A shown field goes before Tools; the queue's row
+    /// index goes first.
+    pub fn show_field(
+        &mut self,
+        key: LibraryListKey,
+        layout: LibraryLayout,
+        field: LibraryField,
+        shown: bool,
+    ) {
+        if !self.can_toggle_field(layout, field) {
+            return;
+        }
+        let fields = self.fields_mut(layout);
+        if !shown {
+            fields.retain(|candidate| *candidate != field);
+        } else if key == LibraryListKey::Queue && field == LibraryField::RowIndex {
+            fields.retain(|candidate| *candidate != field);
+            fields.insert(0, field);
+        } else if !fields.contains(&field) {
+            let position = fields.len() - usize::from(fields.last() == Some(&LibraryField::Tools));
+            fields.insert(position, field);
+        }
+    }
+
+    /// Moves a shown `field` one place earlier (`delta` < 0) or later in `layout`.
+    pub fn move_field(&mut self, layout: LibraryLayout, field: LibraryField, delta: isize) {
+        let fields = self.fields_mut(layout);
+        let Some(index) = fields.iter().position(|candidate| *candidate == field) else {
+            return;
+        };
+        let target = if delta < 0 {
+            index.saturating_sub(1)
+        } else {
+            (index + 1).min(fields.len() - 1)
+        };
+        fields.swap(index, target);
+    }
+
+    /// Moves a shown `source` field before or `after` the shown `target` field in `layout`.
+    pub fn reorder_field(
+        &mut self,
+        layout: LibraryLayout,
+        source: LibraryField,
+        target: LibraryField,
+        after: bool,
+    ) {
+        let fields = self.fields_mut(layout);
+        let Some(source_index) = fields.iter().position(|field| *field == source) else {
+            return;
+        };
+        let field = fields.remove(source_index);
+        let Some(target_index) = fields.iter().position(|field| *field == target) else {
+            fields.insert(source_index.min(fields.len()), field);
+            return;
+        };
+        fields.insert((target_index + usize::from(after)).min(fields.len()), field);
+    }
+
     fn migrate_defaults(&mut self, key: LibraryListKey) {
         if self.layout_version >= LIBRARY_LIST_LAYOUT_VERSION {
             return;
@@ -530,6 +618,14 @@ pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
             settings: LibraryListSettings::for_key(key),
         })
         .collect()
+}
+/// The fields `layout` can show for `key`.
+pub fn available_fields(key: LibraryListKey, layout: LibraryLayout) -> &'static [LibraryField] {
+    match layout {
+        LibraryLayout::Row => available_row_fields(key),
+        LibraryLayout::Grid => available_grid_fields(key),
+        LibraryLayout::Detail => available_detail_track_fields(),
+    }
 }
 pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
     match key {

@@ -8,7 +8,7 @@ use adw::prelude::*;
 use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{ArtistKey, ArtistRow, Row, TagKind, TagRow};
-use localization::{album_count_text, msgid, track_count_text};
+use localization::msgid;
 use rufin_core::collection_context::CollectionTarget;
 
 use crate::CatalogUi;
@@ -35,12 +35,14 @@ use super::route_shell::LibraryPageShellOptions;
 use super::table_sizing::route_column_view_initial_width;
 use crate::LibraryField;
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::library_fields::{playlist_artwork, playlist_field, smart_playlist_field};
+use gtk_widgets::library_fields::playlist_artwork;
 use gtk_widgets::recycled_cells::{RecycledBadgedTextCell, list_cell};
 use gtk_widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
-use rufin_core::settings::presentation::format_duration_units;
+use rufin_core::settings::presentation::{
+    playlist_field, playlist_folder_field, smart_playlist_field, tag_field,
+};
 
 impl CatalogUi {
     pub fn library_tags_route(self: &Rc<Self>, read: Opened, genres: bool) -> MountedRoute {
@@ -337,17 +339,7 @@ impl NamedCollectionRow for TagRow {
             .collect()
     }
     fn field(&self, field: LibraryField) -> String {
-        match field {
-            LibraryField::Title | LibraryField::TitleMerged => self.name.clone(),
-            LibraryField::AlbumCount if self.kind == TagKind::Genre => {
-                album_count_text(self.summary.album_count.max(0) as u64)
-            }
-            LibraryField::SongCount => track_count_text(self.summary.track_count.max(0) as u64),
-            LibraryField::Duration => {
-                format_duration_units((self.summary.duration_millis.max(0) / 1_000) as u32)
-            }
-            _ => String::new(),
-        }
+        tag_field(self, field)
     }
 
     fn present_context(
@@ -438,14 +430,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
         match self {
             Self::Playlist(row) => playlist_field(row, field),
             Self::SmartPlaylist(row) => smart_playlist_field(row, field),
-            Self::Folder(row) => match field {
-                LibraryField::Title | LibraryField::TitleMerged => row.name.clone(),
-                LibraryField::SongCount => track_count_text(row.track_count.max(0) as u64),
-                LibraryField::Duration => {
-                    format_duration_units((row.duration_millis.max(0) / 1_000) as u32)
-                }
-                _ => String::new(),
-            },
+            Self::Folder(row) => playlist_folder_field(row, field),
         }
     }
     fn route(&self) -> Route {

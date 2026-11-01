@@ -40,6 +40,18 @@ pub struct AndroidFieldValue {
 pub struct AndroidBrowseDisplay {
     pub settings: LibraryListSettings,
     pub layouts: Vec<LibraryLayout>,
+    /// What the layout's fields are called, and the fields it can show: shown ones first, in
+    /// their order.
+    pub fields_title: String,
+    pub field_choices: Vec<AndroidFieldChoice>,
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidFieldChoice {
+    pub id: LibraryField,
+    pub title: String,
+    pub shown: bool,
+    pub can_toggle: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -282,11 +294,9 @@ pub fn show_state(
         return None;
     }
     change.show_in(state);
-    if let Row::Track(track) | Row::AlbumTrack { track, .. } = library {
-        for field in &mut row.fields {
-            if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
-                field.text = rufin_core::settings::presentation::track_row_field(track, field.id);
-            }
+    for field in &mut row.fields {
+        if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
+            field.text = rufin_core::settings::presentation::row_field(library, field.id);
         }
     }
     Some(row)
