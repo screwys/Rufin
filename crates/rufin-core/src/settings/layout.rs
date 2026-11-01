@@ -357,17 +357,16 @@ impl LibraryListSettings {
         }
     }
 
-    /// Whether `field` can be shown or hidden in `layout`. A row keeps one field with text.
+    /// Whether `field` can be shown or hidden in `layout`. A row keeps one column, where
+    /// Tools counts as one.
     pub fn can_toggle_field(&self, layout: LibraryLayout, field: LibraryField) -> bool {
+        let column =
+            |field: LibraryField| field == LibraryField::Tools || row_field_is_usable(field);
         let fields = self.fields(layout);
         layout == LibraryLayout::Grid
             || !fields.contains(&field)
-            || !row_field_is_usable(field)
-            || fields
-                .iter()
-                .filter(|field| row_field_is_usable(**field))
-                .count()
-                > 1
+            || !column(field)
+            || fields.iter().filter(|field| column(**field)).count() > 1
     }
 
     /// Shows or hides `field` in `layout`. A shown field goes before Tools; the queue's row
