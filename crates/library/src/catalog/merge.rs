@@ -1227,12 +1227,10 @@ async fn complete_kind(
                 .iter()
                 .map(|album| album.key.raw()),
         ),
-        Kind::Artist => touched.artists.extend(
-            withdraw_unseen::<Artist>(write, keys)
-                .await?
-                .iter()
-                .map(|artist| artist.key.raw()),
-        ),
+        // Album resolution never reads whether an artist is indexed.
+        Kind::Artist => {
+            withdraw_unseen::<Artist>(write, keys).await?;
+        }
         Kind::Tag(_) => {
             withdraw_unseen::<Tag>(write, keys).await?;
         }
