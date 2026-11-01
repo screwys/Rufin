@@ -2553,7 +2553,6 @@ impl Catalog {
             .collect()
     }
 
-    /// A member read's tracks in order.
     /// The tracks of each of these genres and moods in Title order, as their pages list them,
     /// from one pass over the tracks.
     pub(crate) fn tag_members(&self, tags: &[i64]) -> HashMap<i64, Vec<crate::TrackKey>> {
@@ -2594,6 +2593,7 @@ impl Catalog {
             .collect()
     }
 
+    /// A member read's tracks in order.
     pub(crate) async fn members(
         &self,
         connection: &mut SqliteConnection,
