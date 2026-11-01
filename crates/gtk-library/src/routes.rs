@@ -22,11 +22,6 @@ use rufin_core::route::{CollectionCategory, Route};
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
-struct RootTrackRouteOptions {
-    key: LibraryListKey,
-    empty_body: &'static str,
-}
-
 pub struct SearchableTrackOptions {
     pub context_id: String,
     pub content_inset: i32,
@@ -210,10 +205,18 @@ impl CatalogUi {
         let category = read.view.options().category;
         match route {
             Route::History => self.history_route(read),
-            Route::Favorites if category == CollectionCategory::Tracks => {
-                self.favorites_route(read)
-            }
-            Route::Tracks => self.library_tracks_route(read),
+            Route::Favorites if category == CollectionCategory::Tracks => self.root_track_route(
+                LibraryListKey::FavoriteTracks,
+                msgid("No favorites yet"),
+                read,
+                true,
+            ),
+            Route::Tracks => self.root_track_route(
+                LibraryListKey::Tracks,
+                msgid("Nothing here yet"),
+                read,
+                false,
+            ),
             Route::Albums => self.library_albums_route(read, false),
             Route::Favorites if category == CollectionCategory::Albums => {
                 self.library_albums_route(read, true)
@@ -415,41 +418,18 @@ impl CatalogUi {
             .with_states(&view)
     }
 
-    pub fn library_tracks_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
-        self.root_track_route(
-            RootTrackRouteOptions {
-                key: LibraryListKey::Tracks,
-                empty_body: msgid("Nothing here yet"),
-            },
-            read,
-            false,
-        )
-    }
-
-    pub fn favorites_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
-        let key = LibraryListKey::FavoriteTracks;
-        self.root_track_route(
-            RootTrackRouteOptions {
-                key,
-                empty_body: msgid("No favorites yet"),
-            },
-            read,
-            true,
-        )
-    }
-
     fn root_track_route(
         self: &Rc<Self>,
-        options: RootTrackRouteOptions,
+        key: LibraryListKey,
+        empty_body: &'static str,
         read: Opened,
         favorites_only: bool,
     ) -> MountedRoute {
         let context_id = rufin_core::view::context_base(read.view.route());
         let view = route_view(&read);
-        let projection = self.searchable_track_collection(
-            &view,
-            read,
-            options.key,
+        let projection = self.track_projection(
+            TrackCollectionModel::new(self.runtime.clone(), &view, read),
+            key,
             SearchableTrackOptions {
                 context_id,
                 content_inset: 0,
@@ -457,8 +437,7 @@ impl CatalogUi {
                 search: None,
             },
         );
-        let key = options.key;
-        let mut page = self.track_page_shell(key, options.empty_body, &projection);
+        let mut page = self.track_page_shell(key, empty_body, &projection);
         let apply_page = page.clone();
         let apply_projection = projection.clone();
         let reread = projection.page_reread(
@@ -478,9 +457,8 @@ impl CatalogUi {
         let key = LibraryListKey::History;
         let view = route_view(&read);
         let context_id = rufin_core::view::context_base(read.view.route());
-        let projection = self.searchable_track_collection(
-            &view,
-            read,
+        let projection = self.track_projection(
+            TrackCollectionModel::new(self.runtime.clone(), &view, read),
             key,
             SearchableTrackOptions {
                 context_id,
@@ -554,17 +532,6 @@ impl CatalogUi {
             read,
             |row: &library::PlaylistListRow| row.key(),
         )
-    }
-
-    pub fn searchable_track_collection(
-        self: &Rc<Self>,
-        view: &RouteView,
-        read: Opened,
-        key: LibraryListKey,
-        options: SearchableTrackOptions,
-    ) -> TrackListProjection {
-        let model = TrackCollectionModel::new(self.runtime.clone(), view, read);
-        self.track_projection(model, key, options)
     }
 
     pub fn track_projection(

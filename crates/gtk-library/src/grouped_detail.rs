@@ -6,6 +6,7 @@ use localization::msgid;
 
 use crate::CatalogUi;
 use crate::LibraryListKey;
+use crate::track_model::TrackCollectionModel;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -109,9 +110,8 @@ impl CatalogUi {
             showcase_view.append_kind_control(&control);
         }
         showcase_view.replace_summary(&summary_items);
-        let track_projection = self.searchable_track_collection(
-            &view,
-            tracks,
+        let track_projection = self.track_projection(
+            TrackCollectionModel::new(self.runtime.clone(), &view, tracks),
             key,
             SearchableTrackOptions {
                 context_id: playback_context.clone(),
