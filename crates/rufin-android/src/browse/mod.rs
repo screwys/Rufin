@@ -248,16 +248,22 @@ impl AndroidBrowseQuery {
             .map(Arc::as_ref)
     }
 
-    /// The fields the page's rows show in its layout. An artist's favorite tracks show as rows.
+    /// The fields the page's rows show in its layout.
     fn shown_fields(&self) -> &[LibraryField] {
         if matches!(
             self.route,
             Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
         ) {
-            &self.display.row_fields
+            self.favorite_fields()
         } else {
             self.display.fields(self.display.layout)
         }
+    }
+
+    /// The fields an artist's favorite tracks show, on the artist's page and their own: they
+    /// show as rows.
+    fn favorite_fields(&self) -> &[LibraryField] {
+        &self.artist_tracks.row_fields
     }
 
     /// `row` showing `fields`; `index` is its place among the page's rows of its kind.

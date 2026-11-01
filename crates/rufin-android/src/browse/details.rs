@@ -70,7 +70,7 @@ impl AndroidBrowseQuery {
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
-                .map(|(index, row)| Self::shown_row(row, &self.artist_tracks.row_fields, index))
+                .map(|(index, row)| Self::shown_row(row, self.favorite_fields(), index))
                 .collect();
             let favorite_total = view.favorites_len().unwrap_or(0) as u64;
             let count = view.len() as u64;
