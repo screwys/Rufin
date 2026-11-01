@@ -1867,6 +1867,12 @@ impl Records {
         sources: Vec<(bool, SourceId, SourceValue)>,
     ) -> Result<(), String> {
         let stored = owner.settings.load();
+        let configured = stored
+            .sources
+            .configured
+            .iter()
+            .map(|source| source.configuration.source_id.clone())
+            .collect::<std::collections::HashSet<_>>();
         let secrets = Arc::clone(&owner.secrets);
         let device = self.device.clone();
         let names = self.devices();
@@ -1900,6 +1906,13 @@ impl Records {
         if prepared.is_empty() {
             return Ok(());
         }
+        let added = prepared
+            .iter()
+            .filter(|(integration, source)| {
+                !integration && !configured.contains(&source.configuration.source_id)
+            })
+            .map(|(_, source)| source.configuration.clone())
+            .collect::<Vec<_>>();
         let catalog = Arc::clone(&self.catalog);
         let settings = owner.settings_apply.clone();
         owner
@@ -1959,7 +1972,27 @@ impl Records {
                 }
                 Ok(())
             })
-            .await
+            .await?;
+        // A received source syncs as a newly added one does: the first is selected when none
+        // is, and another device's Local library syncs like this device's Local source.
+        let source = Arc::clone(&owner.source);
+        owner.runtime.spawn(async move {
+            let mut selecting = source.selected_library().is_none();
+            for configuration in added {
+                let id = configuration.source_id;
+                let result = if std::mem::take(&mut selecting) {
+                    source.select_source(id).await.map(drop)
+                } else if configuration.kind == "peer" {
+                    source.refresh_source(id, true).await
+                } else {
+                    continue;
+                };
+                if let Err(error) = result {
+                    tracing::warn!(%error, "could not sync a received source");
+                }
+            }
+        });
+        Ok(())
     }
 
     async fn apply_scrobbling(
