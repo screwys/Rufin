@@ -153,7 +153,7 @@ impl SourceOwner {
         art: bool,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.shared.settings.load().ui;
+        let settings = self.shared.settings.load().ui.clone();
         let (header, plan) = self
             .plan(&route, selected.as_ref(), &options, &settings, cancel)
             .await?;
@@ -185,7 +185,7 @@ impl SourceOwner {
         options: &OpenOptions,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
-        let settings = self.shared.settings.load().ui;
+        let settings = self.shared.settings.load().ui.clone();
         let (header, plan) = self
             .plan(route, selected, options, &settings, cancel)
             .await?;
@@ -1024,7 +1024,7 @@ impl View {
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.owner.shared.settings.load().ui;
+        let settings = self.owner.shared.settings.load().ui.clone();
         match (&self.body, &self.selected) {
             (Body::Folders { projection, .. }, Some(selected)) => {
                 let tracks = folder_tracks(&self.route, selected, projection, &options, &settings);
@@ -1093,7 +1093,7 @@ impl View {
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.owner.shared.settings.load().ui;
+        let settings = self.owner.shared.settings.load().ui.clone();
         if matches!(self.body, Body::Releases { .. })
             && self.settings_reread(&settings) != Some(Reread::Page)
         {

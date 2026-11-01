@@ -21,7 +21,7 @@ pub struct KeyringSecretStore {
 
 impl KeyringSecretStore {
     pub(super) fn new(settings: SettingsFile) -> Self {
-        let scope = settings.load().secret_scope_id;
+        let scope = settings.load().secret_scope_id.clone();
         Self {
             keyring: system_keyring_secret_store(&scope),
             file: ConfigSecretStore::with_scope(settings.config_dir().join("secrets.json"), &scope),

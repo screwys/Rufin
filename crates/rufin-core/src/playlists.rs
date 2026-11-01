@@ -618,7 +618,7 @@ async fn generate_artwork(
     let policy = artwork::ExternalPolicy::new(
         stored.ui.application.external_metadata_enabled,
         stored.ui.allows_external_metadata_lookup(),
-        stored.ui.lastfm_api_key,
+        stored.ui.lastfm_api_key.clone(),
     );
     let mut images = futures_util::stream::iter(bindings)
         .map(|binding| {

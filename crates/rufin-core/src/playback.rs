@@ -162,10 +162,10 @@ impl PlaybackOwner {
     {
         let stored = settings.load();
         let eq = equalizer::EqualizerState::new(
-            stored.equalizer,
+            stored.equalizer.clone(),
             stored.ui.playback.audio_output.as_deref(),
         );
-        let ui = stored.ui;
+        let ui = stored.ui.clone();
         let (store_sender, store_receiver) = async_channel::unbounded();
         let (report_sender, report_receiver) = async_channel::unbounded();
         let artwork_settings = settings.clone();
@@ -304,7 +304,7 @@ impl PlaybackOwner {
                 receiver,
                 sequence,
                 random_identity(),
-                stored.ui.playback,
+                stored.ui.playback.clone(),
                 stored.ui.auto_dj_enabled,
                 usize::from(stored.ui.application.auto_dj_refill_threshold),
                 output,
@@ -1317,7 +1317,7 @@ fn cached_cast_artwork(
     let external = artwork::ExternalPolicy::new(
         stored.ui.application.external_metadata_enabled,
         stored.ui.allows_external_metadata_lookup(),
-        stored.ui.lastfm_api_key,
+        stored.ui.lastfm_api_key.clone(),
     );
     artwork.cache_only_file(&artwork::ArtworkRequest::new(binding, 512).with_external(external))
 }

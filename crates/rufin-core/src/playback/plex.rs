@@ -61,12 +61,13 @@ impl PlexPlayback {
         }
         let owner = &self.source_owner;
         let stored = self.settings.load();
-        let preferred = stored.sources.selected_source_id;
+        let preferred = stored.sources.selected_source_id.clone();
         let mut configured = stored
             .sources
             .configured
-            .into_iter()
+            .iter()
             .filter(|source| source.configuration.kind == "plex")
+            .cloned()
             .collect::<Vec<_>>();
         configured
             .sort_by_key(|source| Some(&source.configuration.source_id) != preferred.as_ref());
@@ -1124,7 +1125,7 @@ impl PlaybackOwner {
             let server = timeline
                 .as_ref()
                 .and_then(|timeline| timeline.machine_identifier.as_deref());
-            let preferred = self.settings.load().sources.selected_source_id;
+            let preferred = self.settings.load().sources.selected_source_id.clone();
             let candidates = sources
                 .iter()
                 .enumerate()

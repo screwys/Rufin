@@ -477,7 +477,14 @@ impl SourceOwner {
         runtime.spawn(outbox::run(weak.clone()));
         runtime.spawn(crate::playlist_files::check_links(weak));
         self.asset_downloads_changed();
-        if let Some(source_id) = self.shared.settings.load().sources.selected_source_id {
+        if let Some(source_id) = self
+            .shared
+            .settings
+            .load()
+            .sources
+            .selected_source_id
+            .clone()
+        {
             let owner = self.clone();
             self.shared.runtime.spawn(async move {
                 let _ = owner.select_source(source_id).await;
@@ -534,7 +541,7 @@ impl SourceOwner {
         }
         if setup && self.shared.started.load(Ordering::Acquire) {
             let current = self.shared.settings.load();
-            if let Some(source) = current.sources.selected_source_id.filter(|id| {
+            if let Some(source) = current.sources.selected_source_id.clone().filter(|id| {
                 current
                     .sources
                     .configured
@@ -1184,7 +1191,7 @@ impl SourceOwner {
     }
 
     fn cache_connected(&self, configured: &ConfiguredSource, source: Arc<Source>) -> Arc<Source> {
-        let device = self.shared.settings.load().jellyfin_device_id;
+        let device = self.shared.settings.load().jellyfin_device_id.clone();
         let mut clients = self
             .shared
             .clients
@@ -1237,7 +1244,7 @@ impl SourceOwner {
             stored.sources.configured.push(configured.clone());
             Ok(())
         })?;
-        let device = self.shared.settings.load().jellyfin_device_id;
+        let device = self.shared.settings.load().jellyfin_device_id.clone();
         self.shared
             .clients
             .lock()
@@ -1261,7 +1268,7 @@ impl SourceOwner {
             configured.configuration.clone(),
             credential,
             input,
-            Some(self.shared.settings.load().jellyfin_device_id),
+            Some(self.shared.settings.load().jellyfin_device_id.clone()),
         )
         .await
         .map_err(string_error)?;
@@ -1374,7 +1381,7 @@ impl SourceOwner {
         use crate::runtime::source::{EmbyConnectLoginMethod, PlexLoginMethod};
         use authorization::{Authorization, LoginEvent, SourceAuthorizationMethod};
         let (send, receive) = async_channel::bounded(2);
-        let device_id = self.shared.settings.load().jellyfin_device_id;
+        let device_id = self.shared.settings.load().jellyfin_device_id.clone();
         self.shared.runtime.spawn(async move {
             let authorization = async {
                 Ok::<_, SourceError>(match method {
@@ -1498,7 +1505,7 @@ impl SourceOwner {
         self.reply(move |owner, _| async move {
             let mut seen = std::collections::HashSet::new();
             let mut logins = Vec::new();
-            for configured in owner.shared.settings.load().sources.configured {
+            for configured in &owner.shared.settings.load().sources.configured {
                 if configured.configuration.kind != "plex" {
                     continue;
                 }
@@ -1511,7 +1518,7 @@ impl SourceOwner {
                 let source = owner.client(&configured.configuration.source_id)?;
                 if let Some(login) = source.plex_login() {
                     logins.push((
-                        configured.configuration.name,
+                        configured.configuration.name.clone(),
                         login.lock().await.for_setup(),
                     ));
                 }
@@ -1527,7 +1534,7 @@ impl SourceOwner {
         let SourceSetup::Plex(input) = input else {
             return Ok(None);
         };
-        for configured in self.shared.settings.load().sources.configured {
+        for configured in &self.shared.settings.load().sources.configured {
             if configured.configuration.kind != "plex" {
                 continue;
             }
@@ -1541,7 +1548,7 @@ impl SourceOwner {
                     .merge_authorization(&input.login)
                     .map_err(string_error)?;
                 input.login = login.for_setup();
-                return Ok(configured.credential);
+                return Ok(configured.credential.clone());
             }
         }
         Ok(None)
@@ -1706,7 +1713,7 @@ impl SourceOwner {
             let mut persisted_source_id = None;
             let result = async {
                 let reused_credential = owner.reuse_plex_login(&mut input).await?;
-                let device_id = owner.shared.settings.load().jellyfin_device_id;
+                let device_id = owner.shared.settings.load().jellyfin_device_id.clone();
                 let connected = Source::connect(fresh_source_id()?, input, &device_id)
                     .await
                     .map_err(string_error)?;
@@ -1991,7 +1998,14 @@ impl SourceOwner {
                     .unwrap_or_else(|p| p.into_inner())
                     .clear();
                 owner.release_selected().await;
-                if let Some(selected) = owner.shared.settings.load().sources.selected_source_id {
+                if let Some(selected) = owner
+                    .shared
+                    .settings
+                    .load()
+                    .sources
+                    .selected_source_id
+                    .clone()
+                {
                     let selected_owner = owner.clone();
                     owner.shared.runtime.spawn(async move {
                         let _ = selected_owner.select_source(selected).await;
@@ -2321,15 +2335,15 @@ impl SourceOwner {
             .load()
             .sources
             .configured
-            .into_iter()
+            .iter()
             .filter_map(|configured| {
-                let access = configured.local_access?;
+                let access = configured.local_access.as_ref()?;
                 Some((
                     configured.configuration.source_id.as_str().to_owned(),
                     library::LocalAccess {
                         root: access.root_path.to_string_lossy().into_owned(),
-                        server_prefix: access.server_prefix,
-                        local_prefix: access.local_prefix,
+                        server_prefix: access.server_prefix.clone(),
+                        local_prefix: access.local_prefix.clone(),
                     },
                 ))
             })
@@ -2873,7 +2887,7 @@ impl SourceOwner {
                 CachedSource {
                     configuration: configured.configuration,
                     credential: configured.credential,
-                    jellyfin_device_id: stored.jellyfin_device_id,
+                    jellyfin_device_id: stored.jellyfin_device_id.clone(),
                     source: Arc::clone(&source),
                     refresh: None,
                     observer: None,

@@ -81,7 +81,8 @@ impl MetadataEditor {
                     }
                 }
             };
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             let preferred = if settings.lyrics.preferences.save_lyrics_as_sidecar {
                 LyricsStorage::Sidecar
             } else {
@@ -122,7 +123,8 @@ impl MetadataEditor {
     ) -> Result<Vec<::lyrics::LyricsSearchResult>, Error> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             if !settings
                 .lyrics
                 .preferences
@@ -133,7 +135,11 @@ impl MetadataEditor {
             if artist.trim().is_empty() && title.trim().is_empty() {
                 return Ok(Vec::new());
             }
-            let providers = settings.lyrics.preferences.external_lyrics_providers;
+            let providers = settings
+                .lyrics
+                .preferences
+                .external_lyrics_providers
+                .clone();
             self.source
                 .shared
                 .runtime
@@ -153,7 +159,8 @@ impl MetadataEditor {
     ) -> Result<Option<String>, Error> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
-            let settings = self.source.shared.settings.load().ui;
+            let stored = self.source.shared.settings.load();
+            let settings = &stored.ui;
             if !settings
                 .lyrics
                 .preferences

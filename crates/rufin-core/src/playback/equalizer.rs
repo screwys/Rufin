@@ -1125,7 +1125,7 @@ impl PlaybackOwner {
         &self,
         output: &PlaybackOutput,
     ) -> watch::Receiver<ProcessingRequest> {
-        let device = self.settings.load().ui.playback.audio_output;
+        let device = self.settings.load().ui.playback.audio_output.clone();
         let mut state = self.equalizer.lock().unwrap_or_else(|e| e.into_inner());
         state.local_device = device;
         let id = output_id(

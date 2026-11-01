@@ -1972,7 +1972,7 @@ impl Records {
         let secrets = Arc::clone(&owner.secrets);
         let service = service.to_owned();
         let prepared = tokio::task::spawn_blocking(move || {
-            let mut prepared = file.load();
+            let mut prepared = crate::settings::StoredSettings::clone(&file.load());
             let mut settings = serde_json::to_value(read_scrobbling(&prepared, secrets.as_ref())?)
                 .map_err(error)?;
             let mut account = value.account;

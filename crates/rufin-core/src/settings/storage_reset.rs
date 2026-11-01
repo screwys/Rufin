@@ -39,7 +39,7 @@ impl SettingsOwner {
         };
         Ok(StorageResetRequest {
             reset,
-            stored: Box::new(stored),
+            stored: Box::new(StoredSettings::clone(&stored)),
             connect_keys,
             secrets,
         })

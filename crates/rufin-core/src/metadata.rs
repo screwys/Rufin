@@ -418,7 +418,7 @@ pub fn current_artwork(
                 .with_external(artwork::ExternalPolicy::new(
                     stored.ui.application.external_metadata_enabled,
                     stored.ui.allows_external_metadata_lookup(),
-                    stored.ui.lastfm_api_key,
+                    stored.ui.lastfm_api_key.clone(),
                 ));
         let bytes = owner.shared.artwork.image_bytes(request).await?;
         tokio::task::spawn_blocking(move || bytes.map(checked_artwork).transpose())

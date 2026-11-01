@@ -150,7 +150,7 @@ impl ScrobblingOwner {
     ) -> Receiver<ScrobblingConnectionEvent> {
         let (events, receiver) = bounded(2);
         let owner = self.clone();
-        let scope = self.settings.load().secret_scope_id;
+        let scope = self.settings.load().secret_scope_id.clone();
         self.runtime.spawn(async move {
             let authorization = match request {
                 ScrobblingConnection::LastFm {
@@ -275,7 +275,7 @@ impl ScrobblingOwner {
     ) -> Receiver<Result<(), String>> {
         let (sender, receiver) = bounded(1);
         let owner = self.clone();
-        let scope = self.settings.load().secret_scope_id;
+        let scope = self.settings.load().secret_scope_id.clone();
         self.runtime.spawn_blocking(move || {
             let _work = owner
                 .credential_work
@@ -378,7 +378,7 @@ impl ScrobblingOwner {
         user_token: String,
     ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
         let owner = self.clone();
-        let scope = self.settings.load().secret_scope_id;
+        let scope = self.settings.load().secret_scope_id.clone();
         self.runtime
             .spawn_blocking(move || {
                 let result = scrobbling::connect_listenbrainz(&user_token).and_then(|username| {
@@ -438,7 +438,7 @@ impl ScrobblingOwner {
         edit: ScrobblingCredentialEdit,
     ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
         let owner = self.clone();
-        let scope = self.settings.load().secret_scope_id;
+        let scope = self.settings.load().secret_scope_id.clone();
         self.runtime
             .spawn_blocking(move || {
                 let _work = owner

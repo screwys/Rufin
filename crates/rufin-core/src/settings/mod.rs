@@ -204,11 +204,13 @@ impl StoredSettings {
 
 #[derive(Clone)]
 pub struct SettingsFile {
-    /// Every committed change, whichever writer made it: the one settings feed.
+    /// The committed settings and every change, whichever writer made it: the one settings
+    /// feed.
     committed: tokio::sync::watch::Sender<Arc<StoredSettings>>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
-    value: Arc<Mutex<StoredSettings>>,
+    /// Held while a writer turns the committed settings into the next.
+    writing: Arc<Mutex<()>>,
     persistence: Arc<Mutex<StoredSettings>>,
     edits: Arc<OnceLock<Result<mpsc::SyncSender<Self>, String>>>,
     persistence_error: tokio::sync::watch::Sender<Option<String>>,
@@ -261,7 +263,7 @@ impl SettingsFile {
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
             path: Some(path),
-            value: Arc::new(Mutex::new(value.clone())),
+            writing: Arc::default(),
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
@@ -282,7 +284,7 @@ impl SettingsFile {
             path: None,
             committed: tokio::sync::watch::channel(Arc::new(value.clone())).0,
             config_dir,
-            value: Arc::new(Mutex::new(value.clone())),
+            writing: Arc::default(),
             persistence: Arc::new(Mutex::new(value)),
             edits: Arc::new(OnceLock::new()),
             persistence_error: tokio::sync::watch::channel(None).0,
@@ -290,20 +292,17 @@ impl SettingsFile {
         }
     }
 
-    pub fn load(&self) -> StoredSettings {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+    /// The committed settings.
+    pub fn load(&self) -> Arc<StoredSettings> {
+        self.committed.borrow().clone()
     }
 
     pub(crate) fn equalizer_preset(
         &self,
         id: &str,
     ) -> Option<crate::playback::equalizer::SavedPreset> {
-        self.value
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        self.committed
+            .borrow()
             .equalizer
             .presets
             .iter()
@@ -312,7 +311,7 @@ impl SettingsFile {
     }
 
     pub(crate) fn cache_downloads(&self) -> (bool, bool) {
-        let stored = self.value.lock().unwrap_or_else(|p| p.into_inner());
+        let stored = self.committed.borrow();
         (
             stored.ui.application.download_artwork_automatically,
             stored.ui.application.download_lyrics_automatically,
@@ -320,9 +319,8 @@ impl SettingsFile {
     }
 
     pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.committed
+            .borrow()
             .sources
             .configured
             .iter()
@@ -332,18 +330,12 @@ impl SettingsFile {
     }
 
     pub(crate) fn playback_stream_quality(&self) -> StreamQuality {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .ui
-            .playback
-            .stream_quality
+        self.committed.borrow().ui.playback.stream_quality
     }
 
     pub(crate) fn local_configuration(&self) -> Option<SourceConfiguration> {
-        self.value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.committed
+            .borrow()
             .sources
             .configured
             .iter()
@@ -379,11 +371,14 @@ impl SettingsFile {
         } else {
             None
         };
-        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
-        let mut next = current.clone();
+        let _writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+        let current = self.load();
+        let mut next = StoredSettings::clone(&current);
         let output = operation(&mut next)?;
         next.prepare()?;
         if next != *current {
+            // The writer saves what is committed, so it hears of the edit after it.
+            self.committed.send_replace(Arc::new(next));
             if let Some(writer) = writer {
                 match writer.try_send(self.clone()) {
                     Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
@@ -392,8 +387,6 @@ impl SettingsFile {
                     }
                 }
             }
-            *current = next;
-            self.publish_changes(&current);
         }
         Ok(output)
     }
@@ -404,7 +397,7 @@ impl SettingsFile {
     ) -> Result<T, String> {
         let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
         let previous = self.load();
-        let mut next = previous.clone();
+        let mut next = StoredSettings::clone(&previous);
         let output = operation(&mut next)?;
         next.prepare()?;
         let changed = next != *saved;
@@ -412,7 +405,8 @@ impl SettingsFile {
             self.persist(&next)?;
         }
         *saved = next.clone();
-        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
+        let _writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+        let current = self.load();
         // Preference edits can arrive while a background transaction writes to disk.
         // Keep those newer edits when publishing the committed source or configuration.
         merge_preference_edits(&mut next.ui, &previous.ui, &current.ui)?;
@@ -421,8 +415,9 @@ impl SettingsFile {
             &previous.scrobbling,
             &current.scrobbling,
         )?;
-        *current = next;
-        self.publish_changes(&current);
+        if next != *current {
+            self.committed.send_replace(Arc::new(next));
+        }
         Ok(output)
     }
 
@@ -430,9 +425,9 @@ impl SettingsFile {
         let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
         let result = (|| {
             let next = self.load();
-            if next != *saved {
+            if *next != *saved {
                 self.persist(&next)?;
-                *saved = next;
+                *saved = StoredSettings::clone(&next);
             }
             Ok(())
         })();
@@ -520,16 +515,6 @@ impl SettingsOwner {
 }
 
 impl SettingsFile {
-    fn publish_changes(&self, stored: &StoredSettings) {
-        self.committed.send_if_modified(|current| {
-            if **current == *stored {
-                return false;
-            }
-            *current = Arc::new(stored.clone());
-            true
-        });
-    }
-
     /// Tells the feed that the web controller's token was replaced.
     pub(crate) fn web_controller_token_replaced(&self) -> Result<(), String> {
         self.edit(|stored| {
@@ -555,20 +540,11 @@ impl SettingsOwner {
     }
 
     pub fn load(&self) -> UiSettings {
-        self.file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .ui
-            .clone()
+        self.file.load().ui.clone()
     }
 
     pub fn visualizer_render_settings(&self) -> (u32, visualizer::VisualizerAppearance) {
-        let stored = self
-            .file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stored = self.file.load();
         (
             stored.ui.visualizer.fps_limit,
             stored.ui.visualizer.appearance.clone(),
@@ -874,7 +850,7 @@ pub(crate) fn persist_scrobbling_settings(
     input: &ScrobblingSettings,
     scope: &str,
 ) -> Result<ScrobblingSettings, String> {
-    let mut prepared = file.load();
+    let mut prepared = StoredSettings::clone(&file.load());
     store_scrobbling(&mut prepared, secrets.as_ref(), input)?;
     let mut committed = input.clone();
     file.update(|stored| {
@@ -915,7 +891,7 @@ pub(crate) fn load_scrobbling_settings(
         Ok(settings) => {
             if current.scrobbling_secrets_present || scrobbling_secrets_present(&current.scrobbling)
             {
-                let mut migrated = current.clone();
+                let mut migrated = StoredSettings::clone(&current);
                 if let Err(error) = store_scrobbling(&mut migrated, secrets.as_ref(), &settings)
                     .and_then(|()| {
                         file.update(|stored| {
@@ -1274,7 +1250,7 @@ mod tests {
         assert!(committed.ui.application.private_mode);
         assert_eq!(committed.ui.window_width, Some(1234));
         file.flush().unwrap();
-        assert_eq!(read_startup_settings(&path).unwrap().0, file.load());
+        assert_eq!(read_startup_settings(&path).unwrap().0, *file.load());
     }
 
     #[test]
@@ -1308,8 +1284,8 @@ mod tests {
         let committed = file.load();
         assert_ne!(committed.ui.web_controller, initial.ui.web_controller);
         assert!(changes.has_changed().unwrap());
-        assert_eq!(**changes.borrow(), committed);
-        assert_eq!(read_startup_settings(&path).unwrap().0, committed);
+        assert_eq!(*changes.borrow(), committed);
+        assert_eq!(read_startup_settings(&path).unwrap().0, *committed);
     }
 
     #[derive(Default)]
@@ -1356,7 +1332,14 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let identity = file.load().ui.application.backup.schedule.schedule_id;
+        let identity = file
+            .load()
+            .ui
+            .application
+            .backup
+            .schedule
+            .schedule_id
+            .clone();
         assert!(!identity.is_empty());
         file.update(|stored| {
             stored.ui.application.backup.contents.saved_logins = true;

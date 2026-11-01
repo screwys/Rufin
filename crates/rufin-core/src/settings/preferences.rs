@@ -42,13 +42,7 @@ impl SettingsOwner {
     }
 
     pub fn application_preferences(&self) -> app::ApplicationPreferences {
-        self.file
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .ui
-            .application
-            .clone()
+        self.file.load().ui.application.clone()
     }
 
     pub fn set_backup_preferences(

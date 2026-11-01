@@ -36,7 +36,7 @@ impl SourceOwner {
     /// Fetches artwork and lyrics for every source, or only for these tracks.
     async fn download_assets(&self, only: Option<&BTreeMap<SourceKey, Vec<TrackKey>>>) {
         let (artwork, lyrics) = self.shared.settings.cache_downloads();
-        for configured in self.shared.settings.load().sources.configured {
+        for configured in &self.shared.settings.load().sources.configured {
             let source_id = &configured.configuration.source_id;
             let Some(source_key) = self.shared.catalog.source_key(source_id) else {
                 continue;

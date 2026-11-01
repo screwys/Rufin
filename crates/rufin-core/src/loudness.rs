@@ -111,7 +111,8 @@ impl LoudnessAnalysisOwner {
             self.cancel();
             return;
         };
-        let playback = self.settings.load().ui.playback;
+        let stored = self.settings.load();
+        let playback = &stored.ui.playback;
         let (scope, write_tags) = (
             playback.loudness_normalization_scope,
             playback.write_ebu_r128_tags,

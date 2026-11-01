@@ -80,7 +80,7 @@ impl BackupOwner {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 let Some(owner) = weak.upgrade() else { return };
-                let backup = owner.settings.load().ui.application.backup;
+                let backup = owner.settings.load().ui.application.backup.clone();
                 if !backup.enabled || backup.schedule.due_at(now()).is_none() {
                     continue;
                 }
@@ -129,7 +129,7 @@ impl BackupOwner {
             None
         };
         let settings = if contents.settings {
-            let mut export = stored.clone();
+            let mut export = StoredSettings::clone(&stored);
             export.ui.downloads.clear();
             export.ui.sidebar.pins.clear();
             export.ui.sidebar.playlist_pin_imported_sources.clear();
@@ -174,7 +174,7 @@ impl BackupOwner {
     }
     async fn scheduled(&self) -> Result<(), String> {
         let _lane = self.lane.lock().await;
-        let settings = self.settings.load().ui.application.backup;
+        let settings = self.settings.load().ui.application.backup.clone();
         if !settings.enabled || settings.schedule.due_at(now()).is_none() {
             return Ok(());
         }
@@ -557,7 +557,7 @@ fn restore_preferences_and_logins(
         return warnings;
     }
     if let Some(logins) = logins {
-        let mut restored = file.load();
+        let mut restored = StoredSettings::clone(&file.load());
         restore_logins(secrets, &mut restored, logins, &mut warnings);
         if let Err(error) = settings_apply.restore(
             |current| {
@@ -922,7 +922,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let mut incoming = file.load();
+        let mut incoming = StoredSettings::clone(&file.load());
         incoming.ui.application.private_mode = true;
         incoming.scrobbling.listenbrainz.enabled = false;
         let secrets = Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
