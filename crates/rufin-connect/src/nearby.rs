@@ -13,12 +13,12 @@ use futures_util::{
 };
 use iroh::{
     EndpointId,
-    address_lookup::{
-        AddressLookup, EndpointData, EndpointInfo, Error, Item, memory::MemoryLookup,
-    },
+    address_lookup::{AddressLookup, EndpointData, EndpointInfo, Error, Item},
 };
 use swarm_discovery::{Discoverer, DropGuard, IpClass, Peer};
 use tokio::sync::{broadcast, mpsc};
+
+use crate::network::Routes;
 
 pub(crate) enum Discovery {
     /// A device seen for the first time since it expired, or at new addresses.
@@ -40,10 +40,7 @@ impl fmt::Debug for Nearby {
 }
 
 impl Nearby {
-    pub(crate) fn new(
-        id: EndpointId,
-        addresses: MemoryLookup,
-    ) -> Result<(Self, mpsc::Receiver<Discovery>)> {
+    pub(crate) fn new(id: EndpointId, routes: Routes) -> Result<(Self, mpsc::Receiver<Discovery>)> {
         let (found, receiver) = mpsc::channel(64);
         let (changes, _) = broadcast::channel(64);
         let discovered = changes.clone();
@@ -90,7 +87,7 @@ impl Nearby {
                 }
                 seen.insert(peer_id, data.clone());
                 let info = EndpointInfo::from_parts(peer_id, data);
-                addresses.add_endpoint_info(info.clone());
+                routes.take(info.to_endpoint_addr());
                 let _ = discovered.send(info.clone());
                 Discovery::Found(info)
             };
@@ -113,7 +110,7 @@ impl Nearby {
 
 impl AddressLookup for Nearby {
     fn resolve(&self, id: EndpointId) -> Option<BoxStream<'static, Result<Item, Error>>> {
-        // MemoryLookup supplies known addresses. Keep receiving new routes while connecting.
+        // Routes supply known addresses. Keep receiving new routes while connecting.
         let changes = stream::unfold(self.changes.subscribe(), |mut receiver| async {
             loop {
                 match receiver.recv().await {

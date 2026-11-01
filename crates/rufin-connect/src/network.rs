@@ -1,16 +1,18 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     sync::{Arc, OnceLock, Weak},
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use futures_util::StreamExt;
+use futures_util::{
+    StreamExt,
+    stream::{self, BoxStream},
+};
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr, Watcher,
     address_lookup::{
-        AddressLookup, DnsAddressLookup, EndpointData, PkarrPublisher, PkarrResolver,
-        memory::MemoryLookup,
+        AddressLookup, DnsAddressLookup, EndpointData, Error, Item, PkarrPublisher, PkarrResolver,
     },
     endpoint::{ConnectOptions, Connection, ConnectionError, VarInt, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
@@ -110,12 +112,43 @@ fn canonical_address(mut address: EndpointAddr) -> EndpointAddr {
     address
 }
 
-pub(crate) fn peer_address(addresses: &MemoryLookup, peer: EndpointId) -> EndpointAddr {
-    // An in-flight lookup can predate a newly learned address. Supply known routes directly.
-    addresses
-        .get_endpoint_info(peer)
-        .map(EndpointAddr::from)
-        .unwrap_or_else(|| peer.into())
+/// The routes kept to one device. A sighting puts its routes first and the oldest fall off,
+/// so the ports of a device that restarted age out instead of piling up.
+const ROUTES: usize = 8;
+
+/// The routes this device knows to others, newest first. Iroh looks devices up here.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Routes(Arc<std::sync::Mutex<HashMap<EndpointId, Vec<TransportAddr>>>>);
+
+impl Routes {
+    /// Puts these routes first; true when the routes kept changed.
+    pub(crate) fn take(&self, address: EndpointAddr) -> bool {
+        let address = canonical_address(address);
+        let mut routes = self.0.lock().unwrap();
+        let kept = routes.entry(address.id).or_default();
+        let before = kept.iter().cloned().collect::<BTreeSet<_>>();
+        kept.retain(|route| !address.addrs.contains(route));
+        let mut taken = address.addrs.into_iter().collect::<Vec<_>>();
+        taken.append(kept);
+        taken.truncate(ROUTES);
+        *kept = taken;
+        kept.iter().cloned().collect::<BTreeSet<_>>() != before
+    }
+
+    /// The routes to a device. An in-flight lookup can predate a newly learned route, so
+    /// connections name them directly.
+    pub(crate) fn get(&self, peer: EndpointId) -> EndpointAddr {
+        let routes = self.0.lock().unwrap();
+        EndpointAddr::from_parts(peer, routes.get(&peer).into_iter().flatten().cloned())
+    }
+}
+
+impl AddressLookup for Routes {
+    fn resolve(&self, id: EndpointId) -> Option<BoxStream<'static, Result<Item, Error>>> {
+        let address = self.get(id);
+        (!address.is_empty())
+            .then(|| stream::iter([Ok(Item::new(address.into(), "connect", None))]).boxed())
+    }
 }
 
 // DNS permits a trailing dot, but Iroh keys relay connections by the URL.
@@ -256,7 +289,7 @@ pub struct ConnectNetwork {
     devices: std::sync::RwLock<HashMap<String, bool>>,
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
-    addresses: MemoryLookup,
+    routes: Routes,
     nearby: bool,
     stop: CancellationToken,
     relay: RelayMode,
@@ -269,18 +302,18 @@ impl ConnectNetwork {
         config: NetworkConfig,
         credentials: SecretKey,
     ) -> Result<(Arc<Self>, mpsc::Receiver<NetworkEvent>)> {
-        let addresses = MemoryLookup::new();
+        let routes = Routes::default();
         let relay = relay_mode(config.relay.as_deref(), config.public_relay)?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(credentials.clone())
-            .address_lookup(addresses.clone())
+            .address_lookup(routes.clone())
             .relay_mode(relay.clone());
         if let Some(resolver) = DNS_RESOLVER.get() {
             builder = builder.dns_resolver(resolver());
         }
         let mut nearby_error = None;
         let discoveries = if config.nearby {
-            match Nearby::new(credentials.public(), addresses.clone()) {
+            match Nearby::new(credentials.public(), routes.clone()) {
                 Ok((nearby, discoveries)) => {
                     builder = builder.address_lookup(nearby);
                     Some(discoveries)
@@ -323,7 +356,7 @@ impl ConnectNetwork {
             devices: std::sync::RwLock::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             events,
-            addresses,
+            routes,
             nearby: config.nearby,
             stop: CancellationToken::new(),
             relay,
@@ -426,11 +459,10 @@ impl ConnectNetwork {
         if let Some(profile) = &profile {
             for peer in profile.store.peers().await? {
                 if let Some(address) = &peer.address {
-                    self.addresses
-                        .add_endpoint_info(canonical_address(serde_json::from_str(address)?));
+                    self.routes.take(serde_json::from_str(address)?);
                 }
                 // A joining device reached its host before it had records to keep it in.
-                let known = peer_address(&self.addresses, peer.device.parse()?);
+                let known = self.routes.get(peer.device.parse()?);
                 if !known.is_empty() {
                     let known = serde_json::to_string(&known)?;
                     if peer.address.as_ref() != Some(&known) {
@@ -489,7 +521,7 @@ impl ConnectNetwork {
         );
         Ok(self
             .endpoint
-            .connect(peer_address(&self.addresses, peer), protocol)
+            .connect(self.routes.get(peer), protocol)
             .await?)
     }
 
@@ -534,13 +566,11 @@ impl ConnectNetwork {
         }
     }
 
-    /// Adds routes to a trusted device; true when it had not known them. The device keeps
-    /// them for its next start.
+    /// Takes routes to a trusted device; true when they changed the routes it keeps. The device
+    /// keeps them for its next start.
     async fn remember(&self, address: EndpointAddr) -> bool {
         let peer = address.id;
-        let before = peer_address(&self.addresses, peer);
-        self.addresses.add_endpoint_info(canonical_address(address));
-        if peer_address(&self.addresses, peer) == before {
+        if !self.routes.take(address) {
             return false;
         }
         self.save(peer).await;
@@ -549,7 +579,7 @@ impl ConnectNetwork {
 
     async fn save(&self, peer: EndpointId) {
         if let Some(profile) = self.profile.read().await.as_ref() {
-            let saved = match serde_json::to_string(&peer_address(&self.addresses, peer)) {
+            let saved = match serde_json::to_string(&self.routes.get(peer)) {
                 Ok(address) => profile.store.set_address(&peer.to_string(), &address).await,
                 Err(error) => Err(error.into()),
             };
@@ -564,7 +594,7 @@ impl ConnectNetwork {
         self.trusted_devices()
             .into_iter()
             .filter_map(|peer| peer.parse().ok())
-            .map(|peer| peer_address(&self.addresses, peer))
+            .map(|peer| self.routes.get(peer))
             .filter(|address| !address.is_empty())
             .collect()
     }
@@ -591,9 +621,9 @@ impl ConnectNetwork {
         }
         let address: EndpointAddr =
             serde_json::from_str(invitation).context("Invalid Connect invitation")?;
-        self.addresses
-            .add_endpoint_info(canonical_address(address.clone()));
-        Ok(address.id)
+        let id = address.id;
+        self.routes.take(address);
+        Ok(id)
     }
 
     pub async fn begin_pairing(self: &Arc<Self>, invitation: &str) -> Result<()> {
@@ -622,7 +652,7 @@ impl ConnectNetwork {
                 let connection = network
                     .endpoint
                     .connect_with_opts(
-                        peer_address(&network.addresses, peer),
+                        network.routes.get(peer),
                         protocol,
                         ConnectOptions::new().with_additional_alpns(vec![previous.to_vec()]),
                     )
@@ -942,13 +972,9 @@ mod tests {
         network
             .remember_invitation(&serde_json::to_string(&address).unwrap())
             .unwrap();
-        let remembered: EndpointAddr = network
-            .addresses
-            .get_endpoint_info(peer.id())
-            .unwrap()
-            .into();
+        let remembered = network.routes.get(peer.id());
         assert_eq!(remembered.relay_urls().count(), 1);
-        let raw_lookup = MemoryLookup::new();
+        let raw_lookup = iroh::address_lookup::memory::MemoryLookup::new();
         raw_lookup.add_endpoint_info(address);
         let lookup = CanonicalRelays(raw_lookup);
         let item = lookup
