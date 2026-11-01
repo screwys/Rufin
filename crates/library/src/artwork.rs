@@ -387,33 +387,28 @@ pub(crate) async fn raw_playlist_artwork_on(
         .collect())
 }
 
-/// A playlist row's binding: its own candidates, then its mosaic. None when it has neither.
-pub(crate) fn playlist_artwork(
-    mut candidates: Vec<ArtworkCandidate>,
-    owner: (bool, Option<String>, String),
+/// The candidate a playlist's mosaic picks compose; None without picks.
+pub(crate) fn playlist_mosaic(
     mosaic: Option<&str>,
-) -> LibraryResult<Option<Vec<u8>>> {
+    (smart, source_id, object_id): (bool, Option<String>, String),
+) -> LibraryResult<Option<ArtworkCandidate>> {
     let picks = mosaic
         .map(serde_json::from_str::<Vec<String>>)
         .transpose()?
         .unwrap_or_default();
-    if !picks.is_empty() {
-        let (smart, source_id, object_id) = owner;
-        candidates.push(ArtworkCandidate::new(
-            ArtworkImage::Playlist {
-                smart,
-                source_id,
-                object_id,
-                revision: format!("mosaic:{:x}", Md5::digest(picks.join("\0"))),
-                mosaic: Some(picks),
-            },
-            None,
-        ));
-    }
-    if candidates.is_empty() {
+    if picks.is_empty() {
         return Ok(None);
     }
-    Ok(Some(serde_json::to_vec(&candidates)?))
+    Ok(Some(ArtworkCandidate::new(
+        ArtworkImage::Playlist {
+            smart,
+            source_id,
+            object_id,
+            revision: format!("mosaic:{:x}", Md5::digest(picks.join("\0"))),
+            mosaic: Some(picks),
+        },
+        None,
+    )))
 }
 
 /// Up to four member URIs whose pictures differ, one per album: the chosen ones first, then

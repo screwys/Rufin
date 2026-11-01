@@ -599,9 +599,8 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// A playlist folder's picture is its first playlist's: smart or not, its key, and the
-    /// owner a mosaic names.
-    fn folder_cover(&self, key: PlaylistFolderKey) -> Option<(bool, i64, Option<String>, String)> {
+    /// A playlist folder's picture is its first playlist's: smart or not, and its key.
+    fn folder_cover(&self, key: PlaylistFolderKey) -> Option<(bool, i64)> {
         let snapshot = self.snapshot;
         if snapshot.playlist_folders.get(&key.raw())?.smart {
             return snapshot
@@ -609,7 +608,7 @@ impl<'a> Builder<'a> {
                 .values()
                 .filter(|smart| smart.folder == Some(key.raw()))
                 .min_by_key(|smart| smart.key)
-                .map(|smart| (true, smart.key, None, smart.object.clone()));
+                .map(|smart| (true, smart.key));
         }
         snapshot
             .playlists
@@ -621,15 +620,7 @@ impl<'a> Builder<'a> {
                     && (record.flags & SOURCE_OWNED == 0 || record.indexed())
             })
             .min_by_key(|record| record.key)
-            .map(|record| {
-                (
-                    false,
-                    record.key,
-                    self.source(record.source)
-                        .map(|source| source.object.clone()),
-                    text(snapshot, record.object),
-                )
-            })
+            .map(|record| (false, record.key))
     }
 
     fn source(&self, slot: u16) -> Option<&'a crate::catalog::records::Source> {
@@ -667,8 +658,8 @@ impl<'a> Builder<'a> {
             Item::Playlist(key) => want.add(Part::PlaylistArt, key.raw()),
             Item::Smart(key) => want.add(Part::SmartArt, key.raw()),
             Item::PlaylistFolder(key) => match self.folder_cover(key) {
-                Some((true, key, ..)) => want.add(Part::SmartArt, key),
-                Some((false, key, ..)) => want.add(Part::PlaylistArt, key),
+                Some((true, key)) => want.add(Part::SmartArt, key),
+                Some((false, key)) => want.add(Part::PlaylistArt, key),
                 None => {}
             },
         }
@@ -998,11 +989,7 @@ impl<'a> Builder<'a> {
         Ok(Some(PlaylistRow {
             playlist_key: key,
             source_key: source.map(|source| source.key),
-            artwork_binding: got.playlist(
-                false,
-                key.raw(),
-                (source_id.clone(), object_id.clone()),
-            )?,
+            artwork_binding: got.playlist(false, key.raw())?,
             source_id,
             source_owned: record.flags & SOURCE_OWNED != 0,
             object_id,
@@ -1050,7 +1037,7 @@ impl<'a> Builder<'a> {
             track_count: summary.track_count,
             duration_millis: summary.duration_millis,
             downloaded_count: summary.downloaded_count,
-            artwork_binding: got.playlist(true, key.raw(), (None, smart.object.clone()))?,
+            artwork_binding: got.playlist(true, key.raw())?,
         }))
     }
 
@@ -1096,9 +1083,7 @@ impl<'a> Builder<'a> {
             name: folder.name.clone(),
             smart: folder.smart,
             artwork_binding: match self.folder_cover(key) {
-                Some((smart, key, source_id, object_id)) => {
-                    got.playlist(smart, key, (source_id, object_id))?
-                }
+                Some((smart, key)) => got.playlist(smart, key)?,
                 None => None,
             },
             track_count: i64::from(totals.tracks),

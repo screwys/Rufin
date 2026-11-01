@@ -1,7 +1,7 @@
 //! The one keyed statement of a read: the Store columns of the rows a window shows, their
 //! pictures and blur-hash previews, and the full reads of detail headers. Each kind of row is a
 //! tagged part of one UNION ALL, present only when it has keys, and the statement steps on the
-//! connection's raw handle.
+//! connection's raw handle. Playlist mosaics' previews follow, keyed by the composed candidate.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -138,11 +138,18 @@ impl Part {
                 } else {
                     ("smart_playlists", "smart_playlist_key")
                 };
+                let source = if self == Self::PlaylistArt {
+                    "(SELECT source.object_id FROM sources source WHERE source.source_key=item.source_key)"
+                } else {
+                    "NULL"
+                };
                 (
                     vec![
                         "item.artwork_binding".into(),
                         previews("item.artwork_binding", previews_wanted),
                         "item.mosaic".into(),
+                        source.into(),
+                        "item.object_id".into(),
                     ],
                     format!("JOIN {table} item ON item.{key}=requested.value"),
                 )
@@ -206,11 +213,11 @@ pub(crate) struct TrackText {
     pub(crate) audio: crate::AudioProperties,
 }
 
-/// A playlist's or smart playlist's own binding and mosaic picks.
+/// A playlist's or smart playlist's own binding and the candidate its mosaic picks compose.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PlaylistArt {
     pub(crate) candidates: Option<Vec<ArtworkCandidate>>,
-    pub(crate) mosaic: Option<String>,
+    pub(crate) mosaic: Option<ArtworkCandidate>,
 }
 
 /// What one statement read, by part and key.
@@ -330,23 +337,19 @@ impl Got {
             .transpose()
     }
 
-    /// A playlist row's binding: its own picture, then its mosaic. None when it has neither.
-    pub(crate) fn playlist(
-        &self,
-        smart: bool,
-        key: i64,
-        owner: (Option<String>, String),
-    ) -> LibraryResult<Option<Vec<u8>>> {
+    /// A playlist row's binding with previews: its own picture, then its mosaic. None when it
+    /// has neither.
+    pub(crate) fn playlist(&self, smart: bool, key: i64) -> LibraryResult<Option<Vec<u8>>> {
         let Some(art) = self.playlists.get(&(smart, key)) else {
             return Ok(None);
         };
         let mut candidates = art.candidates.clone().unwrap_or_default();
+        candidates.extend(art.mosaic.clone());
+        if candidates.is_empty() {
+            return Ok(None);
+        }
         self.fill(&mut candidates);
-        crate::artwork::playlist_artwork(
-            candidates,
-            (smart, owner.0, owner.1),
-            art.mosaic.as_deref(),
-        )
+        encode(&candidates).map(Some)
     }
 }
 
@@ -474,12 +477,31 @@ pub(crate) async fn run(
             }
             Part::PlaylistArt | Part::SmartArt => {
                 previews(&rows, &mut got, 3)?;
+                let smart = part == Part::SmartArt;
                 let art = PlaylistArt {
                     candidates: candidates(&rows, 2)?,
-                    mosaic: text(&rows, 4),
+                    mosaic: crate::artwork::playlist_mosaic(
+                        rows.optional_text(4),
+                        (smart, text(&rows, 5), rows.text(6).to_owned()),
+                    )?,
                 };
-                got.playlists.insert((part == Part::SmartArt, key), art);
+                got.playlists.insert((smart, key), art);
             }
+        }
+    }
+    drop(rows);
+    // A mosaic's key comes from its picks, so its preview is read once the picks are known.
+    let mosaics = got
+        .playlists
+        .values()
+        .filter_map(|art| art.mosaic.as_ref().map(|mosaic| &mosaic.key))
+        .collect::<Vec<_>>();
+    if want.previews && !mosaics.is_empty() {
+        let mut rows = handle.prepare("SELECT preview.family,preview.hash FROM json_each(?1) requested JOIN artwork_previews preview ON preview.family=requested.value")?;
+        rows.bind_text(1, &serde_json::to_string(&mosaics)?)?;
+        while rows.step()? {
+            got.previews
+                .insert(rows.text(0).to_owned(), rows.text(1).to_owned());
         }
     }
     Ok(got)
