@@ -14,6 +14,7 @@ use gtk::subclass::prelude::*;
 use crate::CatalogUi;
 use crate::{
     LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, available_sort_fields,
+    presentation::library_sort_title,
 };
 use gtk_widgets::controls::sort_order_icon;
 use gtk_widgets::layout::{
@@ -716,14 +717,6 @@ mod search_empty_tests {
             next_layout(LibraryListKey::Artists, LibraryLayout::Grid),
             LibraryLayout::Row
         );
-    }
-}
-
-fn library_sort_title(key: LibraryListKey, field: LibraryField) -> &'static str {
-    if key == LibraryListKey::PlaylistTracks && field == LibraryField::RowIndex {
-        msgid("Playlist order")
-    } else {
-        rufin_core::settings::presentation::library_field_title(field)
     }
 }
 

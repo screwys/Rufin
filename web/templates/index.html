@@ -153,15 +153,9 @@
             aria-label="{{ localization::tr("Search library") }}"
           />
           <noscript><button class="without-js" type="submit">{{ localization::tr("Search") }}</button></noscript>
-          <template id="track-sort-options">{% call m::track_sort_options("") %}{% endcall %}</template>
+          {% for (view, options) in page.sort_lists() %}<template data-sort="{{ view }}">{% for (name, title) in options %}<option value="{{ name }}">{{ title }}</option>{% endfor %}</template>{% endfor %}
           <select id="sort" name="sort" aria-label="{{ localization::tr("Sort by") }}">
-            {% if page.view() == "playlist" %}<option value="position" {% if page.sort() == "position" %}selected{% endif %}>{{ localization::tr("Position") }}</option>{% endif %}
-            {% if page.view() == "smart-playlist" %}<option value="definition" {% if page.sort() == "definition" %}selected{% endif %}>{{ localization::tr("Playlist order") }}</option>{% endif %}
-            {% if page.view() == "tracks" || page.view() == "favorites" || page.view() == "album" || page.view() == "artist" || page.view() == "genre" || page.view() == "playlist" || page.view() == "smart-playlist" %}
-            {% call m::track_sort_options(page.sort()) %}{% endcall %}
-            {% else %}
-            <option value="title" {% if page.sort() == "title" %}selected{% endif %}>{{ localization::tr("Title") }}</option>
-            {% endif %}
+            {% for (name, title, selected) in page.sort_options() %}<option value="{{ name }}" {% if selected %}selected{% endif %}>{{ title }}</option>{% endfor %}
           </select>
           <button
             class="icon-button"

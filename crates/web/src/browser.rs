@@ -576,6 +576,35 @@ async fn icon(
     Ok(asset("image/svg+xml", file.data))
 }
 
+/// The list each sortable page view shows, by the key the other clients save it under.
+const VIEW_LISTS: [(&str, LibraryListKey); 11] = [
+    ("tracks", LibraryListKey::Tracks),
+    ("favorites", LibraryListKey::FavoriteTracks),
+    ("album", LibraryListKey::AlbumDetailTracks),
+    ("artist", LibraryListKey::ArtistTracks),
+    ("genre", LibraryListKey::GenreTracks),
+    ("playlist", LibraryListKey::PlaylistTracks),
+    ("smart-playlist", LibraryListKey::SmartPlaylistTracks),
+    ("albums", LibraryListKey::Albums),
+    ("artists", LibraryListKey::Artists),
+    ("playlists", LibraryListKey::Playlists),
+    ("smart-playlists", LibraryListKey::SmartPlaylists),
+];
+
+fn view_list_key(view: &str) -> Option<LibraryListKey> {
+    VIEW_LISTS
+        .iter()
+        .find(|(name, _)| *name == view)
+        .map(|(_, key)| *key)
+}
+
+fn translated_sorts(key: LibraryListKey) -> Vec<(&'static str, String)> {
+    sort_options(key)
+        .into_iter()
+        .map(|(name, title)| (name, localization::tr(title)))
+        .collect()
+}
+
 struct QueueRow {
     pub position: u64,
     pub title: String,
@@ -709,6 +738,24 @@ impl Page {
     }
     pub fn sort(&self) -> &str {
         self.parameters.get("sort").map_or("title", String::as_str)
+    }
+    /// The sorts this page's list offers, as `(name, title, selected)`.
+    pub fn sort_options(&self) -> Vec<(&'static str, String, bool)> {
+        view_list_key(self.view())
+            .map_or_else(
+                || vec![("title", localization::tr("Title"))],
+                translated_sorts,
+            )
+            .into_iter()
+            .map(|(name, title)| (name, title, name == self.sort()))
+            .collect()
+    }
+    /// The sorts of every list the web shows, by page view, for the script to switch between.
+    pub fn sort_lists(&self) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+        VIEW_LISTS
+            .iter()
+            .map(|(view, key)| (*view, translated_sorts(*key)))
+            .collect()
     }
     pub fn descending(&self) -> bool {
         self.parameters

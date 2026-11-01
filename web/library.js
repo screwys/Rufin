@@ -313,45 +313,14 @@ function navigate(next, selected = null) {
   run(() => loadView(false, state.selectedLibrary ? null : selected?.track_count ?? null));
 }
 
+// The sorts the page's list offers, as the server lists them for each page view.
 function setSort() {
-  const tracks = [...$("track-sort-options").content.querySelectorAll("option")]
-    .map((option) => [option.value, option.textContent]);
-  const lists = {
-    albums: [
-      ["title", tr("Title")],
-      ["album_artist", tr("Artist")],
-      ["year", tr("Year")],
-      ["date_added", tr("Date added")],
-    ],
-    artists: [
-      ["title", tr("Name")],
-      ["album_count", tr("Albums")],
-      ["track_count", tr("Tracks")],
-      ["last_played", tr("Last played")],
-    ],
-    playlists: [
-      ["position", tr("Playlist order")],
-      ["title", tr("Name")],
-      ["track_count", tr("Tracks")],
-      ["duration", tr("Duration")],
-    ],
-    "smart-playlists": [
-      ["position", tr("Playlist order")],
-      ["title", tr("Name")],
-      ["track_count", tr("Tracks")],
-      ["duration", tr("Duration")],
-    ],
-  };
-  const playlistOrder = {
-    playlists: "position",
-    "smart-playlists": "definition",
-  }[route];
-  const options = detail && playlistOrder
-    ? [[playlistOrder, tr("Playlist order")], ...tracks]
-    : detail ? tracks : lists[route] || tracks;
-  $("sort").replaceChildren(
-    ...options.map(([value, label]) => new Option(label, value)),
-  );
+  const view = detail
+    ? { albums: "album", artists: "artist", genres: "genre", playlists: "playlist", "smart-playlists": "smart-playlist" }[route]
+    : route;
+  const options = document.querySelector(`template[data-sort="${view}"]`)
+    ?? document.querySelector('template[data-sort="tracks"]');
+  $("sort").replaceChildren(options.content.cloneNode(true));
 }
 
 function showOrder(sort, descending) {

@@ -138,10 +138,20 @@ fn routes() -> Router<ProductHandles> {
 }
 
 async fn help() -> Result<Response<Body>, Error> {
-    Ok(json_response(
-        StatusCode::OK,
-        serde_json::from_str(include_str!("help.json")).expect("bundled API help"),
-    ))
+    let mut help: Value =
+        serde_json::from_str(include_str!("help.json")).expect("bundled API help");
+    for (choice, key) in [
+        ("track_sort", LibraryListKey::Tracks),
+        ("album_sort", LibraryListKey::Albums),
+        ("playlist_sort", LibraryListKey::Playlists),
+        ("artist_sort", LibraryListKey::Artists),
+    ] {
+        help["choices"][choice] = sort_options(key)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+    }
+    Ok(json_response(StatusCode::OK, help))
 }
 
 async fn playback_state(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
@@ -644,17 +654,38 @@ const SORTS: [(&str, LibraryField); 18] = [
     ("album_count", LibraryField::AlbumCount),
 ];
 
+/// The `sort` name of a list's own saved order, where the list has one.
+fn own_sort(key: LibraryListKey) -> Option<&'static str> {
+    match key {
+        LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => Some("position"),
+        LibraryListKey::SmartPlaylistTracks => Some("definition"),
+        _ => None,
+    }
+}
+
+/// The `sort` names a list takes and their titles: its own order first, then the fields the
+/// other clients sort it by, titled as GTK titles them.
+fn sort_options(key: LibraryListKey) -> Vec<(&'static str, &'static str)> {
+    own_sort(key)
+        .map(|name| (name, localization::msgid("Playlist order")))
+        .into_iter()
+        .chain(available_sort_fields(key).iter().filter_map(|field| {
+            let (name, _) = SORTS.iter().find(|(_, sorted)| sorted == field)?;
+            Some((
+                *name,
+                rufin_core::settings::presentation::library_sort_title(key, *field),
+            ))
+        }))
+        .collect()
+}
+
 /// Reads `sort` as a documented name for a field `key` sorts by. None is the list's own order:
 /// no `sort`, or the name help.json gives a playlist's saved order.
 fn sort(
     parameters: &HashMap<String, String>,
     key: LibraryListKey,
 ) -> Result<Option<LibraryField>, Error> {
-    let own = match key {
-        LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => Some("position"),
-        LibraryListKey::SmartPlaylistTracks => Some("definition"),
-        _ => None,
-    };
+    let own = own_sort(key);
     let Some(name) = parameters
         .get("sort")
         .filter(|name| Some(name.as_str()) != own)

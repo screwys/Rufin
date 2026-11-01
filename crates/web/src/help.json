@@ -336,51 +336,6 @@
       "password",
       "legacy_password",
       "api_key"
-    ],
-    "track_sort": [
-      "title",
-      "track_number",
-      "artist",
-      "album_artist",
-      "album",
-      "year",
-      "release_date",
-      "date_added",
-      "last_played",
-      "play_count",
-      "rating",
-      "genre",
-      "bpm",
-      "duration",
-      "favorite"
-    ],
-    "album_sort": [
-      "title",
-      "album_artist",
-      "year",
-      "release_date",
-      "date_added",
-      "last_played",
-      "play_count",
-      "rating",
-      "track_count",
-      "duration",
-      "favorite"
-    ],
-    "playlist_sort": [
-      "position",
-      "title",
-      "track_count",
-      "duration"
-    ],
-    "artist_sort": [
-      "title",
-      "album_count",
-      "track_count",
-      "last_played",
-      "play_count",
-      "rating",
-      "favorite"
     ]
   },
   "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. A track page without sort or descending lists in the order its list is set to, as the other clients show it, and its response names that sort and descending. Track, album, artist, playlist and smart-playlist pages accept total=true to include the matching result count; otherwise total is null. Reuse that count while browsing the same results instead of requesting it for every window. The random genre picker also accepts total=true. Browsing or refreshing a source does not switch the source currently in use.",

@@ -206,6 +206,15 @@ pub const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Appears On"),
 ];
 
+/// The title a list's sort choice shows for `field`.
+pub fn library_sort_title(key: LibraryListKey, field: LibraryField) -> &'static str {
+    if key == LibraryListKey::PlaylistTracks && field == LibraryField::RowIndex {
+        msgid("Playlist order")
+    } else {
+        library_field_title(field)
+    }
+}
+
 /// The title of the fields a layout shows.
 pub fn library_fields_title(layout: super::LibraryLayout) -> &'static str {
     match layout {
