@@ -2135,6 +2135,7 @@ pub(crate) async fn pictures(
         tag: Option<TagKind>,
         rows: &[(String, Option<Vec<u8>>)],
     ) -> LibraryResult<()> {
+        write.read_objects::<R>(source, tag, &objects(rows)).await?;
         for (object, artwork) in rows {
             let Some(mut record) = find::<R>(write, source, tag, object).await? else {
                 continue;
@@ -2152,8 +2153,15 @@ pub(crate) async fn pictures(
         }
         Ok(())
     }
+    // The page's rows in one read, not one read per row.
+    fn objects(rows: &[(String, Option<Vec<u8>>)]) -> Vec<&str> {
+        rows.iter().map(|(object, _)| object.as_str()).collect()
+    }
     match Kind::parse(kind)? {
         Kind::Track => {
+            write
+                .read_objects::<Track>(source, None, &objects(rows))
+                .await?;
             let mut tracks = Vec::new();
             for (object, artwork) in rows {
                 if let Some(track) = find::<Track>(write, source, None, object).await?
