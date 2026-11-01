@@ -362,6 +362,13 @@ impl SelectedFeed {
     }
 }
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(usize, u64, {
+    remote,
+    lower: |value| value as u64,
+    try_lift: |value| Ok(usize::try_from(value)?),
+});
+
 /// How far a source's read or download has come.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
