@@ -228,8 +228,10 @@ pub enum NetworkEvent {
         sequence: i64,
         pulled: oneshot::Sender<()>,
     },
+    /// `peer` answered, or `contacted` this device.
     Reachable {
         peer: String,
+        contacted: bool,
     },
     /// `peer` refused this device because it was removed from the profile.
     Removed {
@@ -377,14 +379,19 @@ impl ConnectNetwork {
                     Discovery::Expired(peer) => NetworkEvent::DiscoveryExpired {
                         peer: peer.to_string(),
                     },
-                    Discovery::Found(info) => NetworkEvent::Discovered {
-                        peer: info.endpoint_id.to_string(),
-                        name: info
-                            .data
-                            .user_data()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| info.endpoint_id.to_string()),
-                    },
+                    Discovery::Found(info) => {
+                        if network.trusted(info.endpoint_id) == Some(true) {
+                            network.save(info.endpoint_id).await;
+                        }
+                        NetworkEvent::Discovered {
+                            peer: info.endpoint_id.to_string(),
+                            name: info
+                                .data
+                                .user_data()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| info.endpoint_id.to_string()),
+                        }
+                    }
                 };
                 let _ = network.events.send(event).await;
             }
@@ -460,7 +467,7 @@ impl ConnectNetwork {
     pub(crate) async fn admit(&self, connection: &Connection) -> bool {
         match self.trusted(connection.remote_id()) {
             Some(true) => {
-                self.reached(connection).await;
+                self.reached(connection, true).await;
                 true
             }
             Some(false) => {
@@ -501,40 +508,48 @@ impl ConnectNetwork {
             bail!(REMOVED_FROM_PROFILE);
         }
         if result.is_ok() {
-            self.reached(connection).await;
+            self.reached(connection, false).await;
         }
         result
     }
 
     // A device that restarted listens on another port; its own connections tell where.
-    async fn reached(&self, connection: &Connection) {
+    async fn reached(&self, connection: &Connection, contacted: bool) {
         let peer = connection.remote_id();
         let _ = self
             .events
             .send(NetworkEvent::Reachable {
                 peer: peer.to_string(),
+                contacted,
             })
             .await;
-        let Some(address) = connection
+        if let Some(address) = connection
             .paths()
             .iter()
             .find(|path| path.is_selected())
             .map(|path| path.remote_addr().clone())
-        else {
-            return;
-        };
-        let before = self
-            .addresses
-            .get_endpoint_info(peer)
-            .map(EndpointAddr::from);
-        self.addresses
-            .add_endpoint_info(canonical_address(EndpointAddr::from_parts(peer, [address])));
-        let after = peer_address(&self.addresses, peer);
-        if before.as_ref() == Some(&after) {
-            return;
+        {
+            self.remember(EndpointAddr::from_parts(peer, [address]))
+                .await;
         }
+    }
+
+    /// Adds routes to a trusted device; true when it had not known them. The device keeps
+    /// them for its next start.
+    async fn remember(&self, address: EndpointAddr) -> bool {
+        let peer = address.id;
+        let before = peer_address(&self.addresses, peer);
+        self.addresses.add_endpoint_info(canonical_address(address));
+        if peer_address(&self.addresses, peer) == before {
+            return false;
+        }
+        self.save(peer).await;
+        true
+    }
+
+    async fn save(&self, peer: EndpointId) {
         if let Some(profile) = self.profile.read().await.as_ref() {
-            let saved = match serde_json::to_string(&after) {
+            let saved = match serde_json::to_string(&peer_address(&self.addresses, peer)) {
                 Ok(address) => profile.store.set_address(&peer.to_string(), &address).await,
                 Err(error) => Err(error.into()),
             };
@@ -542,6 +557,32 @@ impl ConnectNetwork {
                 tracing::warn!(%error, "Could not save a Connect device address");
             }
         }
+    }
+
+    /// The routes this device knows to the profile's other devices.
+    pub fn addresses(&self) -> Vec<EndpointAddr> {
+        self.trusted_devices()
+            .into_iter()
+            .filter_map(|peer| peer.parse().ok())
+            .map(|peer| peer_address(&self.addresses, peer))
+            .filter(|address| !address.is_empty())
+            .collect()
+    }
+
+    /// Takes the routes another device knows to the profile's devices; returns the devices
+    /// reachable on routes this one did not know.
+    pub async fn learn(&self, addresses: Vec<EndpointAddr>) -> Vec<String> {
+        let mut learned = Vec::new();
+        for address in addresses {
+            let peer = address.id;
+            if peer != self.endpoint.id()
+                && self.trusted(peer) == Some(true)
+                && self.remember(address).await
+            {
+                learned.push(peer.to_string());
+            }
+        }
+        learned
     }
 
     fn remember_invitation(&self, invitation: &str) -> Result<EndpointId> {

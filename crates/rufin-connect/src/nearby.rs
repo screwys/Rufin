@@ -21,6 +21,7 @@ use swarm_discovery::{Discoverer, DropGuard, IpClass, Peer};
 use tokio::sync::{broadcast, mpsc};
 
 pub(crate) enum Discovery {
+    /// A device seen for the first time since it expired, or at new addresses.
     Found(EndpointInfo),
     Expired(EndpointId),
 }
@@ -47,6 +48,8 @@ impl Nearby {
         let (changes, _) = broadcast::channel(64);
         let discovered = changes.clone();
         let interfaces = multicast_interfaces();
+        // Each device answers every query; only what changed is news.
+        let mut seen = HashMap::<EndpointId, EndpointData>::new();
         let discovery = Discoverer::new(
             "rufin-connect".into(),
             data_encoding::BASE32_NOPAD
@@ -63,6 +66,7 @@ impl Nearby {
                 return;
             }
             let event = if peer.is_expiry() {
+                seen.remove(&peer_id);
                 Discovery::Expired(peer_id)
             } else {
                 let mut data = EndpointData::from(
@@ -81,6 +85,10 @@ impl Nearby {
                         .flatten()
                         .and_then(|name| name.parse().ok()),
                 );
+                if seen.get(&peer_id) == Some(&data) {
+                    return;
+                }
+                seen.insert(peer_id, data.clone());
                 let info = EndpointInfo::from_parts(peer_id, data);
                 addresses.add_endpoint_info(info.clone());
                 let _ = discovered.send(info.clone());
@@ -105,7 +113,8 @@ impl Nearby {
 
 impl AddressLookup for Nearby {
     fn resolve(&self, id: EndpointId) -> Option<BoxStream<'static, Result<Item, Error>>> {
-        // MemoryLookup supplies known addresses. Keep receiving new routes while connecting.
+        // MemoryLookup supplies known addresses. Keep receiving new routes as long as a dial
+        // waits, so a dial that began before the device was found still reaches it.
         let changes = stream::unfold(self.changes.subscribe(), |mut receiver| async {
             loop {
                 match receiver.recv().await {
@@ -117,7 +126,7 @@ impl AddressLookup for Nearby {
         });
         Some(
             changes
-                .take_until(tokio::time::sleep(Duration::from_secs(10)))
+                .take_until(tokio::time::sleep(Duration::from_secs(30)))
                 .filter_map(move |info| async move {
                     (info.endpoint_id == id).then(|| Ok(Item::new(info, "nearby", None)))
                 })

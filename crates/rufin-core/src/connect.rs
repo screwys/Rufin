@@ -345,6 +345,9 @@ enum Stream {
 struct Presence {
     sequence: i64,
     playing: bool,
+    /// The routes the device knows to the profile's devices, so devices that joined through
+    /// it reach each other.
+    addresses: Vec<rufin_connect::EndpointAddr>,
 }
 
 /// Connect while it is on.
@@ -752,32 +755,38 @@ impl ConnectOwner {
         }
     }
 
-    /// Presence to each trusted device; pulls from those that hold newer records; reads the
-    /// sync folder.
+    /// Presence of each trusted device; reads the sync folder.
     async fn refresh(self: &Arc<Self>) {
         let Some(session) = self.session() else {
             return;
         };
-        let Some(network) = self.network.lock().await.clone() else {
+        if self.network.lock().await.is_none() {
             return;
-        };
+        }
         let peers = session.records.peers();
-        let presence = serde_json::to_vec(&Request::Presence).unwrap_or_default();
-        let probes = peers.into_iter().map(|peer| {
-            let network = Arc::clone(&network);
-            let presence = presence.clone();
-            async move {
-                let answer = network.test_connection(&peer, presence).await;
-                (peer, answer)
-            }
-        });
-        for (peer, answer) in futures_util::future::join_all(probes).await {
-            let answer = answer.map_err(error).and_then(|(route, bytes)| {
-                serde_json::from_slice::<Presence>(&bytes)
-                    .map(|presence| (route, presence))
-                    .map_err(error)
-            });
-            self.update_device(&peer, |device| match &answer {
+        futures_util::future::join_all(peers.iter().map(|peer| self.meet(peer))).await;
+        folder::sync(self, &session).await;
+    }
+
+    /// Presence of a trusted device: whether and how it is reachable, then the devices it
+    /// reaches on routes this one did not know, and the records it holds that this one lacks.
+    fn meet<'a>(
+        self: &'a Arc<Self>,
+        peer: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            let network = self.network().await?;
+            let presence = serde_json::to_vec(&Request::Presence).map_err(error)?;
+            let answer = network
+                .test_connection(peer, presence)
+                .await
+                .map_err(error)
+                .and_then(|(route, bytes)| {
+                    serde_json::from_slice::<Presence>(&bytes)
+                        .map(|presence| (route, presence))
+                        .map_err(error)
+                });
+            self.update_device(peer, |device| match &answer {
                 Ok((route, _)) => {
                     device.reachable = true;
                     device.connection = connection_label(route);
@@ -787,12 +796,23 @@ impl ConnectOwner {
                     device.connection = localization::tr("Waiting for device");
                 }
             });
-            if let Ok((_, presence)) = answer {
-                self.pull_when_behind(&session, &peer, presence.sequence)
+            let (_, presence) = answer?;
+            for learned in network.learn(presence.addresses).await {
+                self.met(learned);
+            }
+            if let Some(session) = self.session() {
+                self.pull_when_behind(&session, peer, presence.sequence)
                     .await;
             }
-        }
-        folder::sync(self, &session).await;
+            Ok(())
+        })
+    }
+
+    fn met(self: &Arc<Self>, peer: String) {
+        let owner = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let _ = owner.meet(&peer).await;
+        });
     }
 
     async fn pull_when_behind(self: &Arc<Self>, session: &Arc<Session>, peer: &str, sequence: i64) {
@@ -811,8 +831,29 @@ impl ConnectOwner {
     /// Applies the records a device holds after this device's cursor, in one stream.
     async fn pull(self: &Arc<Self>, session: &Arc<Session>, peer: &str) -> Result<(), String> {
         let network = self.network().await?;
-        self.receive_from(&network, &session.records, &session.profile, peer, false)
-            .await
+        let applied = self
+            .receive_from(&network, &session.records, &session.profile, peer, false)
+            .await?;
+        if applied > 0 {
+            self.relay(session).await;
+        }
+        Ok(())
+    }
+
+    /// Records from another device applied here: tell the other devices, so rows travel on
+    /// through any device that is online. Rows a device already holds apply nowhere, so this
+    /// ends where they came from.
+    async fn relay(&self, session: &Session) {
+        let Some(network) = self.network.lock().await.clone() else {
+            return;
+        };
+        match session.records.store.sequence().await {
+            Ok(sequence) => {
+                self.runtime
+                    .spawn(async move { network.push(sequence).await });
+            }
+            Err(error) => tracing::warn!(%error, "Connect could not read its sequence"),
+        }
     }
 
     async fn receive_from(
@@ -822,7 +863,7 @@ impl ConnectOwner {
         profile: &str,
         peer: &str,
         joining: bool,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         let after = records.pulled(peer).await?;
         let mut pull = network.pull(peer, profile, after).await.map_err(error)?;
         let total = pull.total;
@@ -853,7 +894,7 @@ impl ConnectOwner {
                 });
             }
             if end.is_some() {
-                return Ok(());
+                return Ok(applied);
             }
         }
     }
@@ -1264,9 +1305,17 @@ impl ConnectOwner {
                         projection.view.transport.effective_state()
                             == playback::TransportStatus::Playing
                     });
+                let addresses = self
+                    .network
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|network| network.addresses())
+                    .unwrap_or_default();
                 serde_json::to_value(Presence {
                     sequence: session.records.store.sequence().await.map_err(error)?,
                     playing,
+                    addresses,
                 })
                 .map_err(error)?
             }
@@ -1442,29 +1491,38 @@ impl ConnectOwner {
                     let _ = pulled.send(());
                 });
             }
-            NetworkEvent::Reachable { peer } => {
+            NetworkEvent::Reachable { peer, contacted } => {
+                let mut unreachable = false;
                 self.update_device(&peer, |device| {
+                    unreachable = !device.reachable;
                     device.reachable = true;
                     if device.connection == localization::tr("Waiting for device") {
                         device.connection.clear();
                     }
                 });
+                // A device that was away and contacts this one may hold records it could not
+                // push while away.
+                if contacted && unreachable {
+                    self.met(peer);
+                }
             }
             NetworkEvent::Removed { .. } => {
                 let owner = Arc::clone(self);
                 self.runtime.spawn(async move { owner.removed().await });
             }
             NetworkEvent::Discovered { peer, name } => {
+                let mut enrolled = false;
                 self.status.send_if_modified(|status| {
                     if let Some(device) = status.devices.iter_mut().find(|device| device.id == peer)
                     {
+                        enrolled = device.enrolled;
                         if device.enrolled || device.name == name {
                             return false;
                         }
                         device.name = name;
                     } else {
                         status.devices.push(Device {
-                            id: peer,
+                            id: peer.clone(),
                             name,
                             reachable: true,
                             enrolled: false,
@@ -1474,6 +1532,10 @@ impl ConnectOwner {
                     }
                     true
                 });
+                // A device found nearby, newly or at new addresses, is reachable again there.
+                if enrolled {
+                    self.met(peer);
+                }
             }
             NetworkEvent::DiscoveryExpired { peer } => {
                 self.status.send_if_modified(|status| {
@@ -1655,26 +1717,7 @@ impl ConnectOwner {
             Action::Discover => {
                 self.network().await?;
             }
-            Action::TestConnection { peer } => {
-                let result = self
-                    .network()
-                    .await?
-                    .test_connection(
-                        &peer,
-                        serde_json::to_vec(&Request::Presence).map_err(error)?,
-                    )
-                    .await
-                    .map(|(route, _)| route)
-                    .map_err(error);
-                self.update_device(&peer, |device| {
-                    device.reachable = result.is_ok();
-                    device.connection = match &result {
-                        Ok(route) => connection_label(route),
-                        Err(_) => localization::tr("Waiting for device"),
-                    };
-                });
-                result?;
-            }
+            Action::TestConnection { peer } => self.meet(&peer).await?,
             Action::Network {
                 nearby,
                 relay,

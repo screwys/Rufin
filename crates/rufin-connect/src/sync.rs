@@ -1,6 +1,6 @@
-//! Record sync. A device that wrote records tells the others its sequence; each pulls the rows
-//! after its cursor in one stream. A device serves every row it holds, so rows travel on through
-//! devices that were online together.
+//! Record sync. A device that wrote or applied records tells the others its sequence; each pulls
+//! the rows after its cursor in one stream. A device serves every row it holds, so rows travel on
+//! through any device that is online.
 use std::{
     sync::{Arc, Weak},
     time::Duration,

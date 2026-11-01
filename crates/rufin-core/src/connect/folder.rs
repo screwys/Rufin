@@ -68,8 +68,10 @@ pub(super) async fn sync(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
         read_others(session, &folder).await
     }
     .await;
-    if let Err(error) = result {
-        tracing::warn!(%error, "Connect could not sync the folder");
+    match result {
+        Ok(0) => {}
+        Ok(_) => owner.relay(session).await,
+        Err(error) => tracing::warn!(%error, "Connect could not sync the folder"),
     }
 }
 
@@ -210,7 +212,8 @@ async fn own_rows(session: &Arc<Session>, mut after: i64) -> Result<(Vec<Row>, i
     Ok((rows, after))
 }
 
-async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<(), String> {
+/// Applies the segments other devices wrote; returns how many records applied.
+async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<u64, String> {
     let records = &session.records;
     let cursors = records
         .store
@@ -222,6 +225,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<(), Stri
         .collect::<std::collections::HashMap<_, _>>();
     let mut receiving = Receiving::default();
     let mut ends = Vec::new();
+    let mut applied = 0;
     for device in records.peers() {
         let read = cursors.get(&device).copied().unwrap_or(0);
         let directory = [ROOT, &session.profile, &device].map(str::to_owned);
@@ -250,7 +254,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<(), Stri
             if rows.is_empty() {
                 continue;
             }
-            records
+            applied += records
                 .receive(&device, rows, &mut receiving, None, |device, sequence| {
                     Cursor::Read { device, sequence }
                 })
@@ -261,7 +265,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<(), Stri
         }
     }
     for (device, end) in ends {
-        records
+        applied += records
             .receive(
                 &device,
                 Vec::new(),
@@ -271,7 +275,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<(), Stri
             )
             .await?;
     }
-    Ok(())
+    Ok(applied)
 }
 
 fn seal(session: &Session, rows: &[Row]) -> Result<Vec<u8>, String> {
