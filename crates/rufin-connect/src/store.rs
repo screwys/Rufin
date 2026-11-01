@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS connect_peers (
     pulled INTEGER NOT NULL DEFAULT 0,
     -- Their own sequence this device read up to from their folder directory.
     read INTEGER NOT NULL DEFAULT 0,
-    -- Last known iroh EndpointAddr as JSON.
+    -- Last known iroh routes as JSON {id, addrs}, newest first.
     address TEXT
 ) STRICT;
 ";

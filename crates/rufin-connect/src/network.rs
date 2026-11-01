@@ -17,7 +17,7 @@ use iroh::{
     endpoint::{ConnectOptions, Connection, ConnectionError, VarInt, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -120,19 +120,49 @@ const ROUTES: usize = 8;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Routes(Arc<std::sync::Mutex<HashMap<EndpointId, Vec<TransportAddr>>>>);
 
+/// A device's routes as saved, newest first. An `EndpointAddr` keeps its routes sorted, so
+/// the saved list keeps the order that decides which fall off.
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    id: EndpointId,
+    addrs: Vec<TransportAddr>,
+}
+
 impl Routes {
     /// Puts these routes first; true when the routes kept changed.
     pub(crate) fn take(&self, address: EndpointAddr) -> bool {
         let address = canonical_address(address);
+        self.put(address.id, address.addrs.into_iter().collect())
+    }
+
+    fn put(&self, peer: EndpointId, mut taken: Vec<TransportAddr>) -> bool {
         let mut routes = self.0.lock().unwrap();
-        let kept = routes.entry(address.id).or_default();
+        let kept = routes.entry(peer).or_default();
         let before = kept.iter().cloned().collect::<BTreeSet<_>>();
-        kept.retain(|route| !address.addrs.contains(route));
-        let mut taken = address.addrs.into_iter().collect::<Vec<_>>();
+        kept.retain(|route| !taken.contains(route));
         taken.append(kept);
         taken.truncate(ROUTES);
         *kept = taken;
         kept.iter().cloned().collect::<BTreeSet<_>>() != before
+    }
+
+    /// Takes the routes saved for a device, in their saved order.
+    fn restore(&self, saved: &str) -> Result<()> {
+        let saved: Saved = serde_json::from_str(saved)?;
+        self.put(saved.id, saved.addrs);
+        Ok(())
+    }
+
+    /// The routes to a device as saved, newest first.
+    fn saved(&self, peer: EndpointId) -> Result<Option<String>> {
+        let routes = self.0.lock().unwrap();
+        let Some(addrs) = routes.get(&peer).filter(|addrs| !addrs.is_empty()) else {
+            return Ok(None);
+        };
+        Ok(Some(serde_json::to_string(&Saved {
+            id: peer,
+            addrs: addrs.clone(),
+        })?))
     }
 
     /// The routes to a device. An in-flight lookup can predate a newly learned route, so
@@ -459,15 +489,13 @@ impl ConnectNetwork {
         if let Some(profile) = &profile {
             for peer in profile.store.peers().await? {
                 if let Some(address) = &peer.address {
-                    self.routes.take(serde_json::from_str(address)?);
+                    self.routes.restore(address)?;
                 }
                 // A joining device reached its host before it had records to keep it in.
-                let known = self.routes.get(peer.device.parse()?);
-                if !known.is_empty() {
-                    let known = serde_json::to_string(&known)?;
-                    if peer.address.as_ref() != Some(&known) {
-                        profile.store.set_address(&peer.device, &known).await?;
-                    }
+                if let Some(known) = self.routes.saved(peer.device.parse()?)?
+                    && peer.address.as_ref() != Some(&known)
+                {
+                    profile.store.set_address(&peer.device, &known).await?;
                 }
             }
         }
@@ -579,9 +607,10 @@ impl ConnectNetwork {
 
     async fn save(&self, peer: EndpointId) {
         if let Some(profile) = self.profile.read().await.as_ref() {
-            let saved = match serde_json::to_string(&self.routes.get(peer)) {
-                Ok(address) => profile.store.set_address(&peer.to_string(), &address).await,
-                Err(error) => Err(error.into()),
+            let saved = match self.routes.saved(peer) {
+                Ok(Some(address)) => profile.store.set_address(&peer.to_string(), &address).await,
+                Ok(None) => Ok(()),
+                Err(error) => Err(error),
             };
             if let Err(error) = saved {
                 tracing::warn!(%error, "Could not save a Connect device address");
