@@ -98,7 +98,7 @@ pub fn install_parent_selection<K, R>(
     target: impl Fn(&R) -> Option<PlayRequest> + Send + Sync + 'static,
 ) where
     K: Clone + Eq + Send + Sync + 'static,
-    R: Clone + Send + Sync + 'static,
+    R: Clone + PartialEq + Send + Sync + 'static,
 {
     let weak = Rc::downgrade(sparse);
     let view = Rc::downgrade(view);

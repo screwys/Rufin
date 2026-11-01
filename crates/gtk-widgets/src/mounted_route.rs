@@ -116,7 +116,7 @@ impl RouteViewState {
     pub fn show_states<K, R>(&self, model: &Rc<SparseRouteModel<K, R>>)
     where
         K: Clone + Eq + Send + Sync + 'static,
-        R: library::ShowsState + Clone + Send + Sync + 'static,
+        R: library::ShowsState + Clone + PartialEq + Send + Sync + 'static,
     {
         let model = Rc::downgrade(model);
         self.rows.borrow_mut().push(Box::new(move |change| {
@@ -170,7 +170,7 @@ pub fn view_model<K, R>(
 ) -> Rc<SparseRouteModel<K, R>>
 where
     K: Clone + Eq + Send + Sync + 'static,
-    R: library::ShowsState + Clone + Send + Sync + 'static,
+    R: library::ShowsState + Clone + PartialEq + Send + Sync + 'static,
 {
     let load_view = Rc::clone(view);
     let model = SparseRouteModel::new(

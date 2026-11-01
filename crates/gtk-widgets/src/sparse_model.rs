@@ -243,6 +243,10 @@ impl SparseObjectItem {
         }
     }
 
+    fn ready_row<R: 'static>(&self) -> Option<Arc<R>> {
+        self.is_ready().then(|| self.value::<Arc<R>>()).flatten()
+    }
+
     pub fn is_ready(&self) -> bool {
         use glib::subclass::prelude::ObjectSubclassIsExt;
 
@@ -378,6 +382,20 @@ struct TypedSparseObjectState<K, R> {
     objects: BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
 }
 
+impl<K, R> TypedSparseObjectState<K, R> {
+    /// The row shown or held at `position`: its ready row, or the row a live item keeps
+    /// after a reread until its window is read again.
+    fn shown(&self, position: usize) -> Option<Arc<R>>
+    where
+        R: 'static,
+    {
+        if let Some(row) = self.sparse.ready.get(&position) {
+            return Some(Arc::clone(row));
+        }
+        self.objects.get(&position)?.upgrade()?.ready_row()
+    }
+}
+
 /// Whether a live item shows a row of the window starting at `first`.
 fn window_is_live(
     objects: &BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
@@ -412,13 +430,15 @@ where
         Some(item)
     }
 
+    /// Live items without a ready row of the current order, kept rows included, so a reread
+    /// reads every shown window again.
     fn cold_live_windows(&mut self) -> Vec<usize> {
         let mut windows = Vec::new();
         self.objects.retain(|position, item| {
-            let Some(item) = item.upgrade() else {
+            if item.upgrade().is_none() {
                 return false;
-            };
-            if !item.is_ready() && !self.sparse.ready.contains_key(position) {
+            }
+            if !self.sparse.ready.contains_key(position) {
                 windows.push(window_first(*position));
             }
             true
@@ -671,37 +691,53 @@ impl SparseObjectModel {
         })
     }
 
+    /// Takes a window's rows; only rows that differ from what their positions showed are
+    /// replaced and announced.
     pub fn accept<K, R>(&self, page: &HydrationPage<K>, rows: Vec<R>) -> bool
     where
         K: Clone + 'static,
-        R: 'static,
+        R: PartialEq + 'static,
     {
         let accepted = self.with_typed_mut::<K, R, _>(|state| {
+            let shown = page
+                .range
+                .clone()
+                .map(|position| state.shown(position))
+                .collect::<Vec<_>>();
             let objects = &state.objects;
             let change = state
                 .sparse
                 .accept(page, rows, |window| window_is_live(objects, window))?;
-            let updates = change
+            let changed = change
                 .range
-                .clone()
-                .filter_map(|position| {
-                    let item = state
-                        .objects
-                        .get(&position)
-                        .and_then(glib::WeakRef::upgrade)?;
-                    let value = state.sparse.item(position)?;
-                    Some((item, value))
+                .zip(shown)
+                .filter_map(|(position, shown)| {
+                    let row = state.sparse.ready.get(&position)?;
+                    (shown.as_deref() != Some(&**row)).then(|| (position, Arc::clone(row)))
                 })
                 .collect::<Vec<_>>();
-            Some((change, updates))
+            let updates = changed
+                .iter()
+                .filter_map(|(position, row)| {
+                    let item = state.objects.get(position)?.upgrade()?;
+                    Some((item, Arc::clone(row)))
+                })
+                .collect::<Vec<_>>();
+            let span = changed
+                .first()
+                .zip(changed.last())
+                .map(|((first, _), (last, _))| *first..last + 1);
+            Some((span, updates))
         });
-        let Some((change, updates)) = accepted else {
+        let Some((span, updates)) = accepted else {
             return false;
         };
-        for (item, value) in updates {
-            item.replace_sparse(value, true);
+        for (item, row) in updates {
+            item.replace_sparse(SparseItem::<K, R>::Ready(row), true);
         }
-        self.emit_ready_changed(change.range.start, change.range.len());
+        if let Some(span) = span {
+            self.emit_ready_changed(span.start, span.len());
+        }
         true
     }
 
@@ -736,11 +772,11 @@ impl SparseObjectModel {
         let sections_changed = *self.imp().sections.borrow() != sections;
         self.imp().sections.replace(sections);
         let (preserve_items, updates) = self.with_typed_mut::<K, R, _>(|state| {
+            // A query reread keeps its items by position, so a list that grew or shrank
+            // changes only at its tail; other keys are another list.
             let preserve_items = match (&state.sparse.order, &order) {
                 (SparseSource::Keys(previous), SparseSource::Keys(next)) => previous == next,
-                (SparseSource::Query { count: previous }, SparseSource::Query { count: next }) => {
-                    previous == next
-                }
+                (SparseSource::Query { .. }, SparseSource::Query { .. }) => true,
                 _ => false,
             };
             state.sparse.replace_order(order);
@@ -752,13 +788,20 @@ impl SparseObjectModel {
                 state.objects.clear();
                 return (false, Vec::new());
             }
-            state.objects.retain(|_, item| item.upgrade().is_some());
+            let len = state.sparse.len();
+            state
+                .objects
+                .retain(|position, item| *position < len && item.upgrade().is_some());
             let positions = state.objects.keys().copied().collect::<Vec<_>>();
             let updates = positions
                 .into_iter()
                 .filter_map(|position| {
                     let item = state.objects.get(&position)?.upgrade()?;
                     let value = state.sparse.item(position)?;
+                    // A shown row stays until its window is read again.
+                    if item.is_ready() && matches!(value, SparseItem::Placeholder(_)) {
+                        return None;
+                    }
                     (item.typed_value::<K, R>().as_ref() != Some(&value)).then(|| {
                         let ready = matches!(value, SparseItem::Ready(_));
                         (position, item, value, ready)
@@ -767,9 +810,14 @@ impl SparseObjectModel {
                 .collect::<Vec<_>>();
             (true, updates)
         });
+        let new_len = self.n_items();
         if !preserve_items {
-            self.items_changed(0, old_len, self.n_items());
+            self.items_changed(0, old_len, new_len);
             return;
+        }
+        let common = old_len.min(new_len);
+        if old_len != new_len {
+            self.items_changed(common, old_len - common, new_len - common);
         }
         if sections_changed && self.n_items() > 0 {
             self.sections_changed(0, self.n_items());
@@ -829,7 +877,7 @@ impl SparseObjectModel {
         R: Clone + 'static,
     {
         let updates = self.with_typed_mut::<K, R, _>(|state| {
-            state
+            let mut updates = state
                 .sparse
                 .ready
                 .iter_mut()
@@ -841,7 +889,22 @@ impl SparseObjectModel {
                     let item = state.objects.get(position).and_then(glib::WeakRef::upgrade);
                     Some((*position, item, Arc::clone(row)))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            // Rows a reread kept on screen show the change before their window is read.
+            for (position, item) in &state.objects {
+                if state.sparse.ready.contains_key(position) {
+                    continue;
+                }
+                let Some(item) = item.upgrade() else { continue };
+                let Some(mut row) = item.ready_row::<R>() else {
+                    continue;
+                };
+                if matches(&row) {
+                    update(Arc::make_mut(&mut row));
+                    updates.push((*position, Some(item), row));
+                }
+            }
+            updates
         });
         for (position, item, row) in updates {
             if let Some(item) = item {
@@ -885,7 +948,7 @@ impl SparseObjectModel {
 impl<K, R> SparseRouteModel<K, R>
 where
     K: Clone + Eq + Send + Sync + 'static,
-    R: Clone + Send + Sync + 'static,
+    R: Clone + PartialEq + Send + Sync + 'static,
 {
     pub fn new(
         order: impl Into<SparseSource<K>>,
@@ -978,10 +1041,7 @@ where
         order: impl Into<SparseSource<K>>,
         rows: Vec<R>,
         key: impl Fn(&R) -> K,
-    ) -> bool
-    where
-        R: PartialEq,
-    {
+    ) -> bool {
         self.replace_prepared_at(order, 0, rows, Vec::new(), key)
     }
 
@@ -992,10 +1052,7 @@ where
         rows: Vec<R>,
         sections: Vec<(u32, i64)>,
         key: impl Fn(&R) -> K,
-    ) -> bool
-    where
-        R: PartialEq,
-    {
+    ) -> bool {
         let order = order.into();
         if order.keys().is_some_and(|keys| {
             !rows
@@ -1017,7 +1074,7 @@ where
             .item(position)?
             .downcast::<SparseObjectItem>()
             .ok()?;
-        item.is_ready().then(|| item.value::<Arc<R>>()).flatten()
+        item.ready_row()
     }
 
     pub fn demand_positions(self: &Rc<Self>, positions: impl IntoIterator<Item = usize>) {
@@ -1879,7 +1936,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_replacement_reloads_a_live_row_outside_the_seed_window() {
+    fn prepared_replacement_keeps_and_rereads_a_live_row_outside_the_seed_window() {
         let order = (0..128_u64).collect::<Vec<_>>();
         let model = SparseObjectModel::new::<u64, String>(order.clone(), SPARSE_WINDOW_SIZE);
         let page = model
@@ -1907,7 +1964,7 @@ mod tests {
 
         assert!(matches!(
             deep.typed_value::<u64, String>(),
-            Some(SparseItem::Placeholder(Some(64)))
+            Some(SparseItem::Ready(row)) if row.as_str() == "64"
         ));
         assert_eq!(demanded.get(), Some(64));
     }
@@ -1917,10 +1974,7 @@ fn sparse_item<T: Clone + 'static, R>(
     item: &SparseObjectItem,
     map: impl FnOnce(&T) -> R,
 ) -> Option<R> {
-    if !item.is_ready() {
-        return None;
-    }
-    item.value::<Arc<T>>().map(|row| map(&row))
+    item.ready_row::<T>().map(|row| map(&row))
 }
 
 pub fn object_item<T: Clone + 'static, R>(
