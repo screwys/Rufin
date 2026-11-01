@@ -172,24 +172,17 @@ fn named_context_menu(
     current: Rc<RefCell<TagRow>>,
 ) -> Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>> {
     let shell = Rc::clone(shell);
-    Some(Rc::new(
-        move |target: &gtk::Widget, position, play| match current.borrow().kind {
-            library::TagKind::Genre => present_genre_context_menu(
-                target,
-                &shell.media_menus,
-                current.borrow().clone(),
-                Some(play),
-                position,
-            ),
-            library::TagKind::Mood => present_mood_context_menu(
-                target,
-                &shell.media_menus,
-                current.borrow().clone(),
-                Some(play),
-                position,
-            ),
-        },
-    )
+    Some(Rc::new(move |target: &gtk::Widget, position, play| {
+        let row = current.borrow().clone();
+        match row.kind {
+            library::TagKind::Genre => {
+                present_genre_context_menu(target, &shell.media_menus, row, Some(play), position)
+            }
+            library::TagKind::Mood => {
+                present_mood_context_menu(target, &shell.media_menus, row, Some(play), position)
+            }
+        }
+    })
         as Rc<
             dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay),
         >)
