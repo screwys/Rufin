@@ -3,7 +3,7 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
@@ -85,6 +85,8 @@ pub struct SparseModel<K, R> {
     order: SparseSource<K>,
     ready: BTreeMap<usize, Arc<R>>,
     ready_windows: VecDeque<usize>,
+    /// Windows whose ready rows a refresh kept from the previous read until they are read again.
+    stale: BTreeSet<usize>,
     generation: u64,
 }
 
@@ -382,20 +384,6 @@ struct TypedSparseObjectState<K, R> {
     objects: BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
 }
 
-impl<K, R> TypedSparseObjectState<K, R> {
-    /// The row shown or held at `position`: its ready row, or the row a live item keeps
-    /// after a reread until its window is read again.
-    fn shown(&self, position: usize) -> Option<Arc<R>>
-    where
-        R: 'static,
-    {
-        if let Some(row) = self.sparse.ready.get(&position) {
-            return Some(Arc::clone(row));
-        }
-        self.objects.get(&position)?.upgrade()?.ready_row()
-    }
-}
-
 /// Whether a live item shows a row of the window starting at `first`.
 fn window_is_live(
     objects: &BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
@@ -430,16 +418,17 @@ where
         Some(item)
     }
 
-    /// Live items without a ready row of the current order, kept rows included, so a reread
-    /// reads every shown window again.
+    /// Windows of live items without a current ready row: placeholders, and rows a refresh
+    /// kept.
     fn cold_live_windows(&mut self) -> Vec<usize> {
         let mut windows = Vec::new();
         self.objects.retain(|position, item| {
             if item.upgrade().is_none() {
                 return false;
             }
-            if !self.sparse.ready.contains_key(position) {
-                windows.push(window_first(*position));
+            let window = window_first(*position);
+            if !self.sparse.ready.contains_key(position) || self.sparse.stale.contains(&window) {
+                windows.push(window);
             }
             true
         });
@@ -643,7 +632,7 @@ impl SparseObjectModel {
             let objects = &state.objects;
             state
                 .sparse
-                .seed_at(first, rows, |window| window_is_live(objects, window))
+                .seed_at(first, rows, |window| window_is_live(objects, window));
         });
     }
 
@@ -691,7 +680,7 @@ impl SparseObjectModel {
         })
     }
 
-    /// Takes a window's rows; only rows that differ from what their positions showed are
+    /// Takes a window's rows; only rows that differ from the ready rows they replace are
     /// replaced and announced.
     pub fn accept<K, R>(&self, page: &HydrationPage<K>, rows: Vec<R>) -> bool
     where
@@ -699,10 +688,10 @@ impl SparseObjectModel {
         R: PartialEq + 'static,
     {
         let accepted = self.with_typed_mut::<K, R, _>(|state| {
-            let shown = page
+            let previous = page
                 .range
                 .clone()
-                .map(|position| state.shown(position))
+                .map(|position| state.sparse.ready.get(&position).cloned())
                 .collect::<Vec<_>>();
             let objects = &state.objects;
             let change = state
@@ -710,10 +699,10 @@ impl SparseObjectModel {
                 .accept(page, rows, |window| window_is_live(objects, window))?;
             let changed = change
                 .range
-                .zip(shown)
-                .filter_map(|(position, shown)| {
+                .zip(previous)
+                .filter_map(|(position, previous)| {
                     let row = state.sparse.ready.get(&position)?;
-                    (shown.as_deref() != Some(&**row)).then(|| (position, Arc::clone(row)))
+                    (previous.as_deref() != Some(&**row)).then(|| (position, Arc::clone(row)))
                 })
                 .collect::<Vec<_>>();
             let updates = changed
@@ -784,11 +773,14 @@ impl SparseObjectModel {
                 }
                 _ => false,
             };
-            state.sparse.replace_order(order);
             let objects = &state.objects;
-            state
-                .sparse
-                .seed_at(first, rows, |window| window_is_live(objects, window));
+            let live = |window| window_is_live(objects, window);
+            if preserve_items && refresh {
+                state.sparse.refresh_order(order, first, rows, live);
+            } else {
+                state.sparse.replace_order(order);
+                state.sparse.seed_at(first, rows, live);
+            }
             if !preserve_items {
                 state.objects.clear();
                 return (false, Vec::new());
@@ -803,10 +795,6 @@ impl SparseObjectModel {
                 .filter_map(|position| {
                     let item = state.objects.get(&position)?.upgrade()?;
                     let value = state.sparse.item(position)?;
-                    // A refreshed row stays until its window is read again.
-                    if refresh && item.is_ready() && matches!(value, SparseItem::Placeholder(_)) {
-                        return None;
-                    }
                     (item.typed_value::<K, R>().as_ref() != Some(&value)).then(|| {
                         let ready = matches!(value, SparseItem::Ready(_));
                         (position, item, value, ready)
@@ -882,7 +870,7 @@ impl SparseObjectModel {
         R: Clone + 'static,
     {
         let updates = self.with_typed_mut::<K, R, _>(|state| {
-            let mut updates = state
+            state
                 .sparse
                 .ready
                 .iter_mut()
@@ -894,22 +882,7 @@ impl SparseObjectModel {
                     let item = state.objects.get(position).and_then(glib::WeakRef::upgrade);
                     Some((*position, item, Arc::clone(row)))
                 })
-                .collect::<Vec<_>>();
-            // Rows a reread kept on screen show the change before their window is read.
-            for (position, item) in &state.objects {
-                if state.sparse.ready.contains_key(position) {
-                    continue;
-                }
-                let Some(item) = item.upgrade() else { continue };
-                let Some(mut row) = item.ready_row::<R>() else {
-                    continue;
-                };
-                if matches(&row) {
-                    update(Arc::make_mut(&mut row));
-                    updates.push((*position, Some(item), row));
-                }
-            }
-            updates
+                .collect::<Vec<_>>()
         });
         for (position, item, row) in updates {
             if let Some(item) = item {
@@ -1254,6 +1227,7 @@ where
             order: SparseSource::Keys(Arc::new([])),
             ready: BTreeMap::new(),
             ready_windows: VecDeque::new(),
+            stale: BTreeSet::new(),
             generation: 1,
         }
     }
@@ -1274,7 +1248,34 @@ where
         self.order = order.into();
         self.ready.clear();
         self.ready_windows.clear();
+        self.stale.clear();
         self.generation = self.generation.wrapping_add(1).max(1);
+    }
+
+    /// Reads the same list again: its rows from `first` replace the previous ones, and the
+    /// previous rows of windows `live` items show stay below the new length, stale, until
+    /// those windows are read again.
+    fn refresh_order(
+        &mut self,
+        order: impl Into<SparseSource<K>>,
+        first: usize,
+        rows: Vec<R>,
+        live: impl Fn(usize) -> bool,
+    ) {
+        let previous = std::mem::take(&mut self.ready);
+        self.replace_order(order);
+        let seeded = self.seed_at(first, rows, &live);
+        let len = self.order.len();
+        for (position, row) in previous {
+            let window = window_first(position);
+            if position >= len || seeded.contains(&position) || !live(window) {
+                continue;
+            }
+            if self.stale.insert(window) {
+                self.touch_ready_window(window);
+            }
+            self.ready.insert(position, row);
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -1285,9 +1286,16 @@ where
         self.order.clone()
     }
 
-    fn seed_at(&mut self, first: usize, rows: Vec<R>, live: impl Fn(usize) -> bool) {
+    /// Seeds rows from `first` and returns the positions it filled.
+    fn seed_at(
+        &mut self,
+        first: usize,
+        rows: Vec<R>,
+        live: impl Fn(usize) -> bool,
+    ) -> Range<usize> {
         let capacity = SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - first % SPARSE_WINDOW_SIZE;
         let rows = rows.into_iter().take(capacity);
+        let mut end = first;
         for (offset, row) in rows.enumerate() {
             let position = first.saturating_add(offset);
             if position >= self.order.len() {
@@ -1297,8 +1305,10 @@ where
                 self.touch_ready_window(window_first(position));
             }
             self.ready.insert(position, Arc::new(row));
+            end = position + 1;
         }
         self.evict(live);
+        first..end
     }
 
     #[cfg(test)]
@@ -1340,7 +1350,9 @@ where
         if start == end {
             return None;
         }
-        if (start..end).all(|position| self.ready.contains_key(&position)) {
+        if !self.stale.contains(&start)
+            && (start..end).all(|position| self.ready.contains_key(&position))
+        {
             self.touch_ready_window(start);
             return None;
         }
@@ -1366,7 +1378,9 @@ where
         {
             return None;
         }
-        self.touch_ready_window(window_first(page.range.start));
+        let window = window_first(page.range.start);
+        self.touch_ready_window(window);
+        self.stale.remove(&window);
         for (position, row) in page.range.clone().zip(rows) {
             self.ready.insert(position, Arc::new(row));
         }
@@ -1381,6 +1395,7 @@ where
         self.ready.clear();
         self.order = SparseSource::Keys(Arc::new([]));
         self.ready_windows.clear();
+        self.stale.clear();
         self.generation = self.generation.wrapping_add(1).max(1);
     }
 
@@ -1413,6 +1428,7 @@ where
                 continue;
             }
             let evicted = self.ready_windows.remove(index).expect("ready window");
+            self.stale.remove(&evicted);
             self.ready
                 .retain(|position, _| window_first(*position) != evicted);
         }
@@ -1980,6 +1996,13 @@ mod tests {
             deep.typed_value::<u64, String>(),
             Some(SparseItem::Ready(row)) if row.as_str() == "64"
         ));
+        assert_eq!(
+            model
+                .peek_ready::<u64, String>(64)
+                .as_deref()
+                .map(String::as_str),
+            Some("64")
+        );
         assert_eq!(demanded.get(), Some(64));
     }
 }
