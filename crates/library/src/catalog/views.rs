@@ -592,7 +592,7 @@ struct Sorted<'a> {
     sort: Cow<'a, str>,
     played: Played,
     album: Option<AlbumSort<'a>>,
-    /// The album artist's or the genre's sort text, for those sorts.
+    /// The first artist's, the album artist's or the genre's sort text, for those sorts.
     text: Option<Cow<'a, str>>,
 }
 
@@ -621,6 +621,9 @@ impl Context<'_> {
                 key: i64::from(album.key),
             }),
             text: match sort {
+                S::Artist => snapshot.track_runs(record)[0]
+                    .iter()
+                    .find_map(|slot| self.artist_sort(*slot)),
                 S::AlbumArtist => snapshot
                     .albums
                     .live(record.album)
@@ -637,8 +640,9 @@ impl Context<'_> {
         let snapshot = self.snapshot;
         Some(match sort {
             S::Title => snapshot.text(row.record.title).to_owned(),
-            S::Artist => snapshot.text(row.record.artist).to_owned(),
-            S::AlbumArtist | S::Genre => row.text.as_deref().unwrap_or_default().to_owned(),
+            S::Artist | S::AlbumArtist | S::Genre => {
+                row.text.as_deref().unwrap_or_default().to_owned()
+            }
             S::Album => row
                 .album
                 .as_ref()
@@ -682,7 +686,9 @@ fn compare_tracks(
     let order = match sort {
         S::RowIndex => return first(a.position.cmp(&b.position)),
         S::TrackNumber => album_order().then(first(disc)).then(first(number)),
-        S::Artist => first(a.artist.cmp(b.artist)).then_with(album_tail),
+        S::Artist => nulls_last(a.text.as_deref(), b.text.as_deref(), descending)
+            .then_with(|| first(a.artist.cmp(b.artist)))
+            .then_with(album_tail),
         S::AlbumArtist => {
             nulls_last(a.text.as_deref(), b.text.as_deref(), descending).then_with(album_tail)
         }
