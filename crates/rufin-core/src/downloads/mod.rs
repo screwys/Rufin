@@ -884,11 +884,6 @@ impl Downloads {
     pub fn forget(&self, media_uri: String, path: String) {
         self.send(Command::Forget { media_uri, path });
     }
-
-    /// Reconciles the rules of the sources these Changes touched, or of every source.
-    pub fn library_changed(&self, changes: Option<Vec<Arc<Change>>>) {
-        self.send(Command::LibraryChanged(changes));
-    }
 }
 
 impl Downloads {
