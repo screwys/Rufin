@@ -13,7 +13,7 @@ use crate::paths::Paths;
 use crate::playback::PlaybackOwner;
 use crate::release_update::ReleaseUpdateOwner;
 use crate::scrobbling::ScrobblingOwner;
-use crate::settings::{SettingsFile, SettingsOwner, platform_secret_store};
+use crate::settings::{ApplicationPreferences, SettingsFile, SettingsOwner, platform_secret_store};
 use crate::source::{SourceOutputs, SourceOwner};
 use crate::waveform::WaveformOwner;
 
@@ -86,9 +86,13 @@ where
         Err(error) => return Err(string_error(error)),
     };
     let library = Arc::new(catalog);
-    library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
-    library.set_cover_lookup(stored.ui.application.external_metadata_enabled);
-    library.set_use_sort_tags(stored.ui.application.use_sort_tags);
+    // The Catalog shows rows by these switches; it cannot read the settings itself.
+    let display = |library: &library::Catalog, application: &ApplicationPreferences| {
+        library.set_distinct_track_covers(application.prefer_distinct_track_covers);
+        library.set_cover_lookup(application.external_metadata_enabled);
+        library.set_use_sort_tags(application.use_sort_tags);
+    };
+    display(&library, &stored.ui.application);
     let scrobbler = Arc::new(Scrobbler::new(
         library.as_ref().clone(),
         runtime.clone(),
@@ -222,38 +226,26 @@ where
 
     source.attach_playback(&playback);
 
-    let owners = (Arc::downgrade(&source), Arc::downgrade(&library));
+    let settings_library = Arc::downgrade(&library);
     let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
-    // What a committed settings change means for the owners that follow it.
+    // The Catalog and the client observer follow the committed settings; the owners follow
+    // them themselves.
     let mut committed = settings.changes();
     runtime.spawn(async move {
         let mut previous = Arc::clone(&committed.borrow_and_update());
         while committed.changed().await.is_ok() {
             let current = Arc::clone(&committed.borrow_and_update());
-            let (Some(settings_source), Some(settings_library)) =
-                (owners.0.upgrade(), owners.1.upgrade())
-            else {
+            let Some(library) = settings_library.upgrade() else {
                 return;
             };
             if previous.ui.application != current.ui.application {
-                let application = &current.ui.application;
-                settings_library
-                    .set_distinct_track_covers(application.prefer_distinct_track_covers);
-                settings_library.set_cover_lookup(application.external_metadata_enabled);
-                settings_library.set_use_sort_tags(application.use_sort_tags);
+                display(&library, &current.ui.application);
             }
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
             {
                 settings_committed(&current.ui);
-            }
-            if previous.ui.application.download_artwork_automatically
-                != current.ui.application.download_artwork_automatically
-                || previous.ui.application.download_lyrics_automatically
-                    != current.ui.application.download_lyrics_automatically
-            {
-                settings_source.asset_downloads_changed();
             }
             previous = current;
         }

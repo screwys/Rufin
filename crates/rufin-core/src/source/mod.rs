@@ -483,8 +483,30 @@ impl SourceOwner {
         );
         mosaics::follow(shared);
         runtime.spawn(outbox::run(weak.clone()));
-        runtime.spawn(crate::playlist_files::check_links(weak));
+        runtime.spawn(crate::playlist_files::check_links(weak.clone()));
+        // Automatic artwork and lyrics downloads follow their switches.
+        let switches = |stored: &crate::settings::StoredSettings| {
+            let application = &stored.ui.application;
+            (
+                application.download_artwork_automatically,
+                application.download_lyrics_automatically,
+            )
+        };
+        let mut committed = shared.settings.changes();
+        let mut previous = switches(&committed.borrow_and_update());
         self.asset_downloads_changed();
+        runtime.spawn(async move {
+            while committed.changed().await.is_ok() {
+                let current = switches(&committed.borrow_and_update());
+                let Some(shared) = weak.upgrade() else {
+                    return;
+                };
+                if current != previous {
+                    Self { shared }.asset_downloads_changed();
+                }
+                previous = current;
+            }
+        });
         if let Some(source_id) = self
             .shared
             .settings
