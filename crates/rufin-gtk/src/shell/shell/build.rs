@@ -384,7 +384,7 @@ pub async fn build(
                     } else {
                         crate::menus::media_menus::present_track_menu(
                             target,
-                            &shell.media_menus,
+                            &shell,
                             row.track.clone(),
                             position,
                             None,
@@ -408,7 +408,7 @@ pub async fn build(
                         return (gtk::Box::default().upcast(), Rc::new(|| {}));
                     };
                     let route = shell.navigation.routes.borrow().current().clone();
-                    let catalog = shell.build_catalog(&route, None);
+                    let catalog = crate::library::CatalogUi::new(&shell, &route, None);
                     catalog.related_tracks_view(rows)
                 })
             },
@@ -454,12 +454,6 @@ pub async fn build(
                 products.runtime.clone(),
             )),
             web_controller,
-            media_menus: super::media_menus::build(
-                weak,
-                &products,
-                Rc::clone(&settings_state),
-                Rc::clone(&artwork),
-            ),
             quitting,
             storage_reset,
             diagnostics,

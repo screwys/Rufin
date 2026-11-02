@@ -142,7 +142,7 @@ impl TrackListProjection {
             },
             move |mut read, previous| {
                 let header = read.header.take();
-                let replaced = current.upgrade().is_some_and(|shell| (shell.is_current)())
+                let replaced = current.upgrade().is_some_and(|shell| shell.is_current())
                     && model.replace_page(previous, read);
                 if replaced {
                     changed(header);
@@ -328,7 +328,7 @@ impl CatalogUi {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
-                if !(shell.is_current)() {
+                if !shell.is_current() {
                     return false;
                 }
                 let settings = shell.settings.current.borrow().library_list(key);
@@ -488,7 +488,7 @@ impl CatalogUi {
                     .then(|| {
                         filter_shell
                             .upgrade()
-                            .and_then(|shell| (shell.history_source_id)())
+                            .and_then(|shell| shell.history_source_id())
                     })
                     .flatten(),
             );

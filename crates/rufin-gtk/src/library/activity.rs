@@ -60,7 +60,8 @@ impl ActivityCollections {
             };
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
                 let row = item.borrow::<TrackRow>();
-                (shell.media_menus.play_target)(
+                crate::menus::media_menus::play_target(
+                    &shell.playback,
                     &track_play_request(row.track_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,

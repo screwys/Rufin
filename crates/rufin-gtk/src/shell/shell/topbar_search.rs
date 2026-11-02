@@ -806,7 +806,11 @@ impl SearchPopup {
                     .map(|selected| selected.source_id.clone())
             })
             .flatten();
-        Some(shell.build_catalog(&route, source.as_ref()))
+        Some(crate::library::CatalogUi::new(
+            &shell,
+            &route,
+            source.as_ref(),
+        ))
     }
 
     fn activate(&self, action: Option<SearchAction>) {

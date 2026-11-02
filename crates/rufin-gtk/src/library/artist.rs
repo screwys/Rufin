@@ -586,7 +586,7 @@ fn artist_detail_header_restored(
 ) -> ArtistDetailHeaderProjection {
     let current = Rc::new(RefCell::new(artist.clone()));
     let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
-        (shell.route_width)(),
+        shell.route_width(),
         PRIMARY_ROUTE_MARGIN_START,
     );
     let cover = media_cover_projection(
@@ -648,7 +648,7 @@ fn artist_detail_header_restored(
     let target = crate::widgets::selection::artist_play_request(&artist.row, album_artist);
     let play_shell = Rc::clone(shell);
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-        (play_shell.media_menus.play_target)(&target, placement, shuffled);
+        crate::menus::media_menus::play_target(&play_shell.playback, &target, placement, shuffled);
     });
     let controls = detail_playback_controls(
         &actions,
@@ -682,13 +682,15 @@ fn artist_detail_header_restored(
     let menu_play = Rc::clone(&play);
     let context_menu = Rc::new(move |target: &gtk::Widget, position| {
         let artist = menu_artist.borrow().row.clone();
-        present_artist_context_menu(
-            target,
-            &menu_shell.media_menus,
-            artist,
-            Some(Rc::clone(&menu_play)),
-            position,
-        );
+        if let Some(window) = menu_shell.shell() {
+            present_artist_context_menu(
+                target,
+                &window,
+                artist,
+                Some(Rc::clone(&menu_play)),
+                position,
+            );
+        }
     });
     showcase.replace_external_links(super::detail_showcase::artist_external_links(
         shell,
@@ -720,7 +722,7 @@ fn artist_subroute_header(
     kind_text: &str,
 ) -> gtk::Widget {
     let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
-        (shell.route_width)(),
+        shell.route_width(),
         PRIMARY_ROUTE_MARGIN_START,
     );
     let header = gtk::Box::new(gtk::Orientation::Vertical, 8);

@@ -120,7 +120,8 @@ impl CollectionIndexCell {
             let Some(cell) = weak.upgrade() else { return };
             let target = cell.imp().target.borrow().clone();
             if let (Some(shell), Some(target)) = (cell.imp().shell.borrow().upgrade(), target) {
-                (shell.media_menus.play_target)(
+                crate::menus::media_menus::play_target(
+                    &shell.playback,
                     &target,
                     library::QueuePlacement::Replace { anchor_index: 0 },
                     false,
@@ -361,14 +362,16 @@ impl AlbumTableCell {
                     };
                     let row = cell.imp().row.borrow().clone();
                     if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
-                        present_album_context_menu(
-                            target,
-                            &shell.media_menus,
-                            (*row).clone(),
-                            playback_context.clone(),
-                            None,
-                            position,
-                        );
+                        if let Some(window) = shell.shell() {
+                            present_album_context_menu(
+                                target,
+                                &window,
+                                (*row).clone(),
+                                playback_context.clone(),
+                                None,
+                                position,
+                            );
+                        }
                     }
                 }),
             );
@@ -927,7 +930,9 @@ fn install_artist_list_item_context_menu(
             let Some(artist) = item.upgrade().and_then(|item| item_at_from_item(&item)) else {
                 return;
             };
-            present_artist_context_menu(target, &shell.media_menus, artist, None, position);
+            if let Some(window) = shell.shell() {
+                present_artist_context_menu(target, &window, artist, None, position);
+            }
         }),
     );
 }

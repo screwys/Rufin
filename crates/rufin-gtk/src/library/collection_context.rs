@@ -10,8 +10,9 @@ pub fn present_track_context_menu(
     media_uri: String,
     position: Option<(f64, f64)>,
 ) {
+    let Some(window) = shell.shell() else { return };
     if let Some(selection) = shell.current_route_track_selection(&media_uri) {
-        present_track_selection_menu(target, &shell.media_menus, selection, position);
+        present_track_selection_menu(target, &window, selection, position);
         return;
     }
     let catalog = shell.library.clone();
@@ -21,10 +22,10 @@ pub fn present_track_context_menu(
             .await
     });
     let target = target.clone();
-    let menus = Rc::downgrade(&shell.media_menus);
+    let window = Rc::downgrade(&window);
     gtk::glib::spawn_future_local(async move {
-        if let (Some(menus), Ok(Ok(Some(song)))) = (menus.upgrade(), task.await) {
-            present_track_menu(&target, &menus, song, position, None, None);
+        if let (Some(window), Ok(Ok(Some(song)))) = (window.upgrade(), task.await) {
+            present_track_menu(&target, &window, song, position, None, None);
         }
     });
 }
@@ -36,20 +37,14 @@ pub fn present_playlist_entry_context_menu(
     entry_row: library::TrackRow,
     position: Option<(f64, f64)>,
 ) {
+    let Some(window) = shell.shell() else { return };
     if let Some(selection) = shell.current_playlist_entry_selection(entry) {
-        present_playlist_entry_selection_menu(target, &shell.media_menus, selection, position);
+        present_playlist_entry_selection_menu(target, &window, selection, position);
         return;
     }
     let single = shell
         .current_playlist_entry_selection_owner()
         .zip(entry_row.entry.clone())
         .map(|(selection, entry)| selection.single_entry(entry));
-    present_playlist_entry_menu(
-        target,
-        &shell.media_menus,
-        entry_row,
-        position,
-        playlist,
-        single,
-    );
+    present_playlist_entry_menu(target, &window, entry_row, position, playlist, single);
 }

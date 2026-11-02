@@ -1,13 +1,13 @@
 //! Desktop GTK composition, navigation admission and native actions.
-//! Catalog and persistent player presentation live in their own UI crates.
+//! Pages and the persistent player live in their own modules.
 
 mod application;
 mod downloads;
 mod favorites;
 pub(crate) mod player;
-mod preferences;
+pub(crate) mod preferences;
 mod ratings;
-mod shell;
+pub(crate) mod shell;
 
 pub use application::{
     ApplicationExit, run_application, run_application_after_update, run_startup_error_application,

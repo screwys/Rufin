@@ -124,7 +124,7 @@ impl Shell {
                 | rufin_core::route::Route::PlaylistFolder { smart: true, .. }
         );
         crate::menus::playlist_folders::present_new_folder_dialog(
-            &self.media_menus,
+            self,
             smart,
             Vec::new(),
             Rc::new(|| {}),

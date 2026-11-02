@@ -890,14 +890,16 @@ impl AlbumGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_album_context_menu(
-                    target,
-                    &shell.media_menus,
-                    row,
-                    menu_context.clone(),
-                    None,
-                    point,
-                )
+                if let Some(window) = shell.shell() {
+                    present_album_context_menu(
+                        target,
+                        &window,
+                        row,
+                        menu_context.clone(),
+                        None,
+                        point,
+                    )
+                }
             },
         );
         let play_context = context.clone();
@@ -906,7 +908,8 @@ impl AlbumGridCell {
             &current,
             [play, play_next, play_last],
             move |shell, row, placement| {
-                (shell.media_menus.play_target)(
+                crate::menus::media_menus::play_target(
+                    &shell.playback,
                     &album_playback_target(&row, play_context.as_deref()),
                     placement,
                     false,
@@ -983,7 +986,9 @@ impl ArtistGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_artist_context_menu(target, &shell.media_menus, row, None, point)
+                if let Some(window) = shell.shell() {
+                    present_artist_context_menu(target, &window, row, None, point)
+                }
             },
         );
         install_grid_play(
@@ -996,7 +1001,7 @@ impl ArtistGridCell {
                 } else {
                     crate::widgets::selection::artist_play_request(&row, false)
                 };
-                (shell.media_menus.play_target)(&target, placement, false);
+                crate::menus::media_menus::play_target(&shell.playback, &target, placement, false);
             },
         );
         install_grid_favorite(shell, &current, &favorite, |row| {

@@ -40,7 +40,6 @@ use crate::widgets::library_fields::column_fit_width;
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
-use super::table_sizing::route_column_view_initial_width;
 use crate::widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, TrackPresentation, add_field_skeleton_class, column_width,
 };
@@ -277,12 +276,8 @@ impl SearchItem {
         position: Option<(f64, f64)>,
         is_current: Rc<dyn Fn() -> bool>,
     ) {
-        if present_collection_selection_menu(
-            target,
-            &shell.media_menus,
-            self.play_request(),
-            position,
-        ) {
+        let Some(window) = shell.shell() else { return };
+        if present_collection_selection_menu(target, &window, self.play_request(), position) {
             return;
         }
         let media_uri = match self {
@@ -296,7 +291,7 @@ impl SearchItem {
         let receiver = shell.source.prepare_collection(media_uri);
         let item = self.clone();
         let target = target.downgrade();
-        let menus = Rc::clone(&shell.media_menus);
+        let Some(menus) = shell.shell() else { return };
         gtk::glib::spawn_future_local(async move {
             if let Ok(Err(error)) = receiver.recv().await {
                 tracing::warn!(%error, "could not acquire Search collection");
@@ -380,7 +375,7 @@ impl SearchGridCell {
             &overlay,
             &body.card,
             |target, shell, item, point| {
-                item.present_context(target, shell, point, Rc::clone(&shell.is_current))
+                item.present_context(target, shell, point, shell.current_check())
             },
         );
         Self {
@@ -862,13 +857,13 @@ impl CatalogUi {
             if category != active
                 && let Some(shell) = shell.upgrade()
             {
-                (shell.set_favorite_category)(category);
+                shell.set_favorite_category(category);
             }
         });
         let shell = Rc::downgrade(self);
         page.set_tab_cycle(Rc::new(move || {
             if let Some(shell) = shell.upgrade() {
-                (shell.cycle_favorite_category)();
+                shell.cycle_favorite_category();
             }
         }));
     }
@@ -1058,7 +1053,7 @@ fn search_collection(
                         item.activate(&activate_shell)
                     })),
                     Some(selection.clone().upcast()),
-                    route_column_view_initial_width(&shell),
+                    shell.table_initial_width(0),
                 ))
             }
         }),
@@ -1135,7 +1130,7 @@ fn search_column(
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                 {
-                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
+                    value.present_context(target, &shell, position, shell.current_check());
                 }
             }),
         );
@@ -1230,7 +1225,7 @@ fn search_merged_column(
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                 {
-                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
+                    value.present_context(target, &shell, position, shell.current_check());
                 }
             }),
         );
@@ -1327,7 +1322,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                     && value.favorite().is_some()
                 {
-                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
+                    value.present_context(target, &shell, position, shell.current_check());
                 }
             }),
         );

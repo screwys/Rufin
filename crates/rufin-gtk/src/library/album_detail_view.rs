@@ -62,7 +62,7 @@ impl CatalogUi {
 
         let inner_content_width =
             crate::library::route_layout::detail_route_inner_width_for_viewport(
-                (self.route_width)(),
+                self.route_width(),
                 PRIMARY_ROUTE_MARGIN_START,
             );
         let model = TrackCollectionModel::new(self.runtime.clone(), &view, read);
@@ -174,14 +174,16 @@ impl CatalogUi {
         let context_menu: crate::widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
                 let album = menu_album.borrow().row.clone();
-                present_album_context_menu(
-                    target,
-                    &menu_shell.media_menus,
-                    album,
-                    None,
-                    Some(Rc::clone(&menu_play)),
-                    position,
-                );
+                if let Some(window) = menu_shell.shell() {
+                    present_album_context_menu(
+                        target,
+                        &window,
+                        album,
+                        None,
+                        Some(Rc::clone(&menu_play)),
+                        position,
+                    );
+                }
             });
 
         showcase_view.replace_external_links(album_external_links(self, &album));

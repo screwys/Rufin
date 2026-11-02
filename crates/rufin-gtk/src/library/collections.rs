@@ -19,7 +19,6 @@ use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
     collection_grid_with_demand,
 };
-use super::table_sizing::{column_view_initial_width, route_column_view_initial_width};
 use crate::library::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
 use crate::library::track_model::TrackCollectionModel;
 use crate::library::track_selection::TrackSelection;
@@ -764,7 +763,7 @@ where
             activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
         })),
         None,
-        route_column_view_initial_width(shell),
+        shell.table_initial_width(0),
     )
 }
 
@@ -793,7 +792,7 @@ where
             activate_shell.navigate(Route::of_artist(&artist));
         })),
         None,
-        route_column_view_initial_width(shell),
+        shell.table_initial_width(0),
     )
 }
 pub fn collection_column_width(field: LibraryField) -> i32 {
@@ -1079,7 +1078,7 @@ pub fn track_table(
         false,
         Some(activate),
         Some(selection_model),
-        column_view_initial_width(shell, options.content_inset),
+        shell.table_initial_width(options.content_inset),
     );
     table.table.add_css_class("track-list");
     let _ = table

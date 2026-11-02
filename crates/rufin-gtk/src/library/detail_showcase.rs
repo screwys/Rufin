@@ -610,7 +610,7 @@ pub fn media_cover_projection(
     cover_class: &str,
 ) -> MediaCoverProjection {
     media_cover_projection_with_open(shell, candidates, size, cover_class, |shell, candidates| {
-        (shell.present_full_artwork)(vec![candidates])
+        shell.present_full_artwork(vec![candidates])
     })
 }
 

@@ -434,7 +434,7 @@ impl CatalogUi {
         section.append(&header);
 
         let content_width =
-            crate::library::route_layout::home_album_content_width_for((self.route_width)());
+            crate::library::route_layout::home_album_content_width_for(self.route_width());
         let page_size = collection_grid_column_count(content_width);
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let widget_shell = Rc::clone(self);
@@ -477,7 +477,7 @@ impl CatalogUi {
             let refresh_section = mounted.clone();
             header.refresh().connect_clicked(move |_| {
                 refresh_section.page_start.set(0);
-                (shell.refresh_home_section)(kind);
+                shell.refresh_home_section(kind);
             });
         } else {
             header.refresh().set_visible(false);
@@ -494,8 +494,7 @@ impl CatalogUi {
         item: &HomeAlbumRow,
         showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
     ) -> gtk::Widget {
-        let width =
-            crate::library::route_layout::home_album_content_width_for((self.route_width)());
+        let width = crate::library::route_layout::home_album_content_width_for(self.route_width());
         let mut album = item.album.clone();
         album.title.clone_from(&item.title);
         let seed = stable_seed(&album.object_id);
@@ -532,7 +531,12 @@ impl CatalogUi {
         let play_shell = Rc::clone(self);
         let play_target = crate::widgets::selection::album_play_request(&album);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            (play_shell.media_menus.play_target)(&play_target, placement, shuffled);
+            crate::menus::media_menus::play_target(
+                &play_shell.playback,
+                &play_target,
+                placement,
+                shuffled,
+            );
         });
         let controls = detail_playback_controls(
             &actions,
@@ -570,14 +574,9 @@ impl CatalogUi {
             let Some(album) = album else {
                 return;
             };
-            present_album_context_menu(
-                target,
-                &menu_shell.media_menus,
-                album,
-                None,
-                None,
-                position,
-            );
+            if let Some(window) = menu_shell.shell() {
+                present_album_context_menu(target, &window, album, None, None, position);
+            }
         });
 
         let (artist_scroll, artist) = crate::widgets::text_slide::new_label();
@@ -689,7 +688,8 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let play_shell = Rc::clone(shell);
             let play_key = track.track_key;
             let play = Rc::new(move |_| {
-                (play_shell.media_menus.play_target)(
+                crate::menus::media_menus::play_target(
+                    &play_shell.playback,
                     &track_play_request(play_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
@@ -744,7 +744,8 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
 
 fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
-        HomeItem::Track(item) => (shell.media_menus.play_target)(
+        HomeItem::Track(item) => crate::menus::media_menus::play_target(
+            &shell.playback,
             &track_play_request(item.track.track_key),
             rufin_core::playback::QueuePlacement::Now,
             false,

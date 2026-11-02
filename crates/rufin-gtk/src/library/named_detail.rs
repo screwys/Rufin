@@ -176,10 +176,14 @@ fn named_context_menu(
         let row = current.borrow().clone();
         match row.kind {
             library::TagKind::Genre => {
-                present_genre_context_menu(target, &shell.media_menus, row, Some(play), position)
+                if let Some(window) = shell.shell() {
+                    present_genre_context_menu(target, &window, row, Some(play), position)
+                }
             }
             library::TagKind::Mood => {
-                present_mood_context_menu(target, &shell.media_menus, row, Some(play), position)
+                if let Some(window) = shell.shell() {
+                    present_mood_context_menu(target, &window, row, Some(play), position)
+                }
             }
         }
     })

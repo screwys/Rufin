@@ -1,4 +1,4 @@
-use crate::menus::media_menus::MediaMenus;
+use crate::shell::shell::Shell;
 use crate::widgets::interactions::ContextMenuSurface;
 use adw::prelude::*;
 use localization::msgid;
@@ -40,16 +40,16 @@ pub fn folder_name_dialog(
 }
 
 pub fn present_new_folder_dialog(
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     smart: bool,
     members: Vec<library::PlaylistFolderMember>,
     dismiss: Rc<dyn Fn()>,
 ) {
-    let source = menus.source.clone();
-    let weak = Rc::downgrade(menus);
+    let source = shell.products.source.clone();
+    let weak = Rc::downgrade(shell);
     let dialog = folder_name_dialog(None, move |name| {
         let source = source.clone();
-        let menus = weak.clone();
+        let shell = weak.clone();
         let members = members.clone();
         let dismiss = Rc::clone(&dismiss);
         gtk::glib::spawn_future_local(async move {
@@ -66,36 +66,40 @@ pub fn present_new_folder_dialog(
             match result {
                 Ok(()) => dismiss(),
                 Err(error) => {
-                    if let Some(menus) = menus.upgrade() {
-                        (menus.show_error)(error.to_string());
+                    if let Some(shell) = shell.upgrade() {
+                        shell
+                            .control_feedback
+                            .show_feedback_toast(error.to_string());
                     }
                 }
             }
         });
     });
-    (menus.present_dialog)(&dialog);
+    shell.present_selected_dialog(&dialog);
 }
 
 pub fn move_member(
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     member: library::PlaylistFolderMember,
     folder: Option<library::PlaylistFolderKey>,
 ) {
-    let source = menus.source.clone();
-    let menus = Rc::downgrade(menus);
+    let source = shell.products.source.clone();
+    let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
         if let Err(error) =
             rufin_core::playlists::move_playlist_to_folder(&source, member, folder).await
-            && let Some(menus) = menus.upgrade()
+            && let Some(shell) = shell.upgrade()
         {
-            (menus.show_error)(error.to_string());
+            shell
+                .control_feedback
+                .show_feedback_toast(error.to_string());
         }
     });
 }
 
 pub fn append_folder_actions(
     surface: &ContextMenuSurface,
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     members: Vec<library::PlaylistFolderMember>,
     in_folder: bool,
 ) {
@@ -108,8 +112,8 @@ pub fn append_folder_actions(
             crate::widgets::interactions::popdown_native_menu(&popover);
         }
     });
-    populate_folder_picker(&picker_content, menus, members.clone(), dismiss);
-    let picker = Rc::clone(menus);
+    populate_folder_picker(&picker_content, shell, members.clone(), dismiss);
+    let picker = Rc::clone(shell);
     let picker_members = members.clone();
     surface.append_fixed_widget_submenu(
         msgid("Add to folder"),
@@ -119,25 +123,25 @@ pub fn append_folder_actions(
         move || present_folder_picker(&picker, picker_members.clone()),
     );
     if in_folder {
-        let menus = Rc::clone(menus);
+        let shell = Rc::clone(shell);
         surface.append_fixed_action(
             msgid("Remove from folder"),
             crate::widgets::controls::REMOVE_ICON,
             move || {
                 for member in &members {
-                    move_member(&menus, member.clone(), None);
+                    move_member(&shell, member.clone(), None);
                 }
             },
         );
     }
 }
 
-fn present_folder_picker(menus: &Rc<MediaMenus>, members: Vec<library::PlaylistFolderMember>) {
+fn present_folder_picker(shell: &Rc<Shell>, members: Vec<library::PlaylistFolderMember>) {
     let (picker_dialog, picker_content) = crate::menus::playlist_picker::folder_picker_dialog();
     let close = picker_dialog.downgrade();
     populate_folder_picker(
         &picker_content,
-        menus,
+        shell,
         members,
         Rc::new(move || {
             if let Some(dialog) = close.upgrade() {
@@ -145,12 +149,12 @@ fn present_folder_picker(menus: &Rc<MediaMenus>, members: Vec<library::PlaylistF
             }
         }),
     );
-    (menus.present_dialog)(&picker_dialog);
+    shell.present_selected_dialog(&picker_dialog);
 }
 
 fn populate_folder_picker(
     root: &gtk::Box,
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     members: Vec<library::PlaylistFolderMember>,
     dismiss: Rc<dyn Fn()>,
 ) {
@@ -158,100 +162,104 @@ fn populate_folder_picker(
         members.first(),
         Some(library::PlaylistFolderMember::SmartPlaylist { .. })
     );
-    let create_menus = Rc::downgrade(menus);
+    let create_shell = Rc::downgrade(shell);
     let create_members = members.clone();
     let create_dismiss = Rc::clone(&dismiss);
-    let choose_menus = Rc::downgrade(menus);
+    let choose_shell = Rc::downgrade(shell);
     let choose_members = members.clone();
     let choose_dismiss = Rc::clone(&dismiss);
     let update = crate::menus::playlist_picker::populate_context_picker(
         root,
         true,
         Rc::new(move |folder, _, _| {
-            if let Some(menus) = choose_menus.upgrade() {
+            if let Some(shell) = choose_shell.upgrade() {
                 for member in &choose_members {
-                    move_member(&menus, member.clone(), Some(folder));
+                    move_member(&shell, member.clone(), Some(folder));
                 }
             }
             choose_dismiss();
         }),
         Rc::new(move |_| {
-            let Some(menus) = create_menus.upgrade() else {
+            let Some(shell) = create_shell.upgrade() else {
                 return;
             };
             present_new_folder_dialog(
-                &menus,
+                &shell,
                 smart,
                 create_members.clone(),
                 Rc::clone(&create_dismiss),
             );
         }),
     );
-    update(menus.library.playlist_folder_choices(smart));
+    update(shell.products.library.playlist_folder_choices(smart));
 }
 
 pub fn present_folder_context_menu(
     target: &gtk::Widget,
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     folder: library::PlaylistFolderRow,
     position: Option<(f64, f64)>,
 ) {
     let surface = ContextMenuSurface::new(target, "playlist-folder", position);
-    crate::menus::media_menus::install_sidebar_pin_action(&surface, menus, Some(folder.pin()));
-    let rename_menus = Rc::clone(menus);
+    crate::menus::media_menus::install_sidebar_pin_action(&surface, shell, Some(folder.pin()));
+    let rename_shell = Rc::clone(shell);
     let rename_folder = folder.clone();
     surface.append_fixed_action(
         msgid("Rename folder"),
         crate::widgets::controls::EDIT_ICON,
         move || {
-            let source = rename_menus.source.clone();
-            let menus = Rc::downgrade(&rename_menus);
+            let source = rename_shell.products.source.clone();
+            let shell = Rc::downgrade(&rename_shell);
             let key = rename_folder.folder_key;
             let dialog = folder_name_dialog(Some(&rename_folder.name), move |name| {
                 let source = source.clone();
-                let menus = menus.clone();
+                let shell = shell.clone();
                 gtk::glib::spawn_future_local(async move {
                     if let Err(error) =
                         rufin_core::playlists::rename_playlist_folder(&source, key, name).await
-                        && let Some(menus) = menus.upgrade()
+                        && let Some(shell) = shell.upgrade()
                     {
-                        (menus.show_error)(error.to_string());
+                        shell
+                            .control_feedback
+                            .show_feedback_toast(error.to_string());
                     }
                 });
             });
-            (rename_menus.present_dialog)(&dialog);
+            rename_shell.present_selected_dialog(&dialog);
         },
     );
-    let delete_menus = Rc::clone(menus);
+    let delete_shell = Rc::clone(shell);
     surface.append_fixed_action(
         msgid("Delete folder"),
         crate::widgets::controls::DELETE_ICON,
         move || {
-            let source = delete_menus.source.clone();
-            let menus = Rc::downgrade(&delete_menus);
+            let source = delete_shell.products.source.clone();
+            let shell = Rc::downgrade(&delete_shell);
             let key = folder.folder_key;
             let smart = folder.smart;
             gtk::glib::spawn_future_local(async move {
                 let result = rufin_core::playlists::delete_playlist_folder(&source, key).await;
-                let Some(menus) = menus.upgrade() else { return };
+                let Some(shell) = shell.upgrade() else { return };
                 match result {
                     Ok(()) => {
-                        if (menus.current_route)()
+                        if shell.navigation.routes.borrow().current().clone()
                             == (rufin_core::route::Route::PlaylistFolder { key, smart })
                         {
-                            (menus.navigate)(if smart {
+                            shell.open_route(if smart {
                                 rufin_core::route::Route::SmartPlaylists
                             } else {
                                 rufin_core::route::Route::Playlists
                             });
                         }
                     }
-                    Err(error) => (menus.show_error)(error.to_string()),
+                    Err(error) => shell
+                        .control_feedback
+                        .show_feedback_toast(error.to_string()),
                 }
             });
         },
     );
-    surface.popup(&menus.settings.current.borrow().application.context_menu);
+    surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
 
 pub fn single_regular_playlist_drag(source: &crate::widgets::media_drag::MediaDragSource) -> bool {
@@ -296,7 +304,7 @@ pub fn playlist_drag_matches(
 }
 
 pub fn drop_playlist_on_folder(
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     folder_key: library::PlaylistFolderKey,
     smart: bool,
     source: crate::widgets::media_drag::MediaDragSource,
@@ -310,12 +318,13 @@ pub fn drop_playlist_on_folder(
         MediaDragSource::Targets { targets, .. } => targets,
         _ => return false,
     };
-    let catalog = menus.library.clone();
-    let task = menus
+    let catalog = shell.products.library.clone();
+    let task = shell
+        .products
         .runtime
         .spawn(async move { targets.collections(&catalog).await });
-    let source = menus.source.clone();
-    let menus = Rc::downgrade(menus);
+    let source = shell.products.source.clone();
+    let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
         let result = async {
             let collections = task.await.map_err(|error| error.to_string())??;
@@ -337,9 +346,9 @@ pub fn drop_playlist_on_folder(
         }
         .await;
         if let Err(error) = result
-            && let Some(menus) = menus.upgrade()
+            && let Some(shell) = shell.upgrade()
         {
-            (menus.show_error)(error);
+            shell.control_feedback.show_feedback_toast(error);
         }
     });
     true

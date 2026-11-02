@@ -136,7 +136,7 @@ impl SearchSession {
                 settings.remember_search_result(result.clone())
             });
         let receiver = catalog.source.prepare_collection(result.media_uri.clone());
-        let is_current = Rc::clone(&catalog.is_current);
+        let is_current = catalog.current_check();
         let navigate = catalog.route_navigation();
         glib::spawn_future_local(async move {
             if let Ok(Err(error)) = receiver.recv().await {
@@ -413,7 +413,7 @@ impl SearchSession {
         if let Some(item) = item {
             let generation = self.generation.get();
             let session = Rc::downgrade(self);
-            let current = Rc::clone(&catalog.is_current);
+            let current = catalog.current_check();
             item.present_context(
                 target,
                 catalog,

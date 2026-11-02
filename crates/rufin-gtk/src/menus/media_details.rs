@@ -6,7 +6,7 @@ use adw::prelude::*;
 use gtk::glib;
 use rufin_core::metadata::{MediaDetails, MediaDetailsItem};
 
-use crate::menus::media_menus::MediaMenus;
+use crate::shell::shell::Shell;
 
 pub(crate) struct MenuHeader<'a> {
     pub item: MediaDetailsItem,
@@ -20,7 +20,7 @@ pub(crate) struct MenuHeader<'a> {
 pub(crate) fn append_header(
     surface: &ContextMenuSurface,
     target: &gtk::Widget,
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     identity: MenuHeader<'_>,
 ) {
     let resource = "routes/media_menu_header.ui";
@@ -36,11 +36,11 @@ pub(crate) fn append_header(
     title.set_text(identity.title);
     subtitle.set_text(identity.subtitle);
     subtitle_host.set_visible(!identity.subtitle.is_empty());
-    bind_cover(&cover, menus, identity.artwork, 48);
+    bind_cover(&cover, shell, identity.artwork, 48);
     let (favorite_target, favorited) = identity.favorite;
     crate::widgets::favorites::set_favorite_button_active(&favorite, favorited);
     favorite.set_visible(
-        menus
+        shell
             .settings
             .current
             .borrow()
@@ -48,26 +48,26 @@ pub(crate) fn append_header(
             .context_menu
             .is_visible(rufin_core::settings::ContextMenuItem::Favorites),
     );
-    let favorite_menus = Rc::clone(menus);
+    let favorite_shell = Rc::clone(shell);
     surface.bind_button(&favorite, move || {
-        (favorite_menus.set_favorite)(favorite_target.clone(), !favorited);
+        favorite_shell.set_favorite(favorite_target.clone(), !favorited);
     });
     let parent = target
         .root()
         .and_downcast::<gtk::Window>()
         .map(|parent| parent.downgrade());
-    let menus = menus.clone();
+    let shell = shell.clone();
     surface.bind_button(&details, move || {
         if let Some(parent) = parent.as_ref().and_then(glib::WeakRef::upgrade) {
-            present(&parent, &menus, identity.item.clone());
+            present(&parent, &shell, identity.item.clone());
         }
     });
     surface.append_fixed_widget("media-header", &header);
 }
 
-fn bind_cover(host: &gtk::Box, menus: &MediaMenus, binding: Option<&[u8]>, size: i32) {
+fn bind_cover(host: &gtk::Box, shell: &Shell, binding: Option<&[u8]>, size: i32) {
     let tile = ArtworkTile::new(size);
-    menus.artwork.bind_artwork_tile(
+    shell.artwork.bind_artwork_tile(
         &tile,
         crate::widgets::library_fields::opaque_artwork(binding),
         size,
@@ -75,7 +75,7 @@ fn bind_cover(host: &gtk::Box, menus: &MediaMenus, binding: Option<&[u8]>, size:
     host.append(&tile.widget());
 }
 
-fn present(parent: &gtk::Window, menus: &Rc<MediaMenus>, item: MediaDetailsItem) {
+fn present(parent: &gtk::Window, shell: &Rc<Shell>, item: MediaDetailsItem) {
     let resource = "routes/media_details.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -85,9 +85,9 @@ fn present(parent: &gtk::Window, menus: &Rc<MediaMenus>, item: MediaDetailsItem)
     crate::widgets::controls::configure_dialog_header(&header);
     crate::widgets::popup::present_light_dismiss_dialog(&dialog, parent);
     let weak_dialog = dialog.downgrade();
-    let source = menus.source.clone();
-    let playback = menus.playback.clone();
-    let menus = menus.clone();
+    let source = shell.products.source.clone();
+    let playback = shell.products.playback.clone();
+    let shell = shell.clone();
     let parent = parent.downgrade();
     let load = glib::spawn_future_local(async move {
         let result = rufin_core::metadata::media_details(source, playback, item.clone()).await;
@@ -101,22 +101,27 @@ fn present(parent: &gtk::Window, menus: &Rc<MediaMenus>, item: MediaDetailsItem)
                 title.set_text(&details.title);
                 subtitle.set_text(&details.subtitle);
                 subtitle.set_visible(!details.subtitle.is_empty());
-                bind_cover(&cover, &menus, details.artwork_binding.as_deref(), 86);
-                populate(&summary, &sections, &details, &menus, &parent);
+                bind_cover(&cover, &shell, details.artwork_binding.as_deref(), 86);
+                populate(&summary, &sections, &details, &shell, &parent);
                 edit.set_visible(details.can_edit);
-                let editor = menus.edit_metadata.clone();
+                let editor = Rc::clone(&shell);
                 let weak = dialog.downgrade();
                 edit.connect_clicked(move |_| {
                     if let Some(dialog) = weak.upgrade() {
                         dialog.close();
                     }
-                    editor(item.metadata_item());
+                    crate::shell::preferences::dialogs::metadata::present_metadata_dialog(
+                        &editor,
+                        item.metadata_item(),
+                    );
                 });
                 state.set_visible_child_name("details");
             }
             Err(error) => {
                 dialog.close();
-                (menus.show_error)(error.to_string());
+                shell
+                    .control_feedback
+                    .show_feedback_toast(error.to_string());
             }
         }
     });
@@ -127,7 +132,7 @@ fn populate(
     summary: &gtk::Box,
     sections: &gtk::Box,
     data: &MediaDetails,
-    menus: &Rc<MediaMenus>,
+    shell: &Rc<Shell>,
     parent: &glib::WeakRef<gtk::Window>,
 ) {
     summary.set_visible(!data.audio_summary.is_empty());
@@ -160,16 +165,16 @@ fn populate(
                 musicbrainz.set_visible(true);
                 let url = url.clone();
                 let parent = parent.clone();
-                let show_error = menus.show_error.clone();
+                let feedback = Rc::clone(&shell.control_feedback);
                 musicbrainz.connect_clicked(move |_| {
                     let Some(parent) = parent.upgrade() else {
                         return;
                     };
                     let launcher = gtk::UriLauncher::new(&url);
-                    let show_error = show_error.clone();
+                    let feedback = Rc::clone(&feedback);
                     glib::spawn_future_local(async move {
                         if let Err(error) = launcher.launch_future(Some(&parent)).await {
-                            show_error(error.to_string());
+                            feedback.show_feedback_toast(error.to_string());
                         }
                     });
                 });
@@ -190,7 +195,7 @@ fn populate(
                     .collect();
                 value.set_markup(&markup);
                 let links = field.links.clone();
-                let menus = menus.clone();
+                let shell = shell.clone();
                 let parent = parent.clone();
                 value.connect_activate_link(move |_, link| {
                     if let Some(item) = link
@@ -200,7 +205,7 @@ fn populate(
                         .and_then(|part| part.target.as_ref())
                         && let Some(parent) = parent.upgrade()
                     {
-                        present(&parent, &menus, item.clone());
+                        present(&parent, &shell, item.clone());
                     }
                     glib::Propagation::Stop
                 });

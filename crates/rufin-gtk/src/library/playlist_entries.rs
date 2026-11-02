@@ -30,7 +30,6 @@ use crate::library::playlist_entry_model::PlaylistEntryModel;
 use crate::widgets::recycled_cells::{TrackRowPlayingIndicator, set_track_row_index_text};
 
 use super::route_shell::LibraryToolbarProjection;
-use super::table_sizing::route_column_view_initial_width_with_inset;
 use crate::library::playlist_entry_model::entry_key;
 use crate::library::track_selection::PlaylistEntrySelection;
 use crate::widgets::library_fields::{
@@ -257,10 +256,7 @@ fn playlist_entry_table(
             activate_model.activate(position, queue.clone());
         })),
         Some(selection.selection_model()),
-        route_column_view_initial_width_with_inset(
-            shell,
-            crate::library::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET,
-        ),
+        shell.table_initial_width(crate::library::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET),
     );
     table.widget().add_css_class("track-table");
     table.widget().add_css_class("playlist-entry-table");

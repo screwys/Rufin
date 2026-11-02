@@ -599,7 +599,7 @@ impl SidebarPinItem {
             else {
                 return;
             };
-            let menus = &shell.media_menus;
+            let menus = &shell;
             match row {
                 library::Row::Album(row) => {
                     present_album_context_menu(&target, menus, row, None, None, position)
@@ -1255,9 +1255,9 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             let Some(playback_shell) = playback_shell.upgrade() else {
                 return;
             };
-            crate::shell::shell::catalog_actions::play_target(
+            crate::menus::media_menus::play_target(
+                &playback_shell.products.playback,
                 &playback_target,
-                &playback_shell,
                 QueuePlacement::Now,
                 false,
             );
@@ -1403,7 +1403,7 @@ fn install_playlist_pin_drop(
     if let SidebarPin::PlaylistFolder { smart, .. } = &pin.pin {
         let folder_key = library::PlaylistFolderKey::from_raw(pin.key());
         let smart = *smart;
-        let menus = Rc::downgrade(&shell.media_menus);
+        let menus = Rc::downgrade(&shell);
         let drop = gtk::DropTarget::new(
             glib::BoxedAnyObject::static_type(),
             gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
@@ -1458,7 +1458,7 @@ fn install_playlist_pin_drop(
             return false;
         };
         crate::menus::media_menus::add_drag_to_playlist(
-            &shell.media_menus,
+            &shell,
             playlist_key,
             playlist_name.clone(),
             source,
@@ -1481,9 +1481,9 @@ fn install_sidebar_pin_double_click(
         let Some(shell) = shell.upgrade() else { return };
         if presses >= 2 && presses % 2 == 0 {
             gesture.set_state(gtk::EventSequenceState::Claimed);
-            crate::shell::shell::catalog_actions::play_target(
+            crate::menus::media_menus::play_target(
+                &shell.products.playback,
                 &playback,
-                &shell,
                 QueuePlacement::Now,
                 false,
             );
@@ -1556,7 +1556,7 @@ fn sidebar_pin_transport_button(
     let target = target.clone();
     button.connect_clicked(move |_| {
         let Some(shell) = shell.upgrade() else { return };
-        crate::shell::shell::catalog_actions::play_target(&target, &shell, placement, false);
+        crate::menus::media_menus::play_target(&shell.products.playback, &target, placement, false);
     });
     button
 }

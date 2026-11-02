@@ -32,7 +32,6 @@ use crate::menus::media_menus::{
 use crate::widgets::library_fields::column_fit_width;
 
 use super::route_shell::LibraryPageShellOptions;
-use super::table_sizing::route_column_view_initial_width;
 use crate::library::LibraryField;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::library_fields::playlist_artwork;
@@ -102,7 +101,7 @@ impl CatalogUi {
                 let Some(shell) = shell.upgrade() else {
                     return false;
                 };
-                if !(shell.is_current)() {
+                if !shell.is_current() {
                     return false;
                 }
                 let row_key = Rc::clone(&row_key);
@@ -350,10 +349,14 @@ impl NamedCollectionRow for TagRow {
     ) {
         match self.kind {
             TagKind::Genre => {
-                present_genre_context_menu(target, &shell.media_menus, self.clone(), None, position)
+                if let Some(window) = shell.shell() {
+                    present_genre_context_menu(target, &window, self.clone(), None, position)
+                }
             }
             TagKind::Mood => {
-                present_mood_context_menu(target, &shell.media_menus, self.clone(), None, position)
+                if let Some(window) = shell.shell() {
+                    present_mood_context_menu(target, &window, self.clone(), None, position)
+                }
             }
         }
     }
@@ -462,21 +465,29 @@ impl NamedCollectionRow for library::PlaylistListRow {
     ) {
         match self {
             Self::Playlist(row) => {
-                (shell.playlist_context_menu)(target, row.clone(), None, position)
+                shell.present_playlist_context_menu(target, row.clone(), None, position)
             }
-            Self::SmartPlaylist(row) => present_smart_playlist_context_menu(
-                target,
-                &shell.media_menus,
-                row.clone(),
-                None,
-                position,
-            ),
-            Self::Folder(row) => crate::menus::playlist_folders::present_folder_context_menu(
-                target,
-                &shell.media_menus,
-                row.clone(),
-                position,
-            ),
+            Self::SmartPlaylist(row) => {
+                if let Some(window) = shell.shell() {
+                    present_smart_playlist_context_menu(
+                        target,
+                        &window,
+                        row.clone(),
+                        None,
+                        position,
+                    )
+                }
+            }
+            Self::Folder(row) => {
+                if let Some(window) = shell.shell() {
+                    crate::menus::playlist_folders::present_folder_context_menu(
+                        target,
+                        &window,
+                        row.clone(),
+                        position,
+                    )
+                }
+            }
         }
     }
     fn install_extra(
@@ -484,7 +495,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
         shell: &Rc<CatalogUi>,
         current: Rc<dyn Fn() -> Option<Self>>,
     ) {
-        let menus = Rc::downgrade(&shell.media_menus);
+        let menus = shell.weak_shell();
         let drop = gtk::DropTarget::new(
             gtk::glib::BoxedAnyObject::static_type(),
             gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
@@ -649,7 +660,12 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             play_buttons.clone(),
             move |shell, item, placement| {
                 if let Some(target) = item.playback(key) {
-                    (shell.media_menus.play_target)(&target, placement, false);
+                    crate::menus::media_menus::play_target(
+                        &shell.playback,
+                        &target,
+                        placement,
+                        false,
+                    );
                 }
             },
         );
@@ -753,7 +769,7 @@ where
             activate_shell.navigate(item.route())
         })),
         None,
-        route_column_view_initial_width(shell),
+        shell.table_initial_width(0),
     )
 }
 

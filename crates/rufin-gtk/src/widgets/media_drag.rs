@@ -363,10 +363,6 @@ impl MediaDragSource {
         Self::Selection(selection)
     }
 
-    pub fn track(media_uri: String) -> Self {
-        Self::media_uris([media_uri])
-    }
-
     pub fn media_uris(media_uris: impl IntoIterator<Item = String>) -> Self {
         Self::MediaUris(media_uris.into_iter().collect::<Vec<_>>().into())
     }

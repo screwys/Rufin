@@ -189,9 +189,9 @@ impl Shell {
                 SelectionShortcut::AddToPlaylist => {
                     present_playlist_picker_entries(self, selection)
                 }
-                SelectionShortcut::Download => super::catalog_actions::download(
-                    &crate::widgets::media_drag::MediaDragSource::playlist_entries(selection),
+                SelectionShortcut::Download => crate::menus::media_menus::download(
                     self,
+                    &crate::widgets::media_drag::MediaDragSource::playlist_entries(selection),
                 ),
                 SelectionShortcut::Delete => unreachable!(),
             }
@@ -205,9 +205,9 @@ impl Shell {
                 selection.play(&self.products.playback, placement, false)
             }
             SelectionShortcut::AddToPlaylist => present_playlist_picker_selection(self, selection),
-            SelectionShortcut::Download => super::catalog_actions::download(
-                &crate::widgets::media_drag::MediaDragSource::selection(selection),
+            SelectionShortcut::Download => crate::menus::media_menus::download(
                 self,
+                &crate::widgets::media_drag::MediaDragSource::selection(selection),
             ),
             SelectionShortcut::Delete => unreachable!(),
         }
@@ -227,7 +227,7 @@ impl Shell {
             return true;
         }
         self.current_playlist_entry_selection_snapshot()
-            .is_some_and(|selection| remove_playlist_entry_selection(&self.media_menus, selection))
+            .is_some_and(|selection| remove_playlist_entry_selection(self, selection))
     }
 
     fn focused_track_selection(

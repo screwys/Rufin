@@ -223,7 +223,11 @@ impl ActivityView {
             }
         });
         report_host.set_child(Some(&owner));
-        let collections = ActivityCollections::new(shell.build_catalog(&Route::History, None));
+        let collections = ActivityCollections::new(crate::library::CatalogUi::new(
+            &shell,
+            &Route::History,
+            None,
+        ));
         tracks_host.append(&collections.tracks);
         artists_host.append(&collections.artists);
         albums_host.append(&collections.albums);
@@ -643,7 +647,8 @@ impl ActivityView {
                             .autoplay_first_track
                         && let Some(uri) = top
                     {
-                        (shell.media_menus.play_target)(
+                        crate::menus::media_menus::play_target(
+                            &shell.products.playback,
                             &crate::widgets::selection::track_play_request(uri),
                             rufin_core::playback::QueuePlacement::Now,
                             false,

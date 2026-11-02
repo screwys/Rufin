@@ -86,7 +86,7 @@ impl CatalogUi {
             play_label,
         } = data;
         let content_width = crate::library::route_layout::detail_route_inner_width_for_viewport(
-            (self.route_width)(),
+            self.route_width(),
             PRIMARY_ROUTE_MARGIN_START,
         );
         let cover_size = playlist_cover_size(content_width);
@@ -149,8 +149,8 @@ impl CatalogUi {
             cover_controls,
             context_menu,
             open_cover: {
-                let present = Rc::clone(&self.present_full_artwork);
-                Rc::new(move || present(artwork.clone()))
+                let shell = Rc::clone(self);
+                Rc::new(move || shell.present_full_artwork(artwork.clone()))
             },
         });
         wrapper.append(&library_route_inset(showcase));

@@ -60,7 +60,7 @@ impl PlaylistDetailOwner {
             Self::Saved { summary, .. } => summary.source_id.as_deref(),
             Self::Smart { .. } => None,
         };
-        (catalog.source_label)(source_id)
+        catalog.source_label(source_id)
     }
 
     fn key(&self) -> LibraryListKey {
@@ -148,15 +148,19 @@ impl PlaylistDetailOwner {
     ) {
         match self {
             Self::Saved { summary, .. } => {
-                (shell.playlist_context_menu)(target, summary.clone(), Some(play), position)
+                shell.present_playlist_context_menu(target, summary.clone(), Some(play), position)
             }
-            Self::Smart { summary, .. } => present_smart_playlist_context_menu(
-                target,
-                &shell.media_menus,
-                summary.clone(),
-                Some(play),
-                position,
-            ),
+            Self::Smart { summary, .. } => {
+                if let Some(window) = shell.shell() {
+                    present_smart_playlist_context_menu(
+                        target,
+                        &window,
+                        summary.clone(),
+                        Some(play),
+                        position,
+                    )
+                }
+            }
         }
     }
 }
@@ -175,7 +179,7 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        (self.update_smart_playlist_pin)(&summary);
+        self.update_smart_playlist_pin(&summary);
         let Some(library::Collection::Smart { now, .. }) = read
             .view
             .members()
@@ -383,7 +387,7 @@ impl CatalogUi {
         wrapper.set_margin_top(ROUTE_TOP_MARGIN);
 
         let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
-            (self.route_width)(),
+            self.route_width(),
             PRIMARY_ROUTE_MARGIN_START,
         );
         let artwork = owner.artwork();
@@ -438,7 +442,7 @@ impl CatalogUi {
                     drop.reject();
                 }
             });
-            let drop_menus = Rc::downgrade(&self.media_menus);
+            let drop_menus = self.weak_shell();
             drop.connect_drop(move |_, value, _, _| {
                 let Some(menus) = drop_menus.upgrade() else {
                     return false;
@@ -480,11 +484,11 @@ impl CatalogUi {
             cover_controls: controls,
             context_menu: Some(context_menu),
             open_cover: {
-                let present = Rc::clone(&self.present_full_artwork);
+                let shell = Rc::clone(self);
                 let owner = Rc::clone(&owner_state);
                 Rc::new(move || {
                     let artwork = owner.borrow().artwork();
-                    present(artwork);
+                    shell.present_full_artwork(artwork);
                 })
             },
         });

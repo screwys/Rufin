@@ -374,6 +374,12 @@ impl Shell {
         self.render_current_route();
     }
 
+    /// Navigation from a page or a menu, which also closes the search popup it may be shown in.
+    pub(crate) fn open_route(self: &Rc<Self>, route: Route) {
+        self.chrome.topbar.close_search_popup();
+        self.navigate(route);
+    }
+
     pub(crate) fn set_favorite_category(self: &Rc<Self>, category: CollectionCategory) {
         if self.navigation.favorite_category.replace(category) == category
             || self.navigation.routes.borrow().current() != &Route::Favorites
@@ -557,7 +563,7 @@ impl Shell {
         let previous = self.begin_mounted_route_replacement();
         let release_ms = teardown_started.map(elapsed_ms);
         let model_started = render_started.as_ref().map(|_| Instant::now());
-        let catalog = self.build_catalog(&route, source_id.as_ref());
+        let catalog = crate::library::CatalogUi::new(self, &route, source_id.as_ref());
         catalog.refresh_current_route_now_playing_selections(route_current_track(
             self.player_ui.selected_playback().as_deref(),
         ));
@@ -741,7 +747,7 @@ impl Shell {
             .borrow()
             .as_ref()
             .is_some_and(|catalog| {
-                (catalog.is_current)()
+                catalog.is_current()
                     && (!source_scoped || catalog.selected.as_ref().map(scope) == selected_scope)
             })
     }

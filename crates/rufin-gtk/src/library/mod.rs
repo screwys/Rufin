@@ -31,7 +31,6 @@ mod routes;
 mod search;
 pub use search::session::{SEARCH_PREVIEW_LIMIT, SearchSession};
 mod table_links;
-mod table_sizing;
 pub(crate) fn collection_download_change(
     apply: impl Fn(&CollectionTarget, bool) + 'static,
 ) -> crate::widgets::mounted_route::MountedDownloadChange {

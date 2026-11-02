@@ -15,7 +15,7 @@ pub(crate) fn install_current_track_context_menu(
             if let Some(track) =
                 current_playback_track(shell.player_ui.selected_playback().as_deref())
             {
-                present_track_menu(target, &shell.media_menus, track, position, None, None);
+                present_track_menu(target, &shell, track, position, None, None);
             }
         }),
     );
@@ -28,7 +28,7 @@ pub(crate) fn present_current_track_context_menu(
     if let Some(track) = current_playback_track(shell.player_ui.selected_playback().as_deref()) {
         present_track_menu(
             target.as_ref(),
-            &shell.media_menus,
+            &shell,
             track,
             None,
             Some(gtk::PositionType::Top),

@@ -46,7 +46,6 @@ pub(crate) struct Shell {
     pub(crate) navigation: NavigationState,
     pub(crate) source: Rc<SourceState>,
     startup: StartupState,
-    pub(crate) media_menus: Rc<crate::menus::media_menus::MediaMenus>,
     pub(crate) player_ui: Rc<crate::player::PlayerUi>,
     pub(crate) preferences: Rc<crate::preferences::Preferences>,
     pub(crate) downloads: Rc<DownloadsState>,
@@ -64,13 +63,8 @@ pub(crate) struct Shell {
     pub(crate) right_panel: RightPanelWidgets,
 }
 
-mod media_menus;
-
 mod full_artwork;
 mod route_keyboard;
-
-mod catalog;
-pub(crate) mod catalog_actions;
 
 pub(crate) mod player_menus;
 mod playlist_files;

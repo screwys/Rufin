@@ -154,7 +154,7 @@ fn folder_page(
     FolderResume,
 ) {
     search.set_visible(true);
-    let route_width = (shell.route_width)();
+    let route_width = shell.route_width();
     let view = route_view(&read);
     let folder_sparse = crate::widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: 0 },
@@ -931,7 +931,7 @@ fn folder_empty_view(shell: &Rc<CatalogUi>) -> gtk::Widget {
     refresh.add_css_class("pill");
     refresh.set_halign(gtk::Align::Center);
     let shell = Rc::clone(shell);
-    refresh.connect_clicked(move |_| (shell.refresh)());
+    refresh.connect_clicked(move |_| shell.refresh());
     view.append(&refresh);
     view.upcast()
 }

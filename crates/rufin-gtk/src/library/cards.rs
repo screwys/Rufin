@@ -50,14 +50,16 @@ impl AlbumCover {
             if let Some(shell) = menu_shell.upgrade()
                 && let Some(album) = row.borrow().clone()
             {
-                present_album_context_menu(
-                    target,
-                    &shell.media_menus,
-                    album.clone(),
-                    None,
-                    None,
-                    position,
-                );
+                if let Some(window) = shell.shell() {
+                    present_album_context_menu(
+                        target,
+                        &window,
+                        album.clone(),
+                        None,
+                        None,
+                        position,
+                    );
+                }
             }
         });
         let (controls, favorite) = cover_hover_controls_with_favorite(0, "Play album", false);
@@ -72,7 +74,8 @@ impl AlbumCover {
                 if let Some(shell) = play_shell.upgrade()
                     && let Some(album) = row.borrow().clone()
                 {
-                    (shell.media_menus.play_target)(
+                    crate::menus::media_menus::play_target(
+                        &shell.playback,
                         &crate::widgets::selection::album_play_request(&album),
                         placement,
                         false,
