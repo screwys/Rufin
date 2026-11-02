@@ -19,7 +19,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
 
 async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
     let settings = products.settings.load();
-    let sidebar = settings.sidebar;
+    let sidebar = &settings.sidebar;
     let configured = products.source.list_sources();
     let pins = sidebar
         .pins

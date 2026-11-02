@@ -314,7 +314,7 @@ pub(super) async fn home_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let mut blocks = products.settings.load().application.home_blocks;
+    let mut blocks = products.settings.load().application.home_blocks.clone();
     if let Some(block) = parameters.get("block") {
         let selected: HomeBlockKind =
             serde_json::from_value(Value::String(block.clone())).map_err(bad_request)?;

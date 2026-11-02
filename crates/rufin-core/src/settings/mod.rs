@@ -307,6 +307,11 @@ impl SettingsFile {
         self.committed.borrow().clone()
     }
 
+    /// The committed settings as a reader holds them, without a copy.
+    pub(crate) fn committed(&self) -> Committed {
+        Committed(self.load())
+    }
+
     pub(crate) fn equalizer_preset(
         &self,
         id: &str,
@@ -551,8 +556,9 @@ impl SettingsOwner {
         self.file.changes()
     }
 
-    pub fn load(&self) -> UiSettings {
-        self.file.load().ui.clone()
+    /// The committed settings, shared rather than copied.
+    pub fn load(&self) -> Committed {
+        self.file.committed()
     }
 
     pub fn visualizer_render_settings(&self) -> (u32, visualizer::VisualizerAppearance) {
@@ -1493,5 +1499,17 @@ impl SettingsOwner {
             Ok(())
         })
         .map_err(Into::into)
+    }
+}
+
+/// The committed settings a reader holds: the shared value, read as the UI settings.
+#[derive(Clone)]
+pub struct Committed(Arc<StoredSettings>);
+
+impl std::ops::Deref for Committed {
+    type Target = UiSettings;
+
+    fn deref(&self) -> &UiSettings {
+        &self.0.ui
     }
 }

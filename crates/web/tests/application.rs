@@ -80,7 +80,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     let controller = Controller::new(inputs.products.clone());
     let mut status = controller.status();
     assert!(status.borrow().address.is_none());
-    let settings = inputs.settings.load().web_controller;
+    let settings = inputs.settings.load().web_controller.clone();
     assert!(!settings.enabled);
     assert_eq!(settings.port, 1717);
     inputs.settings.set_controller_port(0).unwrap();

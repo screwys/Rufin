@@ -59,7 +59,7 @@ impl SettingsOwner {
     }
 
     pub fn random_preferences(&self) -> super::RandomPlaySettings {
-        self.load().random_play
+        self.load().random_play.clone()
     }
 
     pub fn set_random_preferences(
@@ -85,7 +85,7 @@ impl SettingsOwner {
     }
 
     pub fn activity_preferences(&self) -> app::ActivityOverviewSettings {
-        self.load().application.activity_overview
+        self.load().application.activity_overview.clone()
     }
 
     pub fn set_activity_preferences(

@@ -79,7 +79,7 @@ pub struct View {
     selected: Option<SelectedLibrary>,
     options: OpenOptions,
     /// The settings the view read with.
-    settings: Settings,
+    settings: crate::settings::Committed,
     art: bool,
     body: Body,
 }
@@ -153,7 +153,7 @@ impl SourceOwner {
         art: bool,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.shared.settings.load().ui.clone();
+        let settings = self.shared.settings.committed();
         let (header, plan) = self
             .plan(&route, selected.as_ref(), &options, &settings, cancel)
             .await?;
@@ -185,7 +185,7 @@ impl SourceOwner {
         options: &OpenOptions,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
-        let settings = self.shared.settings.load().ui.clone();
+        let settings = self.shared.settings.committed();
         let (header, plan) = self
             .plan(route, selected, options, &settings, cancel)
             .await?;
@@ -1024,7 +1024,7 @@ impl View {
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.owner.shared.settings.load().ui.clone();
+        let settings = self.owner.shared.settings.committed();
         match (&self.body, &self.selected) {
             (Body::Folders { projection, .. }, Some(selected)) => {
                 let tracks = folder_tracks(&self.route, selected, projection, &options, &settings);
@@ -1093,7 +1093,7 @@ impl View {
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
-        let settings = self.owner.shared.settings.load().ui.clone();
+        let settings = self.owner.shared.settings.committed();
         if matches!(self.body, Body::Releases { .. })
             && self.settings_reread(&settings) != Some(Reread::Page)
         {
@@ -1105,7 +1105,7 @@ impl View {
     async fn releases(
         &self,
         options: OpenOptions,
-        settings: Settings,
+        settings: crate::settings::Committed,
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
@@ -1133,7 +1133,7 @@ impl View {
     }
 
     /// This view's route with new options and settings, before its body is read.
-    fn again(&self, options: OpenOptions, settings: Settings) -> View {
+    fn again(&self, options: OpenOptions, settings: crate::settings::Committed) -> View {
         View {
             owner: self.owner.clone(),
             route: self.route.clone(),

@@ -28,7 +28,7 @@ pub(super) fn bind(
         web_copy_token_icon: gtk::Image,
         web_status: adw::ActionRow,
     });
-    let config = shell.settings.persistence.load().web_controller;
+    let config = shell.settings.persistence.load().web_controller.clone();
     web_allow_remote.set_active(!config.address.is_loopback());
     web_port.set_value(f64::from(config.port));
     let access_token = bind_controls(shell, page.upcast_ref(), builder, resource);
