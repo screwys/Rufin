@@ -88,21 +88,6 @@ impl PlayerUi {
         }
     }
 
-    pub fn visible_lyrics_are_instrumental(&self) -> bool {
-        let current_media = current_playback_media_id(self.selected_playback().as_deref());
-        let Some(lyrics) = self.selected_lyrics() else {
-            return false;
-        };
-        matches!(
-            &*lyrics.projection.borrow(),
-            CurrentLyrics::Ready {
-                media_id,
-                content: Some(CurrentLyricsContent::Instrumental),
-                ..
-            } if current_media.as_ref() == Some(media_id)
-        )
-    }
-
     fn current_lyrics_resolved(&self) -> bool {
         let current_media = current_playback_media_id(self.selected_playback().as_deref());
         let Some(lyrics) = self.selected_lyrics() else {

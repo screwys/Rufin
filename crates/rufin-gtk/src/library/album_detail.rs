@@ -362,12 +362,10 @@ impl NativeDetailCell {
         fields: &[LibraryField],
         folder: Option<library::FolderKey>,
     ) -> Rc<Self> {
-        let builder = crate::widgets::ui_resource::builder(
-            crate::library::ui_resource::ALBUM_DETAIL_ROW_RESOURCE,
-        );
+        let builder = crate::ui_resource::builder("routes/album_detail_row.ui");
         crate::objects!(
             &builder,
-            crate::library::ui_resource::ALBUM_DETAIL_ROW_RESOURCE,
+            "routes/album_detail_row.ui",
             {
                 root: gtk::Box,
                 gap: gtk::Box,
@@ -1155,12 +1153,10 @@ struct AlbumSidePanel {
 }
 impl AlbumSidePanel {
     fn new(shell: &Rc<CatalogUi>) -> Self {
-        let builder = crate::widgets::ui_resource::builder(
-            crate::library::ui_resource::ALBUM_DETAIL_PANEL_RESOURCE,
-        );
+        let builder = crate::ui_resource::builder("routes/album_detail_panel.ui");
         crate::objects!(
             &builder,
-            crate::library::ui_resource::ALBUM_DETAIL_PANEL_RESOURCE,
+            "routes/album_detail_panel.ui",
             {
                 root: gtk::Box,
                 cover_host: gtk::Stack,
@@ -1373,14 +1369,15 @@ impl AlbumTrackSlot {
                     LibraryField::RowIndex => {
                         let row = Rc::clone(&current);
                         let play_shell = Rc::downgrade(shell);
-                        let cell = super::columns::track_row_index_cell("", move |_| {
-                            let row = row.borrow().clone();
-                            if let Some(shell) = play_shell.upgrade()
-                                && let Some(track) = row
-                            {
-                                play_album_track(&shell, &track, folder);
-                            }
-                        });
+                        let cell =
+                            crate::widgets::recycled_cells::track_row_index_cell("", move |_| {
+                                let row = row.borrow().clone();
+                                if let Some(shell) = play_shell.upgrade()
+                                    && let Some(track) = row
+                                {
+                                    play_album_track(&shell, &track, folder);
+                                }
+                            });
                         (cell.clone().upcast(), AlbumTrackField::Index(cell))
                     }
                     field => {
@@ -1428,12 +1425,14 @@ impl AlbumTrackSlot {
                         album_detail_track_text(track, index, *field)
                     }))
                 }
-                AlbumTrackField::Index(cell) => super::columns::set_track_row_index_text(
-                    cell,
-                    &current
-                        .as_ref()
-                        .map_or_else(String::new, |_| (index + 1).to_string()),
-                ),
+                AlbumTrackField::Index(cell) => {
+                    crate::widgets::recycled_cells::set_track_row_index_text(
+                        cell,
+                        &current
+                            .as_ref()
+                            .map_or_else(String::new, |_| (index + 1).to_string()),
+                    )
+                }
                 AlbumTrackField::Favorite(button) => set_favorite_button_active(
                     button,
                     current.as_ref().is_some_and(|track| track.state.favorite),

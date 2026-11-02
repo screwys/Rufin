@@ -230,5 +230,3 @@ mod tests {
         assert_eq!(large_popup_content_width(620), 682);
     }
 }
-
-pub const WINDOW_CHROME_MARGIN_END: i32 = 8;

@@ -7,7 +7,6 @@ mod track_selection;
 pub use catalog::CatalogUi;
 
 pub mod route_layout;
-pub mod ui_resource;
 
 use rufin_core::settings::*;
 mod album_detail;
@@ -45,5 +44,3 @@ pub(crate) fn collection_download_change(
 
 use rufin_core::collection_context::CollectionTarget;
 use std::rc::Rc;
-
-pub use named_detail::NamedDetailId;

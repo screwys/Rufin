@@ -321,9 +321,9 @@ impl CatalogUi {
             key,
             LibraryListKey::Playlists | LibraryListKey::SmartPlaylists
         ));
-        let resource = crate::library::ui_resource::PLAYLIST_COMMANDS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
-        let menu = crate::widgets::ui_resource::object::<gtk::gio::Menu>(
+        let resource = "routes/playlist_commands.ui";
+        let builder = crate::ui_resource::builder(resource);
+        let menu = crate::ui_resource::object::<gtk::gio::Menu>(
             &builder,
             resource,
             if key == LibraryListKey::SmartPlaylists {
@@ -495,8 +495,8 @@ impl CatalogUi {
         include_detail: bool,
     ) {
         let window = self.window.upgrade().expect("mounted catalog window");
-        let resource = crate::library::ui_resource::LIBRARY_CONFIG_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "routes/library_config.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             dialog: adw::Dialog,
             title: adw::WindowTitle,

@@ -47,8 +47,8 @@ fn library_sources_page(
     navigation: &adw::NavigationView,
     navigation_controls: &PreferencesNavigationControls,
 ) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/library.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         library_page: adw::PreferencesPage,
         activity_source: gtk::MenuButton,
@@ -257,8 +257,8 @@ pub(super) fn downloads_page(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
 ) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/library.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         downloads_page: adw::PreferencesPage,
         download_source: gtk::MenuButton,
@@ -302,8 +302,8 @@ fn source_downloads_group(
     dialog: &adw::Dialog,
     server: &SourceSummary,
 ) -> adw::PreferencesGroup {
-    let resource = crate::preferences::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/library.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         downloads_group: adw::PreferencesGroup,
         download_folder_row: adw::ActionRow,
@@ -467,8 +467,8 @@ fn source_downloads_group(
 }
 
 pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/library.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         local_page: adw::PreferencesPage, local_group: adw::PreferencesGroup,
         empty_local_row: adw::ActionRow, local_actions_row: adw::PreferencesRow,
@@ -867,8 +867,8 @@ fn add_download_queue(
     source_id: &sources::SourceId,
     pause: &gtk::Button,
 ) {
-    let resource = crate::preferences::ui_resource::DOWNLOAD_QUEUE_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/download_queue.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { scroll: gtk::ScrolledWindow, queue: gtk::ListView, empty: adw::ActionRow });
     use crate::widgets::sparse_model::{
         SparseRouteModel, SparseSource, bind_sparse_item, item_at_from_item, unbind_sparse_item,
@@ -900,8 +900,8 @@ fn add_download_queue(
     let source = source_id.clone();
     factory.connect_setup(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let resource = crate::preferences::ui_resource::DOWNLOAD_QUEUE_ROW_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/download_queue_row.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             row: adw::ActionRow, artwork: gtk::Box, drag: gtk::Image,
             up: gtk::Button, down: gtk::Button, cancel: gtk::Button, clear: gtk::Button,

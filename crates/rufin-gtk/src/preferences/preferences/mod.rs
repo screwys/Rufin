@@ -46,8 +46,8 @@ fn show_discord_flatpak_help(row: &adw::SwitchRow) {
     if !row.is_active() || std::env::var_os("FLATPAK_ID").is_none() {
         return;
     }
-    let resource = crate::preferences::ui_resource::DISCORD_FLATPAK_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/discord_flatpak.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::AlertDialog,
         user_command: gtk::Label,
@@ -80,7 +80,8 @@ pub struct PreferencesState {
     pub dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub release_history: RefCell<rufin_core::runtime::ReleaseHistory>,
     pub release_history_view: RefCell<Option<dialogs::release_notes::ReleaseHistoryView>>,
-    pub release_checks: std::sync::Arc<rufin_core::release_update::PeriodicReleaseChecks>,
+    /// Held so the periodic release checks keep running.
+    pub _release_checks: std::sync::Arc<rufin_core::release_update::PeriodicReleaseChecks>,
     pub preview_windows_updates: bool,
     pub release_notification_toast: RefCell<Option<adw::Toast>>,
     pub release_updating: RefCell<Option<String>>,
@@ -331,8 +332,8 @@ fn build_preferences_dialog(
     initial_page: PreferencesPageKind,
 ) {
     let credential_drafts = Rc::new(RefCell::new(shell.products.scrobbling.preferences()));
-    let resource = crate::preferences::ui_resource::PREFERENCES_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialog.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         responsive: adw::BreakpointBin,
         split_view: adw::NavigationSplitView,
@@ -841,8 +842,8 @@ fn general_page(
     shell: &Rc<Preferences>,
     navigation_controls: &PreferencesNavigationControls,
 ) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::GENERAL_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/general.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         page: adw::PreferencesPage,
         prefer_distinct_track_covers_row: adw::SwitchRow,
@@ -1076,7 +1077,7 @@ fn general_page(
     activity::wrap_general(shell, &page, &activity_overview_row, navigation_controls)
 }
 fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
-    let resource = crate::preferences::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
+    let resource = "preferences/appearance.ui";
     crate::objects!(builder, resource, {
         layout_group: adw::PreferencesGroup,
         lyrics_panel_row: adw::SwitchRow,

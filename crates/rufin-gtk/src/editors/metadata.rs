@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 const EDITOR_WIDTH: i32 = 850;
 
-pub use rufin_core::metadata::MetadataDraft;
 use rufin_core::metadata::{MetadataEditor, mixed_field_label};
 
 mod artwork;
@@ -54,8 +53,8 @@ struct Editor {
 }
 
 pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
-    let resource = crate::editors::ui_resource::METADATA_DIALOG_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         error_dialog: adw::Dialog,
         error_header: adw::HeaderBar,
@@ -89,8 +88,8 @@ fn build_editor_view(
     on_change: Option<Rc<dyn Fn()>>,
     runtime: tokio::runtime::Handle,
 ) -> (adw::Dialog, MetadataView) {
-    let resource = crate::editors::ui_resource::METADATA_DIALOG_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         editor_dialog: adw::Dialog,
         editor_toolbar: adw::ToolbarView,
@@ -269,8 +268,8 @@ fn append_named_entry(
     if mixed {
         title = mixed_field_label(&title, count);
     }
-    let resource = crate::editors::ui_resource::METADATA_FIELD_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata_field.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { entry: adw::EntryRow, clear: gtk::Button, undo: gtk::Button });
     entry.set_title(&title);
     entry.set_text(if mixed { "" } else { value });
@@ -509,8 +508,8 @@ fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
                     if summary.tracks == 0 {
                         return Ok(false);
                     }
-                    let resource = crate::editors::ui_resource::METADATA_DIALOG_RESOURCE;
-                    let builder = crate::editors::ui_resource::builder(resource);
+                    let resource = "preferences/dialogs/metadata.ui";
+                    let builder = crate::ui_resource::builder(resource);
                     let confirm: adw::AlertDialog = builder
                         .object("save_confirmation")
                         .expect("metadata save confirmation");

@@ -235,8 +235,8 @@ pub fn mount_metadata_local_access_mapping(
         .and_then(|access| access.server_prefix.clone())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_default();
-    let resource = crate::widgets::ui_resource::MANAGE_SERVER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/manage_server.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         mapping_group: adw::PreferencesGroup,
         mapping_expander: adw::ExpanderRow,

@@ -73,26 +73,17 @@ fn present_random_play_dialog_loaded(
         selected.music_folder_object_id.as_deref(),
     );
 
-    let resource = crate::shell::ui_resource::RANDOM_PLAY_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
-    let dialog: adw::Dialog =
-        crate::widgets::ui_resource::object(&builder, resource, "random_play_dialog");
+    let resource = "player/random_play.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "random_play_dialog");
     let controls = RandomPlayControls {
-        limit: crate::widgets::ui_resource::object(&builder, resource, "limit"),
-        min_year_enabled: crate::widgets::ui_resource::object(
-            &builder,
-            resource,
-            "min_year_enabled",
-        ),
-        min_year: crate::widgets::ui_resource::object(&builder, resource, "min_year"),
-        max_year_enabled: crate::widgets::ui_resource::object(
-            &builder,
-            resource,
-            "max_year_enabled",
-        ),
-        max_year: crate::widgets::ui_resource::object(&builder, resource, "max_year"),
-        genre: crate::widgets::ui_resource::object(&builder, resource, "genre"),
-        played_filter: crate::widgets::ui_resource::object(&builder, resource, "played_filter"),
+        limit: crate::ui_resource::object(&builder, resource, "limit"),
+        min_year_enabled: crate::ui_resource::object(&builder, resource, "min_year_enabled"),
+        min_year: crate::ui_resource::object(&builder, resource, "min_year"),
+        max_year_enabled: crate::ui_resource::object(&builder, resource, "max_year_enabled"),
+        max_year: crate::ui_resource::object(&builder, resource, "max_year"),
+        genre: crate::ui_resource::object(&builder, resource, "genre"),
+        played_filter: crate::ui_resource::object(&builder, resource, "played_filter"),
     };
     configure_spinner(&controls.limit, saved.limit as f64, MIN_LIMIT, MAX_LIMIT);
     configure_spinner(
@@ -124,11 +115,9 @@ fn present_random_play_dialog_loaded(
     connect_year_toggle(&controls.min_year_enabled, &controls.min_year);
     connect_year_toggle(&controls.max_year_enabled, &controls.max_year);
 
-    let play_next: gtk::Button =
-        crate::widgets::ui_resource::object(&builder, resource, "play_next");
-    let play_now: gtk::Button = crate::widgets::ui_resource::object(&builder, resource, "play_now");
-    let play_later: gtk::Button =
-        crate::widgets::ui_resource::object(&builder, resource, "play_later");
+    let play_next: gtk::Button = crate::ui_resource::object(&builder, resource, "play_next");
+    let play_now: gtk::Button = crate::ui_resource::object(&builder, resource, "play_now");
+    let play_later: gtk::Button = crate::ui_resource::object(&builder, resource, "play_later");
     drop(builder);
 
     connect_action(
@@ -311,10 +300,10 @@ fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlac
     glib::spawn_future_local(async move {
         match rufin_core::radio::play_saved_random(&owner, settings, placement).await {
             Ok(true) => {
-                let resource = crate::shell::ui_resource::RANDOM_PLAY_RESOURCE;
-                let builder = crate::widgets::ui_resource::builder(resource);
+                let resource = "player/random_play.ui";
+                let builder = crate::ui_resource::builder(resource);
                 let message: gtk::Label =
-                    crate::widgets::ui_resource::object(&builder, resource, "no_matches");
+                    crate::ui_resource::object(&builder, resource, "no_matches");
                 feedback.show_feedback_toast(message.text().to_string());
             }
             Ok(false) => {}

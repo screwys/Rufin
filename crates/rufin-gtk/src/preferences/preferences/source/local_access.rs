@@ -65,8 +65,8 @@ fn manage_server_content(
         rufin_core::runtime::source::LocalAccessStatus::default(),
     ));
     let sample_source_path = None;
-    let resource = crate::widgets::ui_resource::MANAGE_SERVER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/manage_server.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         scroller: gtk::ScrolledWindow,
         clamp: adw::Clamp,
@@ -298,8 +298,8 @@ fn server_actions_group(
     exit: &ManageServerExitSlot,
     preferences_dialog: &adw::Dialog,
 ) -> adw::PreferencesGroup {
-    let resource = crate::preferences::ui_resource::SERVER_ACTIONS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/server_actions.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         group: adw::PreferencesGroup,
         select: gtk::Button,

@@ -484,7 +484,7 @@ struct SearchRouteProjection {
     search_modes: gtk::Box,
     modes: [gtk::ToggleButton; 2],
     models: [gio::ListStore; 3],
-    playing: super::columns::TrackRowPlayingIndicator,
+    playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     active: RefCell<Option<SearchPresentation>>,
 }
 
@@ -544,7 +544,7 @@ impl SearchRouteProjection {
             search_modes,
             modes,
             models,
-            playing: super::columns::TrackRowPlayingIndicator::new(),
+            playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator::new(),
             active: RefCell::new(None),
         });
         projection.connect();
@@ -983,7 +983,7 @@ fn search_collection(
     shell: &Rc<CatalogUi>,
     model: gio::ListStore,
     category: CollectionCategory,
-    playing: Option<super::columns::TrackRowPlayingIndicator>,
+    playing: Option<crate::widgets::recycled_cells::TrackRowPlayingIndicator>,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(category.key());
     let selection = crate::widgets::selection::PositionSelectionModel::new(model.clone());
@@ -1069,7 +1069,7 @@ fn search_column(
     shell: &Rc<CatalogUi>,
     category: CollectionCategory,
     field: LibraryField,
-    playing: Option<&super::columns::TrackRowPlayingIndicator>,
+    playing: Option<&crate::widgets::recycled_cells::TrackRowPlayingIndicator>,
 ) -> gtk::ColumnViewColumn {
     if field == LibraryField::RowIndex {
         if category == CollectionCategory::Tracks
@@ -1196,7 +1196,7 @@ fn search_merged_column(
     shell: &Rc<CatalogUi>,
     category: CollectionCategory,
     width: i32,
-    playing: Option<super::columns::TrackRowPlayingIndicator>,
+    playing: Option<crate::widgets::recycled_cells::TrackRowPlayingIndicator>,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);

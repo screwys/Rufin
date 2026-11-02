@@ -931,8 +931,8 @@ impl crate::player::PlayerUi {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let resource = crate::player::ui_resource::QUEUE_SETTINGS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/queue_settings.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             dialog: adw::PreferencesDialog,
             page: adw::PreferencesPage,

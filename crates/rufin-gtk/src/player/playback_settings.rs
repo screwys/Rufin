@@ -41,8 +41,8 @@ fn playback_settings_popover(
     let playback = settings.playback;
     let local_output = shell.playback_owner.playback_output().is_local();
 
-    let resource = crate::player::ui_resource::PLAYBACK_SETTINGS_POPOVER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/playback_settings.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         popover: gtk::Popover,
         settings_group: adw::PreferencesGroup,
@@ -139,8 +139,8 @@ pub fn transition_rows(
     settings: &playback::PlaybackSettings,
     scale_width: i32,
 ) -> (adw::ActionRow, adw::PreferencesRow) {
-    let resource = crate::player::ui_resource::TRANSITION_SETTINGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/transition_settings.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         mode: adw::ActionRow,
         crossfade: gtk::ToggleButton,

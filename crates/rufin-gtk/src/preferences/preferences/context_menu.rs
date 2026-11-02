@@ -4,7 +4,7 @@ use crate::preferences::Preferences;
 use rufin_core::settings::ContextMenuItem;
 
 pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) {
-    let resource = crate::preferences::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
+    let resource = "preferences/appearance.ui";
     for (item, id) in [
         (ContextMenuItem::Play, "context_menu_play"),
         (ContextMenuItem::PlayNext, "context_menu_play_next"),
@@ -17,7 +17,7 @@ pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) 
         (ContextMenuItem::GoTo, "context_menu_go_to"),
         (ContextMenuItem::Download, "context_menu_download"),
     ] {
-        let row: adw::SwitchRow = crate::widgets::ui_resource::object(builder, resource, id);
+        let row: adw::SwitchRow = crate::ui_resource::object(builder, resource, id);
         row.set_active(
             shell
                 .settings
@@ -49,7 +49,7 @@ pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) 
     }
 
     let rating: adw::SwitchRow =
-        crate::widgets::ui_resource::object(builder, resource, "context_menu_rating_row");
+        crate::ui_resource::object(builder, resource, "context_menu_rating_row");
     shell.settings.bind_switch(
         &rating,
         "context menu rating setting",

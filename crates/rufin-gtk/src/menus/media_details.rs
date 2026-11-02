@@ -23,8 +23,8 @@ pub(crate) fn append_header(
     menus: &Rc<MediaMenus>,
     identity: MenuHeader<'_>,
 ) {
-    let resource = crate::menus::ui_resource::MEDIA_MENU_HEADER_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/media_menu_header.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         header: gtk::Box, cover: gtk::Box, title_host: gtk::Box, subtitle_host: gtk::Box,
         favorite: gtk::Button, details: gtk::Button,
@@ -76,8 +76,8 @@ fn bind_cover(host: &gtk::Box, menus: &MediaMenus, binding: Option<&[u8]>, size:
 }
 
 fn present(parent: &gtk::Window, menus: &Rc<MediaMenus>, item: MediaDetailsItem) {
-    let resource = crate::menus::ui_resource::MEDIA_DETAILS_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/media_details.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog, header: adw::HeaderBar, heading: adw::WindowTitle, state: gtk::Stack, edit: gtk::Button,
         cover: gtk::Box, title: gtk::Label, subtitle: gtk::Label, summary: gtk::Box, sections: gtk::Box,
@@ -132,21 +132,21 @@ fn populate(
 ) {
     summary.set_visible(!data.audio_summary.is_empty());
     for field in &data.audio_summary {
-        let resource = crate::menus::ui_resource::MEDIA_DETAIL_METRIC_RESOURCE;
-        let builder = crate::menus::ui_resource::builder(resource);
+        let resource = "routes/media_detail_metric.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {metric: gtk::Box, label: gtk::Label, value: gtk::Label});
         label.set_text(&field.label);
         value.set_text(&field.value);
         summary.append(&metric);
     }
     for group in &data.sections {
-        let resource = crate::menus::ui_resource::MEDIA_DETAIL_SECTION_RESOURCE;
-        let builder = crate::menus::ui_resource::builder(resource);
+        let resource = "routes/media_detail_section.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {section: adw::PreferencesGroup, fields: gtk::ListBox});
         section.set_title(&group.title);
         for field in &group.fields {
-            let resource = crate::menus::ui_resource::MEDIA_DETAIL_FIELD_RESOURCE;
-            let builder = crate::menus::ui_resource::builder(resource);
+            let resource = "routes/media_detail_field.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, {row: gtk::ListBoxRow, label: gtk::Label, value: gtk::Label, copy: gtk::Button, copy_icon: gtk::Image, musicbrainz: gtk::Button});
             label.set_text(&field.label);
             value.set_text(&field.value);

@@ -40,8 +40,8 @@ pub(super) struct ContentChromeParts {
 }
 
 pub(super) fn build_content_chrome(right_panel: &gtk::Box) -> ContentChromeParts {
-    let resource = crate::shell::ui_resource::CONTENT_CHROME_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "shell/content_chrome.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         root: gtk::Overlay,
         main_well: gtk::Overlay,

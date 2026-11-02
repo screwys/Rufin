@@ -8,8 +8,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::PreferencesPage {
-    let resource = crate::player::ui_resource::VISUALIZER_SETTINGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/visualizer_settings.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         page: adw::PreferencesPage,
         builtin_names: gtk::StringList,
@@ -597,10 +597,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let Some(shell) = editor.shell.upgrade() else {
             return;
         };
-        let resource = crate::player::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
-        let dialog: adw::AlertDialog =
-            crate::widgets::ui_resource::object(&builder, resource, "confirm");
+        let resource = "player/equalizer-dialogs.ui";
+        let builder = crate::ui_resource::builder(resource);
+        let dialog: adw::AlertDialog = crate::ui_resource::object(&builder, resource, "confirm");
         let Some(slot) = preset_row
             .upgrade()
             .and_then(|row| row.selected().checked_sub(1))

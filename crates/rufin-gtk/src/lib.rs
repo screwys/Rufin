@@ -1,13 +1,14 @@
 //! The GTK desktop client: window composition, pages, player, menus, editors and
 //! preferences.
 
-pub mod editors;
-pub mod library;
-pub mod menus;
-pub mod player;
-pub mod preferences;
-pub mod shell;
-pub mod widgets;
+mod editors;
+mod library;
+mod menus;
+mod player;
+mod preferences;
+mod shell;
+mod ui_resource;
+mod widgets;
 
 pub use shell::{
     ApplicationExit, run_application, run_application_after_update, run_startup_error_application,

@@ -14,8 +14,8 @@ pub(crate) fn present(
     initial_name: &str,
     accept: impl Fn(String) + 'static,
 ) {
-    let resource = crate::player::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/equalizer-dialogs.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         name_dialog: adw::Dialog, name: gtk::Entry, name_accept: gtk::Button,
         duplicate_title: gtk::Label, duplicate_label: gtk::Label,

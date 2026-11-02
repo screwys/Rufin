@@ -1,0 +1,128 @@
+use gtk::glib;
+use gtk::prelude::*;
+
+/// Where the compiled interface definitions and styles live.
+pub(crate) const UI_PREFIX: &str = "/io/github/screwys/Rufin/ui/";
+
+#[macro_export]
+macro_rules! composite_box {
+    ($vis:vis $name:ident, $imp:ident, $gtype:literal, $resource:literal, {
+        $($field:ident: $type:ty),+ $(,)?
+    }) => {
+        $vis mod $imp {
+            use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
+
+            #[derive(CompositeTemplate, Default)]
+            #[template(resource = $resource)]
+            $vis struct $name {
+                $(
+                    #[template_child]
+                    pub(crate) $field: TemplateChild<$type>,
+                )+
+            }
+
+            #[glib::object_subclass]
+            impl ObjectSubclass for $name {
+                const NAME: &'static str = $gtype;
+                type Type = super::$name;
+                type ParentType = gtk::Box;
+
+                fn class_init(class: &mut Self::Class) {
+                    class.bind_template();
+                }
+
+                fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+                    instance.init_template();
+                }
+            }
+
+            impl ObjectImpl for $name {}
+            impl WidgetImpl for $name {}
+            impl BoxImpl for $name {}
+        }
+
+        gtk::glib::wrapper! {
+            $vis struct $name(ObjectSubclass<$imp::$name>)
+                @extends gtk::Widget, gtk::Box,
+                @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+        }
+
+        impl $name {
+            fn new() -> Self {
+                gtk::glib::Object::new()
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! objects {
+    ($builder:expr, $resource:expr, { $($name:ident: $type:ty),+ $(,)? }) => {
+        $(
+            let $name: $type =
+                $crate::ui_resource::object(&$builder, $resource, stringify!($name));
+        )+
+    };
+}
+
+/// Loads an interface definition by its path below the interface prefix.
+pub(crate) fn builder(resource: &str) -> gtk::Builder {
+    let builder = gtk::Builder::new();
+    builder
+        .add_from_resource(&format!("{UI_PREFIX}{resource}"))
+        .unwrap_or_else(|error| panic!("failed to load interface resource {resource}: {error}"));
+    builder
+}
+
+pub(crate) fn object<T>(builder: &gtk::Builder, resource: &str, id: &str) -> T
+where
+    T: IsA<glib::Object>,
+{
+    builder
+        .object(id)
+        .unwrap_or_else(|| panic!("interface resource {resource} is missing object {id}"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn representative_rufin_icons_are_compiled_resources() {
+        crate::register_resources().expect("resource registration");
+        for relative_path in [
+            "scalable/apps/io.github.screwys.Rufin.svg",
+            "64x64/apps/io.github.screwys.Rufin.source.webdav.png",
+            "64x64/apps/io.github.screwys.Rufin.source.smb.png",
+            "64x64/apps/io.github.screwys.Rufin.source.plex.png",
+            "64x64/apps/io.github.screwys.Rufin.source.emby.png",
+            "scalable/actions/rufin-drive-harddisk-symbolic.svg",
+            "scalable/actions/rufin-edit-clear-symbolic.svg",
+            "scalable/actions/rufin-go-last-symbolic.svg",
+            "scalable/actions/rufin-activity-overview-symbolic.svg",
+            "scalable/actions/rufin-audio-only-symbolic.svg",
+            "scalable/actions/rufin-library-music-symbolic.svg",
+            "scalable/actions/rufin-mail-forward-symbolic.svg",
+            "scalable/actions/rufin-media-playback-start-symbolic.svg",
+            "scalable/actions/rufin-media-skip-backward-symbolic.svg",
+            "scalable/actions/rufin-media-skip-forward-symbolic.svg",
+            "scalable/actions/rufin-moods-symbolic.svg",
+            "scalable/actions/rufin-music-queue-symbolic.svg",
+            "scalable/actions/rufin-sliders-vertical-symbolic.svg",
+            "scalable/actions/rufin-sound-symbolic.svg",
+            "scalable/actions/rufin-text-center-symbolic.svg",
+            "scalable/actions/rufin-waves-and-screen-symbolic.svg",
+            "scalable/actions/rufin-view-list-ordered-symbolic.svg",
+            "scalable/actions/rufin-text-justify-center-symbolic.svg",
+            "scalable/actions/rufin-open-menu-symbolic.svg",
+            "scalable/actions/rufin-player-more-symbolic.svg",
+            "scalable/actions/rufin-preferences-desktop-appearance-symbolic.svg",
+            "scalable/actions/rufin-search-symbolic.svg",
+            "scalable/actions/rufin-tag-outline-symbolic.svg",
+            "scalable/actions/rufin-x-office-calendar-symbolic.svg",
+            "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
+        ] {
+            let path = format!("/io/github/screwys/Rufin/icons/hicolor/{relative_path}");
+            gtk::gio::resources_lookup_data(&path, gtk::gio::ResourceLookupFlags::NONE)
+                .unwrap_or_else(|error| panic!("missing compiled Rufin resource {path}: {error}"));
+        }
+    }
+}

@@ -746,10 +746,10 @@ pub(crate) fn toggle_mute_shortcut(shell: &Rc<Shell>) {
 }
 
 fn show_shortcuts_dialog(shell: &Shell) {
-    let resource = crate::shell::ui_resource::SHORTCUTS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "shell/shortcuts.ui";
+    let builder = crate::ui_resource::builder(resource);
     let dialog: adw::ShortcutsDialog =
-        crate::widgets::ui_resource::object(&builder, resource, "shortcuts_dialog");
+        crate::ui_resource::object(&builder, resource, "shortcuts_dialog");
     #[cfg(target_os = "macos")]
     let platform_accelerators = [
         ("shortcut_play_pause", "space"),
@@ -786,7 +786,7 @@ fn show_shortcuts_dialog(shell: &Shell) {
         ),
     ];
     for (id, accelerator) in platform_accelerators {
-        let item: adw::ShortcutsItem = crate::widgets::ui_resource::object(&builder, resource, id);
+        let item: adw::ShortcutsItem = crate::ui_resource::object(&builder, resource, id);
         item.set_accelerator(accelerator);
     }
 
@@ -831,12 +831,10 @@ fn replace_pointer_keycaps(container: &gtk::Widget) {
 }
 
 fn show_about_dialog(shell: &Shell) {
-    let resource = crate::shell::ui_resource::ABOUT_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
-    let dialog: adw::AboutDialog =
-        crate::widgets::ui_resource::object(&builder, resource, "dialog");
-    let sponsor: gtk::LinkButton =
-        crate::widgets::ui_resource::object(&builder, resource, "sponsor");
+    let resource = "application/about.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::AboutDialog = crate::ui_resource::object(&builder, resource, "dialog");
+    let sponsor: gtk::LinkButton = crate::ui_resource::object(&builder, resource, "sponsor");
     let sponsor_uri = sponsor.uri();
     dialog.set_support_url(&sponsor_uri);
     // AboutDialog exposes the URL but not the label of its main-page support action.

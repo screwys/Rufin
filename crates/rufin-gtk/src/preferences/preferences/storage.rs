@@ -29,8 +29,8 @@ pub(super) fn page(
     shell: &Rc<Preferences>,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::STORAGE_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/storage.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         navigation: adw::NavigationView,
         storage_page: adw::PreferencesPage,
@@ -167,10 +167,10 @@ pub(super) fn page(
                 let Some(page) = view.page.upgrade() else {
                     return;
                 };
-                let resource = crate::preferences::ui_resource::STORAGE_PREFERENCES_RESOURCE;
-                let builder = crate::widgets::ui_resource::builder(resource);
+                let resource = "preferences/storage.ui";
+                let builder = crate::ui_resource::builder(resource);
                 let dialog: adw::AlertDialog =
-                    crate::widgets::ui_resource::object(&builder, resource, confirmation);
+                    crate::ui_resource::object(&builder, resource, confirmation);
                 if dialog.choose_future(Some(&page)).await != "clear" {
                     return;
                 }
@@ -221,10 +221,10 @@ impl StorageView {
             let Some(page) = view.page.upgrade() else {
                 return;
             };
-            let resource = crate::preferences::ui_resource::STORAGE_PREFERENCES_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/storage.ui";
+            let builder = crate::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
-                crate::widgets::ui_resource::object(&builder, resource, "cache_entry_confirmation");
+                crate::ui_resource::object(&builder, resource, "cache_entry_confirmation");
             if dialog.choose_future(Some(&page)).await == "clear" {
                 view.load(Some(kind));
             }

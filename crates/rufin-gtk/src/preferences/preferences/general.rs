@@ -42,10 +42,10 @@ pub fn scrobbling_page(
     shell: &Rc<Preferences>,
     drafts: &ScrobblingCredentialDrafts,
 ) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::INTEGRATIONS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/integrations.ui";
+    let builder = crate::ui_resource::builder(resource);
     let page: adw::PreferencesPage =
-        crate::widgets::ui_resource::object(&builder, resource, "integrations_page");
+        crate::ui_resource::object(&builder, resource, "integrations_page");
     super::source::login::bind_integrations(shell, &page, &builder);
     let settings = shell.products.scrobbling.preferences();
     crate::objects!(builder, resource, {
@@ -531,10 +531,10 @@ async fn connect_scrobbling(
     Err(connection_error)
 }
 pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::PLAYBACK_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/playback.ui";
+    let builder = crate::ui_resource::builder(resource);
     let page: adw::PreferencesPage =
-        crate::widgets::ui_resource::object(&builder, resource, "playback_page");
+        crate::ui_resource::object(&builder, resource, "playback_page");
 
     let app_settings = shell.settings.current.borrow().clone();
     let settings = app_settings.playback.clone();
@@ -803,8 +803,8 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 }
 
 pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::PLAYBACK_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/playback.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         equalizer_page: adw::PreferencesPage,
         equalizer_group: adw::PreferencesGroup,
@@ -815,10 +815,10 @@ pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     equalizer_page
 }
 pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/appearance.ui";
+    let builder = crate::ui_resource::builder(resource);
     let page: adw::PreferencesPage =
-        crate::widgets::ui_resource::object(&builder, resource, "appearance_page");
+        crate::ui_resource::object(&builder, resource, "appearance_page");
     crate::objects!(builder, resource, {
         reduce_motion: adw::SwitchRow,
         sidebar_items: adw::ExpanderRow,

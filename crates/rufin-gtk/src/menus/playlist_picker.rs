@@ -111,8 +111,8 @@ pub(crate) fn populate_context_picker<Key: Clone + 'static>(
     activate: Rc<dyn Fn(Key, String, bool)>,
     create: Rc<dyn Fn(String)>,
 ) -> Rc<dyn Fn(Vec<(Key, String)>)> {
-    let resource = crate::menus::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/playlist_picker_context.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         content: gtk::Box,
         search: gtk::SearchEntry,
@@ -222,8 +222,8 @@ pub(crate) fn populate_context_picker<Key: Clone + 'static>(
 }
 
 pub(crate) fn folder_picker_dialog() -> (adw::Dialog, gtk::Box) {
-    let resource = crate::menus::ui_resource::PLAYLIST_PICKER_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/playlist_picker.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog, title: adw::WindowTitle, search: gtk::SearchEntry,
         list: gtk::Box, skip: gtk::CheckButton, cancel: gtk::Button, add: gtk::Button,
@@ -263,8 +263,8 @@ pub fn playlist_picker_dialog(
     title: String,
     preview_uris: Vec<String>,
 ) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {
-    let resource = crate::menus::ui_resource::PLAYLIST_PICKER_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/playlist_picker.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog,
         search: gtk::SearchEntry,

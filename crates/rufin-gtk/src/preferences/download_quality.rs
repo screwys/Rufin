@@ -9,8 +9,8 @@ pub(crate) fn rows(
     initial: DownloadQuality,
     changed: impl Fn(DownloadQuality, Rc<dyn Fn(DownloadQuality)>) + 'static,
 ) -> [adw::PreferencesRow; 3] {
-    let resource = crate::preferences::ui_resource::DOWNLOAD_QUALITY_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/download_quality.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         format: adw::ComboRow,
         bitrate: adw::ActionRow,

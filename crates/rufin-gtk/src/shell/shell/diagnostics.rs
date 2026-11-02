@@ -18,25 +18,24 @@ const DIAGNOSTICS_DIALOG_HEIGHT: i32 = 560;
 const LOG_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(super) fn present_diagnostics(shell: &Rc<Shell>) {
-    let resource = crate::shell::ui_resource::DIAGNOSTICS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
-    let dialog: adw::Dialog =
-        crate::widgets::ui_resource::object(&builder, resource, "diagnostics_dialog");
+    let resource = "shell/diagnostics.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "diagnostics_dialog");
     dialog.set_content_width(large_popup_content_width(DIAGNOSTICS_DIALOG_WIDTH));
     dialog.set_content_height(large_popup_content_height(
         shell.chrome.window.height(),
         DIAGNOSTICS_DIALOG_HEIGHT,
     ));
-    let debug: adw::SwitchRow = crate::widgets::ui_resource::object(&builder, resource, "debug");
+    let debug: adw::SwitchRow = crate::ui_resource::object(&builder, resource, "debug");
     debug.set_active(shell.diagnostics.debug_enabled());
 
-    let log: gtk::TextView = crate::widgets::ui_resource::object(&builder, resource, "log");
+    let log: gtk::TextView = crate::ui_resource::object(&builder, resource, "log");
     log.update_property(&[gtk::accessible::Property::Label(&tr("Diagnostic log"))]);
     let scroller: gtk::ScrolledWindow =
-        crate::widgets::ui_resource::object(&builder, resource, "log_scroller");
-    let copy: gtk::Button = crate::widgets::ui_resource::object(&builder, resource, "copy");
-    let save: gtk::Button = crate::widgets::ui_resource::object(&builder, resource, "save");
-    let status: gtk::Label = crate::widgets::ui_resource::object(&builder, resource, "status");
+        crate::ui_resource::object(&builder, resource, "log_scroller");
+    let copy: gtk::Button = crate::ui_resource::object(&builder, resource, "copy");
+    let save: gtk::Button = crate::ui_resource::object(&builder, resource, "save");
+    let status: gtk::Label = crate::ui_resource::object(&builder, resource, "status");
     drop(builder);
 
     let changing_debug = Rc::new(Cell::new(false));

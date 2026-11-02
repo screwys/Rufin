@@ -69,8 +69,8 @@ impl SourceSetupFlow for PlexFlow {
         shell.select_discovery_provider(sources::DiscoveryProvider::Plex);
         shell.start_server_discovery_once();
         let (scroller, content, _, status) = setup_scaffold(shell, context, self.presentation);
-        let resource = crate::preferences::ui_resource::PLEX_HOST_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/plex_host.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             section: gtk::Box, account: adw::PreferencesGroup, username: adw::EntryRow,
             password: adw::PasswordEntryRow, verification: adw::EntryRow,
@@ -489,8 +489,8 @@ pub(super) fn settings_group(
     saved: &EditableSource,
     _: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
-    let resource = crate::preferences::ui_resource::PLEX_HOST_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/plex_host.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { section: gtk::Box, account: adw::PreferencesGroup, profiles: adw::PreferencesGroup, login_actions: gtk::Box, choose_server: gtk::Button, change_profile: gtk::Button, connect: gtk::Button, save: gtk::Button, server: adw::ComboRow, name: adw::EntryRow, address: adw::EntryRow, cert_verify: adw::SwitchRow });
     for widget in [
         account.upcast::<gtk::Widget>(),

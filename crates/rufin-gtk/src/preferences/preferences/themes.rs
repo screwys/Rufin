@@ -7,10 +7,10 @@ use rufin_core::themes::Accent;
 use std::rc::Rc;
 
 pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::THEME_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/theme.ui";
+    let builder = crate::ui_resource::builder(resource);
     bind(shell, &builder, resource);
-    crate::widgets::ui_resource::object(&builder, resource, "theme_page")
+    crate::ui_resource::object(&builder, resource, "theme_page")
 }
 
 pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &str) {
@@ -125,8 +125,8 @@ fn populate(
     let choices = std::iter::once(None).chain(themes.iter().map(Some));
     let mut group = None;
     for (index, theme) in choices.enumerate() {
-        let resource = crate::preferences::ui_resource::THEME_TILE_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/theme_tile.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             tile: gtk::Box, select: gtk::ToggleButton, preview: gtk::DrawingArea,
             name: gtk::Label, accent: gtk::DropDown, edit: gtk::Button,
@@ -396,8 +396,8 @@ fn accent_factory(accents: &[Accent], show_name: bool) -> gtk::SignalListItemFac
     let accents = accents.to_vec();
     factory.connect_setup(move |_, object| {
         let list_item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let resource = crate::preferences::ui_resource::THEME_ACCENT_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/theme_accent.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, { item: gtk::Box, label: gtk::Label, swatch: gtk::Box });
         label.set_visible(show_name);
         let provider = gtk::CssProvider::new();

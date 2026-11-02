@@ -21,12 +21,13 @@ use super::collections::{
     CollectionTableProjection, LibraryCollectionProjection, LibraryPresentationProjection,
     dynamic_collection_table, library_route_inset,
 };
-use super::columns::{TrackRowPlayingIndicator, set_track_row_index_text, track_column_fit_width};
+use super::columns::track_column_fit_width;
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_selection_and_demand,
 };
 use crate::library::playlist_entry_model::PlaylistEntryModel;
+use crate::widgets::recycled_cells::{TrackRowPlayingIndicator, set_track_row_index_text};
 
 use super::route_shell::LibraryToolbarProjection;
 use super::table_sizing::route_column_view_initial_width_with_inset;

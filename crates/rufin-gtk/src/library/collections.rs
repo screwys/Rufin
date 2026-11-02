@@ -14,10 +14,7 @@ use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
 use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
 
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
-use super::columns::{
-    TrackRowPlayingIndicator, album_column, artist_column, track_column_fit_width,
-    track_column_for_key,
-};
+use super::columns::{album_column, artist_column, track_column_fit_width, track_column_for_key};
 use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
     collection_grid_with_demand,
@@ -31,6 +28,7 @@ use crate::widgets::library_fields::TrackPresentation;
 use crate::widgets::library_fields::{
     column_fit_width, column_width, compact_header_column_width, grid_label_with_label,
 };
+use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
 use crate::widgets::table_header::{ColumnViewHeader, TableFrame};
 use crate::widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
 use rufin_core::route::Route;
@@ -1094,10 +1092,9 @@ pub fn track_table(
             let header = header
                 .downcast_ref::<gtk::ListHeader>()
                 .expect("list header");
-            let resource = crate::library::ui_resource::DISC_HEADER_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
-            let label: gtk::Label =
-                crate::widgets::ui_resource::object(&builder, resource, "heading");
+            let resource = "routes/disc_header.ui";
+            let builder = crate::ui_resource::builder(resource);
+            let label: gtk::Label = crate::ui_resource::object(&builder, resource, "heading");
             header.set_child(Some(&label));
         });
         let sections = model.list_model();

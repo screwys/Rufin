@@ -15,8 +15,6 @@ pub mod artwork;
 
 pub mod downloads;
 
-pub mod ui_resource;
-
 pub mod detail_links;
 pub mod folder_launcher;
 mod playing_indicator;

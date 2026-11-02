@@ -280,8 +280,8 @@ impl EqualizerSurface {
     pub fn new(player: &Rc<crate::player::PlayerUi>) -> Self {
         EqualizerPlot::static_type();
         GainTrackLayout::static_type();
-        let resource = crate::player::ui_resource::EQUALIZER_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/equalizer.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             root: gtk::Box, enabled: gtk::Switch, assigned: gtk::CheckButton,
             toolbar: gtk::Box, editor: gtk::Box, effects: adw::ExpanderRow,
@@ -864,8 +864,8 @@ impl Editor {
         }
         let mut widgets = Vec::with_capacity(count);
         for index in 0..count {
-            let resource = crate::player::ui_resource::EQUALIZER_BAND_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "player/equalizer-band.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, {
                 band: gtk::Box, track: gtk::Box, track_layout: GainTrackLayout,
                 gain: gtk::Entry, scale: gtk::Scale,
@@ -911,17 +911,16 @@ impl Editor {
             });
             scale.add_controller(click);
             self.bands.append(&band);
-            let resource = crate::player::ui_resource::EQUALIZER_FILTER_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "player/equalizer-filter.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, {
                 filter: adw::WrapBox, enabled: gtk::CheckButton, number: gtk::Label,
                 kind: gtk::DropDown, width_unit: gtk::DropDown, width: gtk::Entry,
                 inactive: gtk::Image, remove: gtk::Button,
             });
             let frequency_value: gtk::Entry =
-                crate::widgets::ui_resource::object(&builder, resource, "frequency");
-            let gain_value: gtk::Entry =
-                crate::widgets::ui_resource::object(&builder, resource, "gain");
+                crate::ui_resource::object(&builder, resource, "frequency");
+            let gain_value: gtk::Entry = crate::ui_resource::object(&builder, resource, "gain");
             number.set_text(&(index + 1).to_string());
             self.bind_entry(
                 &frequency_value,
@@ -1510,8 +1509,8 @@ impl Editor {
     }
 
     fn confirm_delete(self: &Rc<Self>) {
-        let resource = crate::player::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/equalizer-dialogs.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, { confirm: adw::AlertDialog });
         let view = self.view.borrow().clone();
         let Some(id) = view.preset_id else { return };

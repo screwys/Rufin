@@ -10,8 +10,8 @@ pub(super) fn wrap_general(
     entry: &adw::ActionRow,
     controls: &PreferencesNavigationControls,
 ) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::ACTIVITY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/activity.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         navigation: adw::NavigationView, root: adw::NavigationPage, settings_page: adw::NavigationPage,
         monthly_enabled: adw::SwitchRow, yearly_enabled: adw::SwitchRow,

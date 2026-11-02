@@ -3,7 +3,6 @@ use playback::PlaybackSettings;
 pub mod lyrics;
 pub mod queue;
 pub mod state;
-pub mod ui_resource;
 use gtk::prelude::*;
 use lyrics::state::{LyricsState, SelectedLyricsState};
 use playback::PlaybackView;

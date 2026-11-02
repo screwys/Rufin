@@ -1,5 +1,5 @@
 use super::{PreferencesPageKind as Page, PreferencesSearchItem};
-use crate::preferences::{Preferences, ui_resource::*};
+use crate::preferences::Preferences;
 use localization::tr;
 
 fn property(node: roxmltree::Node<'_, '_>, name: &str) -> String {
@@ -20,29 +20,26 @@ fn property(node: roxmltree::Node<'_, '_>, name: &str) -> String {
 pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
     let mut items = Vec::new();
     for (page, resource) in [
-        (Page::General, GENERAL_PREFERENCES_RESOURCE),
-        (Page::Customization, APPEARANCE_PREFERENCES_RESOURCE),
-        (Page::Theme, THEME_PREFERENCES_RESOURCE),
-        (Page::Integrations, INTEGRATIONS_RESOURCE),
-        (Page::Playback, PLAYBACK_PREFERENCES_RESOURCE),
-        (
-            Page::Equalizer,
-            crate::player::ui_resource::EQUALIZER_RESOURCE,
-        ),
-        (Page::Library, LIBRARY_PREFERENCES_RESOURCE),
-        (Page::Downloads, DOWNLOAD_QUALITY_RESOURCE),
-        (Page::Connect, CONNECT_RESOURCE),
-        (Page::Controller, CONTROLLER_PREFERENCES_RESOURCE),
-        (Page::Storage, STORAGE_PREFERENCES_RESOURCE),
-        (Page::Storage, BACKUP_PREFERENCES_RESOURCE),
-        (Page::Privacy, PRIVACY_PREFERENCES_RESOURCE),
-        (
-            Page::Playback,
-            crate::player::ui_resource::TRANSITION_SETTINGS_RESOURCE,
-        ),
+        (Page::General, "preferences/general.ui"),
+        (Page::Customization, "preferences/appearance.ui"),
+        (Page::Theme, "preferences/theme.ui"),
+        (Page::Integrations, "preferences/integrations.ui"),
+        (Page::Playback, "preferences/playback.ui"),
+        (Page::Equalizer, "player/equalizer.ui"),
+        (Page::Library, "preferences/library.ui"),
+        (Page::Downloads, "preferences/download_quality.ui"),
+        (Page::Connect, "preferences/connect.ui"),
+        (Page::Controller, "preferences/controller.ui"),
+        (Page::Storage, "preferences/storage.ui"),
+        (Page::Storage, "preferences/backup.ui"),
+        (Page::Privacy, "preferences/privacy.ui"),
+        (Page::Playback, "player/transition_settings.ui"),
     ] {
-        let bytes = gtk::gio::resources_lookup_data(resource, gtk::gio::ResourceLookupFlags::NONE)
-            .expect("compiled preferences resource");
+        let bytes = gtk::gio::resources_lookup_data(
+            &format!("{}{resource}", crate::ui_resource::UI_PREFIX),
+            gtk::gio::ResourceLookupFlags::NONE,
+        )
+        .expect("compiled preferences resource");
         let document = roxmltree::Document::parse(std::str::from_utf8(&bytes).unwrap())
             .expect("preferences resource XML");
         for node in document.descendants().filter(|node| {
@@ -60,7 +57,7 @@ pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
                 continue;
             }
             let mut page = page;
-            if resource == LIBRARY_PREFERENCES_RESOURCE {
+            if resource == "preferences/library.ui" {
                 let root = node
                     .ancestors()
                     .find(|parent| parent.parent_element() == Some(document.root_element()))
@@ -138,7 +135,7 @@ pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
         ),
     ] {
         let bytes = gtk::gio::resources_lookup_data(
-            APPEARANCE_PREFERENCES_RESOURCE,
+            &format!("{}preferences/appearance.ui", crate::ui_resource::UI_PREFIX),
             gtk::gio::ResourceLookupFlags::NONE,
         )
         .unwrap();

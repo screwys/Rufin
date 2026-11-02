@@ -294,10 +294,6 @@ impl PlaylistEntrySelectionSnapshot {
         );
     }
 }
-pub fn selected_values<T: Clone>(order: &[T], positions: &gtk::Bitset) -> Vec<T> {
-    keys_at_positions(order, selected_positions(positions))
-}
-
 pub fn selected_ranges(positions: &gtk::Bitset) -> Vec<std::ops::Range<usize>> {
     if positions.size() == 0 {
         return Vec::new();
@@ -325,26 +321,6 @@ fn selected_positions(positions: &gtk::Bitset) -> impl Iterator<Item = u32> + '_
     first
         .into_iter()
         .flat_map(|(iter, first)| std::iter::once(first).chain(iter))
-}
-
-fn keys_at_positions<T: Clone>(order: &[T], positions: impl Iterator<Item = u32>) -> Vec<T> {
-    positions
-        .filter_map(|position| order.get(position as usize).cloned())
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn selected_positions_follow_visible_track_order() {
-        let order = ["one", "two", "three"];
-        assert_eq!(
-            keys_at_positions(&order, [0, 2].into_iter()),
-            ["one", "three"]
-        );
-    }
 }
 
 /// Plays `scope` whole, carrying the context id of `target`, the collection it reads.

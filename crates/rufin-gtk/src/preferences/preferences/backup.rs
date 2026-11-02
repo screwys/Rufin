@@ -15,7 +15,7 @@ const CONTENT_FIELDS: [fn(&mut BackupContents) -> &mut bool; 7] = [
     |v| &mut v.queue,
 ];
 fn content_rows(builder: &gtk::Builder, mut selected: BackupContents) -> [adw::SwitchRow; 7] {
-    let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
+    let resource = "preferences/dialogs/backup.ui";
     let ids = [
         "settings",
         "saved_logins",
@@ -26,11 +26,8 @@ fn content_rows(builder: &gtk::Builder, mut selected: BackupContents) -> [adw::S
         "queue",
     ];
     std::array::from_fn(|index| {
-        let row: adw::SwitchRow = crate::widgets::ui_resource::object(
-            builder,
-            resource,
-            &format!("content_{}", ids[index]),
-        );
+        let row: adw::SwitchRow =
+            crate::ui_resource::object(builder, resource, &format!("content_{}", ids[index]));
         row.set_active(*CONTENT_FIELDS[index](&mut selected));
         row
     })
@@ -48,8 +45,8 @@ pub(super) fn group(
     navigation: &adw::NavigationView,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> adw::PreferencesGroup {
-    let resource = crate::preferences::ui_resource::BACKUP_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/backup.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         backup_group: adw::PreferencesGroup, enabled: adw::SwitchRow, contents_slot: adw::PreferencesGroup,
         retention_count: gtk::SpinButton, schedule_error: adw::ActionRow, export_button: gtk::Button, restore_button: gtk::Button,
@@ -295,10 +292,10 @@ pub(super) fn group(
             import_dialog(&shell);
         }
     });
-    let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/backup.ui";
+    let builder = crate::ui_resource::builder(resource);
     let contents_group: adw::PreferencesGroup =
-        crate::widgets::ui_resource::object(&builder, resource, "contents_group");
+        crate::ui_resource::object(&builder, resource, "contents_group");
     for (index, row) in content_rows(&builder, settings.contents)
         .into_iter()
         .enumerate()
@@ -417,10 +414,10 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
                 return;
             }
         };
-        let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/dialogs/backup.ui";
+        let builder = crate::ui_resource::builder(resource);
         let confirm: adw::AlertDialog =
-            crate::widgets::ui_resource::object(&builder, resource, "restore_confirm");
+            crate::ui_resource::object(&builder, resource, "restore_confirm");
         if preview.contents.settings && !preview.removed_sources.is_empty() {
             confirm.set_body(&tr_with("Replace the selected contents and remove these configured sources?\n{sources}\nTheir retained user state and saved logins will remain unless selected.",
                 &[("sources", &preview.removed_sources.join("\n"))]));
@@ -473,8 +470,8 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
     });
 }
 async fn options(shell: &Preferences, importing: bool) -> Option<(Option<String>, BackupContents)> {
-    let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/backup.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         options: adw::AlertDialog, options_box: gtk::Box, password: adw::PasswordEntryRow,
         contents_group: adw::PreferencesGroup, export_options: adw::AlertDialog,
@@ -529,10 +526,6 @@ fn feedback(shell: &Preferences, result: Result<(), String>, success: &str) {
     }
 }
 fn chooser(id: &str) -> gtk::FileDialog {
-    let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
-    crate::widgets::ui_resource::object(
-        &crate::widgets::ui_resource::builder(resource),
-        resource,
-        id,
-    )
+    let resource = "preferences/dialogs/backup.ui";
+    crate::ui_resource::object(&crate::ui_resource::builder(resource), resource, id)
 }

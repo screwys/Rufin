@@ -36,8 +36,8 @@ impl Drop for LyricsPane {
 
 impl LyricsPane {
     pub(super) fn new(host: &gtk::Box) -> Self {
-        let resource = crate::editors::ui_resource::METADATA_LYRICS_RESOURCE;
-        let builder = crate::editors::ui_resource::builder(resource);
+        let resource = "preferences/dialogs/metadata_lyrics.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             lyrics_content: gtk::Paned,
             artist: gtk::Entry, title: gtk::Entry, status: gtk::Label,

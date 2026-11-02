@@ -52,8 +52,8 @@ pub(super) struct ArtworkEditor {
 
 impl ArtworkEditor {
     pub(super) fn new(host: &gtk::Box, external_lookup_allowed: bool) -> Self {
-        let resource = crate::editors::ui_resource::METADATA_ARTWORK_RESOURCE;
-        let builder = crate::editors::ui_resource::builder(resource);
+        let resource = "preferences/dialogs/metadata_artwork.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             artwork_content: gtk::Box, artwork_controls: gtk::Box, preview: gtk::Picture,
             artwork_status: gtk::Label, use_current: gtk::Button, upload: gtk::Button,
@@ -485,8 +485,8 @@ fn show_results(
     let mut thumbnails = Vec::with_capacity(results.len());
     let mut candidates = Vec::with_capacity(results.len());
     for result in results {
-        let resource = crate::editors::ui_resource::METADATA_ARTWORK_RESULT_RESOURCE;
-        let builder = crate::editors::ui_resource::builder(resource);
+        let resource = "preferences/dialogs/metadata_artwork_result.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             result_row: gtk::ListBoxRow, thumbnail: gtk::Picture, title: gtk::Label, detail: gtk::Label,
         });

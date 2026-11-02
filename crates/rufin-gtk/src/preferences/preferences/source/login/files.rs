@@ -270,7 +270,7 @@ pub fn bind_integrations(
     page: &adw::PreferencesPage,
     builder: &gtk::Builder,
 ) {
-    let resource = crate::preferences::ui_resource::INTEGRATIONS_RESOURCE;
+    let resource = "preferences/integrations.ui";
     crate::objects!(builder, resource, {
         file_connections: adw::PreferencesGroup, add_webdav: gtk::Button, add_smb: gtk::Button,
     });
@@ -301,10 +301,9 @@ pub fn bind_integrations(
                 }
                 continue;
             }
-            let resource = crate::preferences::ui_resource::FILE_INTEGRATION_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
-            let row: adw::ActionRow =
-                crate::widgets::ui_resource::object(&builder, resource, "connection");
+            let resource = "preferences/source/file_integration.ui";
+            let builder = crate::ui_resource::builder(resource);
+            let row: adw::ActionRow = crate::ui_resource::object(&builder, resource, "connection");
             row.set_title(&connection.name);
             row.set_subtitle(if connection.kind == "smb" {
                 "SMB / Samba"
@@ -391,8 +390,8 @@ pub fn choose_integration(
         present_integration(shell, parent, kind, None, selected);
         return;
     }
-    let resource = crate::preferences::ui_resource::FILE_INTEGRATION_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/file_integration.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { reuse: adw::AlertDialog, existing: adw::ComboRow });
     existing.set_model(Some(&gtk::StringList::new(
         &connections
@@ -425,8 +424,8 @@ pub fn present_integration(
     saved: Option<EditableSource>,
     finished: Rc<dyn Fn(sources::SourceId)>,
 ) {
-    let resource = crate::preferences::ui_resource::FILE_INTEGRATION_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/file_integration.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { dialog: adw::Dialog, content: gtk::Box, status: gtk::Label });
     let draft = Rc::new(RefCell::new(Draft::new(saved.as_ref())));
     let form = form(shell, &draft, kind, saved.is_some(), false, &status);
@@ -481,8 +480,8 @@ fn form(
     music: bool,
     status: &gtk::Label,
 ) -> Form {
-    let resource = crate::preferences::ui_resource::FILE_HOST_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/file_host.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         find_shares: gtk::Button, share: adw::ComboRow, share_options: gtk::StringList,
         section: gtk::Box, name: adw::EntryRow, url: adw::EntryRow,

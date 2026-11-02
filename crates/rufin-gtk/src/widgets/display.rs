@@ -35,8 +35,8 @@ impl DisplayEditor {
     }
 
     pub fn new(value: &DisplaySettings, changed: impl Fn(&DisplaySettings) + 'static) -> Self {
-        let resource = crate::widgets::ui_resource::DISPLAY_SETTINGS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/display.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             display_group: adw::PreferencesGroup,
             size_row: adw::ActionRow,

@@ -39,8 +39,8 @@ impl ArtworkEditor {
         ) -> async_channel::Receiver<Result<Option<Arc<ImageBytes>>, String>>
         + 'static,
     ) -> Rc<Self> {
-        let resource = crate::editors::ui_resource::PLAYLIST_ARTWORK_RESOURCE;
-        let builder = crate::editors::ui_resource::builder(resource);
+        let resource = "preferences/dialogs/playlist_artwork.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             artwork_preview: gtk::Picture, artwork_status: gtk::Label,
             artwork_display: gtk::Stack, artwork_current: gtk::Box,

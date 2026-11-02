@@ -28,7 +28,7 @@ impl ApplicationAppearance {
         };
 
         let base_provider = gtk::CssProvider::new();
-        base_provider.load_from_resource(crate::preferences::ui_resource::BASE_CSS_RESOURCE);
+        base_provider.load_from_resource("/io/github/screwys/Rufin/ui/style.css");
         gtk::style_context_add_provider_for_display(
             &display,
             &base_provider,

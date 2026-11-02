@@ -11,8 +11,8 @@ pub(crate) fn editor(
     local: bool,
     changed: Rc<dyn Fn(Vec<String>)>,
 ) -> (adw::PreferencesGroup, gtk::Button, gtk::Label) {
-    let resource = crate::preferences::ui_resource::EXCLUDED_FOLDERS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/excluded_folders.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         group: adw::PreferencesGroup, add: gtk::Button, save: gtk::Button, status: gtk::Label,
     });
@@ -47,8 +47,8 @@ fn add_row(
     rows: &Rows,
     changed: &Rc<dyn Fn(Vec<String>)>,
 ) -> adw::EntryRow {
-    let resource = crate::preferences::ui_resource::EXCLUDED_FOLDERS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/excluded_folders.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         path: adw::EntryRow, browse: gtk::Button, remove: gtk::Button, chooser: gtk::FileDialog,
     });

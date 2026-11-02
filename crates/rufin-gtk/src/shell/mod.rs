@@ -8,7 +8,6 @@ pub(crate) mod player;
 mod preferences;
 mod ratings;
 mod shell;
-mod ui_resource;
 
 pub use application::{
     ApplicationExit, run_application, run_application_after_update, run_startup_error_application,

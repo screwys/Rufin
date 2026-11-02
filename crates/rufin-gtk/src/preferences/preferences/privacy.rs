@@ -12,8 +12,8 @@ pub(super) fn page(
     dialog: &adw::Dialog,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::PRIVACY_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/privacy.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         navigation: adw::NavigationView,
         privacy_page: adw::PreferencesPage,

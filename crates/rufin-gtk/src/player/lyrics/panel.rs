@@ -46,9 +46,9 @@ impl PlayerUi {
             }
             JapaneseDictionaryStatus::Idle | JapaneseDictionaryStatus::Loading => return,
         };
-        let resource = crate::player::ui_resource::LYRICS_DICTIONARY_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
-        let toast: adw::Toast = crate::widgets::ui_resource::object(&builder, resource, id);
+        let resource = "player/lyrics/dictionary.ui";
+        let builder = crate::ui_resource::builder(resource);
+        let toast: adw::Toast = crate::ui_resource::object(&builder, resource, id);
         let shell = Rc::downgrade(self);
         toast.connect_button_clicked(move |_| {
             if let Some(shell) = shell.upgrade() {
@@ -210,8 +210,8 @@ impl PlayerUi {
         drop(projection);
         drop(lyrics);
 
-        let resource = crate::player::ui_resource::LYRICS_EDIT_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/lyrics/edit.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             dialog: adw::Dialog,
             editor_host: gtk::Box,
@@ -303,8 +303,8 @@ impl PlayerUi {
             return;
         }
 
-        let resource = crate::player::ui_resource::LYRICS_SEARCH_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/lyrics/search.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             dialog: adw::Dialog,
             artist_entry: gtk::Entry,

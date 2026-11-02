@@ -146,8 +146,8 @@ fn present_local_access_recovery(
     source_path: &str,
     on_success: Rc<dyn Fn()>,
 ) {
-    let resource = crate::editors::ui_resource::METADATA_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         recovery_dialog: adw::Dialog,
         recovery_header: adw::HeaderBar,

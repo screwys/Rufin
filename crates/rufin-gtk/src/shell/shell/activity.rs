@@ -142,8 +142,8 @@ impl Shell {
 
 impl ActivityView {
     fn new(shell: &Rc<Shell>) -> Rc<Self> {
-        let resource = crate::shell::ui_resource::ACTIVITY_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "shell/activity.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             root: gtk::Box, report: gtk::Overlay, content_clamp: adw::Clamp,
             outgoing_content: gtk::Picture,
@@ -228,8 +228,8 @@ impl ActivityView {
         artists_host.append(&collections.artists);
         albums_host.append(&collections.albums);
         let genre_rows = (0..10).map(|_| {
-            let resource = crate::shell::ui_resource::ACTIVITY_GENRE_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "shell/activity_genre.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, { row: gtk::Box, name: gtk::Label, count: gtk::Label, bar: gtk::ProgressBar });
             genres_host.append(&row);
             (row, name, count, bar)

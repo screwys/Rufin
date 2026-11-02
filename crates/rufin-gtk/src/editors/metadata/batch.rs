@@ -52,8 +52,8 @@ pub fn build_batch_dialog(
     runtime: tokio::runtime::Handle,
     on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
 ) -> adw::Dialog {
-    let resource = crate::editors::ui_resource::METADATA_BATCH_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata_batch.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         batch_dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,

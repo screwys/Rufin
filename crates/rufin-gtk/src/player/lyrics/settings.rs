@@ -121,10 +121,9 @@ pub fn present_lyrics_settings_dialog(
     }
     drop(lyrics);
 
-    let resource = crate::player::ui_resource::LYRICS_SETTINGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
-    let dialog: adw::PreferencesDialog =
-        crate::widgets::ui_resource::object(&builder, resource, "dialog");
+    let resource = "player/lyrics/settings.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::PreferencesDialog = crate::ui_resource::object(&builder, resource, "dialog");
     dialog.set_content_width(crate::widgets::layout::large_popup_content_width(760));
     dialog.set_content_height(crate::widgets::layout::large_popup_content_height(
         window.height(),
@@ -173,7 +172,7 @@ fn build_lyrics_settings(
     fullscreen: bool,
 ) -> adw::PreferencesPage {
     let settings = shell.settings.current.borrow().lyrics.preferences.clone();
-    let resource = crate::player::ui_resource::LYRICS_SETTINGS_RESOURCE;
+    let resource = "player/lyrics/settings.ui";
     crate::objects!(builder, resource, {
         page: adw::PreferencesPage,
         sources: adw::PreferencesGroup,

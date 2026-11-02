@@ -8,8 +8,8 @@ pub fn folder_name_dialog(
     initial_name: Option<&str>,
     save_name: impl Fn(String) + 'static,
 ) -> adw::Dialog {
-    let resource = crate::menus::ui_resource::PLAYLIST_FOLDER_RESOURCE;
-    let builder = crate::menus::ui_resource::builder(resource);
+    let resource = "routes/playlist_folder.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         name_dialog: adw::Dialog, name: gtk::Entry, cancel: gtk::Button,
         save: gtk::Button, folder_labels: gtk::StringList,

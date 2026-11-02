@@ -38,9 +38,9 @@ impl Shell {
     pub(crate) fn link_playlist_file_dialog(self: &Rc<Self>, key: library::PlaylistKey) {
         let shell = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let resource = crate::widgets::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
-            let dialog: adw::AlertDialog = crate::widgets::ui_resource::object(
-                &crate::widgets::ui_resource::builder(resource),
+            let resource = "preferences/dialogs/playlist_name.ui";
+            let dialog: adw::AlertDialog = crate::ui_resource::object(
+                &crate::ui_resource::builder(resource),
                 resource,
                 "link_choice",
             );
@@ -153,8 +153,8 @@ impl Shell {
         let mut filename = playlist_export_filename(name);
         let shell = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let resource = crate::preferences::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/dialogs/playlist_file.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, { export_options: adw::AlertDialog, export_format: adw::ComboRow, export_path_mode: adw::ComboRow, export_link: adw::SwitchRow });
             let can_link = if let PlaylistExport::Playlist(key) = &target {
                 match rufin_core::playlist_files::settings(&shell.products.source, *key)
@@ -243,9 +243,9 @@ impl Shell {
     ) {
         let shell = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let resource = crate::preferences::ui_resource::BACKUP_DIALOG_RESOURCE;
-            let dialog: gtk::FileDialog = crate::widgets::ui_resource::object(
-                &crate::widgets::ui_resource::builder(resource),
+            let resource = "preferences/dialogs/backup.ui";
+            let dialog: gtk::FileDialog = crate::ui_resource::object(
+                &crate::ui_resource::builder(resource),
                 resource,
                 "activity_chooser",
             );
@@ -294,8 +294,8 @@ enum FileLocation {
 }
 
 fn playlist_chooser() -> gtk::FileDialog {
-    let resource = crate::preferences::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/playlist_file.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { chooser: gtk::FileDialog, playlist_filter: gtk::FileFilter });
     let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
     filters.append(&playlist_filter);
@@ -312,8 +312,8 @@ async fn playlist_file_location(shell: &Rc<Shell>, filename: &str) -> Option<Fil
     let Some(source) = source.filter(|source| source.file_settings.is_some()) else {
         return Some(FileLocation::Device);
     };
-    let resource = crate::preferences::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/playlist_file.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { dialog: adw::AlertDialog, path: adw::EntryRow });
     dialog.set_body(&source.source.name);
     path.set_text(filename);

@@ -10,8 +10,8 @@ pub(crate) fn present_color_chooser(
     default_color: impl Fn() -> gtk::gdk::RGBA + 'static,
     save: impl Fn(gtk::gdk::RGBA) + 'static,
 ) {
-    let resource = crate::player::ui_resource::COLOR_CHOOSER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/color_chooser.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Window,
         heading: adw::WindowTitle,

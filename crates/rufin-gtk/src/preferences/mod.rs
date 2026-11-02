@@ -2,7 +2,6 @@
 pub mod appearance;
 mod download_quality;
 pub mod preferences;
-pub mod ui_resource;
 
 use rufin_core::settings::*;
 use std::rc::Rc;

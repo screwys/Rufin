@@ -15,8 +15,8 @@ struct PanelControls {
 
 impl PanelControls {
     fn new() -> Self {
-        let resource = crate::player::ui_resource::SIDEBAR_CONTROLS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "player/sidebar_controls.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             controls: gtk::Box,
             up: gtk::Button,
@@ -55,8 +55,8 @@ pub fn build_right_panel(
     visualizer_area: &crate::player::visualizer::Visualizer,
     settings: &Settings,
 ) -> RightPanelWidgets {
-    let resource = crate::player::ui_resource::RIGHT_PANEL_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/right_panel.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         queue_loading: adw::Spinner,
         root: gtk::Box,
@@ -200,8 +200,8 @@ impl RightPanelWidgets {
         let mut child: gtk::Widget = self.modules[first.index()].clone().upcast();
         let mut remainder = vec![*first];
         for panel in traversal.iter().skip(1) {
-            let resource = crate::player::ui_resource::SIDEBAR_SPLIT_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "player/sidebar_split.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, { split: gtk::Paned });
             if queue_last {
                 split.set_start_child(Some(&child));

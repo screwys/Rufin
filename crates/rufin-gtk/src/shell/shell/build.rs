@@ -68,8 +68,8 @@ pub async fn build(
         initial_window_size(settings.window_width, settings.window_height);
     let topbar = super::topbar::Topbar::new();
 
-    let shell_root_resource = crate::shell::ui_resource::SHELL_ROOT_RESOURCE;
-    let shell_root_builder = crate::widgets::ui_resource::builder(shell_root_resource);
+    let shell_root_resource = "shell/root.ui";
+    let shell_root_builder = crate::ui_resource::builder(shell_root_resource);
     crate::objects!(shell_root_builder, shell_root_resource, {
         root_stack: gtk::Stack,
         app_root_overlay: gtk::Overlay,
@@ -197,7 +197,7 @@ pub async fn build(
         dialog: gtk::glib::WeakRef::new(),
         release_history: RefCell::new(release_history),
         release_history_view: RefCell::new(None),
-        release_checks: products.release_updates.clone().check_periodically(),
+        _release_checks: products.release_updates.clone().check_periodically(),
         preview_windows_updates: window_bar_preview
             == Some(crate::shell::application::WindowBarPreview::Windows),
         release_notification_toast: RefCell::new(None),
@@ -207,8 +207,8 @@ pub async fn build(
 
     let desktop = DesktopState::new(app, products.playback.clone());
 
-    let navigation_resource = crate::shell::ui_resource::NAVIGATION_RESOURCE;
-    let navigation_builder = crate::widgets::ui_resource::builder(navigation_resource);
+    let navigation_resource = "shell/navigation.ui";
+    let navigation_builder = crate::ui_resource::builder(navigation_resource);
     crate::objects!(navigation_builder, navigation_resource, {
         normal_nav_panel: gtk::Box,
         sidebar_modes: gtk::Stack,
@@ -569,7 +569,7 @@ pub async fn build(
     let weak_shell = Rc::downgrade(&shell);
     #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
     {
-        let body: gtk::Label = crate::widgets::ui_resource::object(
+        let body: gtk::Label = crate::ui_resource::object(
             &shell_root_builder,
             shell_root_resource,
             "secret_storage_portal_body",

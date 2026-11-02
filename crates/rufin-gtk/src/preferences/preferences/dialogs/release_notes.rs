@@ -505,8 +505,8 @@ fn present_release_notes_dialog(
     updating_version: Option<&str>,
     release_updates: &ReleaseUpdateHandle,
 ) -> ReleaseHistoryView {
-    let resource = crate::preferences::ui_resource::RELEASE_NOTES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/release_notes.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog,
         selector: gtk::DropDown,
@@ -704,8 +704,8 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
             clear_updating_version(shell, &version);
             refresh_open_release_notes(shell);
             dismiss_release_notification(shell);
-            let resource = crate::preferences::ui_resource::UPDATE_READY_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/dialogs/update_ready.ui";
+            let builder = crate::ui_resource::builder(resource);
             crate::objects!(builder, resource, { toast: adw::Toast });
             let release_updates = shell.products.release_updates.clone();
             toast.connect_button_clicked(move |_| release_updates.update(version.clone()));
@@ -727,8 +727,8 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
             shell
                 .control_feedback
                 .show_feedback_toast(if restart_required {
-                    let resource = crate::preferences::ui_resource::UPDATE_READY_RESOURCE;
-                    let builder = crate::widgets::ui_resource::builder(resource);
+                    let resource = "preferences/dialogs/update_ready.ui";
+                    let builder = crate::ui_resource::builder(resource);
                     crate::objects!(builder, resource, { toast: adw::Toast });
                     toast.title().expect("update toast title").to_string()
                 } else {

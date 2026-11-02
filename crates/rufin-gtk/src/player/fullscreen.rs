@@ -185,8 +185,8 @@ impl FullscreenPlayerParts {
 pub fn build_fullscreen_player(
     visualizer_area: &crate::player::visualizer::Visualizer,
 ) -> FullscreenPlayerParts {
-    let resource = crate::player::ui_resource::FULLSCREEN_PLAYER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/fullscreen.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         root: gtk::Overlay,
         close_button: gtk::Button,
@@ -351,8 +351,8 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
         return;
     };
     let key = rufin_core::settings::LibraryListKey::FullscreenTracks;
-    let resource = crate::player::ui_resource::FULLSCREEN_SETTINGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/fullscreen_settings.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::PreferencesDialog,
         page: adw::PreferencesPage,
@@ -840,13 +840,6 @@ impl crate::player::PlayerUi {
         self.apply_fullscreen_now_playing_text(presentation);
         self.apply_fullscreen_responsive_layout();
         self.apply_fullscreen_now_playing_cover(presentation);
-    }
-
-    pub fn refresh_fullscreen_player_layout(self: &Rc<Self>) {
-        if !self.fullscreen_player_visible() {
-            return;
-        }
-        self.apply_fullscreen_responsive_layout();
     }
 
     fn apply_fullscreen_responsive_layout(self: &Rc<Self>) {

@@ -5,8 +5,8 @@ use rufin_core::runtime::source::SourceSummary;
 use std::rc::Rc;
 
 pub fn delete_playlist_dialog(name: &str, delete: impl Fn() + 'static) -> adw::AlertDialog {
-    let resource = crate::widgets::ui_resource::PLAYLIST_DELETE_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/playlist_delete.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { dialog: adw::AlertDialog });
     dialog.set_body(&dialog.body().replace("{name}", name));
     dialog.connect_response(Some("delete"), move |_, _| delete());
@@ -14,8 +14,8 @@ pub fn delete_playlist_dialog(name: &str, delete: impl Fn() + 'static) -> adw::A
 }
 
 pub fn delete_playlists_dialog(count: usize, delete: impl Fn() + 'static) -> adw::AlertDialog {
-    let resource = crate::widgets::ui_resource::PLAYLIST_DELETE_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/playlist_delete.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { selection_dialog: adw::AlertDialog });
     selection_dialog.set_body(&localization::trn_with(
         "Delete {count} playlist?",
@@ -52,8 +52,8 @@ pub fn new_playlist_dialog(
     selected: Option<SourceSummary>,
     create: impl Fn(String, Option<library::SourceId>, Option<bool>) + 'static,
 ) -> adw::Dialog {
-    let resource = crate::widgets::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/playlist_name.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         new_dialog: adw::Dialog, new_entry: gtk::Entry, new_owner: gtk::ToggleButton,
         new_public_options: gtk::Box, new_public: gtk::Switch,

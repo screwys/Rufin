@@ -87,9 +87,9 @@ pub fn playlist_auto_save_row(
     if !matches!(source.kind.as_str(), "local" | "smb" | "webdav") {
         return None;
     }
-    let resource = crate::preferences::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
-    let row: adw::SwitchRow = crate::widgets::ui_resource::object(
-        &crate::widgets::ui_resource::builder(resource),
+    let resource = "preferences/dialogs/playlist_file.ui";
+    let row: adw::SwitchRow = crate::ui_resource::object(
+        &crate::ui_resource::builder(resource),
         resource,
         "source_auto_save",
     );

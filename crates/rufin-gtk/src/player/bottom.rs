@@ -126,7 +126,6 @@ pub struct PlayerControls {
     pub waveform_key: RefCell<Option<CurrentMediaId>>,
     pub waveform_peak_count: Cell<usize>,
     pub duration: gtk::Label,
-    pub timestamp_size_group: gtk::SizeGroup,
     pub actions: gtk::Overlay,
     pub action_buttons: gtk::Box,
     pub mute_button: gtk::Button,
@@ -165,7 +164,6 @@ pub struct TransportControls {
     pub progress: gtk::Scale,
     pub waveform: WaveformSeekBar,
     pub duration: gtk::Label,
-    pub timestamp_size_group: gtk::SizeGroup,
 }
 
 pub struct PlayerActionControls {
@@ -442,8 +440,8 @@ pub fn set_waveform_source(context: &gtk::cairo::Context, color: &gtk::gdk::RGBA
 }
 
 pub fn build_bottom_player() -> PlayerControls {
-    let resource = crate::player::ui_resource::BOTTOM_PLAYER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/bottom.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         root: gtk::Box,
         now_playing_wall: gtk::Box,
@@ -479,7 +477,6 @@ pub fn build_bottom_player() -> PlayerControls {
         progress,
         waveform,
         duration,
-        timestamp_size_group,
     } = build_transport_controls(&builder, resource);
 
     now_playing_wall.append(&now_playing);
@@ -554,7 +551,6 @@ pub fn build_bottom_player() -> PlayerControls {
         waveform_key: RefCell::new(None),
         waveform_peak_count: Cell::new(0),
         duration,
-        timestamp_size_group,
         actions,
         action_buttons,
         mute_button,
@@ -655,6 +651,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     progress_stack.set_size_request(BOTTOM_PLAYER_PROGRESS_WIDTH, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
     elapsed.set_xalign(1.0);
     duration.set_xalign(0.0);
+    // The labels keep their size group alive.
     let timestamp_size_group = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
     timestamp_size_group.add_widget(&elapsed);
     timestamp_size_group.add_widget(&duration);
@@ -788,7 +785,6 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
         progress,
         waveform,
         duration,
-        timestamp_size_group,
     }
 }
 

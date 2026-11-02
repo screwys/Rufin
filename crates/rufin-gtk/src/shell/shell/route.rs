@@ -639,8 +639,8 @@ impl Shell {
         source_id: Option<SourceId>,
         render_started: RouteTiming,
     ) {
-        let resource = crate::shell::ui_resource::ROUTE_ERROR_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "shell/route_error.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             root: gtk::Box,
             message: gtk::Label,

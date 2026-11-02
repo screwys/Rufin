@@ -164,8 +164,8 @@ fn smart_playlist_dialog(
     definition: Option<&SmartPlaylistDefinition>,
     sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
 ) -> SmartPlaylistDialog {
-    let resource = crate::editors::ui_resource::SMART_PLAYLIST_DIALOG_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/smart_playlist.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog,
         title: adw::WindowTitle,

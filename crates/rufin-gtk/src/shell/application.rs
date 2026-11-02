@@ -328,8 +328,8 @@ fn gtk_application_window(
 }
 
 fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
-    let resource = crate::shell::ui_resource::STARTUP_ERROR_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "application/startup_error.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         content: gtk::Box,
         header: gtk::HeaderBar,
@@ -354,25 +354,6 @@ fn configure_app_icon() {
 }
 
 #[cfg(test)]
-fn verify_interface_resources() -> Result<(), String> {
-    crate::register_resources()?;
-    crate::widgets::ui_resource::verify_icons()?;
-    for path in crate::shell::ui_resource::INTERFACE_RESOURCE_PATHS
-        .iter()
-        .chain(crate::widgets::ui_resource::INTERFACE_RESOURCE_PATHS)
-        .chain(crate::editors::ui_resource::INTERFACE_RESOURCE_PATHS)
-        .chain(crate::menus::ui_resource::INTERFACE_RESOURCE_PATHS)
-        .chain(crate::preferences::ui_resource::INTERFACE_RESOURCE_PATHS)
-        .chain(crate::player::ui_resource::INTERFACE_RESOURCE_PATHS)
-        .chain(crate::library::ui_resource::INTERFACE_RESOURCE_PATHS)
-    {
-        gio::resources_lookup_data(path, gio::ResourceLookupFlags::NONE)
-            .map_err(|error| format!("missing compiled Rufin resource {path}: {error}"))?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -387,10 +368,5 @@ mod tests {
             Ok(WindowBarPreview::Windows)
         );
         assert!(WindowBarPreview::parse("linux").is_err());
-    }
-
-    #[test]
-    fn composed_interface_resources_are_compiled() {
-        verify_interface_resources().expect("compiled interface resources");
     }
 }

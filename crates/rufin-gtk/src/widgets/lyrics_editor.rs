@@ -16,8 +16,8 @@ pub struct LyricsEditor {
 
 impl LyricsEditor {
     pub fn new(text: &str, offset_millis: i64, on_offset: Rc<dyn Fn(i64)>) -> Self {
-        let resource = crate::widgets::ui_resource::LYRICS_EDITOR_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "lyrics_editor.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             content: gtk::Box, editor: gtk::TextView, offset_entry: gtk::Entry,
             offset_controls: adw::WrapBox,

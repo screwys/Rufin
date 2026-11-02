@@ -8,8 +8,8 @@ pub(crate) fn import<F: Future<Output = Result<(), String>> + 'static>(
     allow_apo: bool,
     apply: impl Fn(String, bool) -> F + 'static,
 ) {
-    let resource = crate::player::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/equalizer-dialogs.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         import_dialog: adw::Dialog, import_text: gtk::TextView,
         import_formats: gtk::Box, import_apo: gtk::ToggleButton,
@@ -113,8 +113,8 @@ pub(crate) fn export(
     filenames: &'static [&'static str],
     preview: impl Fn(bool) -> Result<String, String> + 'static,
 ) {
-    let resource = crate::player::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "player/equalizer-dialogs.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         export_dialog: adw::Dialog, export_formats: gtk::Box, export_apo: gtk::ToggleButton,
         export_text: gtk::TextView, export_error: gtk::Label, file_save: gtk::FileDialog,

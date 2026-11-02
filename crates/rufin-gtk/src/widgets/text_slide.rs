@@ -19,8 +19,8 @@ fn align_glyphs(label: &gtk::Label) {
 }
 
 pub fn new_label() -> (gtk::Widget, gtk::Label) {
-    let resource = crate::widgets::ui_resource::TEXT_SLIDE_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "routes/text_slide.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         fade: crate::widgets::edge_fade::TextFade,
         scroll: gtk::ScrolledWindow, viewport: gtk::Viewport, label: gtk::Label,

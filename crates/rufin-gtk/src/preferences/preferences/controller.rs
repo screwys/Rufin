@@ -7,9 +7,9 @@ use rufin_core::settings::ControllerSettings;
 use crate::preferences::Preferences;
 
 pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
-    let resource = crate::preferences::ui_resource::CONTROLLER_PREFERENCES_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
-    let page = crate::widgets::ui_resource::object(&builder, resource, "controller_page");
+    let resource = "preferences/controller.ui";
+    let builder = crate::ui_resource::builder(resource);
+    let page = crate::ui_resource::object(&builder, resource, "controller_page");
     bind(shell, &page, &builder, resource);
     page
 }
@@ -50,10 +50,10 @@ pub(super) fn bind(
         let token = token.clone();
         let status = status.clone();
         gtk::glib::spawn_future_local(async move {
-            let resource = crate::preferences::ui_resource::CONTROLLER_PREFERENCES_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/controller.ui";
+            let builder = crate::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
-                crate::widgets::ui_resource::object(&builder, resource, "controller_regenerate");
+                crate::ui_resource::object(&builder, resource, "controller_regenerate");
             if dialog.choose_future(Some(&shell.window)).await != "regenerate" {
                 if let Some(button) = button.upgrade() {
                     button.set_sensitive(true);
@@ -115,13 +115,12 @@ pub fn bind_popover(shell: &Rc<Preferences>, button: &gtk::MenuButton) {
         let Some(shell) = weak.upgrade() else {
             return;
         };
-        let resource = crate::preferences::ui_resource::CONTROLLER_POPOVER_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
-        let popover: gtk::Popover =
-            crate::widgets::ui_resource::object(&builder, resource, "popover");
+        let resource = "shell/controller.ui";
+        let builder = crate::ui_resource::builder(resource);
+        let popover: gtk::Popover = crate::ui_resource::object(&builder, resource, "popover");
         popover.connect_show(crate::widgets::interactions::align_topbar_popup);
         let open_settings: gtk::Button =
-            crate::widgets::ui_resource::object(&builder, resource, "open_settings");
+            crate::ui_resource::object(&builder, resource, "open_settings");
         let weak = Rc::downgrade(&shell);
         let popup = popover.downgrade();
         open_settings.connect_clicked(move |_| {
@@ -274,11 +273,11 @@ fn bind_address_action(
             action(&format!("http://{address}/#token={}", state.token));
             return;
         }
-        let resource = crate::preferences::ui_resource::CONTROLLER_POPOVER_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "shell/controller.ui";
+        let builder = crate::ui_resource::builder(resource);
         let popover: gtk::Popover =
-            crate::widgets::ui_resource::object(&builder, resource, "addresses_popover");
-        let list: gtk::Box = crate::widgets::ui_resource::object(&builder, resource, "addresses");
+            crate::ui_resource::object(&builder, resource, "addresses_popover");
+        let list: gtk::Box = crate::ui_resource::object(&builder, resource, "addresses");
         popover.set_parent(button);
         let dismiss = button.ancestor(gtk::Popover::static_type()).map(|parent| {
             // Keep the Controller popover's grab while its address chooser is open.

@@ -260,8 +260,8 @@ impl Preferences {
                 return;
             }
         }
-        let resource = crate::preferences::ui_resource::ONBOARDING_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/onboarding.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             dialog: adw::Dialog, toolbar: adw::ToolbarView,
         });
@@ -404,8 +404,8 @@ impl Preferences {
         flow: Option<Rc<RefCell<Rc<dyn SourceSetupFlow>>>>,
         onboarding: bool,
     ) -> SetupViewContext {
-        let resource = crate::preferences::ui_resource::CONNECTION_PROGRESS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/connection_progress.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             content: gtk::Box,
             surface: gtk::Stack,
@@ -607,8 +607,8 @@ fn subsonic_settings_group(
 
 /// Another device's Local source has only its name, kept on this device.
 fn peer_settings_group(shell: &Rc<Preferences>, saved: &EditableSource) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::CREDENTIAL_HOST_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/credential_host.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         section: gtk::Box,
         fields_group: adw::PreferencesGroup,
@@ -715,8 +715,8 @@ impl SourceSetupFlow for LocalSetupFlow {
         }
         let (scroller, content, actions, status) =
             setup_scaffold(shell, context, self.presentation);
-        let resource = crate::preferences::ui_resource::LOCAL_SETUP_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/local_setup.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             group: adw::PreferencesGroup,
             summary: adw::ActionRow,
@@ -796,8 +796,8 @@ fn setup_scaffold(
     registration: &'static SourcePresentation,
 ) -> (gtk::ScrolledWindow, gtk::Box, gtk::Box, gtk::Label) {
     let compact = true;
-    let resource = crate::preferences::ui_resource::SETUP_SCAFFOLD_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/setup_scaffold.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         scroller: gtk::ScrolledWindow,
         clamp: adw::Clamp,
@@ -845,8 +845,8 @@ fn setup_scaffold(
 }
 
 fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::SOURCE_CHOICE_SELECTOR_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/choice_selector.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         wrapper: gtk::ScrolledWindow, device_sources: adw::PreferencesGroup,
         server_sources: adw::PreferencesGroup, import_backup: gtk::Button,
@@ -855,8 +855,8 @@ fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -
         external_lyrics: adw::SwitchRow, discord_presence: adw::SwitchRow,
     });
     for &presentation in source_presentations() {
-        let resource = crate::preferences::ui_resource::SOURCE_CHOICE_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/choice.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             row: adw::ActionRow, icon: gtk::Image,
         });
@@ -1056,8 +1056,8 @@ fn credential_host_view(
     compact: bool,
     authentication: Option<Rc<Cell<SubsonicAuthentication>>>,
 ) -> CredentialHost {
-    let resource = crate::preferences::ui_resource::CREDENTIAL_HOST_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/credential_host.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         section: gtk::Box,
         fields_group: adw::PreferencesGroup,

@@ -105,8 +105,8 @@ pub fn bind_source_picker(
     selected: u32,
     include_all: bool,
 ) -> gtk::SingleSelection {
-    let resource = crate::widgets::ui_resource::SOURCE_PICKER_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/picker.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { content: gtk::Box, icon: gtk::Image, label: gtk::Label });
     button.set_child(Some(&content));
     let mut titles = Vec::new();

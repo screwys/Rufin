@@ -117,9 +117,9 @@ impl Default for ColumnViewHeader {
 
 impl ColumnViewHeader {
     pub fn new() -> Self {
-        let resource = crate::widgets::ui_resource::COLUMN_VIEW_HEADER_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
-        let root = crate::widgets::ui_resource::object(&builder, resource, "header");
+        let resource = "routes/column_view_header.ui";
+        let builder = crate::ui_resource::builder(resource);
+        let root = crate::ui_resource::object(&builder, resource, "header");
         Self {
             root,
             bindings: Rc::default(),
@@ -171,8 +171,8 @@ pub struct TableFrame {
 
 impl TableFrame {
     pub fn new(content: &impl IsA<gtk::Widget>, header: Option<&gtk::Widget>) -> Self {
-        let resource = crate::widgets::ui_resource::TABLE_FRAME_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "routes/table_frame.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             root: gtk::Box,
             header_host: gtk::Box,

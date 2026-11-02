@@ -896,7 +896,7 @@ where
     column
 }
 
-pub use crate::widgets::recycled_cells::{
+use crate::widgets::recycled_cells::{
     TrackRowPlayingIndicator, set_track_row_index_text, track_row_index_cell,
 };
 

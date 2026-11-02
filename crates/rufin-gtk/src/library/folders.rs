@@ -372,7 +372,7 @@ fn folder_table(
     let selection = gtk::SingleSelection::new(Some(rows.clone()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
-    let playing = super::columns::TrackRowPlayingIndicator::new();
+    let playing = crate::widgets::recycled_cells::TrackRowPlayingIndicator::new();
     let current_playing = playing.clone();
     shell.register_current_route_track_selection(Rc::new(move |current| {
         current_playing.set_current(
@@ -456,7 +456,7 @@ fn folder_table(
 
 fn folder_index_column(
     folders: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
-    playing: super::columns::TrackRowPlayingIndicator,
+    playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
@@ -490,7 +490,7 @@ fn folder_index_column(
                 String::new()
             }
         };
-        super::columns::set_track_row_index_text(&cell, &text);
+        crate::widgets::recycled_cells::set_track_row_index_text(&cell, &text);
     });
     factory.connect_unbind(move |_, item| {
         if let Some(cell) = item
@@ -498,7 +498,7 @@ fn folder_index_column(
             .and_then(gtk::ListItem::child)
             .and_then(|child| child.downcast::<gtk::Overlay>().ok())
         {
-            super::columns::set_track_row_index_text(&cell, "");
+            crate::widgets::recycled_cells::set_track_row_index_text(&cell, "");
             playing.unbind(cell.upcast_ref());
         }
     });
@@ -648,7 +648,7 @@ fn folder_column(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
     folders: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
-    playing: &super::columns::TrackRowPlayingIndicator,
+    playing: &crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     field: LibraryField,
 ) -> gtk::ColumnViewColumn {
     use crate::widgets::library_fields::TrackPresentation;

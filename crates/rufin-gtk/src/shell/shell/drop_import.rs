@@ -34,8 +34,8 @@ pub(super) fn install(shell: &Rc<Shell>) {
 }
 
 async fn import(shell: Rc<Shell>, paths: Vec<PathBuf>) {
-    let resource = crate::shell::ui_resource::DROP_IMPORT_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "shell/drop_import.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::AlertDialog, playlist: gtk::ToggleButton, library: gtk::ToggleButton,
         name: adw::EntryRow, name_group: gtk::ListBox,

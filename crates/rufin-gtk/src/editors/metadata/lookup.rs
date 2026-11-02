@@ -64,8 +64,8 @@ pub(super) fn present(
     runtime: tokio::runtime::Handle,
     on_close: Rc<dyn Fn(bool)>,
 ) {
-    let resource = crate::editors::ui_resource::METADATA_LOOKUP_RESOURCE;
-    let builder = crate::editors::ui_resource::builder(resource);
+    let resource = "preferences/dialogs/metadata_lookup.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,

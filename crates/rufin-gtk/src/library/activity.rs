@@ -1,10 +1,11 @@
 //! The overview uses the same cells as the library, with period-specific counts.
 use crate::library::{
     CatalogUi,
-    columns::{TrackRowPlayingIndicator, track_column_for_key},
+    columns::track_column_for_key,
     grid_cells::{AlbumGridCell, ArtistGridCell, ReusableCollectionGridCell},
 };
 use crate::widgets::mounted_route::RouteCurrentTrack;
+use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
 use crate::widgets::selection::track_play_request;
 use adw::prelude::*;
 use gtk::{gio, glib};

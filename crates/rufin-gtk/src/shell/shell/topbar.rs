@@ -59,8 +59,8 @@ impl Topbar {
     }
 
     pub fn new() -> Self {
-        let resource = crate::shell::ui_resource::TOPBAR_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "shell/topbar.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             window_content: gtk::Box,
             content_host: adw::Bin,

@@ -24,8 +24,8 @@ impl Shell {
                     }
                     Err(_) => return,
                 };
-            let resource = crate::widgets::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/dialogs/playlist_name.ui";
+            let builder = crate::ui_resource::builder(resource);
             let editing = match rufin_core::playlists::playlist_artwork_editing(
                 &shell.products.source,
                 playlist_id,
@@ -351,10 +351,10 @@ impl Shell {
 
     async fn playlist_file_action(self: &Rc<Self>, key: PlaylistKey, action: &'static str) -> bool {
         let owner = &self.products.source;
-        let resource = crate::widgets::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
+        let resource = "preferences/dialogs/playlist_name.ui";
         if action == "delete" {
-            let dialog: adw::AlertDialog = crate::widgets::ui_resource::object(
-                &crate::widgets::ui_resource::builder(resource),
+            let dialog: adw::AlertDialog = crate::ui_resource::object(
+                &crate::ui_resource::builder(resource),
                 resource,
                 "file_delete_confirmation",
             );
@@ -374,8 +374,8 @@ impl Shell {
             && matches!(action, "save" | "reload")
             && rufin_core::playlist_files::is_conflict(error)
         {
-            let dialog: adw::AlertDialog = crate::widgets::ui_resource::object(
-                &crate::widgets::ui_resource::builder(resource),
+            let dialog: adw::AlertDialog = crate::ui_resource::object(
+                &crate::ui_resource::builder(resource),
                 resource,
                 "file_conflict",
             );

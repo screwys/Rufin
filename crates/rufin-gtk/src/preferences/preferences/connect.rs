@@ -167,10 +167,10 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
                     }
                 )
             {
-                let resource = crate::preferences::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-                let builder = crate::widgets::ui_resource::builder(resource);
+                let resource = "preferences/connect-components.ui";
+                let builder = crate::ui_resource::builder(resource);
                 let dialog: adw::AlertDialog =
-                    crate::widgets::ui_resource::object(&builder, resource, "replace_confirmation");
+                    crate::ui_resource::object(&builder, resource, "replace_confirmation");
                 let parent = shell
                     .state
                     .connect_dialog
@@ -198,8 +198,8 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
 }
 
 fn show_disable_confirmation(shell: &Rc<Preferences>) {
-    let resource = crate::preferences::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/connect-components.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         disable_confirmation: adw::AlertDialog,
     });
@@ -342,8 +342,8 @@ fn present(shell: &Rc<Preferences>) {
 }
 
 pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk::Widget {
-    let resource = crate::preferences::ui_resource::CONNECT_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/connect.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
         connect_content: gtk::Overlay, page_title: gtk::Label,
         choose_join: gtk::ToggleButton, choose_invite: gtk::ToggleButton,
@@ -658,10 +658,10 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             return;
         };
         gtk::glib::spawn_future_local(async move {
-            let resource = crate::preferences::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-            let builder = crate::widgets::ui_resource::builder(resource);
+            let resource = "preferences/connect-components.ui";
+            let builder = crate::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
-                crate::widgets::ui_resource::object(&builder, resource, "disconnect_confirmation");
+                crate::ui_resource::object(&builder, resource, "disconnect_confirmation");
             if dialog.choose_future(Some(&parent)).await == "disconnect" {
                 run(&shell, Action::Leave);
             }
@@ -1047,10 +1047,10 @@ fn join_profile(shell: &Rc<Preferences>, parent: &adw::Dialog, invitation: Strin
     let shell = shell.clone();
     let parent = parent.clone();
     gtk::glib::spawn_future_local(async move {
-        let resource = crate::preferences::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/connect-components.ui";
+        let builder = crate::ui_resource::builder(resource);
         let dialog: adw::AlertDialog =
-            crate::widgets::ui_resource::object(&builder, resource, "replace_confirmation");
+            crate::ui_resource::object(&builder, resource, "replace_confirmation");
         if dialog.choose_future(Some(&parent)).await == "join" {
             run(
                 &shell,
@@ -1073,8 +1073,8 @@ fn render_devices(
     nearby_rows: &RefCell<Vec<adw::ActionRow>>,
 ) {
     for device in &state.devices {
-        let resource = crate::preferences::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/connect-components.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder,resource,{device_row:adw::ActionRow,play:gtk::Button,pause:gtk::Button,remove:gtk::Button,join_device:gtk::Button,invite_device:gtk::Button,test_connection:gtk::Button});
         device_row.set_title(&device.name);
         device_row.set_subtitle(&device.connection);

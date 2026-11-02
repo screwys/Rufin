@@ -473,8 +473,8 @@ impl RecycledFolderCell {
 }
 
 pub fn track_row_index_cell(text: &str, activate: impl Fn(&gtk::Button) + 'static) -> gtk::Overlay {
-    let resource = crate::widgets::ui_resource::TRACK_ROW_INDEX_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "routes/track_row_index.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { cell: gtk::Overlay, number: gtk::Label, play: gtk::Button });
     let focus_cell = cell.downgrade();
     play.connect_state_flags_changed(move |play, _| {

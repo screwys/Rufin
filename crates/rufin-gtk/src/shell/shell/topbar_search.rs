@@ -103,8 +103,8 @@ pub(super) struct SearchPopup {
 
 impl SearchPopup {
     pub fn new(shell: &Rc<Shell>, host: &gtk::Overlay) -> Rc<Self> {
-        let resource = crate::shell::ui_resource::SEARCH_POPOVER_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "shell/search_popover.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             popover: gtk::Popover, scroller: gtk::ScrolledWindow, list: gtk::ListBox,
             error: gtk::Label,

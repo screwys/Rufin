@@ -71,8 +71,8 @@ impl Flow {
         context: Option<&SetupViewContext>,
         saved: Option<&EditableSource>,
     ) -> gtk::Widget {
-        let resource = crate::preferences::ui_resource::JELLYFIN_EMBY_HOST_RESOURCE;
-        let builder = crate::widgets::ui_resource::builder(resource);
+        let resource = "preferences/source/jellyfin_emby_host.ui";
+        let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             section: gtk::Box, options: adw::PreferencesGroup, manual: adw::SwitchRow,
             manual_host: gtk::Box, account: adw::PreferencesGroup, username: adw::EntryRow,
@@ -636,8 +636,8 @@ fn present_code_dialog(
     parent: &gtk::Box,
     start: impl Fn(CodeView) -> gtk::glib::JoinHandle<()> + 'static,
 ) -> adw::Dialog {
-    let resource = crate::preferences::ui_resource::CODE_LOGIN_RESOURCE;
-    let builder = crate::widgets::ui_resource::builder(resource);
+    let resource = "preferences/source/code_login.ui";
+    let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { dialog: adw::Dialog, code_row: gtk::Box, code: gtk::Label, copy: gtk::Button, copy_icon: gtk::Image, approval: gtk::LinkButton, refresh: gtk::Button, status: gtk::Label });
     status.connect_label_notify(|label| label.set_visible(!label.text().is_empty()));
     let copy_reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
