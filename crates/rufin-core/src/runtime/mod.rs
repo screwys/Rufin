@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-mod backup;
 mod diagnostics;
 mod events;
 mod inputs;
@@ -13,7 +12,6 @@ pub mod scrobbling;
 pub mod source;
 mod storage;
 mod waveform;
-pub use backup::{BackupHandle, BackupPreview, BackupSettings};
 pub use diagnostics::DiagnosticsHandle;
 pub use downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use events::ProductReceivers;
@@ -34,7 +32,7 @@ pub use waveform::WaveformProjection;
 pub struct ProductHandles {
     pub settings: crate::SettingsHandle,
     pub appearance: tokio::sync::watch::Sender<std::collections::BTreeMap<String, String>>,
-    pub backup: BackupHandle,
+    pub backup: Arc<crate::backup::BackupOwner>,
     pub connect: Arc<crate::connect::ConnectOwner>,
     pub library: Arc<library::Catalog>,
     pub runtime: tokio::runtime::Handle,

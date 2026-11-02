@@ -238,7 +238,7 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     #[serde(default)]
     activity_overview: ActivityOverviewSettings = ActivityOverviewSettings::default();
     #[serde(default)]
-    backup: crate::runtime::BackupSettings = crate::runtime::BackupSettings::default();
+    backup: crate::backup::BackupSettings = crate::backup::BackupSettings::default();
     #[serde(default)]
     secret_storage_mode: SecretStorageMode = SecretStorageMode::default();
 });

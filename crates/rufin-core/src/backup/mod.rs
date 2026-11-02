@@ -2,12 +2,12 @@
 
 pub mod format;
 
-use crate::runtime::BackupPreview;
 use crate::{
     playback::PlaybackOwner,
     settings::{
-        SettingsFile, SettingsOwner, StoredSettings, backup_password_key, backup_password_store,
-        load_provider_secret, read_scrobbling, seal_credential, store_scrobbling,
+        SettingsError, SettingsFile, SettingsOwner, StoredSettings, backup_password_key,
+        backup_password_store, load_provider_secret, read_scrobbling, seal_credential,
+        store_scrobbling,
     },
     source::SourceOwner,
 };
@@ -452,7 +452,7 @@ impl BackupOwner {
         uri: String,
         passphrase: Option<String>,
         contents: format::BackupContents,
-    ) -> Result<Arc<BackupPreview>, format::BackupError> {
+    ) -> Result<Arc<BackupPreview>, SettingsError> {
         self.stage_input(
             move || {
                 sources::open_document_input(&uri)
@@ -463,9 +463,9 @@ impl BackupOwner {
         )
         .recv()
         .await
-        .map_err(|error| format::BackupError::Operation(error.to_string()))?
+        .map_err(|error| error.to_string())?
         .map(Arc::new)
-        .map_err(format::BackupError::Operation)
+        .map_err(Into::into)
     }
 
     pub async fn export_document(
@@ -473,7 +473,7 @@ impl BackupOwner {
         uri: String,
         passphrase: Option<String>,
         contents: format::BackupContents,
-    ) -> Result<(), format::BackupError> {
+    ) -> Result<(), SettingsError> {
         let owner = self.clone();
         let runtime = self.runtime.clone();
         self.runtime
@@ -485,21 +485,21 @@ impl BackupOwner {
                 })
             })
             .await
-            .map_err(|error| format::BackupError::Operation(error.to_string()))?
-            .map_err(format::BackupError::Operation)
+            .map_err(|error| error.to_string())?
+            .map_err(Into::into)
     }
 
     pub async fn restore(
         &self,
         preview: Arc<BackupPreview>,
-    ) -> Result<library::BackupRestoreReport, format::BackupError> {
+    ) -> Result<library::BackupRestoreReport, SettingsError> {
         let owner = self.clone();
         let runtime = self.runtime.clone();
         self.runtime
             .spawn_blocking(move || runtime.block_on(owner.restore_now((*preview).clone())))
             .await
-            .map_err(|error| format::BackupError::Operation(error.to_string()))?
-            .map_err(format::BackupError::Operation)
+            .map_err(|error| error.to_string())?
+            .map_err(Into::into)
     }
 
     pub fn schedule_error(&self) -> Option<String> {
@@ -509,26 +509,90 @@ impl BackupOwner {
             .clone()
     }
 
-    pub async fn save_schedule_password(
-        &self,
-        passphrase: String,
-    ) -> Result<(), format::BackupError> {
+    pub async fn save_schedule_password(&self, passphrase: String) -> Result<(), SettingsError> {
         let owner = self.clone();
         self.runtime
             .spawn_blocking(move || {
                 if passphrase.is_empty() {
-                    return Err(format::BackupError::Operation(
-                        "The scheduled backup password cannot be empty".into(),
-                    ));
+                    return Err("The scheduled backup password cannot be empty".to_string());
                 }
                 backup_password_store(&owner.settings.load(), owner.settings.config_dir())
                     .save_secret(&backup_password_key(), &passphrase)
-                    .map_err(|error| format::BackupError::Operation(error.to_string()))
+                    .map_err(|error| error.to_string())
             })
             .await
-            .map_err(|error| format::BackupError::Operation(error.to_string()))?
+            .map_err(|error| error.to_string())?
+            .map_err(Into::into)
     }
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct BackupSettings {
+    pub enabled: bool,
+    pub retention_count: u32,
+    pub schedule: format::BackupSchedule,
+    pub destination_uri: Option<String>,
+    pub contents: format::BackupContents,
+    pub encrypt: bool,
+}
+
+impl Default for BackupSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            retention_count: 2,
+            schedule: Default::default(),
+            destination_uri: None,
+            contents: Default::default(),
+            encrypt: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
+pub struct BackupPreview {
+    pub staged: Arc<format::StagedBackup>,
+    pub removed_sources: Vec<String>,
+    pub contents: format::BackupContents,
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::BackupSettings;
+
+    #[test]
+    fn backup_defaults_and_existing_settings_preserve_retention() {
+        let defaults = BackupSettings::default();
+        assert!(!defaults.enabled);
+        assert_eq!(defaults.retention_count, 2);
+        let existing: BackupSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(existing.enabled);
+        assert_eq!(existing.retention_count, 2);
+        let configured = BackupSettings {
+            retention_count: 7,
+            ..defaults
+        };
+        let restored: BackupSettings =
+            serde_json::from_str(&serde_json::to_string(&configured).unwrap()).unwrap();
+        assert_eq!(restored.retention_count, 7);
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl BackupPreview {
+    pub fn manifest(&self) -> format::BackupManifest {
+        self.staged.manifest.clone()
+    }
+    pub fn removed_sources(&self) -> Vec<String> {
+        self.removed_sources.clone()
+    }
+    pub fn selected_contents(&self) -> format::BackupContents {
+        self.contents
+    }
+}
+
 fn restore_preferences_and_logins(
     file: &SettingsFile,
     settings_apply: &SettingsOwner,

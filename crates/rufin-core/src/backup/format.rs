@@ -106,11 +106,7 @@ impl StagedBackup {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
-#[cfg_attr(feature = "bindings", uniffi(flat_error))]
 pub enum BackupError {
-    #[error("{0}")]
-    Operation(String),
     #[error(transparent)]
     Library(#[from] LibraryError),
     #[error(transparent)]

@@ -47,7 +47,7 @@ impl SettingsOwner {
 
     pub fn set_backup_preferences(
         &self,
-        mut value: crate::runtime::BackupSettings,
+        mut value: crate::backup::BackupSettings,
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             value.schedule.schedule_id = ui.application.backup.schedule.schedule_id.clone();

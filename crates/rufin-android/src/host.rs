@@ -256,7 +256,7 @@ impl AndroidRuntime {
             .map_err(error)
     }
 
-    pub fn backups(&self) -> rufin_core::runtime::BackupHandle {
+    pub fn backups(&self) -> std::sync::Arc<rufin_core::backup::BackupOwner> {
         self.products.backup.clone()
     }
 
