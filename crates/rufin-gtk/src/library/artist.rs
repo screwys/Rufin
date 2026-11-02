@@ -8,14 +8,14 @@ use library::{ArtistKey, ArtistView, RadioSeed};
 use localization::{album_count_text, msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
+use crate::favorites::{
+    artist_favorite_key, favorite_button_is_active, favorite_icon_button,
+    set_favorite_button_active,
+};
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
 use crate::widgets::artwork::presentation::stable_seed;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::favorites::{
-    artist_favorite_key, favorite_button_is_active, favorite_icon_button,
-    set_favorite_button_active,
-};
 use crate::widgets::layout::width_allocation_owner;
 use crate::widgets::localization::localized_label;
 use crate::widgets::mounted_route::{MountedRoute, PageReread, route_view};

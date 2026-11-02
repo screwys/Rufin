@@ -12,12 +12,12 @@ use library::{
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
+use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
+use crate::ratings::context_rating_row;
 use crate::widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
-use crate::widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use crate::widgets::interactions::{
     ALBUM_ICON, ARTIST_ICON, ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON,
 };
-use crate::widgets::ratings::context_rating_row;
 use localization::msgid;
 use rufin_core::metadata::{MediaDetailsItem, MetadataItemId};
 use rufin_core::playlists::SmartPlaylistChange;

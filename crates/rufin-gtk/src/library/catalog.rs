@@ -17,10 +17,10 @@ pub struct CatalogUi {
     pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub settings: Rc<crate::widgets::settings::SettingsState>,
     pub artwork: Rc<crate::widgets::artwork::ArtworkState>,
-    pub downloads: Rc<crate::widgets::downloads::DownloadsState>,
+    pub downloads: Rc<crate::downloads::DownloadsState>,
     pub local_source: bool,
     pub selected: Option<rufin_core::runtime::SelectedLibrary>,
-    pub favorites: Option<Rc<crate::widgets::favorites::FavoriteSessionState>>,
+    pub favorites: Option<Rc<crate::favorites::FavoriteSessionState>>,
     pub window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
     pub global_search: gtk::SearchEntry,
     pub search_session: Rc<crate::library::SearchSession>,
@@ -331,7 +331,7 @@ impl CatalogUi {
     }
     pub fn register_favorite_button(
         &self,
-        key: crate::widgets::favorites::FavoriteControlKey,
+        key: crate::favorites::FavoriteControlKey,
         button: &gtk::Button,
     ) {
         if let Some(favorites) = &self.favorites {
@@ -340,7 +340,7 @@ impl CatalogUi {
     }
     pub fn register_dynamic_favorite_button(
         &self,
-        key: Rc<dyn Fn() -> Option<crate::widgets::favorites::FavoriteControlKey>>,
+        key: Rc<dyn Fn() -> Option<crate::favorites::FavoriteControlKey>>,
         button: &gtk::Button,
     ) {
         if let Some(favorites) = &self.favorites {

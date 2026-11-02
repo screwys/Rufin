@@ -202,7 +202,7 @@ pub async fn build(
         release_notification_toast: RefCell::new(None),
         release_updating: RefCell::new(None),
     };
-    let downloads = crate::widgets::downloads::DownloadsState::new(Rc::clone(&settings_state));
+    let downloads = crate::downloads::DownloadsState::new(Rc::clone(&settings_state));
 
     let desktop = DesktopState::new(app, products.playback.clone());
 

@@ -491,12 +491,12 @@ impl PartialEq for LyricsPaneContent {
 
 impl LyricsPane {
     pub fn new() -> Self {
-        super::edge_fade::LyricsEdgeFade::static_type();
+        crate::widgets::edge_fade::LyricsEdgeFade::static_type();
         let resource = "player/lyrics/pane.ui";
         let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
             root: gtk::Overlay,
-            edge_fade: super::edge_fade::LyricsEdgeFade,
+            edge_fade: crate::widgets::edge_fade::LyricsEdgeFade,
             scroller: gtk::ScrolledWindow,
             body: gtk::Box,
             controls: gtk::Box,

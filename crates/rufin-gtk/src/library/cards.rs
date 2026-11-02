@@ -1,3 +1,4 @@
+use crate::favorites::{favorite_button_is_active, favorite_icon_button};
 use crate::library::CatalogUi;
 use crate::menus::media_menus::present_album_context_menu;
 use crate::widgets::artwork::ArtworkTile;
@@ -5,7 +6,6 @@ use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
 use crate::widgets::cover_controls::{
     COVER_CORNER_HORIZONTAL_INSET, COVER_CORNER_VERTICAL_INSET, showcase_cover_overlay,
 };
-use crate::widgets::favorites::{favorite_button_is_active, favorite_icon_button};
 use crate::widgets::interactions::ContextMenuOpen;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -86,7 +86,7 @@ impl AlbumCover {
         let row = Rc::downgrade(&current);
         shell.register_dynamic_favorite_button(
             Rc::new(move || {
-                Some(crate::widgets::favorites::album_favorite_key(
+                Some(crate::favorites::album_favorite_key(
                     &row.upgrade()?.borrow().as_ref()?.media_uri,
                 ))
             }),
@@ -126,10 +126,7 @@ impl AlbumCover {
                     .unwrap_or_default(),
                 crate::library::route_layout::detail_showcase_cover_size(i32::MAX),
             );
-            crate::widgets::favorites::set_favorite_button_active(
-                &self.favorite,
-                album.state.favorite,
-            );
+            crate::favorites::set_favorite_button_active(&self.favorite, album.state.favorite);
         } else {
             shell.artwork.clear_artwork_tile(&self.tile);
         }

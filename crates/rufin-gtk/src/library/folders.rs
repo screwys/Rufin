@@ -606,7 +606,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                 if let Some(downloaded) = cell.downloaded() {
                     bind_shell.downloads.bind_download_badge(
                         &downloaded,
-                        crate::widgets::downloads::media_download_badge(
+                        crate::downloads::media_download_badge(
                             &track.media_uri,
                             track.is_downloaded,
                         ),

@@ -1,14 +1,14 @@
 use super::icons::*;
+use crate::favorites::{favorite_icon_button, set_favorite_button_active};
+use crate::ratings::RatingControl;
 use crate::shell::shell::Shell;
 use crate::widgets::interactions::add_widget_click;
 use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
 use crate::widgets::{
     artwork::ArtworkTile,
     detail_links::DetailLinkBinding,
-    favorites::{favorite_icon_button, set_favorite_button_active},
     layout::{AllocationOwner, allocation_owner},
     localization::{bind_widget_accessible_label, bind_widget_tooltip},
-    ratings::RatingControl,
     scale::{
         horizontal_scale_value_at_x, install_pointer_value_bubble, install_scale_fill_updates,
         install_value_bubble_dismissal, point_value_bubble_at_slider,

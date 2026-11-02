@@ -10,12 +10,12 @@ use library::{
 use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
+use crate::favorites::{
+    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
+};
 use crate::library::CatalogUi;
 use crate::widgets::artwork::presentation::stable_seed;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
-};
 use crate::widgets::layout::{configure_fill_width_clip, width_allocation_owner};
 use crate::widgets::localization::{bind_label_text_with, localized_label};
 use crate::widgets::mounted_route::MountedRoute;
@@ -555,7 +555,7 @@ impl CatalogUi {
             .clone();
         for button in [favorite, hover_favorite] {
             self.register_favorite_button(
-                crate::widgets::favorites::album_favorite_key(&album.media_uri),
+                crate::favorites::album_favorite_key(&album.media_uri),
                 &button,
             );
             let favorite_shell = Rc::clone(self);

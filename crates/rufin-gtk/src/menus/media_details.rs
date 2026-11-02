@@ -38,7 +38,7 @@ pub(crate) fn append_header(
     subtitle_host.set_visible(!identity.subtitle.is_empty());
     bind_cover(&cover, shell, identity.artwork, 48);
     let (favorite_target, favorited) = identity.favorite;
-    crate::widgets::favorites::set_favorite_button_active(&favorite, favorited);
+    crate::favorites::set_favorite_button_active(&favorite, favorited);
     favorite.set_visible(
         shell
             .settings

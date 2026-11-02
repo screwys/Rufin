@@ -7,12 +7,12 @@ use std::{
 use ::library::{AlbumView, FavoriteTarget};
 use adw::prelude::*;
 
+use crate::favorites::{
+    album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
+};
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::favorites::{
-    album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
-};
 use crate::widgets::mounted_route::{MountedRoute, route_view};
 use ::library::RadioSeed;
 use localization::{msgid, track_count_text};

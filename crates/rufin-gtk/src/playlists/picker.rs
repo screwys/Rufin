@@ -1,6 +1,6 @@
 //! Adding media to playlists: the context submenu, the full picker and the add itself.
+use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use crate::shell::shell::Shell;
-use crate::widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use crate::widgets::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface, popdown_native_menu};
 use crate::widgets::library_fields::playlist_artwork;
 use crate::widgets::media_drag::MediaDragSource;

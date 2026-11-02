@@ -10,12 +10,12 @@ use library::{AlbumKey, AlbumRow, Row, TrackRow};
 use localization::track_count_text;
 use rufin_core::playback::QueuePlacement;
 
+use crate::favorites::{
+    favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
+};
 use crate::library::CatalogUi;
 use crate::library::{LibraryField, LibraryListKey};
 use crate::widgets::artwork::ArtworkTile;
-use crate::widgets::favorites::{
-    favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
-};
 use crate::widgets::interactions::install_context_menu_openers;
 
 use super::collection_context::present_track_context_menu;
@@ -1521,7 +1521,7 @@ fn album_track_header(fields: &[LibraryField]) -> (gtk::Box, Vec<gtk::Widget>) {
                 let icon = if *field == LibraryField::Duration {
                     "rufin-preferences-system-time-symbolic"
                 } else {
-                    crate::widgets::favorites::FAVORITE_ADD_ICON
+                    crate::favorites::FAVORITE_ADD_ICON
                 };
                 let image = gtk::Image::from_icon_name(icon);
                 image.set_tooltip_text(Some(&localization::tr(

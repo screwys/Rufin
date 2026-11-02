@@ -10,9 +10,9 @@ use gtk::glib;
 use library::{PlaylistKey, TrackRow};
 use localization::msgid;
 
+use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
-use crate::widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::localization::{bind_search_placeholder, localized_column};
 
@@ -493,7 +493,7 @@ fn playlist_entry_title_column(
         cell.subtitle().set_visible(true);
         bind_shell.downloads.bind_download_badge(
             &cell.downloaded().expect("playlist title badge"),
-            crate::widgets::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
+            crate::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
         );
         bind_playing.bind(title.upcast_ref(), item.position(), &entry.media_uri);
     });
@@ -811,7 +811,7 @@ impl ReusableCollectionGridCell<TrackRow> for PlaylistEntryGridCell {
         });
         self.body.set_download_target(
             &self.shell,
-            crate::widgets::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
+            crate::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
         );
         self.current.replace(Some(entry));
         self.bind_current_artwork();

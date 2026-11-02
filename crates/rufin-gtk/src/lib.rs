@@ -1,12 +1,15 @@
 //! The GTK desktop client: window composition, pages, player, menus, editors and
 //! preferences.
 
+mod downloads;
 mod editors;
+mod favorites;
 mod library;
 mod menus;
 mod player;
 mod playlists;
 mod preferences;
+mod ratings;
 mod shell;
 mod ui_resource;
 mod widgets;

@@ -12,9 +12,9 @@ use std::rc::Rc;
 
 use crate::shell::player::desktop::DesktopState;
 
+use crate::downloads::DownloadsState;
 use crate::preferences::preferences::source::SourceState;
 use crate::widgets::artwork::ArtworkState;
-use crate::widgets::downloads::DownloadsState;
 use crate::widgets::feedback::ControlFeedbackState;
 use crate::widgets::settings::SettingsState;
 use chrome::WindowChrome;
@@ -48,7 +48,7 @@ pub(crate) struct Shell {
     pub(crate) player_ui: Rc<crate::player::PlayerUi>,
     pub(crate) preferences: crate::preferences::preferences::PreferencesState,
     pub(crate) downloads: Rc<DownloadsState>,
-    pub(crate) download_feedback: crate::shell::downloads::DownloadFeedbackState,
+    pub(crate) download_feedback: crate::downloads::DownloadFeedbackState,
     pub(crate) control_feedback: Rc<ControlFeedbackState>,
     pub(crate) desktop: DesktopState,
     pub(crate) artwork: Rc<ArtworkState>,

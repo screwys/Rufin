@@ -2,10 +2,7 @@
 //! Pages and the persistent player live in their own modules.
 
 mod application;
-mod downloads;
-mod favorites;
 pub(crate) mod player;
-mod ratings;
 pub(crate) mod shell;
 
 pub use application::{

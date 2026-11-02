@@ -8,14 +8,14 @@ use artwork::ArtworkBinding;
 use gtk::glib;
 
 use super::collection_context::present_track_context_menu;
+use crate::favorites::{
+    FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active,
+};
 use crate::library::CatalogUi;
 use crate::library::{LibraryField, LibraryListKey};
 use crate::menus::media_menus::{present_album_context_menu, present_artist_context_menu};
 use crate::widgets::artwork::ArtworkTile;
-use crate::widgets::favorites::{
-    FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
-    set_favorite_button_active,
-};
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::localization::localized_column;
 

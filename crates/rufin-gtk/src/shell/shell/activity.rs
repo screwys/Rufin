@@ -1,13 +1,21 @@
 use super::Shell;
-use crate::library::activity::ActivityCollections;
+use crate::library::{
+    CatalogUi,
+    columns::track_column_for_key,
+    grid_cells::{AlbumGridCell, ArtistGridCell, ReusableCollectionGridCell},
+};
 use crate::player::fullscreen_background::FullscreenBackground;
+use crate::widgets::mounted_route::RouteCurrentTrack;
 use crate::widgets::mounted_route::route_current_track;
+use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
+use crate::widgets::selection::track_play_request;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use library::{ActivityOverview, CalendarActivityPeriod};
+use library::{ActivityOverview, CalendarActivityPeriod, TrackRow};
 use localization::{tr, tr_with};
 use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
 use rufin_core::route::Route;
+use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -872,4 +880,171 @@ impl ActivityView {
 fn parse_month(month: &str) -> Option<(i32, u8)> {
     let (year, month) = month.split_once('-')?;
     Some((year.parse().ok()?, month.parse().ok()?))
+}
+
+/// The overview uses the same cells as the library, with period-specific counts.
+struct ActivityCollections {
+    pub tracks: gtk::ScrolledWindow,
+    pub artists: gtk::FlowBox,
+    pub albums: gtk::FlowBox,
+    catalog: Rc<CatalogUi>,
+    model: gio::ListStore,
+    playing: TrackRowPlayingIndicator,
+    artist_cells: RefCell<Vec<ArtistGridCell>>,
+    album_cells: RefCell<Vec<AlbumGridCell>>,
+    artist_uris: Rc<RefCell<Vec<String>>>,
+    album_uris: Rc<RefCell<Vec<String>>>,
+}
+
+impl ActivityCollections {
+    pub fn new(catalog: Rc<CatalogUi>) -> Self {
+        let model = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let selection = gtk::NoSelection::new(Some(model.clone()));
+        let table = gtk::ColumnView::new(Some(selection));
+        table.set_show_row_separators(true);
+        table.set_single_click_activate(true);
+        let playing = TrackRowPlayingIndicator::new();
+        for field in [
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::PlayCount,
+        ] {
+            let column = track_column_for_key::<TrackRow>(
+                &catalog,
+                LibraryListKey::History,
+                field,
+                &playing,
+            );
+            column.set_expand(field == LibraryField::TitleMerged);
+            if field == LibraryField::TitleMerged {
+                column.set_fixed_width(-1);
+            }
+            table.append_column(&column);
+        }
+        let weak = Rc::downgrade(&catalog);
+        let rows = model.clone();
+        table.connect_activate(move |_, position| {
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
+                let row = item.borrow::<TrackRow>();
+                crate::menus::media_menus::play_target(
+                    &shell.playback,
+                    &track_play_request(row.track_key),
+                    rufin_core::playback::QueuePlacement::Now,
+                    false,
+                );
+            }
+        });
+        let tracks = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .child(&table)
+            .build();
+        let grid = || {
+            gtk::FlowBox::builder()
+                .homogeneous(true)
+                .min_children_per_line(1)
+                .max_children_per_line(3)
+                .selection_mode(gtk::SelectionMode::None)
+                .activate_on_single_click(true)
+                .hexpand(true)
+                .valign(gtk::Align::Start)
+                .build()
+        };
+        let artists = grid();
+        let albums = grid();
+        let artist_uris = Rc::new(RefCell::new(Vec::<String>::new()));
+        let album_uris = Rc::new(RefCell::new(Vec::<String>::new()));
+        for (grid, uris, artist) in [
+            (&artists, &artist_uris, true),
+            (&albums, &album_uris, false),
+        ] {
+            let weak = Rc::downgrade(&catalog);
+            let uris = Rc::clone(uris);
+            grid.connect_child_activated(move |_, child| {
+                if let Some(catalog) = weak.upgrade()
+                    && let Some(uri) = uris.borrow().get(child.index() as usize)
+                {
+                    catalog.navigate(if artist {
+                        Route::ArtistDetail(uri.clone())
+                    } else {
+                        Route::AlbumDetail(uri.clone())
+                    });
+                }
+            });
+        }
+        Self {
+            tracks,
+            artists,
+            albums,
+            catalog,
+            model,
+            playing,
+            artist_cells: RefCell::new(Vec::new()),
+            album_cells: RefCell::new(Vec::new()),
+            artist_uris,
+            album_uris,
+        }
+    }
+
+    pub fn apply(&self, data: &ActivityOverview, limit: usize) {
+        let tracks = data
+            .tracks
+            .iter()
+            .take(limit)
+            .cloned()
+            .map(glib::BoxedAnyObject::new)
+            .collect::<Vec<_>>();
+        self.model.splice(0, self.model.n_items(), &tracks);
+        self.artists.remove_all();
+        self.albums.remove_all();
+        self.artist_cells.borrow_mut().clear();
+        self.album_cells.borrow_mut().clear();
+        self.artist_uris.replace(
+            data.artists
+                .iter()
+                .take(limit)
+                .map(|row| row.media_uri.clone())
+                .collect(),
+        );
+        self.album_uris.replace(
+            data.albums
+                .iter()
+                .take(limit)
+                .map(|row| row.media_uri.clone())
+                .collect(),
+        );
+        for (position, row) in data.artists.iter().take(limit).enumerate() {
+            let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount], false);
+            cell.follow_favorites();
+            cell.bind(position as u32, row.clone());
+            cell.set_play_count_caption(row.state.play_count);
+            let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);
+            self.artists.insert(&widget, -1);
+            self.artist_cells.borrow_mut().push(cell);
+        }
+        for (position, row) in data.albums.iter().take(limit).enumerate() {
+            let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount], None);
+            cell.follow_favorites();
+            cell.bind(position as u32, row.clone());
+            cell.set_play_count_caption(row.state.play_count);
+            let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);
+            self.albums.insert(&widget, -1);
+            self.album_cells.borrow_mut().push(cell);
+        }
+    }
+
+    pub fn refresh_playback(&self, current: Option<RouteCurrentTrack>) {
+        self.playing.set_current(
+            current.as_ref().map(|row| row.media_uri.as_str()),
+            gtk::INVALID_LIST_POSITION,
+        );
+        self.playing
+            .set_paused(current.as_ref().is_some_and(|row| row.paused));
+        self.catalog
+            .refresh_current_route_now_playing_selections(current);
+    }
 }

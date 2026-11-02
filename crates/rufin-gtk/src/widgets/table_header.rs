@@ -87,7 +87,7 @@ impl HeaderCell {
             });
         let icon = match field {
             Some(LibraryField::Duration) => Some("rufin-preferences-system-time-symbolic"),
-            Some(LibraryField::Favorite) => Some(crate::widgets::favorites::FAVORITE_ADD_ICON),
+            Some(LibraryField::Favorite) => Some(crate::favorites::FAVORITE_ADD_ICON),
             _ => None,
         };
         imp.label.set_visible(icon.is_none());

@@ -682,7 +682,7 @@ fn add_download_rules(
             .subtitle(tr(download_rule_subtitle(rule)))
             .build();
         row.set_visible(rules.contains(rule));
-        let artwork = crate::widgets::downloads::download_rule_artwork(
+        let artwork = crate::downloads::download_rule_artwork(
             &shell.artwork,
             &shell.products.library,
             &shell.products.runtime,
@@ -1037,16 +1037,14 @@ fn add_download_queue(
                 while let Some(child) = artwork.first_child() {
                     artwork.remove(&child);
                 }
-                artwork.append(&crate::widgets::downloads::media_artwork(
+                artwork.append(&crate::downloads::media_artwork(
                     &shell.artwork,
                     &shell.products.library,
                     &shell.products.runtime,
                     &job.preview_uris,
                     48,
                 ));
-                row.set_title(&crate::widgets::downloads::download_subject_title(
-                    &job.subject,
-                ));
+                row.set_title(&crate::downloads::download_subject_title(&job.subject));
             }
             row.set_subtitle(&download_queue_item_subtitle(&job));
             up.set_sensitive(position > 0);

@@ -1599,7 +1599,7 @@ fn rail_button(shell: &Rc<Shell>, item: SidebarRouteItem) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("nav-button");
     button.add_css_class("flat");
-    button.add_css_class(crate::widgets::route::sidebar_route_css_class(item));
+    button.add_css_class(sidebar_route_css_class(item));
     button.add_css_class("rail-button");
     button.set_widget_name(descriptor.stable_id);
     let accessible_label = tr(descriptor.title);
@@ -1661,6 +1661,25 @@ fn configure_sidebar_entry_label(label: &gtk::Label) {
     label.add_css_class("sidebar-entry-label");
     label.set_xalign(0.0);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+}
+
+fn sidebar_route_css_class(item: rufin_core::settings::SidebarRouteItem) -> &'static str {
+    use rufin_core::settings::SidebarRouteItem;
+    match item {
+        SidebarRouteItem::Home => "nav-route-home",
+        SidebarRouteItem::Search => "nav-route-search",
+        SidebarRouteItem::Favorites => "nav-route-favorites",
+        SidebarRouteItem::Albums => "nav-route-albums",
+        SidebarRouteItem::Tracks => "nav-route-tracks",
+        SidebarRouteItem::Artists => "nav-route-artists",
+        SidebarRouteItem::AlbumArtists => "nav-route-album-artists",
+        SidebarRouteItem::Genres => "nav-route-genres",
+        SidebarRouteItem::Moods => "nav-route-moods",
+        SidebarRouteItem::History => "nav-route-history",
+        SidebarRouteItem::Folders => "nav-route-folders",
+        SidebarRouteItem::Playlists => "nav-route-playlists",
+        SidebarRouteItem::SmartPlaylists => "nav-route-smart-playlists",
+    }
 }
 
 #[cfg(test)]

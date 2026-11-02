@@ -6,8 +6,8 @@ use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
 
+use crate::downloads::DownloadsState;
 use crate::widgets::artwork::{ArtworkTile, ArtworkTileWeak};
-use crate::widgets::downloads::DownloadsState;
 use rufin_core::route::Route;
 
 use crate::widgets::detail_links::DetailLinkBinding;
@@ -36,7 +36,7 @@ impl RowActions {
 
 pub fn row_action_cell(field: rufin_core::settings::LibraryField, label: &str) -> gtk::Widget {
     if field == rufin_core::settings::LibraryField::Favorite {
-        crate::widgets::favorites::row_favorite_icon_button(label).upcast()
+        crate::favorites::row_favorite_icon_button(label).upcast()
     } else {
         RowActions::menu_only().upcast()
     }
@@ -51,7 +51,7 @@ pub fn row_action_column(
             rufin_core::settings::presentation::library_field_title(field),
             factory,
         );
-        column.set_fixed_width(crate::widgets::favorites::FAVORITE_COLUMN_WIDTH);
+        column.set_fixed_width(crate::favorites::FAVORITE_COLUMN_WIDTH);
         column
     } else {
         row_actions_column(factory)

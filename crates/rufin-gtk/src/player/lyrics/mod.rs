@@ -1,4 +1,3 @@
-mod edge_fade;
 pub mod search;
 pub mod state;
 mod timing;

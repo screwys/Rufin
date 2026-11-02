@@ -6,14 +6,11 @@ pub mod layout;
 pub mod localization;
 pub mod lyrics_editor;
 pub mod lyrics_snippet;
-pub mod route;
 pub mod settings;
 pub mod sparse_model;
 pub mod text_slide;
 
 pub mod artwork;
-
-pub mod downloads;
 
 pub mod detail_links;
 pub mod folder_launcher;
@@ -23,15 +20,12 @@ pub mod source_labels;
 
 pub mod controls;
 pub mod interactions;
-pub mod ratings;
 
 pub mod popup;
 
 pub mod mounted_route;
 
 pub mod selection;
-
-pub mod favorites;
 
 pub mod local_access;
 

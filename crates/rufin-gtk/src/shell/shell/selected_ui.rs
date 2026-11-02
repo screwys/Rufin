@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use crate::favorites::FavoriteSessionState;
 use crate::player::lyrics::search::connect_lyrics_search_controls;
-use crate::widgets::favorites::FavoriteSessionState;
 use crate::widgets::popup::present_light_dismiss_dialog;
 use rufin_core::runtime::SelectedLibrary;
 

@@ -1,11 +1,11 @@
+use crate::favorites::{
+    FavoriteControlKey, album_favorite_key, artist_favorite_key, favorite_button_is_active,
+    set_favorite_button_active, track_favorite_key,
+};
 use crate::library::CatalogUi;
 use crate::library::LibraryField;
 use crate::menus::media_menus::{present_album_context_menu, present_artist_context_menu};
 use crate::widgets::artwork::ArtworkTile;
-use crate::widgets::favorites::{
-    FavoriteControlKey, album_favorite_key, artist_favorite_key, favorite_button_is_active,
-    set_favorite_button_active, track_favorite_key,
-};
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
 use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};

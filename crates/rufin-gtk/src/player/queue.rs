@@ -1,6 +1,6 @@
+use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::widgets::{
     artwork::ArtworkTileWeak,
-    favorites::{favorite_button_is_active, set_favorite_button_active},
     interactions::install_context_menu_openers,
     library_fields::TrackPresentation,
     media_drag::{

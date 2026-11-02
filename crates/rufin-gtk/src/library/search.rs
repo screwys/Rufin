@@ -15,10 +15,10 @@ use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
 use rufin_core::playback::QueuePlacement;
 
+use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::{LibraryField, LibraryLayout};
 use crate::widgets::artwork::ArtworkTile;
-use crate::widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::mounted_route::{MountedRoute, MountedRouteItemNavigation};
 use rufin_core::collection_context::CollectionTarget;

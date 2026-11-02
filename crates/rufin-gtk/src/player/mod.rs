@@ -101,7 +101,7 @@ impl PlayerUi {
         drop(playback);
         if track_changed {
             let controls = &self.views.player_controls;
-            crate::widgets::favorites::set_favorite_button_active(&controls.favorite_button, false);
+            crate::favorites::set_favorite_button_active(&controls.favorite_button, false);
             controls.rating.set_rating(None, false);
         }
     }

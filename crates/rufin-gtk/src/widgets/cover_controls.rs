@@ -1,9 +1,9 @@
+use crate::favorites::{favorite_icon_button, set_favorite_button_active};
 use crate::widgets::controls::{
     ActionButtonVariant, COVER_PRIMARY_ACTION_SIZE, COVER_SIDE_ACTION_SIZE, MORE_ICON, PLAY_ICON,
     PLAY_LATER_ICON, PLAY_NEXT_ICON, configure_action_button, icon_button,
     icon_button_without_tooltip,
 };
-use crate::widgets::favorites::{favorite_icon_button, set_favorite_button_active};
 use crate::widgets::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, ContextMenuOpen,
     install_context_menu_openers,
