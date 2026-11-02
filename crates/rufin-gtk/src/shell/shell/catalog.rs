@@ -1,0 +1,191 @@
+use super::Shell;
+use adw::prelude::*;
+use rufin_core::route::Route;
+use std::{cell::RefCell, rc::Rc};
+impl Shell {
+    pub(super) fn build_catalog(
+        self: &Rc<Self>,
+        route: &Route,
+        source_id: Option<&sources::SourceId>,
+    ) -> Rc<crate::library::CatalogUi> {
+        let selected = self.selected_library().as_deref().cloned();
+        let selected_source_id = selected.as_ref().map(|selected| selected.source_id.clone());
+        let source = self.products.source.clone();
+        let history_source_name = {
+            let configured = self.source.configured.borrow();
+            let source = configured
+                .sources
+                .iter()
+                .find(|source| Some(&source.id) == configured.selected_source_id.as_ref());
+            source.map(crate::widgets::source_labels::configured_source_display_name)
+        };
+        Rc::new(crate::library::CatalogUi {
+            library: self.products.library.clone(),
+            runtime: self.products.runtime.clone(),
+            source: self.products.source.clone(),
+            playback: self.products.playback.clone(),
+            settings: Rc::clone(&self.settings),
+            artwork: Rc::clone(&self.artwork),
+            downloads: Rc::clone(&self.downloads),
+            local_source: self
+                .source
+                .configured
+                .borrow()
+                .sources
+                .iter()
+                .any(|source| {
+                    source.kind == "local"
+                        && selected
+                            .as_ref()
+                            .is_some_and(|selected| selected.source_id == source.id)
+                }),
+            media_menus: Rc::clone(&self.media_menus),
+            selected,
+            source_label: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |source_id| {
+                    let Some(shell) = weak.upgrade() else {
+                        return crate::widgets::source_labels::source_display_label(None);
+                    };
+                    let configured = shell.source.configured.borrow();
+                    crate::widgets::source_labels::source_display_label(
+                        configured
+                            .sources
+                            .iter()
+                            .find(|source| Some(source.id.as_str()) == source_id),
+                    )
+                })
+            },
+            favorites: self
+                .selected_ui
+                .session()
+                .map(|session| Rc::clone(&session.favorites)),
+            window: self.chrome.window.downgrade(),
+            global_search: self.chrome.topbar.search.clone(),
+            search_session: Rc::clone(&self.search_session),
+            current: RefCell::new(None),
+            current_track_selections: RefCell::new(Vec::new()),
+            media_playing_cells: RefCell::new(Vec::new()),
+            track_selections: RefCell::new(Vec::new()),
+            playlist_entry_selection: RefCell::new(None),
+            history_source_name,
+            update_smart_playlist_pin: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |summary| {
+                    if let Some(shell) = weak.upgrade() {
+                        super::navigation::update_sidebar_smart_playlist_pin_metadata(
+                            &shell, summary,
+                        );
+                    }
+                })
+            },
+            is_current: {
+                let weak = Rc::downgrade(self);
+                let route = route.clone();
+                let source_id = source_id.cloned();
+                Rc::new(move || {
+                    weak.upgrade().is_some_and(|shell| {
+                        shell.navigation.routes.borrow().current() == &route
+                            && source_id.as_ref().is_none_or(|id| {
+                                shell
+                                    .selected_library()
+                                    .as_deref()
+                                    .is_some_and(|selected| &selected.source_id == id)
+                            })
+                    })
+                })
+            },
+            route_width: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move || {
+                    weak.upgrade()
+                        .map_or(1, |shell| super::layout::route_content_width(&shell))
+                })
+            },
+            history_source_id: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move || {
+                    weak.upgrade().and_then(|shell| {
+                        shell.source.configured.borrow().selected_source_id.clone()
+                    })
+                })
+            },
+
+            refresh_home_section: {
+                Rc::new(move |kind| {
+                    if let Some(source_id) = &selected_source_id {
+                        source.refresh_home(source_id.clone(), kind);
+                    }
+                })
+            },
+
+            reconcile: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move || {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.reconcile_mounted_route();
+                    }
+                })
+            },
+            refresh: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move || {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.replace_current_route_when_ready();
+                    }
+                })
+            },
+            present_full_artwork: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |artwork| {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.present_full_artwork_group(artwork);
+                    }
+                })
+            },
+            present_selected_dialog: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |dialog| {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.present_selected_dialog(dialog);
+                    }
+                })
+            },
+            set_favorite_category: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |category| {
+                    if let Some(shell) = weak.upgrade() {
+                        shell.set_favorite_category(category);
+                    }
+                })
+            },
+            cycle_favorite_category: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move || {
+                    if let Some(shell) = weak.upgrade() {
+                        shell
+                            .set_favorite_category(shell.navigation.favorite_category.get().next());
+                    }
+                })
+            },
+            playlist_context_menu: {
+                let weak = Rc::downgrade(self);
+                Rc::new(move |target, playlist, play, position| {
+                    if let Some(shell) = weak.upgrade() {
+                        crate::menus::media_menus::present_playlist_context_menu(
+                            target,
+                            &shell.media_menus,
+                            playlist,
+                            play,
+                            position,
+                            crate::player::state::current_playback_track(
+                                shell.player_ui.selected_playback().as_deref(),
+                            )
+                            .map(|track| track.media_uri),
+                        );
+                    }
+                })
+            },
+        })
+    }
+}

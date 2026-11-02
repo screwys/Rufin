@@ -1,0 +1,1161 @@
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
+
+use crate::widgets::controls::REMOVE_ICON;
+use crate::widgets::layout::large_popup_content_width;
+use ::library::{
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRule,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort,
+};
+use adw::prelude::*;
+use localization::{msgid, tr};
+
+const SMART_PLAYLIST_DIALOG_WIDTH: i32 = 700;
+const SMART_PLAYLIST_ARTWORK_WIDTH: i32 = 320;
+
+use rufin_core::playlists::SmartPlaylistChange;
+use rufin_core::settings::presentation::{
+    smart_operator_title, smart_period_title, smart_rule_field_title, smart_sort_title,
+};
+
+#[derive(Clone)]
+struct SmartPlaylistTemplate {
+    name: &'static str,
+    definition: SmartPlaylistDefinition,
+}
+
+fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
+    let most_played = |name, activity_period| SmartPlaylistTemplate {
+        name,
+        definition: SmartPlaylistDefinition {
+            source_id: None,
+            match_all: vec![SmartPlaylistRule {
+                field: SmartPlaylistRuleField::PlayCount,
+                operator: SmartPlaylistRuleOperator::Above,
+                value: Some(SmartPlaylistRuleValue::Number(0)),
+            }],
+            match_any: Vec::new(),
+            sort_field: SmartPlaylistSort::PlayCount,
+            descending: true,
+            activity_period,
+            limit: Some(100),
+        },
+    };
+    vec![
+        most_played(
+            msgid("Most Played (Weekly)"),
+            SmartPlaylistActivityPeriod::Weekly,
+        ),
+        most_played(
+            msgid("Most Played (Monthly)"),
+            SmartPlaylistActivityPeriod::Monthly,
+        ),
+        most_played(
+            msgid("Most Played (Yearly)"),
+            SmartPlaylistActivityPeriod::Yearly,
+        ),
+        most_played(msgid("Most Played"), SmartPlaylistActivityPeriod::Lifetime),
+        SmartPlaylistTemplate {
+            name: msgid("Never Played"),
+            definition: SmartPlaylistDefinition {
+                source_id: None,
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::Played,
+                    operator: SmartPlaylistRuleOperator::Is,
+                    value: Some(SmartPlaylistRuleValue::Bool(false)),
+                }],
+                match_any: Vec::new(),
+                sort_field: SmartPlaylistSort::Title,
+                descending: false,
+                activity_period: SmartPlaylistActivityPeriod::Lifetime,
+                limit: None,
+            },
+        },
+    ]
+}
+
+type RerenderSlot = Rc<RefCell<Option<Weak<dyn Fn()>>>>;
+
+#[derive(Clone, Default)]
+pub struct RuleValueSuggestions {
+    pub genres: Vec<String>,
+    pub moods: Vec<String>,
+}
+
+#[derive(Clone)]
+struct SmartPlaylistEditor {
+    name: gtk::Entry,
+    source: gtk::DropDown,
+    source_ids: Rc<[Option<library::SourceId>]>,
+    match_all: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    match_any: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    sort: gtk::DropDown,
+    descending: gtk::CheckButton,
+    activity_period: gtk::DropDown,
+    limit: gtk::Entry,
+}
+
+struct SmartPlaylistDialog {
+    dialog: adw::Dialog,
+    editor: SmartPlaylistEditor,
+    template_control: gtk::Box,
+    template_dropdown: gtk::DropDown,
+    apply_template: gtk::Button,
+    match_all_rules: gtk::Box,
+    match_all_add_rule: gtk::Button,
+    match_any_rules: gtk::Box,
+    match_any_add_rule: gtk::Button,
+    cancel: gtk::Button,
+    submit: gtk::Button,
+    editor_content: gtk::Box,
+    artwork_host: gtk::Box,
+    editor_layout: gtk::Box,
+    rules_column: gtk::Box,
+    period_control: gtk::Box,
+}
+
+impl RuleValueSuggestions {
+    fn for_field(&self, field: SmartPlaylistRuleField) -> Option<&[String]> {
+        match field {
+            SmartPlaylistRuleField::Genre => Some(&self.genres),
+            SmartPlaylistRuleField::Mood => Some(&self.moods),
+            _ => None,
+        }
+    }
+}
+
+impl SmartPlaylistEditor {
+    fn definition(&self) -> Option<(String, SmartPlaylistDefinition)> {
+        let name = playlist_name(&self.name.text())?;
+        let limit = self
+            .limit
+            .text()
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|value| *value > 0);
+        let sort_field = SmartPlaylistSort::ALL
+            .get(self.sort.selected() as usize)
+            .copied()
+            .unwrap_or(SmartPlaylistSort::Title);
+        let definition = SmartPlaylistDefinition {
+            source_id: self.source_ids[self.source.selected() as usize].clone(),
+            match_all: self.match_all.borrow().clone(),
+            match_any: self.match_any.borrow().clone(),
+            sort_field,
+            descending: self.descending.is_active(),
+            activity_period: SmartPlaylistActivityPeriod::ALL
+                .get(self.activity_period.selected() as usize)
+                .copied()
+                .unwrap_or(SmartPlaylistActivityPeriod::Lifetime),
+            limit,
+        };
+        Some((name, definition))
+    }
+}
+
+fn smart_playlist_dialog(
+    dialog_title: &str,
+    submit_label: &str,
+    name: Option<&str>,
+    definition: Option<&SmartPlaylistDefinition>,
+    sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
+) -> SmartPlaylistDialog {
+    let resource = crate::editors::ui_resource::SMART_PLAYLIST_DIALOG_RESOURCE;
+    let builder = crate::editors::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        dialog: adw::Dialog,
+        title: adw::WindowTitle,
+        template_control: gtk::Box,
+        template_dropdown: gtk::DropDown,
+        apply_template: gtk::Button,
+        name_entry: gtk::Entry,
+        source: gtk::DropDown,
+        sort: gtk::DropDown,
+        descending: gtk::CheckButton,
+        activity_period: gtk::DropDown,
+        limit: gtk::Entry,
+        match_all_rules: gtk::Box,
+        match_all_add_rule: gtk::Button,
+        match_any_rules: gtk::Box,
+        match_any_add_rule: gtk::Button,
+        cancel: gtk::Button,
+        submit: gtk::Button,
+        editor_content: gtk::Box, artwork_host: gtk::Box,
+        editor_layout: gtk::Box, rules_column: gtk::Box, toolbar: adw::ToolbarView,
+        settings: adw::WrapBox, period_control: gtk::Box,
+    });
+
+    dialog.set_title(&tr(dialog_title));
+    title.set_title(&tr(dialog_title));
+    if let Some(name) = name {
+        name_entry.set_text(name);
+    }
+    let definition = definition.cloned().unwrap_or_default();
+    let mut source_ids = vec![None];
+    let mut labels = vec![tr("All")];
+    for configured in sources.iter() {
+        source_ids.push(Some(configured.id.clone()));
+        labels.push(crate::widgets::source_labels::configured_source_display_name(configured));
+    }
+    if let Some(id) = &definition.source_id
+        && !source_ids.contains(&Some(id.clone()))
+    {
+        source_ids.push(Some(id.clone()));
+        labels.push(id.to_string());
+    }
+    let selected = source_ids
+        .iter()
+        .position(|id| id == &definition.source_id)
+        .unwrap();
+    set_dropdown_labels(&source, &labels, selected);
+    set_dropdown_labels(&sort, &sort_labels(), sort_index(definition.sort_field));
+    descending.set_active(definition.descending);
+    set_dropdown_labels(
+        &activity_period,
+        &SmartPlaylistActivityPeriod::ALL.map(|period| tr(smart_period_title(period))),
+        period_index(definition.activity_period),
+    );
+    if let Some(value) = definition.limit {
+        limit.set_text(&value.to_string());
+    }
+    submit.set_label(&tr(submit_label));
+    let rules_width = settings.measure(gtk::Orientation::Horizontal, -1).1
+        + rules_column.margin_start()
+        + rules_column.margin_end();
+    let preferred_width = if name.is_some() {
+        (SMART_PLAYLIST_ARTWORK_WIDTH
+            + editor_layout.spacing()
+            + rules_width
+            + editor_content.margin_start()
+            + editor_content.margin_end())
+        .max(1000)
+    } else {
+        large_popup_content_width(SMART_PLAYLIST_DIALOG_WIDTH)
+            .max(rules_width + editor_content.margin_start() + editor_content.margin_end())
+    };
+    dialog.set_child(None::<&gtk::Widget>);
+    dialog.set_child(Some(&crate::widgets::layout::preferred_width_owner(
+        &toolbar,
+        preferred_width,
+    )));
+
+    SmartPlaylistDialog {
+        dialog,
+        editor: SmartPlaylistEditor {
+            name: name_entry,
+            source,
+            source_ids: source_ids.into(),
+            match_all: Rc::new(RefCell::new(definition.match_all)),
+            match_any: Rc::new(RefCell::new(definition.match_any)),
+            sort,
+            descending,
+            activity_period,
+            limit,
+        },
+        template_control,
+        template_dropdown,
+        apply_template,
+        match_all_rules,
+        match_all_add_rule,
+        match_any_rules,
+        match_any_add_rule,
+        cancel,
+        submit,
+        editor_content,
+        artwork_host,
+        editor_layout,
+        rules_column,
+        period_control,
+    }
+}
+
+fn configure_smart_playlist_editor(
+    surface: &SmartPlaylistDialog,
+    templates: &[SmartPlaylistTemplate],
+    value_suggestions: RuleValueSuggestions,
+) {
+    let editor = &surface.editor;
+    if !templates.is_empty() {
+        let default_titles = templates
+            .iter()
+            .map(|template| tr(template.name))
+            .collect::<Vec<_>>();
+        set_dropdown_labels(&surface.template_dropdown, &default_titles, 0);
+        surface.template_control.set_visible(true);
+    }
+
+    let update_period: Rc<dyn Fn()> = {
+        let control = surface.period_control.downgrade();
+        let sort = editor.sort.downgrade();
+        let all = Rc::clone(&editor.match_all);
+        let any = Rc::clone(&editor.match_any);
+        Rc::new(move || {
+            let (Some(control), Some(sort)) = (control.upgrade(), sort.upgrade()) else {
+                return;
+            };
+            let uses_period = matches!(
+                SmartPlaylistSort::ALL.get(sort.selected() as usize),
+                Some(
+                    SmartPlaylistSort::PlayCount
+                        | SmartPlaylistSort::SkipCount
+                        | SmartPlaylistSort::LastPlayed
+                )
+            ) || all.borrow().iter().chain(any.borrow().iter()).any(|rule| {
+                matches!(
+                    rule.field,
+                    SmartPlaylistRuleField::PlayCount
+                        | SmartPlaylistRuleField::SkipCount
+                        | SmartPlaylistRuleField::LastPlayed
+                )
+            });
+            control.set_visible(uses_period);
+        })
+    };
+    let update = Rc::clone(&update_period);
+    editor.sort.connect_selected_notify(move |_| update());
+
+    let value_suggestions = Rc::new(value_suggestions);
+    let rerender_slot: RerenderSlot = Rc::new(RefCell::new(None));
+    let rerender: Rc<dyn Fn()> = {
+        let match_all_host = surface.match_all_rules.downgrade();
+        let match_any_host = surface.match_any_rules.downgrade();
+        let match_all = Rc::clone(&editor.match_all);
+        let match_any = Rc::clone(&editor.match_any);
+        let value_suggestions = Rc::clone(&value_suggestions);
+        let rerender_slot = Rc::clone(&rerender_slot);
+        Rc::new(move || {
+            update_period();
+            let (Some(match_all_host), Some(match_any_host)) =
+                (match_all_host.upgrade(), match_any_host.upgrade())
+            else {
+                return;
+            };
+            clear_box(&match_all_host);
+            clear_box(&match_any_host);
+            let Some(rerender) = rerender_slot.borrow().as_ref().and_then(Weak::upgrade) else {
+                return;
+            };
+            append_rule_rows(
+                &match_all_host,
+                Rc::clone(&match_all),
+                Rc::clone(&value_suggestions),
+                Rc::clone(&rerender),
+            );
+            append_rule_rows(
+                &match_any_host,
+                Rc::clone(&match_any),
+                Rc::clone(&value_suggestions),
+                rerender,
+            );
+        })
+    };
+    *rerender_slot.borrow_mut() = Some(Rc::downgrade(&rerender));
+    connect_add_rule(
+        &surface.match_all_add_rule,
+        Rc::clone(&editor.match_all),
+        Rc::clone(&rerender),
+    );
+    connect_add_rule(
+        &surface.match_any_add_rule,
+        Rc::clone(&editor.match_any),
+        Rc::clone(&rerender),
+    );
+    rerender();
+
+    if !templates.is_empty() {
+        let templates = templates.to_vec();
+        let editor = editor.clone();
+        let dropdown = surface.template_dropdown.clone();
+        let rerender = Rc::clone(&rerender);
+        surface.apply_template.connect_clicked(move |_| {
+            let Some(template) = templates.get(dropdown.selected() as usize) else {
+                return;
+            };
+            editor.name.set_text(&tr(template.name));
+            editor
+                .match_all
+                .replace(template.definition.match_all.clone());
+            editor
+                .match_any
+                .replace(template.definition.match_any.clone());
+            editor
+                .sort
+                .set_selected(sort_index(template.definition.sort_field) as u32);
+            editor.descending.set_active(template.definition.descending);
+            editor
+                .activity_period
+                .set_selected(period_index(template.definition.activity_period) as u32);
+            editor.limit.set_text(
+                &template
+                    .definition
+                    .limit
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+            );
+            rerender();
+        });
+    }
+}
+
+fn connect_add_rule(
+    button: &gtk::Button,
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    rerender: Rc<dyn Fn()>,
+) {
+    button.connect_clicked(move |_| {
+        rules
+            .borrow_mut()
+            .push(SmartPlaylistRuleField::Title.default_rule());
+        rerender();
+    });
+}
+
+fn append_rule_rows(
+    parent: &gtk::Box,
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    value_suggestions: Rc<RuleValueSuggestions>,
+    rerender: Rc<dyn Fn()>,
+) {
+    let current_rules = rules.borrow().clone();
+    parent.set_visible(!current_rules.is_empty());
+    for (index, rule) in current_rules.into_iter().enumerate() {
+        append_rule_row(
+            parent,
+            Rc::clone(&rules),
+            Rc::clone(&value_suggestions),
+            index,
+            rule,
+            Rc::clone(&rerender),
+        );
+    }
+}
+
+fn append_rule_row(
+    parent: &gtk::Box,
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    value_suggestions: Rc<RuleValueSuggestions>,
+    index: usize,
+    rule: SmartPlaylistRule,
+    rerender: Rc<dyn Fn()>,
+) {
+    let row = adw::WrapBox::builder()
+        .child_spacing(8)
+        .line_spacing(8)
+        .build();
+    row.set_hexpand(true);
+
+    let field_labels = field_labels();
+    let field = dropdown_from_labels(&field_labels, field_index(rule.field));
+    field.set_hexpand(false);
+
+    {
+        let rules = Rc::clone(&rules);
+        let rerender = Rc::clone(&rerender);
+        field.connect_selected_notify(move |dropdown| {
+            let selected = SmartPlaylistRuleField::ALL
+                .get(dropdown.selected() as usize)
+                .copied()
+                .unwrap_or(SmartPlaylistRuleField::Title);
+            if let Some(rule) = rules.borrow_mut().get_mut(index) {
+                *rule = selected.default_rule();
+            }
+            rerender();
+        });
+    }
+    row.append(&field);
+
+    let operators = rule.field.operators();
+    let operator_titles = op_labels(rule.field, operators);
+    let operator = dropdown_from_labels(&operator_titles, operator_index(operators, rule.operator));
+
+    {
+        let rules = Rc::clone(&rules);
+        let rerender = Rc::clone(&rerender);
+        operator.connect_selected_notify(move |dropdown| {
+            change_rule_operator(&rules, index, dropdown.selected(), || {
+                rerender();
+            });
+        });
+    }
+    row.append(&operator);
+
+    let value_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    value_box.set_hexpand(true);
+    append_value_editor(
+        &value_box,
+        Rc::clone(&rules),
+        &value_suggestions,
+        index,
+        &rule,
+    );
+    row.append(&value_box);
+
+    let remove = gtk::Button::from_icon_name(REMOVE_ICON);
+    remove.add_css_class("flat");
+    remove.set_tooltip_text(Some(&tr("Remove rule")));
+    {
+        let rules = Rc::clone(&rules);
+        let rerender = Rc::clone(&rerender);
+        remove.connect_clicked(move |_| {
+            remove_rule(&rules, index, || rerender());
+        });
+    }
+    row.append(&remove);
+    parent.append(&row);
+}
+
+fn append_value_editor(
+    container: &gtk::Box,
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    value_suggestions: &RuleValueSuggestions,
+    index: usize,
+    rule: &SmartPlaylistRule,
+) {
+    match rule
+        .field
+        .value_kind(rule.operator)
+        .unwrap_or(SmartPlaylistRuleValueKind::None)
+    {
+        SmartPlaylistRuleValueKind::None => {
+            let label = gtk::Label::new(None);
+            label.set_hexpand(true);
+            container.append(&label);
+        }
+        SmartPlaylistRuleValueKind::Text => {
+            if let Some(suggestions) = value_suggestions.for_field(rule.field)
+                && !suggestions.is_empty()
+            {
+                let (labels, selected) = rule_value_labels(suggestions, rule);
+                let dropdown = searchable_dropdown_from_labels(&labels, selected);
+                dropdown.set_hexpand(true);
+                if let Some(value) = labels.get(selected).cloned()
+                    && let Some(rule) = rules.borrow_mut().get_mut(index)
+                {
+                    rule.value = Some(SmartPlaylistRuleValue::Text(value));
+                }
+                dropdown.connect_selected_notify(move |dropdown| {
+                    if let Some(value) = labels.get(dropdown.selected() as usize)
+                        && let Some(rule) = rules.borrow_mut().get_mut(index)
+                    {
+                        rule.value = Some(SmartPlaylistRuleValue::Text(value.clone()));
+                    }
+                });
+                container.append(&dropdown);
+            } else {
+                let entry = gtk::Entry::new();
+                entry.set_hexpand(true);
+                entry.set_placeholder_text(Some(&text_placeholder(rule.field)));
+                if let Some(SmartPlaylistRuleValue::Text(value)) = rule.value.as_ref() {
+                    entry.set_text(value);
+                }
+                entry.connect_changed(move |entry| {
+                    if let Some(rule) = rules.borrow_mut().get_mut(index) {
+                        rule.value = Some(SmartPlaylistRuleValue::Text(entry.text().to_string()));
+                    }
+                });
+                container.append(&entry);
+            }
+        }
+        SmartPlaylistRuleValueKind::Number => {
+            let (min, max, default) = rule.field.number_bounds();
+            let value = match rule.value.as_ref() {
+                Some(SmartPlaylistRuleValue::Number(value)) => *value,
+                _ => default,
+            };
+            let rating = rule.field == SmartPlaylistRuleField::Rating;
+            let spin = number_spin(value, min, max, rating);
+            spin.connect_value_changed(move |spin| {
+                if let Some(rule) = rules.borrow_mut().get_mut(index) {
+                    rule.value = Some(SmartPlaylistRuleValue::Number(spin_value(spin, rating)));
+                }
+            });
+            container.append(&spin);
+        }
+        SmartPlaylistRuleValueKind::NumberRange => {
+            let (min_bound, max_bound, default) = rule.field.number_bounds();
+            let (min_value, max_value) = match rule.value.as_ref() {
+                Some(SmartPlaylistRuleValue::NumberRange { min, max }) => (*min, *max),
+                _ => (default, default),
+            };
+            let rating = rule.field == SmartPlaylistRuleField::Rating;
+            let min_spin = number_spin(min_value, min_bound, max_bound, rating);
+            let max_spin = number_spin(max_value, min_bound, max_bound, rating);
+            connect_number_range(rules, index, min_spin.clone(), max_spin.clone(), rating);
+            container.append(&min_spin);
+            container.append(&gtk::Label::new(Some(&tr("to"))));
+            container.append(&max_spin);
+        }
+        SmartPlaylistRuleValueKind::Date => {
+            let entry = gtk::Entry::new();
+            entry.set_hexpand(true);
+            entry.set_placeholder_text(Some("YYYY-MM-DD"));
+            if let Some(SmartPlaylistRuleValue::Date(value)) = rule.value.as_ref() {
+                entry.set_text(value);
+            }
+            entry.connect_changed(move |entry| {
+                if let Some(rule) = rules.borrow_mut().get_mut(index) {
+                    rule.value = Some(SmartPlaylistRuleValue::Date(entry.text().to_string()));
+                }
+            });
+            container.append(&entry);
+        }
+        SmartPlaylistRuleValueKind::DateRange => {
+            let start = gtk::Entry::new();
+            let end = gtk::Entry::new();
+            start.set_placeholder_text(Some("YYYY-MM-DD"));
+            end.set_placeholder_text(Some("YYYY-MM-DD"));
+            start.set_hexpand(true);
+            end.set_hexpand(true);
+            if let Some(SmartPlaylistRuleValue::DateRange { start: s, end: e }) =
+                rule.value.as_ref()
+            {
+                start.set_text(s);
+                end.set_text(e);
+            }
+            connect_date_range(rules, index, start.clone(), end.clone());
+            container.append(&start);
+            container.append(&gtk::Label::new(Some(&tr("to"))));
+            container.append(&end);
+        }
+        SmartPlaylistRuleValueKind::Bool => {
+            let active = matches!(rule.value, Some(SmartPlaylistRuleValue::Bool(true)));
+            let dropdown = dropdown_from_titles(&[msgid("Yes"), msgid("No")], usize::from(!active));
+            dropdown.connect_selected_notify(move |dropdown| {
+                if let Some(rule) = rules.borrow_mut().get_mut(index) {
+                    rule.value = Some(SmartPlaylistRuleValue::Bool(dropdown.selected() == 0));
+                }
+            });
+            container.append(&dropdown);
+        }
+    }
+}
+
+fn connect_number_range(
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    min_spin: gtk::SpinButton,
+    max_spin: gtk::SpinButton,
+    rating: bool,
+) {
+    let max_for_min = max_spin.downgrade();
+    let min_rules = Rc::clone(&rules);
+    min_spin.connect_value_changed(move |min_spin| {
+        let Some(max_spin) = max_for_min.upgrade() else {
+            return;
+        };
+        update_number_range(&min_rules, index, min_spin, &max_spin, rating);
+    });
+
+    let min_for_max = min_spin.downgrade();
+    max_spin.connect_value_changed(move |max_spin| {
+        let Some(min_spin) = min_for_max.upgrade() else {
+            return;
+        };
+        update_number_range(&rules, index, &min_spin, max_spin, rating);
+    });
+}
+
+fn connect_date_range(
+    rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    start: gtk::Entry,
+    end: gtk::Entry,
+) {
+    let end_for_start = end.downgrade();
+    let start_rules = Rc::clone(&rules);
+    start.connect_changed(move |start| {
+        let Some(end) = end_for_start.upgrade() else {
+            return;
+        };
+        update_date_range(&start_rules, index, start, &end);
+    });
+
+    let start_for_end = start.downgrade();
+    end.connect_changed(move |end| {
+        let Some(start) = start_for_end.upgrade() else {
+            return;
+        };
+        update_date_range(&rules, index, &start, end);
+    });
+}
+
+fn update_number_range(
+    rules: &Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    min_spin: &gtk::SpinButton,
+    max_spin: &gtk::SpinButton,
+    rating: bool,
+) {
+    if let Some(rule) = rules.borrow_mut().get_mut(index) {
+        rule.value = Some(SmartPlaylistRuleValue::NumberRange {
+            min: spin_value(min_spin, rating),
+            max: spin_value(max_spin, rating),
+        });
+    }
+}
+
+fn update_date_range(
+    rules: &Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    start: &gtk::Entry,
+    end: &gtk::Entry,
+) {
+    if let Some(rule) = rules.borrow_mut().get_mut(index) {
+        rule.value = Some(SmartPlaylistRuleValue::DateRange {
+            start: start.text().to_string(),
+            end: end.text().to_string(),
+        });
+    }
+}
+
+fn rule_value_labels(suggestions: &[String], rule: &SmartPlaylistRule) -> (Vec<String>, usize) {
+    let current = match rule.value.as_ref() {
+        Some(SmartPlaylistRuleValue::Text(value)) if !value.is_empty() => Some(value.as_str()),
+        _ => None,
+    };
+    let mut labels = suggestions.to_vec();
+    let selected = current
+        .and_then(|value| labels.iter().position(|candidate| candidate == value))
+        .unwrap_or(0);
+    if let Some(value) = current
+        && !labels.iter().any(|candidate| candidate == value)
+    {
+        labels.push(value.to_string());
+        let selected = labels.len() - 1;
+        return (labels, selected);
+    }
+    (labels, selected)
+}
+
+fn change_rule_operator(
+    rules: &Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    selected: u32,
+    after_change: impl FnOnce(),
+) {
+    {
+        let mut rules = rules.borrow_mut();
+        let Some(rule) = rules.get_mut(index) else {
+            return;
+        };
+        let operators = rule.field.operators();
+        let Some(operator) = operators
+            .get(selected as usize)
+            .copied()
+            .or_else(|| operators.first().copied())
+        else {
+            return;
+        };
+        rule.operator = operator;
+        rule.value = rule.field.default_value(operator);
+    }
+    after_change();
+}
+
+fn remove_rule(
+    rules: &Rc<RefCell<Vec<SmartPlaylistRule>>>,
+    index: usize,
+    after_change: impl FnOnce(),
+) {
+    {
+        let mut rules = rules.borrow_mut();
+        if index < rules.len() {
+            rules.remove(index);
+        }
+    }
+    after_change();
+}
+
+fn field_labels() -> Vec<String> {
+    SmartPlaylistRuleField::ALL
+        .iter()
+        .map(|field| tr(smart_rule_field_title(*field)))
+        .collect()
+}
+
+fn sort_labels() -> Vec<String> {
+    SmartPlaylistSort::ALL
+        .iter()
+        .map(|field| tr(smart_sort_title(*field)))
+        .collect()
+}
+
+fn op_labels(
+    field: SmartPlaylistRuleField,
+    operators: &[SmartPlaylistRuleOperator],
+) -> Vec<String> {
+    operators
+        .iter()
+        .map(|operator| tr(smart_operator_title(field, *operator)))
+        .collect()
+}
+
+fn dropdown_from_titles(titles: &[&str], selected: usize) -> gtk::DropDown {
+    let labels = titles.iter().map(|title| tr(title)).collect::<Vec<_>>();
+    dropdown_from_labels(&labels, selected)
+}
+
+fn dropdown_from_labels(labels: &[String], selected: usize) -> gtk::DropDown {
+    let dropdown = gtk::DropDown::new(None::<gtk::StringList>, None::<gtk::Expression>);
+    set_dropdown_labels(&dropdown, labels, selected);
+    dropdown
+}
+
+fn set_dropdown_labels(dropdown: &gtk::DropDown, labels: &[String], selected: usize) {
+    let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
+    let model = gtk::StringList::new(&refs);
+    dropdown.set_model(Some(&model));
+    dropdown.set_selected(selected as u32);
+}
+
+fn searchable_dropdown_from_labels(labels: &[String], selected: usize) -> gtk::DropDown {
+    let dropdown = dropdown_from_labels(labels, selected);
+    dropdown.set_enable_search(true);
+    dropdown
+}
+
+fn field_index(field: SmartPlaylistRuleField) -> usize {
+    SmartPlaylistRuleField::ALL
+        .iter()
+        .position(|candidate| *candidate == field)
+        .unwrap_or(0)
+}
+
+fn operator_index(
+    operators: &[SmartPlaylistRuleOperator],
+    operator: SmartPlaylistRuleOperator,
+) -> usize {
+    operators
+        .iter()
+        .position(|candidate| *candidate == operator)
+        .unwrap_or(0)
+}
+
+fn period_index(period: SmartPlaylistActivityPeriod) -> usize {
+    SmartPlaylistActivityPeriod::ALL
+        .iter()
+        .position(|value| *value == period)
+        .unwrap_or(SmartPlaylistActivityPeriod::ALL.len() - 1)
+}
+
+fn sort_index(sort: SmartPlaylistSort) -> usize {
+    SmartPlaylistSort::ALL
+        .iter()
+        .position(|field| *field == sort)
+        .unwrap_or(0)
+}
+
+fn number_spin(value: i64, min: i64, max: i64, rating: bool) -> gtk::SpinButton {
+    let scale = if rating { 2.0 } else { 1.0 };
+    let adjustment = gtk::Adjustment::new(
+        value as f64 / scale,
+        min as f64 / scale,
+        max as f64 / scale,
+        1.0 / scale,
+        10.0 / scale,
+        0.0,
+    );
+    let spin = gtk::SpinButton::new(Some(&adjustment), 1.0 / scale, u32::from(rating));
+    spin.set_numeric(true);
+    spin.set_width_chars(7);
+    spin
+}
+
+fn spin_value(spin: &gtk::SpinButton, rating: bool) -> i64 {
+    (spin.value() * if rating { 2.0 } else { 1.0 }).round() as i64
+}
+
+fn text_placeholder(field: SmartPlaylistRuleField) -> String {
+    match field {
+        SmartPlaylistRuleField::Genre => tr("Genre"),
+        SmartPlaylistRuleField::Mood => tr("Mood"),
+        SmartPlaylistRuleField::Comment => tr("Comment text"),
+        SmartPlaylistRuleField::Artist => tr("Artist name"),
+        SmartPlaylistRuleField::Album => tr("Album title"),
+        _ => tr("Text"),
+    }
+}
+
+fn clear_box(box_: &gtk::Box) {
+    while let Some(child) = box_.first_child() {
+        box_.remove(&child);
+    }
+}
+
+fn playlist_name(value: &str) -> Option<String> {
+    let name = value.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn sync_editor_button_enabled(button: &gtk::Button, editor: &SmartPlaylistEditor) {
+    button.set_sensitive(playlist_name(&editor.name.text()).is_some());
+}
+
+fn connect_editor_name_validation(button: &gtk::Button, editor: &SmartPlaylistEditor) {
+    let button = button.downgrade();
+    editor.name.connect_changed(move |name| {
+        let Some(button) = button.upgrade() else {
+            return;
+        };
+        button.set_sensitive(playlist_name(&name.text()).is_some());
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::{change_rule_operator, remove_rule, smart_playlist_templates};
+    use ::library::{
+        SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
+        SmartPlaylistRuleValue,
+    };
+
+    #[test]
+    fn new_read_state() {
+        let rules = Rc::new(RefCell::new(vec![SmartPlaylistRule {
+            field: SmartPlaylistRuleField::Title,
+            operator: SmartPlaylistRuleOperator::Contains,
+            value: Some(SmartPlaylistRuleValue::Text("needle".to_string())),
+        }]));
+        let rerendered = std::cell::Cell::new(false);
+
+        change_rule_operator(&rules, 0, 4, || {
+            rerendered.set(true);
+            assert!(
+                rules.try_borrow().is_ok(),
+                "rerender needs to read the editor state after the operator changes"
+            );
+        });
+
+        assert!(rerendered.get());
+        let rules = rules.borrow();
+        assert_eq!(rules[0].operator, SmartPlaylistRuleOperator::IsEmpty);
+        assert_eq!(rules[0].value, None);
+    }
+
+    #[test]
+    fn new_remove_rule_releases_state_before_rerender() {
+        let rules = Rc::new(RefCell::new(vec![
+            SmartPlaylistRule {
+                field: SmartPlaylistRuleField::Title,
+                operator: SmartPlaylistRuleOperator::Contains,
+                value: Some(SmartPlaylistRuleValue::Text("needle".to_string())),
+            },
+            SmartPlaylistRule {
+                field: SmartPlaylistRuleField::Genre,
+                operator: SmartPlaylistRuleOperator::Equals,
+                value: Some(SmartPlaylistRuleValue::Text("Rock".to_string())),
+            },
+        ]));
+        let rerendered = std::cell::Cell::new(false);
+
+        remove_rule(&rules, 0, || {
+            rerendered.set(true);
+            assert!(
+                rules.try_borrow().is_ok(),
+                "rerender needs to read the editor state after a rule is removed"
+            );
+        });
+
+        assert!(rerendered.get());
+        let rules = rules.borrow();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].field, SmartPlaylistRuleField::Genre);
+    }
+
+    #[test]
+    fn most_played_templates_only_include_tracks_played_in_the_period() {
+        let expected = SmartPlaylistRule {
+            field: SmartPlaylistRuleField::PlayCount,
+            operator: SmartPlaylistRuleOperator::Above,
+            value: Some(SmartPlaylistRuleValue::Number(0)),
+        };
+
+        for template in smart_playlist_templates().into_iter().take(4) {
+            assert_eq!(
+                template.definition.match_all.as_slice(),
+                std::slice::from_ref(&expected)
+            );
+        }
+    }
+}
+
+pub type SmartPlaylistSubmit =
+    Rc<dyn Fn(SmartPlaylistChange, Option<Rc<dyn Fn(Result<(), String>)>>)>;
+pub fn build_dialog(
+    playlist: Option<library::SmartPlaylistRow>,
+    value_suggestions: RuleValueSuggestions,
+    sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
+    publish: SmartPlaylistSubmit,
+    owner: &std::sync::Arc<rufin_core::source::SourceOwner>,
+    artwork_state: &Rc<crate::widgets::artwork::ArtworkState>,
+) -> adw::Dialog {
+    let templates = playlist
+        .is_none()
+        .then(smart_playlist_templates)
+        .unwrap_or_default();
+    let (title, submit_label) = if playlist.is_some() {
+        (msgid("Edit Smart Playlist"), msgid("Save"))
+    } else {
+        (msgid("New Smart Playlist"), msgid("Create"))
+    };
+    let surface = smart_playlist_dialog(
+        title,
+        submit_label,
+        playlist.as_ref().map(|playlist| playlist.name.as_str()),
+        playlist.as_ref().map(|playlist| &playlist.definition),
+        sources,
+    );
+    configure_smart_playlist_editor(&surface, &templates, value_suggestions);
+    let artwork = playlist.as_ref().map(|playlist| {
+        let key = playlist.smart_playlist_key;
+        let artwork = crate::editors::playlist_artwork::ArtworkEditor::new(
+            owner,
+            artwork_state,
+            rufin_core::playlists::PlaylistArtworkEditing {
+                binding: playlist
+                    .artwork_binding
+                    .as_deref()
+                    .map(library::authored_playlist_artwork)
+                    .transpose()
+                    .expect("accepted playlist artwork")
+                    .flatten(),
+                automatic_binding: playlist
+                    .artwork_binding
+                    .as_deref()
+                    .map(library::automatic_playlist_artwork)
+                    .transpose()
+                    .expect("accepted playlist artwork")
+                    .flatten(),
+                writable: true,
+            },
+            &surface.editor_content,
+            &surface.submit,
+            move |owner| rufin_core::playlists::regenerate_smart_playlist_artwork(owner, key),
+        );
+        artwork.overlay.set_size_request(1, 1);
+        artwork.overlay.set_halign(gtk::Align::Fill);
+        artwork.overlay.set_valign(gtk::Align::Fill);
+        artwork.frame.set_hexpand(true);
+        surface.artwork_host.append(&artwork.frame);
+        surface.artwork_host.append(&artwork.status);
+        surface.artwork_host.set_visible(true);
+        surface.editor_content.remove(&surface.editor_layout);
+        let layout = surface.editor_layout.downgrade();
+        let cover = artwork.frame.downgrade();
+        let cover_host = surface.artwork_host.downgrade();
+        let rules = surface.rules_column.downgrade();
+        surface
+            .editor_content
+            .append(&crate::widgets::layout::width_allocation_owner(
+                &surface.editor_layout,
+                move |width| {
+                    let (Some(layout), Some(cover), Some(cover_host), Some(rules)) = (
+                        layout.upgrade(),
+                        cover.upgrade(),
+                        cover_host.upgrade(),
+                        rules.upgrade(),
+                    ) else {
+                        return;
+                    };
+                    let stacked = width
+                        < SMART_PLAYLIST_ARTWORK_WIDTH
+                            + rules.measure(gtk::Orientation::Horizontal, -1).0
+                            + layout.spacing();
+                    let orientation = if stacked {
+                        gtk::Orientation::Vertical
+                    } else {
+                        gtk::Orientation::Horizontal
+                    };
+                    if layout.orientation() != orientation {
+                        layout.set_orientation(orientation);
+                    }
+                    if cover_host.hexpands() != stacked {
+                        cover_host.set_hexpand(stacked);
+                    }
+                    let cover_width = if stacked {
+                        width
+                    } else {
+                        SMART_PLAYLIST_ARTWORK_WIDTH
+                    };
+                    let width_request = if stacked {
+                        -1
+                    } else {
+                        SMART_PLAYLIST_ARTWORK_WIDTH
+                    };
+                    if cover.width_request() != width_request {
+                        cover.set_width_request(width_request);
+                    }
+                    if cover.height_request() != cover_width {
+                        cover.set_height_request(cover_width);
+                    }
+                },
+            ));
+        artwork
+    });
+    let artwork_weak = artwork.as_ref().map(Rc::downgrade);
+    let lifetime = RefCell::new(artwork);
+    surface.dialog.connect_closed(move |_| {
+        lifetime.borrow_mut().take();
+    });
+    let SmartPlaylistDialog {
+        dialog,
+        editor,
+        cancel,
+        submit,
+        ..
+    } = surface;
+    sync_editor_button_enabled(&submit, &editor);
+    connect_editor_name_validation(&submit, &editor);
+
+    let close = dialog.downgrade();
+    cancel.connect_clicked(move |_| {
+        if let Some(dialog) = close.upgrade() {
+            dialog.close();
+        }
+    });
+
+    let key = playlist.map(|playlist| playlist.smart_playlist_key);
+    let close = dialog.downgrade();
+    submit.connect_clicked(move |_| {
+        let Some((name, definition)) = editor.definition() else {
+            return;
+        };
+        let change = match key {
+            Some(key) => SmartPlaylistChange::Update {
+                key,
+                name,
+                definition,
+                artwork: artwork_weak
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .and_then(|editor| editor.change()),
+            },
+            None => SmartPlaylistChange::Create { name, definition },
+        };
+        if let Some(artwork) = artwork_weak.as_ref().and_then(Weak::upgrade) {
+            artwork.set_busy(true);
+        }
+        let artwork = artwork_weak.clone();
+        let dialog = close.clone();
+        publish(
+            change,
+            Some(Rc::new(move |result| {
+                if let Some(artwork) = artwork.as_ref().and_then(Weak::upgrade) {
+                    artwork.set_busy(false);
+                }
+                if result.is_ok()
+                    && let Some(dialog) = dialog.upgrade()
+                {
+                    dialog.close();
+                }
+            })),
+        );
+    });
+    dialog
+}

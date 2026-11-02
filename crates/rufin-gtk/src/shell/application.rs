@@ -1,0 +1,396 @@
+use std::cell::{Cell, RefCell};
+use std::io::{self, Write};
+use std::ops::ControlFlow;
+use std::process::ExitCode;
+use std::rc::Rc;
+
+use adw::prelude::*;
+use app_identity::{APP_ID, DISPLAY_NAME, STABLE_APP_ID};
+use gtk::gio;
+use tracing::error;
+
+use rufin_core::runtime::RuntimeInputs;
+
+const ICON_RESOURCE_ROOT: &str = "/io/github/screwys/Rufin/icons/hicolor";
+const GTK_DECORATION_LAYOUT_OPTION: &str = "gtk-decoration-layout";
+const WINDOW_BAR_PREVIEW_OPTION: &str = "window-bar-preview";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WindowBarPreview {
+    Macos,
+    Windows,
+}
+
+impl WindowBarPreview {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "macos" => Ok(Self::Macos),
+            "windows" => Ok(Self::Windows),
+            _ => Err(format!(
+                "Unknown window bar preview '{value}'. Use 'macos' or 'windows'."
+            )),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ApplicationOptions {
+    decoration_layout: Option<String>,
+    window_bar_preview: Option<WindowBarPreview>,
+}
+
+pub struct ApplicationExit {
+    pub code: ExitCode,
+    pub storage_reset: Option<Result<rufin_core::settings::StorageResetRequest, String>>,
+}
+
+pub(crate) type StorageResetResult =
+    Rc<RefCell<Option<Result<rufin_core::settings::StorageResetRequest, String>>>>;
+
+pub fn run_application<F, Fut>(
+    settings: rufin_core::settings::Settings,
+    bootstrap: F,
+) -> ApplicationExit
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
+{
+    run_application_with_presentation(settings, bootstrap, false, None)
+}
+
+pub fn run_application_after_update<F, Fut>(
+    settings: rufin_core::settings::Settings,
+    bootstrap: F,
+    presented: impl FnOnce() + 'static,
+) -> ApplicationExit
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
+{
+    run_application_with_presentation(settings, bootstrap, true, Some(Box::new(presented)))
+}
+
+fn run_application_with_presentation<F, Fut>(
+    settings: rufin_core::settings::Settings,
+    bootstrap: F,
+    force_initial_presentation: bool,
+    presented: Option<Box<dyn FnOnce()>>,
+) -> ApplicationExit
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
+{
+    let (app, options) = application();
+    let storage_reset = StorageResetResult::default();
+    let reset_result = Rc::clone(&storage_reset);
+    connect_startup_configuration(&app, Rc::clone(&options));
+    let bootstrap = Rc::new(RefCell::new(Some(bootstrap)));
+    let presented = Rc::new(RefCell::new(presented));
+    let quitting = Rc::new(Cell::new(false));
+    let (open_sender, open_receiver) = async_channel::unbounded();
+    app.connect_open(move |app, files, _| {
+        let _ = open_sender.try_send(files.to_vec());
+        app.activate();
+    });
+    app.connect_activate(move |app| {
+        if quitting.get() {
+            return;
+        }
+        if let Some(window) = app
+            .active_window()
+            .or_else(|| app.windows().into_iter().next())
+        {
+            present_window(&window);
+            return;
+        }
+        let Some(bootstrap) = bootstrap.borrow_mut().take() else {
+            return;
+        };
+        let app = app.clone();
+        let hold = app.hold();
+        let settings = settings.clone();
+        let quitting = Rc::clone(&quitting);
+        let storage_reset = Rc::clone(&storage_reset);
+        let presented = presented.borrow_mut().take();
+        let window_bar_preview = options.borrow().window_bar_preview;
+        let open_receiver = open_receiver.clone();
+        gtk::glib::spawn_future_local(async move {
+            let _hold = hold;
+            if let Err(error) = crate::shell::shell::build::build(
+                &app,
+                settings,
+                bootstrap(),
+                quitting,
+                Rc::clone(&storage_reset),
+                force_initial_presentation,
+                presented,
+                window_bar_preview,
+                open_receiver,
+            )
+            .await
+            {
+                error!(%error, "failed to start Rufin");
+                present_startup_error(&app, &error, window_bar_preview);
+            }
+        });
+    });
+
+    let code = app.run().into();
+    for window in app.windows() {
+        window.destroy();
+    }
+    ApplicationExit {
+        code,
+        storage_reset: reset_result.take(),
+    }
+}
+
+pub fn run_startup_error_application(error: String) -> ApplicationExit {
+    let (app, options) = application();
+    connect_startup_configuration(&app, Rc::clone(&options));
+    app.connect_open(|app, _, _| app.activate());
+    app.connect_activate(move |app| {
+        if let Some(window) = app.active_window() {
+            present_window(&window);
+        } else {
+            present_startup_error(app, &error, options.borrow().window_bar_preview);
+        }
+    });
+    let code = app.run().into();
+    for window in app.windows() {
+        window.destroy();
+    }
+    ApplicationExit {
+        code,
+        storage_reset: None,
+    }
+}
+
+fn application() -> (adw::Application, Rc<RefCell<ApplicationOptions>>) {
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
+    app.set_option_context_parameter_string(Some("[FILE_OR_URI ...]"));
+    app.set_option_context_summary(Some(
+        "Open audio files or M3U, PLS and XSPF playlists. Use --headless --help for playback without a window.",
+    ));
+    #[cfg(target_os = "windows")]
+    app.add_main_option(
+        "updated-restart",
+        0u8.into(),
+        gtk::glib::OptionFlags::HIDDEN,
+        gtk::glib::OptionArg::String,
+        "Resume after the update handshake handled by the launcher",
+        Some("VERSION"),
+    );
+    app.add_main_option(
+        GTK_DECORATION_LAYOUT_OPTION,
+        0u8.into(),
+        gtk::glib::OptionFlags::NONE,
+        gtk::glib::OptionArg::String,
+        "Override GTK's window control layout for this run",
+        Some("LAYOUT"),
+    );
+    app.add_main_option(
+        WINDOW_BAR_PREVIEW_OPTION,
+        0u8.into(),
+        gtk::glib::OptionFlags::NONE,
+        gtk::glib::OptionArg::String,
+        "Preview a 25px platform window bar and Windows update preferences",
+        Some("macos|windows"),
+    );
+    let options = Rc::new(RefCell::new(ApplicationOptions::default()));
+    let requested_options = Rc::clone(&options);
+    app.connect_handle_local_options(move |_, options| {
+        if let Ok(Some(layout)) = options.lookup::<String>(GTK_DECORATION_LAYOUT_OPTION) {
+            requested_options.borrow_mut().decoration_layout = Some(layout);
+        }
+        if let Ok(Some(value)) = options.lookup::<String>(WINDOW_BAR_PREVIEW_OPTION) {
+            match WindowBarPreview::parse(&value) {
+                Ok(preview) => requested_options.borrow_mut().window_bar_preview = Some(preview),
+                Err(message) => {
+                    let _ = writeln!(io::stderr().lock(), "{message}");
+                    return ControlFlow::Break(gtk::glib::ExitCode::FAILURE);
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    });
+
+    let quit = gio::SimpleAction::new("quit", None);
+    let quit_app = app.clone();
+    quit.connect_activate(move |_, _| quit_app.quit());
+    app.add_action(&quit);
+    #[cfg(target_os = "macos")]
+    {
+        app.set_accels_for_action("app.quit", &["<Meta>q"]);
+        app.set_accels_for_action("window.close", &["<Meta>w"]);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.set_accels_for_action("app.quit", &["<Control>q"]);
+        app.set_accels_for_action("window.close", &["<Control>w"]);
+    }
+    (app, options)
+}
+
+fn connect_startup_configuration(app: &adw::Application, options: Rc<RefCell<ApplicationOptions>>) {
+    app.connect_startup(move |_| {
+        configure_app_icon();
+        let requested_options = options.borrow();
+        let layout = requested_options.decoration_layout.as_deref().or(
+            match requested_options.window_bar_preview {
+                Some(WindowBarPreview::Macos) => Some("close,minimize,maximize:"),
+                Some(WindowBarPreview::Windows) => Some(":minimize,maximize,close"),
+                None if cfg!(target_os = "macos") => Some("close,minimize,maximize:"),
+                None => None,
+            },
+        );
+        let Some(layout) = layout else {
+            return;
+        };
+        let Some(settings) = gtk::Settings::default() else {
+            error!("could not apply the requested GTK window control layout");
+            return;
+        };
+        settings.set_gtk_decoration_layout(Some(layout));
+    });
+}
+
+pub(crate) fn present_window(window: &impl IsA<gtk::Window>) {
+    let window = window.as_ref();
+    let had_focus = gtk::prelude::RootExt::focus(window).is_some();
+    window.present();
+    if !had_focus {
+        gtk::prelude::RootExt::set_focus(window, None::<&gtk::Widget>);
+    }
+}
+
+pub(crate) fn application_window(
+    app: &adw::Application,
+    title: &str,
+    default_width: i32,
+    default_height: i32,
+    content: &gtk::Box,
+    header: &gtk::HeaderBar,
+    preview: Option<WindowBarPreview>,
+) -> gtk::ApplicationWindow {
+    if let Some(platform) = platform_window_bar(preview) {
+        content.remove(header);
+        let window = gtk_application_window(app, title, default_width, default_height, content);
+        header.set_use_native_controls(platform == WindowBarPreview::Macos && preview.is_none());
+        window.set_titlebar(Some(header));
+        return window;
+    }
+    adw::ApplicationWindow::builder()
+        .application(app)
+        .title(title)
+        .default_width(default_width)
+        .default_height(default_height)
+        .content(content)
+        .build()
+        .upcast()
+}
+
+pub(crate) fn platform_window_bar(preview: Option<WindowBarPreview>) -> Option<WindowBarPreview> {
+    preview.or({
+        #[cfg(target_os = "macos")]
+        {
+            Some(WindowBarPreview::Macos)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            Some(WindowBarPreview::Windows)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    })
+}
+
+fn gtk_application_window(
+    app: &adw::Application,
+    title: &str,
+    default_width: i32,
+    default_height: i32,
+    content: &impl IsA<gtk::Widget>,
+) -> gtk::ApplicationWindow {
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title(title)
+        .default_width(default_width)
+        .default_height(default_height)
+        .build();
+    window.set_child(Some(content));
+    window
+}
+
+fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
+    let resource = crate::shell::ui_resource::STARTUP_ERROR_RESOURCE;
+    let builder = crate::widgets::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        content: gtk::Box,
+        header: gtk::HeaderBar,
+        status: adw::StatusPage,
+    });
+    status.set_icon_name(Some(STABLE_APP_ID));
+    status.set_title(DISPLAY_NAME);
+    status.set_description(Some(error));
+    let window = application_window(app, DISPLAY_NAME, 480, 320, &content, &header, preview);
+    present_window(&window);
+}
+
+fn configure_app_icon() {
+    if let Err(error) = crate::register_resources() {
+        error!(%error, "failed to register Rufin's interface resources");
+    }
+    gtk::Window::set_default_icon_name(STABLE_APP_ID);
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    gtk::IconTheme::for_display(&display).add_resource_path(ICON_RESOURCE_ROOT);
+}
+
+#[cfg(test)]
+fn verify_interface_resources() -> Result<(), String> {
+    crate::register_resources()?;
+    crate::widgets::ui_resource::verify_icons()?;
+    for path in crate::shell::ui_resource::INTERFACE_RESOURCE_PATHS
+        .iter()
+        .chain(crate::widgets::ui_resource::INTERFACE_RESOURCE_PATHS)
+        .chain(crate::editors::ui_resource::INTERFACE_RESOURCE_PATHS)
+        .chain(crate::menus::ui_resource::INTERFACE_RESOURCE_PATHS)
+        .chain(crate::preferences::ui_resource::INTERFACE_RESOURCE_PATHS)
+        .chain(crate::player::ui_resource::INTERFACE_RESOURCE_PATHS)
+        .chain(crate::library::ui_resource::INTERFACE_RESOURCE_PATHS)
+    {
+        gio::resources_lookup_data(path, gio::ResourceLookupFlags::NONE)
+            .map_err(|error| format!("missing compiled Rufin resource {path}: {error}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_bar_preview_accepts_only_named_platforms() {
+        assert_eq!(
+            WindowBarPreview::parse("macos"),
+            Ok(WindowBarPreview::Macos)
+        );
+        assert_eq!(
+            WindowBarPreview::parse("windows"),
+            Ok(WindowBarPreview::Windows)
+        );
+        assert!(WindowBarPreview::parse("linux").is_err());
+    }
+
+    #[test]
+    fn composed_interface_resources_are_compiled() {
+        verify_interface_resources().expect("compiled interface resources");
+    }
+}

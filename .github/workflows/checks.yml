@@ -22,8 +22,8 @@ on:
       - '!**/*.css'
       - '!**/*.ui'
       - '!**/resources/**'
-      - '!crates/gtk-*/**'
-      - crates/gtk-*/Cargo.toml
+      - '!crates/rufin-gtk/**'
+      - crates/rufin-gtk/Cargo.toml
       - xtask/**
       - android/**
       - .github/workflows/android.yml
@@ -84,7 +84,7 @@ jobs:
               android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|xtask/src/android.rs|xtask/src/main.rs|xtask/src/process.rs|xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
                 add_jobs android
                 ;;
-              crates/gtk-*/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|xtask/*)
+              crates/rufin-gtk/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|xtask/*)
                 ;;
               crates/*/Cargo.toml|crates/*/build.rs|crates/*/src/*.rs)
                 add_jobs android
@@ -162,7 +162,7 @@ jobs:
                 Cargo.lock|Cargo.toml|*/Cargo.toml)
                   add_jobs "${workspace_jobs[@]}" cargo-deny
                   ;;
-                crates/gtk-*/*)
+                crates/rufin-gtk/*)
                   ;;
                 CMakeLists.txt|CMakePresets.json|cmake/*)
                   # Package builds otherwise run manually or for a draft release.
@@ -442,24 +442,24 @@ jobs:
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo clippy --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
+          cargo clippy --workspace --exclude rufin-gtk --exclude rufin --all-targets --locked
           --features app-identity/development
 
       - name: Run Rust tests
         if: github.event_name != 'push'
         run: >-
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command
-          cargo nextest run --config-file nextest.toml --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked
+          cargo nextest run --config-file nextest.toml --workspace --exclude rufin-gtk --exclude rufin --all-targets --locked
           --features app-identity/development --test-threads 4
 
       - name: Warm Rust build cache
         if: github.event_name == 'push'
         run: |
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo check --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked \
+            cargo check --workspace --exclude rufin-gtk --exclude rufin --all-targets --locked \
               --features app-identity/development
           nix --accept-flake-config develop "${{ steps.nix-environment.outputs.target }}" --command \
-            cargo test --workspace --exclude 'gtk-*' --exclude rufin --all-targets --locked --no-run \
+            cargo test --workspace --exclude rufin-gtk --exclude rufin --all-targets --locked --no-run \
               --features app-identity/development
 
   workspace_macos:

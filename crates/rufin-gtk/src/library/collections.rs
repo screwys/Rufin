@@ -1,0 +1,1236 @@
+use crate::widgets::sparse_model::{item_at, item_at_from_item};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+use ::library::{AlbumRow, ArtistKey, ArtistRow, TrackRow};
+use adw::prelude::*;
+use gtk::{gio, glib};
+
+use crate::library::CatalogUi;
+use crate::library::{LibraryField, LibraryLayout, LibraryListKey};
+use crate::widgets::layout::{AllocationOwner, width_allocation_owner};
+use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
+
+use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
+use super::columns::{
+    TrackRowPlayingIndicator, album_column, artist_column, track_column_fit_width,
+    track_column_for_key,
+};
+use super::grid_cells::{
+    AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
+    collection_grid_with_demand,
+};
+use super::table_sizing::{column_view_initial_width, route_column_view_initial_width};
+use crate::library::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
+use crate::library::track_model::TrackCollectionModel;
+use crate::library::track_selection::TrackSelection;
+use crate::library::track_selection::install_track_drag_source;
+use crate::widgets::library_fields::TrackPresentation;
+use crate::widgets::library_fields::{
+    column_fit_width, column_width, compact_header_column_width, grid_label_with_label,
+};
+use crate::widgets::table_header::{ColumnViewHeader, TableFrame};
+use crate::widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
+use rufin_core::route::Route;
+
+struct TrackTablePlayingStateInner {
+    model: TrackCollectionModel,
+    handler_model: crate::widgets::sparse_model::SparseObjectModel,
+    model_handler: RefCell<Option<glib::SignalHandlerId>>,
+    track_id: RefCell<Option<String>>,
+    position: Cell<u32>,
+    indicator: TrackRowPlayingIndicator,
+}
+
+#[derive(Clone)]
+pub struct TrackTablePlayingState {
+    inner: Rc<TrackTablePlayingStateInner>,
+}
+
+#[derive(Clone)]
+pub struct CollectionTableProjection {
+    table: gtk::ColumnView,
+    header: ColumnViewHeader,
+    navigation: MountedRouteItemNavigation,
+    fixed_columns: Rc<Vec<(gtk::ColumnViewColumn, i32)>>,
+    column_for_field: Rc<dyn Fn(LibraryField) -> gtk::ColumnViewColumn>,
+    width_for_field: Rc<dyn Fn(LibraryField) -> i32>,
+    field_columns: Rc<RefCell<Vec<(LibraryField, gtk::ColumnViewColumn)>>>,
+    width_fit: ColumnViewWidthFit,
+}
+
+impl CollectionTableProjection {
+    pub fn widget(&self) -> gtk::Widget {
+        self.table.clone().upcast()
+    }
+
+    pub fn frame(&self, scroller: &gtk::ScrolledWindow) -> gtk::Widget {
+        TableFrame::new(scroller, Some(&self.header.widget())).widget()
+    }
+
+    pub fn apply_display(&self, settings: &rufin_core::settings::layout::DisplaySettings) {
+        crate::widgets::display::apply(&self.table, settings);
+        self.header.set_visible(settings.show_header);
+    }
+
+    pub fn apply_fields(&self, fields: &[LibraryField]) {
+        let previous = self.field_columns.borrow().clone();
+        if previous.iter().map(|(field, _)| field).eq(fields) {
+            self.width_fit
+                .set_preferred_widths(&self.preferred_widths(fields));
+            return;
+        }
+        // GTK adds new column cells to section headers as well as track rows.
+        let header_factory = self.table.header_factory();
+        self.table.set_header_factory(None::<&gtk::ListItemFactory>);
+        for (field, column) in &previous {
+            if !fields.contains(field) {
+                self.table.remove_column(column);
+            }
+        }
+        let mut active = self.fixed_columns.as_ref().clone();
+        let mut field_columns = Vec::with_capacity(fields.len());
+        for field in fields {
+            let column = previous
+                .iter()
+                .find(|(previous_field, _)| previous_field == field)
+                .map(|(_, column)| column.clone())
+                .unwrap_or_else(|| (self.column_for_field)(*field));
+            active.push((column.clone(), (self.width_for_field)(*field)));
+            field_columns.push((*field, column));
+        }
+        let columns = self.table.columns();
+        for (position, (column, _)) in active.iter().enumerate() {
+            let position = position as u32;
+            if columns
+                .item(position)
+                .and_downcast::<gtk::ColumnViewColumn>()
+                .as_ref()
+                != Some(column)
+            {
+                self.table.insert_column(position, column);
+            }
+        }
+        self.field_columns.replace(field_columns);
+        self.width_fit.replace(active);
+        self.update_header();
+        self.table.set_header_factory(header_factory.as_ref());
+    }
+
+    pub fn fit_scroller_allocation(&self, scroller: &gtk::ScrolledWindow, width: i32) {
+        self.width_fit.fit_scroller_allocation(scroller, width);
+    }
+
+    fn navigate(&self, direction: gtk::DirectionType) -> glib::Propagation {
+        (self.navigation)(direction)
+    }
+
+    fn preferred_widths(&self, fields: &[LibraryField]) -> Vec<i32> {
+        self.fixed_columns
+            .iter()
+            .map(|(_, width)| *width)
+            .chain(fields.iter().map(|field| (self.width_for_field)(*field)))
+            .collect()
+    }
+
+    fn update_header(&self) {
+        let columns = self
+            .fixed_columns
+            .iter()
+            .map(|(column, _)| (column.clone(), None))
+            .chain(
+                self.field_columns
+                    .borrow()
+                    .iter()
+                    .map(|(field, column)| (column.clone(), Some(*field))),
+            )
+            .collect::<Vec<_>>();
+        self.header.replace(&columns);
+    }
+}
+
+#[derive(Clone)]
+pub enum LibraryPresentationProjection {
+    Row(CollectionTableProjection),
+    Grid(CollectionGridProjection),
+    AlbumDetail(AlbumDetailVirtualList),
+}
+
+impl LibraryPresentationProjection {
+    fn widget(&self) -> gtk::Widget {
+        match self {
+            Self::Row(table) => table.widget(),
+            Self::Grid(grid) => grid.widget(),
+            Self::AlbumDetail(detail) => detail.widget(),
+        }
+    }
+
+    fn apply_fields(&self, settings: &crate::library::LibraryListSettings) {
+        if let Self::Row(table) = self {
+            table.apply_display(&settings.display);
+        } else {
+            crate::widgets::display::apply(&self.widget(), &settings.display);
+        }
+        if let Self::Grid(grid) = self {
+            grid.apply_display(&settings.display);
+        }
+        match self {
+            Self::Row(table) => table.apply_fields(&settings.row_fields),
+            Self::Grid(grid) => grid.apply_fields(&settings.grid_fields),
+            Self::AlbumDetail(detail) => detail.apply_display(&settings.display),
+        }
+    }
+
+    fn navigate(&self, direction: gtk::DirectionType) -> glib::Propagation {
+        match self {
+            Self::Row(table) => table.navigate(direction),
+            Self::Grid(grid) => grid.navigate(direction),
+            Self::AlbumDetail(detail) => detail.navigate(direction),
+        }
+    }
+
+    fn header_widget(&self) -> Option<gtk::Widget> {
+        match self {
+            Self::Row(table) => Some(table.header.widget()),
+            Self::Grid(_) | Self::AlbumDetail(_) => None,
+        }
+    }
+
+    fn fit_scroller_allocation(&self, scroller: &gtk::ScrolledWindow, width: i32) {
+        match self {
+            Self::Row(table) => table.width_fit.fit_scroller_allocation(scroller, width),
+            Self::Grid(grid) => grid.fit_allocation(width),
+            Self::AlbumDetail(detail) => detail.fit_allocation(width),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct LibraryCollectionProjection {
+    host: Rc<RefCell<LibraryCollectionHost>>,
+    settings: Rc<RefCell<crate::library::LibraryListSettings>>,
+    presentation: Rc<RefCell<LibraryPresentationProjection>>,
+    build: Rc<dyn Fn(LibraryLayout) -> LibraryPresentationProjection>,
+}
+
+#[derive(Clone)]
+enum LibraryCollectionHost {
+    Embedded(gtk::Box),
+    Scrolled {
+        scroller: gtk::ScrolledWindow,
+        frame: TableFrame,
+        overlay: gtk::Overlay,
+        margin_start: i32,
+        margin_end: i32,
+        width_owner: AllocationOwner,
+    },
+}
+
+impl LibraryCollectionProjection {
+    pub fn new(
+        settings: crate::library::LibraryListSettings,
+        build: Rc<dyn Fn(LibraryLayout) -> LibraryPresentationProjection>,
+    ) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.set_hexpand(true);
+        root.set_vexpand(true);
+        let presentation = build(settings.layout);
+        presentation.apply_fields(&settings);
+        let widget = presentation.widget();
+        if widget.parent().is_none() {
+            root.append(&widget);
+        }
+        Self {
+            host: Rc::new(RefCell::new(LibraryCollectionHost::Embedded(root))),
+            settings: Rc::new(RefCell::new(settings)),
+            presentation: Rc::new(RefCell::new(presentation)),
+            build,
+        }
+    }
+
+    pub fn scrolling_scroller(&self) -> gtk::ScrolledWindow {
+        if let LibraryCollectionHost::Scrolled { scroller, .. } = &*self.host.borrow() {
+            return scroller.clone();
+        }
+
+        let scroller = gtk::ScrolledWindow::new();
+        configure_library_route_scroller(&scroller);
+        self.mount_in_scroller(
+            &scroller,
+            PRIMARY_ROUTE_MARGIN_START,
+            PRIMARY_ROUTE_MARGIN_END,
+        );
+        scroller
+    }
+
+    pub fn scrolling_widget(&self) -> gtk::Widget {
+        self.scrolling_scroller();
+        let LibraryCollectionHost::Scrolled { width_owner, .. } = &*self.host.borrow() else {
+            unreachable!("scrolling_scroller installs the scrolled collection host");
+        };
+        width_owner.clone().upcast()
+    }
+
+    pub fn item_scroll(
+        &self,
+    ) -> Rc<dyn Fn() -> Option<crate::widgets::mounted_route::NativeListScroll>> {
+        let presentation = Rc::clone(&self.presentation);
+        Rc::new(move || match &*presentation.borrow() {
+            LibraryPresentationProjection::AlbumDetail(detail) => Some(detail.item_scroll()),
+            LibraryPresentationProjection::Row(_) | LibraryPresentationProjection::Grid(_) => None,
+        })
+    }
+
+    pub fn item_navigation(&self) -> MountedRouteItemNavigation {
+        let presentation = Rc::clone(&self.presentation);
+        Rc::new(move |direction| presentation.borrow().navigate(direction))
+    }
+
+    pub fn mount_in_scroller(
+        &self,
+        scroller: &gtk::ScrolledWindow,
+        margin_start: i32,
+        margin_end: i32,
+    ) -> gtk::Widget {
+        let presentation = self.presentation.borrow();
+        let active = presentation.widget();
+        let inset = matches!(&*presentation, LibraryPresentationProjection::Grid(_));
+        drop(presentation);
+        let previous_host = self.host.borrow().clone();
+        match previous_host {
+            LibraryCollectionHost::Embedded(root) => {
+                if active.parent().as_ref() == Some(root.upcast_ref()) {
+                    root.remove(&active);
+                }
+            }
+            LibraryCollectionHost::Scrolled {
+                scroller: previous, ..
+            } => previous.set_child(None::<&gtk::Widget>),
+        }
+        active.set_margin_start(if inset { margin_start } else { 0 });
+        active.set_margin_end(if inset { margin_end } else { 0 });
+        scroller.set_child(Some(&active));
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(scroller));
+        let frame = TableFrame::new(
+            &overlay,
+            self.presentation.borrow().header_widget().as_ref(),
+        );
+        let presentation = Rc::clone(&self.presentation);
+        let resize_scroller = scroller.clone();
+        let width_owner = width_allocation_owner(&frame.widget(), move |width| {
+            presentation
+                .borrow()
+                .fit_scroller_allocation(&resize_scroller, width)
+        });
+        let presentation = Rc::clone(&self.presentation);
+        width_owner.set_after_allocate_callback(move || {
+            if let LibraryPresentationProjection::AlbumDetail(detail) = &*presentation.borrow() {
+                detail.after_allocate();
+            }
+        });
+        self.configure_width_owner(&width_owner, scroller, &overlay);
+        self.host.replace(LibraryCollectionHost::Scrolled {
+            scroller: scroller.clone(),
+            frame,
+            overlay,
+            margin_start,
+            margin_end,
+            width_owner: width_owner.clone(),
+        });
+        width_owner.upcast()
+    }
+
+    fn configure_width_owner(
+        &self,
+        owner: &AllocationOwner,
+        scroller: &gtk::ScrolledWindow,
+        overlay: &gtk::Overlay,
+    ) {
+        if let LibraryPresentationProjection::AlbumDetail(detail) = &*self.presentation.borrow() {
+            detail.attach_scroller(scroller, overlay);
+        }
+        let presentation = Rc::clone(&self.presentation);
+        let scroller = scroller.clone();
+        owner.set_width_callback(Some(Rc::new(move |width| {
+            presentation
+                .borrow()
+                .fit_scroller_allocation(&scroller, width)
+        })));
+    }
+
+    pub fn apply_settings(&self, settings: &crate::library::LibraryListSettings) {
+        let previous = self.settings.borrow().clone();
+        let saved = if let LibraryPresentationProjection::AlbumDetail(detail) =
+            &*self.presentation.borrow()
+        {
+            detail.item_scroll().capture()
+        } else {
+            None
+        };
+        if collection_presentation_needs_rebuild(&previous, settings) {
+            let presentation = (self.build)(settings.layout);
+            presentation.apply_fields(settings);
+            let widget = presentation.widget();
+            let host = self.host.borrow().clone();
+            if widget.parent().is_some() {
+                match host {
+                    LibraryCollectionHost::Embedded(root) => {
+                        while let Some(child) = root.first_child() {
+                            root.remove(&child);
+                        }
+                    }
+                    LibraryCollectionHost::Scrolled {
+                        scroller, frame, ..
+                    } => {
+                        scroller.set_child(None::<&gtk::Widget>);
+                        frame.set_header(None);
+                        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                        root.set_hexpand(true);
+                        root.set_vexpand(true);
+                        self.host.replace(LibraryCollectionHost::Embedded(root));
+                    }
+                }
+            } else {
+                match host {
+                    LibraryCollectionHost::Embedded(root) => {
+                        while let Some(child) = root.first_child() {
+                            root.remove(&child);
+                        }
+                        widget.set_margin_start(0);
+                        widget.set_margin_end(0);
+                        root.append(&widget);
+                    }
+                    LibraryCollectionHost::Scrolled {
+                        scroller,
+                        frame,
+                        margin_start,
+                        margin_end,
+                        ..
+                    } => {
+                        let inset = matches!(&presentation, LibraryPresentationProjection::Grid(_));
+                        widget.set_margin_start(if inset { margin_start } else { 0 });
+                        widget.set_margin_end(if inset { margin_end } else { 0 });
+                        scroller.set_child(Some(&widget));
+                        frame.set_header(presentation.header_widget().as_ref());
+                    }
+                }
+            }
+            self.presentation.replace(presentation);
+            if let (Some(saved), LibraryPresentationProjection::AlbumDetail(detail)) =
+                (saved, &*self.presentation.borrow())
+            {
+                detail.restore(saved);
+            }
+            let host = self.host.borrow().clone();
+            if let LibraryCollectionHost::Scrolled {
+                scroller,
+                width_owner,
+                overlay,
+                ..
+            } = host
+            {
+                self.configure_width_owner(&width_owner, &scroller, &overlay);
+            }
+        } else {
+            self.presentation.borrow().apply_fields(settings);
+        }
+        *self.settings.borrow_mut() = settings.clone();
+    }
+}
+
+fn collection_presentation_needs_rebuild(
+    previous: &crate::library::LibraryListSettings,
+    current: &crate::library::LibraryListSettings,
+) -> bool {
+    previous.layout != current.layout
+        || (previous.detail_track_fields != current.detail_track_fields
+            && current.layout == LibraryLayout::Detail)
+}
+
+fn matching_context_rank(
+    context: Option<&crate::widgets::mounted_route::RouteCurrentTrackContext>,
+    base: &str,
+    visible: &str,
+) -> Option<usize> {
+    context
+        .filter(|context| context.context_id == base || context.context_id == visible)
+        .map(|context| context.source_rank)
+}
+
+impl TrackTablePlayingState {
+    pub fn new(model: &TrackCollectionModel, indicator: TrackRowPlayingIndicator) -> Self {
+        let handler_model = model.list_model();
+        let inner = Rc::new(TrackTablePlayingStateInner {
+            model: model.clone(),
+            handler_model: handler_model.clone(),
+            model_handler: RefCell::new(None),
+            track_id: RefCell::new(None),
+            position: Cell::new(gtk::INVALID_LIST_POSITION),
+            indicator,
+        });
+        let weak_inner = Rc::downgrade(&inner);
+        let handler = handler_model.connect_items_changed(move |_, _, _, _| {
+            let Some(inner) = weak_inner.upgrade() else {
+                return;
+            };
+            let track_id = inner.track_id.borrow();
+            let position = track_id
+                .as_ref()
+                .and_then(|track_id| {
+                    inner
+                        .model
+                        .selection_position_after_point_change(track_id, inner.position.get())
+                })
+                .unwrap_or(gtk::INVALID_LIST_POSITION);
+            inner.position.set(position);
+            inner.indicator.set_current(track_id.as_deref(), position);
+        });
+        inner.model_handler.replace(Some(handler));
+        Self { inner }
+    }
+
+    fn set_position(&self, position: u32) {
+        self.inner.position.set(position);
+        self.inner
+            .indicator
+            .set_current(self.inner.track_id.borrow().as_deref(), position);
+    }
+
+    fn clear_now_playing(&self) {
+        self.inner.track_id.borrow_mut().take();
+        self.set_position(gtk::INVALID_LIST_POSITION);
+    }
+
+    fn set_track_id(&self, media_uri: &str, position: Option<u32>) {
+        *self.inner.track_id.borrow_mut() = Some(media_uri.to_string());
+        let position = position
+            .or_else(|| self.inner.model.position_for_current_uri(media_uri, None))
+            .unwrap_or(gtk::INVALID_LIST_POSITION);
+        self.set_position(position);
+    }
+
+    pub fn set_now_playing_track(&self, media_uri: Option<&str>, position: Option<u32>) {
+        if let Some(media_uri) = media_uri {
+            self.set_track_id(media_uri, position);
+        } else {
+            self.clear_now_playing();
+        }
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.inner.indicator.set_paused(paused);
+    }
+}
+
+impl Drop for TrackTablePlayingStateInner {
+    fn drop(&mut self) {
+        if let Some(handler) = self.model_handler.take() {
+            self.handler_model.disconnect(handler);
+        }
+    }
+}
+
+pub fn library_route_inset(child: gtk::Widget) -> gtk::Widget {
+    child.set_margin_start(PRIMARY_ROUTE_MARGIN_START);
+    child.set_margin_end(PRIMARY_ROUTE_MARGIN_END);
+    child.set_hexpand(true);
+    child.set_halign(gtk::Align::Fill);
+    child
+}
+pub fn album_collection_projection(
+    shell: &Rc<CatalogUi>,
+    models: Rc<RefCell<AlbumCollectionModels>>,
+    key: LibraryListKey,
+) -> LibraryCollectionProjection {
+    let settings = shell.settings.current.borrow().library_list(key);
+    let shell = Rc::clone(shell);
+    LibraryCollectionProjection::new(
+        settings,
+        Rc::new(move |layout| {
+            let models = models.borrow().clone();
+            match layout {
+                LibraryLayout::Row => LibraryPresentationProjection::Row(album_table(
+                    &shell,
+                    models.albums(),
+                    key,
+                    None,
+                )),
+                LibraryLayout::Detail if key.supports_layout(LibraryLayout::Detail) => {
+                    LibraryPresentationProjection::AlbumDetail(album_detail_list(
+                        &shell,
+                        models.detail(),
+                        key,
+                    ))
+                }
+                LibraryLayout::Grid | LibraryLayout::Detail => {
+                    LibraryPresentationProjection::Grid(album_grid(&shell, &models, key))
+                }
+            }
+        }),
+    )
+}
+
+pub fn artist_collection_projection(
+    shell: &Rc<CatalogUi>,
+    sparse: Rc<crate::widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    key: LibraryListKey,
+) -> LibraryCollectionProjection {
+    let settings = shell.settings.current.borrow().library_list(key);
+    let shell = Rc::clone(shell);
+    LibraryCollectionProjection::new(
+        settings,
+        Rc::new(move |layout| match layout {
+            LibraryLayout::Row => {
+                LibraryPresentationProjection::Row(artist_table(&shell, sparse.list_model(), key))
+            }
+            LibraryLayout::Grid | LibraryLayout::Detail => {
+                LibraryPresentationProjection::Grid(artist_grid(&shell, &sparse, key))
+            }
+        }),
+    )
+}
+pub fn track_collection_projection(
+    shell: &Rc<CatalogUi>,
+    model: TrackCollectionModel,
+    key: LibraryListKey,
+    settings: crate::library::LibraryListSettings,
+    context_id: String,
+    content_inset: i32,
+) -> LibraryCollectionProjection {
+    let shell = Rc::clone(shell);
+    let selection = TrackSelection::new(model.clone());
+    shell.register_current_route_track_selection_owner(selection.clone());
+    let play_model = model.clone();
+    let play_queue = shell.playback.clone();
+    let play_context_id = context_id.clone();
+    let play_from_collection = Rc::new(move |position: u32| {
+        play_model.play(
+            play_queue.clone(),
+            position as usize,
+            rufin_core::playback::QueuePlacement::Now,
+            &play_context_id,
+            false,
+            false,
+        );
+    }) as Rc<dyn Fn(u32)>;
+    LibraryCollectionProjection::new(
+        settings,
+        Rc::new(move |layout| match layout {
+            LibraryLayout::Grid => LibraryPresentationProjection::Grid(track_grid(
+                &shell,
+                model.clone(),
+                key,
+                Rc::clone(&play_from_collection),
+                selection.clone(),
+            )),
+            LibraryLayout::Row | LibraryLayout::Detail => {
+                LibraryPresentationProjection::Row(track_table(
+                    &shell,
+                    model.clone(),
+                    key,
+                    TrackTableOptions {
+                        detail: false,
+                        context_id: context_id.clone(),
+                        content_inset,
+                        fields: None,
+                    },
+                    selection.clone(),
+                ))
+            }
+        }),
+    )
+}
+
+pub struct TrackTableOptions {
+    pub detail: bool,
+    pub context_id: String,
+    pub content_inset: i32,
+    pub fields: Option<Vec<LibraryField>>,
+}
+
+pub fn album_grid(
+    shell: &Rc<CatalogUi>,
+    models: &AlbumCollectionModels,
+    key: LibraryListKey,
+) -> CollectionGridProjection {
+    let settings = shell.settings.current.borrow().library_list(key);
+    let fields = settings.grid_fields;
+    let sparse = models
+        .album_rows()
+        .expect("Album grid has an Album row sparse model");
+    let cell_shell = Rc::clone(shell);
+    let activate_shell = Rc::clone(shell);
+    let demand = Rc::clone(&sparse);
+    collection_grid_with_demand(
+        sparse.list_model(),
+        &fields,
+        move |fields| AlbumGridCell::new(&cell_shell, fields, None),
+        move |_, album: AlbumRow| {
+            activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()))
+        },
+        move |position| demand.demand_positions([position as usize]),
+    )
+}
+
+pub fn artist_grid(
+    shell: &Rc<CatalogUi>,
+    sparse: &Rc<crate::widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    key: LibraryListKey,
+) -> CollectionGridProjection {
+    let fields = shell
+        .settings
+        .current
+        .borrow()
+        .library_list(key)
+        .grid_fields;
+    let album_artist = key == LibraryListKey::AlbumArtists;
+    let cell_shell = Rc::clone(shell);
+    let activate_shell = Rc::clone(shell);
+    let demand = Rc::clone(sparse);
+    collection_grid_with_demand(
+        sparse.list_model(),
+        &fields,
+        move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
+        move |_, artist: ArtistRow| {
+            activate_shell.navigate(Route::of_artist(&artist));
+        },
+        move |position| demand.demand_positions([position as usize]),
+    )
+}
+pub fn track_grid(
+    shell: &Rc<CatalogUi>,
+    model: TrackCollectionModel,
+    key: LibraryListKey,
+    play_from_collection: Rc<dyn Fn(u32)>,
+    selection: TrackSelection,
+) -> CollectionGridProjection {
+    let sparse = model.sparse_model();
+    let demand = Rc::clone(&sparse);
+    let model = sparse.list_model();
+    let demand: Rc<dyn Fn(u32)> =
+        Rc::new(move |position| demand.demand_positions([position as usize]));
+    let fields = shell
+        .settings
+        .current
+        .borrow()
+        .library_list(key)
+        .grid_fields;
+    let field = Rc::new(move |_: u32, item: &TrackRow, field| item.links(field));
+    let cell_shell = Rc::clone(shell);
+    let cell_play = Rc::clone(&play_from_collection);
+    let activate = Rc::clone(&play_from_collection);
+    let bind_demand = Rc::clone(&demand);
+    super::grid_cells::collection_grid_with_selection_and_demand(
+        model,
+        Some(selection.selection_model()),
+        &fields,
+        move |fields| {
+            TrackGridCell::new(
+                &cell_shell,
+                fields,
+                Rc::clone(&cell_play),
+                field.clone(),
+                Some(selection.clone()),
+            )
+        },
+        move |position, _: TrackRow| activate(position),
+        move |position| bind_demand(position),
+    )
+}
+pub fn album_table<M>(
+    shell: &Rc<CatalogUi>,
+    model: M,
+    key: LibraryListKey,
+    playback_context: Option<String>,
+) -> CollectionTableProjection
+where
+    M: IsA<gio::ListModel> + Clone + 'static,
+{
+    let fields = shell.settings.current.borrow().library_list(key).row_fields;
+    let activate_shell = Rc::clone(shell);
+    let column_shell = Rc::clone(shell);
+    let column_playback_context = playback_context;
+    dynamic_collection_table(
+        shell,
+        key,
+        model,
+        &fields,
+        Vec::new(),
+        move |field| album_column(&column_shell, field, column_playback_context.clone()),
+        |field| column_fit_width(field, column_width(field)),
+        true,
+        Some(Box::new(move |_, album: AlbumRow| {
+            activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
+        })),
+        None,
+        route_column_view_initial_width(shell),
+    )
+}
+
+pub fn artist_table<M>(
+    shell: &Rc<CatalogUi>,
+    model: M,
+    key: LibraryListKey,
+) -> CollectionTableProjection
+where
+    M: IsA<gio::ListModel> + Clone + 'static,
+{
+    let fields = shell.settings.current.borrow().library_list(key).row_fields;
+    let activate_shell = Rc::clone(shell);
+    let column_shell = Rc::clone(shell);
+    let album_artist = key == LibraryListKey::AlbumArtists;
+    dynamic_collection_table(
+        shell,
+        key,
+        model,
+        &fields,
+        Vec::new(),
+        move |field| artist_column(&column_shell, field, album_artist),
+        |field| column_fit_width(field, column_width(field)),
+        true,
+        Some(Box::new(move |_, artist: ArtistRow| {
+            activate_shell.navigate(Route::of_artist(&artist));
+        })),
+        None,
+        route_column_view_initial_width(shell),
+    )
+}
+pub fn collection_column_width(field: LibraryField) -> i32 {
+    match field {
+        LibraryField::AlbumCount | LibraryField::SongCount => compact_header_column_width(
+            rufin_core::settings::presentation::library_field_title(field),
+            96,
+        ),
+        LibraryField::Duration => compact_header_column_width(
+            rufin_core::settings::presentation::library_field_title(field),
+            128,
+        ),
+        _ => column_width(field),
+    }
+}
+
+pub fn dynamic_collection_table<T, M>(
+    shell: &Rc<CatalogUi>,
+    key: LibraryListKey,
+    model: M,
+    fields: &[LibraryField],
+    fixed_columns: Vec<(gtk::ColumnViewColumn, i32)>,
+    column_for_field: impl Fn(LibraryField) -> gtk::ColumnViewColumn + 'static,
+    width_for_field: impl Fn(LibraryField) -> i32 + 'static,
+    _single_click_activate: bool,
+    activate: Option<Box<dyn Fn(u32, T)>>,
+    selection: Option<gtk::SelectionModel>,
+    initial_width: i32,
+) -> CollectionTableProjection
+where
+    T: Clone + 'static,
+    M: IsA<gio::ListModel> + Clone + 'static,
+{
+    let width_for_field = Rc::new(width_for_field) as Rc<dyn Fn(LibraryField) -> i32>;
+    let column_for_field =
+        Rc::new(column_for_field) as Rc<dyn Fn(LibraryField) -> gtk::ColumnViewColumn>;
+    let field_columns = fields
+        .iter()
+        .map(|field| (*field, column_for_field(*field)))
+        .collect::<Vec<_>>();
+    let mut active = fixed_columns.clone();
+    active.extend(
+        field_columns
+            .iter()
+            .map(|(field, column)| (column.clone(), width_for_field(*field))),
+    );
+    let (table, width_fit, navigation) =
+        collection_table_with_width(model, active, initial_width, false, activate, selection);
+    table.add_css_class("external-header");
+    let projection = CollectionTableProjection {
+        table,
+        header: ColumnViewHeader::new(),
+        navigation,
+        fixed_columns: Rc::new(fixed_columns),
+        column_for_field,
+        width_for_field,
+        field_columns: Rc::new(RefCell::new(field_columns)),
+        width_fit,
+    };
+    projection.update_header();
+    projection
+        .table
+        .update_relation(&[gtk::accessible::Relation::Owns(&[projection
+            .header
+            .widget()
+            .upcast_ref()])]);
+    projection.apply_display(&shell.settings.current.borrow().library_list(key).display);
+    projection
+}
+
+fn collection_table_with_width<T, M>(
+    model: M,
+    columns: Vec<(gtk::ColumnViewColumn, i32)>,
+    initial_width: i32,
+    _single_click_activate: bool,
+    activate: Option<Box<dyn Fn(u32, T)>>,
+    selection: Option<gtk::SelectionModel>,
+) -> (
+    gtk::ColumnView,
+    ColumnViewWidthFit,
+    MountedRouteItemNavigation,
+)
+where
+    T: Clone + 'static,
+    M: IsA<gio::ListModel> + Clone + 'static,
+{
+    let selection = selection.unwrap_or_else(|| {
+        if model
+            .as_ref()
+            .is::<crate::widgets::sparse_model::SparseObjectModel>()
+        {
+            crate::widgets::selection::PositionSelectionModel::new(model.clone()).upcast()
+        } else {
+            gtk::MultiSelection::new(Some(model.clone())).upcast()
+        }
+    });
+    let table = gtk::ColumnView::new(Some(selection.clone()));
+    table.add_css_class("track-table");
+    table.set_single_click_activate(false);
+    let row_factory = gtk::SignalListItemFactory::new();
+    row_factory.connect_setup(|_, row| {
+        if let Some(row) = row.downcast_ref::<gtk::ColumnViewRow>() {
+            row.set_activatable(true);
+        }
+    });
+    table.set_row_factory(Some(&row_factory));
+    table.set_vscroll_policy(gtk::ScrollablePolicy::Minimum);
+    table.set_hexpand(true);
+    table.set_vexpand(true);
+    for (column, _) in &columns {
+        table.append_column(column);
+    }
+    let width_fit = install_column_view_width_fit(&table, columns, initial_width);
+    table.connect_activate(move |_, position| {
+        if let Some(activate) = activate.as_ref()
+            && let Some(value) = item_at::<T>(&model, position)
+        {
+            activate(position, value);
+        }
+    });
+    let navigation_table = table.clone();
+    let navigation_selection = selection;
+    let navigation = Rc::new(move |direction| {
+        if !matches!(direction, gtk::DirectionType::Up | gtk::DirectionType::Down) {
+            return glib::Propagation::Stop;
+        }
+        if navigation_table
+            .state_flags()
+            .contains(gtk::StateFlags::FOCUS_WITHIN)
+        {
+            return glib::Propagation::Proceed;
+        }
+        let Some(model) = navigation_table.model() else {
+            return glib::Propagation::Stop;
+        };
+        if let Some(position) = item_navigation_entry_position(
+            selected_position(&navigation_selection),
+            model.n_items(),
+            direction,
+        ) {
+            navigation_selection.select_item(position, true);
+            navigation_table.scroll_to(position, None, gtk::ListScrollFlags::FOCUS, None);
+            navigation_table.grab_focus();
+        }
+        glib::Propagation::Stop
+    }) as MountedRouteItemNavigation;
+    (table, width_fit, navigation)
+}
+
+impl CatalogUi {
+    pub fn related_tracks_view(
+        self: &Rc<Self>,
+        rows: Vec<TrackRow>,
+    ) -> (gtk::Widget, Rc<dyn Fn()>) {
+        let key = LibraryListKey::FullscreenTracks;
+        let model = TrackCollectionModel::related(self.library.clone(), self.runtime.clone(), rows);
+        let selection = TrackSelection::new(model.clone());
+        self.register_current_route_track_selection_owner(selection.clone());
+        let table = track_table(
+            self,
+            model.clone(),
+            key,
+            TrackTableOptions {
+                detail: false,
+                context_id: "related".into(),
+                content_inset: 0,
+                fields: None,
+            },
+            selection,
+        );
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .hexpand(true)
+            .vexpand(true)
+            .child(&table.widget())
+            .build();
+        scroller.add_css_class("sidebar-scroller");
+        scroller.add_css_class("right-panel-scroller");
+        crate::widgets::layout::configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
+        let settings = Rc::clone(&self.settings);
+        let update_table = table.clone();
+        let changed: Rc<dyn Fn()> = Rc::new(move || {
+            let config = settings.current.borrow().library_list(key);
+            update_table.apply_display(&config.display);
+            update_table.apply_fields(&config.row_fields);
+        });
+        let weak = scroller.downgrade();
+        let root =
+            crate::widgets::layout::width_allocation_owner(&table.frame(&scroller), move |width| {
+                if let Some(scroller) = weak.upgrade() {
+                    table.fit_scroller_allocation(&scroller, width);
+                }
+            });
+        model.resume_initial_demand();
+        (root.upcast(), changed)
+    }
+}
+
+pub fn track_table(
+    shell: &Rc<CatalogUi>,
+    model: TrackCollectionModel,
+    key: LibraryListKey,
+    options: TrackTableOptions,
+    selection: TrackSelection,
+) -> CollectionTableProjection {
+    let playing_indicator = TrackRowPlayingIndicator::new();
+    let playing_state = TrackTablePlayingState::new(&model, playing_indicator.clone());
+    let selection_context_base = options.context_id.clone();
+    let current_playing_state = Rc::downgrade(&playing_state.inner);
+    shell.register_current_route_track_selection(Rc::new(move |current| {
+        let Some(inner) = current_playing_state.upgrade() else {
+            return false;
+        };
+        let current_playing_state = TrackTablePlayingState { inner };
+        let selection_model = &current_playing_state.inner.model;
+        let position = current.and_then(|current| {
+            let expected_context_id = selection_model.visible_context_id(&selection_context_base);
+            let source_rank = matching_context_rank(
+                current.context.as_ref(),
+                &selection_context_base,
+                &expected_context_id,
+            );
+            selection_model.position_for_current_uri(&current.media_uri, source_rank)
+        });
+        current_playing_state
+            .set_now_playing_track(current.map(|current| current.media_uri.as_str()), position);
+        current_playing_state.set_paused(current.is_some_and(|current| current.paused));
+        true
+    }));
+    let fields = if let Some(fields) = options.fields {
+        fields
+    } else if options.detail {
+        shell
+            .settings
+            .current
+            .borrow()
+            .library_list(key)
+            .detail_track_fields
+    } else {
+        shell.settings.current.borrow().library_list(key).row_fields
+    };
+    let queue = shell.playback.clone();
+    let play_model = model.clone();
+    let context_id = options.context_id;
+    let activate = Box::new(move |position, _: TrackRow| {
+        play_model.play(
+            queue.clone(),
+            position as usize,
+            rufin_core::playback::QueuePlacement::Now,
+            &context_id,
+            false,
+            false,
+        );
+    });
+    let column_shell = Rc::clone(shell);
+    let column_playing_indicator = playing_indicator;
+    let column_selection = selection.clone();
+    let selection_model = selection.selection_model();
+    let table = dynamic_collection_table(
+        shell,
+        key,
+        model.list_model(),
+        &fields,
+        Vec::new(),
+        move |field| {
+            let column = track_column_for_key::<TrackRow>(
+                &column_shell,
+                key,
+                field,
+                &column_playing_indicator,
+            );
+            if field != LibraryField::Favorite {
+                install_track_column_drag_source::<TrackRow>(
+                    &column,
+                    &column_shell,
+                    column_selection.clone(),
+                );
+            }
+            column
+        },
+        move |field| track_column_fit_width(key, field),
+        false,
+        Some(activate),
+        Some(selection_model),
+        column_view_initial_width(shell, options.content_inset),
+    );
+    table.table.add_css_class("track-list");
+    let _ = table
+        .table
+        .add_weak_ref_notify_local(move || drop(playing_state));
+    if key == LibraryListKey::AlbumDetailTracks {
+        table.table.add_css_class("album-track-table");
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(|_, header| {
+            let header = header
+                .downcast_ref::<gtk::ListHeader>()
+                .expect("list header");
+            let resource = crate::library::ui_resource::DISC_HEADER_RESOURCE;
+            let builder = crate::widgets::ui_resource::builder(resource);
+            let label: gtk::Label =
+                crate::widgets::ui_resource::object(&builder, resource, "heading");
+            header.set_child(Some(&label));
+        });
+        let sections = model.list_model();
+        factory.connect_bind(move |_, header| {
+            let header = header
+                .downcast_ref::<gtk::ListHeader>()
+                .expect("list header");
+            let label = header
+                .child()
+                .and_downcast::<gtk::Label>()
+                .expect("disc heading");
+            let disc = sections.section_value(header.start());
+            label.set_visible(disc.is_some());
+            if let Some(disc) = disc {
+                label.set_label(&if disc > 0 {
+                    localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+                } else {
+                    localization::tr("Unknown disc")
+                });
+            }
+        });
+        table.table.set_header_factory(Some(&factory));
+    }
+    table
+}
+
+fn install_track_column_drag_source<T: TrackPresentation>(
+    column: &gtk::ColumnViewColumn,
+    shell: &Rc<CatalogUi>,
+    selection: TrackSelection,
+) {
+    let Some(factory) = column
+        .factory()
+        .and_then(|factory| factory.downcast::<gtk::SignalListItemFactory>().ok())
+    else {
+        return;
+    };
+    let drag_shell = Rc::downgrade(shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(child) = item.child() else {
+            return;
+        };
+        let Some(shell) = drag_shell.upgrade() else {
+            return;
+        };
+        let item = item.downgrade();
+        install_track_drag_source(&child, &shell.artwork, selection.clone(), move || {
+            let item = item.upgrade()?;
+            item_at_from_item::<T>(&item).map(|track| {
+                let artwork = track
+                    .artwork()
+                    .map(artwork::ArtworkBinding::opaque)
+                    .unwrap_or_default();
+                (
+                    track.media_uri().to_string(),
+                    track.title().to_string(),
+                    artwork,
+                )
+            })
+        });
+    });
+}
+
+fn selected_position(selection: &gtk::SelectionModel) -> u32 {
+    let positions = selection.selection();
+    if positions.is_empty() {
+        gtk::INVALID_LIST_POSITION
+    } else {
+        positions.minimum()
+    }
+}
+fn collection_grid_field_class(field: LibraryField) -> &'static str {
+    match field {
+        LibraryField::Artist | LibraryField::AlbumArtist => "artist-label",
+        _ => "muted",
+    }
+}
+
+pub fn collection_grid_field_label(value: &str, field: LibraryField) -> (gtk::Widget, gtk::Label) {
+    grid_label_with_label(value, collection_grid_field_class(field))
+}
+
+#[cfg(test)]
+mod layout_policy_tests {
+    use super::*;
+
+    #[test]
+    fn playing_selection_accepts_base_and_decorated_route_contexts() {
+        let base = "album:7";
+        let visible = "album:7|query=|sort=Position|descending=false";
+        for context_id in [base, visible] {
+            assert_eq!(
+                matching_context_rank(
+                    Some(&crate::widgets::mounted_route::RouteCurrentTrackContext {
+                        context_id: context_id.to_string(),
+                        source_rank: 3,
+                    }),
+                    base,
+                    visible,
+                ),
+                Some(3)
+            );
+        }
+    }
+
+    #[test]
+    fn collection_presentation_rebuilds_only_for_layout_owned_changes() {
+        let row = crate::library::LibraryListSettings::for_key(LibraryListKey::Tracks);
+        assert!(!collection_presentation_needs_rebuild(&row, &row));
+
+        let mut grid = row.clone();
+        grid.layout = LibraryLayout::Grid;
+        assert!(collection_presentation_needs_rebuild(&row, &grid));
+
+        let mut unused_detail_fields = row.clone();
+        unused_detail_fields.detail_track_fields = vec![LibraryField::Title];
+        assert!(!collection_presentation_needs_rebuild(
+            &row,
+            &unused_detail_fields
+        ));
+
+        let mut detail = crate::library::LibraryListSettings::for_key(LibraryListKey::Albums);
+        detail.layout = LibraryLayout::Detail;
+        let mut changed_detail = detail.clone();
+        changed_detail.detail_track_fields = vec![LibraryField::Title];
+        assert!(collection_presentation_needs_rebuild(
+            &detail,
+            &changed_detail
+        ));
+    }
+}
+
+use crate::library::route_layout::configure_library_route_scroller;

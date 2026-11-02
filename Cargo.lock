@@ -3135,159 +3135,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtk-editors"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "async-channel",
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "rufin-core",
- "sources",
- "tokio",
-]
-
-[[package]]
-name = "gtk-library"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "glib-build-tools",
- "gtk-media-menus",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "rufin-core",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gtk-media-menus"
-version = "0.16.6"
-dependencies = [
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "rufin-core",
- "sources",
- "tokio",
-]
-
-[[package]]
-name = "gtk-player"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "audio-processing",
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "regex",
- "rufin-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gtk-preferences"
-version = "0.16.6"
-dependencies = [
- "async-channel",
- "desktop-integration",
- "directories",
- "glib-build-tools",
- "gtk-player",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "pulldown-cmark",
- "roxmltree 0.21.1",
- "rufin-core",
- "sources",
- "tempfile",
- "tracing",
- "web",
-]
-
-[[package]]
-name = "gtk-shell"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "ashpd",
- "async-channel",
- "desktop-integration",
- "glib-build-tools",
- "gtk-editors",
- "gtk-library",
- "gtk-media-menus",
- "gtk-player",
- "gtk-preferences",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "proptest",
- "rufin-core",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
- "web",
-]
-
-[[package]]
-name = "gtk-widgets"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "async-channel",
- "desktop-integration",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "process-memory",
- "proptest",
- "rufin-core",
- "serde",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "gtk4"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7218,12 +7065,12 @@ version = "0.16.6"
 dependencies = [
  "app-identity",
  "desktop-integration",
- "gtk-shell",
  "localization",
  "playback-gstreamer",
  "process-memory",
  "rufin-controller",
  "rufin-core",
+ "rufin-gtk",
  "tracing",
  "windows-updater",
 ]
@@ -7345,6 +7192,39 @@ dependencies = [
  "url",
  "windows-updater",
  "wiremock",
+]
+
+[[package]]
+name = "rufin-gtk"
+version = "0.16.6"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "ashpd",
+ "async-channel",
+ "audio-processing",
+ "desktop-integration",
+ "directories",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "playback",
+ "process-memory",
+ "proptest",
+ "pulldown-cmark",
+ "regex",
+ "roxmltree 0.21.1",
+ "rufin-core",
+ "serde",
+ "serde_json",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "web",
 ]
 
 [[package]]

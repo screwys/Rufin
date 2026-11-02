@@ -29,7 +29,7 @@ localization.workspace = true
 playback-gstreamer.workspace = true
 process-memory.workspace = true
 tracing.workspace = true
-gtk-shell.workspace = true
+rufin-gtk.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-updater.workspace = true

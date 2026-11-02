@@ -85,13 +85,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `rufin-controller` | headless executable with optional HTTP access |
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `gtk-shell` | desktop window composition, navigation admission and native actions |
-| `gtk-library` | browsing pages, bounded projections, models and page selection |
-| `gtk-widgets` | shared GTK controls, field selection, artwork presentation and resources |
-| `gtk-player` | persistent playback, queue, lyrics, and visualizer presentation |
-| `gtk-preferences` | preferences, source setup, and appearance |
-| `gtk-editors` | metadata and smart playlist editors |
-| `gtk-media-menus` | media context menus and playlist picking |
+| `rufin-gtk` | the GTK desktop client: window composition, pages, player, menus, editors, preferences and resources |
 | `web` | HTTP routes, server lifetime and embedded browser presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |

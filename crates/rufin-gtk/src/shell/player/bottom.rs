@@ -1,0 +1,128 @@
+use crate::shell::shell::player_menus::{
+    install_current_track_context_menu, present_current_track_context_menu,
+};
+
+use crate::player::playback_settings::configure_playback_settings_popover;
+use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
+
+use crate::shell::shell::Shell;
+use crate::widgets::interactions::add_widget_click;
+use adw::prelude::*;
+use std::rc::Rc;
+impl Shell {
+    pub(crate) fn refresh_bottom_player_owner_details(self: &Rc<Self>) {
+        let player = self.player_ui.selected_playback();
+        let Some(current) = player
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+        else {
+            self.player_ui
+                .set_current_rating_and_favorite(false, None, false);
+            return;
+        };
+        let track = &current.row.track;
+        self.player_ui.set_current_rating_and_favorite(
+            track.state.favorite,
+            track
+                .state
+                .rating
+                .and_then(|value| u8::try_from(value).ok()),
+            self.half_stars_enabled(&track.media_uri, track.source_id.as_deref()),
+        );
+    }
+}
+fn install_now_playing_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    artwork: &gtk::Picture,
+    shell: &Rc<Shell>,
+) {
+    let drag_shell = Rc::downgrade(shell);
+    install_compact_media_drag_source(target, artwork, move || {
+        let shell = drag_shell.upgrade()?;
+        let player = shell.player_ui.selected_playback()?;
+        let current = player.transport.current.as_ref()?;
+        let source = MediaDragSource::media_uris([current.row.track.media_uri.clone()]);
+        Some((source, current.row.track.metadata.title.clone()))
+    });
+}
+pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
+    crate::player::bottom::connect_player_controls(&shell.player_ui);
+    let controls = &shell.player_ui.views.player_controls;
+    let drag_artwork = controls.cover.drag_paintable_source();
+    install_now_playing_drag_source(&controls.cover.area, &drag_artwork, shell);
+    install_now_playing_drag_source(&controls.title, &drag_artwork, shell);
+    let title_shell = Rc::clone(shell);
+    add_widget_click(controls.title.upcast_ref(), move || {
+        title_shell.player_ui.navigate_current_track_album();
+    });
+    install_current_track_context_menu(&shell.player_ui.views.player_controls.cover.area, shell);
+    let menu_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .menu_button
+        .connect_clicked(move |button| present_current_track_context_menu(button, &menu_shell));
+    let fullscreen_shell = Rc::clone(shell);
+    add_widget_click(
+        shell
+            .player_ui
+            .views
+            .player_controls
+            .cover
+            .area
+            .upcast_ref(),
+        move || {
+            gtk::prelude::ActionGroupExt::activate_action(
+                &fullscreen_shell.chrome.window,
+                "toggle-fullscreen-player",
+                None,
+            );
+        },
+    );
+
+    let random_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .random_button
+        .connect_clicked(move |_| super::random_play::present_random_play_dialog(&random_shell));
+
+    let queue_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .queue_button
+        .connect_clicked(move |_| queue_shell.toggle_right_panel());
+
+    let favorite_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .favorite_button
+        .connect_clicked(move |_| favorite_shell.toggle_current_track_favorite());
+
+    let rating_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .rating
+        .connect_commit(move |rating| rating_shell.set_current_track_rating(rating));
+
+    configure_playback_settings_popover(
+        &shell.player_ui.views.player_controls.settings_button,
+        &shell.player_ui,
+        {
+            let weak = Rc::downgrade(shell);
+            Rc::new(move |lyrics, visualizer| {
+                if let Some(shell) = weak.upgrade() {
+                    shell.set_right_panel_media_visibility(lyrics, visualizer);
+                }
+            })
+        },
+    );
+}

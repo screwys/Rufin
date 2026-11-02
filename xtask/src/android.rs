@@ -321,7 +321,7 @@ fn clippy(root: &Path) -> Result<()> {
             ])
             .args([
                 "--exclude",
-                "gtk-*",
+                "rufin-gtk",
                 "--exclude",
                 "rufin",
                 "--exclude",

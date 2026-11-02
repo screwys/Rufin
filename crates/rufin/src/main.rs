@@ -84,7 +84,7 @@ fn main() -> ExitCode {
     let runtime = match app::worker_runtime() {
         Ok(runtime) => runtime,
         Err(error) => {
-            return finish_storage_reset(gtk_shell::run_startup_error_application(
+            return finish_storage_reset(rufin_gtk::run_startup_error_application(
                 error.to_string(),
             ));
         }
@@ -92,9 +92,9 @@ fn main() -> ExitCode {
     let result = {
         let _guard = runtime.enter();
         if updated_restart {
-            gtk_shell::run_application_after_update(initial_settings, bootstrap, || {})
+            rufin_gtk::run_application_after_update(initial_settings, bootstrap, || {})
         } else {
-            gtk_shell::run_application(initial_settings, bootstrap)
+            rufin_gtk::run_application(initial_settings, bootstrap)
         }
     };
     if result.storage_reset.is_some() {
@@ -107,7 +107,7 @@ fn main() -> ExitCode {
     result.code
 }
 
-fn finish_storage_reset(mut result: gtk_shell::ApplicationExit) -> ExitCode {
+fn finish_storage_reset(mut result: rufin_gtk::ApplicationExit) -> ExitCode {
     loop {
         let Some(reset) = result.storage_reset else {
             return result.code;
@@ -117,7 +117,7 @@ fn finish_storage_reset(mut result: gtk_shell::ApplicationExit) -> ExitCode {
             .and_then(|()| restart_after_storage_reset().map_err(|error| error.to_string()));
         match reset {
             Ok(code) => return code,
-            Err(error) => result = gtk_shell::run_startup_error_application(error),
+            Err(error) => result = rufin_gtk::run_startup_error_application(error),
         }
     }
 }

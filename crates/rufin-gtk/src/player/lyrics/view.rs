@@ -1,0 +1,1673 @@
+use lyrics::{
+    LYRICS_USER_SCROLL_PAUSE_MS, active_lyrics_line_index, intro_lyrics_line_index,
+    lyric_line_has_text, should_highlight_all_lyrics_lines,
+};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use gtk::glib;
+use gtk::prelude::*;
+use localization::{msgid, tr};
+use lyrics::{
+    JapaneseReadingSegment, LyricsAgentRole, LyricsDocument, LyricsLine, PreparedCueLine,
+    PreparedLyrics, PreparedLyricsLine,
+};
+
+use super::wrapping_line::WrappingLine;
+use lyrics::KaraokeTiming;
+
+const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
+const MIN_LYRICS_SCROLL_ANIMATION_MS: u64 = 80;
+const LYRICS_SCROLL_MS: u64 = 200;
+
+mod karaoke_text {
+    use std::cell::RefCell;
+
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+
+    use super::LyricsCueHighlight;
+
+    mod imp {
+        use super::*;
+
+        struct HighlightGeometry {
+            serial: u32,
+            offsets: (i32, i32),
+            rectangles: Vec<Vec<(i32, gtk::graphene::Rect, bool)>>,
+        }
+
+        #[derive(Default)]
+        pub struct KaraokeText {
+            pub label: RefCell<Option<gtk::Label>>,
+            pub(super) highlights: RefCell<Vec<LyricsCueHighlight>>,
+            geometry: RefCell<Option<HighlightGeometry>>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for KaraokeText {
+            const NAME: &'static str = "RufinLyricsKaraokeText";
+            type Type = super::KaraokeText;
+            type ParentType = gtk::Widget;
+        }
+
+        impl ObjectImpl for KaraokeText {
+            fn dispose(&self) {
+                if let Some(label) = self.label.take() {
+                    label.unparent();
+                }
+            }
+        }
+
+        impl WidgetImpl for KaraokeText {
+            fn request_mode(&self) -> gtk::SizeRequestMode {
+                self.label
+                    .borrow()
+                    .as_ref()
+                    .map_or(gtk::SizeRequestMode::ConstantSize, |base| {
+                        base.request_mode()
+                    })
+            }
+
+            fn measure(
+                &self,
+                orientation: gtk::Orientation,
+                for_size: i32,
+            ) -> (i32, i32, i32, i32) {
+                self.label.borrow().as_ref().map_or((0, 0, -1, -1), |base| {
+                    // WrappingLine chooses the width before measuring height.
+                    // Fitting text back into that height would reshape it again.
+                    base.measure(
+                        orientation,
+                        if orientation == gtk::Orientation::Horizontal {
+                            -1
+                        } else {
+                            for_size
+                        },
+                    )
+                })
+            }
+
+            fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+                if let Some(base) = self.label.borrow().as_ref() {
+                    base.allocate(width, height, baseline, None);
+                }
+            }
+
+            fn snapshot(&self, snapshot: &gtk::Snapshot) {
+                let label = self.label.borrow();
+                let Some(base) = label.as_ref() else {
+                    return;
+                };
+                self.obj().snapshot_child(base, snapshot);
+                let highlights = self.highlights.borrow();
+                if highlights.iter().all(|span| span.progress.get() <= 0.0) {
+                    return;
+                }
+                let transform = base
+                    .compute_transform(&*self.obj())
+                    .expect("lyric label is parented to its text widget");
+                let (xx, yx, xy, yy, dx, dy) = transform
+                    .to_2d()
+                    .expect("lyric label allocation uses a 2D transform");
+                let transform = gtk::gsk::Transform::new().matrix_2d(
+                    xx as f32, yx as f32, xy as f32, yy as f32, dx as f32, dy as f32,
+                );
+                let (x, y) = base.layout_offsets();
+                snapshot.save();
+                // Preserve translation/scale classification so both text passes
+                // use the same glyph rasterization grid.
+                snapshot.transform(Some(&transform));
+                let layout = base.layout();
+                let fully_sung = highlights.iter().all(|span| span.progress.get() >= 1.0);
+                if !fully_sung {
+                    let path = gtk::gsk::PathBuilder::new();
+                    let mut geometry = self.geometry.borrow_mut();
+                    if geometry.as_ref().is_none_or(|geometry| {
+                        geometry.serial != layout.serial() || geometry.offsets != (x, y)
+                    }) {
+                        *geometry = Some(HighlightGeometry {
+                            serial: layout.serial(),
+                            offsets: (x, y),
+                            rectangles: highlights
+                                .iter()
+                                .map(|span| {
+                                    let mut rectangles = Vec::new();
+                                    let mut lines = layout.iter();
+                                    loop {
+                                        let line =
+                                            lines.line_readonly().expect("lyric layout line");
+                                        let start =
+                                            (span.range.start as i32).max(line.start_index());
+                                        let end = (span.range.end as i32)
+                                            .min(line.start_index() + line.length());
+                                        if start < end {
+                                            let (_, bounds) = lines.line_extents();
+                                            let ranges = line.x_ranges(start, end);
+                                            rectangles.extend(ranges.chunks_exact(2).map(
+                                                |range| {
+                                                    let (_, index, _) = layout.xy_to_index(
+                                                        range[0] + (range[1] - range[0]) / 2,
+                                                        bounds.y() + bounds.height() / 2,
+                                                    );
+                                                    (
+                                                        index,
+                                                        gtk::graphene::Rect::new(
+                                                            x as f32
+                                                                + range[0] as f32
+                                                                    / gtk::pango::SCALE as f32,
+                                                            y as f32
+                                                                + bounds.y() as f32
+                                                                    / gtk::pango::SCALE as f32,
+                                                            (range[1] - range[0]) as f32
+                                                                / gtk::pango::SCALE as f32,
+                                                            bounds.height() as f32
+                                                                / gtk::pango::SCALE as f32,
+                                                        ),
+                                                        layout.direction(index)
+                                                            == gtk::pango::Direction::Rtl,
+                                                    )
+                                                },
+                                            ));
+                                        }
+                                        if !lines.next_line() {
+                                            break;
+                                        }
+                                    }
+                                    rectangles.sort_unstable_by_key(|(index, _, _)| *index);
+                                    rectangles
+                                })
+                                .collect(),
+                        });
+                    }
+                    for (span, rectangles) in highlights
+                        .iter()
+                        .zip(&geometry.as_ref().unwrap().rectangles)
+                        .filter(|(span, _)| span.progress.get() > 0.0)
+                    {
+                        let mut remaining = rectangles
+                            .iter()
+                            .map(|(_, rect, _)| rect.width())
+                            .sum::<f32>()
+                            * span.progress.get() as f32;
+                        for (_, rect, rtl) in rectangles {
+                            let width = remaining.min(rect.width());
+                            if width <= 0.0 {
+                                break;
+                            }
+                            path.add_rect(&gtk::graphene::Rect::new(
+                                rect.x() + if *rtl { rect.width() - width } else { 0.0 },
+                                rect.y(),
+                                width,
+                                rect.height(),
+                            ));
+                            remaining -= width;
+                        }
+                    }
+                    snapshot.push_fill(&path.to_path(), gtk::gsk::FillRule::Winding);
+                }
+                // GTK's layout renderer preserves CSS text shadows while reusing
+                // the base label's shaping and wrapping for the highlighted pass.
+                #[allow(deprecated)]
+                snapshot.render_layout(
+                    &self.obj().style_context(),
+                    f64::from(x),
+                    f64::from(y),
+                    &layout,
+                );
+                if !fully_sung {
+                    snapshot.pop();
+                }
+                snapshot.restore();
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KaraokeText(ObjectSubclass<imp::KaraokeText>)
+            @extends gtk::Widget,
+            @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    }
+
+    impl KaraokeText {
+        pub fn new(text: &str) -> Self {
+            let widget: Self = glib::Object::new();
+            let base = Self::text_label(text);
+            base.add_css_class("lyrics-cue-base");
+            base.set_parent(&widget);
+            widget.imp().label.replace(Some(base));
+            widget.add_css_class("lyrics-cue-sung");
+            widget.set_accessible_role(gtk::AccessibleRole::Presentation);
+            widget
+        }
+
+        fn text_label(text: &str) -> gtk::Label {
+            let label = gtk::Label::new(Some(text));
+            label.set_wrap(true);
+            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            label.set_xalign(0.5);
+            label.set_justify(gtk::Justification::Center);
+            label
+        }
+
+        pub fn add_text_class(&self, class: &str) {
+            self.add_css_class(class);
+            if let Some(base) = self.imp().label.borrow().as_ref() {
+                base.add_css_class(class);
+            }
+        }
+
+        pub fn text_len(&self) -> usize {
+            self.imp().label.borrow().as_ref().unwrap().text().len()
+        }
+
+        pub(super) fn add_highlight(&self, highlight: LyricsCueHighlight) {
+            self.imp().highlights.borrow_mut().push(highlight);
+        }
+
+        pub fn set_position(&self, position_millis: i128) {
+            let mut changed = false;
+            for span in self.imp().highlights.borrow().iter() {
+                let progress = span
+                    .timings
+                    .iter()
+                    .map(|timing| timing.progress(position_millis))
+                    .sum::<f64>()
+                    .clamp(0.0, 1.0);
+                changed |= (span.progress.replace(progress) - progress).abs() > f64::EPSILON;
+            }
+            if changed {
+                self.queue_draw();
+            }
+        }
+    }
+}
+
+impl LyricsPane {
+    pub(super) fn render_projection(
+        &self,
+        projection: &rufin_core::lyrics::CurrentLyrics,
+        current_media: Option<&playback::CurrentMediaId>,
+        current_track: Option<&str>,
+        settings: &rufin_core::settings::Settings,
+        writable: bool,
+        offset: i64,
+        seek: Rc<dyn Fn(u64)>,
+    ) {
+        use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
+        let (media_id, content, origin, loading) = match projection {
+            CurrentLyrics::Ready {
+                media_id,
+                content,
+                origin,
+            } => (Some(media_id), content.as_ref(), *origin, false),
+            CurrentLyrics::Loading { media_id } => (Some(media_id), None, None, true),
+            CurrentLyrics::Cleared => (None, None, None, false),
+        };
+        // A new playback run of the same queue item keeps the same lyrics and scroll extent.
+        let matches_current =
+            current_media.map(|media| &media.media_uri) == media_id.map(|media| &media.media_uri);
+        let document = match content {
+            Some(CurrentLyricsContent::Document { .. }) if matches_current => content,
+            _ => None,
+        };
+        let instrumental =
+            matches_current && matches!(content, Some(CurrentLyricsContent::Instrumental));
+        let available = document.is_some();
+        let (search_label, search_enabled) = if settings.application.private_mode {
+            (tr("Private mode is on"), false)
+        } else if current_media.is_some() {
+            (tr("Search lyrics"), true)
+        } else {
+            (tr("Nothing playing"), false)
+        };
+        self.set_save_action(&tr("Save Lyrics"), available);
+        self.set_edit_action(available && writable);
+        self.set_search_action(&search_label, search_enabled);
+        self.set_clear_auto_search_action(
+            &tr("Clear fetched lyrics for this track"),
+            current_track.is_some_and(|track| {
+                settings.lyrics.can_suppress_auto_lyrics(
+                    settings.application.private_mode,
+                    track,
+                    if matches_current { origin } else { None },
+                )
+            }),
+            !instrumental,
+        );
+        self.set_offset_action(
+            &tr("Lyrics offset (ms)"),
+            &tr("Decrease"),
+            &tr("Increase"),
+            offset,
+            available,
+        );
+        if current_media.is_some() && media_id.is_some() && !matches_current {
+            self.hide_content();
+            return;
+        }
+        let content = if let Some(CurrentLyricsContent::Document {
+            document: lyrics,
+            pronunciation,
+            prepared,
+        }) = document
+        {
+            LyricsPaneContent::Document {
+                lyrics: Arc::clone(lyrics),
+                pronunciation: pronunciation.clone(),
+                show_furigana: settings.lyrics.preferences.show_furigana,
+                show_romanization: settings.lyrics.preferences.show_romanization,
+                word_by_word_highlighting: settings.lyrics.preferences.karaoke_mode,
+                prepared: Arc::clone(prepared),
+            }
+        } else if instrumental {
+            LyricsPaneContent::Instrumental
+        } else if loading && matches_current {
+            LyricsPaneContent::Loading
+        } else {
+            LyricsPaneContent::Empty(if settings.application.private_mode {
+                tr("Server lyrics are off in private mode")
+            } else if !settings.lyrics.preferences.external_lyrics_enabled {
+                tr("External lyric lookup is off")
+            } else {
+                tr("No lyrics")
+            })
+        };
+        self.set_content(content, seek);
+    }
+}
+
+use karaoke_text::KaraokeText;
+
+#[derive(Clone)]
+pub struct LyricsPane {
+    root: gtk::Overlay,
+    layout: crate::widgets::layout::AllocationOwner,
+    scroller: gtk::ScrolledWindow,
+    controls: gtk::Box,
+    pub(crate) settings_controls: gtk::Box,
+    body: gtk::Box,
+    save_button: gtk::Button,
+    clear_auto_search_button: gtk::Button,
+    search_button: gtk::Button,
+    edit_button: gtk::Button,
+    settings_button: gtk::Button,
+    offset_decrease_button: gtk::Button,
+    offset_entry: gtk::Entry,
+    offset_increase_button: gtk::Button,
+    rows: Rc<RefCell<Vec<LyricsRow>>>,
+    content: Rc<RefCell<Option<LyricsPaneContent>>>,
+    active_index: Rc<Cell<Option<usize>>>,
+    scroll_index: Rc<Cell<Option<usize>>>,
+    active_row: Rc<RefCell<Option<gtk::Widget>>>,
+    resize_anchor_y: Rc<Cell<Option<f32>>>,
+    scroll_generation: Rc<Cell<u64>>,
+    follow_pause_until: Rc<Cell<Option<Instant>>>,
+    scrollbar_dragging: Rc<Cell<bool>>,
+}
+
+#[derive(Clone)]
+struct LyricsRow {
+    track: LyricsRowTrack,
+    line_index: usize,
+    row: gtk::Widget,
+    cues: Vec<KaraokeText>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LyricsRowTrack {
+    Primary,
+    Pronunciation,
+}
+
+struct LyricsCueHighlight {
+    range: std::ops::Range<usize>,
+    timings: Vec<KaraokeTiming>,
+    progress: Cell<f64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LyricsFollowScrollPause {
+    Inactive,
+    Active,
+    Expired,
+}
+
+pub enum LyricsPaneContent {
+    Document {
+        lyrics: Arc<LyricsDocument>,
+        pronunciation: Option<Arc<LyricsDocument>>,
+        show_furigana: bool,
+        show_romanization: bool,
+        word_by_word_highlighting: bool,
+        prepared: Arc<PreparedLyrics>,
+    },
+    Instrumental,
+    Loading,
+    Empty(String),
+}
+
+impl PartialEq for LyricsPaneContent {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Document {
+                    lyrics,
+                    pronunciation,
+                    show_furigana,
+                    show_romanization,
+                    word_by_word_highlighting,
+                    prepared,
+                },
+                Self::Document {
+                    lyrics: next,
+                    pronunciation: next_pronunciation,
+                    show_furigana: next_furigana,
+                    show_romanization: next_romanization,
+                    word_by_word_highlighting: next_highlighting,
+                    prepared: next_prepared,
+                },
+            ) => {
+                Arc::ptr_eq(lyrics, next)
+                    && match (pronunciation, next_pronunciation) {
+                        (Some(previous), Some(next)) => Arc::ptr_eq(previous, next),
+                        (None, None) => true,
+                        _ => false,
+                    }
+                    && show_furigana == next_furigana
+                    && show_romanization == next_romanization
+                    && word_by_word_highlighting == next_highlighting
+                    && Arc::ptr_eq(prepared, next_prepared)
+            }
+            (Self::Instrumental, Self::Instrumental) | (Self::Loading, Self::Loading) => true,
+            (Self::Empty(previous), Self::Empty(next)) => previous == next,
+            _ => false,
+        }
+    }
+}
+
+impl LyricsPane {
+    pub fn new() -> Self {
+        super::edge_fade::LyricsEdgeFade::static_type();
+        let resource = crate::player::ui_resource::LYRICS_PANE_RESOURCE;
+        let builder = crate::widgets::ui_resource::builder(resource);
+        crate::objects!(builder, resource, {
+            root: gtk::Overlay,
+            edge_fade: super::edge_fade::LyricsEdgeFade,
+            scroller: gtk::ScrolledWindow,
+            body: gtk::Box,
+            controls: gtk::Box,
+            settings_controls: gtk::Box,
+            save_button: gtk::Button,
+            clear_auto_search_button: gtk::Button,
+            search_button: gtk::Button,
+            edit_button: gtk::Button,
+            settings_button: gtk::Button,
+            offset_decrease_button: gtk::Button,
+            offset_entry: gtk::Entry,
+            offset_increase_button: gtk::Button,
+        });
+        let edit_label = tr("Edit lyrics");
+        edit_button.set_tooltip_text(Some(&edit_label));
+        edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
+        root.set_measure_overlay(&controls, false);
+        root.set_child(gtk::Widget::NONE);
+        let layout = crate::widgets::layout::allocation_owner(&edge_fade, |_, _| {});
+        root.set_child(Some(&layout));
+
+        let pane = Self {
+            root,
+            layout,
+            scroller,
+            controls,
+            settings_controls,
+            body,
+            save_button,
+            clear_auto_search_button,
+            search_button,
+            edit_button,
+            settings_button,
+            offset_decrease_button,
+            offset_entry,
+            offset_increase_button,
+            rows: Rc::new(RefCell::new(Vec::new())),
+            content: Rc::new(RefCell::new(None)),
+            active_index: Rc::new(Cell::new(None)),
+            scroll_index: Rc::new(Cell::new(None)),
+            active_row: Rc::new(RefCell::new(None)),
+            resize_anchor_y: Rc::new(Cell::new(None)),
+            scroll_generation: Rc::new(Cell::new(0)),
+            follow_pause_until: Rc::new(Cell::new(None)),
+            scrollbar_dragging: Rc::new(Cell::new(false)),
+        };
+        pane.connect_user_scroll_pause();
+        pane.connect_viewport_layout();
+        pane
+    }
+
+    fn connect_viewport_layout(&self) {
+        let scroller = self.scroller.downgrade();
+        let body = self.body.downgrade();
+        let rows = Rc::clone(&self.rows);
+        let content = Rc::clone(&self.content);
+        let index = Rc::clone(&self.scroll_index);
+        let generation = Rc::clone(&self.scroll_generation);
+        let pause = Rc::clone(&self.follow_pause_until);
+        let dragging = Rc::clone(&self.scrollbar_dragging);
+        let previous_size = Cell::new((0, 0));
+        self.layout.set_size_callback(move |width, height| {
+            let (Some(scroller), Some(body)) = (scroller.upgrade(), body.upgrade()) else {
+                return;
+            };
+            // Start near the top, with enough space below to center the final lines.
+            let (top_padding, bottom_padding) =
+                if matches!(*content.borrow(), Some(LyricsPaneContent::Document { .. })) {
+                    (height / 10, height / 2)
+                } else {
+                    (0, 0)
+                };
+            let resized = previous_size.replace((width, height)) != (width, height);
+            let padding_changed =
+                body.margin_top() != top_padding || body.margin_bottom() != bottom_padding;
+            body.set_margin_top(top_padding);
+            body.set_margin_bottom(bottom_padding);
+            if !resized && !padding_changed {
+                return;
+            }
+            if lyrics_follow_scroll_pause_state(pause.get(), dragging.get(), Instant::now())
+                == LyricsFollowScrollPause::Active
+            {
+                return;
+            }
+            let row = rows
+                .borrow()
+                .iter()
+                .find(|row| {
+                    row.track == LyricsRowTrack::Primary && Some(row.line_index) == index.get()
+                })
+                .map(|row| row.row.clone());
+            if let Some(row) = row {
+                let next = generation.get().saturating_add(1);
+                generation.set(next);
+                scroll_row_into_view_after_layout(scroller, row, 0, Rc::clone(&generation), next);
+            }
+        });
+    }
+
+    pub fn widget(&self) -> &gtk::Overlay {
+        &self.root
+    }
+
+    pub fn use_right_panel_scrollbar(&self) {
+        self.scroller.add_css_class("right-panel-scroller");
+    }
+
+    pub fn connect_search_clicked(&self, search: impl Fn() + 'static) {
+        self.search_button.connect_clicked(move |_| search());
+    }
+
+    pub fn connect_settings_clicked(&self, open: impl Fn() + 'static) {
+        self.settings_button.connect_clicked(move |_| open());
+    }
+
+    pub fn set_lyrics_visible(&self, visible: bool) {
+        self.scroller.set_visible(visible);
+        self.search_button.set_visible(visible);
+        self.edit_button
+            .set_visible(visible && self.edit_button.is_sensitive());
+        self.controls.set_visible(visible);
+    }
+
+    pub fn connect_edit_clicked(&self, edit: impl Fn() + 'static) {
+        self.edit_button.connect_clicked(move |_| edit());
+    }
+
+    pub fn connect_save_clicked(&self, save: impl Fn() + 'static) {
+        self.save_button.connect_clicked(move |_| save());
+    }
+
+    pub fn connect_clear_auto_search_clicked(&self, clear: impl Fn() + 'static) {
+        self.clear_auto_search_button
+            .connect_clicked(move |_| clear());
+    }
+
+    pub fn connect_offset_decrease_clicked(&self, decrease: impl Fn() + 'static) {
+        crate::widgets::interactions::connect_repeating_button(
+            &self.offset_decrease_button,
+            decrease,
+        );
+    }
+
+    pub fn connect_offset_increase_clicked(&self, increase: impl Fn() + 'static) {
+        crate::widgets::interactions::connect_repeating_button(
+            &self.offset_increase_button,
+            increase,
+        );
+    }
+
+    pub fn set_search_action(&self, label: &str, enabled: bool) {
+        self.search_button.set_tooltip_text(Some(label));
+        self.search_button
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+        self.search_button.set_sensitive(enabled);
+    }
+
+    pub fn set_save_action(&self, label: &str, enabled: bool) {
+        self.save_button.set_tooltip_text(Some(label));
+        self.save_button
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+        self.save_button.set_visible(enabled);
+        self.save_button.set_sensitive(enabled);
+    }
+
+    pub fn set_edit_action(&self, enabled: bool) {
+        self.edit_button
+            .set_visible(enabled && self.scroller.is_visible());
+        self.edit_button.set_sensitive(enabled);
+    }
+
+    pub fn set_clear_auto_search_action(&self, label: &str, enabled: bool, visible: bool) {
+        self.clear_auto_search_button.set_tooltip_text(Some(label));
+        self.clear_auto_search_button
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+        self.clear_auto_search_button.set_visible(visible);
+        self.clear_auto_search_button.set_sensitive(enabled);
+    }
+
+    pub fn connect_offset_committed(&self, commit: impl Fn(String) + 'static) {
+        let commit: Rc<dyn Fn(String)> = Rc::new(commit);
+        let activate_commit = Rc::clone(&commit);
+        self.offset_entry.connect_activate(move |entry| {
+            activate_commit(entry.text().to_string());
+        });
+
+        let entry = self.offset_entry.downgrade();
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(move |_| {
+            if let Some(entry) = entry.upgrade() {
+                commit(entry.text().to_string());
+            }
+        });
+        self.offset_entry.add_controller(focus);
+    }
+
+    pub fn connect_offset_changed(&self, changed: impl Fn(String) + 'static) {
+        self.offset_entry
+            .connect_changed(move |entry| changed(entry.text().to_string()));
+    }
+
+    pub fn set_offset_action(
+        &self,
+        label: &str,
+        decrease_label: &str,
+        increase_label: &str,
+        offset_millis: i64,
+        enabled: bool,
+    ) {
+        self.offset_entry.set_text(&format!("{offset_millis} ms"));
+        self.offset_entry.set_tooltip_text(Some(label));
+        self.offset_entry
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+        for (button, button_label) in [
+            (&self.offset_decrease_button, decrease_label),
+            (&self.offset_increase_button, increase_label),
+        ] {
+            button.set_visible(enabled);
+            button.set_tooltip_text(Some(button_label));
+            button.update_property(&[gtk::accessible::Property::Label(button_label)]);
+        }
+        self.offset_entry.set_visible(enabled);
+    }
+
+    pub fn hide_content(&self) {
+        self.body.set_visible(false);
+        self.restart_follow_tracking();
+    }
+
+    pub fn set_content(&self, content: LyricsPaneContent, seek: Rc<dyn Fn(u64)>) {
+        self.body.set_visible(true);
+        if self.content.borrow().as_ref() == Some(&content) {
+            return;
+        }
+        while let Some(child) = self.body.first_child() {
+            self.body.remove(&child);
+        }
+        self.rows.borrow_mut().clear();
+        self.active_index.set(None);
+        self.scroll_index.set(None);
+        self.active_row.borrow_mut().take();
+        self.cancel_scroll_animation();
+
+        if let LyricsPaneContent::Document {
+            lyrics: current_lyrics,
+            pronunciation,
+            show_furigana,
+            show_romanization,
+            word_by_word_highlighting,
+            prepared,
+        } = &content
+        {
+            self.append_document_rows(
+                current_lyrics,
+                LyricsRowTrack::Primary,
+                &prepared.lines,
+                *show_furigana,
+                *show_romanization && pronunciation.is_none(),
+                *word_by_word_highlighting,
+                Rc::clone(&seek),
+            );
+            if *show_romanization && let Some(pronunciation) = pronunciation {
+                let heading = gtk::Label::new(Some(&tr(msgid("Pronunciation"))));
+                heading.add_css_class("lyrics-track-heading");
+                self.body.append(&heading);
+                self.append_document_rows(
+                    pronunciation,
+                    LyricsRowTrack::Pronunciation,
+                    &prepared.pronunciation,
+                    false,
+                    false,
+                    *word_by_word_highlighting,
+                    seek,
+                );
+            }
+        } else if matches!(&content, LyricsPaneContent::Instrumental) {
+            let indicator = gtk::Box::new(gtk::Orientation::Vertical, 20);
+            indicator.set_halign(gtk::Align::Center);
+            indicator.set_valign(gtk::Align::Center);
+            indicator.set_vexpand(true);
+
+            let icon = gtk::Image::from_icon_name("rufin-audio-x-generic-symbolic");
+            icon.set_pixel_size(36);
+            icon.add_css_class("dim-label");
+            indicator.append(&icon);
+
+            let label = gtk::Label::new(Some(&tr(msgid("Instrumental"))));
+            label.add_css_class("lyrics-instrumental");
+            indicator.append(&label);
+            self.body.append(&indicator);
+        } else if matches!(&content, LyricsPaneContent::Loading) {
+            let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            placeholder.set_halign(gtk::Align::Fill);
+            placeholder.set_valign(gtk::Align::Center);
+            placeholder.set_hexpand(true);
+            placeholder.set_vexpand(true);
+
+            let spinner = adw::Spinner::new();
+            spinner.set_halign(gtk::Align::Center);
+            spinner.set_valign(gtk::Align::Center);
+            spinner.set_width_request(24);
+            spinner.set_height_request(24);
+            placeholder.append(&spinner);
+            self.body.append(&placeholder);
+        } else if let LyricsPaneContent::Empty(empty_status) = &content {
+            let status = gtk::Label::new(Some(empty_status));
+            status.add_css_class("muted");
+            status.set_wrap(true);
+            status.set_justify(gtk::Justification::Center);
+            status.set_valign(gtk::Align::Center);
+            status.set_vexpand(true);
+            self.body.append(&status);
+        }
+        self.content.replace(Some(content));
+        self.layout.queue_allocate();
+    }
+
+    fn append_document_rows(
+        &self,
+        document: &LyricsDocument,
+        track: LyricsRowTrack,
+        prepared: &[PreparedLyricsLine],
+        show_furigana: bool,
+        show_romanization: bool,
+        word_by_word_highlighting: bool,
+        seek: Rc<dyn Fn(u64)>,
+    ) {
+        let local_japanese_readings =
+            track == LyricsRowTrack::Primary && document.is_japanese_for_readings();
+        let show_furigana = show_furigana && local_japanese_readings;
+        let show_romanization = show_romanization && local_japanese_readings;
+        for (line_index, line) in document.lines.iter().enumerate() {
+            if !lyric_line_has_text(line) {
+                continue;
+            }
+            let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            content.set_hexpand(true);
+            content.set_halign(gtk::Align::Fill);
+            let mut cue_highlights = Vec::new();
+            let prepared = &prepared[line_index];
+            let karaoke_line = word_by_word_highlighting && !line.cue_lines.is_empty();
+            let reading = prepared.reading.as_deref();
+            if karaoke_line {
+                for (cue_line, prepared) in line.cue_lines.iter().zip(&prepared.cue_lines) {
+                    let reading = prepared.reading.as_deref();
+                    let cue_part = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                    if let Some(agent) = cue_line
+                        .agent_id
+                        .as_deref()
+                        .and_then(|id| document.agents.iter().find(|agent| agent.id == id))
+                    {
+                        cue_part.add_css_class(match agent.role {
+                            LyricsAgentRole::Main => "lyrics-agent-main",
+                            LyricsAgentRole::Voice => "lyrics-agent-voice",
+                            LyricsAgentRole::Background => "lyrics-agent-background",
+                            LyricsAgentRole::Group => "lyrics-agent-group",
+                        });
+                        if let Some(name) = agent.name.as_deref() {
+                            let agent_label = gtk::Label::new(Some(name));
+                            agent_label.add_css_class("lyrics-agent-name");
+                            cue_part.append(&agent_label);
+                        }
+                    }
+                    let cue_line_widget = WrappingLine::new();
+                    cue_line_widget.add_css_class("lyrics-line");
+                    let romanization_line = show_romanization.then(|| {
+                        let line = WrappingLine::new();
+                        line.add_css_class("lyrics-line");
+                        line.add_css_class("lyrics-romanization");
+                        line
+                    });
+                    if show_furigana
+                        && let Some(reading) =
+                            reading.filter(|reading| !reading.segments.is_empty())
+                    {
+                        let mut cursor = 0;
+                        for (index, segment) in reading.segments.iter().enumerate() {
+                            let range = cursor..cursor + segment.surface.len();
+                            cursor = range.end;
+                            let base = karaoke_surface(
+                                &cue_line.text,
+                                range.clone(),
+                                prepared,
+                                &mut cue_highlights,
+                            );
+                            let (ruby, annotation) = ruby_segment(segment, base.upcast_ref());
+                            if segment.furigana.is_some() {
+                                register_karaoke_text(
+                                    &annotation,
+                                    &prepared.furigana[index],
+                                    &mut cue_highlights,
+                                );
+                            }
+                            cue_line_widget.append(&ruby);
+                        }
+                    } else if !cue_line.text.is_empty() {
+                        cue_line_widget.append(&karaoke_surface(
+                            &cue_line.text,
+                            0..cue_line.text.len(),
+                            prepared,
+                            &mut cue_highlights,
+                        ));
+                    }
+                    if let Some(romanization_line) = romanization_line.as_ref() {
+                        if let Some(reading) = reading {
+                            let mut previous_was_word = false;
+                            for (index, (range, romanization)) in
+                                reading.romanization_spans.iter().enumerate()
+                            {
+                                let surface = cue_line
+                                    .text
+                                    .get(range.clone())
+                                    .expect("token source range");
+                                let is_word = surface.chars().any(char::is_alphanumeric);
+                                if previous_was_word && is_word {
+                                    romanization_line.append(&gtk::Label::new(Some(" ")));
+                                }
+                                previous_was_word = is_word;
+                                let label = KaraokeText::new(romanization);
+                                register_karaoke_text(
+                                    &label,
+                                    &prepared.romanization[index],
+                                    &mut cue_highlights,
+                                );
+                                romanization_line.append(&label);
+                            }
+                        } else if !cue_line.text.is_empty() {
+                            romanization_line.append(&karaoke_surface(
+                                &cue_line.text,
+                                0..cue_line.text.len(),
+                                prepared,
+                                &mut cue_highlights,
+                            ));
+                        }
+                    }
+                    cue_part.append(&cue_line_widget);
+                    if let Some(line) = romanization_line {
+                        cue_part.append(&line);
+                    }
+                    content.append(&cue_part);
+                }
+            } else if show_furigana
+                && let Some(reading) = reading.filter(|reading| !reading.segments.is_empty())
+            {
+                content.append(&ruby_line(&reading.segments));
+            } else {
+                let label = lyrics_label(&line.text);
+                label.add_css_class("lyrics-scroll-anchor");
+                content.append(&label);
+            }
+
+            if show_romanization
+                && cue_highlights.is_empty()
+                && let Some(reading) = reading
+            {
+                let label = lyrics_label(&reading.romanization);
+                label.add_css_class("lyrics-romanization");
+                content.append(&label);
+            }
+
+            let row: gtk::Widget = if let Some(start_millis) = line.start_millis {
+                let row = gtk::Button::new();
+                row.add_css_class("flat");
+                row.set_hexpand(true);
+                row.set_child(Some(&content));
+                let seek = Rc::clone(&seek);
+                row.connect_clicked(move |_| seek(start_millis));
+                row.upcast()
+            } else {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                row.set_hexpand(true);
+                row.append(&content);
+                row.upcast()
+            };
+            row.add_css_class("lyrics-row");
+            self.body.append(&row);
+            self.rows.borrow_mut().push(LyricsRow {
+                track,
+                line_index,
+                row,
+                cues: cue_highlights,
+            });
+        }
+    }
+
+    pub fn update_highlight(&self, lyrics: Option<&LyricsDocument>, position_millis: i128) {
+        self.update_highlight_with_scroll_duration(lyrics, position_millis, None);
+    }
+
+    fn update_highlight_with_scroll_duration(
+        &self,
+        lyrics: Option<&LyricsDocument>,
+        position_millis: i128,
+        scroll_duration: Option<u64>,
+    ) {
+        let active_index = lyrics
+            .and_then(|lyrics| active_lyrics_line_index(lyrics.lines.as_slice(), position_millis));
+        let highlight_all_lines =
+            lyrics.is_some_and(|lyrics| should_highlight_all_lyrics_lines(lyrics.lines.as_slice()));
+        let previous_index = self.active_index.replace(active_index);
+        let scroll_index = active_index.or_else(|| {
+            lyrics.and_then(|lyrics| intro_lyrics_line_index(&lyrics.lines, position_millis))
+        });
+        let previous_scroll_index = self.scroll_index.replace(scroll_index);
+        if previous_index != active_index {
+            self.active_row.borrow_mut().take();
+        }
+        let full_row_sync = karaoke_rows_need_full_sync(previous_index, active_index);
+        let follow_pause = self.follow_scroll_pause();
+        let scroll_target = {
+            let rows = self.rows.borrow();
+            for row in rows.iter() {
+                if full_row_sync
+                    || Some(row.line_index) == previous_index
+                    || Some(row.line_index) == active_index
+                {
+                    let active = row.track == LyricsRowTrack::Primary
+                        && (highlight_all_lines || Some(row.line_index) == active_index);
+                    if active {
+                        row.row.add_css_class("lyrics-row-active");
+                        if Some(row.line_index) == active_index {
+                            self.active_row.replace(Some(row.row.clone()));
+                        }
+                    } else {
+                        row.row.remove_css_class("lyrics-row-active");
+                    }
+                    for cue in &row.cues {
+                        cue.set_position(position_millis);
+                    }
+                }
+            }
+
+            lyrics_follow_scroll_target(scroll_index, previous_scroll_index, follow_pause).and_then(
+                |index| {
+                    let row = rows
+                        .iter()
+                        .find(|row| {
+                            row.track == LyricsRowTrack::Primary && row.line_index == index
+                        })?
+                        .row
+                        .clone();
+                    let duration = scroll_duration.unwrap_or_else(|| {
+                        lyrics
+                            .map(|lyrics| {
+                                lyrics_scroll_animation_millis(
+                                    lyrics.lines.as_slice(),
+                                    index,
+                                    position_millis,
+                                )
+                            })
+                            .unwrap_or(DEFAULT_LYRICS_SCROLL_ANIMATION_MS)
+                    });
+                    Some((row, duration))
+                },
+            )
+        };
+
+        if let Some((row, duration)) = scroll_target {
+            self.scroll_row_into_view(row, duration);
+        }
+    }
+
+    pub fn refocus_highlight(&self, lyrics: Option<&LyricsDocument>, position_millis: i128) {
+        self.active_index.set(None);
+        self.scroll_index.set(None);
+        self.follow_pause_until.set(None);
+        self.cancel_scroll_animation();
+        self.update_highlight_with_scroll_duration(lyrics, position_millis, Some(0));
+    }
+
+    pub fn clear_follow_scroll_pause(&self) {
+        self.follow_pause_until.set(None);
+    }
+
+    pub fn capture_active_row_resize_anchor(&self) {
+        let anchor = self
+            .active_row
+            .borrow()
+            .as_ref()
+            .and_then(|row| row.compute_bounds(&self.scroller))
+            .map(|bounds| bounds.y());
+        self.resize_anchor_y.set(anchor);
+    }
+
+    pub fn restore_active_row_resize_anchor(&self) {
+        let Some(previous_y) = self.resize_anchor_y.take() else {
+            return;
+        };
+        let Some(current_y) = self
+            .active_row
+            .borrow()
+            .as_ref()
+            .and_then(|row| row.compute_bounds(&self.scroller))
+            .map(|bounds| bounds.y())
+        else {
+            return;
+        };
+        let adjustment = self.scroller.vadjustment();
+        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        adjustment.set_value(
+            (adjustment.value() + f64::from(current_y - previous_y))
+                .clamp(adjustment.lower(), maximum),
+        );
+    }
+
+    pub fn restart_follow_tracking(&self) {
+        self.active_index.set(None);
+        self.scroll_index.set(None);
+        self.follow_pause_until.set(None);
+        self.cancel_scroll_animation();
+    }
+
+    fn connect_user_scroll_pause(&self) {
+        let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pause = {
+            let until = Rc::clone(&self.follow_pause_until);
+            let generation = Rc::clone(&self.scroll_generation);
+            move || {
+                generation.set(generation.get().saturating_add(1));
+                until.set(Some(
+                    Instant::now() + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS),
+                ));
+            }
+        };
+        let scroll_pause = pause.clone();
+        controller.connect_scroll(move |_, _, _| {
+            scroll_pause();
+            glib::Propagation::Proceed
+        });
+        self.scroller.add_controller(controller);
+
+        let events = gtk::EventControllerLegacy::new();
+        events.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dragging = Rc::clone(&self.scrollbar_dragging);
+        events.connect_event(move |_, event| {
+            match event.event_type() {
+                gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin => {
+                    dragging.set(true);
+                    pause();
+                }
+                gtk::gdk::EventType::ButtonRelease
+                | gtk::gdk::EventType::TouchEnd
+                | gtk::gdk::EventType::TouchCancel
+                | gtk::gdk::EventType::GrabBroken => {
+                    dragging.set(false);
+                    pause();
+                }
+                _ => {}
+            }
+            glib::Propagation::Proceed
+        });
+        self.scroller.vscrollbar().add_controller(events);
+    }
+
+    fn follow_scroll_pause(&self) -> LyricsFollowScrollPause {
+        let pause = lyrics_follow_scroll_pause_state(
+            self.follow_pause_until.get(),
+            self.scrollbar_dragging.get(),
+            Instant::now(),
+        );
+        if pause == LyricsFollowScrollPause::Expired {
+            self.follow_pause_until.set(None);
+        }
+        pause
+    }
+
+    fn cancel_scroll_animation(&self) {
+        self.scroll_generation
+            .set(self.scroll_generation.get().saturating_add(1));
+    }
+
+    fn scroll_row_into_view(&self, row: gtk::Widget, duration_millis: u64) {
+        let scroller = self.scroller.clone();
+        let generation = self.scroll_generation.get().saturating_add(1);
+        self.scroll_generation.set(generation);
+        let scroll_generation = Rc::clone(&self.scroll_generation);
+        scroll_row_into_view_after_layout(
+            scroller,
+            row,
+            duration_millis,
+            scroll_generation,
+            generation,
+        );
+    }
+}
+
+fn karaoke_rows_need_full_sync(previous: Option<usize>, current: Option<usize>) -> bool {
+    match (previous, current) {
+        (Some(previous), Some(current)) => {
+            current < previous || current > previous.saturating_add(1)
+        }
+        (Some(_), None) | (None, _) => true,
+    }
+}
+
+fn lyrics_label(text: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_xalign(0.5);
+    label.set_justify(gtk::Justification::Center);
+    label.set_hexpand(true);
+    label.add_css_class("lyrics-line");
+    label
+}
+
+fn ruby_line(segments: &[JapaneseReadingSegment]) -> WrappingLine {
+    let line = WrappingLine::new();
+    line.add_css_class("lyrics-line");
+    for segment in segments {
+        let surface = reading_surface_label(&segment.surface);
+        line.append(&ruby_segment(segment, surface.upcast_ref()).0);
+    }
+    line
+}
+
+fn register_karaoke_text(
+    label: &KaraokeText,
+    timings: &[KaraokeTiming],
+    highlights: &mut Vec<KaraokeText>,
+) {
+    if !timings.is_empty() {
+        label.add_highlight(LyricsCueHighlight {
+            range: 0..label.text_len(),
+            timings: timings.to_vec(),
+            progress: Cell::new(0.0),
+        });
+        highlights.push(label.clone());
+    }
+}
+
+fn karaoke_surface(
+    text: &str,
+    range: std::ops::Range<usize>,
+    prepared: &PreparedCueLine,
+    highlights: &mut Vec<KaraokeText>,
+) -> KaraokeText {
+    let surface = reading_surface_label(
+        text.get(range.clone())
+            .expect("reading segment belongs to its lyric line"),
+    );
+    surface.add_css_class("lyrics-cue");
+    let mut timed = false;
+    for span in prepared
+        .surface
+        .iter()
+        .filter(|span| range.contains(&span.range.start))
+    {
+        timed |= !span.timings.is_empty();
+        surface.add_highlight(LyricsCueHighlight {
+            range: span.range.start - range.start..span.range.end - range.start,
+            timings: span.timings.clone(),
+            progress: Cell::new(0.0),
+        });
+    }
+    if timed {
+        highlights.push(surface.clone());
+    }
+    surface
+}
+
+fn ruby_segment(
+    segment: &JapaneseReadingSegment,
+    surface: &gtk::Widget,
+) -> (gtk::Box, KaraokeText) {
+    let segment_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    segment_box.set_halign(gtk::Align::Center);
+    segment_box.set_valign(gtk::Align::Baseline);
+    segment_box.set_baseline_child(1);
+    if segment.furigana.is_some() {
+        segment_box.add_css_class("lyrics-ruby-annotated");
+    }
+
+    let furigana = KaraokeText::new(segment.furigana.as_deref().unwrap_or(" "));
+    furigana.add_text_class("lyrics-furigana");
+    furigana.set_halign(gtk::Align::Center);
+    segment_box.append(&furigana);
+    segment_box.append(surface);
+    (segment_box, furigana)
+}
+
+fn reading_surface_label(text: &str) -> KaraokeText {
+    let label = KaraokeText::new(text);
+    label.add_text_class("lyrics-reading-surface");
+    label.add_text_class("lyrics-scroll-anchor");
+    label.set_halign(gtk::Align::Center);
+    label
+}
+
+fn first_lyrics_scroll_surface(widget: &gtk::Widget) -> Option<gtk::Widget> {
+    if widget.has_css_class("lyrics-scroll-anchor") {
+        return Some(widget.clone());
+    }
+    std::iter::successors(widget.first_child(), gtk::Widget::next_sibling)
+        .find_map(|child| first_lyrics_scroll_surface(&child))
+}
+
+fn last_lyrics_scroll_surface(widget: &gtk::Widget) -> Option<gtk::Widget> {
+    if widget.has_css_class("lyrics-scroll-anchor") {
+        return Some(widget.clone());
+    }
+    std::iter::successors(widget.last_child(), gtk::Widget::prev_sibling)
+        .find_map(|child| last_lyrics_scroll_surface(&child))
+}
+
+fn scroll_row_into_view_after_layout(
+    scroller: gtk::ScrolledWindow,
+    row: gtk::Widget,
+    duration_millis: u64,
+    scroll_generation: Rc<Cell<u64>>,
+    generation: u64,
+) {
+    // Tick callbacks run before allocation. Read the row bounds after this frame's
+    // layout, so changing panes does not first center using the old viewport.
+    scroller.add_tick_callback(move |scroller, clock| {
+        if scroll_generation.get() != generation {
+            return glib::ControlFlow::Break;
+        }
+        let scroller = scroller.downgrade();
+        let row = row.downgrade();
+        let scroll_generation = Rc::clone(&scroll_generation);
+        let handler = Rc::new(RefCell::new(None));
+        let disconnect = Rc::clone(&handler);
+        *handler.borrow_mut() = Some(clock.connect_local("layout", true, move |values| {
+            let clock = values[0].get::<gtk::gdk::FrameClock>().unwrap();
+            clock.disconnect(disconnect.take().unwrap());
+            if scroll_generation.get() != generation {
+                return None;
+            }
+            let (Some(scroller), Some(row)) = (scroller.upgrade(), row.upgrade()) else {
+                return None;
+            };
+            let first_surface = first_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
+            let last_surface = last_lyrics_scroll_surface(&row).unwrap_or_else(|| row.clone());
+            let first_bounds = first_surface.compute_bounds(&scroller);
+            let last_bounds = last_surface.compute_bounds(&scroller);
+            let adjustment = scroller.vadjustment();
+            let (Some(first_bounds), Some(last_bounds)) = (first_bounds, last_bounds) else {
+                return None;
+            };
+            let viewport_height = f64::from(scroller.height().max(1));
+            let surface_top = f64::from(first_bounds.y().min(last_bounds.y()));
+            let surface_bottom = f64::from(
+                (first_bounds.y() + first_bounds.height())
+                    .max(last_bounds.y() + last_bounds.height()),
+            );
+            let upper = adjustment.upper() - adjustment.page_size();
+            let target = centered_scroll_target(
+                surface_top,
+                surface_bottom,
+                adjustment.value(),
+                viewport_height,
+            )
+            .clamp(adjustment.lower(), upper.max(adjustment.lower()));
+            animate_lyrics_scroll(
+                adjustment,
+                target,
+                if scroller.settings().is_gtk_enable_animations() {
+                    duration_millis
+                } else {
+                    0
+                },
+                Rc::clone(&scroll_generation),
+                generation,
+            );
+            None
+        }));
+        clock.request_phase(gtk::gdk::FrameClockPhase::LAYOUT);
+        glib::ControlFlow::Break
+    });
+}
+
+fn animate_lyrics_scroll(
+    adjustment: gtk::Adjustment,
+    target: f64,
+    duration_millis: u64,
+    scroll_generation: Rc<Cell<u64>>,
+    generation: u64,
+) {
+    let start = adjustment.value();
+    let delta = target - start;
+    if duration_millis == 0 || delta.abs() < 1.0 {
+        adjustment.set_value(target);
+        return;
+    }
+    let mut started_at = None;
+    glib::timeout_add_local(Duration::from_millis(16), move || {
+        if scroll_generation.get() != generation {
+            return glib::ControlFlow::Break;
+        }
+        let elapsed = started_at
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            .as_millis() as f64;
+        let progress = (elapsed / duration_millis as f64).clamp(0.0, 1.0);
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        adjustment.set_value(start + delta * eased);
+        if progress >= 1.0 {
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
+fn centered_scroll_target(
+    surface_top: f64,
+    surface_bottom: f64,
+    current_scroll: f64,
+    viewport_height: f64,
+) -> f64 {
+    let surface_center = current_scroll + (surface_top + surface_bottom) / 2.0;
+    surface_center - viewport_height / 2.0
+}
+
+pub fn lyrics_follow_scroll_pause_state(
+    paused_until: Option<Instant>,
+    dragging: bool,
+    now: Instant,
+) -> LyricsFollowScrollPause {
+    if dragging {
+        return LyricsFollowScrollPause::Active;
+    }
+    match paused_until {
+        Some(paused_until) if now < paused_until => LyricsFollowScrollPause::Active,
+        Some(_) => LyricsFollowScrollPause::Expired,
+        None => LyricsFollowScrollPause::Inactive,
+    }
+}
+
+pub fn lyrics_follow_scroll_target(
+    active_index: Option<usize>,
+    previous_index: Option<usize>,
+    follow_pause: LyricsFollowScrollPause,
+) -> Option<usize> {
+    if follow_pause == LyricsFollowScrollPause::Active {
+        return None;
+    }
+    active_index.filter(|index| {
+        follow_pause == LyricsFollowScrollPause::Expired || Some(*index) != previous_index
+    })
+}
+
+pub fn lyrics_scroll_animation_millis(
+    lines: &[LyricsLine],
+    active_index: usize,
+    position_millis: i128,
+) -> u64 {
+    let budget = lines
+        .iter()
+        .skip(active_index + 1)
+        .filter(|line| lyric_line_has_text(line))
+        .filter_map(|line| line.start_millis)
+        .find(|start| i128::from(*start) > position_millis)
+        .and_then(|next_start| {
+            u64::try_from(i128::from(next_start) - position_millis)
+                .ok()
+                .and_then(|gap| gap.checked_sub(LYRICS_SCROLL_MS))
+        });
+    budget
+        .map(|budget| {
+            budget.clamp(
+                MIN_LYRICS_SCROLL_ANIMATION_MS,
+                DEFAULT_LYRICS_SCROLL_ANIMATION_MS,
+            )
+        })
+        .unwrap_or(DEFAULT_LYRICS_SCROLL_ANIMATION_MS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LYRICS_USER_SCROLL_PAUSE_MS, LyricsFollowScrollPause, active_lyrics_line_index,
+        centered_scroll_target, intro_lyrics_line_index, karaoke_rows_need_full_sync,
+        lyrics_follow_scroll_pause_state, lyrics_follow_scroll_target,
+        lyrics_scroll_animation_millis, should_highlight_all_lyrics_lines,
+    };
+    use lyrics::LyricsLine as LyricLine;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn karaoke_frames_resync_only_after_nonsequential_transitions() {
+        assert!(karaoke_rows_need_full_sync(None, Some(4)));
+        assert!(!karaoke_rows_need_full_sync(Some(4), Some(4)));
+        assert!(!karaoke_rows_need_full_sync(Some(4), Some(5)));
+        assert!(karaoke_rows_need_full_sync(Some(4), Some(7)));
+        assert!(karaoke_rows_need_full_sync(Some(4), Some(2)));
+        assert!(karaoke_rows_need_full_sync(Some(4), None));
+    }
+
+    #[test]
+    fn sync_lyrics_started() {
+        let lines = vec![
+            line("intro", Some(1_000)),
+            line("verse", Some(5_500)),
+            line("unsynced", None),
+            line("chorus", Some(9_000)),
+        ];
+
+        assert_eq!(active_lyrics_line_index(&lines, 999), None);
+        assert_eq!(active_lyrics_line_index(&lines, 1_000), Some(0));
+        assert_eq!(active_lyrics_line_index(&lines, 5_499), Some(0));
+        assert_eq!(active_lyrics_line_index(&lines, 5_500), Some(1));
+        assert_eq!(active_lyrics_line_index(&lines, 8_999), Some(1));
+        assert_eq!(active_lyrics_line_index(&lines, 9_000), Some(3));
+    }
+
+    #[test]
+    fn lyrics_blank_line_clears_highlight() {
+        let lines = vec![
+            line("current", Some(1_000)),
+            line("", Some(5_000)),
+            line("next", Some(9_000)),
+        ];
+
+        assert_eq!(active_lyrics_line_index(&lines, 4_999), Some(0));
+        assert_eq!(active_lyrics_line_index(&lines, 5_000), None);
+        assert_eq!(active_lyrics_line_index(&lines, 8_999), None);
+        assert_eq!(active_lyrics_line_index(&lines, 9_000), Some(2));
+    }
+
+    #[test]
+    fn lyrics_keep_active() {
+        let lines = vec![line("last", Some(1_000)), line(" ", Some(5_000))];
+
+        assert_eq!(active_lyrics_line_index(&lines, 5_000), None);
+        assert_eq!(active_lyrics_line_index(&lines, 50_000), None);
+    }
+
+    #[test]
+    fn unsynchronized_lyrics_timed() {
+        let lines = vec![line("plain", None)];
+
+        assert_eq!(active_lyrics_line_index(&lines, 0), None);
+    }
+
+    #[test]
+    fn unsynchronized_lyrics_highlight() {
+        let lines = vec![line("first", None), line("second", None)];
+
+        assert!(should_highlight_all_lyrics_lines(&lines));
+    }
+
+    #[test]
+    fn sync_lyrics_every() {
+        let lines = vec![line("first", Some(1_000)), line("untimed note", None)];
+
+        assert!(!should_highlight_all_lyrics_lines(&lines));
+        assert!(!should_highlight_all_lyrics_lines(&[]));
+    }
+
+    #[test]
+    fn lyrics_finish_line() {
+        let lines = vec![line("current", Some(5_500)), line("next", Some(6_000))];
+
+        let duration = lyrics_scroll_animation_millis(&lines, 0, 5_500);
+
+        assert!(duration <= 300);
+        assert!(duration >= 80);
+        assert_eq!(
+            lyrics_scroll_animation_millis(&lines, 0, 5_501),
+            duration - 1
+        );
+    }
+
+    #[test]
+    fn lyrics_follow_scroll_pause_expires() {
+        let now = Instant::now();
+
+        assert_eq!(
+            lyrics_follow_scroll_pause_state(None, false, now),
+            LyricsFollowScrollPause::Inactive
+        );
+        assert_eq!(
+            lyrics_follow_scroll_pause_state(Some(now + Duration::from_millis(1)), false, now),
+            LyricsFollowScrollPause::Active
+        );
+        assert_eq!(
+            lyrics_follow_scroll_pause_state(Some(now), false, now),
+            LyricsFollowScrollPause::Expired
+        );
+    }
+
+    #[test]
+    fn scrollbar_drag_suppresses_line_follow_even_after_the_pause_deadline() {
+        let started = Instant::now();
+        let later = started + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS * 2);
+        let held = lyrics_follow_scroll_pause_state(Some(started), true, later);
+        assert_eq!(lyrics_follow_scroll_target(Some(4), Some(3), held), None);
+        let released_until = later + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS);
+        let released = lyrics_follow_scroll_pause_state(Some(released_until), false, later);
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(4), released),
+            None
+        );
+        let expired = lyrics_follow_scroll_pause_state(Some(released_until), false, released_until);
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(4), expired),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn lyrics_ignore_line() {
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(3), Some(3), LyricsFollowScrollPause::Inactive),
+            None
+        );
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(3), LyricsFollowScrollPause::Inactive),
+            Some(4)
+        );
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(3), Some(3), LyricsFollowScrollPause::Expired),
+            Some(3)
+        );
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(3), LyricsFollowScrollPause::Active),
+            None
+        );
+    }
+
+    #[test]
+    fn lyrics_loop_scrolls_to_the_intro_without_highlighting_it_or_resetting_instrumental_gaps() {
+        let lines = [
+            line("", Some(0)),
+            line("First", Some(5_000)),
+            line("", Some(10_000)),
+            line("Last", Some(15_000)),
+            line("", Some(20_000)),
+        ];
+        let mut previous = None;
+        for (position, highlight, target) in [
+            (15_000, Some(3), Some(3)),
+            (20_000, None, None),
+            (0, None, Some(1)),
+            (1_000, None, None),
+            (5_000, Some(1), None),
+            (10_000, None, None),
+            (15_000, Some(3), Some(3)),
+            (0, None, Some(1)),
+        ] {
+            let active = active_lyrics_line_index(&lines, position);
+            assert_eq!(active, highlight);
+            let scroll = active.or_else(|| intro_lyrics_line_index(&lines, position));
+            assert_eq!(
+                lyrics_follow_scroll_target(scroll, previous, LyricsFollowScrollPause::Inactive),
+                target,
+            );
+            previous = scroll;
+        }
+        assert_eq!(intro_lyrics_line_index(&[], 0), None);
+        assert_eq!(intro_lyrics_line_index(&[line("Untimed", None)], 0), None);
+    }
+
+    #[test]
+    fn lyrics_scroll_centers_the_surface_instead_of_its_annotations() {
+        let target = centered_scroll_target(38.0, 58.0, 240.0, 100.0);
+
+        assert_eq!(target, 238.0);
+        assert_ne!(target, centered_scroll_target(20.0, 58.0, 240.0, 100.0));
+    }
+
+    fn line(text: &str, start_millis: Option<u64>) -> LyricLine {
+        LyricLine {
+            text: text.to_string(),
+            start_millis,
+            end_millis: None,
+            cue_lines: Vec::new(),
+        }
+    }
+}
