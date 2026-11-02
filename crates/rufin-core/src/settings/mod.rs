@@ -20,8 +20,6 @@ pub mod visualizer;
 mod web_controller;
 pub use web_controller::ControllerSettings;
 
-pub use crate::downloads::DownloadRule;
-pub use crate::downloads::{DownloadRules, SourceDownloadSettings};
 pub use app::{
     ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
     RandomPlaySettings, Settings, SettingsHandle, default_home_blocks,

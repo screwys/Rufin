@@ -149,19 +149,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::clone(&catalog),
     )
     .unwrap();
-    let downloads = crate::downloads::Downloads::new(
-        artwork::Artwork::new(
-            (root.path().join("downloads")).join("artwork"),
-            (runtime.clone()).clone(),
-            Arc::clone(&catalog),
-        )
-        .unwrap(),
-        root.path().join("downloads"),
-        catalog.as_ref().clone(),
-        runtime.clone(),
-        async_channel::unbounded().0,
-        Vec::new(),
-    );
+    let downloads = root.path().join("downloads");
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         catalog.clone(),
@@ -172,6 +160,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         crate::source::SourceOutputs {
             events: async_channel::unbounded().0,
             discovery: async_channel::unbounded().0,
+            downloads: async_channel::unbounded().0,
         },
     );
     let waveform = WaveformOwner::new(

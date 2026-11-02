@@ -664,7 +664,7 @@ fn add_download_rules(
     shell: &Rc<Preferences>,
     preferences_dialog: &adw::Dialog,
     source_id: &sources::SourceId,
-    rules: rufin_core::settings::DownloadRules,
+    rules: rufin_core::downloads::DownloadRules,
 ) -> gtk::MenuButton {
     let mut rows = Vec::new();
     for rule in DownloadRule::ALL {

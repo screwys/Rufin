@@ -1875,19 +1875,7 @@ mod tests {
             )
             .unwrap(),
             Arc::new(catalog.clone()),
-            crate::downloads::Downloads::new(
-                artwork::Artwork::new(
-                    (directory.path().join("downloads")).join("artwork"),
-                    (runtime.clone()).clone(),
-                    Arc::new(catalog.clone()),
-                )
-                .unwrap(),
-                directory.path().join("downloads"),
-                catalog.clone(),
-                runtime.clone(),
-                async_channel::unbounded().0,
-                Vec::new(),
-            ),
+            directory.path().join("downloads"),
             settings.clone(),
             Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
                 secrets::MemorySecretStore::new(),
@@ -1896,6 +1884,7 @@ mod tests {
             crate::source::SourceOutputs {
                 events: async_channel::unbounded().0,
                 discovery: async_channel::unbounded().0,
+                downloads: async_channel::unbounded().0,
             },
         );
         let service = LyricsService::new(

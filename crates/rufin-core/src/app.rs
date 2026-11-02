@@ -118,14 +118,6 @@ where
             .map_err(string_error)?
         }
     };
-    let downloads = crate::downloads::Downloads::new(
-        artwork.clone(),
-        paths.downloads_dir(),
-        library.as_ref().clone(),
-        runtime.clone(),
-        download_events,
-        stored.ui.downloads.clone(),
-    );
     let release_updates = ReleaseUpdateOwner::new(
         settings.clone(),
         runtime.clone(),
@@ -138,13 +130,14 @@ where
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         library.clone(),
-        downloads.clone(),
+        paths.downloads_dir(),
         settings.clone(),
         Arc::clone(&secrets),
         runtime.clone(),
         SourceOutputs {
             events: source_events.clone(),
             discovery: discovery_events,
+            downloads: download_events,
         },
     );
     if !stored.ui.recent_search_results.is_empty() {
@@ -230,7 +223,6 @@ where
     source.attach_playback(&playback);
 
     let owners = (Arc::downgrade(&source), Arc::downgrade(&library));
-    let settings_downloads = downloads.clone();
     let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
     // What a committed settings change means for the owners that follow it.
     let mut committed = settings.changes();
@@ -262,18 +254,6 @@ where
                     != current.ui.application.download_lyrics_automatically
             {
                 settings_source.asset_downloads_changed();
-            }
-            if previous.ui.downloads != current.ui.downloads {
-                settings_downloads.settings_changed(current.ui.downloads.clone());
-                let rules = |downloads: &[crate::settings::SourceDownloadSettings]| {
-                    downloads
-                        .iter()
-                        .map(|source| source.rules.clone())
-                        .collect::<Vec<_>>()
-                };
-                if rules(&previous.ui.downloads) != rules(&current.ui.downloads) {
-                    settings_downloads.library_changed(None);
-                }
             }
             previous = current;
         }
@@ -342,8 +322,8 @@ where
             connect,
             library,
             runtime,
+            downloads: source.downloads().clone(),
             source: source_handle,
-            downloads,
             playback,
             artwork,
             lyrics: lyrics.handle(),

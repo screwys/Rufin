@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,6 +16,8 @@ use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
+use crate::settings::SettingsFile;
+
 mod quality;
 pub use quality::{DOWNLOAD_BITRATES, download_bitrates};
 mod storage;
@@ -25,9 +27,6 @@ pub use storage::DownloadDirectory;
 use track_download::*;
 
 pub type DownloadCount = usize;
-
-/// Finds a source's current client, which its owner keeps and may replace at any time.
-pub type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
 
 const QUEUE_VERSION: u32 = 3;
 const QUEUE_FILE: &str = "queue.json";
@@ -61,7 +60,6 @@ enum Command {
         limit: u32,
         response: Sender<Result<DownloadPage, String>>,
     },
-    SourceResolver(Arc<SourceResolver>),
     Attach {
         source_id: SourceId,
         source_key: SourceKey,
@@ -83,7 +81,6 @@ enum Command {
         media_uri: String,
         path: String,
     },
-    SettingsChanged(Vec<SourceDownloadSettings>),
     RemoveRule {
         source_id: SourceId,
         rule: DownloadRule,
@@ -330,7 +327,7 @@ async fn load_queue(
 async fn load_direct_queue(
     root: &Path,
     catalog: &Catalog,
-    settings: &HashMap<SourceId, SourceDownloadSettings>,
+    settings: &crate::settings::Settings,
 ) -> Result<Vec<DownloadJob>, String> {
     let Some((bytes, recovered, path, part)) = read_queue_file(root, None)? else {
         return Ok(Vec::new());
@@ -374,10 +371,8 @@ async fn load_direct_queue(
         let key = catalog
             .source_key(&source)
             .ok_or("The download source is unavailable")?;
-        let directory = settings
-            .get(&source)
-            .and_then(|settings| settings.directory.as_ref());
-        let mut saved = load_queue(root, &source, catalog, key, directory).await?;
+        let directory = settings.download_settings(&source).directory;
+        let mut saved = load_queue(root, &source, catalog, key, directory.as_ref()).await?;
         for job in jobs {
             if let Some(existing) = saved.iter_mut().find(|existing| existing.id == job.id) {
                 let mut completed = existing.completed.iter().cloned().collect::<HashSet<_>>();
@@ -783,9 +778,10 @@ struct Actor {
     events: DownloadEvents,
     transfers: Arc<TransferClients>,
     prepared_rules: Sender<PreparedRules>,
-    sources: Arc<SourceResolver>,
+    /// Gives each job its source's current client when it starts.
+    source: Weak<crate::source::SourceOwner>,
     attached: HashMap<SourceId, AttachedSource>,
-    settings: HashMap<SourceId, SourceDownloadSettings>,
+    settings: SettingsFile,
     running_rules: Option<RuleIntent>,
     pending_rules: Option<RuleIntent>,
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
@@ -804,7 +800,8 @@ impl Downloads {
         catalog: Catalog,
         runtime: tokio::runtime::Handle,
         events: Sender<DownloadEvent>,
-        settings: Vec<SourceDownloadSettings>,
+        settings: SettingsFile,
+        source: Weak<crate::source::SourceOwner>,
     ) -> Self {
         let (commands, receiver) = async_channel::unbounded();
         let (prepared_rules, rule_results) = async_channel::unbounded();
@@ -834,12 +831,9 @@ impl Downloads {
                 },
                 transfers: Arc::new(TransferClients::default()),
                 prepared_rules,
-                sources: Arc::new(|_| None),
+                source,
                 attached: HashMap::new(),
-                settings: settings
-                    .into_iter()
-                    .map(|settings| (settings.source_id.clone(), settings))
-                    .collect(),
+                settings,
                 running_rules: None,
                 pending_rules: None,
                 jobs: HashMap::new(),
@@ -850,14 +844,6 @@ impl Downloads {
             rule_results,
         ));
         downloads
-    }
-
-    /// Downloads ask `resolve` for a source's client each time they start one.
-    pub fn install_source_resolver(
-        &self,
-        resolve: impl Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync + 'static,
-    ) {
-        self.send(Command::SourceResolver(Arc::new(resolve)));
     }
 
     pub async fn attach(
@@ -897,10 +883,6 @@ impl Downloads {
     /// names `path`; its rules download it again.
     pub fn forget(&self, media_uri: String, path: String) {
         self.send(Command::Forget { media_uri, path });
-    }
-
-    pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
-        self.send(Command::SettingsChanged(settings));
     }
 
     /// Reconciles the rules of the sources these Changes touched, or of every source.
@@ -990,7 +972,7 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     if let Err(error) = migrate_download_records(&actor.root, &actor.catalog, None, None).await {
         warn!(%error, "could not restore direct download access");
     }
-    match load_direct_queue(&actor.root, &actor.catalog, &actor.settings).await {
+    match load_direct_queue(&actor.root, &actor.catalog, &actor.settings.load().ui).await {
         Ok(jobs) if !jobs.is_empty() => {
             actor.jobs.insert(None, jobs);
         }
@@ -998,6 +980,8 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
         Err(error) => warn!(%error, "could not load the direct download queue"),
     }
     actor.publish(None).await;
+    let mut committed = actor.settings.changes();
+    let mut previous = Arc::clone(&committed.borrow_and_update());
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
@@ -1031,6 +1015,13 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
                     let current = active.swap_remove(index);
                     actor.finish(current, result, &mut active).await;
                 }
+                Ok(()) = committed.changed() => {
+                    let current = Arc::clone(&committed.borrow_and_update());
+                    if current.ui.downloads != previous.ui.downloads {
+                        actor.settings_changed(&mut active).await;
+                    }
+                    previous = current;
+                }
                 _ = retry.tick() => actor.retry_waiting(),
             }
             continue;
@@ -1044,6 +1035,13 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
             }
             Ok(prepared) = rule_results.recv() => {
                 actor.apply_prepared_rules(prepared, &mut active).await;
+            }
+            Ok(()) = committed.changed() => {
+                let current = Arc::clone(&committed.borrow_and_update());
+                if current.ui.downloads != previous.ui.downloads {
+                    actor.settings_changed(&mut active).await;
+                }
+                previous = current;
             }
             _ = retry.tick() => {
                 actor.retry_waiting();
@@ -1106,7 +1104,6 @@ impl Actor {
                     .send(self.queue_page(scope, offset, limit).await)
                     .await;
             }
-            Command::SourceResolver(resolve) => self.sources = resolve,
             Command::Attach {
                 source_id,
                 source_key,
@@ -1207,9 +1204,6 @@ impl Actor {
                     }
                 }
             }
-            Command::SettingsChanged(settings) => {
-                self.apply_settings(settings, active).await;
-            }
             Command::RemoveRule {
                 source_id,
                 rule,
@@ -1252,10 +1246,7 @@ impl Actor {
                 self.move_job(&source_id, &job_id, movement).await;
             }
             Command::Clear { source_id, notify } => {
-                if let Some(settings) = self.settings.get_mut(&source_id) {
-                    settings.rules = DownloadRules::default();
-                }
-                self.reconcile_all_rules(&source_id);
+                self.schedule_rules(&source_id, DownloadRules::default(), true);
                 self.abort_matching(active, false, |download| {
                     download.source_id.as_ref() == Some(&source_id)
                 })
@@ -1266,41 +1257,17 @@ impl Actor {
     }
 
     fn settings_for(&self, source_id: &SourceId) -> SourceDownloadSettings {
-        self.settings
-            .get(source_id)
-            .cloned()
-            .unwrap_or_else(|| SourceDownloadSettings::for_source(source_id.clone()))
+        self.settings.load().ui.download_settings(source_id)
     }
 
-    async fn apply_settings(
-        &mut self,
-        settings: Vec<SourceDownloadSettings>,
-        active: &mut Vec<ActiveDownload>,
-    ) {
-        let settings = settings
-            .into_iter()
-            .map(|settings| (settings.source_id.clone(), settings))
-            .collect::<HashMap<_, _>>();
-        let changed_quality = self
-            .settings
-            .keys()
-            .chain(settings.keys())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .filter_map(|id| {
-                let quality = settings
-                    .get(id)
-                    .map_or(DownloadQuality::Original, |setting| setting.quality);
-                (self.settings_for(id).quality != quality).then(|| (id.clone(), quality))
-            })
-            .collect::<Vec<_>>();
-        self.settings = settings;
+    /// Follows the committed download settings: a source whose folder moved leaves what it
+    /// downloaded to the old one, queued jobs take their source's quality, and the rules run
+    /// again.
+    async fn settings_changed(&mut self, active: &mut Vec<ActiveDownload>) {
+        let stored = self.settings.load();
         let source_ids = self.attached.keys().cloned().collect::<Vec<_>>();
         for source_id in &source_ids {
-            let directory = self
-                .settings
-                .get(source_id)
-                .and_then(|settings| settings.directory.clone());
+            let directory = stored.ui.download_settings(source_id).directory;
             if self
                 .attached
                 .get(source_id)
@@ -1316,8 +1283,9 @@ impl Actor {
                 }
             }
         }
-        for (source_id, quality) in changed_quality {
-            if let Some(jobs) = self.jobs.get_mut(&Some(source_id)) {
+        for (source_id, jobs) in &mut self.jobs {
+            if let Some(source_id) = source_id {
+                let quality = stored.ui.download_settings(source_id).quality;
                 for job in jobs {
                     job.quality = quality;
                 }
@@ -2495,8 +2463,8 @@ impl Actor {
     }
 
     async fn source(&self, source_id: &SourceId) -> Option<Arc<Source>> {
-        let (resolve, source_id) = (Arc::clone(&self.sources), source_id.clone());
-        tokio::task::spawn_blocking(move || resolve(&source_id))
+        let (owner, source_id) = (self.source.upgrade()?, source_id.clone());
+        tokio::task::spawn_blocking(move || owner.client(&source_id).ok())
             .await
             .ok()
             .flatten()
@@ -3165,7 +3133,7 @@ mod tests {
         std::fs::create_dir_all(old.audio_part.parent().unwrap()).unwrap();
         std::fs::write(&old.audio_part, b"old partial").unwrap();
         std::fs::write(&http.audio_part, b"http partial").unwrap();
-        let settings = HashMap::new();
+        let settings = crate::settings::Settings::default();
         for _ in 0..2 {
             let direct_queue = load_direct_queue(root.path(), &catalog, &settings)
                 .await
@@ -3186,7 +3154,15 @@ mod tests {
             bitrate_kbps: Some(64),
             channels: library::AudioChannels::Preserve,
         });
-        actor.settings.insert(source_id.clone(), settings.clone());
+        actor
+            .settings
+            .update(|stored| {
+                stored
+                    .ui
+                    .set_download_quality(source_id.clone(), settings.quality.clone());
+                Ok(())
+            })
+            .unwrap();
         actor
             .attach(source_id.clone(), source, None, None)
             .await
@@ -3701,7 +3677,7 @@ mod tests {
             },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
-            sources: Arc::new(|_| None),
+            source: Weak::new(),
             attached: HashMap::from([(
                 source_id.clone(),
                 AttachedSource {
@@ -3710,7 +3686,7 @@ mod tests {
                     directory: None,
                 },
             )]),
-            settings: HashMap::new(),
+            settings: SettingsFile::memory(),
             running_rules: None,
             pending_rules: None,
             jobs: HashMap::new(),

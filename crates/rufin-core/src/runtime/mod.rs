@@ -12,7 +12,6 @@ pub mod scrobbling;
 pub mod source;
 mod storage;
 mod waveform;
-pub use crate::downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use diagnostics::DiagnosticsHandle;
 pub use events::ProductReceivers;
 pub use inputs::{

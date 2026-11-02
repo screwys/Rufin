@@ -48,6 +48,7 @@ const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub(crate) struct SourceOutputs {
     pub(crate) events: Sender<SourceEvent>,
     pub(crate) discovery: Sender<DiscoveryUpdate>,
+    pub(crate) downloads: Sender<crate::downloads::DownloadEvent>,
 }
 
 #[derive(Clone)]
@@ -387,7 +388,7 @@ impl SourceOwner {
     pub(crate) fn open_dormant(
         artwork: Artwork,
         catalog: Arc<Catalog>,
-        downloads: Downloads,
+        downloads_root: std::path::PathBuf,
         settings: SettingsFile,
         secrets: Arc<SwitchableSecretStore>,
         runtime: tokio::runtime::Handle,
@@ -407,44 +408,52 @@ impl SourceOwner {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let (feed, notices) = feed::Feed::open();
-        let shared = Arc::new(Shared {
-            feed,
-            configuration_changed: tokio::sync::watch::channel(()).0,
-            home_showcase_variation: home_variation,
-            home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
-            artwork,
-            catalog,
-            downloads,
-            settings,
-            secrets,
-            clients: Mutex::new(HashMap::new()),
-            plex_logins: Mutex::new(HashMap::new()),
-            runtime,
-            outputs,
-            operation: tokio::sync::watch::channel(operation).0,
-            discovery: tokio::sync::watch::channel(None).0,
-            selected: Mutex::new(None),
-            catalog_counts: Mutex::new(HashMap::new()),
-            selection_intent: Mutex::new(Weak::new()),
-            connection: Mutex::new(None),
-            album_release: Mutex::new(None),
-            outbox: Arc::new(tokio::sync::Notify::new()),
-            asset_downloads: Mutex::new(None),
-            playlist_edits: Mutex::new(HashMap::new()),
-            playback: Mutex::new(Weak::new()),
-            connect: Mutex::new(Weak::new()),
-            started: AtomicBool::new(false),
-        });
-        let weak = Arc::downgrade(&shared);
-        let clients = weak.clone();
-        shared.downloads.install_source_resolver(move |source_id| {
-            let shared = clients.upgrade()?;
-            Self { shared }.client(source_id).ok()
-        });
-        shared
-            .runtime
-            .spawn(feed::run(weak, shared.catalog.changes(), notices));
-        Arc::new(Self { shared })
+        Arc::new_cyclic(|owner| {
+            // Each download asks this owner for its source's current client when it starts.
+            let downloads = Downloads::new(
+                artwork.clone(),
+                downloads_root,
+                catalog.as_ref().clone(),
+                runtime.clone(),
+                outputs.downloads.clone(),
+                settings.clone(),
+                owner.clone(),
+            );
+            let shared = Arc::new(Shared {
+                feed,
+                configuration_changed: tokio::sync::watch::channel(()).0,
+                home_showcase_variation: home_variation,
+                home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
+                artwork,
+                catalog,
+                downloads,
+                settings,
+                secrets,
+                clients: Mutex::new(HashMap::new()),
+                plex_logins: Mutex::new(HashMap::new()),
+                runtime,
+                outputs,
+                operation: tokio::sync::watch::channel(operation).0,
+                discovery: tokio::sync::watch::channel(None).0,
+                selected: Mutex::new(None),
+                catalog_counts: Mutex::new(HashMap::new()),
+                selection_intent: Mutex::new(Weak::new()),
+                connection: Mutex::new(None),
+                album_release: Mutex::new(None),
+                outbox: Arc::new(tokio::sync::Notify::new()),
+                asset_downloads: Mutex::new(None),
+                playlist_edits: Mutex::new(HashMap::new()),
+                playback: Mutex::new(Weak::new()),
+                connect: Mutex::new(Weak::new()),
+                started: AtomicBool::new(false),
+            });
+            shared.runtime.spawn(feed::run(
+                Arc::downgrade(&shared),
+                shared.catalog.changes(),
+                notices,
+            ));
+            Self { shared }
+        })
     }
 
     pub(crate) fn attach_playback(&self, playback: &Arc<PlaybackOwner>) {
@@ -3286,25 +3295,14 @@ mod source_tests {
             )
             .unwrap(),
             Arc::clone(&catalog),
-            Downloads::new(
-                artwork::Artwork::new(
-                    directory.path().join("downloads/artwork"),
-                    runtime.clone(),
-                    Arc::clone(&catalog),
-                )
-                .unwrap(),
-                directory.path().join("downloads"),
-                catalog.as_ref().clone(),
-                runtime.clone(),
-                async_channel::unbounded().0,
-                Vec::new(),
-            ),
+            directory.path().join("downloads"),
             settings,
             Arc::clone(&secrets),
             runtime,
             SourceOutputs {
                 events: async_channel::unbounded().0,
                 discovery: async_channel::unbounded().0,
+                downloads: async_channel::unbounded().0,
             },
         );
         let mut first = Source::open(
@@ -3397,19 +3395,7 @@ mod source_tests {
             )
             .unwrap(),
             Arc::clone(&catalog),
-            Downloads::new(
-                artwork::Artwork::new(
-                    directory.path().join("downloads/artwork"),
-                    runtime.clone(),
-                    Arc::clone(&catalog),
-                )
-                .unwrap(),
-                directory.path().join("downloads"),
-                catalog.as_ref().clone(),
-                runtime.clone(),
-                async_channel::unbounded().0,
-                Vec::new(),
-            ),
+            directory.path().join("downloads"),
             SettingsFile::memory(),
             Arc::new(SwitchableSecretStore::new(Arc::new(
                 secrets::MemorySecretStore::new(),
@@ -3418,6 +3404,7 @@ mod source_tests {
             SourceOutputs {
                 events,
                 discovery: async_channel::unbounded().0,
+                downloads: async_channel::unbounded().0,
             },
         );
 
@@ -3629,19 +3616,7 @@ mod source_tests {
                 )
                 .unwrap(),
                 Arc::clone(&catalog),
-                Downloads::new(
-                    artwork::Artwork::new(
-                        directory.path().join("downloads/artwork"),
-                        runtime.clone(),
-                        Arc::clone(&catalog),
-                    )
-                    .unwrap(),
-                    directory.path().join("downloads"),
-                    catalog.as_ref().clone(),
-                    runtime.clone(),
-                    async_channel::unbounded().0,
-                    Vec::new(),
-                ),
+                directory.path().join("downloads"),
                 SettingsFile::memory(),
                 Arc::new(SwitchableSecretStore::new(Arc::new(
                     secrets::MemorySecretStore::new(),
@@ -3650,6 +3625,7 @@ mod source_tests {
                 SourceOutputs {
                     events,
                     discovery: async_channel::unbounded().0,
+                    downloads: async_channel::unbounded().0,
                 },
             );
             let mut connected = if already_configured {
@@ -3848,25 +3824,14 @@ mod source_tests {
                 )
                 .unwrap(),
                 Arc::clone(&catalog),
-                Downloads::new(
-                    artwork::Artwork::new(
-                        directory.path().join("downloads/artwork"),
-                        runtime.clone(),
-                        Arc::clone(&catalog),
-                    )
-                    .unwrap(),
-                    directory.path().join("downloads"),
-                    catalog.as_ref().clone(),
-                    runtime.clone(),
-                    async_channel::unbounded().0,
-                    Vec::new(),
-                ),
+                directory.path().join("downloads"),
                 settings,
                 secrets,
                 runtime,
                 SourceOutputs {
                     events,
                     discovery: async_channel::unbounded().0,
+                    downloads: async_channel::unbounded().0,
                 },
             );
             let changes = owner.changes();
@@ -4179,19 +4144,7 @@ mod source_tests {
                 )
                 .unwrap(),
                 Arc::clone(&catalog),
-                Downloads::new(
-                    artwork::Artwork::new(
-                        directory.path().join("downloads/artwork"),
-                        runtime.clone(),
-                        Arc::clone(&catalog),
-                    )
-                    .unwrap(),
-                    directory.path().join("downloads"),
-                    catalog.as_ref().clone(),
-                    runtime.clone(),
-                    async_channel::unbounded().0,
-                    Vec::new(),
-                ),
+                directory.path().join("downloads"),
                 settings.clone(),
                 Arc::new(SwitchableSecretStore::new(Arc::new(
                     secrets::MemorySecretStore::new(),
@@ -4200,6 +4153,7 @@ mod source_tests {
                 SourceOutputs {
                     events,
                     discovery: async_channel::unbounded().0,
+                    downloads: async_channel::unbounded().0,
                 },
             );
             assert_eq!(owner.list_sources().sources.len(), 2);

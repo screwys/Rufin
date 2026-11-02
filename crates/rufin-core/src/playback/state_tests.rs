@@ -69,19 +69,7 @@ pub(in crate::playback) async fn seeded(
         Arc::new(catalog.clone()),
     )
     .unwrap();
-    let downloads = crate::downloads::Downloads::new(
-        artwork::Artwork::new(
-            (directory.path().join("downloads")).join("artwork"),
-            (runtime.clone()).clone(),
-            Arc::new(catalog.clone()),
-        )
-        .unwrap(),
-        directory.path().join("downloads"),
-        catalog.clone(),
-        runtime.clone(),
-        async_channel::unbounded().0,
-        Vec::new(),
-    );
+    let downloads = directory.path().join("downloads");
     let source = SourceOwner::open_dormant(
         artwork.clone(),
         Arc::new(catalog.clone()),
@@ -94,6 +82,7 @@ pub(in crate::playback) async fn seeded(
         crate::source::SourceOutputs {
             events: async_channel::unbounded().0,
             discovery: async_channel::unbounded().0,
+            downloads: async_channel::unbounded().0,
         },
     );
     let waveform = WaveformOwner::new(
