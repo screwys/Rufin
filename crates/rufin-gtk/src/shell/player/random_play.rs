@@ -30,7 +30,7 @@ struct RandomPlayControls {
     played_filter: gtk::DropDown,
 }
 
-pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
+pub(crate) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };

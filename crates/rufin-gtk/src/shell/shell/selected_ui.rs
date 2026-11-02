@@ -113,6 +113,6 @@ impl Shell {
             .attach_lyrics_pane(&lyrics.fullscreen_pane);
         drop(lyrics);
         connect_lyrics_search_controls(&self.player_ui);
-        crate::shell::player::lyrics::settings::connect_lyrics_settings_controls(self);
+        crate::player::lyrics::settings::connect_lyrics_settings_controls(self);
     }
 }

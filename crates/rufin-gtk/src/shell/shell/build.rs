@@ -17,13 +17,12 @@ use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
 use tracing::info;
 
+use crate::player::bottom::connect_player_controls;
 use crate::player::lyrics::state::LyricsState;
 use crate::player::state::PlaybackState;
 use crate::preferences::preferences::PreferencesState;
-use crate::shell::player::connect_player_controls;
 use crate::shell::player::desktop::DesktopState;
 use crate::shell::player::desktop::lifecycle::install_application_quit;
-use crate::shell::player::right_panel::RightPanelWidgets;
 use crate::shell::player::{install_desktop_lifecycle, present_initial_window};
 use crate::shell::preferences::dialogs::release_notes::check_for_release_update;
 use crate::shell::preferences::source::SourceState;
@@ -223,15 +222,16 @@ pub async fn build(
     compact_nav_scroller.set_max_content_width(COMPACT_RAIL_WIDTH);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
     let visualizer = build_visualizer();
-    let player_right_panel = build_right_panel(&visualizer.sidebar_area, &settings);
-    let right_panel = player_right_panel.root.clone();
-
-    let content_chrome = build_content_chrome(&right_panel);
+    let content_chrome = build_content_chrome();
     let route_host = content_chrome.route_host;
     let route_loading = content_chrome.route_loading;
-    let right_split = content_chrome.right_split;
-    let right_panel_slot = content_chrome.right_panel_slot;
-    let right_resize_handle = content_chrome.right_resize_handle;
+    let player_right_panel = build_right_panel(
+        &visualizer.sidebar_area,
+        &settings,
+        content_chrome.right_split,
+        content_chrome.right_panel_slot,
+        content_chrome.right_resize_handle,
+    );
     let fullscreen_player = build_fullscreen_player(&visualizer.fullscreen_area);
     let player_controls = build_bottom_player();
     topbar.casting_host.append(&player_controls.output_button);
@@ -300,11 +300,6 @@ pub async fn build(
         compact_nav,
     };
     let route_viewport = RouteViewport::new(route_host, route_loading);
-    let right_panel = RightPanelWidgets {
-        right_split,
-        right_panel_slot,
-        right_resize_handle,
-    };
     let player_view = PlayerDesktopWidgets {
         fullscreen_player,
         player_controls,
@@ -350,76 +345,11 @@ pub async fn build(
             products.lyrics.clone(),
             &chrome.window,
             &chrome.toast_overlay,
-            &right_panel.right_panel_slot,
             Rc::clone(&artwork),
             Rc::clone(&control_feedback),
             products.library.clone(),
             products.runtime.clone(),
-            {
-                let weak = weak.clone();
-                Rc::new(move |route| {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.navigate(route);
-                    }
-                })
-            },
-            {
-                let weak = weak.clone();
-                Rc::new(move || {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.refresh_bottom_player_owner_details();
-                    }
-                })
-            },
-            {
-                let weak = weak.clone();
-                Rc::new(move |target, row, selection, position| {
-                    let Some(shell) = weak.upgrade() else {
-                        return;
-                    };
-                    if let Some(selection) = selection {
-                        crate::shell::player::queue::present_queue_selection_context_menu(
-                            target, &shell, selection, position,
-                        );
-                    } else {
-                        crate::menus::media_menus::present_track_menu(
-                            target,
-                            &shell,
-                            row.track.clone(),
-                            position,
-                            None,
-                            Some((row.position, row.occurrence_id)),
-                        );
-                    }
-                })
-            },
-            {
-                let weak = weak.clone();
-                Rc::new(move |uri, favorite| {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.set_favorite(library::FavoriteTarget::Track(uri), favorite);
-                    }
-                })
-            },
-            {
-                let weak = weak.clone();
-                Rc::new(move |rows| {
-                    let Some(shell) = weak.upgrade() else {
-                        return (gtk::Box::default().upcast(), Rc::new(|| {}));
-                    };
-                    let route = shell.navigation.routes.borrow().current().clone();
-                    let catalog = crate::library::CatalogUi::new(&shell, &route, None);
-                    catalog.related_tracks_view(rows)
-                })
-            },
-            {
-                let weak = weak.clone();
-                Rc::new(move |artwork| {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.present_full_artwork(artwork);
-                    }
-                })
-            },
+            weak.clone(),
             &chrome.app_content_stack,
         ));
         let web_controller = Rc::new(web::Controller::new(products.clone()));
@@ -476,7 +406,6 @@ pub async fn build(
             layout_state,
             navigation_view,
             route_viewport,
-            right_panel,
         }
     });
 
@@ -539,7 +468,7 @@ pub async fn build(
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);
     connect_queue_panel_controls(&shell.player_ui);
-    crate::shell::player::queue::connect_queue_playlist_button(&shell);
+    crate::player::queue::connect_queue_playlist_button(&shell);
     connect_sidebar_controls(&shell.player_ui);
     shell.connect_route_keyboard();
     connect_transient_entry_focus_dismissal(&shell);

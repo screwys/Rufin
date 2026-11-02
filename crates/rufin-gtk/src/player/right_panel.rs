@@ -1,5 +1,8 @@
+use crate::shell::shell::Shell;
+use crate::shell::shell::layout::{ActiveLayoutProfile, resolve_layout};
 use adw::prelude::*;
 use localization::tr;
+use rufin_core::settings::RightSidebarMode;
 use rufin_core::settings::{
     Settings,
     right_panel::{RightPanelSettings, SidebarPanel},
@@ -30,7 +33,12 @@ impl PanelControls {
     }
 }
 
+/// The right panel: the window's split, slot and resize handle, and the queue, lyrics and
+/// visualizer inside it.
 pub struct RightPanelWidgets {
+    pub(crate) right_split: gtk::Paned,
+    pub(crate) right_panel_slot: gtk::ScrolledWindow,
+    pub(crate) right_resize_handle: gtk::Box,
     pub queue_loading: adw::Spinner,
     pub root: gtk::Box,
     pub queue_panel: gtk::Box,
@@ -51,9 +59,12 @@ pub struct RightPanelWidgets {
     combined: Cell<bool>,
 }
 
-pub fn build_right_panel(
+pub(crate) fn build_right_panel(
     visualizer_area: &crate::player::visualizer::Visualizer,
     settings: &Settings,
+    right_split: gtk::Paned,
+    right_panel_slot: gtk::ScrolledWindow,
+    right_resize_handle: gtk::Box,
 ) -> RightPanelWidgets {
     let resource = "player/right_panel.ui";
     let builder = crate::ui_resource::builder(resource);
@@ -93,7 +104,11 @@ pub fn build_right_panel(
             root.set_focus(gtk::Widget::NONE);
         }
     });
+    right_panel_slot.set_child(Some(&root));
     RightPanelWidgets {
+        right_split,
+        right_panel_slot,
+        right_resize_handle,
         queue_loading,
         root,
         queue_panel,
@@ -482,4 +497,69 @@ pub fn apply_sidebar_media_visibility(shell: Rc<crate::player::PlayerUi>) {
         shell.update_lyrics_highlight();
     }
     shell.sync_visualizer_state();
+}
+
+impl Shell {
+    pub(crate) fn toggle_right_panel(self: &Rc<Self>) {
+        let visible = self.right_sidebar_visible();
+        self.set_right_sidebar_visible(!visible);
+    }
+
+    pub(crate) fn set_right_sidebar_visible(self: &Rc<Self>, visible: bool) {
+        if !visible {
+            self.player_ui.save_sidebar_panel_sizes();
+        }
+        let active_profile =
+            resolve_layout(&self.settings.current.borrow().layout, self.layout_width()).profile;
+        self.settings
+            .update_app_settings("right sidebar setting", |settings| {
+                let profile = match active_profile {
+                    ActiveLayoutProfile::Default => &mut settings.layout.default_profile,
+                    ActiveLayoutProfile::Narrow => &mut settings.layout.narrow_profile,
+                };
+                if visible {
+                    if profile.right_sidebar.is_visible() {
+                        return false;
+                    }
+                    profile.right_sidebar = RightSidebarMode::Visible;
+                } else {
+                    if !profile.right_sidebar.is_visible() {
+                        return false;
+                    }
+                    profile.right_sidebar = RightSidebarMode::Hidden;
+                }
+                settings.layout.sanitize();
+                true
+            });
+        self.update_layout();
+        self.chrome.window.queue_resize();
+    }
+
+    pub(crate) fn toggle_lyrics_panel(self: &Rc<Self>) {
+        let visible = !self.right_sidebar_visible() || !self.player_ui.lyrics.panel_visible.get();
+        self.set_lyrics_panel_visible(visible);
+    }
+
+    pub(crate) fn set_lyrics_panel_visible(self: &Rc<Self>, visible: bool) {
+        self.set_right_panel_media_visibility(
+            visible,
+            self.player_ui.right_panel.visualizer_visible.get(),
+        );
+    }
+
+    pub(crate) fn set_visualizer_panel_visible(self: &Rc<Self>, visible: bool) {
+        self.set_right_panel_media_visibility(self.player_ui.lyrics.panel_visible.get(), visible);
+    }
+
+    pub(crate) fn set_right_panel_media_visibility(
+        self: &Rc<Self>,
+        lyrics_visible: bool,
+        visualizer_visible: bool,
+    ) {
+        if (lyrics_visible || visualizer_visible) && !self.right_sidebar_visible() {
+            self.set_right_sidebar_visible(true);
+        }
+        self.player_ui
+            .set_right_panel_media_visibility(lyrics_visible, visualizer_visible);
+    }
 }

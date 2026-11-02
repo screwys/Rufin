@@ -571,7 +571,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
             if let Some(shell) = weak.upgrade() {
                 let presentation =
                     NowPlayingPresentation::new(shell.selected_playback().as_deref());
-                (shell.present_full_artwork)(presentation.artwork);
+                shell.present_full_artwork(presentation.artwork);
             }
         });
 
@@ -708,7 +708,7 @@ impl crate::player::PlayerUi {
                     parts.related_status.set_text(&parts.related_empty.text());
                     parts.related_status.set_visible(items.is_empty());
                     if !items.is_empty() {
-                        let (view, changed) = (shell.related_tracks_view)(items);
+                        let (view, changed) = shell.related_tracks_view(items);
                         parts.related_display_changed.replace(Some(changed));
                         parts.related_list.append(&view);
                     }

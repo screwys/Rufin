@@ -3,6 +3,7 @@ use playback::PlaybackSettings;
 pub mod lyrics;
 pub mod queue;
 pub mod state;
+use crate::shell::shell::Shell;
 use gtk::prelude::*;
 use lyrics::state::{LyricsState, SelectedLyricsState};
 use playback::PlaybackView;
@@ -10,7 +11,7 @@ use queue::QueueState;
 use rufin_core::runtime::WaveformProjection;
 use state::PlaybackState;
 use std::cell::{Ref, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 pub struct SelectedPlaybackState {
     player: PlaybackView,
     waveform: WaveformProjection,
@@ -21,12 +22,7 @@ pub struct PlayerUi {
     pub control_feedback: Rc<crate::widgets::feedback::ControlFeedbackState>,
     catalog: std::sync::Arc<library::Catalog>,
     runtime: tokio::runtime::Handle,
-    navigate: Rc<dyn Fn(rufin_core::route::Route)>,
-    refresh_current_controls: Rc<dyn Fn()>,
-    open_queue_menu: QueueMenu,
-    set_track_favorite: TrackFavorite,
-    related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> (gtk::Widget, Rc<dyn Fn()>)>,
-    present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
+    shell: Weak<Shell>,
     content_stack: gtk::glib::WeakRef<gtk::Stack>,
     pub settings: Rc<crate::widgets::settings::SettingsState>,
     pub playback_owner: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
@@ -34,7 +30,6 @@ pub struct PlayerUi {
     pub right_panel: right_panel::RightPanelWidgets,
     window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
     toast_overlay: gtk::glib::WeakRef<adw::ToastOverlay>,
-    panel_slot: gtk::glib::WeakRef<gtk::ScrolledWindow>,
     pub views: PlayerDesktopWidgets,
     pub controls: PlaybackState,
     pub lyrics: LyricsState,
@@ -53,17 +48,11 @@ impl PlayerUi {
         lyrics_service: rufin_core::lyrics::LyricsHandle,
         window: &gtk::ApplicationWindow,
         toast_overlay: &adw::ToastOverlay,
-        panel_slot: &gtk::ScrolledWindow,
         artwork: Rc<crate::widgets::artwork::ArtworkState>,
         control_feedback: Rc<crate::widgets::feedback::ControlFeedbackState>,
         catalog: std::sync::Arc<library::Catalog>,
         runtime: tokio::runtime::Handle,
-        navigate: Rc<dyn Fn(rufin_core::route::Route)>,
-        refresh_current_controls: Rc<dyn Fn()>,
-        open_queue_menu: QueueMenu,
-        set_track_favorite: TrackFavorite,
-        related_tracks_view: Rc<dyn Fn(Vec<library::TrackRow>) -> (gtk::Widget, Rc<dyn Fn()>)>,
-        present_full_artwork: Rc<dyn Fn(artwork::ArtworkBinding)>,
+        shell: Weak<Shell>,
         content_stack: &gtk::Stack,
     ) -> Self {
         Self {
@@ -71,12 +60,7 @@ impl PlayerUi {
             control_feedback,
             catalog,
             runtime,
-            navigate,
-            refresh_current_controls,
-            open_queue_menu,
-            set_track_favorite,
-            related_tracks_view,
-            present_full_artwork,
+            shell,
             content_stack: content_stack.downgrade(),
             settings,
             playback_owner,
@@ -84,7 +68,6 @@ impl PlayerUi {
             right_panel,
             window: window.downgrade(),
             toast_overlay: toast_overlay.downgrade(),
-            panel_slot: panel_slot.downgrade(),
             views,
             controls,
             lyrics,
@@ -122,6 +105,81 @@ impl PlayerUi {
             controls.rating.set_rating(None, false);
         }
     }
+    fn shell(&self) -> Option<Rc<Shell>> {
+        self.shell.upgrade()
+    }
+
+    pub fn navigate(&self, route: rufin_core::route::Route) {
+        if let Some(shell) = self.shell() {
+            shell.navigate(route);
+        }
+    }
+
+    /// Navigation for the artist and album links of the player.
+    pub fn route_navigation(&self) -> Rc<dyn Fn(rufin_core::route::Route)> {
+        let shell = self.shell.clone();
+        Rc::new(move |route| {
+            if let Some(shell) = shell.upgrade() {
+                shell.navigate(route);
+            }
+        })
+    }
+
+    /// Shows the lyrics and visualizer panels as asked, opening the right sidebar for them.
+    fn show_media_panels(&self, lyrics: bool, visualizer: bool) {
+        if let Some(shell) = self.shell() {
+            shell.set_right_panel_media_visibility(lyrics, visualizer);
+        }
+    }
+
+    fn refresh_current_controls(&self) {
+        if let Some(shell) = self.shell() {
+            shell.refresh_bottom_player_owner_details();
+        }
+    }
+
+    fn open_queue_menu(
+        &self,
+        target: &gtk::Widget,
+        row: &library::QueueRow,
+        selection: Option<queue::QueueSelectionSnapshot>,
+        position: Option<(f64, f64)>,
+    ) {
+        let Some(shell) = self.shell() else { return };
+        if let Some(selection) = selection {
+            queue::present_queue_selection_context_menu(target, &shell, selection, position);
+        } else {
+            crate::menus::media_menus::present_track_menu(
+                target,
+                &shell,
+                row.track.clone(),
+                position,
+                None,
+                Some((row.position, row.occurrence_id)),
+            );
+        }
+    }
+
+    fn set_track_favorite(&self, media_uri: String, favorite: bool) {
+        if let Some(shell) = self.shell() {
+            shell.set_favorite(library::FavoriteTarget::Track(media_uri), favorite);
+        }
+    }
+
+    fn related_tracks_view(&self, rows: Vec<library::TrackRow>) -> (gtk::Widget, Rc<dyn Fn()>) {
+        let Some(shell) = self.shell() else {
+            return (gtk::Box::default().upcast(), Rc::new(|| {}));
+        };
+        let route = shell.navigation.routes.borrow().current().clone();
+        crate::library::CatalogUi::new(&shell, &route, None).related_tracks_view(rows)
+    }
+
+    fn present_full_artwork(&self, artwork: artwork::ArtworkBinding) {
+        if let Some(shell) = self.shell() {
+            shell.present_full_artwork(artwork);
+        }
+    }
+
     pub fn clear_player(&self) {
         self.playback.borrow_mut().take();
     }
@@ -185,9 +243,7 @@ pub struct PlayerDesktopWidgets {
 pub mod right_panel;
 impl PlayerUi {
     pub fn right_sidebar_visible(&self) -> bool {
-        self.panel_slot
-            .upgrade()
-            .is_some_and(|slot| slot.get_visible())
+        self.right_panel.right_panel_slot.get_visible()
     }
     pub fn fullscreen_player_visible(&self) -> bool {
         self.views.fullscreen_player.visible.get()
@@ -212,15 +268,5 @@ impl PlayerUi {
 }
 
 pub mod outputs;
-
-pub type QueueMenu = Rc<
-    dyn Fn(
-        &gtk::Widget,
-        std::sync::Arc<library::QueueRow>,
-        Option<queue::QueueSelectionSnapshot>,
-        Option<(f64, f64)>,
-    ),
->;
-pub type TrackFavorite = Rc<dyn Fn(String, bool)>;
 
 pub mod playback_settings;

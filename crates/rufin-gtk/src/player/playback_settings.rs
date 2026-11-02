@@ -19,24 +19,14 @@ use crate::player::PlayerUi;
 const PLAYBACK_RATE_COMMIT_DELAY: Duration = Duration::from_millis(200);
 const PLAYBACK_SETTINGS_SCALE_WIDTH: i32 = 180;
 
-pub fn configure_playback_settings_popover(
-    button: &gtk::MenuButton,
-    shell: &Rc<PlayerUi>,
-    set_media_visibility: Rc<dyn Fn(bool, bool)>,
-) {
+pub fn configure_playback_settings_popover(button: &gtk::MenuButton, shell: &Rc<PlayerUi>) {
     let shell = Rc::clone(shell);
     button.set_create_popup_func(move |button| {
-        button.set_popover(Some(&playback_settings_popover(
-            &shell,
-            Rc::clone(&set_media_visibility),
-        )));
+        button.set_popover(Some(&playback_settings_popover(&shell)));
     });
 }
 
-fn playback_settings_popover(
-    shell: &Rc<PlayerUi>,
-    set_media_visibility: Rc<dyn Fn(bool, bool)>,
-) -> gtk::Popover {
+fn playback_settings_popover(shell: &Rc<PlayerUi>) -> gtk::Popover {
     let settings = shell.settings.current.borrow().clone();
     let playback = settings.playback;
     let local_output = shell.playback_owner.playback_output().is_local();
@@ -108,9 +98,8 @@ fn playback_settings_popover(
 
     lyrics.set_active(settings.lyrics_panel_visible);
     let lyrics_shell = Rc::clone(shell);
-    let lyrics_visibility = Rc::clone(&set_media_visibility);
     lyrics.connect_active_notify(move |row| {
-        lyrics_visibility(
+        lyrics_shell.show_media_panels(
             row.is_active(),
             lyrics_shell.right_panel.visualizer_visible.get(),
         );
@@ -120,7 +109,8 @@ fn playback_settings_popover(
     visualizer.set_sensitive(local_output);
     let visualizer_shell = Rc::clone(shell);
     visualizer.connect_active_notify(move |row| {
-        set_media_visibility(visualizer_shell.lyrics.panel_visible.get(), row.is_active());
+        visualizer_shell
+            .show_media_panels(visualizer_shell.lyrics.panel_visible.get(), row.is_active());
     });
     settings_group.add(&visualizer);
     combine.set_active(settings.right_panel.combined);

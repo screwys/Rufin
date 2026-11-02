@@ -1,4 +1,7 @@
 use super::icons::*;
+use crate::shell::shell::Shell;
+use crate::widgets::interactions::add_widget_click;
+use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
 use crate::widgets::{
     artwork::ArtworkTile,
     detail_links::DetailLinkBinding,
@@ -1268,7 +1271,7 @@ impl crate::player::PlayerUi {
         } else {
             0
         });
-        (self.refresh_current_controls)();
+        self.refresh_current_controls();
     }
 
     pub fn navigate_current_track_album(self: &Rc<Self>) {
@@ -1281,7 +1284,7 @@ impl crate::player::PlayerUi {
             return;
         };
         if let Some(album) = &current.row.track.links.album_media_uri {
-            (self.navigate)(Route::AlbumDetail(album.clone()));
+            self.navigate(Route::AlbumDetail(album.clone()));
         }
     }
 
@@ -2124,7 +2127,7 @@ mod tests {
     }
 }
 
-pub fn connect_player_controls(shell: &Rc<crate::player::PlayerUi>) {
+fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
     connect_bottom_player_resize(shell);
     let fullscreen = &shell.views.fullscreen_player;
     for (label, binding) in [
@@ -2137,7 +2140,7 @@ pub fn connect_player_controls(shell: &Rc<crate::player::PlayerUi>) {
             Rc::new(move |route| {
                 if let Some(shell) = weak.upgrade() {
                     shell.close_fullscreen_player();
-                    (shell.navigate)(route);
+                    shell.navigate(route);
                 }
             }),
         )));
@@ -2145,11 +2148,11 @@ pub fn connect_player_controls(shell: &Rc<crate::player::PlayerUi>) {
     let controls = &shell.views.player_controls;
     controls.artist_links.replace(Some(DetailLinkBinding::new(
         &controls.artist,
-        Rc::clone(&shell.navigate),
+        shell.route_navigation(),
     )));
     controls.album_links.replace(Some(DetailLinkBinding::new(
         &controls.album,
-        Rc::clone(&shell.navigate),
+        shell.route_navigation(),
     )));
     let transport = shell.playback_owner.clone();
     shell
@@ -2348,5 +2351,148 @@ impl crate::player::PlayerUi {
         let controls = &self.views.player_controls;
         set_favorite_button_active(&controls.favorite_button, favorite);
         controls.rating.set_rating(rating, half_stars);
+    }
+}
+
+impl Shell {
+    pub(crate) fn refresh_bottom_player_owner_details(self: &Rc<Self>) {
+        let player = self.player_ui.selected_playback();
+        let Some(current) = player
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+        else {
+            self.player_ui
+                .set_current_rating_and_favorite(false, None, false);
+            return;
+        };
+        let track = &current.row.track;
+        self.player_ui.set_current_rating_and_favorite(
+            track.state.favorite,
+            track
+                .state
+                .rating
+                .and_then(|value| u8::try_from(value).ok()),
+            self.half_stars_enabled(&track.media_uri, track.source_id.as_deref()),
+        );
+    }
+}
+fn install_now_playing_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    artwork: &gtk::Picture,
+    shell: &Rc<Shell>,
+) {
+    let drag_shell = Rc::downgrade(shell);
+    install_compact_media_drag_source(target, artwork, move || {
+        let shell = drag_shell.upgrade()?;
+        let player = shell.player_ui.selected_playback()?;
+        let current = player.transport.current.as_ref()?;
+        let source = MediaDragSource::media_uris([current.row.track.media_uri.clone()]);
+        Some((source, current.row.track.metadata.title.clone()))
+    });
+}
+pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
+    connect_transport_controls(&shell.player_ui);
+    let controls = &shell.player_ui.views.player_controls;
+    let drag_artwork = controls.cover.drag_paintable_source();
+    install_now_playing_drag_source(&controls.cover.area, &drag_artwork, shell);
+    install_now_playing_drag_source(&controls.title, &drag_artwork, shell);
+    let title_shell = Rc::clone(shell);
+    add_widget_click(controls.title.upcast_ref(), move || {
+        title_shell.player_ui.navigate_current_track_album();
+    });
+    install_current_track_context_menu(&shell.player_ui.views.player_controls.cover.area, shell);
+    let menu_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .menu_button
+        .connect_clicked(move |button| present_current_track_context_menu(button, &menu_shell));
+    let fullscreen_shell = Rc::clone(shell);
+    add_widget_click(
+        shell
+            .player_ui
+            .views
+            .player_controls
+            .cover
+            .area
+            .upcast_ref(),
+        move || {
+            gtk::prelude::ActionGroupExt::activate_action(
+                &fullscreen_shell.chrome.window,
+                "toggle-fullscreen-player",
+                None,
+            );
+        },
+    );
+
+    let random_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .random_button
+        .connect_clicked(move |_| {
+            crate::shell::player::random_play::present_random_play_dialog(&random_shell)
+        });
+
+    let queue_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .queue_button
+        .connect_clicked(move |_| queue_shell.toggle_right_panel());
+
+    let favorite_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .favorite_button
+        .connect_clicked(move |_| favorite_shell.toggle_current_track_favorite());
+
+    let rating_shell = Rc::clone(shell);
+    shell
+        .player_ui
+        .views
+        .player_controls
+        .rating
+        .connect_commit(move |rating| rating_shell.set_current_track_rating(rating));
+
+    crate::player::playback_settings::configure_playback_settings_popover(
+        &shell.player_ui.views.player_controls.settings_button,
+        &shell.player_ui,
+    );
+}
+
+fn install_current_track_context_menu(target: &impl IsA<gtk::Widget>, shell: &Rc<Shell>) {
+    let shell = Rc::clone(shell);
+    crate::widgets::interactions::install_context_menu_openers(
+        target,
+        Rc::new(move |target, position| {
+            if let Some(track) = crate::player::state::current_playback_track(
+                shell.player_ui.selected_playback().as_deref(),
+            ) {
+                crate::menus::media_menus::present_track_menu(
+                    target, &shell, track, position, None, None,
+                );
+            }
+        }),
+    );
+}
+
+fn present_current_track_context_menu(target: &impl IsA<gtk::Widget>, shell: &Rc<Shell>) {
+    if let Some(track) =
+        crate::player::state::current_playback_track(shell.player_ui.selected_playback().as_deref())
+    {
+        crate::menus::media_menus::present_track_menu(
+            target.as_ref(),
+            &shell,
+            track,
+            None,
+            Some(gtk::PositionType::Top),
+            None,
+        );
     }
 }

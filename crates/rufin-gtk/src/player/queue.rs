@@ -365,7 +365,7 @@ fn install_queue_row_interactions(
             let selection = shell
                 .selected_queue()
                 .and_then(|queue| queue.selected_rows_for(&queue_position));
-            (shell.open_queue_menu)(target, row.clone(), selection, position);
+            shell.open_queue_menu(target, &row, selection, position);
         }),
     );
 }
@@ -494,7 +494,7 @@ fn queue_title_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewCol
         let Some(shell) = setup_shell.upgrade() else {
             return;
         };
-        let cell = RecycledMergedCell::without_downloads(Rc::clone(&shell.navigate), 48);
+        let cell = RecycledMergedCell::without_downloads(shell.route_navigation(), 48);
         let title = cell.title();
         title.add_css_class("track-list-title");
         title.add_css_class("queue-title");
@@ -650,7 +650,7 @@ fn queue_actions_column(
                 return;
             };
             let favorite = !favorite_button_is_active(button);
-            (click_shell.set_track_favorite)(row.track.media_uri.clone(), favorite);
+            click_shell.set_track_favorite(row.track.media_uri.clone(), favorite);
         });
     });
     connect_sparse_bind(&factory, |item| {
@@ -894,7 +894,7 @@ fn queue_text_column(
         };
         let cell = RecycledTextCell::new();
         if let Some(shell) = weak.upgrade() {
-            cell.enable_links(Rc::clone(&shell.navigate));
+            cell.enable_links(shell.route_navigation());
             install_queue_row_interactions(cell.upcast_ref(), &shell, item, None);
         }
         item.set_child(Some(&cell));
@@ -1571,4 +1571,76 @@ mod tests {
         assert!(!state.reveal_current[1].get());
         assert_eq!(object, state.model.item(10).unwrap());
     }
+}
+
+pub(crate) fn connect_queue_playlist_button(shell: &Rc<crate::shell::shell::Shell>) {
+    let weak = Rc::downgrade(shell);
+    shell
+        .player_ui
+        .right_panel
+        .queue_playlist_button
+        .connect_clicked(move |_| {
+            let Some(shell) = weak.upgrade() else {
+                return;
+            };
+            let queue = shell.products.playback.clone();
+            let weak = Rc::downgrade(&shell);
+            gtk::glib::spawn_future_local(async move {
+                let result = queue.selection().await;
+                let Some(shell) = weak.upgrade() else {
+                    return;
+                };
+                match result {
+                    Ok(tracks) => {
+                        shell.new_playlist_dialog_with(String::new(), tracks.as_ref().clone())
+                    }
+                    Err(error) => shell
+                        .control_feedback
+                        .show_feedback_toast(error.to_string()),
+                }
+            });
+        });
+}
+pub(crate) fn present_queue_selection_context_menu(
+    target: &gtk::Widget,
+    shell: &Rc<crate::shell::shell::Shell>,
+    selection: QueueSelectionSnapshot,
+    position: Option<(f64, f64)>,
+) {
+    let surface =
+        crate::widgets::interactions::ContextMenuSurface::new(target, "queue-selection", position);
+    let queue = shell.products.playback.clone();
+    let remove = selection.selection.clone();
+    surface.append_fixed_action(
+        localization::msgid("Remove from Queue"),
+        crate::widgets::controls::REMOVE_ICON,
+        move || queue.remove_many(remove.clone()),
+    );
+    let queue = shell.products.playback.clone();
+    let play = selection.selection.clone();
+    surface.append_configurable_action(
+        rufin_core::settings::ContextMenuItem::Play,
+        localization::msgid("Play"),
+        crate::widgets::controls::PLAY_ICON,
+        move || match &play {
+            QueueSelection::Occurrences(ids) => {
+                if let Some(id) = ids.first() {
+                    queue.activate_occurrence(*id);
+                }
+            }
+            QueueSelection::Positions(positions) => {
+                if let Some(position) = positions.first() {
+                    queue.activate(*position);
+                }
+            }
+        },
+    );
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        crate::widgets::media_drag::MediaDragSource::media_uris(
+            selection.media_uris.iter().cloned(),
+        ),
+    );
+    surface.popup(&shell.settings.current.borrow().application.context_menu);
 }

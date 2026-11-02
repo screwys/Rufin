@@ -11,7 +11,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::shell::player::desktop::DesktopState;
-use crate::shell::player::right_panel::RightPanelWidgets;
 
 use crate::shell::preferences::source::SourceState;
 use crate::widgets::artwork::ArtworkState;
@@ -60,11 +59,9 @@ pub(crate) struct Shell {
     layout_state: ShellLayoutState,
     pub(crate) navigation_view: NavigationWidgets,
     pub(crate) route_viewport: RouteViewport,
-    pub(crate) right_panel: RightPanelWidgets,
 }
 
 mod full_artwork;
 mod route_keyboard;
 
-pub(crate) mod player_menus;
 mod playlist_files;

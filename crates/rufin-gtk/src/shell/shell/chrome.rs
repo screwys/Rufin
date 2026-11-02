@@ -39,7 +39,7 @@ pub(super) struct ContentChromeParts {
     pub(super) right_resize_handle: gtk::Box,
 }
 
-pub(super) fn build_content_chrome(right_panel: &gtk::Box) -> ContentChromeParts {
+pub(super) fn build_content_chrome() -> ContentChromeParts {
     let resource = "shell/content_chrome.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -54,7 +54,6 @@ pub(super) fn build_content_chrome(right_panel: &gtk::Box) -> ContentChromeParts
     main_well.set_measure_overlay(&route_loading, false);
 
     configure_fill_width_clip(&right_panel_slot, gtk::PolicyType::Never);
-    right_panel_slot.set_child(Some(right_panel));
 
     right_resize_handle.set_width_request(RIGHT_RESIZE_HANDLE_WIDTH);
     right_resize_handle.set_cursor_from_name(Some("col-resize"));

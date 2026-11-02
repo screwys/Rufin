@@ -430,7 +430,7 @@ impl Shell {
     }
 
     pub(crate) fn right_sidebar_visible(&self) -> bool {
-        self.right_panel.right_panel_slot.get_visible()
+        self.player_ui.right_panel.right_panel_slot.get_visible()
     }
 
     pub(crate) fn fullscreen_player_visible(&self) -> bool {
@@ -522,11 +522,15 @@ impl Shell {
         );
         let right_visibility_changed = previous_right_visible != right_visible;
         self.chrome.topbar.update_sidebar(self.left_sidebar_mode());
-        set_widget_visible(&self.right_panel.right_panel_slot, right_visible);
+        set_widget_visible(&self.player_ui.right_panel.right_panel_slot, right_visible);
         set_widget_visible(&self.player_ui.right_panel.root, right_visible);
-        set_widget_visible(&self.right_panel.right_resize_handle, right_visible);
-        if self.right_panel.right_split.position() != resolved.main_width {
-            self.right_panel
+        set_widget_visible(
+            &self.player_ui.right_panel.right_resize_handle,
+            right_visible,
+        );
+        if self.player_ui.right_panel.right_split.position() != resolved.main_width {
+            self.player_ui
+                .right_panel
                 .right_split
                 .set_position(resolved.main_width);
         }
@@ -630,7 +634,7 @@ impl Shell {
     }
 
     fn current_right_sidebar_width(&self) -> i32 {
-        let split = &self.right_panel.right_split;
+        let split = &self.player_ui.right_panel.right_split;
         let allocated_width = split
             .width()
             .saturating_sub(split.position())
@@ -838,11 +842,12 @@ fn connect_right_sidebar_resize(shell: &Rc<Shell>) {
     let drag_exact_width = Rc::new(Cell::new(None::<f64>));
     let position_shell = Rc::clone(shell);
     shell
+        .player_ui
         .right_panel
         .right_split
         .connect_position_notify(move |split| {
             position_right_resize_handle(
-                &position_shell.right_panel.right_resize_handle,
+                &position_shell.player_ui.right_panel.right_resize_handle,
                 split.position(),
             );
         });
@@ -861,7 +866,7 @@ fn connect_right_sidebar_resize(shell: &Rc<Shell>) {
         if drag_shell.layout_state.right_drag_width.take().is_some() {
             drag_shell.update_layout();
         }
-        let handle = &drag_shell.right_panel.right_resize_handle;
+        let handle = &drag_shell.player_ui.right_panel.right_resize_handle;
         let handle_start = f64::from(handle.margin_start());
         let hits_handle = right_sidebar_handle_hit(handle_start, handle.width().max(1), start_x);
         if !handle.is_mapped()
@@ -947,6 +952,7 @@ fn connect_right_sidebar_resize(shell: &Rc<Shell>) {
         }
     });
     shell
+        .player_ui
         .right_panel
         .right_resize_handle
         .parent()
