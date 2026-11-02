@@ -220,11 +220,11 @@ impl ContextMenuSurface {
                 if settings.is_visible(*setting) {
                     let run = Rc::clone(&run);
                     let (placement, item) = (*placement, *setting);
-                    let entry = self.item(&tr(label), icon, move || run(placement, shuffled));
+                    let action = self.action(true, move || run(placement, shuffled));
                     if item == ContextMenuItem::Play && !shuffled {
-                        self.submenu_default(&tr(msgid("Play")), &entry);
+                        self.submenu_default(&tr(msgid("Play")), &action);
                     }
-                    section.append_item(&entry);
+                    section.append_item(&menu_action_item(&tr(label), &action, icon));
                 }
             }
             submenu.append_section(None, &section);
@@ -246,11 +246,11 @@ impl ContextMenuSurface {
             (QueuePlacement::Last, msgid("Play Later"), PLAY_LATER_ICON),
         ] {
             let run = Rc::clone(&run);
-            let entry = self.item(&tr(title), icon, move || run(placement));
+            let action = self.action(true, move || run(placement));
             if placement == QueuePlacement::Now {
-                self.submenu_default(&tr(label), &entry);
+                self.submenu_default(&tr(label), &action);
             }
-            submenu.append_item(&entry);
+            submenu.append_item(&menu_action_item(&tr(title), &action, icon));
         }
         self.append_configurable_submenu(ContextMenuItem::PlayRadio, label, &submenu, RADIO_ICON);
     }
@@ -302,16 +302,11 @@ impl ContextMenuSurface {
         format!("{}.{name}", self.group_name)
     }
 
-    /// The submenu row titled `label` runs `item`'s action when its body is clicked.
-    fn submenu_default(&self, label: &str, item: &gio::MenuItem) {
-        if let Some(action) = item
-            .attribute_value("action", None)
-            .and_then(|value| value.get::<String>())
-        {
-            self.submenu_actions
-                .borrow_mut()
-                .push((label.to_owned(), action));
-        }
+    /// The submenu row titled `label` runs `action` when its body is clicked.
+    fn submenu_default(&self, label: &str, action: &str) {
+        self.submenu_actions
+            .borrow_mut()
+            .push((label.to_owned(), action.to_owned()));
     }
 
     pub fn append_fixed_widget(&self, id: &str, widget: &impl IsA<gtk::Widget>) {
