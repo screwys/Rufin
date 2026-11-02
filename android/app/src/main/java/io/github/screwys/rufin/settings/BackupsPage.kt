@@ -1,7 +1,7 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.backup.BackupContents
-import io.github.screwys.rufin.shared.backup.BackupManifest
+import io.github.screwys.rufin.shared.rufin_core.BackupContents
+import io.github.screwys.rufin.shared.rufin_core.BackupManifest
 import io.github.screwys.rufin.shared.rufin_core.BackupPreview
 import io.github.screwys.rufin.shared.rufin_core.BackupOwner
 

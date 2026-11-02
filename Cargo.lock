@@ -640,24 +640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backup"
-version = "0.16.6"
-dependencies = [
- "age",
- "blake3",
- "chrono",
- "flate2",
- "library",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "uniffi",
-]
-
-[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3253,7 +3235,6 @@ name = "gtk-preferences"
 version = "0.16.6"
 dependencies = [
  "async-channel",
- "backup",
  "desktop-integration",
  "directories",
  "downloads",
@@ -7352,11 +7333,12 @@ dependencies = [
  "async-channel",
  "audio-processing",
  "axum",
- "backup",
  "base64 0.23.1",
  "blake3",
+ "chrono",
  "directories",
  "downloads",
+ "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "gio",
@@ -7379,6 +7361,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sources",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

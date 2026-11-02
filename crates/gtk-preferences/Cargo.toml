@@ -17,7 +17,6 @@ web.workspace = true
 pulldown-cmark.workspace = true
 tempfile.workspace = true
 directories.workspace = true
-backup.workspace = true
 gtk-player.workspace = true
 gtk-widgets.workspace = true
 rufin-core.workspace = true

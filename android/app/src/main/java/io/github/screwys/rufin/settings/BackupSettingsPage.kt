@@ -1,6 +1,6 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.backup.BackupFrequency
+import io.github.screwys.rufin.shared.rufin_core.BackupFrequency
 
 import android.app.Activity
 import android.content.Intent

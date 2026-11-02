@@ -1,3 +1,7 @@
+//! Backup archives and the owner that writes, schedules and restores them.
+
+pub mod format;
+
 use crate::runtime::BackupPreview;
 use crate::{
     playback::PlaybackOwner,
@@ -104,7 +108,7 @@ impl BackupOwner {
         &self,
         passphrase: Option<String>,
         scheduled: bool,
-        contents: Option<backup::BackupContents>,
+        contents: Option<format::BackupContents>,
     ) -> Result<tempfile::TempPath, String> {
         let stored = self.settings.load();
         if scheduled
@@ -154,10 +158,10 @@ impl BackupOwner {
             None
         };
         let mut output = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-        backup::write_backup(
+        format::write_backup(
             &self.catalog,
             &mut output,
-            backup::BackupOptions {
+            format::BackupOptions {
                 contents,
                 settings: settings.as_deref(),
                 saved_logins: logins.as_deref(),
@@ -193,7 +197,7 @@ impl BackupOwner {
         };
         let output = self.export_now(passphrase, true, None).await?;
         let completed = now();
-        let name = backup::backup_filename(Some(&settings.schedule.schedule_id), completed);
+        let name = format::backup_filename(Some(&settings.schedule.schedule_id), completed);
         if let Some(uri) = settings
             .destination_uri
             .as_deref()
@@ -330,7 +334,7 @@ impl BackupOwner {
                             .await
                             .map_err(|e| e.to_string())?;
                     }
-                    let result = backup::restore_backup(&self.catalog, &preview.staged, contents)
+                    let result = format::restore_backup(&self.catalog, &preview.staged, contents)
                         .await
                         .map_err(|e| e.to_string());
                     if let Err(error) = result {
@@ -397,7 +401,7 @@ impl BackupOwner {
         &self,
         path: std::path::PathBuf,
         passphrase: Option<String>,
-        contents: backup::BackupContents,
+        contents: format::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
         self.stage_input(
             move || {
@@ -412,14 +416,14 @@ impl BackupOwner {
     fn stage_input<R: std::io::Read, P: FnOnce() -> Option<String>>(
         &self,
         open: impl FnOnce() -> Result<(R, P), String> + Send + 'static,
-        contents: backup::BackupContents,
+        contents: format::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
         let (send, receive) = async_channel::bounded(1);
         let settings = self.settings.clone();
         self.runtime.spawn_blocking(move || {
             let result = (|| {
                 let (input, passphrase) = open()?;
-                let staged = backup::stage_backup(input, passphrase).map_err(|e| e.to_string())?;
+                let staged = format::stage_backup(input, passphrase).map_err(|e| e.to_string())?;
                 let removed_sources = if contents.settings && staged.manifest.contents.settings {
                     let raw =
                         serde_json::from_slice(&staged.settings().map_err(|e| e.to_string())?)
@@ -447,8 +451,8 @@ impl BackupOwner {
         &self,
         uri: String,
         passphrase: Option<String>,
-        contents: backup::BackupContents,
-    ) -> Result<Arc<BackupPreview>, backup::BackupError> {
+        contents: format::BackupContents,
+    ) -> Result<Arc<BackupPreview>, format::BackupError> {
         self.stage_input(
             move || {
                 sources::open_document_input(&uri)
@@ -459,17 +463,17 @@ impl BackupOwner {
         )
         .recv()
         .await
-        .map_err(|error| backup::BackupError::Operation(error.to_string()))?
+        .map_err(|error| format::BackupError::Operation(error.to_string()))?
         .map(Arc::new)
-        .map_err(backup::BackupError::Operation)
+        .map_err(format::BackupError::Operation)
     }
 
     pub async fn export_document(
         &self,
         uri: String,
         passphrase: Option<String>,
-        contents: backup::BackupContents,
-    ) -> Result<(), backup::BackupError> {
+        contents: format::BackupContents,
+    ) -> Result<(), format::BackupError> {
         let owner = self.clone();
         let runtime = self.runtime.clone();
         self.runtime
@@ -481,21 +485,21 @@ impl BackupOwner {
                 })
             })
             .await
-            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
-            .map_err(backup::BackupError::Operation)
+            .map_err(|error| format::BackupError::Operation(error.to_string()))?
+            .map_err(format::BackupError::Operation)
     }
 
     pub async fn restore(
         &self,
         preview: Arc<BackupPreview>,
-    ) -> Result<library::BackupRestoreReport, backup::BackupError> {
+    ) -> Result<library::BackupRestoreReport, format::BackupError> {
         let owner = self.clone();
         let runtime = self.runtime.clone();
         self.runtime
             .spawn_blocking(move || runtime.block_on(owner.restore_now((*preview).clone())))
             .await
-            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
-            .map_err(backup::BackupError::Operation)
+            .map_err(|error| format::BackupError::Operation(error.to_string()))?
+            .map_err(format::BackupError::Operation)
     }
 
     pub fn schedule_error(&self) -> Option<String> {
@@ -508,21 +512,21 @@ impl BackupOwner {
     pub async fn save_schedule_password(
         &self,
         passphrase: String,
-    ) -> Result<(), backup::BackupError> {
+    ) -> Result<(), format::BackupError> {
         let owner = self.clone();
         self.runtime
             .spawn_blocking(move || {
                 if passphrase.is_empty() {
-                    return Err(backup::BackupError::Operation(
+                    return Err(format::BackupError::Operation(
                         "The scheduled backup password cannot be empty".into(),
                     ));
                 }
                 backup_password_store(&owner.settings.load(), owner.settings.config_dir())
                     .save_secret(&backup_password_key(), &passphrase)
-                    .map_err(|error| backup::BackupError::Operation(error.to_string()))
+                    .map_err(|error| format::BackupError::Operation(error.to_string()))
             })
             .await
-            .map_err(|error| backup::BackupError::Operation(error.to_string()))?
+            .map_err(|error| format::BackupError::Operation(error.to_string()))?
     }
 }
 fn restore_preferences_and_logins(
@@ -681,7 +685,7 @@ fn document_backup_files(
             if entry.size.is_some_and(|size| size != bytes) {
                 continue;
             }
-            if let Some(timestamp) = backup::scheduled_backup_timestamp(&entry.name, schedule_id) {
+            if let Some(timestamp) = format::scheduled_backup_timestamp(&entry.name, schedule_id) {
                 owned.push((timestamp, entry.uri));
             }
         }
@@ -735,7 +739,7 @@ fn scheduled_backup_files(
         }
         let name = info.name();
         if let Some(timestamp) =
-            backup::scheduled_backup_timestamp(&name.to_string_lossy(), schedule_id)
+            format::scheduled_backup_timestamp(&name.to_string_lossy(), schedule_id)
         {
             owned.push((timestamp, name));
         }
@@ -994,14 +998,14 @@ mod tests {
                 fs::write(
                     directory
                         .path()
-                        .join(backup::backup_filename(Some("mine"), timestamp)),
+                        .join(format::backup_filename(Some("mine"), timestamp)),
                     [],
                 )
                 .unwrap();
             }
-            let foreign = backup::backup_filename(Some("other"), 1);
-            let manual = backup::backup_filename(None, 1);
-            let incomplete = format!(".{}.partial", backup::backup_filename(Some("mine"), 5));
+            let foreign = format::backup_filename(Some("other"), 1);
+            let manual = format::backup_filename(None, 1);
+            let incomplete = format!(".{}.partial", format::backup_filename(Some("mine"), 5));
             for name in [&foreign, &manual, &incomplete] {
                 fs::write(directory.path().join(name), []).unwrap();
             }
@@ -1015,7 +1019,7 @@ mod tests {
                 assert_eq!(
                     directory
                         .path()
-                        .join(backup::backup_filename(Some("mine"), timestamp))
+                        .join(format::backup_filename(Some("mine"), timestamp))
                         .exists(),
                     timestamp > 4 - i64::from(retention_count)
                 );

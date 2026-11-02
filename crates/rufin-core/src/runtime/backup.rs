@@ -7,9 +7,9 @@ use std::sync::Arc;
 pub struct BackupSettings {
     pub enabled: bool,
     pub retention_count: u32,
-    pub schedule: backup::BackupSchedule,
+    pub schedule: crate::backup::format::BackupSchedule,
     pub destination_uri: Option<String>,
-    pub contents: backup::BackupContents,
+    pub contents: crate::backup::format::BackupContents,
     pub encrypt: bool,
 }
 
@@ -29,9 +29,9 @@ impl Default for BackupSettings {
 #[derive(Clone)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct BackupPreview {
-    pub staged: Arc<backup::StagedBackup>,
+    pub staged: Arc<crate::backup::format::StagedBackup>,
     pub removed_sources: Vec<String>,
-    pub contents: backup::BackupContents,
+    pub contents: crate::backup::format::BackupContents,
 }
 
 pub type BackupHandle = Arc<crate::backup::BackupOwner>;
@@ -60,13 +60,13 @@ mod tests {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl BackupPreview {
-    pub fn manifest(&self) -> backup::BackupManifest {
+    pub fn manifest(&self) -> crate::backup::format::BackupManifest {
         self.staged.manifest.clone()
     }
     pub fn removed_sources(&self) -> Vec<String> {
         self.removed_sources.clone()
     }
-    pub fn selected_contents(&self) -> backup::BackupContents {
+    pub fn selected_contents(&self) -> crate::backup::format::BackupContents {
         self.contents
     }
 }

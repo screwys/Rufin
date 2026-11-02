@@ -1,7 +1,4 @@
 //! Streaming semantic backups. Archive framing is staged before any live owner is changed.
-#[cfg(feature = "bindings")]
-uniffi::setup_scaffolding!();
-
 use chrono::{Datelike, TimeZone};
 use library::{BackupRestoreReport, Catalog, LibraryError, StateGroups};
 use serde::{Deserialize, Serialize};
@@ -703,9 +700,3 @@ mod tests {
 }
 
 pub type RetentionCount = usize;
-#[cfg(feature = "bindings")]
-uniffi::custom_type!(RetentionCount, u64, {
-    remote,
-    lower: |value| value as u64,
-    try_lift: |value| Ok(usize::try_from(value)?),
-});

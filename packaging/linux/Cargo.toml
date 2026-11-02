@@ -20,7 +20,6 @@ uniffi = "0.32"
 app-identity = { path = "crates/app-identity" }
 artwork = { path = "crates/artwork" }
 audio-processing = { path = "crates/audio-processing" }
-backup = { path = "crates/backup" }
 desktop-integration = { path = "crates/desktop-integration" }
 downloads = { path = "crates/downloads" }
 gtk-editors = { path = "crates/gtk-editors" }

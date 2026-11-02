@@ -1,8 +1,8 @@
 use crate::Preferences;
 use adw::prelude::*;
-use backup::{BackupContents, BackupFrequency};
 use gtk::{gio, glib};
 use localization::{msgid, tr, tr_with};
+use rufin_core::backup::format::{BackupContents, BackupFrequency};
 use std::rc::Rc;
 
 const CONTENT_FIELDS: [fn(&mut BackupContents) -> &mut bool; 7] = [

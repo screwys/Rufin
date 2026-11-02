@@ -461,10 +461,12 @@ impl StoredSettings {
     fn prepare(&mut self) -> Result<(), String> {
         self.ui.sanitize();
         let backup = &mut self.ui.application.backup;
-        if backup.enabled && backup.schedule.frequency == backup::BackupFrequency::Off {
-            backup.schedule.frequency = backup::BackupFrequency::Daily;
+        if backup.enabled
+            && backup.schedule.frequency == crate::backup::format::BackupFrequency::Off
+        {
+            backup.schedule.frequency = crate::backup::format::BackupFrequency::Daily;
         }
-        if backup.schedule.frequency != backup::BackupFrequency::Off
+        if backup.schedule.frequency != crate::backup::format::BackupFrequency::Off
             && backup.schedule.schedule_id.is_empty()
         {
             backup.schedule.schedule_id = random_identity("schedule-")?;
@@ -1327,7 +1329,8 @@ mod tests {
         };
         assert!(!file.load().ui.application.backup.enabled);
         file.update(|stored| {
-            stored.ui.application.backup.schedule.frequency = backup::BackupFrequency::Daily;
+            stored.ui.application.backup.schedule.frequency =
+                crate::backup::format::BackupFrequency::Daily;
             Ok(())
         })
         .unwrap();
