@@ -6,7 +6,7 @@ use gtk::{gio, glib};
 use localization::tr;
 use sources::SourceId;
 
-use crate::shell::preferences::{
+use crate::preferences::preferences::{
     present_add_server_preferences_dialog, present_library_preferences_dialog,
 };
 use crate::shell::shell::{Shell, navigation::popdown_primary_menu};
@@ -95,7 +95,7 @@ pub(crate) fn install_source_menu_actions(shell: &Rc<Shell>) {
     let manage_libraries_shell = Rc::clone(shell);
     manage_libraries.connect_activate(move |_, _| {
         popdown_primary_menu(&manage_libraries_shell);
-        present_library_preferences_dialog(&manage_libraries_shell.preferences);
+        present_library_preferences_dialog(&manage_libraries_shell);
     });
     shell.chrome.window.add_action(&manage_libraries);
 
@@ -103,7 +103,7 @@ pub(crate) fn install_source_menu_actions(shell: &Rc<Shell>) {
     let add_library_shell = Rc::clone(shell);
     add_library.connect_activate(move |_, _| {
         popdown_primary_menu(&add_library_shell);
-        present_add_server_preferences_dialog(&add_library_shell.preferences);
+        present_add_server_preferences_dialog(&add_library_shell);
     });
     shell.chrome.window.add_action(&add_library);
 }

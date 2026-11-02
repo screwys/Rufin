@@ -16,9 +16,9 @@ use gtk::glib;
 use playback::{CurrentMedia, PlaybackView, PositionDiscontinuity};
 use tracing::{info, warn};
 
-use crate::shell::Settings as UiSettings;
 use crate::shell::shell::Shell;
 use crate::widgets::artwork::THUMB_COVER_SIZE;
+use rufin_core::settings::Settings as UiSettings;
 
 #[cfg(not(target_os = "macos"))]
 const TRAY_POLL_INTERVAL: Duration = Duration::from_millis(120);
@@ -396,7 +396,7 @@ impl Shell {
                     }
                     desktop_integration::TrayIntent::TogglePrivateMode => {
                         let enabled = !shell.settings.current.borrow().application.private_mode;
-                        shell.preferences.set_private_mode(enabled);
+                        shell.set_private_mode(enabled);
                     }
                     desktop_integration::TrayIntent::Quit => {
                         shell.request_quit("tray action");

@@ -14,7 +14,7 @@ use super::{
     PreferencesNavigationControls,
     source::{configured_source_kind_display_name, half_stars_row},
 };
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use crate::widgets::source_labels::{configured_source_display_name, configured_source_icon_name};
 use localization::{album_count_text, track_count_text};
 use rufin_core::runtime::source::{LocalAccessStatus, SourceLocalAccessSummary, SourceSummary};
@@ -24,7 +24,7 @@ const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
 const DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE: &str = msgid("Default");
 
 pub(super) fn library_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     navigation_controls: &PreferencesNavigationControls,
 ) -> gtk::Widget {
@@ -42,7 +42,7 @@ pub(super) fn library_page(
 }
 
 fn library_sources_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     navigation: &adw::NavigationView,
     navigation_controls: &PreferencesNavigationControls,
@@ -247,16 +247,13 @@ fn library_sources_page(
                 .and_then(|row| row.selected().checked_sub(1))
                 .and_then(|index| sources.get(index as usize))
                 .map(|source| source.id.clone());
-            (shell.effects)(crate::preferences::Effect::ExportActivity(format, source));
+            shell.export_activity_dialog(format, source);
         }
     });
     library_page
 }
 
-pub(super) fn downloads_page(
-    shell: &Rc<Preferences>,
-    dialog: &adw::Dialog,
-) -> adw::PreferencesPage {
+pub(super) fn downloads_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage {
     let resource = "preferences/library.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -298,7 +295,7 @@ pub(super) fn downloads_page(
 }
 
 fn source_downloads_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     server: &SourceSummary,
 ) -> adw::PreferencesGroup {
@@ -368,7 +365,10 @@ fn source_downloads_group(
             if let Some(directory) = initial_directory.as_ref() {
                 chooser.set_initial_folder(Some(&gio::File::for_path(directory)));
             }
-            let Ok(folder) = chooser.select_folder_future(Some(&shell.window)).await else {
+            let Ok(folder) = chooser
+                .select_folder_future(Some(&shell.chrome.window))
+                .await
+            else {
                 return;
             };
             let Some(path) = folder.path() else {
@@ -466,7 +466,7 @@ fn source_downloads_group(
     downloads_group
 }
 
-pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw::PreferencesPage {
+pub fn local_sources_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage {
     let resource = "preferences/library.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -534,7 +534,10 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
             let chooser = gtk::FileDialog::builder()
                 .title(tr("Select Music Folder"))
                 .build();
-            let Ok(folder) = chooser.select_folder_future(Some(&shell.window)).await else {
+            let Ok(folder) = chooser
+                .select_folder_future(Some(&shell.chrome.window))
+                .await
+            else {
                 return;
             };
             let Some(path) = folder.path() else {
@@ -552,7 +555,7 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
         let source_id = local.id.clone();
         let source = shell.products.source.clone();
         let dialog = dialog.downgrade();
-        let window = shell.window.downgrade();
+        let window = shell.chrome.window.downgrade();
         forget_local.connect_clicked(move |_| {
             let Some(window) = window.upgrade() else {
                 return;
@@ -604,7 +607,7 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
         let paths = Rc::new(RefCell::new(initial.clone()));
         let draft = Rc::clone(&paths);
         let (group, save, status) = super::source::excluded_folders::editor(
-            &shell.window,
+            &shell.chrome.window,
             &initial,
             true,
             Rc::new(move |value| *draft.borrow_mut() = value),
@@ -667,7 +670,7 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
 
 fn add_download_rules(
     group: &adw::PreferencesGroup,
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
     source_id: &sources::SourceId,
     rules: rufin_core::downloads::DownloadRules,
@@ -785,7 +788,7 @@ fn add_download_rules(
 }
 
 fn remove_download_rule(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     source_id: sources::SourceId,
     rule: DownloadRule,
     delete_downloads: bool,
@@ -803,7 +806,7 @@ fn remove_download_rule(
 }
 
 fn confirm_remove_download_rule(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
     source_id: sources::SourceId,
     rule: DownloadRule,
@@ -863,7 +866,7 @@ fn download_rule_action_name(rule: DownloadRule) -> &'static str {
 
 fn add_download_queue(
     group: &adw::PreferencesGroup,
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     source_id: &sources::SourceId,
     pause: &gtk::Button,
 ) {
@@ -1171,7 +1174,7 @@ fn download_queue_item_subtitle(job: &rufin_core::downloads::DownloadQueueItem) 
 }
 
 fn confirm_remove_all_downloads(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
     source_id: sources::SourceId,
 ) {
@@ -1187,7 +1190,7 @@ fn confirm_remove_all_downloads(
     dialog.set_close_response("cancel");
     dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
     let shell = Rc::clone(shell);
-    let window = shell.window.clone();
+    let window = shell.chrome.window.clone();
     let preferences_dialog = preferences_dialog.downgrade();
     dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
         if response.as_str() == "remove" {
@@ -1207,7 +1210,7 @@ fn confirm_remove_all_downloads(
     });
 }
 
-fn confirm_remove_local_folder(shell: &Rc<Preferences>, path: String, row: adw::ActionRow) {
+fn confirm_remove_local_folder(shell: &Rc<Shell>, path: String, row: adw::ActionRow) {
     let dialog = adw::AlertDialog::builder()
         .heading(tr("Remove"))
         .body(path.clone())
@@ -1220,7 +1223,7 @@ fn confirm_remove_local_folder(shell: &Rc<Preferences>, path: String, row: adw::
     dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
     let source = shell.products.source.clone();
     dialog.choose(
-        Some(&shell.window),
+        Some(&shell.chrome.window),
         None::<&gio::Cancellable>,
         move |response| {
             if response.as_str() == "remove" {
@@ -1231,13 +1234,16 @@ fn confirm_remove_local_folder(shell: &Rc<Preferences>, path: String, row: adw::
     );
 }
 
-pub fn locate_local_folder(shell: &Rc<Preferences>, current: String) {
+pub fn locate_local_folder(shell: &Rc<Shell>, current: String) {
     let shell = Rc::clone(shell);
     gtk::glib::spawn_future_local(async move {
         let chooser = gtk::FileDialog::builder()
             .title(tr("Select Music Folder"))
             .build();
-        let Ok(folder) = chooser.select_folder_future(Some(&shell.window)).await else {
+        let Ok(folder) = chooser
+            .select_folder_future(Some(&shell.chrome.window))
+            .await
+        else {
             return;
         };
         let Some(replacement) = folder.path() else {

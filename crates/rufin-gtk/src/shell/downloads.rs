@@ -53,9 +53,7 @@ impl Shell {
         feedback: &OperationFeedback,
         action: Option<Box<dyn FnOnce()>>,
     ) {
-        crate::shell::preferences::dialogs::release_notes::dismiss_release_notification(
-            &self.preferences,
-        );
+        crate::preferences::preferences::dialogs::release_notes::dismiss_release_notification(self);
         let title = &feedback.title;
         let count = track_count_text(feedback.item_count as u64);
         let subtitle = operation_feedback_subtitle(&feedback.kind, &count);
@@ -158,7 +156,7 @@ impl Shell {
                 return;
             };
             if shell.download_feedback.feedback_opens_queue.get() {
-                crate::shell::preferences::present_downloads_preferences_dialog(&shell.preferences);
+                crate::preferences::preferences::present_downloads_preferences_dialog(&shell);
             }
             shell.chrome.operation_feedback.set_visible(false);
             shell.download_feedback.feedback_action.borrow_mut().take();

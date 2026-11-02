@@ -104,12 +104,12 @@ impl Topbar {
                 &self.search_host,
             )));
         super::navigation::install_primary_menu(&self.menu, shell);
-        crate::shell::preferences::controller::bind_popover(&shell.preferences, &self.controller);
+        crate::preferences::preferences::controller::bind_popover(&shell, &self.controller);
         let weak = Rc::downgrade(shell);
         self.source.set_create_popup_func(move |button| {
             if let Some(shell) = weak.upgrade() {
                 let (_, _, model) =
-                    crate::shell::preferences::source::selector::source_submenu(&shell);
+                    crate::preferences::preferences::source::selector::source_submenu(&shell);
                 let popover = gtk::PopoverMenu::from_model(Some(&model));
                 popover.connect_show(crate::widgets::interactions::align_topbar_popup);
                 button.set_popover(Some(&popover));

@@ -110,7 +110,7 @@ fn present(parent: &gtk::Window, shell: &Rc<Shell>, item: MediaDetailsItem) {
                     if let Some(dialog) = weak.upgrade() {
                         dialog.close();
                     }
-                    crate::shell::preferences::dialogs::metadata::present_metadata_dialog(
+                    crate::editors::metadata::present_metadata_dialog(
                         &editor,
                         item.metadata_item(),
                     );

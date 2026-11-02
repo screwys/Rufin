@@ -42,14 +42,14 @@ impl Flow {
 }
 
 pub(super) fn setup_flow(
-    _: &Rc<Preferences>,
+    _: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     Rc::new(Flow::new(presentation, None))
 }
 
 pub(super) fn settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     presentation: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
@@ -57,7 +57,7 @@ pub(super) fn settings_group(
 }
 
 impl SourceSetupFlow for Flow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         let (scroller, content, _, _) = setup_scaffold(shell, context, self.presentation);
         content.append(&self.form(shell, Some(context), None));
         scroller.upcast()
@@ -67,7 +67,7 @@ impl SourceSetupFlow for Flow {
 impl Flow {
     fn form(
         &self,
-        shell: &Rc<Preferences>,
+        shell: &Rc<Shell>,
         context: Option<&SetupViewContext>,
         saved: Option<&EditableSource>,
     ) -> gtk::Widget {

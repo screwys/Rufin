@@ -9,10 +9,10 @@ use tracing::warn;
 
 use crate::player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use crate::player::state::{NowPlayingPresentation, current_playback_media_id};
+use crate::preferences::preferences::dialogs::release_notes::apply_release_update;
 use crate::shell::player::{
     now_playing_notification_can_send, now_playing_notification_should_withdraw,
 };
-use crate::shell::preferences::dialogs::release_notes::apply_release_update;
 use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{DiscoveryStatus, DiscoveryUpdate, SourceOperation};
 use rufin_core::runtime::{
@@ -121,7 +121,7 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     let event_shell = Rc::clone(shell);
     glib::spawn_future_local(async move {
         while let Ok(update) = release_updates.recv().await {
-            apply_release_update(&event_shell.preferences, update);
+            apply_release_update(&event_shell, update);
         }
     });
 }
@@ -139,7 +139,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
             );
             apply_selected_source(shell, configured, selected);
             if added {
-                shell.preferences.complete_add_server_dialog();
+                shell.complete_add_server_dialog();
             }
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
@@ -286,7 +286,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     match &operation {
         SourceOperation::Adding { .. } | SourceOperation::Switching { .. } => {
             if started_blocking && matches!(operation, SourceOperation::Adding { .. }) {
-                shell.preferences.close_preferences_dialog();
+                shell.close_preferences_dialog();
             }
             if !shell.has_active_mounted_route() {
                 shell.startup.route_revealed.set(false);
@@ -299,8 +299,8 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
         } => {
             warn!(error = %message, "source operation failed");
             if *add_form {
-                if !shell.preferences.restore_add_server_dialog_after_failure() {
-                    shell.preferences.update_add_server_dialog();
+                if !shell.restore_add_server_dialog_after_failure() {
+                    shell.update_add_server_dialog();
                 }
                 if previously_blocked {
                     shell.prepare_startup_route_content();
@@ -310,7 +310,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
             }
         }
         SourceOperation::Idle => {
-            shell.preferences.update_add_server_dialog();
+            shell.update_add_server_dialog();
             if shell.selected_library().is_some() && !shell.startup.route_revealed.get() {
                 shell.prepare_startup_route_content();
             }
@@ -448,7 +448,7 @@ fn apply_source_discovery(shell: &Rc<Shell>, update: DiscoveryUpdate) {
         .source
         .discovery_running
         .set(matches!(update.status, DiscoveryStatus::Searching));
-    shell.preferences.update_add_server_discovery();
+    shell.update_add_server_discovery();
 }
 
 fn apply_playback_projection(shell: &Rc<Shell>, projection: playback::PlaybackProjection) {
@@ -651,7 +651,7 @@ fn show_local_folder_recovery(shell: &Rc<Shell>, folder: String) {
     let recovery_shell = Rc::clone(shell);
     toast.connect_button_clicked(move |toast| {
         toast.dismiss();
-        crate::shell::preferences::locate_local_folder(&recovery_shell.preferences, folder.clone());
+        crate::preferences::preferences::locate_local_folder(&recovery_shell, folder.clone());
     });
     shell.chrome.toast_overlay.add_toast(toast);
 }

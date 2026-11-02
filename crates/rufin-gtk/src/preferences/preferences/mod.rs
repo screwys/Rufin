@@ -4,15 +4,15 @@ pub const NARROW_LEFT_TITLE: &str = localization::msgid("Narrow left sidebar");
 pub const NARROW_RIGHT_TITLE: &str = localization::msgid("Narrow right sidebar");
 mod activity;
 pub mod backup;
-use crate::preferences::Preferences;
-use crate::preferences::{
-    MAX_NARROW_LAYOUT_THRESHOLD, MIN_NARROW_LAYOUT_THRESHOLD, SidebarRouteItem,
-    SidebarRouteItemSettings,
-};
+use crate::shell::shell::Shell;
 use crate::widgets::layout::{LARGE_POPUP_BASE_HEIGHT, large_popup_content_height};
 use crate::widgets::popup::present_light_dismiss_dialog;
 use adw::prelude::*;
 use localization::{language_option_index, language_options, tr};
+use rufin_core::settings::{
+    MAX_NARROW_LAYOUT_THRESHOLD, MIN_NARROW_LAYOUT_THRESHOLD, SidebarRouteItem,
+    SidebarRouteItemSettings,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -97,24 +97,24 @@ impl PreferencesState {
     }
 }
 
-pub fn present_preferences_dialog(shell: &Rc<Preferences>) {
+pub fn present_preferences_dialog(shell: &Rc<Shell>) {
     present_preferences_dialog_with_page(shell, PreferencesPageKind::General, false, false);
 }
-pub fn present_library_preferences_dialog(shell: &Rc<Preferences>) {
+pub fn present_library_preferences_dialog(shell: &Rc<Shell>) {
     present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, false, false);
 }
-pub fn present_add_server_preferences_dialog(shell: &Rc<Preferences>) {
+pub fn present_add_server_preferences_dialog(shell: &Rc<Shell>) {
     if shell.source.configured.borrow().sources.is_empty() {
         shell.present_onboarding();
     } else {
         present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, true, false);
     }
 }
-pub fn present_downloads_preferences_dialog(shell: &Rc<Preferences>) {
+pub fn present_downloads_preferences_dialog(shell: &Rc<Shell>) {
     present_preferences_dialog_with_page(shell, PreferencesPageKind::Downloads, false, true);
 }
 
-impl Preferences {
+impl Shell {
     pub fn set_external_metadata_enabled(self: &Rc<Self>, enabled: bool) {
         if self
             .settings
@@ -126,13 +126,13 @@ impl Preferences {
             if enabled {
                 self.retry_external_artwork("metadata setting");
             } else {
-                (self.effects)(crate::preferences::Effect::MediaControlsChanged);
+                self.update_media_controls();
             }
         }
     }
 
     pub fn close_preferences_dialog(&self) {
-        if let Some(dialog) = self.state.active_dialog() {
+        if let Some(dialog) = self.preferences.active_dialog() {
             dialog.close();
         }
     }
@@ -287,7 +287,7 @@ fn set_preferences_back_visible(button: &gtk::Button, visible: bool) {
 }
 
 fn present_preferences_dialog_with_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     initial_page: PreferencesPageKind,
     open_add_server: bool,
     focus_download_queue: bool,
@@ -295,23 +295,23 @@ fn present_preferences_dialog_with_page(
     if !open_add_server {
         shell.clear_retained_add_server_form();
     }
-    let dialog = shell.state.active_dialog().unwrap_or_else(|| {
+    let dialog = shell.preferences.active_dialog().unwrap_or_else(|| {
         let dialog = adw::Dialog::builder()
             .title(tr("Preferences"))
             .content_width(900)
             .content_height(large_popup_content_height(
-                shell.window.height(),
+                shell.chrome.window.height(),
                 LARGE_POPUP_BASE_HEIGHT,
             ))
             .build();
         dialog.add_css_class("preferences");
-        shell.state.set_active_dialog(&dialog);
+        shell.preferences.set_active_dialog(&dialog);
         let close_shell = Rc::downgrade(shell);
         dialog.connect_closed(move |dialog| {
             dialog.set_child(None::<&gtk::Widget>);
             dialog.insert_action_group("preferences", None::<&gtk::gio::SimpleActionGroup>);
             if let Some(shell) = close_shell.upgrade() {
-                shell.state.dialog.set(None::<&adw::Dialog>);
+                shell.preferences.dialog.set(None::<&adw::Dialog>);
                 shell.release_inactive_add_server_form();
             }
         });
@@ -319,7 +319,7 @@ fn present_preferences_dialog_with_page(
         dialog
     });
 
-    present_light_dismiss_dialog(&dialog, &shell.window);
+    present_light_dismiss_dialog(&dialog, &shell.chrome.window);
     let _ = dialog.activate_action(
         "preferences.show",
         Some(&(initial_page.name(), open_add_server, focus_download_queue).to_variant()),
@@ -327,7 +327,7 @@ fn present_preferences_dialog_with_page(
 }
 
 fn build_preferences_dialog(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     initial_page: PreferencesPageKind,
 ) {
@@ -793,7 +793,7 @@ mod search_tests {
 }
 
 fn mount_preferences_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     page_slots: &[(PreferencesPageKind, gtk::Box)],
     navigation_controls: &PreferencesNavigationControls,
@@ -817,7 +817,7 @@ fn mount_preferences_page(
 }
 
 fn build_preferences_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     navigation_controls: &PreferencesNavigationControls,
     credential_drafts: &ScrobblingCredentialDrafts,
@@ -839,7 +839,7 @@ fn build_preferences_page(
     }
 }
 fn general_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     navigation_controls: &PreferencesNavigationControls,
 ) -> gtk::Widget {
     let resource = "preferences/general.ui";
@@ -980,7 +980,7 @@ fn general_page(
             if !enabled {
                 start_minimized_row_for_tray.set_active(false);
             }
-            (tray_shell.effects)(crate::preferences::Effect::TrayEnabled(enabled));
+            tray_shell.set_tray_enabled(enabled);
         });
         #[cfg(not(target_os = "macos"))]
         let keep_running_shell = Rc::clone(shell);
@@ -989,9 +989,7 @@ fn general_page(
         #[cfg(not(target_os = "macos"))]
         keep_running_row.connect_active_notify(move |row| {
             let enabled = row.is_active();
-            (keep_running_shell.effects)(crate::preferences::Effect::KeepRunningAfterClose(
-                enabled,
-            ));
+            keep_running_shell.set_keep_running_after_close(enabled);
             if enabled {
                 tray_row_for_keep_running.set_active(true);
             }
@@ -1001,9 +999,7 @@ fn general_page(
         let start_minimized_shell = Rc::clone(shell);
         #[cfg(not(target_os = "macos"))]
         start_minimized_row.connect_active_notify(move |row| {
-            (start_minimized_shell.effects)(crate::preferences::Effect::StartMinimized(
-                row.is_active(),
-            ));
+            start_minimized_shell.set_start_minimized_enabled(row.is_active());
         });
         shell.settings.bind_switch(
             &type_to_search_row,
@@ -1012,11 +1008,11 @@ fn general_page(
             |_| {},
         );
         if shell
-            .state
+            .preferences
             .release_history
             .borrow()
             .automatic_updates_supported
-            || shell.state.preview_windows_updates
+            || shell.preferences.preview_windows_updates
         {
             shell.settings.bind_switch(
                 &automatic_updates_row,
@@ -1064,7 +1060,7 @@ fn general_page(
         |settings| &mut settings.application.notifications_enabled,
         move |settings| {
             if !settings.application.notifications_enabled {
-                (notifications_shell.effects)(crate::preferences::Effect::WithdrawNotification);
+                notifications_shell.withdraw_now_playing_notification();
             }
         },
     );
@@ -1076,7 +1072,7 @@ fn general_page(
     );
     activity::wrap_general(shell, &page, &activity_overview_row, navigation_controls)
 }
-fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
+fn populate_layout_group(shell: &Rc<Shell>, builder: &gtk::Builder) {
     let resource = "preferences/appearance.ui";
     crate::objects!(builder, resource, {
         layout_group: adw::PreferencesGroup,
@@ -1105,7 +1101,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                     settings.layout.default_profile.left_sidebar = mode;
                     true
                 });
-            (default_left_shell.effects)(crate::preferences::Effect::LayoutChanged);
+            default_left_shell.update_layout();
         },
     );
     group.add(&default_left_row);
@@ -1126,7 +1122,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                     settings.layout.sanitize();
                     true
                 });
-            (default_right_shell.effects)(crate::preferences::Effect::LayoutChanged);
+            default_right_shell.update_layout();
         },
     );
     group.add(&default_right_row);
@@ -1134,18 +1130,14 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
     lyrics_panel_row.set_active(settings.lyrics_panel_visible);
     let lyrics_panel_shell = Rc::clone(shell);
     lyrics_panel_row.connect_active_notify(move |row| {
-        (lyrics_panel_shell.effects)(crate::preferences::Effect::LyricsPanelVisible(
-            row.is_active(),
-        ));
+        lyrics_panel_shell.set_lyrics_panel_visible(row.is_active());
     });
     group.add(&lyrics_panel_row);
 
     visualizer_panel_row.set_active(settings.visualizer_panel_visible);
     let visualizer_panel_shell = Rc::clone(shell);
     visualizer_panel_row.connect_active_notify(move |row| {
-        (visualizer_panel_shell.effects)(crate::preferences::Effect::VisualizerPanelVisible(
-            row.is_active(),
-        ));
+        visualizer_panel_shell.set_visualizer_panel_visible(row.is_active());
     });
     group.add(&visualizer_panel_row);
 
@@ -1193,7 +1185,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                 settings.layout.sanitize();
                 true
             });
-        (threshold_shell.effects)(crate::preferences::Effect::LayoutChanged);
+        threshold_shell.update_layout();
     });
     group.add(&threshold_row);
 
@@ -1212,7 +1204,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                     settings.layout.narrow_profile.left_sidebar = mode;
                     true
                 });
-            (narrow_left_shell.effects)(crate::preferences::Effect::LayoutChanged);
+            narrow_left_shell.update_layout();
         },
     );
     narrow_left_row.set_sensitive(settings.layout.narrow_enabled);
@@ -1234,7 +1226,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                     settings.layout.sanitize();
                     true
                 });
-            (narrow_right_shell.effects)(crate::preferences::Effect::LayoutChanged);
+            narrow_right_shell.update_layout();
         },
     );
     narrow_right_row.set_sensitive(settings.layout.narrow_enabled);
@@ -1258,11 +1250,11 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
                 settings.layout.narrow_enabled = enabled;
                 true
             });
-        (narrow_shell.effects)(crate::preferences::Effect::LayoutChanged);
+        narrow_shell.update_layout();
     });
 }
 fn configure_sidebar_items_expander(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     pins: &adw::SwitchRow,
 ) {
@@ -1281,7 +1273,7 @@ fn configure_sidebar_items_expander(
             })
             .is_some()
         {
-            (pins_shell.effects)(crate::preferences::Effect::SidebarChanged);
+            pins_shell.rebuild_sidebar_navigation();
         }
     });
     let rows = Rc::new(RefCell::new(
@@ -1294,7 +1286,7 @@ fn configure_sidebar_items_expander(
     });
 }
 fn populate_sidebar_item_rows(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     rows: &Rc<RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
     pins: &adw::SwitchRow,
@@ -1317,7 +1309,7 @@ fn populate_sidebar_item_rows(
     expander.add_row(pins);
 }
 fn sidebar_item_row(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     rows: &Rc<RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
     pins: &adw::SwitchRow,
@@ -1335,7 +1327,7 @@ fn sidebar_item_row(
             .update_app_settings("sidebar setting", |settings| {
                 settings.sidebar.set_route_visible(entry.item, is_visible)
             });
-        (visible_shell.effects)(crate::preferences::Effect::SidebarChanged);
+        visible_shell.rebuild_sidebar_navigation();
         if let Some(expander) = visible_expander.upgrade() {
             populate_sidebar_item_rows(&visible_shell, &expander, &visible_rows, &visible_pins);
         }
@@ -1372,7 +1364,7 @@ fn sidebar_item_row(
             })
             .is_some();
         if changed {
-            (drop_shell.effects)(crate::preferences::Effect::SidebarChanged);
+            drop_shell.rebuild_sidebar_navigation();
             populate_sidebar_item_rows(&drop_shell, &expander, &rows, &drop_pins);
         }
         changed
@@ -1393,13 +1385,13 @@ fn sidebar_item_row(
         on_drop,
     )
 }
-fn move_sidebar_item(shell: &Rc<Preferences>, item: SidebarRouteItem, delta: isize) {
+fn move_sidebar_item(shell: &Rc<Shell>, item: SidebarRouteItem, delta: isize) {
     shell
         .settings
         .update_app_settings("sidebar setting", |settings| {
             settings.sidebar.move_route(item, delta)
         });
-    (shell.effects)(crate::preferences::Effect::SidebarChanged);
+    shell.rebuild_sidebar_navigation();
 }
 fn sidebar_route_item_subtitle(entry: &SidebarRouteItemSettings, position: usize) -> String {
     let state = visibility_position_subtitle(entry.visible, position);
@@ -1413,7 +1405,7 @@ fn sidebar_route_item_subtitle(entry: &SidebarRouteItemSettings, position: usize
     }
 }
 
-fn open_folder(shell: &Rc<Preferences>, folder: gtk::gio::File) {
+fn open_folder(shell: &Rc<Shell>, folder: gtk::gio::File) {
     let shell = Rc::clone(shell);
     gtk::glib::spawn_future_local(async move {
         let result = async {
@@ -1426,7 +1418,7 @@ fn open_folder(shell: &Rc<Preferences>, folder: gtk::gio::File) {
                 }
             }
             gtk::FileLauncher::new(Some(&folder))
-                .launch_future(Some(&shell.window))
+                .launch_future(Some(&shell.chrome.window))
                 .await
         }
         .await;

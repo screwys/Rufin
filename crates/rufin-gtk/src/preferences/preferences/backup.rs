@@ -1,4 +1,4 @@
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use localization::{msgid, tr, tr_with};
@@ -41,7 +41,7 @@ fn selected_contents(rows: &[adw::SwitchRow; 7]) -> BackupContents {
 }
 
 pub(super) fn group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     navigation: &adw::NavigationView,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> adw::PreferencesGroup {
@@ -234,7 +234,7 @@ pub(super) fn group(
         let (folder, summary, reset) = (folder.clone(), summary.clone(), reset.clone());
         glib::spawn_future_local(async move {
             if let Ok(selected) = chooser("folder_chooser")
-                .select_folder_future(Some(&shell.window))
+                .select_folder_future(Some(&shell.chrome.window))
                 .await
             {
                 if shell
@@ -326,14 +326,14 @@ pub(super) fn group(
     backup_group
 }
 
-fn export_dialog(shell: &Rc<Preferences>) {
+fn export_dialog(shell: &Rc<Shell>) {
     let shell = Rc::clone(shell);
     glib::spawn_future_local(async move {
         let Some((passphrase, _)) = options(&shell, false).await else {
             return;
         };
         let Ok(destination) = chooser("export_chooser")
-            .save_future(Some(&shell.window))
+            .save_future(Some(&shell.chrome.window))
             .await
         else {
             return;
@@ -375,14 +375,14 @@ fn export_dialog(shell: &Rc<Preferences>) {
     });
 }
 
-pub fn import_dialog(shell: &Rc<Preferences>) {
+pub fn import_dialog(shell: &Rc<Shell>) {
     let shell = Rc::clone(shell);
     glib::spawn_future_local(async move {
         let Some((passphrase, contents)) = options(&shell, true).await else {
             return;
         };
         let Ok(input) = chooser("restore_chooser")
-            .open_future(Some(&shell.window))
+            .open_future(Some(&shell.chrome.window))
             .await
         else {
             return;
@@ -422,7 +422,12 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
             confirm.set_body(&tr_with("Replace the selected contents and remove these configured sources?\n{sources}\nTheir retained user state and saved logins will remain unless selected.",
                 &[("sources", &preview.removed_sources.join("\n"))]));
         }
-        if confirm.choose_future(Some(&shell.window)).await.as_str() != "restore" {
+        if confirm
+            .choose_future(Some(&shell.chrome.window))
+            .await
+            .as_str()
+            != "restore"
+        {
             return;
         }
         let affected = preview.contents;
@@ -436,20 +441,20 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
             Ok(report) => {
                 shell.complete_add_server_dialog();
                 shell.settings.sync();
-                if let Some(dialog) = shell.state.active_dialog() {
+                if let Some(dialog) = shell.preferences.active_dialog() {
                     dialog.close();
                 }
                 if affected.settings {
                     shell.appearance.apply(&shell.settings.current.borrow());
-                    (shell.effects)(crate::preferences::Effect::LayoutChanged);
-                    (shell.effects)(crate::preferences::Effect::PrivateModeChanged);
-                    (shell.effects)(crate::preferences::Effect::MediaControlsChanged);
+                    shell.update_layout();
+                    shell.refresh_tray_private_mode();
+                    shell.update_media_controls();
                     shell.player_ui.render_lyrics_panel();
                 }
                 if affected.settings || affected.playlists {
-                    (shell.effects)(crate::preferences::Effect::SidebarChanged);
+                    shell.rebuild_sidebar_navigation();
                 }
-                (shell.effects)(crate::preferences::Effect::ReloadCatalog);
+                shell.render_current_route();
                 if affected.queue {
                     shell.player_ui.render_queue_panel();
                 }
@@ -469,7 +474,7 @@ pub fn import_dialog(shell: &Rc<Preferences>) {
         }
     });
 }
-async fn options(shell: &Preferences, importing: bool) -> Option<(Option<String>, BackupContents)> {
+async fn options(shell: &Shell, importing: bool) -> Option<(Option<String>, BackupContents)> {
     let resource = "preferences/dialogs/backup.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -508,7 +513,12 @@ async fn options(shell: &Preferences, importing: bool) -> Option<(Option<String>
         });
         (export_options, export_password)
     };
-    if options.choose_future(Some(&shell.window)).await.as_str() != "continue" {
+    if options
+        .choose_future(Some(&shell.chrome.window))
+        .await
+        .as_str()
+        != "continue"
+    {
         return None;
     }
     Some((
@@ -517,7 +527,7 @@ async fn options(shell: &Preferences, importing: bool) -> Option<(Option<String>
         selected_contents(&rows),
     ))
 }
-fn feedback(shell: &Preferences, result: Result<(), String>, success: &str) {
+fn feedback(shell: &Shell, result: Result<(), String>, success: &str) {
     match result {
         Ok(()) => shell.control_feedback.show_feedback_toast(tr(success)),
         Err(error) => shell

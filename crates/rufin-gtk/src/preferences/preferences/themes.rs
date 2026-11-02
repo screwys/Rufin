@@ -1,19 +1,19 @@
-use crate::preferences::{
-    AccentPreference, Preferences, ThemePreference, appearance::ApplicationAppearance,
-};
+use crate::preferences::appearance::ApplicationAppearance;
+use crate::shell::shell::Shell;
 use adw::prelude::*;
 use gtk::glib;
+use rufin_core::settings::{AccentPreference, ThemePreference};
 use rufin_core::themes::Accent;
 use std::rc::Rc;
 
-pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+pub(super) fn page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let resource = "preferences/theme.ui";
     let builder = crate::ui_resource::builder(resource);
     bind(shell, &builder, resource);
     crate::ui_resource::object(&builder, resource, "theme_page")
 }
 
-pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &str) {
+pub(super) fn bind(shell: &Rc<Shell>, builder: &gtk::Builder, resource: &str) {
     crate::objects!(builder, resource, {
         theme_grid: gtk::FlowBox, theme_errors: gtk::Label,
         themes_folder: gtk::Button, themes_reload: gtk::Button,
@@ -95,7 +95,7 @@ pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &s
 }
 
 fn populate(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     grid: &gtk::FlowBox,
     standard_accent: &gtk::SingleSelection,
     names: &gtk::StringList,
@@ -140,7 +140,7 @@ fn populate(
                 let file = file.clone();
                 gtk::glib::spawn_future_local(async move {
                     if let Err(error) = gtk::FileLauncher::new(Some(&file))
-                        .launch_future(Some(&shell.window))
+                        .launch_future(Some(&shell.chrome.window))
                         .await
                     {
                         if !error.matches(gtk::DialogError::Dismissed)

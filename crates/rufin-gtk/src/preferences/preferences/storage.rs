@@ -5,7 +5,7 @@ use rufin_core::runtime::source::{SourceOperation, source_download_text};
 use rufin_core::runtime::{CacheKind, CacheUsage, ProductHandles, StorageSummary};
 use sources::SourceProgressStage;
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 
 struct CacheRow {
     kind: CacheKind,
@@ -26,7 +26,7 @@ struct StorageView {
 }
 
 pub(super) fn page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> gtk::Widget {
     let resource = "preferences/storage.ui";
@@ -179,9 +179,8 @@ pub(super) fn page(
                 match result {
                     Ok(request) => {
                         if let Some(shell) = weak.upgrade() {
-                            (shell.effects)(crate::preferences::Effect::ResetStorage(Box::new(
-                                request,
-                            )));
+                            shell.storage_reset.replace(Some(Ok(request)));
+                            shell.request_quit("storage reset");
                         }
                     }
                     Err(message) => {

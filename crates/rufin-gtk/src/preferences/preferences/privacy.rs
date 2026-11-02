@@ -5,10 +5,10 @@ use adw::prelude::*;
 use localization::tr;
 use rufin_core::settings::SecretStorageMode;
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 
 pub(super) fn page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     navigation_controls: &super::PreferencesNavigationControls,
 ) -> gtk::Widget {
@@ -44,7 +44,7 @@ pub(super) fn page(
         .collect::<Vec<_>>();
     secret_storage_row.set_model(Some(&gtk::StringList::new(&secret_storage_refs)));
     shell
-        .state
+        .preferences
         .secret_storage_row
         .set(Some(&secret_storage_row));
     secret_storage_row.set_selected(secret_storage_mode_index(
@@ -84,7 +84,7 @@ pub(super) fn page(
         let shell = Rc::clone(&secret_storage_shell);
         let guard = Rc::clone(&secret_storage_guard_for_row);
         let preferences_dialog = preferences_dialog_for_secret_storage.clone();
-        let window = shell.window.clone();
+        let window = shell.chrome.window.clone();
         confirm.choose(
             Some(&window),
             None::<&gtk::gio::Cancellable>,

@@ -1,6 +1,6 @@
 use super::Shell;
-use crate::shell::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, sanitized_window_size};
 use adw::prelude::*;
+use rufin_core::settings::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, sanitized_window_size};
 
 pub(crate) fn initial_window_size(width: Option<i32>, height: Option<i32>) -> (i32, i32) {
     sanitized_window_size(width, height).unwrap_or((DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT))

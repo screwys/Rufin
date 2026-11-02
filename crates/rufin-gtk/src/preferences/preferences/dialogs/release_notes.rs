@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use crate::widgets::layout::{large_popup_content_height, large_popup_content_width};
 use crate::widgets::popup::present_light_dismiss_dialog;
 use adw::prelude::*;
@@ -38,7 +38,7 @@ struct CivilDate {
     day: u32,
 }
 
-pub fn check_for_release_update(shell: &Rc<Preferences>) {
+pub fn check_for_release_update(shell: &Rc<Shell>) {
     shell.products.release_updates.check_and_update();
 }
 
@@ -639,15 +639,15 @@ fn populate_release_notes_view(
     view.selection_handler.replace(Some(handler));
 }
 
-fn refresh_open_release_notes(shell: &Preferences) {
-    let view = shell.state.release_history_view.borrow();
+fn refresh_open_release_notes(shell: &Shell) {
+    let view = shell.preferences.release_history_view.borrow();
     let Some(view) = view.as_ref() else {
         return;
     };
-    let history = shell.state.release_history.borrow().clone();
-    let updating_version = shell.state.release_updating.borrow().clone();
+    let history = shell.preferences.release_history.borrow().clone();
+    let updating_version = shell.preferences.release_updating.borrow().clone();
     populate_release_notes_view(
-        &shell.window,
+        &shell.chrome.window,
         view,
         &history,
         updating_version.as_deref(),
@@ -655,7 +655,7 @@ fn refresh_open_release_notes(shell: &Preferences) {
     );
 }
 
-pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
+pub fn apply_release_update(shell: &Rc<Shell>, update: ReleaseUpdate) {
     match update {
         ReleaseUpdate::Refreshed {
             history,
@@ -663,7 +663,7 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
         } => {
             let update_available = history.available_version.is_some();
             let changed = {
-                let mut current = shell.state.release_history.borrow_mut();
+                let mut current = shell.preferences.release_history.borrow_mut();
                 if *current == history {
                     false
                 } else {
@@ -685,8 +685,8 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
             toast.set_timeout(0);
             toast.set_button_label(Some(&tr("View")));
             toast.set_action_name(Some("win.show-release-notes"));
-            shell.toast_overlay.add_toast(toast.clone());
-            *shell.state.release_notification_toast.borrow_mut() = Some(toast);
+            shell.chrome.toast_overlay.add_toast(toast.clone());
+            *shell.preferences.release_notification_toast.borrow_mut() = Some(toast);
             if let Err(error) = shell.products.release_updates.mark_seen(version) {
                 warn!(%error, "failed to record the shown release notification");
             }
@@ -697,7 +697,7 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
                 "Updating Rufin to {version}...",
                 &[("version", version.as_str())],
             ));
-            *shell.state.release_updating.borrow_mut() = Some(version);
+            *shell.preferences.release_updating.borrow_mut() = Some(version);
             refresh_open_release_notes(shell);
         }
         ReleaseUpdate::Ready { version } => {
@@ -709,8 +709,8 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
             crate::objects!(builder, resource, { toast: adw::Toast });
             let release_updates = shell.products.release_updates.clone();
             toast.connect_button_clicked(move |_| release_updates.update(version.clone()));
-            shell.toast_overlay.add_toast(toast.clone());
-            *shell.state.release_notification_toast.borrow_mut() = Some(toast);
+            shell.chrome.toast_overlay.add_toast(toast.clone());
+            *shell.preferences.release_notification_toast.borrow_mut() = Some(toast);
         }
         ReleaseUpdate::Updated {
             version,
@@ -719,7 +719,7 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
             dismiss_release_notification(shell);
             clear_updating_version(shell, &version);
             {
-                let mut history = shell.state.release_history.borrow_mut();
+                let mut history = shell.preferences.release_history.borrow_mut();
                 history.installed_version = version.clone();
                 history.available_version = None;
             }
@@ -749,36 +749,41 @@ pub fn apply_release_update(shell: &Rc<Preferences>, update: ReleaseUpdate) {
         }
         ReleaseUpdate::Restarting { version } => {
             dismiss_release_notification(shell);
-            *shell.state.release_updating.borrow_mut() = Some(version);
-            (shell.effects)(crate::preferences::Effect::Quit("update restart"));
+            *shell.preferences.release_updating.borrow_mut() = Some(version);
+            shell.request_quit("update restart");
         }
     }
 }
 
-pub fn dismiss_release_notification(shell: &Preferences) {
-    if let Some(toast) = shell.state.release_notification_toast.borrow_mut().take() {
+pub fn dismiss_release_notification(shell: &Shell) {
+    if let Some(toast) = shell
+        .preferences
+        .release_notification_toast
+        .borrow_mut()
+        .take()
+    {
         toast.dismiss();
     }
 }
 
-fn clear_updating_version(shell: &Preferences, version: &str) {
-    let mut updating = shell.state.release_updating.borrow_mut();
+fn clear_updating_version(shell: &Shell, version: &str) {
+    let mut updating = shell.preferences.release_updating.borrow_mut();
     if updating.as_deref() == Some(version) {
         updating.take();
     }
 }
 
-impl Preferences {
+impl Shell {
     pub fn present_release_notes(&self) {
-        let history = self.state.release_history.borrow().clone();
-        let updating_version = self.state.release_updating.borrow().clone();
+        let history = self.preferences.release_history.borrow().clone();
+        let updating_version = self.preferences.release_updating.borrow().clone();
         let view = present_release_notes_dialog(
-            &self.window,
+            &self.chrome.window,
             &history,
             updating_version.as_deref(),
             &self.products.release_updates,
         );
-        self.state.release_history_view.replace(Some(view));
+        self.preferences.release_history_view.replace(Some(view));
     }
 }
 

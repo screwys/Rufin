@@ -4,9 +4,9 @@ use adw::prelude::*;
 use localization::tr;
 use rufin_core::settings::ControllerSettings;
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 
-pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+pub(super) fn page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let resource = "preferences/controller.ui";
     let builder = crate::ui_resource::builder(resource);
     let page = crate::ui_resource::object(&builder, resource, "controller_page");
@@ -15,7 +15,7 @@ pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 }
 
 pub(super) fn bind(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     page: &adw::PreferencesPage,
     builder: &gtk::Builder,
     resource: &str,
@@ -54,7 +54,7 @@ pub(super) fn bind(
             let builder = crate::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
                 crate::ui_resource::object(&builder, resource, "controller_regenerate");
-            if dialog.choose_future(Some(&shell.window)).await != "regenerate" {
+            if dialog.choose_future(Some(&shell.chrome.window)).await != "regenerate" {
                 if let Some(button) = button.upgrade() {
                     button.set_sensitive(true);
                 }
@@ -109,7 +109,7 @@ pub(super) fn bind(
     });
 }
 
-pub fn bind_popover(shell: &Rc<Preferences>, button: &gtk::MenuButton) {
+pub fn bind_popover(shell: &Rc<Shell>, button: &gtk::MenuButton) {
     let weak = Rc::downgrade(shell);
     button.set_create_popup_func(move |button| {
         let Some(shell) = weak.upgrade() else {
@@ -143,7 +143,7 @@ pub fn bind_popover(shell: &Rc<Preferences>, button: &gtk::MenuButton) {
 }
 
 fn bind_controls(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     surface: &gtk::Widget,
     builder: &gtk::Builder,
     resource: &str,
@@ -187,7 +187,7 @@ fn bind_controls(
         let link = link.to_owned();
         gtk::glib::spawn_future_local(async move {
             if let Err(error) = gtk::UriLauncher::new(&link)
-                .launch_future(Some(&shell.window))
+                .launch_future(Some(&shell.chrome.window))
                 .await
             {
                 status.set_subtitle(&error.to_string());
@@ -245,7 +245,7 @@ fn bind_controls(
 }
 
 fn bind_address_action(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     status: &adw::ActionRow,
     button: &gtk::Button,
     action: impl Fn(&str) + 'static,
@@ -343,7 +343,7 @@ fn save(
     }
 }
 
-impl Preferences {
+impl Shell {
     pub fn bind_controller_appearance(self: &Rc<Self>) {
         self.publish_controller_appearance();
         let weak = Rc::downgrade(self);
@@ -367,7 +367,7 @@ impl Preferences {
         // Resolve CSS variables in the window's theme, rather than legacy named colors.
         let sample = gtk::Label::new(None);
         sample.set_visible(false);
-        self.app_root_overlay.add_overlay(&sample);
+        self.chrome.app_root_overlay.add_overlay(&sample);
         let provider = gtk::CssProvider::new();
         sample
             .style_context()
@@ -384,12 +384,12 @@ impl Preferences {
         let dark =
             background.red() * 0.2126 + background.green() * 0.7152 + background.blue() * 0.0722
                 < 0.5;
-        self.app_root_overlay.remove_overlay(&sample);
+        self.chrome.app_root_overlay.remove_overlay(&sample);
         colors.insert(
             "color-scheme".into(),
             if dark { "dark" } else { "light" }.into(),
         );
-        if let Some(font) = self.window.pango_context().font_description()
+        if let Some(font) = self.chrome.window.pango_context().font_description()
             && let Some(family) = font.family()
         {
             colors.insert("font-family".into(), format!("{family:?}, system-ui"));

@@ -7,9 +7,9 @@ use gtk::{gio, glib};
 use playback::PlaybackTransitionMode;
 use rufin_core::playback::QueuePlacement;
 
+use crate::preferences::preferences::present_preferences_dialog;
+use crate::preferences::preferences::source::selector::install_source_menu_actions;
 use crate::shell::player::play_saved_random;
-use crate::shell::preferences::present_preferences_dialog;
-use crate::shell::preferences::source::selector::install_source_menu_actions;
 use crate::widgets::popup::present_light_dismiss_dialog;
 #[cfg(any(target_os = "macos", test))]
 use localization::tr_with;
@@ -94,7 +94,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         let shell = Rc::clone(shell);
         move || {
             let enabled = !shell.settings.current.borrow().application.private_mode;
-            shell.preferences.set_private_mode(enabled);
+            shell.set_private_mode(enabled);
             if shell.settings.current.borrow().application.private_mode == enabled {
                 shell
                     .control_feedback
@@ -411,7 +411,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     let release_notes_accels = &["<Control>h"][..];
     add_window_action(shell, "show-release-notes", release_notes_accels, {
         let shell = Rc::clone(shell);
-        move || shell.preferences.present_release_notes()
+        move || shell.present_release_notes()
     });
 
     #[cfg(target_os = "macos")]
@@ -451,7 +451,7 @@ fn install_application_actions(shell: &Rc<Shell>) {
     let preferences_shell = Rc::downgrade(shell);
     preferences.connect_activate(move |_, _| {
         if let Some(shell) = preferences_shell.upgrade() {
-            present_preferences_dialog(&shell.preferences);
+            present_preferences_dialog(&shell);
         }
     });
     shell.chrome.application.add_action(&preferences);

@@ -47,7 +47,7 @@ struct PlexFlow {
 }
 
 pub(super) fn setup_flow(
-    _: &Rc<Preferences>,
+    _: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     Rc::new(PlexFlow {
@@ -56,7 +56,7 @@ pub(super) fn setup_flow(
     })
 }
 
-fn remount(shell: &std::rc::Weak<Preferences>) {
+fn remount(shell: &std::rc::Weak<Shell>) {
     if let Some(shell) = shell.upgrade()
         && let Some(context) = shell.mounted_add_server_context()
     {
@@ -65,7 +65,7 @@ fn remount(shell: &std::rc::Weak<Preferences>) {
 }
 
 impl SourceSetupFlow for PlexFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         shell.select_discovery_provider(sources::DiscoveryProvider::Plex);
         shell.start_server_discovery_once();
         let (scroller, content, _, status) = setup_scaffold(shell, context, self.presentation);
@@ -485,7 +485,7 @@ fn bind_connection(
 }
 
 pub(super) fn settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     _: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {

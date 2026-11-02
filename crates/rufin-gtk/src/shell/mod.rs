@@ -5,12 +5,9 @@ mod application;
 mod downloads;
 mod favorites;
 pub(crate) mod player;
-pub(crate) mod preferences;
 mod ratings;
 pub(crate) mod shell;
 
 pub use application::{
     ApplicationExit, run_application, run_application_after_update, run_startup_error_application,
 };
-
-use rufin_core::settings::*;

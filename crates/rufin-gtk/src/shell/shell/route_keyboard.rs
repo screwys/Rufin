@@ -43,7 +43,7 @@ impl Shell {
     }
 
     fn transient_route_input_active(&self) -> bool {
-        self.preferences.state.active_dialog().is_some()
+        self.preferences.active_dialog().is_some()
             || self.source.add_server.borrow().is_some()
             || self
                 .player_ui

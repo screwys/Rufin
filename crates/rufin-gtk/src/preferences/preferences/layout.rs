@@ -1,6 +1,6 @@
 use crate::widgets::forms::selection_row;
 pub fn populate_home_block_rows(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     rows: &Rc<std::cell::RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
 ) {
@@ -280,14 +280,14 @@ pub fn discord_link_from_index(index: u32) -> LinkType {
 }
 use std::rc::Rc;
 
-use crate::preferences::Preferences;
-use crate::preferences::{LeftSidebarMode, RightSidebarMode};
+use crate::shell::shell::Shell;
 use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::{CompositeTemplate, TemplateChild, glib};
 use localization::tr;
 use rufin_core::presence::{DisplayType, LinkType};
 use rufin_core::settings::HomeBlockKind;
+use rufin_core::settings::{LeftSidebarMode, RightSidebarMode};
 
 mod reorder_row_imp {
     use super::*;

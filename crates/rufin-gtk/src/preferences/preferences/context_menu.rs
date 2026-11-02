@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use rufin_core::settings::ContextMenuItem;
 
-pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) {
+pub fn configure_context_menus(shell: &Rc<Shell>, builder: &gtk::Builder) {
     let resource = "preferences/appearance.ui";
     for (item, id) in [
         (ContextMenuItem::Play, "context_menu_play"),

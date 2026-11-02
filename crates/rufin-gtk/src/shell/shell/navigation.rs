@@ -19,7 +19,6 @@ use crate::widgets::selection::collection_play_request;
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::PlayRequest;
 
-use crate::shell::{SidebarPin, SidebarRouteItem};
 use crate::widgets::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
     replace_native_menu_checkmarks, show_native_menu_icons,
@@ -31,6 +30,7 @@ use library::SmartPlaylistRow;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::playlists::smart_playlist_display_name;
 use rufin_core::route::{CollectionCategory, Route};
+use rufin_core::settings::{SidebarPin, SidebarRouteItem};
 use tracing::warn;
 
 use super::{Shell, layout::ResolvedLeftSidebarMode, route::RouteStack};
@@ -1584,7 +1584,7 @@ pub(crate) fn sidebar_route_at_position(shell: &Shell, position: usize) -> Optio
 }
 
 fn sidebar_route_at_position_in(
-    route_items: &[crate::shell::SidebarRouteItemSettings],
+    route_items: &[rufin_core::settings::SidebarRouteItemSettings],
     position: usize,
 ) -> Option<Route> {
     let item = route_items
@@ -1671,7 +1671,7 @@ mod tests {
     fn sidebar_position_uses_visible_configured_route_order() {
         let mut items = rufin_core::settings::SidebarRouteItem::all()
             .into_iter()
-            .map(|item| crate::shell::SidebarRouteItemSettings {
+            .map(|item| rufin_core::settings::SidebarRouteItemSettings {
                 item,
                 visible: true,
             })

@@ -26,7 +26,7 @@ use super::{
     populate_layout_group, show_discord_flatpak_help,
 };
 
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use adw::prelude::*;
 use localization::{tr, tr_with};
 use playback::StreamQuality;
@@ -39,7 +39,7 @@ use rufin_core::runtime::{ScrobblingConnection, ScrobblingConnectionEvent, Scrob
 pub(super) type ScrobblingCredentialDrafts = Rc<RefCell<ScrobblingPreferences>>;
 
 pub fn scrobbling_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     drafts: &ScrobblingCredentialDrafts,
 ) -> adw::PreferencesPage {
     let resource = "preferences/integrations.ui";
@@ -98,7 +98,7 @@ pub fn scrobbling_page(
                 })
                 .is_some()
             {
-                (external_links_shell.effects)(crate::preferences::Effect::CatalogChanged);
+                external_links_shell.reconcile_mounted_route();
             }
         });
         let lastfm_links_shell = Rc::clone(shell);
@@ -106,21 +106,21 @@ pub fn scrobbling_page(
             &lastfm_links_row,
             "Last.fm site links setting",
             |settings| &mut settings.application.external_site_links.lastfm,
-            move |_| (lastfm_links_shell.effects)(crate::preferences::Effect::CatalogChanged),
+            move |_| lastfm_links_shell.reconcile_mounted_route(),
         );
         let musicbrainz_links_shell = Rc::clone(shell);
         shell.settings.bind_switch(
             &musicbrainz_links_row,
             "MusicBrainz site links setting",
             |settings| &mut settings.application.external_site_links.musicbrainz,
-            move |_| (musicbrainz_links_shell.effects)(crate::preferences::Effect::CatalogChanged),
+            move |_| musicbrainz_links_shell.reconcile_mounted_route(),
         );
         let server_links_shell = Rc::clone(shell);
         shell.settings.bind_switch(
             &server_links_row,
             "server site links setting",
             |settings| &mut settings.application.external_site_links.server,
-            move |_| (server_links_shell.effects)(crate::preferences::Effect::CatalogChanged),
+            move |_| server_links_shell.reconcile_mounted_route(),
         );
         presence_row.set_active(settings.rich_presence.enabled);
         let presence_shell = Rc::clone(shell);
@@ -441,7 +441,7 @@ pub fn scrobbling_page(
 
 fn bind_scrobbling_switch(
     row: &adw::SwitchRow,
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     warning_action: &'static str,
     update: impl Fn(&mut ScrobblingPreferences, bool) -> bool + 'static,
 ) {
@@ -484,7 +484,7 @@ pub fn inline_link_markup(before: &str, url: &str, label: &str, after: &str) -> 
     format!("{before} <a href=\"{url}\">{label}</a>{after}")
 }
 
-fn selected_source_is_local(shell: &Preferences) -> bool {
+fn selected_source_is_local(shell: &Shell) -> bool {
     let configured = shell.source.configured.borrow();
     let Some(selected) = configured.selected_source_id.as_ref() else {
         return false;
@@ -496,7 +496,7 @@ fn selected_source_is_local(shell: &Preferences) -> bool {
         .is_some_and(|source| source.kind == sources::LOCAL_SOURCE_ID)
 }
 async fn connect_scrobbling(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     request: ScrobblingConnection,
     open_error: &'static str,
     connection_error: String,
@@ -507,7 +507,7 @@ async fn connect_scrobbling(
         match event {
             ScrobblingConnectionEvent::OpenUrl { url, opened } => {
                 let launcher = gtk::UriLauncher::new(&url);
-                match launcher.launch_future(Some(&shell.window)).await {
+                match launcher.launch_future(Some(&shell.chrome.window)).await {
                     Ok(()) => {
                         opened.complete(None).await;
                     }
@@ -530,7 +530,7 @@ async fn connect_scrobbling(
     }
     Err(connection_error)
 }
-pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let resource = "preferences/playback.ui";
     let builder = crate::ui_resource::builder(resource);
     let page: adw::PreferencesPage =
@@ -719,7 +719,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
             let scope = scope.clone();
             let target = target.clone();
             let write = write.clone();
-            let window = shell.window.clone();
+            let window = shell.chrome.window.clone();
             confirm.choose(
                 Some(&window),
                 None::<&gtk::gio::Cancellable>,
@@ -802,7 +802,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     page
 }
 
-pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+pub fn equalizer_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let resource = "preferences/playback.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -814,7 +814,7 @@ pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 
     equalizer_page
 }
-pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+pub fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let resource = "preferences/appearance.ui";
     let builder = crate::ui_resource::builder(resource);
     let page: adw::PreferencesPage =

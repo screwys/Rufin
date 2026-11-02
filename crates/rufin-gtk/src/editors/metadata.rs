@@ -4,10 +4,13 @@ use std::{
 };
 
 use adw::prelude::*;
-use localization::{tr, tr_with};
+use localization::{msgid, tr, tr_with};
 
+use crate::shell::shell::Shell;
 use crate::widgets::field_layout::{compact_field_row_group, style_compact_field_row};
 use crate::widgets::layout::large_popup_content_width;
+use rufin_core::metadata::MetadataItemId;
+use sources::SourceMetadataError;
 use std::sync::Arc;
 
 const EDITOR_WIDTH: i32 = 850;
@@ -52,7 +55,7 @@ struct Editor {
     lock_group: adw::PreferencesGroup,
 }
 
-pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
+fn metadata_error_dialog(message: &str) -> adw::Dialog {
     let resource = "preferences/dialogs/metadata.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -71,7 +74,7 @@ struct MetadataView {
     editor: Rc<Editor>,
 }
 
-pub fn build_dialog(model: Arc<MetadataEditor>, runtime: tokio::runtime::Handle) -> adw::Dialog {
+fn build_dialog(model: Arc<MetadataEditor>, runtime: tokio::runtime::Handle) -> adw::Dialog {
     let (dialog, view) = build_editor_view(model, None, None, None, runtime);
     dialog.set_child(Some(&view.content));
     let owner = RefCell::new(Some(view));
@@ -637,4 +640,186 @@ impl Editor {
             .iter()
             .any(|candidate| candidate.key == field && candidate.writable)
     }
+}
+
+pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
+    let source = shell.products.source.clone();
+    let selected = item.clone();
+    if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
+        load.abort();
+    }
+    let weak_shell = Rc::downgrade(shell);
+    let load = gtk::glib::spawn_future_local(async move {
+        let editor = MetadataEditor::open(source, selected).await;
+        let Some(shell) = weak_shell.upgrade() else {
+            return;
+        };
+        match editor {
+            Ok(editor) => {
+                let dialog = if let Some(batch) = editor.track_batch() {
+                    let weak = Rc::downgrade(&shell);
+                    let on_error = Rc::new(move |error, retry| {
+                        if let Some(shell) = weak.upgrade() {
+                            track_metadata_error(&shell, retry, error);
+                        }
+                    });
+                    build_batch_dialog(batch, shell.products.runtime.clone(), on_error)
+                } else {
+                    build_dialog(editor, shell.products.runtime.clone())
+                };
+                shell.present_selected_dialog(&dialog);
+            }
+            Err(SourceMetadataError::LocalAccessRequired {
+                source_id,
+                source_path,
+            }) => {
+                let Some(selected) = shell
+                    .selected_library()
+                    .as_deref()
+                    .filter(|selected| selected.source_id == source_id)
+                    .cloned()
+                else {
+                    shell
+                        .control_feedback
+                        .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+                    return;
+                };
+                let retry_shell = Rc::downgrade(&shell);
+                present_local_access_recovery(
+                    &shell,
+                    selected,
+                    &source_path,
+                    Rc::new(move || {
+                        if let Some(shell) = retry_shell.upgrade() {
+                            present_metadata_dialog(&shell, item.clone());
+                        }
+                    }),
+                );
+            }
+            Err(SourceMetadataError::Unavailable) => shell
+                .control_feedback
+                .show_feedback_toast(tr(msgid("Metadata editing is no longer available"))),
+            Err(error) => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
+        }
+    });
+    shell.selected_ui.metadata_load.replace(Some(load));
+}
+pub(crate) fn present_track_metadata_dialog(
+    shell: &Rc<Shell>,
+    selection: library::MemberSelection,
+) {
+    let source = shell.products.source.clone();
+    if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
+        load.abort();
+    }
+    let weak = Rc::downgrade(shell);
+    let retry_selection = selection.clone();
+    let load = gtk::glib::spawn_future_local(async move {
+        let result =
+            rufin_core::metadata::MetadataBatch::open(source, std::sync::Arc::new(selection)).await;
+        let Some(shell) = weak.upgrade() else { return };
+        match result {
+            Ok(batch) => {
+                let weak = Rc::downgrade(&shell);
+                let on_error = Rc::new(move |error, retry| {
+                    if let Some(shell) = weak.upgrade() {
+                        track_metadata_error(&shell, retry, error);
+                    }
+                });
+                shell.present_selected_dialog(&build_batch_dialog(
+                    batch,
+                    shell.products.runtime.clone(),
+                    on_error,
+                ));
+            }
+            Err(error) => {
+                let weak = Rc::downgrade(&shell);
+                track_metadata_error(
+                    &shell,
+                    Rc::new(move || {
+                        if let Some(shell) = weak.upgrade() {
+                            present_track_metadata_dialog(&shell, retry_selection.clone());
+                        }
+                    }),
+                    error,
+                );
+            }
+        }
+    });
+    shell.selected_ui.metadata_load.replace(Some(load));
+}
+
+fn track_metadata_error(shell: &Rc<Shell>, retry: Rc<dyn Fn()>, error: SourceMetadataError) {
+    match error {
+        SourceMetadataError::LocalAccessRequired {
+            source_id,
+            source_path,
+        } => {
+            if let Some(selected) = shell
+                .selected_library()
+                .as_deref()
+                .filter(|selected| selected.source_id == source_id)
+                .cloned()
+            {
+                present_local_access_recovery(shell, selected, &source_path, retry);
+            } else {
+                shell
+                    .control_feedback
+                    .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+            }
+        }
+        error => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
+    }
+}
+
+fn present_local_access_recovery(
+    shell: &Rc<Shell>,
+    selected: rufin_core::runtime::SelectedLibrary,
+    source_path: &str,
+    on_success: Rc<dyn Fn()>,
+) {
+    let resource = "preferences/dialogs/metadata.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, {
+        recovery_dialog: adw::Dialog,
+        recovery_header: adw::HeaderBar,
+        recovery_content: gtk::Box,
+    });
+    crate::widgets::controls::configure_dialog_header(&recovery_header);
+    recovery_dialog.set_content_width(large_popup_content_width(650));
+    let retry_requested = Rc::new(Cell::new(false));
+    recovery_dialog.connect_closed({
+        let retry_requested = Rc::clone(&retry_requested);
+        move |_| {
+            if retry_requested.replace(false) {
+                let on_success = Rc::clone(&on_success);
+                gtk::glib::idle_add_local_once(move || on_success());
+            }
+        }
+    });
+    let close = recovery_dialog.downgrade();
+    let retry: Rc<dyn Fn()> = Rc::new(move || {
+        retry_requested.set(true);
+        if let Some(dialog) = close.upgrade() {
+            dialog.close();
+        }
+    });
+    let access = shell
+        .source
+        .configured
+        .borrow()
+        .local_access
+        .iter()
+        .find(|summary| summary.source_id == selected.source_id)
+        .and_then(|summary| summary.access.clone());
+    crate::widgets::local_access::mount_metadata_local_access_mapping(
+        &shell.products.source,
+        &shell.chrome.window,
+        &selected.source_id,
+        access.as_ref(),
+        source_path,
+        &recovery_content,
+        retry,
+    );
+    shell.present_selected_dialog(&recovery_dialog);
 }

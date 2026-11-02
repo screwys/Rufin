@@ -3,12 +3,13 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use crate::shell::shell::Shell;
 use crate::widgets::controls::REMOVE_ICON;
 use crate::widgets::layout::large_popup_content_width;
 use ::library::{
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRule,
     SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
 };
 use adw::prelude::*;
 use localization::{msgid, tr};
@@ -79,12 +80,6 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
 
 type RerenderSlot = Rc<RefCell<Option<Weak<dyn Fn()>>>>;
 
-#[derive(Clone, Default)]
-pub struct RuleValueSuggestions {
-    pub genres: Vec<String>,
-    pub moods: Vec<String>,
-}
-
 #[derive(Clone)]
 struct SmartPlaylistEditor {
     name: gtk::Entry,
@@ -117,13 +112,15 @@ struct SmartPlaylistDialog {
     period_control: gtk::Box,
 }
 
-impl RuleValueSuggestions {
-    fn for_field(&self, field: SmartPlaylistRuleField) -> Option<&[String]> {
-        match field {
-            SmartPlaylistRuleField::Genre => Some(&self.genres),
-            SmartPlaylistRuleField::Mood => Some(&self.moods),
-            _ => None,
-        }
+/// The values the library offers for a rule field, where it offers any.
+fn suggestions_for(
+    suggestions: &SmartPlaylistValueSuggestions,
+    field: SmartPlaylistRuleField,
+) -> Option<&[String]> {
+    match field {
+        SmartPlaylistRuleField::Genre => Some(&suggestions.genres),
+        SmartPlaylistRuleField::Mood => Some(&suggestions.moods),
+        _ => None,
     }
 }
 
@@ -276,7 +273,7 @@ fn smart_playlist_dialog(
 fn configure_smart_playlist_editor(
     surface: &SmartPlaylistDialog,
     templates: &[SmartPlaylistTemplate],
-    value_suggestions: RuleValueSuggestions,
+    value_suggestions: SmartPlaylistValueSuggestions,
 ) {
     let editor = &surface.editor;
     if !templates.is_empty() {
@@ -417,7 +414,7 @@ fn connect_add_rule(
 fn append_rule_rows(
     parent: &gtk::Box,
     rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
-    value_suggestions: Rc<RuleValueSuggestions>,
+    value_suggestions: Rc<SmartPlaylistValueSuggestions>,
     rerender: Rc<dyn Fn()>,
 ) {
     let current_rules = rules.borrow().clone();
@@ -437,7 +434,7 @@ fn append_rule_rows(
 fn append_rule_row(
     parent: &gtk::Box,
     rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
-    value_suggestions: Rc<RuleValueSuggestions>,
+    value_suggestions: Rc<SmartPlaylistValueSuggestions>,
     index: usize,
     rule: SmartPlaylistRule,
     rerender: Rc<dyn Fn()>,
@@ -511,7 +508,7 @@ fn append_rule_row(
 fn append_value_editor(
     container: &gtk::Box,
     rules: Rc<RefCell<Vec<SmartPlaylistRule>>>,
-    value_suggestions: &RuleValueSuggestions,
+    value_suggestions: &SmartPlaylistValueSuggestions,
     index: usize,
     rule: &SmartPlaylistRule,
 ) {
@@ -526,7 +523,7 @@ fn append_value_editor(
             container.append(&label);
         }
         SmartPlaylistRuleValueKind::Text => {
-            if let Some(suggestions) = value_suggestions.for_field(rule.field)
+            if let Some(suggestions) = suggestions_for(&value_suggestions, rule.field)
                 && !suggestions.is_empty()
             {
                 let (labels, selected) = rule_value_labels(suggestions, rule);
@@ -985,16 +982,14 @@ mod tests {
     }
 }
 
-pub type SmartPlaylistSubmit =
-    Rc<dyn Fn(SmartPlaylistChange, Option<Rc<dyn Fn(Result<(), String>)>>)>;
-pub fn build_dialog(
+fn build_dialog(
+    shell: &Rc<Shell>,
     playlist: Option<library::SmartPlaylistRow>,
-    value_suggestions: RuleValueSuggestions,
-    sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
-    publish: SmartPlaylistSubmit,
-    owner: &std::sync::Arc<rufin_core::source::SourceOwner>,
-    artwork_state: &Rc<crate::widgets::artwork::ArtworkState>,
+    value_suggestions: SmartPlaylistValueSuggestions,
+    folder: Option<library::PlaylistFolderKey>,
 ) -> adw::Dialog {
+    let sources: Rc<[rufin_core::runtime::source::SourceSummary]> =
+        shell.source.configured.borrow().sources.clone().into();
     let templates = playlist
         .is_none()
         .then(smart_playlist_templates)
@@ -1015,8 +1010,8 @@ pub fn build_dialog(
     let artwork = playlist.as_ref().map(|playlist| {
         let key = playlist.smart_playlist_key;
         let artwork = crate::editors::playlist_artwork::ArtworkEditor::new(
-            owner,
-            artwork_state,
+            &shell.products.source,
+            &shell.artwork,
             rufin_core::playlists::PlaylistArtworkEditing {
                 binding: playlist
                     .artwork_binding
@@ -1122,7 +1117,11 @@ pub fn build_dialog(
 
     let key = playlist.map(|playlist| playlist.smart_playlist_key);
     let close = dialog.downgrade();
+    let publish_shell = Rc::downgrade(shell);
     submit.connect_clicked(move |_| {
+        let Some(shell) = publish_shell.upgrade() else {
+            return;
+        };
         let Some((name, definition)) = editor.definition() else {
             return;
         };
@@ -1143,8 +1142,9 @@ pub fn build_dialog(
         }
         let artwork = artwork_weak.clone();
         let dialog = close.clone();
-        publish(
+        shell.publish_smart_playlist_change(
             change,
+            folder,
             Some(Rc::new(move |result| {
                 if let Some(artwork) = artwork.as_ref().and_then(Weak::upgrade) {
                     artwork.set_busy(false);
@@ -1158,4 +1158,84 @@ pub fn build_dialog(
         );
     });
     dialog
+}
+
+impl Shell {
+    pub(crate) fn publish_smart_playlist_change(
+        self: &Rc<Self>,
+        change: SmartPlaylistChange,
+        folder: Option<library::PlaylistFolderKey>,
+        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
+    ) {
+        let owner = self.products.source.clone();
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let result = rufin_core::playlists::apply_smart_playlist_change(&owner, change, folder)
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|applied| {
+                    applied
+                        .map(|_| ())
+                        .ok_or_else(|| "Smart Playlist is no longer current".to_string())
+                });
+            let Some(shell) = shell.upgrade() else { return };
+            if let Err(error) = result.as_ref() {
+                shell
+                    .control_feedback
+                    .show_control_feedback_toast(error.clone());
+            }
+            if let Some(settled) = settled.as_ref() {
+                settled(result);
+            }
+        });
+    }
+
+    pub(crate) fn new_smart_playlist_dialog(self: &Rc<Self>) {
+        self.load_smart_playlist_suggestions(None);
+    }
+
+    pub(crate) fn edit_smart_playlist_dialog(self: &Rc<Self>, playlist: library::SmartPlaylistRow) {
+        self.load_smart_playlist_suggestions(Some(playlist));
+    }
+
+    fn load_smart_playlist_suggestions(
+        self: &Rc<Self>,
+        playlist: Option<library::SmartPlaylistRow>,
+    ) {
+        let Some(selected) = self.selected_library().as_deref().cloned() else {
+            self.present_smart_playlist_dialog(playlist, SmartPlaylistValueSuggestions::default());
+            return;
+        };
+        let catalog = std::sync::Arc::clone(&self.products.library);
+        let source = selected.source_key;
+        let folder = selected.music_folder_key;
+        let task = self.products.runtime.spawn(async move {
+            catalog
+                .smart_playlist_value_suggestions(source, folder, &library::ReadCancellation::new())
+                .await
+        });
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let Some(shell) = shell.upgrade() else { return };
+            let suggestions = task.await.ok().and_then(Result::ok).unwrap_or_default();
+            shell.present_smart_playlist_dialog(playlist, suggestions);
+        });
+    }
+
+    fn present_smart_playlist_dialog(
+        self: &Rc<Self>,
+        playlist: Option<library::SmartPlaylistRow>,
+        suggestions: SmartPlaylistValueSuggestions,
+    ) {
+        let folder = if playlist.is_none() {
+            match self.navigation.routes.borrow().current() {
+                rufin_core::route::Route::PlaylistFolder { key, smart: true } => Some(*key),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let dialog = build_dialog(self, playlist, suggestions, folder);
+        crate::widgets::popup::present_light_dismiss_dialog(&dialog, &self.chrome.window);
+    }
 }

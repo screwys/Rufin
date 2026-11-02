@@ -1,4 +1,4 @@
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use crate::widgets::popup::present_light_dismiss_dialog;
 use adw::prelude::*;
 use rufin_core::connect::{
@@ -10,7 +10,7 @@ use std::{
     rc::Rc,
 };
 
-pub fn install(shell: &Rc<Preferences>) {
+pub fn install(shell: &Rc<Shell>) {
     let mut updates = shell.products.connect.subscribe();
     let weak = Rc::downgrade(shell);
     let pairing = gtk::glib::spawn_future_local(async move {
@@ -46,10 +46,13 @@ pub fn install(shell: &Rc<Preferences>) {
             }
         }
     });
-    shell.window.connect_destroy(move |_| pairing.abort());
+    shell
+        .chrome
+        .window
+        .connect_destroy(move |_| pairing.abort());
 }
 
-fn offer_continuation(shell: &Rc<Preferences>, continuation: &Continuation) {
+fn offer_continuation(shell: &Rc<Shell>, continuation: &Continuation) {
     let toast = adw::Toast::builder()
         .title(localization::tr_with(
             "Continue from {device}",
@@ -64,12 +67,12 @@ fn offer_continuation(shell: &Rc<Preferences>, continuation: &Continuation) {
             run(&shell, Action::Continue { peer: peer.clone() });
         }
     });
-    shell.toast_overlay.add_toast(toast);
+    shell.chrome.toast_overlay.add_toast(toast);
 }
 
-fn show_feedback(shell: &Preferences, message: String) {
+fn show_feedback(shell: &Shell, message: String) {
     shell
-        .state
+        .preferences
         .connect_feedback
         .borrow()
         .as_ref()
@@ -77,7 +80,7 @@ fn show_feedback(shell: &Preferences, message: String) {
         .show_feedback_toast(message);
 }
 
-fn show_connected(shell: &Rc<Preferences>, connected: &str) {
+fn show_connected(shell: &Rc<Shell>, connected: &str) {
     if !shell.products.connect.status().receiving_collection {
         shell
             .control_feedback
@@ -95,7 +98,7 @@ fn show_connected(shell: &Rc<Preferences>, connected: &str) {
             present(&shell);
         }
     });
-    shell.toast_overlay.add_toast(toast.clone());
+    shell.chrome.toast_overlay.add_toast(toast.clone());
     let mut updates = shell.products.connect.subscribe();
     gtk::glib::spawn_future_local(async move {
         loop {
@@ -123,11 +126,11 @@ fn flash_success(button: &gtk::Button, original: &'static str) {
     });
 }
 
-fn run(shell: &Rc<Preferences>, action: Action) {
+fn run(shell: &Rc<Shell>, action: Action) {
     run_with_feedback(shell, action, None);
 }
 
-fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gtk::Button>) {
+fn run_with_feedback(shell: &Rc<Shell>, action: Action, button: Option<&gtk::Button>) {
     let button = button.map(|button| button.downgrade());
     let testing_connection = matches!(action, Action::TestConnection { .. });
     let pending_replace = matches!(
@@ -172,11 +175,11 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
                 let dialog: adw::AlertDialog =
                     crate::ui_resource::object(&builder, resource, "replace_confirmation");
                 let parent = shell
-                    .state
+                    .preferences
                     .connect_dialog
                     .upgrade()
                     .map(|dialog| dialog.upcast::<gtk::Widget>())
-                    .unwrap_or_else(|| shell.window.clone().upcast());
+                    .unwrap_or_else(|| shell.chrome.window.clone().upcast());
                 if dialog.choose_future(Some(&parent)).await == "join" {
                     if let Action::Pair { replace, .. } = &mut action {
                         *replace = true;
@@ -197,7 +200,7 @@ fn run_with_feedback(shell: &Rc<Preferences>, action: Action, button: Option<&gt
     });
 }
 
-fn show_disable_confirmation(shell: &Rc<Preferences>) {
+fn show_disable_confirmation(shell: &Rc<Shell>) {
     let resource = "preferences/connect-components.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -205,11 +208,11 @@ fn show_disable_confirmation(shell: &Rc<Preferences>) {
     });
     let shell = shell.clone();
     let parent = shell
-        .state
+        .preferences
         .connect_dialog
         .upgrade()
         .map(|dialog| dialog.upcast::<gtk::Widget>())
-        .unwrap_or_else(|| shell.window.clone().upcast());
+        .unwrap_or_else(|| shell.chrome.window.clone().upcast());
     gtk::glib::spawn_future_local(async move {
         if disable_confirmation.choose_future(Some(&parent)).await == "disable" {
             run(&shell, Action::Enable { enabled: false });
@@ -218,7 +221,7 @@ fn show_disable_confirmation(shell: &Rc<Preferences>) {
 }
 
 pub fn bind_controller(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     popover: &gtk::Popover,
     builder: &gtk::Builder,
     resource: &str,
@@ -328,9 +331,9 @@ pub fn bind_controller(
     });
 }
 
-fn present(shell: &Rc<Preferences>) {
-    if let Some(dialog) = shell.state.connect_dialog.upgrade() {
-        present_light_dismiss_dialog(&dialog, &shell.window);
+fn present(shell: &Rc<Shell>) {
+    if let Some(dialog) = shell.preferences.connect_dialog.upgrade() {
+        present_light_dismiss_dialog(&dialog, &shell.chrome.window);
         return;
     }
     super::present_preferences_dialog_with_page(
@@ -341,7 +344,7 @@ fn present(shell: &Rc<Preferences>) {
     );
 }
 
-pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk::Widget {
+pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widget {
     let resource = "preferences/connect.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -370,12 +373,12 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         browse_folder: gtk::Button, clear_folder: gtk::Button,
         leave: gtk::Button, folder_chooser: gtk::FileDialog,
     });
-    *shell.state.connect_feedback.borrow_mut() =
+    *shell.preferences.connect_feedback.borrow_mut() =
         Some(crate::widgets::feedback::ControlFeedbackState::new(
             &feedback_label,
             shell.settings.clone(),
         ));
-    shell.state.connect_dialog.set(Some(connect_dialog));
+    shell.preferences.connect_dialog.set(Some(connect_dialog));
     let initial = shell.products.connect.status();
     device_name.set_text(&initial.settings.name);
     nearby.set_active(initial.settings.nearby);
@@ -772,7 +775,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         };
         run(&shell, Action::Folder { folder });
     });
-    let parent = shell.window.downgrade();
+    let parent = shell.chrome.window.downgrade();
     let entry = folder.downgrade();
     browse_folder.connect_clicked(move |_| {
         let (Some(parent), Some(entry)) = (parent.upgrade(), entry.upgrade()) else {
@@ -979,8 +982,8 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
             parent.set_can_close(true);
         }
         if let Some(shell) = weak.upgrade() {
-            shell.state.connect_dialog.set(None::<&adw::Dialog>);
-            shell.state.connect_feedback.borrow_mut().take();
+            shell.preferences.connect_dialog.set(None::<&adw::Dialog>);
+            shell.preferences.connect_feedback.borrow_mut().take();
         }
     });
     let state = shell.products.connect.status();
@@ -1043,7 +1046,7 @@ fn show_folder(
     row.set_text(&path);
 }
 
-fn join_profile(shell: &Rc<Preferences>, parent: &adw::Dialog, invitation: String) {
+fn join_profile(shell: &Rc<Shell>, parent: &adw::Dialog, invitation: String) {
     let shell = shell.clone();
     let parent = parent.clone();
     gtk::glib::spawn_future_local(async move {
@@ -1064,7 +1067,7 @@ fn join_profile(shell: &Rc<Preferences>, parent: &adw::Dialog, invitation: Strin
 }
 
 fn render_devices(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     parent: &adw::Dialog,
     group: &adw::PreferencesGroup,
     nearby: &adw::PreferencesGroup,

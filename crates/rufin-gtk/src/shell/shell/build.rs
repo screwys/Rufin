@@ -21,11 +21,11 @@ use crate::player::bottom::connect_player_controls;
 use crate::player::lyrics::state::LyricsState;
 use crate::player::state::PlaybackState;
 use crate::preferences::preferences::PreferencesState;
+use crate::preferences::preferences::dialogs::release_notes::check_for_release_update;
+use crate::preferences::preferences::source::SourceState;
 use crate::shell::player::desktop::DesktopState;
 use crate::shell::player::desktop::lifecycle::install_application_quit;
 use crate::shell::player::{install_desktop_lifecycle, present_initial_window};
-use crate::shell::preferences::dialogs::release_notes::check_for_release_update;
-use crate::shell::preferences::source::SourceState;
 use crate::widgets::settings::SettingsState;
 use rufin_core::runtime::RuntimeInputs;
 
@@ -353,29 +353,6 @@ pub async fn build(
             &chrome.app_content_stack,
         ));
         let web_controller = Rc::new(web::Controller::new(products.clone()));
-        let preferences = Rc::new(crate::preferences::Preferences {
-            state: preferences,
-            settings: Rc::clone(&settings_state),
-            source: Rc::clone(&source),
-            products: products.clone(),
-            player_ui: Rc::clone(&player_ui),
-            downloads: Rc::clone(&downloads),
-            artwork: Rc::clone(&artwork),
-            appearance: Rc::clone(&appearance),
-            control_feedback: Rc::clone(&control_feedback),
-            web_controller: Rc::clone(&web_controller),
-            window: chrome.window.clone(),
-            toast_overlay: chrome.toast_overlay.clone(),
-            app_root_overlay: chrome.app_root_overlay.clone(),
-            effects: {
-                let weak = weak.clone();
-                Box::new(move |effect| {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.apply_preferences_effect(effect);
-                    }
-                })
-            },
-        });
 
         Shell {
             search_session: Rc::new(crate::library::SearchSession::new(
@@ -420,7 +397,7 @@ pub async fn build(
             }
         }
     });
-    shell.preferences.bind_controller_appearance();
+    shell.bind_controller_appearance();
     shell.follow_settings();
     let weak = Rc::downgrade(&shell);
     app.connect_shutdown(move |_| {
@@ -488,7 +465,7 @@ pub async fn build(
     apply_sidebar_media_visibility(Rc::clone(&shell.player_ui));
     shell.player_ui.request_initial_lyrics_if_needed();
     install_product_event_receivers(&shell, receivers);
-    crate::shell::preferences::connect::install(&shell.preferences);
+    crate::preferences::preferences::connect::install(&shell);
     let weak_shell = Rc::downgrade(&shell);
     #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
     {
@@ -544,7 +521,7 @@ pub async fn build(
                 .borrow_mut()
                 .application
                 .secret_storage_mode = mode;
-            if let Some(row) = shell.preferences.state.secret_storage_row.upgrade() {
+            if let Some(row) = shell.preferences.secret_storage_row.upgrade() {
                 row.set_selected(match mode {
                     rufin_core::settings::SecretStorageMode::ConfigFile => 0,
                     rufin_core::settings::SecretStorageMode::SystemKeyring => 1,
@@ -553,7 +530,7 @@ pub async fn build(
         }
     });
 
-    check_for_release_update(&shell.preferences);
+    check_for_release_update(&shell);
     if let Some(presented) = presented {
         if shell.chrome.window.is_mapped() {
             presented();
@@ -568,7 +545,7 @@ pub async fn build(
     }
     if shell.source.configured.borrow().sources.is_empty() {
         if shell.chrome.window.is_mapped() {
-            shell.preferences.present_onboarding();
+            shell.present_onboarding();
         } else {
             let pending = Cell::new(true);
             let weak = Rc::downgrade(&shell);
@@ -577,7 +554,7 @@ pub async fn build(
                     return;
                 }
                 if let Some(shell) = weak.upgrade() {
-                    shell.preferences.present_onboarding();
+                    shell.present_onboarding();
                 }
             });
         }

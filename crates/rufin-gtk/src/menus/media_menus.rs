@@ -181,7 +181,7 @@ pub fn present_track_menu(
             msgid("Edit metadata"),
             EDIT_ICON,
             move || {
-                crate::shell::preferences::dialogs::metadata::present_metadata_dialog(
+                crate::editors::metadata::present_metadata_dialog(
                     &metadata_shell,
                     MetadataItemId::Track(media_uri.clone()),
                 )
@@ -472,7 +472,7 @@ pub fn present_playlist_entry_menu(
             msgid("Edit metadata"),
             EDIT_ICON,
             move || {
-                crate::shell::preferences::dialogs::metadata::present_metadata_dialog(
+                crate::editors::metadata::present_metadata_dialog(
                     &metadata_shell,
                     MetadataItemId::Track(media_uri.clone()),
                 )
@@ -562,9 +562,7 @@ fn collection_selection_surface(
         glib::spawn_future_local(async move {
             match task.await {
                 Ok(Ok(selection)) => {
-                    crate::shell::preferences::dialogs::metadata::present_track_metadata_dialog(
-                        &shell, selection,
-                    )
+                    crate::editors::metadata::present_track_metadata_dialog(&shell, selection)
                 }
                 Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
                 Err(error) => shell
@@ -871,12 +869,7 @@ fn append_metadata_selection_action(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         EDIT_ICON,
-        move || {
-            crate::shell::preferences::dialogs::metadata::present_track_metadata_dialog(
-                &shell,
-                selection.clone(),
-            )
-        },
+        move || crate::editors::metadata::present_track_metadata_dialog(&shell, selection.clone()),
     );
 }
 
@@ -1425,12 +1418,7 @@ fn append_metadata_action(surface: &ContextMenuSurface, shell: &Rc<Shell>, item:
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         EDIT_ICON,
-        move || {
-            crate::shell::preferences::dialogs::metadata::present_metadata_dialog(
-                &shell,
-                item.clone(),
-            )
-        },
+        move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone()),
     );
 }
 

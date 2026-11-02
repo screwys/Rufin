@@ -1,3 +1,4 @@
+use crate::shell::shell::Shell;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -10,6 +11,7 @@ use rufin_core::runtime::source::{
 pub(super) mod excluded_folders;
 pub(super) mod local_access;
 pub mod login;
+pub(crate) mod selector;
 
 pub struct SourceState {
     pub configured: RefCell<ConfiguredSources>,
@@ -24,13 +26,13 @@ pub struct SourceState {
 }
 
 pub(super) fn preference_source_choices(
-    shell: &Rc<crate::preferences::Preferences>,
+    shell: &Rc<Shell>,
     button: &gtk::MenuButton,
 ) -> (Rc<[SourceSummary]>, gtk::SingleSelection) {
     let configured = shell.source.configured.borrow();
     let sources: Rc<[SourceSummary]> = configured.sources.iter().cloned().collect();
     let selected = shell
-        .state
+        .preferences
         .source_choice
         .borrow()
         .clone()
@@ -47,7 +49,7 @@ pub(super) fn preference_source_choices(
         if let (Some(shell), Some(source)) =
             (weak.upgrade(), choices.get(selection.selected() as usize))
         {
-            *shell.state.source_choice.borrow_mut() = Some(source.id.clone());
+            *shell.preferences.source_choice.borrow_mut() = Some(source.id.clone());
         }
     });
     (sources, selection)
@@ -57,10 +59,7 @@ pub fn configured_source_kind_display_name(kind: &str) -> String {
     rufin_core::runtime::source::source_kind_title(kind).map_or_else(|| kind.to_string(), tr)
 }
 
-pub fn half_stars_row(
-    shell: &Rc<crate::preferences::Preferences>,
-    source: &SourceSummary,
-) -> Option<adw::SwitchRow> {
+pub fn half_stars_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::SwitchRow> {
     if !matches!(source.kind.as_str(), "navidrome" | "subsonic" | "local") {
         return None;
     }
@@ -79,10 +78,7 @@ pub fn half_stars_row(
     Some(row)
 }
 
-pub fn playlist_auto_save_row(
-    shell: &Rc<crate::preferences::Preferences>,
-    source: &SourceSummary,
-) -> Option<adw::SwitchRow> {
+pub fn playlist_auto_save_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::SwitchRow> {
     use adw::prelude::*;
     if !matches!(source.kind.as_str(), "local" | "smb" | "webdav") {
         return None;

@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use crate::shell::player::desktop::DesktopState;
 
-use crate::shell::preferences::source::SourceState;
+use crate::preferences::preferences::source::SourceState;
 use crate::widgets::artwork::ArtworkState;
 use crate::widgets::downloads::DownloadsState;
 use crate::widgets::feedback::ControlFeedbackState;
@@ -46,7 +46,7 @@ pub(crate) struct Shell {
     pub(crate) source: Rc<SourceState>,
     startup: StartupState,
     pub(crate) player_ui: Rc<crate::player::PlayerUi>,
-    pub(crate) preferences: Rc<crate::preferences::Preferences>,
+    pub(crate) preferences: crate::preferences::preferences::PreferencesState,
     pub(crate) downloads: Rc<DownloadsState>,
     pub(crate) download_feedback: crate::shell::downloads::DownloadFeedbackState,
     pub(crate) control_feedback: Rc<ControlFeedbackState>,

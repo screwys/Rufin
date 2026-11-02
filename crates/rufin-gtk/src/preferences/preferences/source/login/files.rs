@@ -167,7 +167,7 @@ struct FileSetupFlow {
 }
 
 pub(super) fn setup_flow(
-    _: &Rc<Preferences>,
+    _: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     Rc::new(FileSetupFlow {
@@ -177,7 +177,7 @@ pub(super) fn setup_flow(
 }
 
 impl SourceSetupFlow for FileSetupFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         let (scroller, content, _actions, status) =
             setup_scaffold(shell, context, self.presentation);
         let form = form(
@@ -225,7 +225,7 @@ impl SourceSetupFlow for FileSetupFlow {
 }
 
 pub(super) fn settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     presentation: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
@@ -265,11 +265,7 @@ struct Form {
     save: gtk::Button,
 }
 
-pub fn bind_integrations(
-    shell: &Rc<Preferences>,
-    page: &adw::PreferencesPage,
-    builder: &gtk::Builder,
-) {
+pub fn bind_integrations(shell: &Rc<Shell>, page: &adw::PreferencesPage, builder: &gtk::Builder) {
     let resource = "preferences/integrations.ui";
     crate::objects!(builder, resource, {
         file_connections: adw::PreferencesGroup, add_webdav: gtk::Button, add_smb: gtk::Button,
@@ -374,7 +370,7 @@ pub fn bind_integrations(
 }
 
 pub fn choose_integration(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     parent: &impl IsA<gtk::Widget>,
     kind: &'static str,
     selected: Rc<dyn Fn(sources::SourceId)>,
@@ -418,7 +414,7 @@ pub fn choose_integration(
 }
 
 pub fn present_integration(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     parent: &impl IsA<gtk::Widget>,
     kind: &'static str,
     saved: Option<EditableSource>,
@@ -473,7 +469,7 @@ pub fn present_integration(
 }
 
 fn form(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     draft: &Rc<RefCell<Draft>>,
     kind: &str,
     editing: bool,
@@ -518,7 +514,7 @@ fn form(
     if music {
         let state = Rc::clone(draft);
         let (exclusions, _, _) = crate::preferences::preferences::source::excluded_folders::editor(
-            &shell.window,
+            &shell.chrome.window,
             &value.settings.excluded_folders,
             false,
             Rc::new(move |paths| state.borrow_mut().settings.excluded_folders = paths),

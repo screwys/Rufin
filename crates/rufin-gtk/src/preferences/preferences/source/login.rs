@@ -20,7 +20,7 @@ use sources::{
 };
 
 use super::folder_selected_text;
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use crate::widgets::controls::text_button;
 use crate::widgets::layout::large_popup_content_width;
 use crate::widgets::popup::present_light_dismiss_dialog;
@@ -33,13 +33,9 @@ const SETUP_PROGRESS_PAGE: &str = "progress";
 const JELLYFIN_SOURCE_KIND: &str = "jellyfin";
 const LOCAL_SOURCE_KIND: &str = "local";
 
-type SetupFlowFactory =
-    fn(&Rc<Preferences>, &'static SourcePresentation) -> Rc<dyn SourceSetupFlow>;
-type SettingsGroupFactory = fn(
-    &Rc<Preferences>,
-    &EditableSource,
-    &'static SourcePresentation,
-) -> Result<gtk::Widget, String>;
+type SetupFlowFactory = fn(&Rc<Shell>, &'static SourcePresentation) -> Rc<dyn SourceSetupFlow>;
+type SettingsGroupFactory =
+    fn(&Rc<Shell>, &EditableSource, &'static SourcePresentation) -> Result<gtk::Widget, String>;
 
 #[derive(Clone, Copy)]
 struct SourcePresentation {
@@ -104,7 +100,7 @@ fn source_presentation(kind: &str) -> Option<&'static SourcePresentation> {
 }
 
 pub fn source_settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
 ) -> Option<Result<gtk::Widget, String>> {
     if saved.source.kind == "peer" {
@@ -117,7 +113,7 @@ pub fn source_settings_group(
 }
 
 pub trait SourceSetupFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget;
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget;
 }
 
 pub struct SourceSetupViewHandle {
@@ -196,7 +192,7 @@ struct CredentialSetupFlow {
 struct SourceChoiceFlow;
 
 impl SourceSetupFlow for SourceChoiceFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         source_choice_selector(shell, context)
     }
 }
@@ -245,7 +241,7 @@ impl CredentialHost {
     }
 }
 
-impl Preferences {
+impl Shell {
     pub fn present_onboarding(self: &Rc<Self>) {
         let context = self
             .source
@@ -256,7 +252,7 @@ impl Preferences {
             .filter(|context| context.onboarding);
         if let Some(context) = context {
             if let Some(dialog) = context.preferences_dialog {
-                dialog.present(Some(&self.window));
+                dialog.present(Some(&self.chrome.window));
                 return;
             }
         }
@@ -282,7 +278,7 @@ impl Preferences {
                 shell.release_inactive_add_server_form();
             }
         });
-        dialog.present(Some(&self.window));
+        dialog.present(Some(&self.chrome.window));
     }
 
     pub fn add_server_navigation_page(
@@ -389,10 +385,10 @@ impl Preferences {
             return false;
         };
         if context.onboarding {
-            dialog.present(Some(&self.window));
+            dialog.present(Some(&self.chrome.window));
         } else {
-            self.state.set_active_dialog(&dialog);
-            present_light_dismiss_dialog(&dialog, &self.window);
+            self.preferences.set_active_dialog(&dialog);
+            present_light_dismiss_dialog(&dialog, &self.chrome.window);
         }
         update_setup_surface(self, &context);
         true
@@ -472,7 +468,7 @@ impl Preferences {
 }
 
 fn local_setup_flow(
-    _shell: &Rc<Preferences>,
+    _shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     Rc::new(LocalSetupFlow {
@@ -485,7 +481,7 @@ fn local_setup_flow(
 }
 
 fn subsonic_setup_flow_for(
-    _shell: &Rc<Preferences>,
+    _shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
     kind: SubsonicFlavor,
 ) -> Rc<dyn SourceSetupFlow> {
@@ -509,21 +505,21 @@ fn subsonic_setup_flow_for(
 }
 
 fn navidrome_setup_flow(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     subsonic_setup_flow_for(shell, presentation, SubsonicFlavor::Navidrome)
 }
 
 fn subsonic_setup_flow(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     subsonic_setup_flow_for(shell, presentation, SubsonicFlavor::Subsonic)
 }
 
 fn subsonic_settings_group_for(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     presentation: &'static SourcePresentation,
     kind: SubsonicFlavor,
@@ -590,7 +586,7 @@ fn subsonic_settings_group_for(
 }
 
 fn navidrome_settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     presentation: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
@@ -598,7 +594,7 @@ fn navidrome_settings_group(
 }
 
 fn subsonic_settings_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     saved: &EditableSource,
     presentation: &'static SourcePresentation,
 ) -> Result<gtk::Widget, String> {
@@ -606,7 +602,7 @@ fn subsonic_settings_group(
 }
 
 /// Another device's Local source has only its name, kept on this device.
-fn peer_settings_group(shell: &Rc<Preferences>, saved: &EditableSource) -> gtk::Widget {
+fn peer_settings_group(shell: &Rc<Shell>, saved: &EditableSource) -> gtk::Widget {
     let resource = "preferences/source/credential_host.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -641,7 +637,7 @@ fn peer_settings_group(shell: &Rc<Preferences>, saved: &EditableSource) -> gtk::
 }
 
 fn complete_source_save(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     button: &gtk::Button,
     result: impl std::future::Future<Output = Result<(), String>> + 'static,
 ) {
@@ -671,7 +667,7 @@ fn complete_source_save(
 }
 
 impl SourceSetupFlow for CredentialSetupFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         let (scroller, content, actions, status) =
             setup_scaffold(shell, context, self.presentation);
         let host = credential_host(
@@ -699,7 +695,7 @@ impl SourceSetupFlow for CredentialSetupFlow {
 }
 
 impl SourceSetupFlow for LocalSetupFlow {
-    fn view(&self, shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         if shell
             .source
             .configured
@@ -747,7 +743,7 @@ impl SourceSetupFlow for LocalSetupFlow {
             connect: login.clone(),
             ready: Rc::new(move || !folders_for_ready.borrow().is_empty()),
         });
-        connect_add_local_folder_button(&shell.window, &add, Rc::clone(&self.folders), {
+        connect_add_local_folder_button(&shell.chrome.window, &add, Rc::clone(&self.folders), {
             let group = selection.group.downgrade();
             let summary = selection.summary.downgrade();
             let rows = Rc::clone(&selection.rows);
@@ -791,7 +787,7 @@ impl SourceSetupFlow for LocalSetupFlow {
 }
 
 fn setup_scaffold(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     _context: &SetupViewContext,
     registration: &'static SourcePresentation,
 ) -> (gtk::ScrolledWindow, gtk::Box, gtk::Box, gtk::Label) {
@@ -844,7 +840,7 @@ fn setup_scaffold(
     (scroller, content, actions, status)
 }
 
-fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -> gtk::Widget {
+fn source_choice_selector(shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
     let resource = "preferences/source/choice_selector.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -929,7 +925,7 @@ fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -
     wrapper.upcast()
 }
 
-fn mount_setup_flow(shell: &Rc<Preferences>, context: &SetupViewContext) {
+fn mount_setup_flow(shell: &Rc<Shell>, context: &SetupViewContext) {
     context.actions.borrow_mut().take();
     context.discovery.borrow_mut().take();
     context.retry_focus.borrow_mut().take();
@@ -942,7 +938,7 @@ fn mount_setup_flow(shell: &Rc<Preferences>, context: &SetupViewContext) {
     update_setup_surface(shell, context);
 }
 
-fn update_setup_surface(shell: &Rc<Preferences>, context: &SetupViewContext) {
+fn update_setup_surface(shell: &Rc<Shell>, context: &SetupViewContext) {
     let operation = shell.source.operation.borrow();
     match setup_surface_state(&operation) {
         SetupSurfaceState::Progress => {
@@ -1203,7 +1199,7 @@ fn bind_credential_draft(
 }
 
 fn append_credential_connect(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     context: &SetupViewContext,
     content: &gtk::Box,
     actions: &gtk::Box,
@@ -1330,7 +1326,7 @@ fn discovered_servers_view(host: &CredentialHost, kind: &'static str) -> Discove
     }
 }
 
-fn refresh_discovered_servers_view(shell: &Rc<Preferences>, view: &DiscoveredServersView) {
+fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersView) {
     let status = shell.source.discovery_status.borrow().clone();
     let running = shell.source.discovery_running.get();
     let servers = shell.source.discovered_servers.borrow().clone();

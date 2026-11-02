@@ -1,11 +1,11 @@
 use super::PreferencesNavigationControls;
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use adw::prelude::*;
 use rufin_core::settings::app::ActivityOverviewSettings;
 use std::rc::Rc;
 
 pub(super) fn wrap_general(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     general: &adw::PreferencesPage,
     entry: &adw::ActionRow,
     controls: &PreferencesNavigationControls,

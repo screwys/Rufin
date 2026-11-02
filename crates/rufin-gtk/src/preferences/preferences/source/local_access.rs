@@ -9,7 +9,7 @@ use localization::{tr, tr_with};
 use sources::SourceId;
 
 use super::login::source_settings_group;
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use crate::widgets::layout::large_popup_content_width;
 use crate::widgets::local_access::{
     LocalAccessDraft, LocalAccessEditor, LocalAccessOperation, connect_mapping_expander_visibility,
@@ -25,7 +25,7 @@ struct ManageServerExitSlot {
 }
 
 pub fn manage_server_navigation_page(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     server: SourceSummary,
     navigation: &adw::NavigationView,
     preferences_dialog: &adw::Dialog,
@@ -45,7 +45,7 @@ pub fn manage_server_navigation_page(
 }
 
 fn manage_server_content(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     server: SourceSummary,
     exit: ManageServerExitSlot,
     preferences_dialog: &adw::Dialog,
@@ -241,7 +241,7 @@ fn manage_server_content(
         }
     });
     editor.connect_folder_row(
-        &shell.window,
+        &shell.chrome.window,
         &folder_button,
         &folder_row,
         &folder_edit,
@@ -292,7 +292,7 @@ fn close_manage_server(exit: &ManageServerExitSlot) {
 }
 
 fn server_actions_group(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     server: &SourceSummary,
     selected: bool,
     exit: &ManageServerExitSlot,
@@ -366,7 +366,7 @@ fn server_actions_group(
 }
 
 pub fn confirm_forget_source(
-    shell: &Rc<Preferences>,
+    shell: &Rc<Shell>,
     source_id: SourceId,
     server_name: &str,
     after_forget: Rc<dyn Fn()>,
@@ -386,7 +386,7 @@ pub fn confirm_forget_source(
     dialog.set_response_appearance("forget", adw::ResponseAppearance::Destructive);
     let source = shell.products.source.clone();
     dialog.choose(
-        Some(&shell.window),
+        Some(&shell.chrome.window),
         None::<&gio::Cancellable>,
         move |response| {
             if response.as_str() == "forget" {

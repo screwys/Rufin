@@ -1,4 +1,4 @@
-use crate::preferences::{AccentPreference, Settings, ThemePreference};
+use rufin_core::settings::{AccentPreference, Settings, ThemePreference};
 
 use rufin_core::themes::{Mode, Theme};
 use std::{cell::RefCell, path::PathBuf};

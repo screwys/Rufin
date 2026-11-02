@@ -1,11 +1,11 @@
 use std::{cell::Cell, rc::Rc};
 
-use crate::shell::{
+use adw::prelude::*;
+use gtk::glib;
+use rufin_core::settings::{
     LayoutProfile, LayoutSettings, LeftSidebarMode, MAX_RIGHT_SIDEBAR_WIDTH,
     MIN_LEFT_SIDEBAR_WIDTH, MIN_RIGHT_SIDEBAR_WIDTH, RightSidebarMode,
 };
-use adw::prelude::*;
-use gtk::glib;
 use tracing::debug;
 
 use super::Shell;
@@ -13,13 +13,13 @@ use super::Shell;
 pub(super) const COMPACT_RAIL_WIDTH: i32 = 72;
 pub(super) const LEFT_PANE_SEPARATOR_WIDTH: i32 = 8;
 pub(super) const RIGHT_PANE_SEPARATOR_WIDTH: i32 = 8;
-pub(super) const NORMAL_SIDEBAR_WIDTH: i32 = crate::shell::DEFAULT_LEFT_SIDEBAR_WIDTH;
+pub(super) const NORMAL_SIDEBAR_WIDTH: i32 = rufin_core::settings::DEFAULT_LEFT_SIDEBAR_WIDTH;
 pub(crate) const MIN_APP_WINDOW_WIDTH: i32 = 450;
 pub(crate) const MIN_USEFUL_MAIN_WIDTH: i32 = MIN_APP_WINDOW_WIDTH;
 pub(super) const MIN_APP_WINDOW_HEIGHT: i32 = 400;
 
-const LEFT_SIDEBAR_COLLAPSE_DETENT: i32 = crate::shell::MIN_LEFT_SIDEBAR_WIDTH - 40;
-const LEFT_SIDEBAR_EXPAND_DETENT: i32 = crate::shell::MIN_LEFT_SIDEBAR_WIDTH;
+const LEFT_SIDEBAR_COLLAPSE_DETENT: i32 = rufin_core::settings::MIN_LEFT_SIDEBAR_WIDTH - 40;
+const LEFT_SIDEBAR_EXPAND_DETENT: i32 = rufin_core::settings::MIN_LEFT_SIDEBAR_WIDTH;
 type ShellAllocationCallback = Rc<dyn Fn(i32, i32)>;
 
 mod shell_allocation_owner_imp {
@@ -206,7 +206,7 @@ fn fitted_left_sidebar_drag_width(
         return Some((
             requested.clamp(
                 MIN_LEFT_SIDEBAR_WIDTH,
-                maximum_with_right.min(crate::shell::MAX_LEFT_SIDEBAR_WIDTH),
+                maximum_with_right.min(rufin_core::settings::MAX_LEFT_SIDEBAR_WIDTH),
             ),
             false,
         ));
@@ -217,7 +217,7 @@ fn fitted_left_sidebar_drag_width(
         (
             requested.clamp(
                 MIN_LEFT_SIDEBAR_WIDTH,
-                maximum_without_right.min(crate::shell::MAX_LEFT_SIDEBAR_WIDTH),
+                maximum_without_right.min(rufin_core::settings::MAX_LEFT_SIDEBAR_WIDTH),
             ),
             true,
         )
@@ -997,7 +997,7 @@ pub(super) fn connect_shell_layout(shell: &Rc<Shell>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::shell::{LayoutSettings, LeftSidebarMode, RightSidebarMode};
+    use rufin_core::settings::{LayoutSettings, LeftSidebarMode, RightSidebarMode};
 
     use super::*;
 
@@ -1385,7 +1385,7 @@ mod tests {
         assert_eq!(resolved.right_sidebar, RightSidebarMode::Visible);
         assert_eq!(
             resolved.main_width,
-            1_500 - crate::shell::DEFAULT_RIGHT_SIDEBAR_WIDTH - RIGHT_PANE_SEPARATOR_WIDTH
+            1_500 - rufin_core::settings::DEFAULT_RIGHT_SIDEBAR_WIDTH - RIGHT_PANE_SEPARATOR_WIDTH
         );
     }
 
@@ -1406,7 +1406,7 @@ mod tests {
             narrow_width
                 - COMPACT_RAIL_WIDTH
                 - LEFT_PANE_SEPARATOR_WIDTH
-                - crate::shell::DEFAULT_RIGHT_SIDEBAR_WIDTH
+                - rufin_core::settings::DEFAULT_RIGHT_SIDEBAR_WIDTH
                 - RIGHT_PANE_SEPARATOR_WIDTH
         );
     }

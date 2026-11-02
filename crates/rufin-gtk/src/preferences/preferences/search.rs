@@ -1,5 +1,5 @@
 use super::{PreferencesPageKind as Page, PreferencesSearchItem};
-use crate::preferences::Preferences;
+use crate::shell::shell::Shell;
 use localization::tr;
 
 fn property(node: roxmltree::Node<'_, '_>, name: &str) -> String {
@@ -17,7 +17,7 @@ fn property(node: roxmltree::Node<'_, '_>, name: &str) -> String {
         .unwrap_or_default()
 }
 
-pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
+pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
     let mut items = Vec::new();
     for (page, resource) in [
         (Page::General, "preferences/general.ui"),
@@ -121,7 +121,7 @@ pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
     for (id, titles) in [
         (
             "sidebar_items",
-            crate::preferences::SidebarRouteItem::all()
+            rufin_core::settings::SidebarRouteItem::all()
                 .iter()
                 .map(|item| tr(rufin_core::route::sidebar_route_descriptor(*item).title))
                 .collect::<Vec<_>>(),
