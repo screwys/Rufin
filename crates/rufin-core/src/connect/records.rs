@@ -2023,7 +2023,8 @@ impl Records {
                     json!(secret.get(descriptor.kind()).cloned().unwrap_or_default());
             }
             settings[&service] = account;
-            let settings: crate::scrobbling::Settings = serde_json::from_value(settings).map_err(error)?;
+            let settings: crate::scrobbling::Settings =
+                serde_json::from_value(settings).map_err(error)?;
             store_scrobbling(&mut prepared, secrets.as_ref(), &settings)?;
             Ok::<_, String>(prepared)
         })

@@ -27,6 +27,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::features::follow;
 use crate::runtime::VisualizerPublication;
+use crate::scrobbling::Scrobbler;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::QueueUpdate;
@@ -35,7 +36,6 @@ use playback::{
     PlaybackBackend, PlaybackProjection, PreparedStream, QueueRepeatMode, RunId, StreamRequest,
 };
 use queue::Sequence;
-use crate::scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 

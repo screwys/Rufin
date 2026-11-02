@@ -43,10 +43,7 @@ impl Preferences {
 
     pub(super) async fn set_secret_storage_mode(self: &Rc<Self>, mode: SecretStorageMode) -> bool {
         match self.products.source.change_secret_storage(mode).await {
-            Ok(()) => {
-                self.products.scrobbling.storage_reset();
-                true
-            }
+            Ok(()) => true,
             Err(error) => {
                 warn!(%error, "failed to change secret storage mode");
                 false

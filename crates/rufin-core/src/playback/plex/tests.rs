@@ -186,7 +186,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             Ok(())
         })
         .unwrap();
-    let stored = settings.load();
     let lyrics = LyricsService::new(
         catalog.as_ref().clone(),
         source.clone(),
@@ -195,15 +194,11 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         async_channel::unbounded().0,
         root.path().join("dictionary"),
     );
-    let scrobbler = Arc::new(tokio::task::block_in_place(|| {
-        Scrobbler::new(
-            catalog.as_ref().clone(),
-            runtime.clone(),
-            stored.scrobbling_runtime_settings(),
-            true,
-        )
-        .unwrap()
-    }));
+    let scrobbler = Arc::new(Scrobbler::new(
+        catalog.as_ref().clone(),
+        runtime.clone(),
+        settings.clone(),
+    ));
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
     let owner = PlaybackOwner::new(
         catalog,

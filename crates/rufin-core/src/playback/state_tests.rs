@@ -108,7 +108,6 @@ pub(in crate::playback) async fn seeded(
             Ok(())
         })
         .unwrap();
-    let stored = settings.load();
     let lyrics = LyricsService::new(
         catalog.clone(),
         source.clone(),
@@ -117,15 +116,11 @@ pub(in crate::playback) async fn seeded(
         async_channel::unbounded().0,
         directory.path().join("dictionary"),
     );
-    let scrobbler = Arc::new(tokio::task::block_in_place(|| {
-        crate::scrobbling::Scrobbler::new(
-            catalog.clone(),
-            runtime.clone(),
-            stored.scrobbling_runtime_settings(),
-            true,
-        )
-        .unwrap()
-    }));
+    let scrobbler = Arc::new(crate::scrobbling::Scrobbler::new(
+        catalog.clone(),
+        runtime.clone(),
+        settings.clone(),
+    ));
     let commands = Arc::new(Mutex::new(Vec::new()));
     let backend_commands = commands.clone();
     let (visualizer, visualizer_drain) = async_channel::bounded(1);

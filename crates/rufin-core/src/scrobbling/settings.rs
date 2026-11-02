@@ -207,6 +207,16 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Takes the service switches from `other`; the accounts stay.
+    pub fn copy_switches(&mut self, other: &Settings) {
+        self.lastfm.enabled = other.lastfm.enabled;
+        self.lastfm.now_playing_enabled = other.lastfm.now_playing_enabled;
+        self.librefm.enabled = other.librefm.enabled;
+        self.librefm.now_playing_enabled = other.librefm.now_playing_enabled;
+        self.listenbrainz.enabled = other.listenbrainz.enabled;
+        self.listenbrainz.now_playing_enabled = other.listenbrainz.now_playing_enabled;
+    }
+
     pub fn sanitize(&mut self) {
         self.lastfm.sanitize();
         self.librefm.sanitize();

@@ -89,23 +89,11 @@ where
     library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
     library.set_cover_lookup(stored.ui.application.external_metadata_enabled);
     library.set_use_sort_tags(stored.ui.application.use_sort_tags);
-    let scrobbling_library = library.as_ref().clone();
-    let scrobbling_runtime = runtime.clone();
-    let scrobbling_settings = stored.scrobbling_runtime_settings();
-    let private_mode = stored.ui.application.private_mode;
-    let scrobbler = Arc::new(
-        runtime
-            .spawn_blocking(move || {
-                Scrobbler::new(
-                    scrobbling_library,
-                    scrobbling_runtime,
-                    scrobbling_settings,
-                    private_mode,
-                )
-            })
-            .await
-            .map_err(string_error)??,
-    );
+    let scrobbler = Arc::new(Scrobbler::new(
+        library.as_ref().clone(),
+        runtime.clone(),
+        settings.clone(),
+    ));
 
     let (source_events, source_receiver) = unbounded();
     let (visualizer_events, visualizer_receiver) = bounded(1);
@@ -241,11 +229,7 @@ where
 
     source.attach_playback(&playback);
 
-    let owners = (
-        Arc::downgrade(&source),
-        Arc::downgrade(&scrobbling),
-        Arc::downgrade(&library),
-    );
+    let owners = (Arc::downgrade(&source), Arc::downgrade(&library));
     let settings_downloads = downloads.clone();
     let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
     // What a committed settings change means for the owners that follow it.
@@ -254,12 +238,11 @@ where
         let mut previous = Arc::clone(&committed.borrow_and_update());
         while committed.changed().await.is_ok() {
             let current = Arc::clone(&committed.borrow_and_update());
-            let (Some(settings_source), Some(settings_scrobbling), Some(settings_library)) =
-                (owners.0.upgrade(), owners.1.upgrade(), owners.2.upgrade())
+            let (Some(settings_source), Some(settings_library)) =
+                (owners.0.upgrade(), owners.1.upgrade())
             else {
                 return;
             };
-            let credentials_changed = previous.secrets_revision != current.secrets_revision;
             if previous.ui.application != current.ui.application {
                 let application = &current.ui.application;
                 settings_library
@@ -272,12 +255,6 @@ where
                 || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
             {
                 settings_committed(&current.ui);
-            }
-            if previous.ui.application.private_mode != current.ui.application.private_mode
-                || previous.scrobbling != current.scrobbling
-                || credentials_changed
-            {
-                settings_scrobbling.settings_changed(credentials_changed);
             }
             if previous.ui.application.download_artwork_automatically
                 != current.ui.application.download_artwork_automatically

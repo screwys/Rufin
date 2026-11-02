@@ -45,9 +45,9 @@ use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
+use crate::scrobbling::Settings as ScrobblingSettings;
 use app::Settings as UiSettings;
 use playback::StreamQuality;
-use crate::scrobbling::Settings as ScrobblingSettings;
 use secrets::{
     CachedSecretStore, ConfigSecretStore, SecretKey, SecretStore, SwitchableSecretStore,
 };
@@ -192,6 +192,19 @@ impl StoredSettings {
         self.ui.visualizer.migrate_named_presets();
         app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
+    }
+
+    /// Whether `other` names the same scrobbling accounts and secrets; the switches may
+    /// differ.
+    pub(crate) fn same_scrobbling_accounts(&self, other: &Self) -> bool {
+        let mut accounts = other.scrobbling.clone();
+        accounts.copy_switches(&self.scrobbling);
+        accounts == self.scrobbling
+            && other.scrobbling_credentials == self.scrobbling_credentials
+            && other.scrobbling_secrets_present == self.scrobbling_secrets_present
+            && other.ui.lastfm_api_key == self.ui.lastfm_api_key
+            && other.secret_scope_id == self.secret_scope_id
+            && other.secrets_revision == self.secrets_revision
     }
 
     pub(crate) fn scrobbling_runtime_settings(&self) -> ScrobblingSettings {
@@ -850,37 +863,21 @@ pub(crate) fn persist_scrobbling_settings(
     secrets: &Arc<SwitchableSecretStore>,
     input: &ScrobblingSettings,
     scope: &str,
-) -> Result<ScrobblingSettings, String> {
+) -> Result<(), String> {
     let mut prepared = StoredSettings::clone(&file.load());
     store_scrobbling(&mut prepared, secrets.as_ref(), input)?;
-    let mut committed = input.clone();
     file.update(|stored| {
         if stored.secret_scope_id != scope {
             return Err("credential storage was reset".into());
         }
-        prepared.scrobbling.lastfm.enabled = stored.scrobbling.lastfm.enabled;
-        prepared.scrobbling.lastfm.now_playing_enabled =
-            stored.scrobbling.lastfm.now_playing_enabled;
-        prepared.scrobbling.librefm.enabled = stored.scrobbling.librefm.enabled;
-        prepared.scrobbling.librefm.now_playing_enabled =
-            stored.scrobbling.librefm.now_playing_enabled;
-        prepared.scrobbling.listenbrainz.enabled = stored.scrobbling.listenbrainz.enabled;
-        prepared.scrobbling.listenbrainz.now_playing_enabled =
-            stored.scrobbling.listenbrainz.now_playing_enabled;
+        // The switches stay as they are committed.
+        prepared.scrobbling.copy_switches(&stored.scrobbling);
         stored.scrobbling = prepared.scrobbling;
         stored.scrobbling_credentials = prepared.scrobbling_credentials;
         stored.scrobbling_secrets_present = false;
         stored.ui.lastfm_api_key = prepared.ui.lastfm_api_key;
-        committed.lastfm.enabled = stored.scrobbling.lastfm.enabled;
-        committed.lastfm.now_playing_enabled = stored.scrobbling.lastfm.now_playing_enabled;
-        committed.librefm.enabled = stored.scrobbling.librefm.enabled;
-        committed.librefm.now_playing_enabled = stored.scrobbling.librefm.now_playing_enabled;
-        committed.listenbrainz.enabled = stored.scrobbling.listenbrainz.enabled;
-        committed.listenbrainz.now_playing_enabled =
-            stored.scrobbling.listenbrainz.now_playing_enabled;
         Ok(())
-    })?;
-    Ok(committed)
+    })
 }
 
 pub(crate) fn load_scrobbling_settings(
@@ -1401,14 +1398,12 @@ mod tests {
         let mut settings = load_scrobbling_settings(&file, &secrets);
         settings.listenbrainz.user_token = "token".to_string();
 
-        let committed =
-            persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
-                .expect("persist first scrobbling secret");
+        persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
+            .expect("persist first scrobbling secret");
 
         assert_eq!(store.loads.load(Ordering::Relaxed), 2);
         assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
         assert_eq!(store.saves.load(Ordering::Relaxed), 1);
-        assert_eq!(committed.listenbrainz.user_token, "token");
         assert!(!file.load().scrobbling_secrets_present);
         assert!(
             file.load()
