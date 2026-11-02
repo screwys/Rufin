@@ -174,7 +174,6 @@ panic = "abort"
 
 [profile.dev]
 debug = "line-tables-only"
-opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
