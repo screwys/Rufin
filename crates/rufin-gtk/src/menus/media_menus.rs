@@ -1,6 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use crate::shell::shell::Shell;
+use crate::widgets::media_drag::MediaDragSource;
 
 use adw::prelude::*;
 use gtk::glib;
@@ -47,7 +48,7 @@ pub fn add_drag_to_playlist(
             return;
         };
         let Some(owner) = shell.upgrade() else { return };
-        crate::widgets::playlists::add_media_to_playlist(
+        crate::playlists::picker::add_media_to_playlist(
             &owner.products.source,
             playlist_key,
             selection,
@@ -165,7 +166,11 @@ pub fn present_track_menu(
         msgid("Track radio"),
         RadioSeed::Track(track.media_uri.clone()),
     );
-    append_context_menu_picker(&surface, shell, track_play_request(track.track_key));
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        MediaDragSource::capture_target(track_play_request(track.track_key)),
+    );
     if track.access.cue_path.is_none()
         && (track.source_key.is_some() || track.media_uri.starts_with("file:"))
     {
@@ -474,7 +479,11 @@ pub fn present_playlist_entry_menu(
             },
         );
     }
-    append_context_menu_picker_media(&surface, shell, row.media_uri.clone());
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        MediaDragSource::media_uris([row.media_uri.clone()]),
+    );
     if context_menu_rating_visible(shell) {
         let rating_shell = Rc::clone(shell);
         let media_uri = row.media_uri.clone();
@@ -595,11 +604,7 @@ fn collection_selection_surface(
             });
         },
     );
-    crate::shell::shell::playlist_picker::append_context_menu_picker_source(
-        &surface,
-        shell,
-        payload.clone(),
-    );
+    crate::playlists::picker::append_to_menu(&surface, shell, payload.clone());
     install_selection_download_actions(&surface, shell, payload);
     Some((surface, targets))
 }
@@ -624,52 +629,51 @@ fn present_playlist_selection_menu(
         };
         let shell = Rc::clone(&delete_shell);
         let targets = targets.clone();
-        let dialog =
-            crate::widgets::playlists::delete_playlists_dialog(targets.count(), move || {
-                let targets = targets.clone();
-                let source = shell.products.source.clone();
-                let catalog = Arc::clone(&shell.products.library);
-                let task = shell.products.runtime.spawn(async move {
-                    let targets = targets.collections(&catalog).await?;
-                    let mut smart = Vec::new();
-                    let mut failure = None;
-                    for collection in targets {
-                        match collection {
-                            library::Collection::Playlist(key) => {
-                                if let Err(error) =
-                                    rufin_core::playlists::delete_playlist(&source, key).await
-                                {
-                                    failure.get_or_insert_with(|| error.to_string());
-                                }
-                            }
-                            library::Collection::Smart { key, .. } => smart.push(key),
-                            _ => unreachable!("playlist selection contains playlists"),
-                        }
-                    }
-                    Ok::<_, String>((smart, failure))
-                });
-                let shell = Rc::clone(&shell);
-                glib::spawn_future_local(async move {
-                    match task.await {
-                        Ok(Ok((smart, failure))) => {
-                            for key in smart {
-                                shell.publish_smart_playlist_change(
-                                    SmartPlaylistChange::Delete(key),
-                                    None,
-                                    None,
-                                );
-                            }
-                            if let Some(error) = failure {
-                                shell.control_feedback.show_feedback_toast(error);
+        let dialog = crate::playlists::delete_playlists_dialog(targets.count(), move || {
+            let targets = targets.clone();
+            let source = shell.products.source.clone();
+            let catalog = Arc::clone(&shell.products.library);
+            let task = shell.products.runtime.spawn(async move {
+                let targets = targets.collections(&catalog).await?;
+                let mut smart = Vec::new();
+                let mut failure = None;
+                for collection in targets {
+                    match collection {
+                        library::Collection::Playlist(key) => {
+                            if let Err(error) =
+                                rufin_core::playlists::delete_playlist(&source, key).await
+                            {
+                                failure.get_or_insert_with(|| error.to_string());
                             }
                         }
-                        Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
-                        Err(error) => shell
-                            .control_feedback
-                            .show_feedback_toast(error.to_string()),
+                        library::Collection::Smart { key, .. } => smart.push(key),
+                        _ => unreachable!("playlist selection contains playlists"),
                     }
-                });
+                }
+                Ok::<_, String>((smart, failure))
             });
+            let shell = Rc::clone(&shell);
+            glib::spawn_future_local(async move {
+                match task.await {
+                    Ok(Ok((smart, failure))) => {
+                        for key in smart {
+                            shell.publish_smart_playlist_change(
+                                SmartPlaylistChange::Delete(key),
+                                None,
+                                None,
+                            );
+                        }
+                        if let Some(error) = failure {
+                            shell.control_feedback.show_feedback_toast(error);
+                        }
+                    }
+                    Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
+                    Err(error) => shell
+                        .control_feedback
+                        .show_feedback_toast(error.to_string()),
+                }
+            });
+        });
         dialog.present(Some(&target));
     };
     let catalog = shell.products.library.clone();
@@ -784,7 +788,7 @@ pub fn remove_playlist_entry_selection(
         };
         let source = shell.products.source.clone();
         shell.show_undoable_operation_feedback(&feedback, move || {
-            crate::widgets::playlists::add_media_to_playlist(
+            crate::playlists::picker::add_media_to_playlist(
                 &source,
                 selection.playlist,
                 songs.clone(),
@@ -812,7 +816,11 @@ fn append_playlist_entry_selection_actions(
             play_selection.play(&play_shell.products.playback, placement, shuffled)
         },
     );
-    append_context_menu_picker_entries(surface, shell, selection.clone());
+    crate::playlists::picker::append_to_menu(
+        surface,
+        shell,
+        MediaDragSource::playlist_entries(selection.clone()),
+    );
     append_metadata_selection_action(surface, shell, selection.input.clone());
     let download_shell = Rc::clone(shell);
     let download_payload = crate::widgets::media_drag::MediaDragSource::playlist_entries(selection);
@@ -840,7 +848,11 @@ fn append_track_selection_actions(
             play_selection.play(&play_shell.products.playback, placement, shuffled)
         },
     );
-    append_context_menu_picker_selection(surface, shell, selection.clone());
+    crate::playlists::picker::append_to_menu(
+        surface,
+        shell,
+        MediaDragSource::selection(selection.clone()),
+    );
     append_metadata_selection_action(surface, shell, selection.input.clone());
     install_selection_download_actions(
         surface,
@@ -928,10 +940,10 @@ pub fn present_album_context_menu(
         msgid("Album radio"),
         RadioSeed::Album(album.album_key),
     );
-    append_context_menu_picker(
+    crate::playlists::picker::append_to_menu(
         &surface,
         shell,
-        crate::widgets::selection::album_play_request(&album),
+        MediaDragSource::capture_target(crate::widgets::selection::album_play_request(&album)),
     );
     append_metadata_action(
         &surface,
@@ -1046,7 +1058,11 @@ pub fn present_artist_context_menu(
             RadioSeed::Artist(artist.artist_key)
         },
     );
-    append_context_menu_picker(&surface, shell, playback.clone());
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        MediaDragSource::capture_target(playback.clone()),
+    );
     append_metadata_action(
         &surface,
         shell,
@@ -1161,7 +1177,11 @@ pub fn present_mood_context_menu(
         false,
         mood.summary.track_count > 0 && mood.summary.downloaded_count == mood.summary.track_count,
     );
-    append_context_menu_picker(&surface, shell, playback);
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        MediaDragSource::capture_target(playback),
+    );
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
 
@@ -1218,7 +1238,7 @@ pub fn present_playlist_context_menu(
             current.is_some(),
             move || {
                 if let Some(media_uri) = current.as_ref() {
-                    crate::widgets::playlists::add_media_to_playlist(
+                    crate::playlists::picker::add_media_to_playlist(
                         &add_shell.products.source,
                         playlist_key,
                         library::MemberSelection::Uris((vec![media_uri.clone()]).into()),
@@ -1283,7 +1303,7 @@ pub fn present_playlist_context_menu(
                 return;
             };
             let shell = Rc::clone(&delete_shell);
-            let dialog = crate::widgets::playlists::delete_playlist_dialog(&name, move || {
+            let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
                 let source = shell.products.source.clone();
                 gtk::glib::spawn_future_local(async move {
                     let _ = rufin_core::playlists::delete_playlist(&source, playlist_key).await;
@@ -1359,7 +1379,7 @@ pub fn present_smart_playlist_context_menu(
             return;
         };
         let shell = Rc::clone(&delete_shell);
-        let dialog = crate::widgets::playlists::delete_playlist_dialog(&name, move || {
+        let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
             let navigate = Rc::clone(&shell);
             shell.publish_smart_playlist_change(
                 SmartPlaylistChange::Delete(key),
@@ -1516,48 +1536,4 @@ fn context_menu_rating_visible(shell: &Shell) -> bool {
         .application
         .context_menu
         .rating_visible
-}
-
-fn append_context_menu_picker_entries(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    selection: PlaylistEntrySelectionSnapshot,
-) {
-    crate::shell::shell::playlist_picker::append_context_menu_picker_source(
-        surface,
-        shell,
-        crate::widgets::media_drag::MediaDragSource::playlist_entries(selection),
-    );
-}
-
-fn append_context_menu_picker_selection(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    selection: TrackSelectionSnapshot,
-) {
-    crate::shell::shell::playlist_picker::append_context_menu_picker_source(
-        surface,
-        shell,
-        crate::widgets::media_drag::MediaDragSource::selection(selection),
-    );
-}
-
-fn append_context_menu_picker_media(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    media_uri: String,
-) {
-    crate::shell::shell::playlist_picker::append_context_menu_picker_source(
-        surface,
-        shell,
-        crate::widgets::media_drag::MediaDragSource::media_uris([media_uri]),
-    );
-}
-
-fn append_context_menu_picker(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    target: PlayRequest,
-) {
-    crate::shell::shell::playlist_picker::append_context_menu_picker(surface, shell, target);
 }

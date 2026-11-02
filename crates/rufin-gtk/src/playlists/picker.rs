@@ -1,12 +1,17 @@
+//! Adding media to playlists: the context submenu, the full picker and the add itself.
+use crate::shell::shell::Shell;
 use crate::widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
-use crate::widgets::interactions::popdown_native_menu;
+use crate::widgets::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface, popdown_native_menu};
 use crate::widgets::library_fields::playlist_artwork;
+use crate::widgets::media_drag::MediaDragSource;
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
-use localization::tr;
+use library::PlaylistKey;
+use localization::{msgid, tr};
+use rufin_core::settings::ContextMenuItem;
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 crate::composite_box!(
     pub(crate) PlaylistPickerRowView,
     playlist_picker_row_view_imp,
@@ -36,18 +41,155 @@ struct ReadyPlaylistTracks {
     preview_uris: Vec<String>,
 }
 
-pub fn populate_context_playlist_picker(
-    root: &gtk::Box,
-    source: rufin_core::runtime::SourceHandle,
-    feedback: Rc<dyn Fn(&OperationFeedback)>,
+/// Adds "Add to Playlist" to a context menu: a submenu of the playlists, and the full picker
+/// when the item itself is clicked.
+pub(crate) fn append_to_menu(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    source: MediaDragSource,
+) {
+    let picker = context_picker(shell, source.clone(), surface.popover());
+    let click_shell = Rc::downgrade(shell);
+    surface.append_configurable_widget_submenu(
+        ContextMenuItem::AddToPlaylist,
+        msgid("Add to Playlist"),
+        "playlist-picker",
+        &picker,
+        ADD_TO_PLAYLIST_ICON,
+        move || {
+            if let Some(shell) = click_shell.upgrade() {
+                present(&shell, source.clone());
+            }
+        },
+    );
+}
+
+/// Opens the full picker for `source` once its tracks and the destinations are read.
+pub(crate) fn present(shell: &Rc<Shell>, source: MediaDragSource) {
+    let (source_key, task) = read_destinations(shell, source);
+    let shell = Rc::downgrade(shell);
+    glib::spawn_future_local(async move {
+        let Some((playlists, selection, title, preview_uris)) =
+            task.await.ok().and_then(Result::ok)
+        else {
+            return;
+        };
+        if let Some(shell) = shell.upgrade() {
+            present_dialog(
+                &shell,
+                source_key,
+                playlists,
+                selection,
+                title,
+                preview_uris,
+            );
+        }
+    });
+}
+
+pub(crate) fn add_media_to_playlist(
+    source: &rufin_core::source::SourceOwner,
+    playlist: PlaylistKey,
+    selection: library::MemberSelection,
+    skip_existing: bool,
+    settled: Rc<dyn Fn(usize)>,
+) {
+    let source = source.clone();
+    glib::spawn_future_local(async move {
+        let accepted = rufin_core::playlists::add_playlist_tracks(
+            &source,
+            playlist,
+            selection.into(),
+            skip_existing,
+        )
+        .await
+        .unwrap_or(0);
+        settled(accepted);
+    });
+}
+
+type Destinations = (
+    Vec<library::PlaylistRow>,
+    library::MemberSelection,
+    String,
+    Vec<String>,
+);
+
+/// Reads the tracks of `source` and the playlists of the selected library they can go to.
+fn read_destinations(
+    shell: &Shell,
+    source: MediaDragSource,
+) -> (
+    Option<library::SourceKey>,
+    tokio::task::JoinHandle<Result<Destinations, String>>,
+) {
+    let source_key = shell
+        .selected_library()
+        .as_deref()
+        .map(|selected| selected.source_key);
+    let catalog = shell.products.library.clone();
+    let task = shell.products.runtime.spawn(async move {
+        let (selection, title, preview_uris) = source.playlist_input(&catalog).await?;
+        let playlists = catalog
+            .playlist_destinations(source_key, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((playlists, selection, title, preview_uris))
+    });
+    (source_key, task)
+}
+
+fn show_feedback(shell: &Weak<Shell>, feedback: &OperationFeedback) {
+    if let Some(shell) = shell.upgrade() {
+        shell.show_operation_feedback(feedback);
+    }
+}
+
+fn new_playlist(shell: &Weak<Shell>, name: String, selection: library::MemberSelection) {
+    if let Some(shell) = shell.upgrade() {
+        shell.new_playlist_dialog_in_folder(name, selection, None);
+    }
+}
+
+fn context_picker(
+    shell: &Rc<Shell>,
+    source: MediaDragSource,
     popover: &gtk::PopoverMenu,
-    new_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
-) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::MemberSelection, String, Vec<String>)> {
+) -> gtk::Box {
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    root.add_css_class("context-playlist-submenu");
+    root.set_hexpand(true);
+
+    let started = Cell::new(false);
+    let picker_shell = Rc::downgrade(shell);
+    let picker_popover = popover.downgrade();
+    root.connect_map(move |root| {
+        if started.replace(true) {
+            return;
+        }
+        let (Some(shell), Some(popover)) = (picker_shell.upgrade(), picker_popover.upgrade())
+        else {
+            return;
+        };
+        populate_context_playlist_picker(root, &shell, source.clone(), &popover);
+    });
+    root
+}
+
+fn populate_context_playlist_picker(
+    root: &gtk::Box,
+    shell: &Rc<Shell>,
+    source: MediaDragSource,
+    popover: &gtk::PopoverMenu,
+) {
     let ready = Rc::new(RefCell::new(None::<ReadyPlaylistTracks>));
     let create_ready = Rc::clone(&ready);
     let create_popover = popover.downgrade();
+    let create_shell = Rc::downgrade(shell);
     let activate_ready = Rc::clone(&ready);
     let activate_popover = popover.downgrade();
+    let activate_shell = Rc::downgrade(shell);
+    let owner = shell.products.source.clone();
     let update = populate_context_picker(
         root,
         false,
@@ -55,22 +197,25 @@ pub fn populate_context_playlist_picker(
             let Some(ready) = activate_ready.borrow().clone() else {
                 return;
             };
-            let feedback = Rc::clone(&feedback);
-            crate::widgets::playlists::add_media_to_playlist(
-                &source,
+            let shell = activate_shell.clone();
+            add_media_to_playlist(
+                &owner,
                 key,
                 ready.selection,
                 skip_duplicates,
                 Rc::new(move |accepted| {
                     if accepted > 0 {
-                        feedback(&OperationFeedback {
-                            title: ready.title.clone(),
-                            artwork: OperationArtwork::MediaUris(ready.preview_uris.clone()),
-                            item_count: accepted,
-                            kind: OperationFeedbackKind::PlaylistAdded {
-                                destination: destination.clone(),
+                        show_feedback(
+                            &shell,
+                            &OperationFeedback {
+                                title: ready.title.clone(),
+                                artwork: OperationArtwork::MediaUris(ready.preview_uris.clone()),
+                                item_count: accepted,
+                                kind: OperationFeedbackKind::PlaylistAdded {
+                                    destination: destination.clone(),
+                                },
                             },
-                        });
+                        );
                     }
                 }),
             );
@@ -87,10 +232,16 @@ pub fn populate_context_playlist_picker(
             if let Some(popover) = create_popover.upgrade() {
                 popdown_native_menu(&popover);
             }
-            new_playlist(name, selection);
+            new_playlist(&create_shell, name, selection);
         }),
     );
-    Rc::new(move |playlists, selection, title, preview_uris| {
+    let (_, task) = read_destinations(shell, source);
+    glib::spawn_future_local(async move {
+        let Some((playlists, selection, title, preview_uris)) =
+            task.await.ok().and_then(Result::ok)
+        else {
+            return;
+        };
         ready.replace(Some(ReadyPlaylistTracks {
             selection,
             title,
@@ -102,7 +253,7 @@ pub fn populate_context_playlist_picker(
                 .map(|row| (row.playlist_key, row.name))
                 .collect(),
         );
-    })
+    });
 }
 
 pub(crate) fn populate_context_picker<Key: Clone + 'static>(
@@ -252,17 +403,18 @@ struct PickerRow {
     haystack: String,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn playlist_picker_dialog(
-    source: rufin_core::runtime::SourceHandle,
-    artwork: Rc<crate::widgets::artwork::ArtworkState>,
-    create_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
-    feedback: Rc<dyn Fn(&OperationFeedback)>,
+fn present_dialog(
+    shell: &Rc<Shell>,
+    source_key: Option<library::SourceKey>,
     playlists: Vec<library::PlaylistRow>,
     selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
-) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {
+) {
+    let source = shell.products.source.clone();
+    let artwork = Rc::clone(&shell.artwork);
+    let feedback_shell = Rc::downgrade(shell);
+    let create_shell = Rc::downgrade(shell);
     let resource = "routes/playlist_picker.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -306,7 +458,7 @@ pub fn playlist_picker_dialog(
     create.connect_clicked(move |_| {
         let name = create_search.text().trim().to_string();
         if !name.is_empty() {
-            create_playlist(name, create_tracks.clone());
+            new_playlist(&create_shell, name, create_tracks.clone());
             create_search.set_text("");
         }
     });
@@ -326,11 +478,11 @@ pub fn playlist_picker_dialog(
             let pending = Rc::clone(&pending);
             let accepted = Rc::clone(&accepted);
             let accepted_names = Rc::clone(&accepted_names);
-            let feedback = Rc::clone(&feedback);
+            let feedback_shell = feedback_shell.clone();
             let feedback_title = title.clone();
             let preview_uris = preview_uris.clone();
             let name = playlist.name.clone();
-            crate::widgets::playlists::add_media_to_playlist(
+            add_media_to_playlist(
                 &source,
                 playlist.playlist_key,
                 selection.clone(),
@@ -347,12 +499,15 @@ pub fn playlist_picker_dialog(
                             [name] => name.clone(),
                             _ => format!("{} {}", names.len(), tr("Playlists")),
                         };
-                        feedback(&OperationFeedback {
-                            title: feedback_title.clone(),
-                            artwork: OperationArtwork::MediaUris(preview_uris.clone()),
-                            item_count: accepted.get(),
-                            kind: OperationFeedbackKind::PlaylistAdded { destination },
-                        });
+                        show_feedback(
+                            &feedback_shell,
+                            &OperationFeedback {
+                                title: feedback_title.clone(),
+                                artwork: OperationArtwork::MediaUris(preview_uris.clone()),
+                                item_count: accepted.get(),
+                                kind: OperationFeedbackKind::PlaylistAdded { destination },
+                            },
+                        );
                     }
                 }),
             );
@@ -361,13 +516,42 @@ pub fn playlist_picker_dialog(
             dialog.close();
         }
     });
-    let refresh_dialog = dialog.downgrade();
-    let update = Rc::new(move |playlists| {
-        if refresh_dialog.upgrade().is_some() {
-            replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
+    let close_shell = Rc::downgrade(shell);
+    dialog.connect_closed(move |_| {
+        if let Some(shell) = close_shell.upgrade() {
+            shell.set_playlist_picker_refresh(None);
         }
     });
-    (dialog, update)
+    // The destinations are read again when playlists change while the picker is open.
+    let refresh_dialog = dialog.downgrade();
+    let refresh_shell = Rc::downgrade(shell);
+    shell.set_playlist_picker_refresh(Some(Rc::new(move || {
+        if refresh_dialog.upgrade().is_none() {
+            return;
+        }
+        let Some(shell) = refresh_shell.upgrade() else {
+            return;
+        };
+        let catalog = shell.products.library.clone();
+        let task = shell.products.runtime.spawn(async move {
+            catalog
+                .playlist_destinations(source_key, &library::ReadCancellation::new())
+                .await
+        });
+        let artwork = Rc::clone(&artwork);
+        let (list, create, rows, add) =
+            (list.clone(), create.clone(), Rc::clone(&rows), add.clone());
+        let dialog = refresh_dialog.clone();
+        glib::spawn_future_local(async move {
+            let Some(playlists) = task.await.ok().and_then(Result::ok) else {
+                return;
+            };
+            if dialog.upgrade().is_some() {
+                replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
+            }
+        });
+    })));
+    shell.present_selected_dialog(&dialog);
 }
 
 fn replace_picker_rows(

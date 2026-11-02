@@ -5,6 +5,7 @@ mod editors;
 mod library;
 mod menus;
 mod player;
+mod playlists;
 mod preferences;
 mod shell;
 mod ui_resource;

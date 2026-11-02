@@ -68,4 +68,3 @@ mod route_keyboard;
 
 pub(crate) mod player_menus;
 mod playlist_files;
-pub(crate) mod playlist_picker;

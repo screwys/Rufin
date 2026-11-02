@@ -25,7 +25,6 @@ pub mod controls;
 pub mod interactions;
 pub mod ratings;
 
-pub mod playlists;
 pub mod popup;
 
 pub mod mounted_route;

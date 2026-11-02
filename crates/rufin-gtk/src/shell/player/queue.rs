@@ -1,6 +1,5 @@
 use crate::player::queue::QueueSelectionSnapshot;
 use crate::shell::shell::Shell;
-use crate::shell::shell::playlist_picker::append_context_menu_picker_media_uris;
 use crate::widgets::{
     controls::{PLAY_ICON, REMOVE_ICON},
     interactions::ContextMenuSurface,
@@ -70,6 +69,12 @@ pub(crate) fn present_queue_selection_context_menu(
             }
         },
     );
-    append_context_menu_picker_media_uris(&surface, shell, selection.media_uris.iter().cloned());
+    crate::playlists::picker::append_to_menu(
+        &surface,
+        shell,
+        crate::widgets::media_drag::MediaDragSource::media_uris(
+            selection.media_uris.iter().cloned(),
+        ),
+    );
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }

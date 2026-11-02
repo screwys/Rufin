@@ -2,10 +2,8 @@ use super::Shell;
 use super::actions::toggle_mute_shortcut;
 use crate::menus::media_menus::remove_playlist_entry_selection;
 use crate::player::outputs::{select_next_audio_output, select_previous_audio_output};
-use crate::shell::shell::playlist_picker::{
-    present_playlist_picker_entries, present_playlist_picker_media_uris,
-    present_playlist_picker_selection,
-};
+use crate::playlists::picker;
+use crate::widgets::media_drag::MediaDragSource;
 use crate::widgets::selection::TrackSelectionSnapshot;
 use adw::prelude::*;
 use gtk::glib;
@@ -172,7 +170,10 @@ impl Shell {
                     }
                 },
                 SelectionShortcut::AddToPlaylist => {
-                    present_playlist_picker_media_uris(self, selection.media_uris.iter().cloned());
+                    picker::present(
+                        self,
+                        MediaDragSource::media_uris(selection.media_uris.iter().cloned()),
+                    );
                 }
                 SelectionShortcut::Download => return false,
                 SelectionShortcut::Delete => unreachable!(),
@@ -187,11 +188,11 @@ impl Shell {
                     selection.play(&self.products.playback, placement, false)
                 }
                 SelectionShortcut::AddToPlaylist => {
-                    present_playlist_picker_entries(self, selection)
+                    picker::present(self, MediaDragSource::playlist_entries(selection))
                 }
                 SelectionShortcut::Download => crate::menus::media_menus::download(
                     self,
-                    &crate::widgets::media_drag::MediaDragSource::playlist_entries(selection),
+                    &MediaDragSource::playlist_entries(selection),
                 ),
                 SelectionShortcut::Delete => unreachable!(),
             }
@@ -204,11 +205,12 @@ impl Shell {
             SelectionShortcut::Play(placement) => {
                 selection.play(&self.products.playback, placement, false)
             }
-            SelectionShortcut::AddToPlaylist => present_playlist_picker_selection(self, selection),
-            SelectionShortcut::Download => crate::menus::media_menus::download(
-                self,
-                &crate::widgets::media_drag::MediaDragSource::selection(selection),
-            ),
+            SelectionShortcut::AddToPlaylist => {
+                picker::present(self, MediaDragSource::selection(selection))
+            }
+            SelectionShortcut::Download => {
+                crate::menus::media_menus::download(self, &MediaDragSource::selection(selection))
+            }
             SelectionShortcut::Delete => unreachable!(),
         }
         true

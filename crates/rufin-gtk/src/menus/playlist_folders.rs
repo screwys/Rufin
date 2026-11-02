@@ -137,7 +137,7 @@ pub fn append_folder_actions(
 }
 
 fn present_folder_picker(shell: &Rc<Shell>, members: Vec<library::PlaylistFolderMember>) {
-    let (picker_dialog, picker_content) = crate::menus::playlist_picker::folder_picker_dialog();
+    let (picker_dialog, picker_content) = crate::playlists::picker::folder_picker_dialog();
     let close = picker_dialog.downgrade();
     populate_folder_picker(
         &picker_content,
@@ -168,7 +168,7 @@ fn populate_folder_picker(
     let choose_shell = Rc::downgrade(shell);
     let choose_members = members.clone();
     let choose_dismiss = Rc::clone(&dismiss);
-    let update = crate::menus::playlist_picker::populate_context_picker(
+    let update = crate::playlists::picker::populate_context_picker(
         root,
         true,
         Rc::new(move |folder, _, _| {

@@ -13,7 +13,6 @@ use crate::shell::player::{
     now_playing_notification_can_send, now_playing_notification_should_withdraw,
 };
 use crate::shell::preferences::dialogs::release_notes::apply_release_update;
-use crate::shell::shell::playlist_picker::refresh_context_playlist_picker;
 use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{DiscoveryStatus, DiscoveryUpdate, SourceOperation};
 use rufin_core::runtime::{
@@ -182,7 +181,7 @@ fn apply_configured_sources(
     *shell.source.configured.borrow_mut() = configured;
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
-    refresh_context_playlist_picker(shell);
+    shell.refresh_playlist_picker();
     shell.player_ui.update_bottom_player();
 }
 
@@ -201,7 +200,7 @@ fn apply_selected_source(
         .selected_ui
         .install(super::selected_ui::SelectedUiSession::new(selected.clone()));
     shell.search_session.set_selected(Some(selected));
-    refresh_context_playlist_picker(shell);
+    shell.refresh_playlist_picker();
     let route = shell.navigation.routes.borrow().current().clone();
     if changed && shell.route_uses_selected_source(&route) {
         shell.replace_current_route_when_ready();
@@ -239,7 +238,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
         || !changed.playlists.is_empty()
         || changed.playlist_lists
     {
-        refresh_context_playlist_picker(shell);
+        shell.refresh_playlist_picker();
     }
     if rufin_core::view::pins_refresh(&shell.products.source, changed) {
         super::navigation::refresh_sidebar_pins(shell);

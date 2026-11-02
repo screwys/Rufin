@@ -402,3 +402,29 @@ impl Shell {
         }
     }
 }
+
+pub(crate) fn delete_playlist_dialog(name: &str, delete: impl Fn() + 'static) -> adw::AlertDialog {
+    let resource = "preferences/dialogs/playlist_delete.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { dialog: adw::AlertDialog });
+    dialog.set_body(&dialog.body().replace("{name}", name));
+    dialog.connect_response(Some("delete"), move |_, _| delete());
+    dialog
+}
+
+pub(crate) fn delete_playlists_dialog(
+    count: usize,
+    delete: impl Fn() + 'static,
+) -> adw::AlertDialog {
+    let resource = "preferences/dialogs/playlist_delete.ui";
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { selection_dialog: adw::AlertDialog });
+    selection_dialog.set_body(&localization::trn_with(
+        "Delete {count} playlist?",
+        "Delete {count} playlists?",
+        count as u64,
+        &[("count", &count.to_string())],
+    ));
+    selection_dialog.connect_response(Some("delete"), move |_, _| delete());
+    selection_dialog
+}
