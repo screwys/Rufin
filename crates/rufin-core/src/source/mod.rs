@@ -409,7 +409,13 @@ impl SourceOwner {
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let (feed, notices) = feed::Feed::open();
         Arc::new_cyclic(|owner| {
-            // Each download asks this owner for its source's current client when it starts.
+            // Artwork fetches and each download ask this owner for a source's current client.
+            let artwork_owner = owner.clone();
+            artwork.install_source_resolver(move |source_id| {
+                artwork_owner
+                    .upgrade()
+                    .and_then(|owner: Arc<Self>| owner.client(source_id).ok())
+            });
             let downloads = Downloads::new(
                 artwork.clone(),
                 downloads_root,

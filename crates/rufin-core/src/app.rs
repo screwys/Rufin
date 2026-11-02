@@ -172,12 +172,6 @@ where
             Err(error) => warn!(%error, "could not read recent search artwork"),
         }
     }
-    let artwork_source = Arc::downgrade(&source);
-    artwork.install_source_resolver(move |source_id| {
-        artwork_source
-            .upgrade()
-            .and_then(|owner| owner.client(source_id).ok())
-    });
     let waveform = WaveformOwner::new(
         runtime.clone(),
         waveform_events,
