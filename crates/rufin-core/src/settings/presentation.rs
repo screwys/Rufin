@@ -224,6 +224,16 @@ pub fn library_fields_title(layout: super::LibraryLayout) -> &'static str {
     }
 }
 
+/// A list column's header: the field's title, "Title" for the merged title, and none for
+/// the tools column.
+pub fn library_column_title(value: LibraryField) -> Option<&'static str> {
+    match value {
+        LibraryField::Tools => None,
+        LibraryField::TitleMerged => Some(msgid("Title")),
+        field => Some(library_field_title(field)),
+    }
+}
+
 pub fn library_field_title(value: LibraryField) -> &'static str {
     match value {
         LibraryField::RowIndex => "#",

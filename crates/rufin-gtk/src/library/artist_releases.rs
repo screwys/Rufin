@@ -392,7 +392,7 @@ impl ArtistRouteListCell {
         });
         for (position, field) in fields.iter().enumerate() {
             let widget = if header {
-                let title = album_table_title(*field)
+                let title = rufin_core::settings::presentation::library_column_title(*field)
                     .map(localization::tr)
                     .unwrap_or_default();
                 crate::widgets::table_header::HeaderCell::new(&title, Some(*field), position)
@@ -427,7 +427,8 @@ impl ArtistRouteListCell {
             .iter()
             .zip(&preferred)
             .map(|(field, preferred)| {
-                let title = album_table_title(*field).map(localization::tr);
+                let title = rufin_core::settings::presentation::library_column_title(*field)
+                    .map(localization::tr);
                 crate::widgets::table_sizing::column_header_minimum_width(
                     title.as_deref(),
                     *preferred,
@@ -445,16 +446,6 @@ impl ArtistRouteListCell {
         for slot in self.imp().grid_cells.borrow().iter() {
             slot.cell.apply_fields(fields);
         }
-    }
-}
-
-fn album_table_title(field: LibraryField) -> Option<&'static str> {
-    match field {
-        LibraryField::Tools => None,
-        LibraryField::TitleMerged => Some("Title"),
-        _ => Some(rufin_core::settings::presentation::library_field_title(
-            field,
-        )),
     }
 }
 

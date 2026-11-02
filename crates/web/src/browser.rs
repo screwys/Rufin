@@ -79,14 +79,10 @@ impl<'a> Column<'a> {
             Some(LibraryField::Tools) => ("actions", ""),
             _ => ("", ""),
         };
-        let title = match parsed {
-            Some(LibraryField::RowIndex) => "#".into(),
-            Some(LibraryField::TitleMerged) => localization::tr("Title"),
-            Some(field) => localization::tr(
-                rufin_core::settings::presentation::library_field_title(field),
-            ),
-            None => String::new(),
-        };
+        let title = parsed
+            .and_then(rufin_core::settings::presentation::library_column_title)
+            .map(localization::tr)
+            .unwrap_or_default();
         Self {
             field,
             title,

@@ -221,11 +221,7 @@ pub fn album_column(
     if field == LibraryField::Tools {
         return crate::widgets::recycled_cells::row_actions_column(&factory);
     }
-    let title = if field == LibraryField::TitleMerged {
-        "Title"
-    } else {
-        rufin_core::settings::presentation::library_field_title(field)
-    };
+    let title = rufin_core::settings::presentation::library_column_title(field).unwrap_or_default();
     let column = localized_column(title, &factory);
     column.set_fixed_width(column_width(field));
     column
