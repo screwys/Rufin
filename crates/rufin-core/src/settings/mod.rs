@@ -20,13 +20,13 @@ pub mod visualizer;
 mod web_controller;
 pub use web_controller::ControllerSettings;
 
+pub use crate::downloads::DownloadRule;
+pub use crate::downloads::{DownloadRules, SourceDownloadSettings};
 pub use app::{
     ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
     RandomPlaySettings, Settings, SettingsHandle, default_home_blocks,
 };
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
-pub use downloads::DownloadRule;
-pub use downloads::{DownloadRules, SourceDownloadSettings};
 pub use layout::{
     AccentPreference, DEFAULT_LEFT_SIDEBAR_WIDTH, DEFAULT_RIGHT_SIDEBAR_WIDTH,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, LayoutProfile, LayoutSettings, LeftSidebarMode,
@@ -634,7 +634,7 @@ impl SettingsOwner {
     pub fn set_download_location(
         &self,
         source_id: SourceId,
-        location: Option<downloads::DownloadDirectory>,
+        location: Option<crate::downloads::DownloadDirectory>,
     ) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.set_download_location(source_id, location);
@@ -1467,7 +1467,10 @@ mod tests {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn download_settings(&self, source_id: SourceId) -> downloads::SourceDownloadSettings {
+    pub fn download_settings(
+        &self,
+        source_id: SourceId,
+    ) -> crate::downloads::SourceDownloadSettings {
         self.load().download_settings(&source_id)
     }
 }

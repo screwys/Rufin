@@ -25,7 +25,6 @@ uniffi.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 artwork.workspace = true
 async-channel.workspace = true
-downloads.workspace = true
 glib.workspace = true
 gstreamer.workspace = true
 gstreamer-audio.workspace = true

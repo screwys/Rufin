@@ -1,8 +1,8 @@
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use downloads::DownloadSubject;
 use gtk::glib;
 use localization::tr;
+use rufin_core::downloads::DownloadSubject;
 use sources::SourceId;
 use std::{
     cell::{Cell, RefCell},
@@ -145,10 +145,16 @@ impl DownloadsState {
 
 pub fn download_subject_title(subject: &DownloadSubject) -> String {
     match subject {
-        DownloadSubject::Rule(downloads::DownloadRule::EntireLibrary) => tr("Entire Library"),
-        DownloadSubject::Rule(downloads::DownloadRule::Favorites) => tr("Favorites"),
-        DownloadSubject::Rule(downloads::DownloadRule::AllPlaylists) => tr("All Playlists"),
-        DownloadSubject::Rule(downloads::DownloadRule::LatestFiveAlbums) => tr("5 Latest Albums"),
+        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::EntireLibrary) => {
+            tr("Entire Library")
+        }
+        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::Favorites) => tr("Favorites"),
+        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::AllPlaylists) => {
+            tr("All Playlists")
+        }
+        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::LatestFiveAlbums) => {
+            tr("5 Latest Albums")
+        }
         DownloadSubject::Prepared { title, .. } => title.clone().unwrap_or_else(|| tr("Selection")),
     }
 }
@@ -192,7 +198,7 @@ pub fn download_rule_artwork(
     catalog: &Arc<library::Catalog>,
     runtime: &tokio::runtime::Handle,
     source_id: SourceId,
-    rule: downloads::DownloadRule,
+    rule: rufin_core::downloads::DownloadRule,
     size: i32,
 ) -> gtk::Widget {
     let projection = artwork.cover_group_projection_for_artwork(&[], size, size, true);
@@ -205,16 +211,16 @@ pub fn download_rule_artwork(
             return Ok::<_, library::LibraryError>(Vec::new());
         };
         let scope = match rule {
-            downloads::DownloadRule::EntireLibrary => {
+            rufin_core::downloads::DownloadRule::EntireLibrary => {
                 library::RepresentativeArtworkScope::AllTracks
             }
-            downloads::DownloadRule::Favorites => {
+            rufin_core::downloads::DownloadRule::Favorites => {
                 library::RepresentativeArtworkScope::FavoriteTracks
             }
-            downloads::DownloadRule::AllPlaylists => {
+            rufin_core::downloads::DownloadRule::AllPlaylists => {
                 library::RepresentativeArtworkScope::PlaylistTracks
             }
-            downloads::DownloadRule::LatestFiveAlbums => {
+            rufin_core::downloads::DownloadRule::LatestFiveAlbums => {
                 library::RepresentativeArtworkScope::LatestAlbums(5)
             }
         };

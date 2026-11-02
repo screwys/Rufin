@@ -10,6 +10,7 @@ pub mod collection_context;
 pub mod connect;
 pub mod detail_links;
 pub mod diagnostics;
+pub mod downloads;
 mod features;
 mod loudness;
 pub mod paths;

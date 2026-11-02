@@ -1858,28 +1858,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
-name = "downloads"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "async-channel",
- "audio-processing",
- "blake3",
- "httpdate",
- "library",
- "reqwest 0.13.5",
- "serde",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "uniffi",
- "wiremock",
-]
-
-[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3179,7 +3157,6 @@ name = "gtk-library"
 version = "0.16.6"
 dependencies = [
  "artwork",
- "downloads",
  "glib-build-tools",
  "gtk-media-menus",
  "gtk-widgets",
@@ -3237,7 +3214,6 @@ dependencies = [
  "async-channel",
  "desktop-integration",
  "directories",
- "downloads",
  "glib-build-tools",
  "gtk-player",
  "gtk-widgets",
@@ -3264,7 +3240,6 @@ dependencies = [
  "ashpd",
  "async-channel",
  "desktop-integration",
- "downloads",
  "glib-build-tools",
  "gtk-editors",
  "gtk-library",
@@ -3295,7 +3270,6 @@ dependencies = [
  "artwork",
  "async-channel",
  "desktop-integration",
- "downloads",
  "glib-build-tools",
  "gtk4",
  "libadwaita",
@@ -7261,7 +7235,6 @@ dependencies = [
  "app-identity",
  "artwork",
  "async-channel",
- "downloads",
  "glib",
  "gstreamer",
  "gstreamer-audio",
@@ -7337,12 +7310,12 @@ dependencies = [
  "blake3",
  "chrono",
  "directories",
- "downloads",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "gio",
  "glib",
+ "httpdate",
  "image",
  "library",
  "localization",
@@ -7371,6 +7344,7 @@ dependencies = [
  "uniffi",
  "url",
  "windows-updater",
+ "wiremock",
 ]
 
 [[package]]
@@ -9807,7 +9781,6 @@ dependencies = [
  "blake3",
  "bytes",
  "constant_time_eq 0.6.0",
- "downloads",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",

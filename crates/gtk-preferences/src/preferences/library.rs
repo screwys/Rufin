@@ -4,8 +4,8 @@ use std::path::Path;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use downloads::{DownloadQueueState, DownloadRule};
 use gtk::gio;
+use rufin_core::downloads::{DownloadQueueState, DownloadRule};
 
 use localization::{msgid, tr, trn_with};
 use tracing::warn;
@@ -869,7 +869,7 @@ fn add_download_queue(
     };
     let owner = shell.products.downloads.clone();
     let source = source_id.clone();
-    let jobs = SparseRouteModel::<String, downloads::DownloadQueueItem>::new(
+    let jobs = SparseRouteModel::<String, rufin_core::downloads::DownloadQueueItem>::new(
         SparseSource::Query { count: 0 },
         shell.products.runtime.clone(),
         Rc::new(move |_, range, _| {
@@ -878,7 +878,7 @@ fn add_download_queue(
             Box::pin(async move {
                 owner
                     .queue_page(
-                        downloads::DownloadQueueScope::Source { source_id },
+                        rufin_core::downloads::DownloadQueueScope::Source { source_id },
                         range.start as u64,
                         range.len() as u32,
                     )
@@ -900,7 +900,9 @@ fn add_download_queue(
             row: adw::ActionRow, artwork: gtk::Box, drag: gtk::Image,
             up: gtk::Button, down: gtk::Button, cancel: gtk::Button, clear: gtk::Button,
         });
-        let current = Rc::new(RefCell::new(None::<downloads::DownloadQueueItem>));
+        let current = Rc::new(RefCell::new(
+            None::<rufin_core::downloads::DownloadQueueItem>,
+        ));
         for (button, after) in [(&up, false), (&down, true)] {
             let weak = weak_shell.clone();
             let item = item.downgrade();
@@ -909,16 +911,18 @@ fn add_download_queue(
                 let (Some(shell), Some(item)) = (weak.upgrade(), item.upgrade()) else {
                     return;
                 };
-                let Some(job) = item_at_from_item::<downloads::DownloadQueueItem>(&item) else {
+                let Some(job) =
+                    item_at_from_item::<rufin_core::downloads::DownloadQueueItem>(&item)
+                else {
                     return;
                 };
                 shell.products.downloads.move_job(
                     source.clone(),
                     job.id,
                     if after {
-                        downloads::DownloadQueueMove::Down
+                        rufin_core::downloads::DownloadQueueMove::Down
                     } else {
-                        downloads::DownloadQueueMove::Up
+                        rufin_core::downloads::DownloadQueueMove::Up
                     },
                 );
             });
@@ -976,9 +980,9 @@ fn add_download_queue(
                 return false;
             }
             let movement = if y > f64::from(row.height()) / 2.0 {
-                downloads::DownloadQueueMove::After { job_id: job.id }
+                rufin_core::downloads::DownloadQueueMove::After { job_id: job.id }
             } else {
-                downloads::DownloadQueueMove::Before { job_id: job.id }
+                rufin_core::downloads::DownloadQueueMove::Before { job_id: job.id }
             };
             shell
                 .products
@@ -1006,7 +1010,7 @@ fn add_download_queue(
                 return;
             };
             let position = item.position() as usize;
-            let job = item_at_from_item::<downloads::DownloadQueueItem>(item);
+            let job = item_at_from_item::<rufin_core::downloads::DownloadQueueItem>(item);
             row.set_sensitive(job.is_some());
             let Some(job) = job else {
                 current.borrow_mut().take();
@@ -1111,7 +1115,7 @@ fn add_download_queue(
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             if let Ok(page) = owner
                 .queue_page(
-                    downloads::DownloadQueueScope::Source { source_id },
+                    rufin_core::downloads::DownloadQueueScope::Source { source_id },
                     offset as u64,
                     128,
                 )
@@ -1144,7 +1148,7 @@ fn add_download_queue(
     });
 }
 
-fn download_queue_item_subtitle(job: &downloads::DownloadQueueItem) -> String {
+fn download_queue_item_subtitle(job: &rufin_core::downloads::DownloadQueueItem) -> String {
     let progress = format!(
         "{} / {}",
         job.completed_tracks.min(job.total_tracks),

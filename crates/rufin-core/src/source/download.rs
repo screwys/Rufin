@@ -203,8 +203,11 @@ impl SourceOwner {
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
-            let subject =
-                downloads::DownloadSubject::for_media_uris(&context, title.as_deref(), &uris);
+            let subject = crate::downloads::DownloadSubject::for_media_uris(
+                &context,
+                title.as_deref(),
+                &uris,
+            );
             owner.download_media(subject, uris);
             Ok(())
         })

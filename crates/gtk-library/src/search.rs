@@ -951,7 +951,7 @@ impl CatalogUi {
         )
         .with_download_change(downloads)
         .with_download_change(Rc::new(move |event| {
-            let downloads::DownloadEvent::Changed { media_uri: uri, downloaded } = event else { return };
+            let rufin_core::downloads::DownloadEvent::Changed { media_uri: uri, downloaded } = event else { return };
             let (uri, downloaded) = (uri.as_str(), *downloaded);
             if let Some(projection) = download_tracks.upgrade() {
                 projection.update_matching(

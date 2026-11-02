@@ -4,9 +4,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use downloads::{DownloadEvent, DownloadFeedbackKind};
 use gtk::glib;
 use localization::{tr, track_count_text};
+use rufin_core::downloads::{DownloadEvent, DownloadFeedbackKind};
 
 use crate::shell::Shell;
 

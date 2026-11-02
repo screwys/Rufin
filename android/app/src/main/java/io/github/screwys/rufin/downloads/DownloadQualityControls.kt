@@ -6,7 +6,7 @@ import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.SettingsSliderNumber
 import io.github.screwys.rufin.shared.library.*
 import io.github.screwys.rufin.shared.sources.DownloadQuality
-import io.github.screwys.rufin.shared.downloads.downloadBitrates
+import io.github.screwys.rufin.shared.rufin_core.downloadBitrates
 
 @Composable
 internal fun DownloadQualityControls(quality: DownloadQuality, enabled: Boolean = true, change: (DownloadQuality) -> Unit) {

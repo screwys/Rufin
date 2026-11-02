@@ -42,7 +42,7 @@ impl TrackListProjection {
     pub fn download_change(&self) -> gtk_widgets::mounted_route::MountedDownloadChange {
         let model = self.model.clone();
         Rc::new(move |event| {
-            if let downloads::DownloadEvent::Changed {
+            if let rufin_core::downloads::DownloadEvent::Changed {
                 media_uri,
                 downloaded,
             } = event

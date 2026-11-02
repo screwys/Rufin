@@ -5,9 +5,9 @@ use crate::{
 };
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use downloads::DownloadSubject;
 use gtk::glib;
 use rufin_core::collection_context::CollectionTarget;
+use rufin_core::downloads::DownloadSubject;
 use rufin_core::playback::PlayRequest;
 use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};

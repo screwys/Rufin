@@ -244,7 +244,7 @@ impl AndroidRuntime {
         Arc::new(crate::storage::AndroidStorage::new(self))
     }
 
-    pub fn downloads(&self) -> Arc<downloads::Downloads> {
+    pub fn downloads(&self) -> Arc<rufin_core::downloads::Downloads> {
         Arc::new(self.products.downloads.clone())
     }
 

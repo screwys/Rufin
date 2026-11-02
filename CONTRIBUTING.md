@@ -72,7 +72,6 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `artwork` | artwork selection, loading, and caching |
 | `audio-processing` | waveform, loudness, transcoding and spectrum analysis |
 | `desktop-integration` | desktop media controls, notifications, the tray, and Discord IPC |
-| `downloads` | server track downloads and download management |
 | `library` | music items, listening activity, and the database |
 | `localization` | translation tooling and locales |
 | `lyrics` | lyrics documents, parsing, lookup and reading aids |

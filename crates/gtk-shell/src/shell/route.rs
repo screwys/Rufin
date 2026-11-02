@@ -698,7 +698,10 @@ impl Shell {
         }
     }
 
-    pub(crate) fn apply_download_change_to_mounted_route(&self, event: &downloads::DownloadEvent) {
+    pub(crate) fn apply_download_change_to_mounted_route(
+        &self,
+        event: &rufin_core::downloads::DownloadEvent,
+    ) {
         let apply = self
             .route_viewport
             .mounted_route

@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::downloads::Downloads;
 use crate::runtime::source::{
     ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, EditableSource, LocalAccessStatus,
     LocalFolder, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourceSummary,
@@ -26,7 +27,6 @@ use crate::runtime::{SelectedLibrary, SourceEvent};
 use crate::settings::SecretStorageMode;
 use artwork::Artwork;
 use async_channel::{Receiver, Sender};
-use downloads::Downloads;
 use library::{Catalog, FavoriteTarget, ReadCancellation, SourceKey};
 use secrets::SwitchableSecretStore;
 use sources::{
@@ -1813,7 +1813,7 @@ impl SourceOwner {
     pub fn set_download_rule(
         &self,
         source_id: SourceId,
-        rule: downloads::DownloadRule,
+        rule: crate::downloads::DownloadRule,
         enabled: bool,
         delete_downloads: bool,
     ) -> sources::SourceResult<bool> {
@@ -1839,9 +1839,10 @@ impl SourceOwner {
         self.shared
             .settings
             .edit(|stored| {
-                stored
-                    .ui
-                    .set_download_rules(source_id.clone(), downloads::DownloadRules::default());
+                stored.ui.set_download_rules(
+                    source_id.clone(),
+                    crate::downloads::DownloadRules::default(),
+                );
                 Ok(())
             })
             .map_err(SourceError::Other)?;
@@ -2480,7 +2481,11 @@ impl SourceOwner {
             .upgrade()
     }
 
-    pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
+    pub fn download_media(
+        &self,
+        subject: crate::downloads::DownloadSubject,
+        media_uris: Vec<String>,
+    ) {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
             let mut source_ids = Vec::new();

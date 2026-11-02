@@ -343,7 +343,7 @@ impl CatalogUi {
             play,
         )
         .with_download_change(Rc::new(move |event| {
-            let downloads::DownloadEvent::Changed {
+            let rufin_core::downloads::DownloadEvent::Changed {
                 media_uri,
                 downloaded,
             } = event

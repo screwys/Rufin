@@ -102,9 +102,9 @@ impl CollectionTarget {
     }
 
     /// The collection a download event marks downloaded or not.
-    pub fn downloaded(event: &downloads::DownloadEvent) -> Option<(Self, bool)> {
-        let downloads::DownloadEvent::SubjectChanged {
-            subject: downloads::DownloadSubject::Prepared { context_id, .. },
+    pub fn downloaded(event: &crate::downloads::DownloadEvent) -> Option<(Self, bool)> {
+        let crate::downloads::DownloadEvent::SubjectChanged {
+            subject: crate::downloads::DownloadSubject::Prepared { context_id, .. },
             downloaded,
         } = event
         else {

@@ -149,7 +149,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::clone(&catalog),
     )
     .unwrap();
-    let downloads = downloads::Downloads::new(
+    let downloads = crate::downloads::Downloads::new(
         artwork::Artwork::new(
             (root.path().join("downloads")).join("artwork"),
             (runtime.clone()).clone(),

@@ -14,7 +14,6 @@ publish.workspace = true
 process-memory.workspace = true
 app-identity.workspace = true
 async-channel.workspace = true
-downloads.workspace = true
 desktop-integration.workspace = true
 sources.workspace = true
 artwork.workspace = true

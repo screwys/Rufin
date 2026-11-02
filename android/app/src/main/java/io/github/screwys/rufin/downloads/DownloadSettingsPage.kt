@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.shared.downloads.*
+import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.settings.PreferencesConnection

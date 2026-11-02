@@ -56,7 +56,7 @@ async fn download(
     }
     let input: Input = body(request).await?;
     products.source.download_media(
-        downloads::DownloadSubject::Prepared {
+        rufin_core::downloads::DownloadSubject::Prepared {
             context_id: "api".into(),
             title: None,
         },

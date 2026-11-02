@@ -4,7 +4,7 @@ import androidx.compose.runtime.*
 import androidx.paging.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
-import io.github.screwys.rufin.shared.downloads.*
+import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceOwner

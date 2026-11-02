@@ -118,7 +118,7 @@ where
             .map_err(string_error)?
         }
     };
-    let downloads = downloads::Downloads::new(
+    let downloads = crate::downloads::Downloads::new(
         artwork.clone(),
         paths.downloads_dir(),
         library.as_ref().clone(),

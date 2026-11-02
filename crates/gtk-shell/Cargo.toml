@@ -24,7 +24,6 @@ app-identity.workspace = true
 async-channel.workspace = true
 artwork.workspace = true
 desktop-integration.workspace = true
-downloads.workspace = true
 gtk = { workspace = true, features = ["v4_20"] }
 library.workspace = true
 localization.workspace = true

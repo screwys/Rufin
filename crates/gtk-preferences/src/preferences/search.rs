@@ -158,7 +158,7 @@ pub(super) fn items(shell: &Preferences) -> Vec<PreferencesSearchItem> {
             );
         }
     }
-    for rule in downloads::DownloadRule::ALL {
+    for rule in rufin_core::downloads::DownloadRule::ALL {
         add(
             &mut items,
             Page::Downloads,

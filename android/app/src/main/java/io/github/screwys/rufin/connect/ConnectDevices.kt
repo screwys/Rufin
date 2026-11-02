@@ -14,7 +14,7 @@ import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
 import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
 import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
-import io.github.screwys.rufin.shared.downloads.DownloadDirectory
+import io.github.screwys.rufin.shared.rufin_core.DownloadDirectory
 
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsRow

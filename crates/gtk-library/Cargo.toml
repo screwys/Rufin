@@ -13,7 +13,6 @@ publish.workspace = true
 [dependencies]
 gtk-media-menus.workspace = true
 sources.workspace = true
-downloads.workspace = true
 
 tracing.workspace = true
 gtk-widgets.workspace = true

@@ -28,7 +28,7 @@ impl CacheKind {
     pub(crate) async fn clear(
         self,
         library: &library::Catalog,
-        downloads: &downloads::Downloads,
+        downloads: &crate::downloads::Downloads,
         lyrics: &crate::lyrics::LyricsHandle,
     ) -> Result<(), String> {
         match self {

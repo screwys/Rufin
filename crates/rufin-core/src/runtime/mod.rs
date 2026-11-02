@@ -12,8 +12,8 @@ pub mod scrobbling;
 pub mod source;
 mod storage;
 mod waveform;
+pub use crate::downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use diagnostics::DiagnosticsHandle;
-pub use downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use events::ProductReceivers;
 pub use inputs::{
     RuntimeInputs, SelectedLibrary, SourceEvent, SourceNotice, SourceNoticeKind,
@@ -37,7 +37,7 @@ pub struct ProductHandles {
     pub library: Arc<library::Catalog>,
     pub runtime: tokio::runtime::Handle,
     pub source: SourceHandle,
-    pub downloads: downloads::Downloads,
+    pub downloads: crate::downloads::Downloads,
     pub playback: std::sync::Arc<crate::playback::PlaybackOwner>,
     pub artwork: artwork::Artwork,
     pub lyrics: crate::lyrics::LyricsHandle,

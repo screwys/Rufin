@@ -15,8 +15,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::storage::DownloadAudio;
-use crate::{DownloadDirectory, DownloadOwner, ReleasedDownloadOwner, rebind_released_subject};
+use crate::downloads::storage::DownloadAudio;
+use crate::downloads::{
+    DownloadDirectory, DownloadOwner, ReleasedDownloadOwner, rebind_released_subject,
+};
 
 pub(super) const RECORD_VERSION: u32 = 5;
 pub(super) const AUDIO_EXTENSION: &str = "audio";

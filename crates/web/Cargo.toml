@@ -15,7 +15,6 @@ bindings = ["dep:uniffi"]
 
 [dependencies]
 audio-processing.workspace = true
-downloads.workspace = true
 uniffi = { workspace = true, optional = true }
 artwork.workspace = true
 askama.workspace = true

@@ -20,7 +20,6 @@ app-identity = { path = "crates/app-identity" }
 artwork = { path = "crates/artwork" }
 audio-processing = { path = "crates/audio-processing" }
 desktop-integration = { path = "crates/desktop-integration" }
-downloads = { path = "crates/downloads" }
 gtk-editors = { path = "crates/gtk-editors" }
 gtk-library = { path = "crates/gtk-library" }
 gtk-media-menus = { path = "crates/gtk-media-menus" }

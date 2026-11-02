@@ -69,7 +69,7 @@ pub(in crate::playback) async fn seeded(
         Arc::new(catalog.clone()),
     )
     .unwrap();
-    let downloads = downloads::Downloads::new(
+    let downloads = crate::downloads::Downloads::new(
         artwork::Artwork::new(
             (directory.path().join("downloads")).join("artwork"),
             (runtime.clone()).clone(),

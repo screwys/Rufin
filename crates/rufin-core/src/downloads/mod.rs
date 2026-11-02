@@ -1,8 +1,5 @@
 //! Download queue ownership, command handling, and bounded transfer execution.
 
-#[cfg(feature = "bindings")]
-uniffi::setup_scaffolding!();
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -28,12 +25,6 @@ pub use storage::DownloadDirectory;
 use track_download::*;
 
 pub type DownloadCount = usize;
-#[cfg(feature = "bindings")]
-uniffi::custom_type!(DownloadCount, u64, {
-    remote,
-    lower: |value| value as u64,
-    try_lift: |value| Ok(usize::try_from(value)?),
-});
 
 /// Finds a source's current client, which its owner keeps and may replace at any time.
 pub type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;

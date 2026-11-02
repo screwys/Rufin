@@ -1875,7 +1875,7 @@ mod tests {
             )
             .unwrap(),
             Arc::new(catalog.clone()),
-            downloads::Downloads::new(
+            crate::downloads::Downloads::new(
                 artwork::Artwork::new(
                     (directory.path().join("downloads")).join("artwork"),
                     (runtime.clone()).clone(),

@@ -328,8 +328,8 @@ fn folder_page(
             tracks.resume_initial_demand();
         }) as FolderResume
     };
-    let download_change = Rc::new(move |event: &downloads::DownloadEvent| {
-        let downloads::DownloadEvent::Changed {
+    let download_change = Rc::new(move |event: &rufin_core::downloads::DownloadEvent| {
+        let rufin_core::downloads::DownloadEvent::Changed {
             media_uri,
             downloaded,
         } = event

@@ -1,7 +1,7 @@
 use adw::prelude::*;
-use downloads::DOWNLOAD_BITRATES;
 use gtk_widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
 use library::{AudioChannels, AudioCodec, AudioEncoding};
+use rufin_core::downloads::DOWNLOAD_BITRATES;
 use sources::DownloadQuality;
 use std::{cell::Cell, rc::Rc};
 

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::downloads::{DownloadRules, SourceDownloadSettings};
 use crate::presence::Settings as RichPresenceSettings;
-use downloads::{DownloadRules, SourceDownloadSettings};
 use library::PlayedFilter;
 use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
@@ -479,7 +479,10 @@ impl Settings {
             .and_then(|directory| directory.native().map(PathBuf::from))
     }
 
-    pub fn download_location(&self, source_id: &SourceId) -> Option<downloads::DownloadDirectory> {
+    pub fn download_location(
+        &self,
+        source_id: &SourceId,
+    ) -> Option<crate::downloads::DownloadDirectory> {
         self.download_settings(source_id).directory
     }
 
@@ -510,14 +513,14 @@ impl Settings {
     ) -> bool {
         self.set_download_location(
             source_id,
-            directory.map(downloads::DownloadDirectory::Native),
+            directory.map(crate::downloads::DownloadDirectory::Native),
         )
     }
 
     pub fn set_download_location(
         &mut self,
         source_id: SourceId,
-        directory: Option<downloads::DownloadDirectory>,
+        directory: Option<crate::downloads::DownloadDirectory>,
     ) -> bool {
         self.update_download_settings(source_id, |settings| settings.directory = directory)
     }
@@ -631,8 +634,8 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
             .directory
             .as_ref()
             .is_some_and(|directory| match directory {
-                downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
-                downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
+                crate::downloads::DownloadDirectory::Native(path) => path.as_os_str().is_empty(),
+                crate::downloads::DownloadDirectory::Document { uri } => uri.is_empty(),
             })
         {
             entry.directory = None;

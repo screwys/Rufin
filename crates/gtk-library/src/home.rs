@@ -396,7 +396,7 @@ impl CatalogUi {
         MountedRoute::new(widget, Rc::new(|| {}))
             .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
             .with_download_change(Rc::new(move |event| {
-                let downloads::DownloadEvent::Changed {
+                let rufin_core::downloads::DownloadEvent::Changed {
                     media_uri: uri,
                     downloaded,
                 } = event

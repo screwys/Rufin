@@ -1057,7 +1057,7 @@ pub(crate) async fn prepare_stream<F>(
     playable: &library::Playable,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
-    downloads: Option<&downloads::Downloads>,
+    downloads: Option<&crate::downloads::Downloads>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
 ) -> Result<audio_processing::ResolvedStream, playback::BackendFailure>
 where

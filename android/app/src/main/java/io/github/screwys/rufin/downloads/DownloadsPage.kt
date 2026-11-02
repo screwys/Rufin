@@ -16,7 +16,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.shared.downloads.DownloadQueueItem
+import io.github.screwys.rufin.shared.rufin_core.DownloadQueueItem
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.player.PlayerConnection

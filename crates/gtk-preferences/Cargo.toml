@@ -26,7 +26,6 @@ library.workspace = true
 localization.workspace = true
 sources.workspace = true
 playback.workspace = true
-downloads.workspace = true
 tracing.workspace = true
 roxmltree.workspace = true
 
