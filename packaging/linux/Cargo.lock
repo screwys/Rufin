@@ -1813,28 +1813,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
-name = "downloads"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "async-channel",
- "audio-processing",
- "blake3",
- "httpdate",
- "library",
- "reqwest 0.13.5",
- "serde",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "uniffi",
- "wiremock",
-]
-
-[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3109,163 +3087,6 @@ dependencies = [
  "gstreamer-sys",
  "libc",
  "system-deps 7.0.8",
-]
-
-[[package]]
-name = "gtk-editors"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "async-channel",
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "rufin-core",
- "sources",
- "tokio",
-]
-
-[[package]]
-name = "gtk-library"
-version = "0.16.6"
-dependencies = [
- "artwork",
- "downloads",
- "glib-build-tools",
- "gtk-media-menus",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "rufin-core",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gtk-media-menus"
-version = "0.16.6"
-dependencies = [
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "rufin-core",
- "sources",
- "tokio",
-]
-
-[[package]]
-name = "gtk-player"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "audio-processing",
- "glib-build-tools",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "regex",
- "rufin-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gtk-preferences"
-version = "0.16.6"
-dependencies = [
- "async-channel",
- "desktop-integration",
- "directories",
- "downloads",
- "glib-build-tools",
- "gtk-player",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "pulldown-cmark",
- "roxmltree 0.21.1",
- "rufin-core",
- "sources",
- "tempfile",
- "tracing",
- "web",
-]
-
-[[package]]
-name = "gtk-shell"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "ashpd",
- "async-channel",
- "desktop-integration",
- "downloads",
- "glib-build-tools",
- "gtk-editors",
- "gtk-library",
- "gtk-media-menus",
- "gtk-player",
- "gtk-preferences",
- "gtk-widgets",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "playback",
- "proptest",
- "rufin-core",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
- "web",
-]
-
-[[package]]
-name = "gtk-widgets"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "async-channel",
- "desktop-integration",
- "downloads",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "process-memory",
- "proptest",
- "rufin-core",
- "serde",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7199,12 +7020,12 @@ version = "0.16.6"
 dependencies = [
  "app-identity",
  "desktop-integration",
- "gtk-shell",
  "localization",
  "playback-gstreamer",
  "process-memory",
  "rufin-controller",
  "rufin-core",
+ "rufin-gtk",
  "tracing",
  "windows-updater",
 ]
@@ -7261,16 +7082,17 @@ dependencies = [
  "blake3",
  "chrono",
  "directories",
- "downloads",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "gio",
  "glib",
+ "httpdate",
  "image",
  "library",
  "localization",
  "lyrics",
+ "md-5 0.10.6",
  "metadata-lookup",
  "notify",
  "playback",
@@ -7280,7 +7102,6 @@ dependencies = [
  "resvg",
  "rufin-connect",
  "rust-embed",
- "scrobbling",
  "secrets",
  "serde",
  "serde_json",
@@ -7295,6 +7116,40 @@ dependencies = [
  "uniffi",
  "url",
  "windows-updater",
+ "wiremock",
+]
+
+[[package]]
+name = "rufin-gtk"
+version = "0.16.6"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "ashpd",
+ "async-channel",
+ "audio-processing",
+ "desktop-integration",
+ "directories",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "playback",
+ "process-memory",
+ "proptest",
+ "pulldown-cmark",
+ "regex",
+ "roxmltree 0.21.1",
+ "rufin-core",
+ "serde",
+ "serde_json",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "web",
 ]
 
 [[package]]
@@ -7551,20 +7406,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "scrobbling"
-version = "0.16.6"
-dependencies = [
- "library",
- "md-5 0.10.6",
- "reqwest 0.13.5",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "scroll"
@@ -9743,7 +9584,6 @@ dependencies = [
  "blake3",
  "bytes",
  "constant_time_eq 0.6.0",
- "downloads",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",
