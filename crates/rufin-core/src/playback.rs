@@ -35,7 +35,7 @@ use playback::{
     PlaybackBackend, PlaybackProjection, PreparedStream, QueueRepeatMode, RunId, StreamRequest,
 };
 use queue::Sequence;
-use scrobbling::Scrobbler;
+use crate::scrobbling::Scrobbler;
 use state::{AutoDjRequest, ClockSample, Command};
 use tracing::{debug, warn};
 

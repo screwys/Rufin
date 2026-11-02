@@ -4,8 +4,8 @@ use reqwest::{blocking::Client, header::AUTHORIZATION};
 use serde_json::{Value, json};
 use tracing::debug;
 
-use crate::retry::{DeliveryError, Submission, SubmissionTrack, USER_AGENT};
-use crate::settings::ListenBrainzSettings;
+use crate::scrobbling::retry::{DeliveryError, Submission, SubmissionTrack, USER_AGENT};
+use crate::scrobbling::settings::ListenBrainzSettings;
 
 const API_URL: &str = "https://api.listenbrainz.org/1/submit-listens";
 

@@ -113,7 +113,7 @@ pub(crate) fn device_secrets(stored: &StoredSettings) -> Vec<secrets::SecretKey>
             .map(super::provider_secret_key),
     );
     keys.extend(
-        scrobbling::secret_descriptors()
+        crate::scrobbling::secret_descriptors()
             .iter()
             .copied()
             .map(super::scrobbling_secret_key),

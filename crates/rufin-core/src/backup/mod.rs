@@ -139,7 +139,7 @@ impl BackupOwner {
             export.ui.sidebar.playlist_pin_imported_sources.clear();
             export.secret_scope_id.clear();
             export.scrobbling_secrets_present = false;
-            for descriptor in scrobbling::secret_descriptors() {
+            for descriptor in crate::scrobbling::secret_descriptors() {
                 descriptor.value_mut(&mut export.scrobbling).clear();
             }
             Some(serde_json::to_vec_pretty(&export).map_err(|e| e.to_string())?)
@@ -654,7 +654,7 @@ fn copy_scrobbling_logins(previous: &StoredSettings, incoming: &mut StoredSettin
     incoming.scrobbling.lastfm.username = previous.scrobbling.lastfm.username.clone();
     incoming.scrobbling.librefm.username = previous.scrobbling.librefm.username.clone();
     incoming.scrobbling.listenbrainz.username = previous.scrobbling.listenbrainz.username.clone();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         *descriptor.value_mut(&mut incoming.scrobbling) =
             descriptor.value(&previous.scrobbling).to_owned();
     }
@@ -873,7 +873,7 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
             .insert(source.configuration.source_id.clone(), value);
     }
     let scrobbling = read_scrobbling(stored, secrets)?;
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         let value = descriptor.value(&scrobbling);
         logins.scrobbling.insert(
             format!("{}:{}", descriptor.namespace(), descriptor.kind()),
@@ -915,7 +915,7 @@ fn restore_logins(
         }
     }
     let mut scrobbling = incoming.scrobbling_runtime_settings();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         let name = format!("{}:{}", descriptor.namespace(), descriptor.kind());
         if let Some(value) = logins.scrobbling.get(&name) {
             *descriptor.value_mut(&mut scrobbling) = value.clone().unwrap_or_default();

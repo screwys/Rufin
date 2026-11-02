@@ -2015,7 +2015,7 @@ impl Records {
                 .transpose()
                 .map_err(error)?
                 .unwrap_or_default();
-            for descriptor in scrobbling::secret_descriptors()
+            for descriptor in crate::scrobbling::secret_descriptors()
                 .iter()
                 .filter(|descriptor| descriptor.kind().starts_with(&service))
             {
@@ -2023,7 +2023,7 @@ impl Records {
                     json!(secret.get(descriptor.kind()).cloned().unwrap_or_default());
             }
             settings[&service] = account;
-            let settings: scrobbling::Settings = serde_json::from_value(settings).map_err(error)?;
+            let settings: crate::scrobbling::Settings = serde_json::from_value(settings).map_err(error)?;
             store_scrobbling(&mut prepared, secrets.as_ref(), &settings)?;
             Ok::<_, String>(prepared)
         })
@@ -2336,7 +2336,7 @@ fn set_preference(
 fn scrobbling_value(settings: &Value, service: &str) -> Result<ScrobblingValue, String> {
     let mut account = settings[service].clone();
     let mut secret = BTreeMap::new();
-    for descriptor in scrobbling::secret_descriptors()
+    for descriptor in crate::scrobbling::secret_descriptors()
         .iter()
         .filter(|descriptor| descriptor.kind().starts_with(service))
     {

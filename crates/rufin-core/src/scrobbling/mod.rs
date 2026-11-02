@@ -1,8 +1,8 @@
 //! Scrobbling settings, credentials, and account authorization.
 //!
-//! The Scrobbling crate owns service protocols and retry delivery. This owner
-//! joins those operations to Rufin's settings and secret storage while the UI
-//! sees only editable preferences and connection progress.
+//! The service protocols and retry delivery live beside this owner, which joins them to
+//! Rufin's settings and secret storage while the UI sees only editable preferences and
+//! connection progress.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -13,7 +13,17 @@ use crate::runtime::{
 };
 use async_channel::{Receiver, bounded};
 use library::{Change, Scope};
-use scrobbling::{AudioscrobblerAuthorization, AudioscrobblerSession, Scrobbler};
+mod retry;
+mod services;
+mod settings;
+
+pub use retry::Scrobbler;
+pub use services::audioscrobbler::{AudioscrobblerAuthorization, AudioscrobblerSession};
+pub use services::listenbrainz::connect as connect_listenbrainz;
+pub use settings::{
+    AudioscrobblerSettings, LASTFM_API_SECRET, LASTFM_SESSION, LIBREFM_SESSION, LISTENBRAINZ_TOKEN,
+    ListenBrainzSettings, SecretDescriptor, Settings, secret_descriptors,
+};
 use secrets::{SecretStore, SwitchableSecretStore};
 use tracing::warn;
 
@@ -131,7 +141,7 @@ impl ScrobblingOwner {
 
     fn commit(
         &self,
-        settings: scrobbling::Settings,
+        settings: Settings,
         scope: &str,
     ) -> Result<ScrobblingPreferences, String> {
         let committed =
@@ -261,7 +271,7 @@ impl ScrobblingOwner {
 }
 
 impl ScrobblingOwner {
-    fn loaded_settings(&self) -> scrobbling::Settings {
+    fn loaded_settings(&self) -> Settings {
         if self.secrets.is_persistent() {
             load_scrobbling_settings(&self.settings, &self.secrets)
         } else {
@@ -307,7 +317,7 @@ impl ScrobblingOwner {
 }
 
 /// The service switches `preferences` set.
-fn switches(settings: &mut scrobbling::Settings, preferences: &ScrobblingPreferences) {
+fn switches(settings: &mut Settings, preferences: &ScrobblingPreferences) {
     settings.lastfm.enabled = preferences.lastfm.enabled;
     settings.lastfm.now_playing_enabled = preferences.lastfm.now_playing_enabled;
     settings.librefm.enabled = preferences.librefm.enabled;
@@ -316,7 +326,7 @@ fn switches(settings: &mut scrobbling::Settings, preferences: &ScrobblingPrefere
     settings.listenbrainz.now_playing_enabled = preferences.listenbrainz.now_playing_enabled;
 }
 
-fn preferences(settings: &scrobbling::Settings) -> ScrobblingPreferences {
+fn preferences(settings: &Settings) -> ScrobblingPreferences {
     ScrobblingPreferences {
         lastfm: LastFmPreferences {
             enabled: settings.lastfm.enabled,
@@ -381,7 +391,7 @@ impl ScrobblingOwner {
         let scope = self.settings.load().secret_scope_id.clone();
         self.runtime
             .spawn_blocking(move || {
-                let result = scrobbling::connect_listenbrainz(&user_token).and_then(|username| {
+                let result = connect_listenbrainz(&user_token).and_then(|username| {
                     let _work = owner
                         .credential_work
                         .lock()

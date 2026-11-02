@@ -41,8 +41,8 @@ glib.workspace = true
 gio.workspace = true
 playback.workspace = true
 playback-cast.workspace = true
-reqwest = { workspace = true, features = ["blocking", "json"] }
-scrobbling.workspace = true
+reqwest = { workspace = true, features = ["blocking", "form", "json"] }
+md5_digest.workspace = true
 sources.workspace = true
 secrets.workspace = true
 library.workspace = true

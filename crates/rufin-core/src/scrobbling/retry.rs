@@ -11,8 +11,8 @@ use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use tracing::warn;
 
-use crate::services::{audioscrobbler, listenbrainz};
-use crate::{AudioscrobblerSettings, ListenBrainzSettings, Settings};
+use crate::scrobbling::services::{audioscrobbler, listenbrainz};
+use crate::scrobbling::{AudioscrobblerSettings, ListenBrainzSettings, Settings};
 
 const NOTIFICATION_CAPACITY: usize = 1;
 const DELIVERY_BATCH_SIZE: usize = 50;

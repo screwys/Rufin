@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use app::Settings as UiSettings;
 use playback::StreamQuality;
-use scrobbling::Settings as ScrobblingSettings;
+use crate::scrobbling::Settings as ScrobblingSettings;
 use secrets::{
     CachedSecretStore, ConfigSecretStore, SecretKey, SecretStore, SwitchableSecretStore,
 };
@@ -778,12 +778,12 @@ pub(crate) fn load_provider_secret(
 }
 
 fn scrobbling_secrets_present(settings: &ScrobblingSettings) -> bool {
-    scrobbling::secret_descriptors()
+    crate::scrobbling::secret_descriptors()
         .iter()
         .any(|descriptor| !descriptor.value(settings).trim().is_empty())
 }
 
-pub(crate) fn scrobbling_secret_key(descriptor: scrobbling::SecretDescriptor) -> SecretKey {
+pub(crate) fn scrobbling_secret_key(descriptor: crate::scrobbling::SecretDescriptor) -> SecretKey {
     SecretKey::namespaced(
         descriptor.namespace(),
         descriptor.kind(),
@@ -796,7 +796,7 @@ pub(crate) fn read_scrobbling(
     secrets: &dyn SecretStore,
 ) -> Result<ScrobblingSettings, String> {
     let mut settings = stored.scrobbling_runtime_settings();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         if let Some(credential) = stored.scrobbling_credentials.get(descriptor.kind()) {
             *descriptor.value_mut(&mut settings) =
                 load_provider_secret(secrets, credential)?.unwrap_or_default();
@@ -818,7 +818,7 @@ pub(crate) fn store_scrobbling(
 ) -> Result<(), String> {
     let mut input = input.clone();
     input.sanitize();
-    for descriptor in scrobbling::secret_descriptors() {
+    for descriptor in crate::scrobbling::secret_descriptors() {
         let value = descriptor.value(&input);
         if value.is_empty() {
             stored.scrobbling_credentials.remove(descriptor.kind());
@@ -1432,7 +1432,7 @@ mod tests {
 
         assert_eq!(
             store.loads.load(Ordering::Relaxed),
-            scrobbling::secret_descriptors().len()
+            crate::scrobbling::secret_descriptors().len()
         );
         assert!(!file.load().scrobbling_secrets_present);
     }

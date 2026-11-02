@@ -118,7 +118,7 @@ pub(in crate::playback) async fn seeded(
         directory.path().join("dictionary"),
     );
     let scrobbler = Arc::new(tokio::task::block_in_place(|| {
-        scrobbling::Scrobbler::new(
+        crate::scrobbling::Scrobbler::new(
             catalog.clone(),
             runtime.clone(),
             stored.scrobbling_runtime_settings(),

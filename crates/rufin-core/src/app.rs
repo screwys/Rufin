@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::runtime::{DiagnosticsHandle, ProductHandles, ProductReceivers, RuntimeInputs};
-use ::scrobbling::Scrobbler;
+use crate::scrobbling::Scrobbler;
 use async_channel::{bounded, unbounded};
 use playback::PlaybackBackend;
 use secrets::SwitchableSecretStore;

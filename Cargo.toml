@@ -39,7 +39,6 @@ process-memory = { path = "crates/process-memory" }
 rufin-connect = { path = "crates/rufin-connect" }
 rufin-controller = { path = "crates/rufin-controller" }
 rufin-core = { path = "crates/rufin-core" }
-scrobbling = { path = "crates/scrobbling" }
 secrets = { path = "crates/secrets" }
 sources = { path = "crates/sources" }
 windows-updater = { path = "crates/windows-updater" }

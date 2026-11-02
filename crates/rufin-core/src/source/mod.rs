@@ -1960,7 +1960,7 @@ impl SourceOwner {
                         stored.ui.lastfm_api_key.clear();
                         stored.scrobbling.lastfm.username.clear();
                         stored.scrobbling.librefm.username.clear();
-                        for descriptor in scrobbling::secret_descriptors() {
+                        for descriptor in crate::scrobbling::secret_descriptors() {
                             descriptor.value_mut(&mut stored.scrobbling).clear();
                         }
                         stored.scrobbling_secrets_present = false;

@@ -84,7 +84,6 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `rufin-core` | shared application runtime, operations, settings and sources |
 | `rufin-connect` | Connect networking, pairing, and profile synchronization|
 | `rufin-controller` | headless executable with optional HTTP access |
-| `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
 | `gtk-shell` | desktop window composition, navigation admission and native actions |

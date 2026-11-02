@@ -6,8 +6,8 @@ use reqwest::blocking::Client;
 use serde_json::Value;
 use tracing::debug;
 
-use crate::retry::{DeliveryError, Submission, SubmissionTrack};
-use crate::settings::{AudioscrobblerSettings, LIBREFM_API_KEY, LIBREFM_API_SECRET};
+use crate::scrobbling::retry::{DeliveryError, Submission, SubmissionTrack};
+use crate::scrobbling::settings::{AudioscrobblerSettings, LIBREFM_API_KEY, LIBREFM_API_SECRET};
 
 const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 const LIBREFM_API_URL: &str = "https://libre.fm/2.0/";
