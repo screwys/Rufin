@@ -137,6 +137,26 @@ impl Routes {
         self.put(address.id, address.addrs.into_iter().collect())
     }
 
+    /// Takes routes another device relayed: those not known yet go first, as the newest, and
+    /// the known ones keep their places, since a relayed list carries no order of its own.
+    /// True when the routes kept changed.
+    pub(crate) fn hear(&self, address: EndpointAddr) -> bool {
+        let address = canonical_address(address);
+        let known = self
+            .0
+            .lock()
+            .unwrap()
+            .get(&address.id)
+            .cloned()
+            .unwrap_or_default();
+        let new = address
+            .addrs
+            .into_iter()
+            .filter(|route| !known.contains(route))
+            .collect::<Vec<_>>();
+        !new.is_empty() && self.put(address.id, new)
+    }
+
     fn put(&self, peer: EndpointId, mut taken: Vec<TransportAddr>) -> bool {
         let mut routes = self.0.lock().unwrap();
         let kept = routes.entry(peer).or_default();
@@ -638,8 +658,9 @@ impl ConnectNetwork {
             let peer = address.id;
             if peer != self.endpoint.id()
                 && self.trusted(peer) == Some(true)
-                && self.remember(address).await
+                && self.routes.hear(address)
             {
+                self.save(peer).await;
                 learned.push(peer.to_string());
             }
         }
