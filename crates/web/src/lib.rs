@@ -699,6 +699,37 @@ fn sort(
         .ok_or_else(|| bad_request("Unknown sort"))
 }
 
+/// The order a card list opens in: the request's, else the one saved for `key`, as GTK opens
+/// it. Returns the field, the direction and the order's documented name.
+fn list_order(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+    key: LibraryListKey,
+) -> Result<(LibraryField, bool, &'static str), Error> {
+    let saved = products.settings.load().library_list(key);
+    let sort = if parameters.contains_key("sort") {
+        sort(parameters, key)?.unwrap_or(LibraryField::RowIndex)
+    } else {
+        saved.sort_key
+    };
+    let descending = if parameters.contains_key("descending") {
+        boolean(parameters, "descending")?
+    } else {
+        saved.descending
+    };
+    let name = (sort == LibraryField::RowIndex)
+        .then(|| own_sort(key))
+        .flatten()
+        .or_else(|| {
+            SORTS
+                .iter()
+                .find(|(_, field)| *field == sort)
+                .map(|(name, _)| *name)
+        })
+        .unwrap_or("title");
+    Ok((sort, descending, name))
+}
+
 /// The documented name of the order a track read lists in. Only a smart playlist reads in its
 /// own order, `definition`, without a field.
 fn sort_name(read: &library::MemberRead) -> &'static str {

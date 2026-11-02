@@ -323,13 +323,14 @@ pub(super) async fn list_data(
     } else {
         (None, None)
     };
-    let sort = sort(parameters, LibraryListKey::Playlists)?.unwrap_or(LibraryField::RowIndex);
+    let (sort, descending, sort_name) =
+        list_order(products, parameters, LibraryListKey::Playlists)?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let query = library::ListRead {
         folder,
         filter: parameters.get("q").cloned().unwrap_or_default(),
-        descending: boolean(parameters, "descending")?,
+        descending,
         ..library::ListRead::new(library::ListKind::Playlists, source, sort)
     };
     let activity_sensitive = query.activity_sensitive();
@@ -344,7 +345,7 @@ pub(super) async fn list_data(
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit,"playlists":playlists}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort_name,"descending":descending,"total":total,"offset":offset,"limit":limit,"playlists":playlists}),
     )
 }
 

@@ -413,14 +413,19 @@ pub(super) async fn artists_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let sort = sort(parameters, LibraryListKey::Artists)?.unwrap_or(LibraryField::Title);
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
     let album_artists = boolean(parameters, "album_artists")?;
+    let key = if album_artists {
+        LibraryListKey::AlbumArtists
+    } else {
+        LibraryListKey::Artists
+    };
+    let (sort, descending, sort_name) = list_order(products, parameters, key)?;
     let query = library::ListRead {
         folder,
         filter: parameters.get("q").cloned().unwrap_or_default(),
-        descending: boolean(parameters, "descending")?,
+        descending,
         favorites_only: boolean(parameters, "favorites")?,
         ..library::ListRead::new(
             library::ListKind::Artists {
@@ -449,7 +454,7 @@ pub(super) async fn artists_data(
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit,"artists":artists}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort_name,"descending":descending,"total":total,"offset":offset,"limit":limit,"artists":artists}),
     )
 }
 
@@ -509,13 +514,14 @@ pub(super) async fn smart_playlists_data(
     } else {
         (None, None)
     };
-    let sort = sort(parameters, LibraryListKey::SmartPlaylists)?.unwrap_or(LibraryField::RowIndex);
+    let (sort, descending, sort_name) =
+        list_order(products, parameters, LibraryListKey::SmartPlaylists)?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
     let query = library::ListRead {
         folder,
         filter: parameters.get("q").cloned().unwrap_or_default(),
-        descending: boolean(parameters, "descending")?,
+        descending,
         ..library::ListRead::new(
             library::ListKind::SmartPlaylists { now: now() },
             source,
@@ -534,7 +540,7 @@ pub(super) async fn smart_playlists_data(
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit,"smart_playlists":smart_playlists}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort_name,"descending":descending,"total":total,"offset":offset,"limit":limit,"smart_playlists":smart_playlists}),
     )
 }
 
@@ -585,11 +591,11 @@ pub(super) async fn albums_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let sort = sort(parameters, LibraryListKey::Albums)?.unwrap_or(LibraryField::Title);
+    let (sort, descending, sort_name) = list_order(products, parameters, LibraryListKey::Albums)?;
     let query = library::ListRead {
         folder,
         filter: parameters.get("q").cloned().unwrap_or_default(),
-        descending: boolean(parameters, "descending")?,
+        descending,
         favorites_only: boolean(parameters, "favorites")?,
         ..library::ListRead::new(library::ListKind::Albums, Some(source), sort)
     };
@@ -609,7 +615,7 @@ pub(super) async fn albums_data(
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"activity_sensitive":activity_sensitive,"total":total,"offset":offset,"limit":limit,"albums":albums}),
+        json!({"activity_sensitive":activity_sensitive,"sort":sort_name,"descending":descending,"total":total,"offset":offset,"limit":limit,"albums":albums}),
     )
 }
 
