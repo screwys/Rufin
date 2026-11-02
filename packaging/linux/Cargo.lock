@@ -634,24 +634,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backup"
-version = "0.16.6"
-dependencies = [
- "age",
- "blake3",
- "chrono",
- "flate2",
- "library",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "uniffi",
-]
-
-[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1698,7 +1680,6 @@ dependencies = [
  "metadata-lookup",
  "mpris-server",
  "playback",
- "presence",
  "rufin-core",
  "serde_json",
  "tempfile",
@@ -3209,7 +3190,6 @@ name = "gtk-preferences"
 version = "0.16.6"
 dependencies = [
  "async-channel",
- "backup",
  "desktop-integration",
  "directories",
  "downloads",
@@ -3221,7 +3201,6 @@ dependencies = [
  "library",
  "localization",
  "playback",
- "presence",
  "pulldown-cmark",
  "roxmltree 0.21.1",
  "rufin-core",
@@ -6464,15 +6443,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "presence"
-version = "0.16.6"
-dependencies = [
- "playback",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7287,11 +7257,12 @@ dependencies = [
  "async-channel",
  "audio-processing",
  "axum",
- "backup",
  "base64 0.23.1",
  "blake3",
+ "chrono",
  "directories",
  "downloads",
+ "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "gio",
@@ -7304,7 +7275,6 @@ dependencies = [
  "notify",
  "playback",
  "playback-cast",
- "presence",
  "pulldown-cmark",
  "reqwest 0.13.5",
  "resvg",
@@ -7315,6 +7285,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sources",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
