@@ -21,7 +21,6 @@ blake3.workspace = true
 localization.workspace = true
 playback.workspace = true
 rufin-core.workspace = true
-presence.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 url.workspace = true

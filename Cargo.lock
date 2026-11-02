@@ -1743,7 +1743,6 @@ dependencies = [
  "metadata-lookup",
  "mpris-server",
  "playback",
- "presence",
  "rufin-core",
  "serde_json",
  "tempfile",
@@ -3266,7 +3265,6 @@ dependencies = [
  "library",
  "localization",
  "playback",
- "presence",
  "pulldown-cmark",
  "roxmltree 0.21.1",
  "rufin-core",
@@ -6509,15 +6507,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "presence"
-version = "0.16.6"
-dependencies = [
- "playback",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7380,7 +7369,6 @@ dependencies = [
  "notify",
  "playback",
  "playback-cast",
- "presence",
  "pulldown-cmark",
  "reqwest 0.13.5",
  "resvg",

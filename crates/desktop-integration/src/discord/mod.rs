@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use playback::{PlaybackProjection, TransportStatus, TransportView};
 use tracing::debug;
 
-use presence::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
+use rufin_core::presence::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
 
 pub(crate) struct LatestSender<T> {
     value: Arc<Mutex<Option<T>>>,

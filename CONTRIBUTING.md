@@ -81,7 +81,6 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback` | playback behavior and the queue |
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
-| `presence` | shared Discord preferences, playback activity and payload construction |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
 | `rufin-core` | shared application runtime, operations, settings and sources |
 | `rufin-connect` | Connect networking, pairing, and profile synchronization|

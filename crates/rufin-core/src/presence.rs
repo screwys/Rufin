@@ -1,4 +1,4 @@
-//! Shared rich-presence settings and Discord activity construction.
+//! Rich-presence settings and Discord activity construction.
 //! Platform hosts own authentication and delivery.
 
 use std::sync::Arc;

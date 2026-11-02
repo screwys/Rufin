@@ -286,7 +286,7 @@ use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::{CompositeTemplate, TemplateChild, glib};
 use localization::tr;
-use presence::{DisplayType, LinkType};
+use rufin_core::presence::{DisplayType, LinkType};
 use rufin_core::settings::HomeBlockKind;
 
 mod reorder_row_imp {

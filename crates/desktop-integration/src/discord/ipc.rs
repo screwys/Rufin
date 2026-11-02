@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use presence::Activity;
+use rufin_core::presence::Activity;
 use serde_json::{Value, json};
 use tracing::debug;
 
@@ -393,7 +393,7 @@ fn read_response(stream: &mut IpcStream) -> Result<(), String> {
 mod tests {
     use super::*;
     use playback::TransportStatus;
-    use presence::{APP_ICON_ASSET, LinkType, Settings};
+    use rufin_core::presence::{APP_ICON_ASSET, LinkType, Settings};
 
     #[test]
     fn lastfm_album_url_uses_the_album_display_artist() {

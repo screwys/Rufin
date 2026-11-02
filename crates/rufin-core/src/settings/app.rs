@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::presence::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
 use library::PlayedFilter;
 use localization::{default_language_preference, sanitize_language_preference};
@@ -9,7 +10,6 @@ use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
     PlaybackSettings, QueueRepeatMode,
 };
-use presence::Settings as RichPresenceSettings;
 use serde::{Deserialize, Serialize};
 use sources::SourceId;
 

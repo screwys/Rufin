@@ -38,7 +38,6 @@ playback = { path = "crates/playback" }
 playback-cast = { path = "crates/playback-cast" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
 process-memory = { path = "crates/process-memory" }
-presence = { path = "crates/presence" }
 rufin-connect = { path = "crates/rufin-connect" }
 rufin-controller = { path = "crates/rufin-controller" }
 rufin-core = { path = "crates/rufin-core" }
