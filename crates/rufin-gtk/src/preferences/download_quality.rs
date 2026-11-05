@@ -2,8 +2,9 @@ use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_val
 use adw::prelude::*;
 use library::{AudioChannels, AudioCodec};
 use rufin_core::downloads::{
-    DOWNLOAD_BITRATES, download_quality_shows_bitrate, download_quality_shows_channels,
-    download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
+    DEFAULT_DOWNLOAD_BITRATE, DOWNLOAD_BITRATES, download_quality_shows_bitrate,
+    download_quality_shows_channels, download_quality_with_bitrate, download_quality_with_channels,
+    download_quality_with_codec,
 };
 use sources::DownloadQuality;
 use std::{cell::Cell, rc::Rc};
@@ -53,7 +54,7 @@ pub(crate) fn rows(
     );
     let updating = Rc::new(Cell::new(false));
     let current = Rc::new(Cell::new(initial));
-    let rate = Rc::new(Cell::new(None::<u32>));
+    let rate = Rc::new(Cell::new(DEFAULT_DOWNLOAD_BITRATE));
     let set: Rc<dyn Fn(DownloadQuality)> = {
         let (weak, updating, current, rate) = (
             weak.clone(),
@@ -73,14 +74,18 @@ pub(crate) fn rows(
             updating.set(true);
             current.set(quality);
             let encoding = quality.encoding();
-            rate.set(encoding.map_or(Some(128), |encoding| encoding.bitrate_kbps));
+            rate.set(
+                encoding
+                    .and_then(|encoding| encoding.bitrate_kbps)
+                    .unwrap_or(DEFAULT_DOWNLOAD_BITRATE),
+            );
             format.set_selected(encoding.map_or(0, |encoding| {
                 1 + codecs
                     .iter()
                     .position(|codec| *codec == encoding.codec)
                     .unwrap() as u32
             }));
-            let value = f64::from(rate.get().unwrap_or(128));
+            let value = f64::from(rate.get());
             scale.set_range(lower.min(value), upper.max(value));
             scale.set_value(value);
             channels.set_selected(encoding.map_or(0, |encoding| {
@@ -117,10 +122,10 @@ pub(crate) fn rows(
                 .checked_sub(1)
                 .and_then(|index| codecs.get(index as usize))
                 .copied();
-            let mut quality = download_quality_with_codec(current.get(), codec);
-            if let Some(rate) = rate.get() {
-                quality = download_quality_with_bitrate(quality, rate);
-            }
+            let quality = download_quality_with_bitrate(
+                download_quality_with_codec(current.get(), codec),
+                rate.get(),
+            );
             let quality = download_quality_with_channels(
                 quality,
                 channel_choices[channels.selected() as usize],
@@ -184,7 +189,7 @@ pub(crate) fn rows(
             scale.set_value(value);
             return;
         }
-        rate.set(Some(value as u32));
+        rate.set(value as u32);
         if !interacting.get() {
             commit();
         }
@@ -195,12 +200,9 @@ pub(crate) fn rows(
 pub(crate) fn label(quality: DownloadQuality) -> String {
     match quality {
         DownloadQuality::Original => localization::tr("Original"),
-        DownloadQuality::Transcoded(encoding) => encoding
-            .bitrate_kbps
-            .filter(|_| encoding.codec != AudioCodec::Flac)
-            .map_or_else(
-                || encoding.codec.name().to_ascii_uppercase(),
-                |rate| format!("{} {rate} kbps", encoding.codec.name().to_ascii_uppercase()),
-            ),
+        DownloadQuality::Transcoded(encoding) => encoding.bitrate_kbps.map_or_else(
+            || encoding.codec.name().to_ascii_uppercase(),
+            |rate| format!("{} {rate} kbps", encoding.codec.name().to_ascii_uppercase()),
+        ),
     }
 }
