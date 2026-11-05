@@ -292,33 +292,34 @@ impl AndroidView {
         self.view.context_id()
     }
 
-    /// Plays the page from its row `index`. A track of the Albums list in Detail layout plays
-    /// its album, which `context_title` names.
-    pub async fn play(
-        self: Arc<Self>,
+    /// Plays the page from its shown track `row` at `index`. A track of the Albums list in
+    /// Detail layout plays its album, which `context_title` names.
+    pub fn play(
+        &self,
+        row: AndroidBrowseRow,
         index: u64,
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let runtime = self.runtime.clone();
-        run_read(&runtime, move |cancel| async move {
-            let index = usize::try_from(index).map_err(error)?;
-            let request = self
-                .view
-                .play(index, QueuePlacement::Now, shuffled, None, &cancel)
-                .await
-                .map_err(error)?;
-            // A track of the Albums list in Detail layout plays its album.
-            let target = if self.view.album_spans().is_some() {
-                Some(CollectionTarget::Album(String::new()))
-            } else {
-                CollectionTarget::for_route(self.view.route())
-            };
-            self.play_request(
-                request.map(|request| request.with_context_title(caption(target, context_title))),
-            )
-        })
-        .await
+        let AndroidBrowseItem::Library { row } = row.item else {
+            return self.play_request(None);
+        };
+        let request = self.view.play(
+            &row,
+            usize::try_from(index).map_err(error)?,
+            QueuePlacement::Now,
+            shuffled,
+            None,
+        );
+        // A track of the Albums list in Detail layout plays its album.
+        let target = if self.view.album_spans().is_some() {
+            Some(CollectionTarget::Album(String::new()))
+        } else {
+            CollectionTarget::for_route(self.view.route())
+        };
+        self.play_request(
+            request.map(|request| request.with_context_title(caption(target, context_title))),
+        )
     }
 
     /// Plays or queues the page whole, as its header does.
@@ -598,7 +599,8 @@ impl AndroidLibrary {
         .await
     }
 
-    /// Plays or queues what `route` lists, as its page's header does.
+    /// Plays or queues what `route` lists, as its page's header does: a collection row's card
+    /// and menu Play.
     pub async fn play_route(
         self: Arc<Self>,
         route: Route,
@@ -606,22 +608,27 @@ impl AndroidLibrary {
         shuffled: bool,
         context_title: Option<String>,
     ) -> Result<(), AndroidError> {
-        let opened = self
-            .clone()
-            .open(
-                route,
-                CollectionCategory::Tracks,
-                String::new(),
-                None,
-                false,
-                false,
-                false,
-                false,
-                None,
-                true,
-            )
-            .await?;
-        opened.view.play_all(placement, shuffled, context_title)
+        let source = self.source.clone();
+        let selected = source.selected_library();
+        let target = CollectionTarget::for_route(&route);
+        let request = run_read(&self.runtime, move |cancel| async move {
+            source
+                .play_route(
+                    &route,
+                    selected.as_ref(),
+                    &OpenOptions::default(),
+                    placement,
+                    shuffled,
+                    &cancel,
+                )
+                .await
+                .map_err(error)
+        })
+        .await?
+        .ok_or_else(|| error("Choose a collection"))?;
+        self.playback
+            .play_selection(request.with_context_title(caption(target, context_title)));
+        Ok(())
     }
 
     /// Plays or queues one track.

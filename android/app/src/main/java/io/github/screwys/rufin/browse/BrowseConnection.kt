@@ -291,10 +291,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             val replace = placement is QueuePlacement.Replace
             when {
                 !item.row.isTrack -> item.row.route?.let { library.playRoute(it, placement, shuffled, item.row.title) }
-                replace && item.section != null && item.view != null ->
-                    item.view.playSection(item.section, item.index, shuffled, item.contextTitle)
-                replace && item.view != null ->
-                    item.view.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
+                // A Home track card plays just that track; its section header plays the section.
+                replace && item.section == null && item.view != null ->
+                    item.view.play(item.row, item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
                 replace && item.searchContext != null -> {
                     val order = item.searchOrder ?: listOf(item.row.mediaUri)
                     library.playRows(item.searchContext, order, order.indexOf(item.row.mediaUri).toULong(), placement, shuffled,

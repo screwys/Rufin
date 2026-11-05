@@ -1094,7 +1094,6 @@ impl Rows<Row> {
         placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
     ) {
-        use glib::subclass::prelude::ObjectSubclassIsExt;
         let order = self.order_id();
         let source = self.with(|state| match &state.source {
             Source::View {
@@ -1133,25 +1132,20 @@ impl Rows<Row> {
             );
             return;
         };
-        let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
+        // The row as it shows anchors the play, wherever the current order has it.
+        let Some(row) = self.ready(index) else {
             return;
         };
-        let playback = Arc::clone(playback);
-        runtime.spawn(async move {
-            let cancel = ReadCancellation::new();
-            let request = if favorites {
-                view.play_favorite(index, placement, shuffled, Some(&order), &cancel)
-                    .await
-            } else {
-                view.play(index, placement, shuffled, Some(&order), &cancel)
-                    .await
-            };
-            match request {
-                Ok(Some(request)) => playback.play_selection(request),
-                Ok(None) => {}
-                Err(error) => tracing::warn!(%error, "could not play the row"),
+        let request = match (favorites, row.as_ref()) {
+            (true, Row::Track(track)) => {
+                view.play_favorite(track.track_key, index, placement, shuffled, Some(&order))
             }
-        });
+            (true, _) => None,
+            (false, row) => view.play(row, index, placement, shuffled, Some(&order)),
+        };
+        if let Some(request) = request {
+            playback.play_selection(request);
+        }
     }
 
     /// Plays or queues everything the list shows, as a page header does.

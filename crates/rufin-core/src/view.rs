@@ -208,10 +208,38 @@ impl SourceOwner {
                 }
                 read.selection()
             }
-            Plan::Rows(Read::List(read) | Read::AlbumTracks(read))
-            | Plan::Releases { read, .. } => read.selection(),
+            Plan::Rows(Read::List(read) | Read::AlbumTracks(read)) => read.selection(),
+            Plan::Releases { read, .. } => match artist_tracks(&read, &settings) {
+                Some(tracks) => tracks.selection(),
+                None => return Ok(None),
+            },
             _ => return Ok(None),
         }))
+    }
+
+    /// What playing `route` whole queues, as its page's header Play does: everything it lists
+    /// in its saved list sort, or the order and filter `options` ask, from a random track when
+    /// shuffled. A collection row's card, pin and menu Play play the page the row opens. None
+    /// when the route lists nothing or its collection is gone or empty.
+    pub async fn play_route(
+        &self,
+        route: &Route,
+        selected: Option<&SelectedLibrary>,
+        options: &OpenOptions,
+        placement: QueuePlacement,
+        shuffled: bool,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
+        let Some(selection) = self.selection(route, selected, options, cancel).await? else {
+            return Ok(None);
+        };
+        let (sort, descending, _) = read_order(route, options, &self.shared.settings.committed());
+        Ok(Some(play_whole(
+            selection,
+            context_id(route, selected, options, sort, descending).into(),
+            placement,
+            shuffled,
+        )))
     }
 
     /// What `route` reads and the header it shows, from the resident Catalog: no rows.
@@ -767,19 +795,24 @@ impl View {
     }
 
     /// What playing the page whole queues, as its header Play does: everything it lists in
-    /// its order and filter, from a random track when shuffle is on. None when it lists no
-    /// tracks of its own.
+    /// its order and filter, from a random track when shuffle is on; an artist page plays the
+    /// artist's tracks. None when it lists no tracks of its own.
     pub fn play_all(
         &self,
         placement: QueuePlacement,
         shuffled: bool,
         result: Option<&str>,
     ) -> Option<PlayRequest> {
-        Some(
-            PlayRequest::ordered(self.selection()?, 0, placement, true)
-                .with_context(self.play_context(result))
-                .shuffled(shuffled),
-        )
+        let selection = match &self.body {
+            Body::Releases { read, .. } => artist_tracks(read, &self.settings)?.selection(),
+            _ => self.selection()?,
+        };
+        Some(play_whole(
+            selection,
+            self.play_context(result),
+            placement,
+            shuffled,
+        ))
     }
 
     /// What playing the page from its track `key` at `index` among its tracks queues; `entry`
@@ -805,78 +838,65 @@ impl View {
         )
     }
 
-    /// What playing an artist page's favorite track `index` queues, as [`View::play_track`]
-    /// does for the page's tracks. None when the page shows no favorite tracks.
-    pub async fn play_favorite(
+    /// What playing an artist page's favorite track `key` at `index` among them queues, as
+    /// [`View::play_track`] does for the page's tracks. None when the page shows no favorite
+    /// tracks.
+    pub fn play_favorite(
         &self,
+        key: library::TrackKey,
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
         result: Option<&str>,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
-        let Some(read) = self.favorites() else {
-            return Ok(None);
-        };
-        let key = match self
-            .catalog()
-            .order(&Read::Members(read.clone()), cancel)
-            .await?
-            .items(index..index + 1)
-            .pop()
-        {
-            Some(Item::Track { key, .. }) => key,
-            _ => return Ok(None),
-        };
+    ) -> Option<PlayRequest> {
+        let read = self.favorites()?;
         if !matches!(placement, QueuePlacement::Replace { .. }) {
-            return Ok(self.play_track(key, None, index, placement, shuffled, result));
+            return Some(PlayRequest::track(key, placement));
         }
-        Ok(self.favorites_context_id().map(|context| {
+        self.favorites_context_id().map(|context| {
             PlayRequest::captured(read.clone().selection(), index, placement, false)
                 .with_context(with_result(context, result))
                 .with_anchor(key, None)
                 .shuffled(shuffled)
-        }))
+        })
     }
 
-    /// What playing row `index` queues: a track plays the page from it, and a track of the
-    /// Albums list in Detail layout plays its album from it. None for other rows.
-    pub async fn play(
+    /// What playing the shown `row` at `index` queues: a track plays the page from it, and a
+    /// track of the Albums list in Detail layout plays its album from it. The row's track and
+    /// playlist entry anchor the play, so a row that moved since it showed still plays. None
+    /// for other rows.
+    pub fn play(
         &self,
+        row: &Row,
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
         result: Option<&str>,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
+    ) -> Option<PlayRequest> {
         let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
-        Ok(match self.item(index, cancel).await? {
-            Some(Item::Track { key, entry }) => {
-                self.play_track(key, entry, tracks, placement, shuffled, result)
-            }
-            // A History row names its listen; its row holds the track.
-            Some(Item::Listen(_)) => self
-                .rows(index..index + 1, cancel)
-                .await?
-                .into_iter()
-                .find_map(|row| match row {
-                    Row::Track(track) => Some(track.track_key),
-                    _ => None,
-                })
-                .and_then(|key| self.play_track(key, None, tracks, placement, shuffled, result)),
-            Some(Item::AlbumTrack { key, .. })
+        match row {
+            Row::Track(track) => self.play_track(
+                track.track_key,
+                track.entry.as_ref().map(|entry| entry.key),
+                tracks,
+                placement,
+                shuffled,
+                result,
+            ),
+            Row::AlbumTrack { track, .. }
                 if !matches!(placement, QueuePlacement::Replace { .. }) =>
             {
-                self.play_track(key, None, tracks, placement, shuffled, result)
+                Some(PlayRequest::track(track.track_key, placement))
             }
-            Some(Item::AlbumTrack { key, album, .. }) => {
+            Row::AlbumTrack { track, .. } => {
                 let list = self
                     .settings
                     .library_list(LibraryListKey::AlbumDetailTracks);
-                let mut read = MemberRead::new(Collection::Album(album));
+                let mut read = MemberRead::new(Collection::Album(track.links.album_key?));
                 read.sort = Some(list.sort_key);
                 read.descending = list.descending;
-                self.catalog().uri(Item::Album(album)).map(|uri| {
+                let uri = track.links.album_media_uri.clone()?;
+                Some(
                     PlayRequest::captured(read.selection(), 0, placement, false)
                         .with_context(with_result(
                             context_id(
@@ -888,12 +908,12 @@ impl View {
                             ),
                             result,
                         ))
-                        .with_anchor(key, None)
-                        .shuffled(shuffled)
-                })
+                        .with_anchor(track.track_key, None)
+                        .shuffled(shuffled),
+                )
             }
             _ => None,
-        })
+        }
     }
 
     /// What playing Home's section `index` queues: its rows in the order it shows them, from
@@ -1192,35 +1212,6 @@ impl View {
             Body::Rows { spans, .. } => spans.as_ref(),
             _ => None,
         }
-    }
-
-    /// The item at `index`, for anchors and plays by index. A live folder has none.
-    pub async fn item(
-        &self,
-        index: usize,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<Item>> {
-        let catalog = self.catalog();
-        let (read, index) = match &self.body {
-            Body::Rows { read, .. } => (read.clone(), index),
-            Body::Releases { read, .. } => (Read::List(read.clone()), index),
-            Body::Folders {
-                folders,
-                folder_len,
-                tracks,
-                ..
-            } => match (index < *folder_len, folders) {
-                (true, Some(folders)) => (Read::Folders(folders.clone()), index),
-                (true, None) => return Ok(None),
-                (false, _) => (Read::Members(tracks.clone()), index - folder_len),
-            },
-            Body::Home(_) | Body::Missing => return Ok(None),
-        };
-        Ok(catalog
-            .order(&read, cancel)
-            .await?
-            .items(index..index + 1)
-            .pop())
     }
 
     /// The member read behind a track page, for selections and plays.
@@ -1615,6 +1606,42 @@ fn section_selections(section: &HomeSection) -> Vec<MemberSelection> {
             }
         })
         .collect()
+}
+
+/// What playing `selection` whole queues, with `context`, from a random track when shuffled.
+fn play_whole(
+    selection: MemberSelection,
+    context: Arc<str>,
+    placement: QueuePlacement,
+    shuffled: bool,
+) -> PlayRequest {
+    PlayRequest::ordered(selection, 0, placement, true)
+        .with_context(context)
+        .shuffled(shuffled)
+}
+
+/// An artist page's own tracks, in the Artist tracks list's saved order: what the page plays
+/// and downloads whole, rather than whole albums of its releases, which queue other artists
+/// of a compilation.
+fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead> {
+    let ListKind::ArtistAlbums {
+        artist,
+        album_artist,
+        ..
+    } = releases.kind
+    else {
+        return None;
+    };
+    let list = settings.library_list(LibraryListKey::ArtistTracks);
+    let mut read = MemberRead::new(Collection::Artist {
+        key: artist,
+        album_artist,
+    });
+    read.sort = Some(list.sort_key);
+    read.descending = list.descending;
+    read.folder = releases.folder;
+    read.activity = list.sort_key.activity_sensitive();
+    Some(read)
 }
 
 /// `context` tied to the order a client shows: `|result=` and its id.

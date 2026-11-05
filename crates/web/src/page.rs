@@ -163,6 +163,27 @@ async fn scope(
     }))
 }
 
+/// What playing `token`'s page whole queues at `placement`, without reading its rows.
+pub(super) async fn play(
+    products: &ProductHandles,
+    token: &PageToken,
+    placement: rufin_core::playback::QueuePlacement,
+) -> Result<Option<rufin_core::playback::PlayRequest>, Error> {
+    let selected = scope(products, token).await?;
+    products
+        .source
+        .play_route(
+            &token.route,
+            selected.as_ref(),
+            &token.options,
+            placement,
+            false,
+            &ReadCancellation::new(),
+        )
+        .await
+        .map_err(read_error)
+}
+
 /// An open page and the rows it read at `offset`.
 pub(super) struct Opened {
     pub token: PageToken,

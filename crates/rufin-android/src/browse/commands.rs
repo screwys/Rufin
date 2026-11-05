@@ -623,13 +623,6 @@ impl AndroidLibrary {
         &self,
         route: Route,
     ) -> Result<Arc<MemberSelection>, AndroidError> {
-        let route = match route {
-            Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => Route::ArtistTracks(uri),
-            Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
-                Route::AlbumArtistTracks(uri)
-            }
-            route => route,
-        };
         let source = self.source.clone();
         let selected = source.selected_library();
         run_read(&self.runtime, move |cancel| async move {

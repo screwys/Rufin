@@ -382,38 +382,38 @@ async fn queue_play(
             }
             (None, None) => return Err(bad_request("uris or page is required")),
         };
-        let view = page::open(products, token, 0, 0).await?.view;
         let gone = || bad_request("Nothing to play here");
-        let anchor = match (&input.anchor_uri, input.anchor_entry) {
-            (Some(uri), entry) => products
+        let anchor = match (&input.anchor_uri, input.anchor_entry, &token.route) {
+            (None, None, _) if input.index.is_some() => {
+                return Err(bad_request(
+                    "A row play names its anchor_uri or anchor_entry",
+                ));
+            }
+            (None, None, _) => None,
+            (Some(uri), entry, _) => products
                 .library
                 .track_keys(std::slice::from_ref(uri), &library::ReadCancellation::new())
                 .await
                 .map_err(internal)?
                 .first()
                 .map(|key| (*key, entry)),
-            (None, Some(entry)) => match view.route() {
-                rufin_core::route::Route::PlaylistDetail(playlist) => products
-                    .library
-                    .playlist_entry_track(*playlist, entry)
-                    .map(|key| (key, Some(entry))),
-                _ => None,
-            },
-            (None, None) => None,
+            (None, Some(entry), rufin_core::route::Route::PlaylistDetail(playlist)) => products
+                .library
+                .playlist_entry_track(*playlist, entry)
+                .map(|key| (key, Some(entry))),
+            (None, Some(_), _) => return Err(gone()),
         };
-        match (input.index, anchor) {
-            (Some(index), _) => view
-                .play(
-                    index,
-                    placement,
-                    false,
-                    None,
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .map_err(page::read_error)?,
-            (None, Some((key, entry))) => view.play_track(key, entry, 0, placement, false, None),
-            (None, None) => view.play_all(placement, false, None),
+        match anchor {
+            // A page without a track plays whole, as its header and the card that opens it do.
+            None => page::play(products, &token, placement).await?,
+            Some((key, entry)) => page::open(products, token, 0, 0).await?.view.play_track(
+                key,
+                entry,
+                input.index.unwrap_or(0),
+                placement,
+                false,
+                None,
+            ),
         }
         .ok_or_else(gone)?
     };
