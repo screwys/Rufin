@@ -155,7 +155,8 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             events: async_channel::unbounded().0,
             downloads: async_channel::unbounded().0,
         },
-    );
+    )
+    .expect("the source owner opens");
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,

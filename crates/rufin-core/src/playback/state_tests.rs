@@ -79,7 +79,8 @@ pub(in crate::playback) async fn seeded(
             events: async_channel::unbounded().0,
             downloads: async_channel::unbounded().0,
         },
-    );
+    )
+    .expect("the source owner opens");
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,

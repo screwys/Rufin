@@ -369,7 +369,7 @@ impl SourceOwner {
         secrets: Arc<SwitchableSecretStore>,
         runtime: tokio::runtime::Handle,
         outputs: SourceOutputs,
-    ) -> Arc<Self> {
+    ) -> Result<Arc<Self>, String> {
         let stored = settings.load();
         let operation =
             stored
@@ -384,31 +384,39 @@ impl SourceOwner {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let (feed, notices) = feed::Feed::open();
+        // Artwork fetches and each download ask this owner for a source's current client.
+        let resolver = Arc::new(std::sync::OnceLock::<Weak<Self>>::new());
+        let open_artwork = |folder: &std::path::Path| {
+            let resolver = Arc::clone(&resolver);
+            Artwork::new(
+                folder,
+                runtime.clone(),
+                Arc::clone(&catalog),
+                move |source_id| {
+                    resolver
+                        .get()?
+                        .upgrade()
+                        .and_then(|owner| owner.client(source_id).ok())
+                },
+            )
+        };
         // A cache that cannot be used where it belongs is kept in a temporary folder.
-        let artwork_dir = match Artwork::prepare(&artwork_dir) {
-            Ok(()) => artwork_dir,
+        let artwork = match open_artwork(&artwork_dir) {
+            Ok(artwork) => artwork,
             Err(error) => {
                 warn!(%error, "could not use the artwork cache; startup will continue with a temporary cache");
                 let started = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |duration| duration.as_nanos());
-                std::env::temp_dir().join(format!("rufin-artwork-{}-{started}", std::process::id()))
+                open_artwork(
+                    &std::env::temp_dir()
+                        .join(format!("rufin-artwork-{}-{started}", std::process::id())),
+                )
+                .map_err(string_error)?
             }
         };
-        Arc::new_cyclic(|owner| {
-            // Artwork fetches and each download ask this owner for a source's current client.
-            let artwork_owner = owner.clone();
-            let artwork = Artwork::new(
-                &artwork_dir,
-                runtime.clone(),
-                Arc::clone(&catalog),
-                move |source_id| {
-                    artwork_owner
-                        .upgrade()
-                        .and_then(|owner: Arc<Self>| owner.client(source_id).ok())
-                },
-            )
-            .expect("the artwork cache opens in its prepared folder");
+        Ok(Arc::new_cyclic(|owner| {
+            let _ = resolver.set(owner.clone());
             let downloads = Downloads::new(
                 artwork.clone(),
                 downloads_root,
@@ -450,7 +458,7 @@ impl SourceOwner {
                 notices,
             ));
             Self { shared }
-        })
+        }))
     }
 
     pub(crate) fn artwork(&self) -> &Artwork {
@@ -3256,7 +3264,8 @@ mod source_tests {
                 events: async_channel::unbounded().0,
                 downloads: async_channel::unbounded().0,
             },
-        );
+        )
+        .expect("the source owner opens");
         let mut first = Source::open(
             configured[0].configuration.clone(),
             Some(secret.clone()),
@@ -3358,7 +3367,8 @@ mod source_tests {
                 events,
                 downloads: async_channel::unbounded().0,
             },
-        );
+        )
+        .expect("the source owner opens");
 
         let music = directory.path().join("music");
         std::fs::create_dir(&music).unwrap();
@@ -3566,7 +3576,8 @@ mod source_tests {
                     events: async_channel::unbounded().0,
                     downloads: async_channel::unbounded().0,
                 },
-            );
+            )
+            .expect("the source owner opens");
             let connected = if already_configured {
                 let source_id = SourceId::new("restored-source");
                 owner
@@ -3758,7 +3769,8 @@ mod source_tests {
                     events,
                     downloads: async_channel::unbounded().0,
                 },
-            );
+            )
+            .expect("the source owner opens");
             let changes = owner.changes();
             owner.shared.load_source_counts().await.unwrap();
             // An album is listed only while it has a listed track.
@@ -4068,7 +4080,8 @@ mod source_tests {
                     events,
                     downloads: async_channel::unbounded().0,
                 },
-            );
+            )
+            .expect("the source owner opens");
             assert_eq!(owner.list_sources().sources.len(), 2);
             assert!(owner.selected_library().is_none());
             let missing = owner.select_source(SourceId::new("missing"));

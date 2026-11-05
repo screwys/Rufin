@@ -142,7 +142,7 @@ where
             events: source_events.clone(),
             downloads: download_events,
         },
-    );
+    )?;
     let artwork = source.artwork().clone();
     // Recent search results show the pictures their rows have once the Catalog is loaded.
     if !stored.ui.recent_search_results.is_empty() {

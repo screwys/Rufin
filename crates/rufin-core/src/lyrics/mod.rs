@@ -1891,7 +1891,8 @@ mod tests {
                 events: async_channel::unbounded().0,
                 downloads: async_channel::unbounded().0,
             },
-        );
+        )
+        .expect("the source owner opens");
         let service = LyricsService::new(
             catalog.clone(),
             source_owner,

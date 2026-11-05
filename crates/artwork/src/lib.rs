@@ -329,12 +329,7 @@ impl Artwork {
             .map_err(|error| std::io::Error::other(error.to_string()))?
     }
 
-    /// Creates the cache's directories, so a cache there can open.
-    pub fn prepare(cache_root: impl AsRef<Path>) -> Result<(), ArtworkError> {
-        cache::current_layout(cache_root.as_ref())?;
-        Ok(())
-    }
-
+    /// Opens the cache in `cache_root`, creating its directories.
     pub fn new(
         cache_root: impl AsRef<Path>,
         runtime: Handle,
