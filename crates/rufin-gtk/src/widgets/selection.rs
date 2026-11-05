@@ -334,22 +334,6 @@ pub fn collection_play_request(
     .with_context(target.context_id().into())
 }
 
-pub fn track_play_request(key: library::TrackKey) -> rufin_core::playback::PlayRequest {
-    rufin_core::playback::PlayRequest::ordered(
-        library::MemberSelection::Keys {
-            source: None,
-            keys: (vec![key.raw()])
-                .into_iter()
-                .map(library::TrackKey::from_raw)
-                .collect::<Vec<_>>()
-                .into(),
-        },
-        0,
-        QueuePlacement::Now,
-        false,
-    )
-}
-
 pub fn smart_play_request(key: library::SmartPlaylistKey) -> rufin_core::playback::PlayRequest {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

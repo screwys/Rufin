@@ -759,15 +759,7 @@ impl View {
         result: Option<&str>,
     ) -> Option<PlayRequest> {
         if !matches!(placement, QueuePlacement::Replace { .. }) {
-            return Some(PlayRequest::ordered(
-                MemberSelection::Keys {
-                    source: None,
-                    keys: vec![key].into(),
-                },
-                0,
-                placement,
-                false,
-            ));
+            return Some(PlayRequest::track(key, placement));
         }
         Some(
             PlayRequest::captured(self.members()?.clone().selection(), index, placement, false)

@@ -8,12 +8,12 @@ use crate::player::fullscreen_background::FullscreenBackground;
 use crate::widgets::mounted_route::RouteCurrentTrack;
 use crate::widgets::mounted_route::route_current_track;
 use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
-use crate::widgets::selection::track_play_request;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use library::{ActivityOverview, CalendarActivityPeriod, TrackRow};
 use localization::{tr, tr_with};
 use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
+use rufin_core::playback::{PlayRequest, QueuePlacement};
 use rufin_core::route::Route;
 use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{
@@ -669,7 +669,7 @@ impl ActivityView {
                     {
                         crate::menus::media_menus::play_target(
                             &shell.products.playback,
-                            &crate::widgets::selection::track_play_request(uri),
+                            &PlayRequest::track(uri, QueuePlacement::Now),
                             rufin_core::playback::QueuePlacement::Now,
                             false,
                         );
@@ -943,7 +943,7 @@ impl ActivityCollections {
                 let row = item.borrow::<TrackRow>();
                 crate::menus::media_menus::play_target(
                     &shell.products.playback,
-                    &track_play_request(row.track_key),
+                    &PlayRequest::track(row.track_key, QueuePlacement::Now),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
                 );

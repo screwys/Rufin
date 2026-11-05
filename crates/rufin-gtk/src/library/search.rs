@@ -13,7 +13,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
-use rufin_core::playback::QueuePlacement;
+use rufin_core::playback::{PlayRequest, QueuePlacement};
 
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
@@ -119,7 +119,7 @@ impl SearchItem {
     }
     fn play_request(&self) -> rufin_core::playback::PlayRequest {
         match self {
-            Self::Track(row, _) => crate::widgets::selection::track_play_request(row.track_key),
+            Self::Track(row, _) => PlayRequest::track(row.track_key, QueuePlacement::Now),
             Self::Album(row) => crate::widgets::selection::album_play_request(row),
             Self::Artist(row) => crate::widgets::selection::artist_play_request(row, false),
         }
@@ -417,9 +417,7 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
     fn bind(&self, _: u32, item: SearchItem) {
         self.snippet.bind(item.lyrics());
         let target = match &item {
-            SearchItem::Track(row, _) => {
-                crate::widgets::selection::track_play_request(row.track_key)
-            }
+            SearchItem::Track(row, _) => PlayRequest::track(row.track_key, QueuePlacement::Now),
             SearchItem::Album(row) => crate::widgets::selection::album_play_request(&row),
             SearchItem::Artist(row) => crate::widgets::selection::artist_play_request(&row, false),
         };

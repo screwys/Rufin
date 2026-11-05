@@ -24,7 +24,7 @@ use rufin_core::playlists::SmartPlaylistChange;
 use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
 
-use crate::widgets::selection::{collection_play_request, track_play_request};
+use crate::widgets::selection::collection_play_request;
 use rufin_core::playback::PlayRequest;
 pub type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
 
@@ -128,7 +128,7 @@ pub fn present_track_menu(
         && present_collection_selection_menu(
             target,
             shell,
-            track_play_request(track.track_key),
+            PlayRequest::track(track.track_key, QueuePlacement::Now),
             position,
         )
     {
@@ -158,7 +158,12 @@ pub fn present_track_menu(
     if let Some((position, occurrence_id)) = queue_entry {
         append_queue_entry_actions(&surface, shell, track.track_key, position, occurrence_id);
     } else {
-        append_loaded_play(&surface, shell, track_play_request(track.track_key), None);
+        append_loaded_play(
+            &surface,
+            shell,
+            PlayRequest::track(track.track_key, QueuePlacement::Now),
+            None,
+        );
     }
     append_radio(
         &surface,
@@ -169,7 +174,7 @@ pub fn present_track_menu(
     crate::playlists::picker::append_to_menu(
         &surface,
         shell,
-        MediaDragSource::capture_target(track_play_request(track.track_key)),
+        MediaDragSource::capture_target(PlayRequest::track(track.track_key, QueuePlacement::Now)),
     );
     if track.access.cue_path.is_none()
         && (track.source_key.is_some() || track.media_uri.starts_with("file:"))
@@ -195,7 +200,7 @@ pub fn present_track_menu(
         &track.media_uri,
         track.source_id.as_deref(),
     );
-    let playback = track_play_request(track.track_key);
+    let playback = PlayRequest::track(track.track_key, QueuePlacement::Now);
     install_download_actions(
         &surface,
         shell,
@@ -256,7 +261,7 @@ fn append_queue_entry_actions(
         move |placement, shuffled| match (placement, occurrence_id) {
             _ if shuffled => play_target(
                 &play_shell.products.playback,
-                &track_play_request(track),
+                &PlayRequest::track(track, QueuePlacement::Now),
                 placement,
                 true,
             ),
@@ -456,8 +461,9 @@ pub fn present_playlist_entry_menu(
     install_download_actions(
         &surface,
         shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(track_play_request(
+        &crate::widgets::media_drag::MediaDragSource::capture_target(PlayRequest::track(
             row.track_key,
+            QueuePlacement::Now,
         )),
         Some(&row.media_uri),
         true,

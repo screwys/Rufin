@@ -59,6 +59,18 @@ impl PlayRequest {
         };
         request
     }
+    /// One track, queued by `placement` with no context.
+    pub fn track(key: library::TrackKey, placement: QueuePlacement) -> Self {
+        Self::ordered(
+            library::MemberSelection::Keys {
+                source: None,
+                keys: vec![key].into(),
+            },
+            0,
+            placement,
+            false,
+        )
+    }
     pub fn captured(
         selection: library::MemberSelection,
         anchor_index: usize,

@@ -18,7 +18,6 @@ use std::rc::Rc;
 
 use super::cards;
 use super::collections::collection_grid_field_label;
-use crate::widgets::selection::track_play_request;
 use rufin_core::playback::PlayRequest;
 
 use crate::library::track_selection::TrackSelection;
@@ -712,8 +711,10 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                     action_shell.upgrade(),
                     action_current.borrow().as_ref().cloned(),
                 ) {
-                    let mut request =
-                        track_play_request(row.track_key().expect("catalog song key"));
+                    let mut request = PlayRequest::track(
+                        row.track_key().expect("catalog song key"),
+                        QueuePlacement::Now,
+                    );
                     request.placement = placement;
                     shell.products.playback.play_selection(request);
                 }
@@ -731,8 +732,9 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                 Some(selection) => {
                     MediaDragSource::selection(selection.dragged_tracks_for(track.media_uri()))
                 }
-                None => MediaDragSource::capture_target(track_play_request(
+                None => MediaDragSource::capture_target(PlayRequest::track(
                     track.track_key().expect("catalog song key"),
+                    QueuePlacement::Now,
                 )),
             };
             Some((source, track.title().to_string()))
@@ -769,7 +771,10 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
             .bind(row.title(), |value| (self.field)(position, &row, value));
         self.body.bind_playing_target(
             &shell,
-            track_play_request(row.track_key().expect("catalog song key")),
+            PlayRequest::track(
+                row.track_key().expect("catalog song key"),
+                QueuePlacement::Now,
+            ),
         );
         self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));

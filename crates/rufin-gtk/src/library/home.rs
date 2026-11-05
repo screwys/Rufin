@@ -8,7 +8,7 @@ use library::{
     HomeAlbumRow, HomeProviderSection, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow,
 };
 use localization::{album_count_text, msgid, tr, track_count_text};
-use rufin_core::playback::RadioPlayRequest;
+use rufin_core::playback::{PlayRequest, QueuePlacement, RadioPlayRequest};
 
 use crate::favorites::{
     favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
@@ -34,7 +34,6 @@ use super::grid_cells::{
 };
 use crate::library::home_layout::home_section_header;
 use crate::menus::media_menus::present_album_context_menu;
-use crate::widgets::selection::track_play_request;
 
 use crate::library::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
 use crate::widgets::detail_links::DetailLinkBinding;
@@ -665,7 +664,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let play = Rc::new(move |_| {
                 crate::menus::media_menus::play_target(
                     &play_shell.products.playback,
-                    &track_play_request(play_key),
+                    &PlayRequest::track(play_key, QueuePlacement::Now),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
                 );
@@ -719,7 +718,7 @@ fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => crate::menus::media_menus::play_target(
             &shell.products.playback,
-            &track_play_request(item.track.track_key),
+            &PlayRequest::track(item.track.track_key, QueuePlacement::Now),
             rufin_core::playback::QueuePlacement::Now,
             false,
         ),
