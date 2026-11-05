@@ -345,10 +345,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     suspend fun queuePage(offset: ULong, search: String = ""): PreparedQueuePage? = withContext(Dispatchers.Default) {
         playbackOwner?.queuePage(offset, 80u, search)
     }
-    suspend fun createQueuePlaylist(name: String, sourceId: String?, public: Boolean?, current: Boolean?) {
+    suspend fun createQueuePlaylist(name: String, sourceId: String?, public: Boolean?) {
         val source = sourceOwner ?: return
         val selection = playbackOwner?.selection() ?: return
-        try { createPlaylist(source, sourceId, name, selection, public, current)?.settingsError?.let { error(it) } }
+        try { createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) } }
         finally { selection.destroy() }
         connection.showFeedback(translate("Saved"))
     }

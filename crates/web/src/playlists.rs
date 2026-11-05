@@ -319,7 +319,6 @@ pub(super) async fn create(
     #[derive(Deserialize)]
     struct Input {
         source: Option<sources::SourceId>,
-        current: Option<bool>,
         public: Option<bool>,
         name: String,
         #[serde(default)]
@@ -335,7 +334,6 @@ pub(super) async fn create(
         input.name,
         selection.into(),
         input.public,
-        input.current,
     )
     .await
     .map_err(bad_request)?;

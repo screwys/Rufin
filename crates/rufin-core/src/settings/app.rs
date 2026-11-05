@@ -225,8 +225,6 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     reduce_motion: bool = false => set_reduce_motion;
     #[serde(default = "default_true")]
     show_downloaded_badges: bool = true => set_show_downloaded_badges;
-    #[serde(default = "default_true")]
-    new_playlist_current: bool = true => set_new_playlist_current;
     #[serde(default = "default_auto_dj_refill_threshold")]
     auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
     #[serde(default)]

@@ -566,11 +566,11 @@ internal fun PlaylistPickerSheet(
         create = false
         pages.refresh()
     })
-    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public, _ ->
+    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
         browse.library?.let { library ->
             playlistSelection(library, item).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
-                    createPlaylist(source, sourceId, name, selection, public, null)?.settingsError?.let { error(it) }
+                    createPlaylist(source, sourceId, name, selection, public)?.settingsError?.let { error(it) }
                 }
             }
         }
@@ -588,15 +588,14 @@ private suspend fun playlistSelection(library: io.github.screwys.rufin.core.Andr
 internal fun PlaylistCreateSheet(
     model: RufinConnection,
     onDismiss: () -> Unit,
-    initialCurrentSource: Boolean = true,
-    // Name, owning source, public, and the owner choice when it was offered.
-    save: suspend (String, String?, Boolean?, Boolean?) -> Unit,
+    // Name, owning source and public.
+    save: suspend (String, String?, Boolean?) -> Unit,
 ) {
     // A playlist made for a source that cannot own one is a Rufin playlist, with no choice.
     val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
         ?.takeIf { it.ownsPlaylists }
     var name by remember { mutableStateOf("") }
-    var currentSource by remember(source?.id) { mutableStateOf(initialCurrentSource && source != null) }
+    var currentSource by remember(source?.id) { mutableStateOf(source != null) }
     var public by remember { mutableStateOf(false) }
     val supportsPublic = currentSource && source?.supportsPlaylistPublic == true
     AlertDialog(onDismissRequest = onDismiss,
@@ -621,7 +620,7 @@ internal fun PlaylistCreateSheet(
             }
         } },
         confirmButton = { TextButton({ model.runAction {
-            save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic }, currentSource.takeIf { source != null })
+            save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic })
         } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Create")) } },
         dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } })
 }

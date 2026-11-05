@@ -211,7 +211,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }
         }
     }
-    if (queue) PlayerQueueSheet(player, preferences, onDismiss = { queue = false },
+    if (queue) PlayerQueueSheet(player, onDismiss = { queue = false },
         onNavigate = { route, title, source -> queue = false; onNavigate(route, title, source) })
     if (output) PlayerOutputSheet(player) { output = false }
     navigation?.let { uri -> MediaNavigationSheet(player.metadataLinks?.takeIf { it.mediaUri == uri }, player,

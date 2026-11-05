@@ -570,7 +570,7 @@ async fn exercise_http_api(
     let playlist = api(
         reqwest::Method::POST,
         "playlists",
-        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items,"current":false}),
+        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items}),
     )
     .await["id"]
         .clone();
@@ -587,10 +587,6 @@ async fn exercise_http_api(
     assert_eq!(
         serde_json::to_value(&settings.load().sidebar.pins).unwrap(),
         json!([playlist_pin])
-    );
-    assert_eq!(
-        api(reqwest::Method::GET, "sources", Value::Null).await["new_playlist_current"],
-        false
     );
     api(
         reqwest::Method::POST,

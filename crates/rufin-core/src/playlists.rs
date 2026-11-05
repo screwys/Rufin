@@ -386,7 +386,6 @@ pub async fn create_playlist(
     name: String,
     songs: Arc<library::MemberSelection>,
     public: Option<bool>,
-    current: Option<bool>,
 ) -> sources::SourceResult<Option<PlaylistCreation>> {
     crate::playlist_files::run(owner, move |owner| async move {
         let catalog = &owner.shared.catalog;
@@ -492,9 +491,6 @@ pub async fn create_playlist(
                     },
                     true,
                 );
-                if let Some(current) = current {
-                    stored.ui.application.new_playlist_current = current;
-                }
                 Ok(())
             })
         })

@@ -24,7 +24,6 @@ impl Shell {
                 name,
                 selection.into(),
                 public,
-                None,
             )
             .await;
             let error = match result {

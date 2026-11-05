@@ -524,11 +524,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     menu?.let { item -> BrowseMenuSheet(model, browse, item, player, { menu = null }, { playlist = item; menu = null }, { metadata = item; menu = null },
         onNavigate = { route, title, source -> menu = null; fullPlayer = false; browse.openLinkedRoute(route, title, source) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
-    if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false },
-        initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public, _ ->
+    if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false }) { name, sourceId, public ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
-            io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)?.let { created ->
+            io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public)?.let { created ->
                 playlistFolder?.let { folder ->
                     created.playlistKey?.let { key -> movePlaylistToFolder(source,
                         io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(key), folder.key) }
