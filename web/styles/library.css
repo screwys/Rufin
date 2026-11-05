@@ -467,6 +467,13 @@
   text-overflow: ellipsis;
 }
 
+.album-card .collection-title .icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -3px;
+}
+
 .album-card .collection-title,
 .album-card .metadata-link,
 .album-card p {
