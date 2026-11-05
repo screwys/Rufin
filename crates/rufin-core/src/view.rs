@@ -697,7 +697,8 @@ impl View {
     }
 
     /// What playing the page from its track `key` at `index` among its tracks queues; `entry`
-    /// names a playlist entry. None when the page lists no tracks.
+    /// names a playlist entry. Play Next and Play Later queue only that track. None when the
+    /// page lists no tracks.
     pub fn play_track(
         &self,
         key: library::TrackKey,
@@ -706,6 +707,17 @@ impl View {
         placement: QueuePlacement,
         shuffled: bool,
     ) -> Option<PlayRequest> {
+        if !matches!(placement, QueuePlacement::Replace { .. }) {
+            return Some(PlayRequest::ordered(
+                MemberSelection::Keys {
+                    source: None,
+                    keys: vec![key].into(),
+                },
+                0,
+                placement,
+                false,
+            ));
+        }
         Some(
             PlayRequest::captured(self.members()?.clone().selection(), index, placement, false)
                 .with_context(self.context_id().into())
@@ -738,6 +750,11 @@ impl View {
                     _ => None,
                 })
                 .and_then(|key| self.play_track(key, None, tracks, placement, shuffled)),
+            Some(Item::AlbumTrack { key, .. })
+                if !matches!(placement, QueuePlacement::Replace { .. }) =>
+            {
+                self.play_track(key, None, tracks, placement, shuffled)
+            }
             Some(Item::AlbumTrack { key, album, .. }) => {
                 let list = self
                     .settings
