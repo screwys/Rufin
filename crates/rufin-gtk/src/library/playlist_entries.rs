@@ -123,7 +123,7 @@ impl CatalogUi {
         view: &RouteView,
         read: Opened,
     ) -> PlaylistEntriesView {
-        let model = PlaylistEntryModel::new(self.runtime.clone(), playlist, view, read);
+        let model = PlaylistEntryModel::new(self.products.runtime.clone(), playlist, view, read);
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 8);
         wrapper.set_hexpand(true);
         wrapper.set_width_request(1);
@@ -242,7 +242,7 @@ fn playlist_entry_table(
         .row_fields;
     let column_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.playback.clone();
+    let queue = shell.products.playback.clone();
     let table = dynamic_collection_table(
         shell,
         LibraryListKey::PlaylistTracks,
@@ -719,7 +719,7 @@ fn install_playlist_entry_drag(
         let position = target + i64::from(after) - i64::from(moved < target + i64::from(after));
         if position != moved {
             rufin_core::playlists::move_playlist_entry(
-                &shell.source,
+                &shell.products.source,
                 playlist,
                 entry,
                 position.max(0) as usize,
@@ -853,7 +853,7 @@ fn playlist_entry_grid(
         .grid_fields;
     let cell_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.playback.clone();
+    let queue = shell.products.playback.clone();
     collection_grid_with_selection_and_demand(
         model.list_model(),
         Some(selection.selection_model()),

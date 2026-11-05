@@ -71,7 +71,7 @@ impl CatalogUi {
         R: CollectionRow<Key = K>,
     {
         let view = route_view(&read);
-        let sparse = view_model(self.runtime.clone(), &view, R::row, &mut read);
+        let sparse = view_model(self.products.runtime.clone(), &view, R::row, &mut read);
         let row_key = Rc::new(row_key);
         crate::widgets::media_drag::install_parent_selection(&sparse, &view, {
             move |row| row.playback(key)
@@ -127,7 +127,7 @@ impl CatalogUi {
             }
         };
         let reread = PageReread::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             "mounted named collection",
             &view,
             crate::library::routes::list_inputs(&search),
@@ -349,14 +349,10 @@ impl NamedCollectionRow for TagRow {
     ) {
         match self.kind {
             TagKind::Genre => {
-                if let Some(window) = shell.shell() {
-                    present_genre_context_menu(target, &window, self.clone(), None, position)
-                }
+                present_genre_context_menu(target, shell.shell(), self.clone(), None, position)
             }
             TagKind::Mood => {
-                if let Some(window) = shell.shell() {
-                    present_mood_context_menu(target, &window, self.clone(), None, position)
-                }
+                present_mood_context_menu(target, shell.shell(), self.clone(), None, position)
             }
         }
     }
@@ -464,30 +460,26 @@ impl NamedCollectionRow for library::PlaylistListRow {
         position: Option<(f64, f64)>,
     ) {
         match self {
-            Self::Playlist(row) => {
-                shell.present_playlist_context_menu(target, row.clone(), None, position)
-            }
-            Self::SmartPlaylist(row) => {
-                if let Some(window) = shell.shell() {
-                    present_smart_playlist_context_menu(
-                        target,
-                        &window,
-                        row.clone(),
-                        None,
-                        position,
-                    )
-                }
-            }
-            Self::Folder(row) => {
-                if let Some(window) = shell.shell() {
-                    crate::menus::playlist_folders::present_folder_context_menu(
-                        target,
-                        &window,
-                        row.clone(),
-                        position,
-                    )
-                }
-            }
+            Self::Playlist(row) => crate::menus::media_menus::present_playlist_context_menu(
+                target,
+                shell,
+                row.clone(),
+                None,
+                position,
+            ),
+            Self::SmartPlaylist(row) => present_smart_playlist_context_menu(
+                target,
+                shell.shell(),
+                row.clone(),
+                None,
+                position,
+            ),
+            Self::Folder(row) => crate::menus::playlist_folders::present_folder_context_menu(
+                target,
+                shell.shell(),
+                row.clone(),
+                position,
+            ),
         }
     }
     fn install_extra(
@@ -495,7 +487,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
         shell: &Rc<CatalogUi>,
         current: Rc<dyn Fn() -> Option<Self>>,
     ) {
-        let menus = shell.weak_shell();
+        let menus = Rc::downgrade(shell.shell());
         let drop = gtk::DropTarget::new(
             gtk::glib::BoxedAnyObject::static_type(),
             gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
@@ -622,7 +614,7 @@ where
         sparse.list_model(),
         fields,
         move |fields| NamedCollectionGridCell::<T>::new(Rc::clone(&cell_shell), fields, key),
-        move |_, row: T| activate_shell.navigate(row.route()),
+        move |_, row: T| activate_shell.open_route(row.route()),
         move |position| demand.demand_positions([position as usize]),
     )
 }
@@ -661,7 +653,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             move |shell, item, placement| {
                 if let Some(target) = item.playback(key) {
                     crate::menus::media_menus::play_target(
-                        &shell.playback,
+                        &shell.products.playback,
                         &target,
                         placement,
                         false,
@@ -719,7 +711,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
         self.body
             .bind(item.name(), |field| DetailLinks::text(&item.field(field)));
         self.body
-            .set_download_target(&self.shell, !self.shell.local_source && item.downloaded());
+            .set_download_target(&self.shell, !self.shell.local_source() && item.downloaded());
         self.current.replace(Some(item));
     }
 
@@ -766,7 +758,7 @@ where
         move |field| column_fit_width(field, named_column_width(key, field)),
         true,
         Some(Box::new(move |_, item: T| {
-            activate_shell.navigate(item.route())
+            activate_shell.open_route(item.route())
         })),
         None,
         shell.table_initial_width(0),

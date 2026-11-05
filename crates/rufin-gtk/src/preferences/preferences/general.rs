@@ -794,7 +794,7 @@ pub fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     );
     audio_group.add(&quality_row);
 
-    let output_dropdown = audio_output_dropdown(&shell.player_ui, 220);
+    let output_dropdown = audio_output_dropdown(&shell, 220);
     output_row.add_suffix(&output_dropdown);
     output_row.set_activatable_widget(Some(&output_dropdown));
     audio_group.add(&output_row);
@@ -809,7 +809,7 @@ pub fn equalizer_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         equalizer_page: adw::PreferencesPage,
         equalizer_group: adw::PreferencesGroup,
     });
-    let equalizer = EqualizerSurface::new(&shell.player_ui);
+    let equalizer = EqualizerSurface::new(&shell);
     equalizer_group.add(&equalizer.root);
 
     equalizer_page

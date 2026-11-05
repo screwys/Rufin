@@ -3,7 +3,7 @@ mod home_layout;
 mod playlist_entry_model;
 mod track_model;
 mod track_selection;
-pub use catalog::CatalogUi;
+pub(crate) use catalog::CatalogUi;
 
 pub mod route_layout;
 

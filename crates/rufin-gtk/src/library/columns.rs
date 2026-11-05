@@ -121,7 +121,7 @@ impl CollectionIndexCell {
             let target = cell.imp().target.borrow().clone();
             if let (Some(shell), Some(target)) = (cell.imp().shell.borrow().upgrade(), target) {
                 crate::menus::media_menus::play_target(
-                    &shell.playback,
+                    &shell.products.playback,
                     &target,
                     library::QueuePlacement::Replace { anchor_index: 0 },
                     false,
@@ -288,7 +288,7 @@ glib::wrapper! {
 }
 
 impl AlbumTableCell {
-    pub fn new(
+    pub(crate) fn new(
         shell: &Rc<CatalogUi>,
         field: LibraryField,
         playback_context: Option<String>,
@@ -358,10 +358,10 @@ impl AlbumTableCell {
                     };
                     let row = cell.imp().row.borrow().clone();
                     if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
-                        if let Some(window) = shell.shell() {
+                        {
                             present_album_context_menu(
                                 target,
-                                &window,
+                                shell.shell(),
                                 (*row).clone(),
                                 playback_context.clone(),
                                 None,
@@ -926,8 +926,8 @@ fn install_artist_list_item_context_menu(
             let Some(artist) = item.upgrade().and_then(|item| item_at_from_item(&item)) else {
                 return;
             };
-            if let Some(window) = shell.shell() {
-                present_artist_context_menu(target, &window, artist, None, position);
+            {
+                present_artist_context_menu(target, shell.shell(), artist, None, position);
             }
         }),
     );

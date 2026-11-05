@@ -100,6 +100,8 @@ pub(crate) struct RouteViewport {
 
 struct MountedRouteEntry {
     route: Route,
+    /// The library the route was opened for.
+    selected: Option<rufin_core::runtime::SelectedLibrary>,
     load_failed: bool,
     view: MountedRoute,
     surface: RouteSurface,
@@ -491,10 +493,10 @@ impl Shell {
         let route = self.navigation.routes.borrow().current().clone();
         let selected = self
             .route_viewport
-            .catalog
+            .mounted_route
             .borrow()
             .as_ref()
-            .and_then(|catalog| catalog.selected.clone());
+            .and_then(|entry| entry.selected.clone());
         match rufin_core::view::refresh(
             &self.products.source,
             &route,
@@ -563,6 +565,7 @@ impl Shell {
         let previous = self.begin_mounted_route_replacement();
         let release_ms = teardown_started.map(elapsed_ms);
         let model_started = render_started.as_ref().map(|_| Instant::now());
+        let selected = self.selected_library().as_deref().cloned();
         let catalog = crate::library::CatalogUi::new(self, &route, source_id.as_ref());
         catalog.refresh_current_route_now_playing_selections(route_current_track(
             self.player_ui.selected_playback().as_deref(),
@@ -614,6 +617,7 @@ impl Shell {
             .mounted_route
             .replace(Some(MountedRouteEntry {
                 route: route.clone(),
+                selected,
                 load_failed: false,
                 view: view.clone(),
                 surface: surface.clone(),
@@ -746,10 +750,14 @@ impl Shell {
             .catalog
             .borrow()
             .as_ref()
-            .is_some_and(|catalog| {
-                catalog.is_current()
-                    && (!source_scoped || catalog.selected.as_ref().map(scope) == selected_scope)
-            })
+            .is_some_and(|catalog| catalog.is_current())
+            && (!source_scoped
+                || self
+                    .route_viewport
+                    .mounted_route
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|entry| entry.selected.as_ref().map(scope) == selected_scope))
     }
 
     fn begin_mounted_route_replacement(&self) -> Option<MountedRouteEntry> {

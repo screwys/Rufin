@@ -8,6 +8,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::PreferencesPage {
+    let Some(app) = shell.shell() else {
+        return adw::PreferencesPage::new();
+    };
     let resource = "player/visualizer_settings.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, {
@@ -84,21 +87,19 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     }
 
     ignore_volume.set_active(
-        shell
-            .settings
+        app.settings
             .current
             .borrow()
             .playback
             .visualizer_ignore_volume,
     );
 
-    let limit = shell.settings.current.borrow().visualizer.fps_limit;
+    let limit = app.settings.current.borrow().visualizer.fps_limit;
     fps_limit.set_value(limit as f64);
     crate::widgets::scale::install_scale_scroll_forwarding(&fps_limit);
 
     fft_size.set_selected(
-        shell
-            .settings
+        app.settings
             .current
             .borrow()
             .playback
@@ -120,7 +121,8 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let delete = delete.downgrade();
         Rc::new(move || {
             let Some(shell) = shell.upgrade() else { return };
-            let settings = shell.settings.current.borrow().visualizer.clone();
+            let Some(app) = shell.shell() else { return };
+            let settings = app.settings.current.borrow().visualizer.clone();
             let previous = syncing.replace(true);
             let selected = settings.selected_preset();
             if let Some(row) = presets.upgrade() {
@@ -207,8 +209,11 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             let Some(shell) = shell.upgrade() else {
                 return;
             };
-            let settings = shell.settings.current.borrow().visualizer.clone();
-            let playback = shell.settings.current.borrow().playback.clone();
+            let Some(app) = shell.shell() else {
+                return;
+            };
+            let settings = app.settings.current.borrow().visualizer.clone();
+            let playback = app.settings.current.borrow().playback.clone();
             refresh_presets();
             syncing.set(true);
             if let Some(row) = fps_limit.upgrade() {
@@ -477,13 +482,14 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             let Some(shell) = editor.shell.upgrade() else {
                 return;
             };
-            let Some(window) = shell.window.upgrade() else {
+            let Some(app) = shell.shell() else {
                 return;
             };
+            let window = app.chrome.window.clone();
             let default_colors = crate::player::visualizer::accent_gradient(
                 shell.views.visualizer.sidebar_area.color(),
             );
-            let colors = shell
+            let colors = app
                 .settings
                 .current
                 .borrow()
@@ -519,6 +525,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             let Some(shell) = editor.shell.upgrade() else {
                 return;
             };
+            let Some(app) = shell.shell() else {
+                return;
+            };
             let slot = presets
                 .upgrade()
                 .and_then(|row| row.selected().checked_sub(1))
@@ -548,13 +557,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 }
                 return;
             }
-            let Some(window) = shell.window.upgrade() else {
-                return;
-            };
+            let window = app.chrome.window.clone();
             let name = slot
                 .and_then(|slot| {
-                    shell
-                        .settings
+                    app.settings
                         .current
                         .borrow()
                         .visualizer
@@ -597,6 +603,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let Some(shell) = editor.shell.upgrade() else {
             return;
         };
+        let Some(app) = shell.shell() else {
+            return;
+        };
         let resource = "player/equalizer-dialogs.ui";
         let builder = crate::ui_resource::builder(resource);
         let dialog: adw::AlertDialog = crate::ui_resource::object(&builder, resource, "confirm");
@@ -610,14 +619,12 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         if slot < rufin_core::settings::visualizer::BUILTIN_PRESET_COUNT {
             return;
         }
-        let settings = shell.settings.current.borrow().visualizer.clone();
+        let settings = app.settings.current.borrow().visualizer.clone();
         let Some(preset) = settings.presets.get(slot) else {
             return;
         };
         dialog.set_body(&preset.name);
-        let Some(window) = shell.window.upgrade() else {
-            return;
-        };
+        let window = app.chrome.window.clone();
         let editor = Rc::clone(&editor);
         gtk::glib::spawn_future_local(async move {
             if dialog.choose_future(Some(&window)).await == "accept" {
@@ -654,10 +661,11 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let Some(shell) = editor.shell.upgrade() else {
             return;
         };
-        let Some(window) = shell.window.upgrade() else {
+        let Some(app) = shell.shell() else {
             return;
         };
-        let text = shell
+        let window = app.chrome.window.clone();
+        let text = app
             .settings
             .current
             .borrow()
@@ -673,9 +681,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let Some(shell) = editor.shell.upgrade() else {
             return;
         };
-        let Some(window) = shell.window.upgrade() else {
+        let Some(app) = shell.shell() else {
             return;
         };
+        let window = app.chrome.window.clone();
         let editor = Rc::clone(&editor);
         crate::player::preset_transfer::import(&window, false, move |text, _| {
             let result = VisualizerPreset::from_json(&text).map(|preset| {
@@ -712,7 +721,10 @@ impl VisualizerEdits {
         let Some(shell) = self.shell.upgrade() else {
             return false;
         };
-        let changed = shell.settings.update_app_settings(action, edit).is_some();
+        let Some(app) = shell.shell() else {
+            return false;
+        };
+        let changed = app.settings.update_app_settings(action, edit).is_some();
         shell.apply_visualizer_appearance();
         if catalog {
             (self.refresh_catalog)();

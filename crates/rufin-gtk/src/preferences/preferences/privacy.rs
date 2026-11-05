@@ -115,7 +115,7 @@ pub(super) fn page(
         |settings| &mut settings.application.cast_proxy_enabled,
         |_| {},
     );
-    let cast_network_dropdown = casting_network_dropdown(&shell.player_ui, 220);
+    let cast_network_dropdown = casting_network_dropdown(&shell, 220);
     cast_network_row.add_suffix(&cast_network_dropdown);
     cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));
 

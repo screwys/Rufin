@@ -100,11 +100,11 @@ impl Shell {
             {
                 match key {
                     gtk::gdk::Key::Up => {
-                        select_previous_audio_output(&shell.player_ui);
+                        select_previous_audio_output(&shell);
                         return glib::Propagation::Stop;
                     }
                     gtk::gdk::Key::Down => {
-                        select_next_audio_output(&shell.player_ui);
+                        select_next_audio_output(&shell);
                         return glib::Propagation::Stop;
                     }
                     _ => {}

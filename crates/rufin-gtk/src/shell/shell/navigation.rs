@@ -611,17 +611,7 @@ impl SidebarPinItem {
                     present_genre_context_menu(&target, menus, row, None, position)
                 }
                 library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => {
-                    present_playlist_context_menu(
-                        &target,
-                        menus,
-                        row,
-                        None,
-                        position,
-                        crate::player::state::current_playback_track(
-                            shell.player_ui.selected_playback().as_deref(),
-                        )
-                        .map(|track| track.media_uri),
-                    )
+                    present_playlist_context_menu(&target, menus, row, None, position)
                 }
                 library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(row)) => {
                     present_smart_playlist_context_menu(&target, menus, row, None, position)

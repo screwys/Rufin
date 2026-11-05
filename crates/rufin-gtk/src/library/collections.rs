@@ -601,7 +601,7 @@ pub fn track_collection_projection(
     let selection = TrackSelection::new(model.clone());
     shell.register_current_route_track_selection_owner(selection.clone());
     let play_model = model.clone();
-    let play_queue = shell.playback.clone();
+    let play_queue = shell.products.playback.clone();
     let play_context_id = context_id.clone();
     let play_from_collection = Rc::new(move |position: u32| {
         play_model.play(
@@ -666,7 +666,7 @@ pub fn album_grid(
         &fields,
         move |fields| AlbumGridCell::new(&cell_shell, fields, None),
         move |_, album: AlbumRow| {
-            activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()))
+            activate_shell.open_route(Route::AlbumDetail(album.media_uri.clone()))
         },
         move |position| demand.demand_positions([position as usize]),
     )
@@ -692,7 +692,7 @@ pub fn artist_grid(
         &fields,
         move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
         move |_, artist: ArtistRow| {
-            activate_shell.navigate(Route::of_artist(&artist));
+            activate_shell.open_route(Route::of_artist(&artist));
         },
         move |position| demand.demand_positions([position as usize]),
     )
@@ -760,7 +760,7 @@ where
         |field| column_fit_width(field, column_width(field)),
         true,
         Some(Box::new(move |_, album: AlbumRow| {
-            activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
+            activate_shell.open_route(Route::AlbumDetail(album.media_uri.clone()));
         })),
         None,
         shell.table_initial_width(0),
@@ -789,7 +789,7 @@ where
         |field| column_fit_width(field, column_width(field)),
         true,
         Some(Box::new(move |_, artist: ArtistRow| {
-            activate_shell.navigate(Route::of_artist(&artist));
+            activate_shell.open_route(Route::of_artist(&artist));
         })),
         None,
         shell.table_initial_width(0),
@@ -948,7 +948,11 @@ impl CatalogUi {
         rows: Vec<TrackRow>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let model = TrackCollectionModel::related(self.library.clone(), self.runtime.clone(), rows);
+        let model = TrackCollectionModel::related(
+            self.products.library.clone(),
+            self.products.runtime.clone(),
+            rows,
+        );
         let selection = TrackSelection::new(model.clone());
         self.register_current_route_track_selection_owner(selection.clone());
         let table = track_table(
@@ -1035,7 +1039,7 @@ pub fn track_table(
     } else {
         shell.settings.current.borrow().library_list(key).row_fields
     };
-    let queue = shell.playback.clone();
+    let queue = shell.products.playback.clone();
     let play_model = model.clone();
     let context_id = options.context_id;
     let activate = Box::new(move |position, _: TrackRow| {

@@ -132,7 +132,7 @@ impl TrackListProjection {
         let model = self.model.clone();
         let current = Rc::downgrade(shell);
         let reread = PageReread::new(
-            shell.runtime.clone(),
+            shell.products.runtime.clone(),
             context,
             view,
             move |options| {
@@ -296,7 +296,7 @@ impl CatalogUi {
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
         let view = route_view(&read);
-        let models = AlbumCollectionModels::new(&self.runtime, &view, read);
+        let models = AlbumCollectionModels::new(&self.products.runtime, &view, read);
         let models = Rc::new(RefCell::new(models));
 
         let search = gtk::SearchEntry::new();
@@ -335,7 +335,11 @@ impl CatalogUi {
                 let current_models = models.borrow().clone();
                 let replace_model = current_models.is_detail() != read.view.album_spans().is_some();
                 if replace_model {
-                    models.replace(AlbumCollectionModels::new(&shell.runtime, &view, read));
+                    models.replace(AlbumCollectionModels::new(
+                        &shell.products.runtime,
+                        &view,
+                        read,
+                    ));
                 } else if !current_models.replace_prepared(previous, read) {
                     tracing::warn!("rejected a mismatched prepared Albums page");
                     return false;
@@ -351,7 +355,7 @@ impl CatalogUi {
             }
         };
         let reread = PageReread::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             "mounted Albums route",
             &view,
             list_inputs(&search),
@@ -428,7 +432,7 @@ impl CatalogUi {
         let context_id = rufin_core::view::context_base(read.view.route());
         let view = route_view(&read);
         let projection = self.track_projection(
-            TrackCollectionModel::new(self.runtime.clone(), &view, read),
+            TrackCollectionModel::new(self.products.runtime.clone(), &view, read),
             key,
             SearchableTrackOptions {
                 context_id,
@@ -458,7 +462,7 @@ impl CatalogUi {
         let view = route_view(&read);
         let context_id = rufin_core::view::context_base(read.view.route());
         let projection = self.track_projection(
-            TrackCollectionModel::new(self.runtime.clone(), &view, read),
+            TrackCollectionModel::new(self.products.runtime.clone(), &view, read),
             key,
             SearchableTrackOptions {
                 context_id,
@@ -482,7 +486,15 @@ impl CatalogUi {
         );
         let filter_reread = Rc::downgrade(&reread);
         let filter_shell = Rc::downgrade(self);
-        page.configure_history_filter(self.history_source_name.clone(), move |current_only| {
+        let source_name = {
+            let configured = self.source.configured.borrow();
+            configured
+                .sources
+                .iter()
+                .find(|source| Some(&source.id) == configured.selected_source_id.as_ref())
+                .map(crate::widgets::source_labels::configured_source_display_name)
+        };
+        page.configure_history_filter(source_name, move |current_only| {
             source.replace(
                 current_only
                     .then(|| {

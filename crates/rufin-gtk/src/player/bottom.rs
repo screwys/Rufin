@@ -1094,6 +1094,9 @@ impl crate::player::PlayerUi {
         player: Option<&PlaybackView>,
         presentation: Option<&NowPlayingPresentation>,
     ) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let current = player.and_then(|player| player.transport.current.as_ref());
         let state = player
             .map(|player| player.transport.effective_state())
@@ -1165,7 +1168,7 @@ impl crate::player::PlayerUi {
             f64::from(displayed_seconds.min(duration_seconds)) / f64::from(duration_seconds)
         };
         controls.waveform.set_position_fraction(position_fraction);
-        let waveform_enabled = self
+        let waveform_enabled = shell
             .settings
             .current
             .borrow()
@@ -1226,22 +1229,23 @@ impl crate::player::PlayerUi {
     }
 
     fn apply_bottom_now_playing(self: &Rc<Self>, presentation: &NowPlayingPresentation) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let controls = &self.views.player_controls;
         let window_title = crate::player::state::playback_window_title(
             presentation.current.then_some(presentation.title.as_str()),
             presentation.current.then_some(presentation.artist.as_str()),
         );
-        if let Some(window) = self.window.upgrade() {
-            window.set_title(Some(&window_title));
-        }
+        shell.chrome.window.set_title(Some(&window_title));
         if presentation.current {
-            self.artwork.bind_playback_artwork_tile(
+            shell.artwork.bind_playback_artwork_tile(
                 &controls.cover,
                 presentation.artwork.clone(),
                 BOTTOM_PLAYER_COVER_SIZE,
             );
         } else {
-            self.artwork.clear_artwork_tile(&controls.cover);
+            shell.artwork.clear_artwork_tile(&controls.cover);
         }
         controls.title.set_text(&presentation.title);
         if let Some(artist_links) = controls.artist_links.borrow().as_ref() {
@@ -1263,7 +1267,7 @@ impl crate::player::PlayerUi {
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
         let rating_visible =
-            self.settings.current.borrow().show_bottom_bar_rating && presentation.current;
+            shell.settings.current.borrow().show_bottom_bar_rating && presentation.current;
         controls.rating.widget().set_visible(rating_visible);
         controls.rating.widget().set_sensitive(rating_visible);
         controls.action_buttons.set_margin_top(if rating_visible {
@@ -1422,7 +1426,10 @@ impl OutputPopoverStatus {
 }
 
 pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::player::PlayerUi>) {
-    let selected = shell.playback_owner.playback_output();
+    let Some(app) = shell.shell() else {
+        return;
+    };
+    let selected = app.products.playback.playback_output();
     let popover = gtk::Popover::new();
     popover.add_css_class("playback-output-popover");
     popover.connect_show(crate::widgets::interactions::align_topbar_popup);
@@ -1485,8 +1492,8 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::player::Pl
         );
         remote_rows.push(row);
     }
-    let transport = shell.playback_owner.clone();
-    let runtime = shell.runtime.clone();
+    let transport = app.products.playback.clone();
+    let runtime = app.products.runtime.clone();
     let weak_popover = popover.downgrade();
     let weak_shell = Rc::downgrade(shell);
     let discovery = gtk::glib::spawn_future_local(async move {
@@ -1618,6 +1625,9 @@ fn select_output_async(
     status: &OutputPopoverStatus,
     output: PlaybackOutput,
 ) {
+    let Some(app) = shell.shell() else {
+        return;
+    };
     outputs.set_sensitive(false);
     status.selection_started.set(true);
     status.root.set_visible(true);
@@ -1629,7 +1639,7 @@ fn select_output_async(
         "Connecting to {device}...",
         &[("device", device.as_str())],
     ));
-    let transport = shell.playback_owner.clone();
+    let transport = app.products.playback.clone();
     let selected = output.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     let closing = Arc::clone(&cancelled);
@@ -1641,7 +1651,8 @@ fn select_output_async(
         destroying.store(true, Ordering::Release);
     });
     let selection_cancelled = Arc::clone(&cancelled);
-    let selection = shell
+    let selection = app
+        .products
         .runtime
         .spawn_blocking(move || transport.select_playback_output(selected, cancelled));
     let shell = Rc::downgrade(shell);
@@ -1761,25 +1772,31 @@ pub fn preview_player_seek_fraction(shell: &Rc<crate::player::PlayerUi>, positio
 }
 
 pub fn commit_player_seek_preview_now(shell: &Rc<crate::player::PlayerUi>) {
+    let Some(app) = shell.shell() else {
+        return;
+    };
     let Some(seconds) = shell.seek_preview_seconds() else {
         return;
     };
-    shell.playback_owner.seek_seconds(seconds);
+    app.products.playback.seek_seconds(seconds);
 }
 
 impl crate::player::PlayerUi {
     pub fn apply_user_volume(self: &Rc<Self>, volume: f64) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let volume = if volume.is_finite() {
             volume.clamp(0.0, 1.0)
         } else {
             1.0
         };
-        self.playback_owner.set_volume(volume);
+        shell.products.playback.set_volume(volume);
         let local = self
             .selected_playback()
             .as_deref()
             .map(|player| player.controls.playback_output.is_local())
-            .unwrap_or_else(|| self.playback_owner.playback_output().is_local());
+            .unwrap_or_else(|| shell.products.playback.playback_output().is_local());
         if !local {
             return;
         }
@@ -1788,15 +1805,22 @@ impl crate::player::PlayerUi {
         }
         let shell = Rc::clone(self);
         let source = glib::timeout_add_local_once(VOLUME_PERSIST_DELAY, move || {
+            let Some(app) = shell.shell() else {
+                return;
+            };
             *shell.controls.volume_persist_source.borrow_mut() = None;
-            shell.playback_owner.persist_volume(volume);
+            app.products.playback.persist_volume(volume);
         });
         *self.controls.volume_persist_source.borrow_mut() = Some(source);
     }
 }
 
 pub fn connect_bottom_player_resize(shell: &Rc<crate::player::PlayerUi>) {
-    if let Some(window) = shell.window.upgrade() {
+    let Some(app) = shell.shell() else {
+        return;
+    };
+    {
+        let window = app.chrome.window.clone();
         let weak = Rc::downgrade(shell);
         let watch_scale = move |window: &gtk::ApplicationWindow| {
             if let Some(surface) = window.surface() {
@@ -2128,6 +2152,9 @@ mod tests {
 }
 
 fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
+    let Some(app) = shell.shell() else {
+        return;
+    };
     connect_bottom_player_resize(shell);
     let fullscreen = &shell.views.fullscreen_player;
     for (label, binding) in [
@@ -2154,21 +2181,21 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
         &controls.album,
         shell.route_navigation(),
     )));
-    let transport = shell.playback_owner.clone();
+    let transport = app.products.playback.clone();
     shell
         .views
         .player_controls
         .previous_button
         .connect_clicked(move |_| transport.previous());
 
-    let transport = shell.playback_owner.clone();
+    let transport = app.products.playback.clone();
     shell
         .views
         .player_controls
         .play_button
         .connect_clicked(move |_| transport.play_pause());
 
-    let transport = shell.playback_owner.clone();
+    let transport = app.products.playback.clone();
     shell
         .views
         .player_controls
@@ -2181,6 +2208,9 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
         .player_controls
         .shuffle_button
         .connect_clicked(move |_| {
+            let Some(app) = feedback_shell.shell() else {
+                return;
+            };
             let Some(enabled) = feedback_shell
                 .selected_playback()
                 .as_deref()
@@ -2188,7 +2218,7 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
             else {
                 return;
             };
-            feedback_shell.playback_owner.set_shuffle(enabled);
+            app.products.playback.set_shuffle(enabled);
         });
 
     let feedback_shell = Rc::clone(shell);
@@ -2197,10 +2227,13 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
         .player_controls
         .repeat_button
         .connect_clicked(move |_| {
+            let Some(app) = feedback_shell.shell() else {
+                return;
+            };
             if feedback_shell.selected_playback().is_none() {
                 return;
             }
-            feedback_shell.playback_owner.cycle_repeat();
+            app.products.playback.cycle_repeat();
         });
 
     let feedback_shell = Rc::clone(shell);
@@ -2209,10 +2242,13 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
         .player_controls
         .dj_button
         .connect_clicked(move |_| {
+            let Some(app) = feedback_shell.shell() else {
+                return;
+            };
             if feedback_shell.selected_playback().is_none() {
                 return;
             }
-            feedback_shell.playback_owner.toggle_auto_dj();
+            app.products.playback.toggle_auto_dj();
         });
 
     let mute_shell = Rc::clone(shell);
@@ -2221,6 +2257,9 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
         .player_controls
         .mute_button
         .connect_clicked(move |_| {
+            let Some(app) = mute_shell.shell() else {
+                return;
+            };
             let Some(muted) = mute_shell
                 .selected_playback()
                 .as_deref()
@@ -2228,7 +2267,7 @@ fn connect_transport_controls(shell: &Rc<crate::player::PlayerUi>) {
             else {
                 return;
             };
-            mute_shell.playback_owner.set_muted(muted);
+            app.products.playback.set_muted(muted);
         });
     let output_shell = Rc::clone(shell);
     shell
@@ -2462,7 +2501,7 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
 
     crate::player::playback_settings::configure_playback_settings_popover(
         &shell.player_ui.views.player_controls.settings_button,
-        &shell.player_ui,
+        shell,
     );
 }
 

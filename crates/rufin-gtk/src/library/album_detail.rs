@@ -1655,7 +1655,7 @@ fn play_album_track(shell: &Rc<CatalogUi>, track: &TrackRow, folder: Option<libr
     else {
         return;
     };
-    let queue = shell.playback.clone();
+    let queue = shell.products.playback.clone();
     let settings = shell
         .settings
         .current

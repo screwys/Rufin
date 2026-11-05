@@ -260,7 +260,7 @@ impl SearchItem {
             });
         let mut request = self.play_request();
         request.placement = placement;
-        shell.playback.play_selection(request);
+        shell.products.playback.play_selection(request);
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
         if matches!(self, Self::Track(..)) {
@@ -276,8 +276,7 @@ impl SearchItem {
         position: Option<(f64, f64)>,
         is_current: Rc<dyn Fn() -> bool>,
     ) {
-        let Some(window) = shell.shell() else { return };
-        if present_collection_selection_menu(target, &window, self.play_request(), position) {
+        if present_collection_selection_menu(target, shell.shell(), self.play_request(), position) {
             return;
         }
         let media_uri = match self {
@@ -288,10 +287,10 @@ impl SearchItem {
             Self::Album(row) => row.media_uri.clone(),
             Self::Artist(row) => row.media_uri.clone(),
         };
-        let receiver = shell.source.prepare_collection(media_uri);
+        let receiver = shell.products.source.prepare_collection(media_uri);
         let item = self.clone();
         let target = target.downgrade();
-        let Some(menus) = shell.shell() else { return };
+        let menus = Rc::clone(shell.shell());
         gtk::glib::spawn_future_local(async move {
             if let Ok(Err(error)) = receiver.recv().await {
                 tracing::warn!(%error, "could not acquire Search collection");
@@ -509,7 +508,7 @@ crate::composite_box!(
 impl SearchRouteProjection {
     fn new(shell: &Rc<CatalogUi>) -> Rc<Self> {
         let wrapper = SearchRouteView::new();
-        let search = shell.global_search.clone();
+        let search = shell.chrome.topbar.search.clone();
 
         let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<SparseObjectItem>());
         let category_pages =

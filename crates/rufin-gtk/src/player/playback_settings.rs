@@ -19,17 +19,23 @@ use crate::player::PlayerUi;
 const PLAYBACK_RATE_COMMIT_DELAY: Duration = Duration::from_millis(200);
 const PLAYBACK_SETTINGS_SCALE_WIDTH: i32 = 180;
 
-pub fn configure_playback_settings_popover(button: &gtk::MenuButton, shell: &Rc<PlayerUi>) {
-    let shell = Rc::clone(shell);
+pub fn configure_playback_settings_popover(
+    button: &gtk::MenuButton,
+    shell: &Rc<crate::shell::shell::Shell>,
+) {
+    let shell = Rc::downgrade(shell);
     button.set_create_popup_func(move |button| {
-        button.set_popover(Some(&playback_settings_popover(&shell)));
+        if let Some(shell) = shell.upgrade() {
+            button.set_popover(Some(&playback_settings_popover(&shell)));
+        }
     });
 }
 
-fn playback_settings_popover(shell: &Rc<PlayerUi>) -> gtk::Popover {
-    let settings = shell.settings.current.borrow().clone();
+fn playback_settings_popover(window: &Rc<crate::shell::shell::Shell>) -> gtk::Popover {
+    let shell = &window.player_ui;
+    let settings = window.settings.current.borrow().clone();
     let playback = settings.playback;
-    let local_output = shell.playback_owner.playback_output().is_local();
+    let local_output = window.products.playback.playback_output().is_local();
 
     let resource = "player/playback_settings.ui";
     let builder = crate::ui_resource::builder(resource);
@@ -46,7 +52,7 @@ fn playback_settings_popover(shell: &Rc<PlayerUi>) -> gtk::Popover {
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
     }
-    let device = crate::player::outputs::audio_output_dropdown(shell, 180);
+    let device = crate::player::outputs::audio_output_dropdown(window, 180);
     crate::widgets::interactions::keep_parent_grab_for_dropdown(&device);
     audio_output.add_suffix(&device);
     audio_output.set_activatable_widget(Some(&device));
@@ -66,15 +72,18 @@ fn playback_settings_popover(shell: &Rc<PlayerUi>) -> gtk::Popover {
     settings_group.add(&preserve_pitch);
 
     waveform_row.set_active(
-        shell
+        window
             .settings
             .current
             .borrow()
             .player_display
             .seekbar_waveform_enabled,
     );
-    let waveform_shell = Rc::clone(shell);
+    let waveform_shell = Rc::downgrade(window);
     waveform_row.connect_active_notify(move |row| {
+        let Some(waveform_shell) = waveform_shell.upgrade() else {
+            return;
+        };
         if waveform_shell
             .settings
             .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
@@ -82,7 +91,7 @@ fn playback_settings_popover(shell: &Rc<PlayerUi>) -> gtk::Popover {
             })
             .is_some()
         {
-            waveform_shell.update_bottom_player_transport();
+            waveform_shell.player_ui.update_bottom_player_transport();
         }
     });
     settings_group.add(&waveform_row);

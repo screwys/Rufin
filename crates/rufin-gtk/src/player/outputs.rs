@@ -1,4 +1,4 @@
-use crate::player::PlayerUi;
+use crate::shell::shell::Shell;
 use gtk::prelude::*;
 use localization::tr;
 use playback::AudioOutput;
@@ -13,20 +13,20 @@ pub fn default_audio_output_options() -> AudioOutputOptions {
     vec![(None, tr("System default"))]
 }
 
-pub fn warm_audio_output_cache(shell: &Rc<PlayerUi>) {
+pub fn warm_audio_output_cache(shell: &Rc<Shell>) {
     request_audio_output_refresh(shell);
 }
 
-pub fn select_previous_audio_output(shell: &Rc<PlayerUi>) {
+pub fn select_previous_audio_output(shell: &Rc<Shell>) {
     cycle_audio_output(shell, -1);
 }
 
-pub fn select_next_audio_output(shell: &Rc<PlayerUi>) {
+pub fn select_next_audio_output(shell: &Rc<Shell>) {
     cycle_audio_output(shell, 1);
 }
 
-fn cycle_audio_output(shell: &Rc<PlayerUi>, direction: isize) {
-    if !shell.playback_owner.playback_output().is_local() {
+fn cycle_audio_output(shell: &Rc<Shell>, direction: isize) {
+    if !shell.products.playback.playback_output().is_local() {
         return;
     }
     let selected = shell
@@ -37,14 +37,16 @@ fn cycle_audio_output(shell: &Rc<PlayerUi>, direction: isize) {
         .audio_output
         .clone();
     let (next_id, next_title) = {
-        let outputs = shell.controls.audio_output_options.borrow();
+        let outputs = shell.player_ui.controls.audio_output_options.borrow();
         let current = audio_output_index(&outputs, selected.as_deref()).unwrap_or_default();
         let Some(next) = adjacent_audio_output_index(outputs.len(), current, direction) else {
             return;
         };
         outputs[next].clone()
     };
-    shell.update_playback_settings(|settings| settings.audio_output = next_id.clone());
+    shell
+        .player_ui
+        .update_playback_settings(|settings| settings.audio_output = next_id.clone());
     if shell.settings.current.borrow().playback.audio_output == next_id {
         shell
             .control_feedback
@@ -52,7 +54,7 @@ fn cycle_audio_output(shell: &Rc<PlayerUi>, direction: isize) {
     }
 }
 
-pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown {
+pub fn audio_output_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropDown {
     let selected = shell
         .settings
         .current
@@ -90,7 +92,9 @@ pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown 
         };
         *output_selected.borrow_mut() = id.clone();
         dropdown.set_tooltip_text(Some(&title));
-        output_shell.update_playback_settings(|settings| settings.audio_output = id);
+        output_shell
+            .player_ui
+            .update_playback_settings(|settings| settings.audio_output = id);
     });
 
     request_audio_output_refresh(shell);
@@ -98,7 +102,7 @@ pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown 
     dropdown
 }
 
-pub fn casting_network_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown {
+pub fn casting_network_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropDown {
     let selected = shell
         .settings
         .current
@@ -108,7 +112,8 @@ pub fn casting_network_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDo
     let mut options = vec![(None, tr("Automatic"))];
     options.extend(
         shell
-            .playback_owner
+            .products
+            .playback
             .available_cast_networks()
             .into_iter()
             .map(|network| {
@@ -130,12 +135,15 @@ pub fn casting_network_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDo
     dropdown.set_width_request(width);
     configure_output_dropdown_factory(&dropdown);
 
-    let network_shell = Rc::clone(shell);
+    let network_shell = Rc::downgrade(shell);
     dropdown.connect_selected_notify(move |dropdown| {
         let Some((id, title)) = options.get(dropdown.selected() as usize) else {
             return;
         };
         dropdown.set_tooltip_text(Some(title));
+        let Some(network_shell) = network_shell.upgrade() else {
+            return;
+        };
         network_shell
             .settings
             .set_app_setting("casting network setting", id.clone(), |settings| {
@@ -183,13 +191,18 @@ fn configure_output_dropdown_factory(dropdown: &gtk::DropDown) {
 
 fn refresh_audio_output_dropdown(
     dropdown: &gtk::DropDown,
-    shell: &Rc<PlayerUi>,
+    shell: &Rc<Shell>,
     options: &Rc<RefCell<AudioOutputOptions>>,
     selected: &Rc<RefCell<Option<String>>>,
     syncing: &Rc<Cell<bool>>,
 ) {
     let selected_id = selected.borrow().clone();
-    let shown = shell.controls.audio_output_options.borrow().clone();
+    let shown = shell
+        .player_ui
+        .controls
+        .audio_output_options
+        .borrow()
+        .clone();
     let selected_index = audio_output_index(&shown, selected_id.as_deref()).unwrap_or_default();
     let titles = shown
         .iter()
@@ -205,11 +218,17 @@ fn refresh_audio_output_dropdown(
     *options.borrow_mut() = shown;
 }
 
-fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
-    if *shell.controls.audio_output_refresh_running.borrow() {
+fn request_audio_output_refresh(shell: &Rc<Shell>) {
+    if *shell
+        .player_ui
+        .controls
+        .audio_output_refresh_running
+        .borrow()
+    {
         return;
     }
     if shell
+        .player_ui
         .controls
         .audio_output_refreshed_at
         .get()
@@ -218,12 +237,14 @@ fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
         return;
     }
     shell
+        .player_ui
         .controls
         .audio_output_refresh_running
         .send_replace(true);
 
-    let transport = shell.playback_owner.clone();
+    let transport = shell.products.playback.clone();
     let refresh = shell
+        .products
         .runtime
         .spawn_blocking(move || transport.available_audio_outputs());
 
@@ -233,15 +254,18 @@ fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
         let Some(shell) = shell.upgrade() else { return };
         if let Ok(outputs) = result {
             shell
+                .player_ui
                 .controls
                 .audio_output_options
                 .replace(playback_output_options(outputs));
         }
         shell
+            .player_ui
             .controls
             .audio_output_refreshed_at
             .set(Some(Instant::now()));
         shell
+            .player_ui
             .controls
             .audio_output_refresh_running
             .send_replace(false);
@@ -249,13 +273,17 @@ fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
 }
 
 fn watch_audio_output_dropdown_refresh(
-    shell: &Rc<PlayerUi>,
+    shell: &Rc<Shell>,
     dropdown: &gtk::DropDown,
     options: Rc<RefCell<AudioOutputOptions>>,
     selected: Rc<RefCell<Option<String>>>,
     syncing: Rc<Cell<bool>>,
 ) {
-    let mut refresh = shell.controls.audio_output_refresh_running.subscribe();
+    let mut refresh = shell
+        .player_ui
+        .controls
+        .audio_output_refresh_running
+        .subscribe();
     if !*refresh.borrow() {
         return;
     }

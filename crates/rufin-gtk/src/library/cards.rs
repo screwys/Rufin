@@ -41,7 +41,7 @@ impl AlbumCover {
             if let Some(shell) = open_shell.upgrade()
                 && let Some(album) = row.borrow().clone()
             {
-                shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
+                shell.open_route(Route::AlbumDetail(album.media_uri.clone()));
             }
         });
         let menu_shell = Rc::downgrade(shell);
@@ -50,10 +50,10 @@ impl AlbumCover {
             if let Some(shell) = menu_shell.upgrade()
                 && let Some(album) = row.borrow().clone()
             {
-                if let Some(window) = shell.shell() {
+                {
                     present_album_context_menu(
                         target,
-                        &window,
+                        shell.shell(),
                         album.clone(),
                         None,
                         None,
@@ -75,7 +75,7 @@ impl AlbumCover {
                     && let Some(album) = row.borrow().clone()
                 {
                     crate::menus::media_menus::play_target(
-                        &shell.playback,
+                        &shell.products.playback,
                         &crate::widgets::selection::album_play_request(&album),
                         placement,
                         false,

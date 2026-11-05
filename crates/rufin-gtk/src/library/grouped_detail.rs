@@ -111,7 +111,7 @@ impl CatalogUi {
         }
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.track_projection(
-            TrackCollectionModel::new(self.runtime.clone(), &view, tracks),
+            TrackCollectionModel::new(self.products.runtime.clone(), &view, tracks),
             key,
             SearchableTrackOptions {
                 context_id: playback_context.clone(),
@@ -120,7 +120,7 @@ impl CatalogUi {
                 search: None,
             },
         );
-        let controller = self.playback.clone();
+        let controller = self.products.playback.clone();
         let play_context = playback_context;
         let play_tracks = track_projection.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
@@ -150,7 +150,7 @@ impl CatalogUi {
             context_menu,
             open_cover: {
                 let shell = Rc::clone(self);
-                Rc::new(move || shell.present_full_artwork(artwork.clone()))
+                Rc::new(move || shell.present_full_artwork_group(artwork.clone()))
             },
         });
         wrapper.append(&library_route_inset(showcase));

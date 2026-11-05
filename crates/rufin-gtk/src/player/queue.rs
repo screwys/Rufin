@@ -390,7 +390,10 @@ fn enqueue_media_drop(
     let Some(shell) = shell.upgrade() else {
         return false;
     };
-    let queue = shell.playback_owner.clone();
+    let Some(window) = shell.shell() else {
+        return false;
+    };
+    let queue = window.products.playback.clone();
     if let MediaDragSource::Queue { selection, .. } = source {
         let within_selection = match (&selection, &target) {
             (
@@ -415,8 +418,8 @@ fn enqueue_media_drop(
         queue.reorder(selection, target);
         return true;
     }
-    let catalog = shell.catalog.clone();
-    shell.runtime.spawn(async move {
+    let catalog = window.products.library.clone();
+    window.products.runtime.spawn(async move {
         let Ok(input) = source.track_selection(&catalog).await else {
             return;
         };
@@ -540,7 +543,10 @@ fn queue_title_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewCol
         subtitle.set_visible(!row.track.metadata.artist.is_empty());
         cell.bind_subtitle(row.links(LibraryField::Artist));
         let cover = cell.cover();
-        shell.artwork.bind_artwork_tile(
+        let Some(window) = shell.shell() else {
+            return;
+        };
+        window.artwork.bind_artwork_tile(
             &cover,
             row.track
                 .artwork_binding
@@ -558,8 +564,8 @@ fn queue_title_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewCol
             cell.title().set_text("");
             playing.unbind(cell.title().upcast_ref());
             cell.clear_subtitle();
-            if let Some(shell) = unbind_shell.upgrade() {
-                shell.artwork.clear_artwork_tile(&cell.cover());
+            if let Some(window) = unbind_shell.upgrade().and_then(|shell| shell.shell()) {
+                window.artwork.clear_artwork_tile(&cell.cover());
             }
         }
     });
@@ -768,7 +774,7 @@ fn build_queue_table(
         1,
     );
 
-    let activate = shell.playback_owner.clone();
+    let activate = Rc::downgrade(shell);
     let activate_model = model.clone();
     table.connect_activate(move |table, position| {
         let Some(object) = activate_model
@@ -793,7 +799,10 @@ fn build_queue_table(
             );
         }
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
-        let activate = activate.clone();
+        let Some(window) = activate.upgrade().and_then(|shell| shell.shell()) else {
+            return;
+        };
+        let activate = window.products.playback.clone();
         glib::idle_add_local_once(move || match row.occurrence_id {
             Some(id) => activate.activate_occurrence(id),
             None => activate.activate(row.position),
@@ -818,7 +827,10 @@ pub(super) fn configure_queue_columns(
     table: &gtk::ColumnView,
     key: LibraryListKey,
 ) -> Vec<(gtk::ColumnViewColumn, i32)> {
-    let settings = shell.settings.current.borrow().library_list(key).clone();
+    let Some(window) = shell.shell() else {
+        return Vec::new();
+    };
+    let settings = window.settings.current.borrow().library_list(key);
     crate::widgets::display::apply(table, &settings.display);
     while let Some(column) = table
         .columns()
@@ -928,9 +940,10 @@ fn queue_text_column(
 
 impl crate::player::PlayerUi {
     fn present_queue_settings(self: &Rc<Self>) {
-        let Some(window) = self.window.upgrade() else {
+        let Some(shell) = self.shell() else {
             return;
         };
+        let window = shell.chrome.window.clone();
         let resource = "player/queue_settings.ui";
         let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {
@@ -962,17 +975,17 @@ impl crate::player::PlayerUi {
             }
         });
         crate::widgets::library_field_editor::populate_library_field_rows(
-            &self.settings,
+            &shell.settings,
             Rc::clone(&changed),
             LibraryListKey::Queue,
             &fields_group,
             &rows,
         );
-        let settings = Rc::clone(&self.settings);
-        let display_settings = Rc::clone(&self.settings);
+        let settings = Rc::clone(&shell.settings);
+        let display_settings = Rc::clone(&shell.settings);
         let display_changed = Rc::clone(&changed);
         let display = crate::widgets::display::DisplayEditor::new(
-            &self
+            &shell
                 .settings
                 .current
                 .borrow()
@@ -1066,13 +1079,16 @@ fn queue_overlay_empty_label(
 
 impl crate::player::PlayerUi {
     pub fn clear_queue(&self) {
-        let include_current = self
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let include_current = shell
             .settings
             .current
             .borrow()
             .player_display
             .clear_queue_includes_current;
-        self.playback_owner.clear(include_current);
+        shell.products.playback.clear(include_current);
     }
 
     pub fn schedule_queue_panel_render(self: &Rc<Self>) {
@@ -1346,13 +1362,15 @@ fn render_panel(
     };
     queue_header(shell, key).set_visible(
         has_rows
-            && shell
-                .settings
-                .current
-                .borrow()
-                .library_list(key)
-                .display
-                .show_header,
+            && shell.shell().is_some_and(|window| {
+                window
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(key)
+                    .display
+                    .show_header
+            }),
     );
     if let Some(empty) = queue_overlay_empty_label(&scroller, shell) {
         empty.set_visible(!has_rows);

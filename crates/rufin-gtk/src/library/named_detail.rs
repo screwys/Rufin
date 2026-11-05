@@ -176,14 +176,10 @@ fn named_context_menu(
         let row = current.borrow().clone();
         match row.kind {
             library::TagKind::Genre => {
-                if let Some(window) = shell.shell() {
-                    present_genre_context_menu(target, &window, row, Some(play), position)
-                }
+                present_genre_context_menu(target, shell.shell(), row, Some(play), position)
             }
             library::TagKind::Mood => {
-                if let Some(window) = shell.shell() {
-                    present_mood_context_menu(target, &window, row, Some(play), position)
-                }
+                present_mood_context_menu(target, shell.shell(), row, Some(play), position)
             }
         }
     })
@@ -196,7 +192,7 @@ fn named_kind_controls(shell: &Rc<CatalogUi>, id: NamedDetailId) -> Vec<gtk::Wid
     let mut controls = Vec::new();
     if let NamedDetailId::Genre(key) = id {
         let radio = detail_radio_button();
-        let controller = shell.playback.clone();
+        let controller = shell.products.playback.clone();
         radio.connect_clicked(move |_| {
             controller.play_radio(RadioPlayRequest::now(RadioSeed::Genre(key)));
         });

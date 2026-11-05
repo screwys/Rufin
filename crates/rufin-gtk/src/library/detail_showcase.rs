@@ -165,7 +165,7 @@ impl DetailShowcaseView {
         self.imp().genres.set_visible(false);
     }
 
-    pub fn set_genres<'a>(
+    pub(crate) fn set_genres<'a>(
         &self,
         shell: &Rc<CatalogUi>,
         genres: impl IntoIterator<Item = (&'a str, library::GenreKey)>,
@@ -190,7 +190,7 @@ impl DetailShowcaseView {
             let shell = Rc::downgrade(shell);
             button.connect_clicked(move |_| {
                 if let Some(shell) = shell.upgrade() {
-                    shell.navigate(Route::GenreDetail(key));
+                    shell.open_route(Route::GenreDetail(key));
                 }
             });
             imp.genre_overflow_list.append(&button);
@@ -610,7 +610,7 @@ pub fn media_cover_projection(
     cover_class: &str,
 ) -> MediaCoverProjection {
     media_cover_projection_with_open(shell, candidates, size, cover_class, |shell, candidates| {
-        shell.present_full_artwork(vec![candidates])
+        shell.present_full_artwork(candidates)
     })
 }
 
@@ -629,7 +629,7 @@ pub fn home_album_cover_projection(
             .unwrap_or_default(),
         size,
         "",
-        move |shell, _| shell.navigate(Route::AlbumDetail(album_uri.clone())),
+        move |shell, _| shell.open_route(Route::AlbumDetail(album_uri.clone())),
     )
 }
 
@@ -710,7 +710,7 @@ pub fn fit_detail_text(label: &gtk::Label, text: &str) {
 pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumView) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let source = library::source_entity_parts(&album.row.media_uri)
-        .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
+        .and_then(|(source_id, _, _)| shell.products.source.configuration(&source_id));
     detail_external_links(
         shell,
         rufin_core::detail_links::album_external_links(
@@ -730,7 +730,7 @@ pub fn artist_external_links(
 ) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let source = library::source_entity_parts(&artist.row.media_uri)
-        .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
+        .and_then(|(source_id, _, _)| shell.products.source.configuration(&source_id));
     detail_external_links(
         shell,
         rufin_core::detail_links::artist_external_links(
@@ -797,7 +797,7 @@ fn detail_external_link_button(
     url: String,
 ) -> gtk::Button {
     let button = detail_link_button(icon_name, label);
-    connect_web_link(&button, shell.window.clone(), url);
+    connect_web_link(&button, shell.chrome.window.downgrade(), url);
     button
 }
 
@@ -838,15 +838,15 @@ fn detail_source_button(
     album_artist: bool,
 ) -> Option<gtk::Button> {
     let (source_id, _, _) = library::source_entity_parts(media_uri)?;
-    let source = shell.source.configuration(&source_id)?;
+    let source = shell.products.source.configuration(&source_id)?;
     let link = rufin_core::detail_links::source_link(&source, media_uri)?;
     let button = detail_link_button(link.icon_name, link.title);
     if let Some(uri) = link.url {
-        connect_web_link(&button, shell.window.clone(), uri);
+        connect_web_link(&button, shell.chrome.window.downgrade(), uri);
         return Some(button);
     }
-    let source = shell.source.clone();
-    let window = shell.window.clone();
+    let source = shell.products.source.clone();
+    let window = shell.chrome.window.downgrade();
     let media_uri = media_uri.to_owned();
     let scope = shell
         .selected_library()

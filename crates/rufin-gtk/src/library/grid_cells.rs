@@ -731,7 +731,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                     let mut request =
                         track_play_request(row.track_key().expect("catalog song key"));
                     request.placement = placement;
-                    shell.playback.play_selection(request);
+                    shell.products.playback.play_selection(request);
                 }
             });
         }
@@ -852,7 +852,7 @@ impl AlbumGridCell {
                 && let Some(uri) = uri
             {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                shell.navigate(rufin_core::route::Route::AlbumDetail(uri));
+                shell.open_route(rufin_core::route::Route::AlbumDetail(uri));
             }
         });
         self.body.card.add_controller(click);
@@ -890,16 +890,14 @@ impl AlbumGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                if let Some(window) = shell.shell() {
-                    present_album_context_menu(
-                        target,
-                        &window,
-                        row,
-                        menu_context.clone(),
-                        None,
-                        point,
-                    )
-                }
+                present_album_context_menu(
+                    target,
+                    shell.shell(),
+                    row,
+                    menu_context.clone(),
+                    None,
+                    point,
+                )
             },
         );
         let play_context = context.clone();
@@ -909,7 +907,7 @@ impl AlbumGridCell {
             [play, play_next, play_last],
             move |shell, row, placement| {
                 crate::menus::media_menus::play_target(
-                    &shell.playback,
+                    &shell.products.playback,
                     &album_playback_target(&row, play_context.as_deref()),
                     placement,
                     false,
@@ -986,9 +984,7 @@ impl ArtistGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                if let Some(window) = shell.shell() {
-                    present_artist_context_menu(target, &window, row, None, point)
-                }
+                present_artist_context_menu(target, shell.shell(), row, None, point)
             },
         );
         install_grid_play(
@@ -1001,7 +997,12 @@ impl ArtistGridCell {
                 } else {
                     crate::widgets::selection::artist_play_request(&row, false)
                 };
-                crate::menus::media_menus::play_target(&shell.playback, &target, placement, false);
+                crate::menus::media_menus::play_target(
+                    &shell.products.playback,
+                    &target,
+                    placement,
+                    false,
+                );
             },
         );
         install_grid_favorite(shell, &current, &favorite, |row| {
@@ -1045,7 +1046,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         });
         self.body.set_download_target(
             &shell,
-            !shell.local_source
+            !shell.local_source()
                 && collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
         );
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
@@ -1102,7 +1103,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         });
         self.body.set_download_target(
             &shell,
-            !shell.local_source
+            !shell.local_source()
                 && collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
         );
         set_grid_favorite(&self.favorite, Some(row.state.favorite));

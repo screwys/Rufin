@@ -149,7 +149,6 @@ pub struct LibraryToolbarProjection {
     sort_dropdown: gtk::DropDown,
     direction: gtk::Button,
     layout: gtk::Button,
-    configure: gtk::Button,
     layout_mode: Rc<Cell<LibraryLayout>>,
     syncing: Rc<Cell<bool>>,
 }
@@ -168,10 +167,6 @@ impl LibraryToolbarProjection {
 
     pub fn set_layout_control_visible(&self, visible: bool) {
         self.layout.set_visible(visible);
-    }
-
-    pub fn set_configure_control_visible(&self, visible: bool) {
-        self.configure.set_visible(visible);
     }
 
     pub fn cycle_layout(&self) {
@@ -483,7 +478,6 @@ impl CatalogUi {
             sort_dropdown,
             direction,
             layout,
-            configure,
             layout_mode,
             syncing,
         };
@@ -494,7 +488,7 @@ impl CatalogUi {
         key: LibraryListKey,
         include_detail: bool,
     ) {
-        let window = self.window.upgrade().expect("mounted catalog window");
+        let window = self.chrome.window.clone();
         let resource = "routes/library_config.ui";
         let builder = crate::ui_resource::builder(resource);
         crate::objects!(builder, resource, {

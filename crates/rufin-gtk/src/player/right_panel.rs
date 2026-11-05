@@ -269,6 +269,9 @@ impl RightPanelWidgets {
 
 impl crate::player::PlayerUi {
     pub fn save_sidebar_panel_sizes(&self) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let panel = &self.right_panel;
         let visible = panel.visible_panels.borrow();
         if !panel.root.is_mapped() || visible.len() < 2 {
@@ -284,7 +287,7 @@ impl crate::player::PlayerUi {
             .filter(|height| *height > 0);
         let combined = panel.combined.get();
         {
-            let settings = self.settings.current.borrow();
+            let settings = shell.settings.current.borrow();
             let saved_lyrics = if combined {
                 settings.queue_lyrics_height
             } else {
@@ -297,7 +300,8 @@ impl crate::player::PlayerUi {
                 return;
             }
         }
-        self.settings
+        shell
+            .settings
             .update_app_settings("sidebar panel sizes", |settings| {
                 let lyrics_height = if combined {
                     &mut settings.queue_lyrics_height
@@ -336,8 +340,12 @@ impl crate::player::PlayerUi {
     }
 
     pub fn set_right_panel_combined(self: &Rc<Self>, combined: bool) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         self.save_sidebar_panel_sizes();
-        self.settings
+        shell
+            .settings
             .set_app_setting("combine sidebar panels", combined, |settings| {
                 &mut settings.right_panel.combined
             });
@@ -346,8 +354,12 @@ impl crate::player::PlayerUi {
     }
 
     pub fn set_sidebar_queue_visible(&self, visible: bool) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         self.save_sidebar_panel_sizes();
-        self.settings
+        shell
+            .settings
             .set_app_setting("sidebar queue visibility", visible, |settings| {
                 &mut settings.right_panel.queue_visible
             });
@@ -355,6 +367,9 @@ impl crate::player::PlayerUi {
     }
 
     fn move_sidebar_panel(self: &Rc<Self>, panel: SidebarPanel, direction: isize) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let Some((_, controls)) = self
             .right_panel
             .controls
@@ -365,7 +380,7 @@ impl crate::player::PlayerUi {
         };
         let had_focus = controls.up.has_focus() || controls.down.has_focus();
         self.save_sidebar_panel_sizes();
-        let changed = self
+        let changed = shell
             .settings
             .update_app_settings("sidebar panel order", |settings| {
                 settings.right_panel.move_panel(
@@ -396,8 +411,11 @@ impl crate::player::PlayerUi {
     }
 
     fn arrange_sidebar_panels(&self) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let (settings, combined_height) = {
-            let settings = self.settings.current.borrow();
+            let settings = shell.settings.current.borrow();
             (settings.right_panel.clone(), settings.queue_lyrics_height)
         };
         self.right_panel.rebuild(
@@ -413,6 +431,9 @@ impl crate::player::PlayerUi {
         lyrics_visible: bool,
         visualizer_visible: bool,
     ) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         if self.lyrics.panel_visible.get() != lyrics_visible
             || self.right_panel.visualizer_visible.get() != visualizer_visible
         {
@@ -420,7 +441,8 @@ impl crate::player::PlayerUi {
         }
         self.lyrics.panel_visible.set(lyrics_visible);
         self.right_panel.visualizer_visible.set(visualizer_visible);
-        self.settings
+        shell
+            .settings
             .update_app_settings("right panel media visibility", |settings| {
                 if settings.lyrics_panel_visible == lyrics_visible
                     && settings.visualizer_panel_visible == visualizer_visible

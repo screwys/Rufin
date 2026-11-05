@@ -177,7 +177,9 @@ impl PlayerUi {
         if !self.lyrics_surface_visible() {
             return;
         }
-        self.lyrics_service.load(media_id);
+        if let Some(shell) = self.shell() {
+            shell.products.lyrics.load(media_id);
+        }
     }
 
     pub fn suppress_auto_lyrics_for_current(self: &Rc<Self>) {
@@ -187,8 +189,12 @@ impl PlayerUi {
         let Some(track_id) = current_playback_track_id(self.selected_playback().as_deref()) else {
             return;
         };
-        self.lyrics_service.clear_fetched(media_id);
-        self.settings
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        shell.products.lyrics.clear_fetched(media_id);
+        shell
+            .settings
             .update_app_settings("lyrics auto-search setting", |settings| {
                 settings.lyrics.suppress_auto_lyrics(&track_id)
             });
@@ -312,7 +318,9 @@ impl PlayerUi {
         let offset_millis = lyrics.offset_millis.get();
         drop(lyrics);
         let position_millis = playback_position_for_lyrics_position(position_millis, offset_millis);
-        self.playback_owner.seek_millis(position_millis);
+        if let Some(shell) = self.shell() {
+            shell.products.playback.seek_millis(position_millis);
+        }
         self.update_lyrics_highlight_at(position_millis, std::time::Instant::now());
     }
 }

@@ -4,28 +4,14 @@ use crate::widgets::mounted_route::{RouteCurrentTrack, RouteCurrentTrackSelectio
 use crate::widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 use gtk::prelude::*;
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
-/// What a page needs from the window it is shown in, for the route and source it was opened for.
-pub struct CatalogUi {
-    shell: Weak<Shell>,
+/// A page of the window: the route and source it was opened for, and what it shows of the
+/// current track and its selections. Everything else is the window's, through `Deref`.
+pub(crate) struct CatalogUi {
+    shell: Rc<Shell>,
     route: rufin_core::route::Route,
     source_id: Option<sources::SourceId>,
-    pub library: std::sync::Arc<library::Catalog>,
-    pub runtime: tokio::runtime::Handle,
-    pub source: rufin_core::runtime::SourceHandle,
-    pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-    pub settings: Rc<crate::widgets::settings::SettingsState>,
-    pub artwork: Rc<crate::widgets::artwork::ArtworkState>,
-    pub downloads: Rc<crate::downloads::DownloadsState>,
-    pub local_source: bool,
-    pub selected: Option<rufin_core::runtime::SelectedLibrary>,
-    pub favorites: Option<Rc<crate::favorites::FavoriteSessionState>>,
-    pub window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
-    pub global_search: gtk::SearchEntry,
-    pub search_session: Rc<crate::library::SearchSession>,
-    pub history_source_name: Option<String>,
-
     pub current: RefCell<Option<RouteCurrentTrack>>,
     pub current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
     pub media_playing_cells:
@@ -34,47 +20,24 @@ pub struct CatalogUi {
     pub playlist_entry_selection: RefCell<Option<PlaylistEntrySelection>>,
 }
 
+impl std::ops::Deref for CatalogUi {
+    type Target = Rc<Shell>;
+
+    fn deref(&self) -> &Rc<Shell> {
+        &self.shell
+    }
+}
+
 impl CatalogUi {
     pub(crate) fn new(
         shell: &Rc<Shell>,
         route: &rufin_core::route::Route,
         source_id: Option<&sources::SourceId>,
     ) -> Rc<Self> {
-        let selected = shell.selected_library().as_deref().cloned();
-        let configured = shell.source.configured.borrow();
-        let local_source = configured.sources.iter().any(|source| {
-            source.kind == "local"
-                && selected
-                    .as_ref()
-                    .is_some_and(|selected| selected.source_id == source.id)
-        });
-        let history_source_name = configured
-            .sources
-            .iter()
-            .find(|source| Some(&source.id) == configured.selected_source_id.as_ref())
-            .map(crate::widgets::source_labels::configured_source_display_name);
-        drop(configured);
         Rc::new(Self {
-            shell: Rc::downgrade(shell),
+            shell: Rc::clone(shell),
             route: route.clone(),
             source_id: source_id.cloned(),
-            library: shell.products.library.clone(),
-            runtime: shell.products.runtime.clone(),
-            source: shell.products.source.clone(),
-            playback: shell.products.playback.clone(),
-            settings: Rc::clone(&shell.settings),
-            artwork: Rc::clone(&shell.artwork),
-            downloads: Rc::clone(&shell.downloads),
-            local_source,
-            selected,
-            favorites: shell
-                .selected_ui
-                .session()
-                .map(|session| Rc::clone(&session.favorites)),
-            window: shell.chrome.window.downgrade(),
-            global_search: shell.chrome.topbar.search.clone(),
-            search_session: Rc::clone(&shell.search_session),
-            history_source_name,
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             media_playing_cells: RefCell::new(Vec::new()),
@@ -83,26 +46,19 @@ impl CatalogUi {
         })
     }
 
-    /// The window, while it is open.
-    pub(crate) fn shell(&self) -> Option<Rc<Shell>> {
-        self.shell.upgrade()
-    }
-
-    pub(crate) fn weak_shell(&self) -> Weak<Shell> {
-        self.shell.clone()
+    /// The window the page is shown in.
+    pub(crate) fn shell(&self) -> &Rc<Shell> {
+        &self.shell
     }
 
     /// Whether the window still shows the route and source this page was opened for.
     pub fn is_current(&self) -> bool {
-        self.shell().is_some_and(|shell| {
-            shell.navigation.routes.borrow().current() == &self.route
-                && self.source_id.as_ref().is_none_or(|id| {
-                    shell
-                        .selected_library()
-                        .as_deref()
-                        .is_some_and(|selected| &selected.source_id == id)
-                })
-        })
+        self.navigation.routes.borrow().current() == &self.route
+            && self.source_id.as_ref().is_none_or(|id| {
+                self.selected_library()
+                    .as_deref()
+                    .is_some_and(|selected| &selected.source_id == id)
+            })
     }
 
     /// `is_current` for work that finishes after this call.
@@ -111,10 +67,20 @@ impl CatalogUi {
         Rc::new(move || page.upgrade().is_some_and(|page| page.is_current()))
     }
 
-    pub fn route_width(&self) -> i32 {
-        self.shell().map_or(1, |shell| {
-            crate::shell::shell::layout::route_content_width(&shell)
+    /// Whether the selected source is a Local one, whose tracks are on this device already.
+    pub fn local_source(&self) -> bool {
+        let selected = self.selected_library();
+        let configured = self.source.configured.borrow();
+        selected.is_some_and(|selected| {
+            configured.sources.iter().any(|source| {
+                source.id == selected.source_id
+                    && library::SourceKind::parse(&source.kind) == Some(library::SourceKind::Local)
+            })
         })
+    }
+
+    pub fn route_width(&self) -> i32 {
+        crate::shell::shell::layout::route_content_width(&self.shell)
     }
 
     /// A table's width before it is allocated: the route's width less its inset and the
@@ -128,10 +94,7 @@ impl CatalogUi {
     }
 
     pub fn source_label(&self, source_id: Option<&str>) -> (&'static str, String) {
-        let Some(shell) = self.shell() else {
-            return crate::widgets::source_labels::source_display_label(None);
-        };
-        let configured = shell.source.configured.borrow();
+        let configured = self.source.configured.borrow();
         crate::widgets::source_labels::source_display_label(
             configured
                 .sources
@@ -141,82 +104,31 @@ impl CatalogUi {
     }
 
     pub fn history_source_id(&self) -> Option<sources::SourceId> {
-        self.shell()
-            .and_then(|shell| shell.source.configured.borrow().selected_source_id.clone())
+        self.source.configured.borrow().selected_source_id.clone()
     }
 
     pub fn refresh_home_section(&self, kind: rufin_core::settings::HomeSectionKind) {
-        if let Some(selected) = &self.selected {
-            self.source.refresh_home(selected.source_id.clone(), kind);
-        }
-    }
-
-    /// Rereads the shown page after its settings change.
-    pub fn reconcile(&self) {
-        if let Some(shell) = self.shell() {
-            shell.reconcile_mounted_route();
-        }
-    }
-
-    pub fn refresh(&self) {
-        if let Some(shell) = self.shell() {
-            shell.replace_current_route_when_ready();
-        }
-    }
-
-    pub fn present_full_artwork(&self, artwork: Vec<artwork::ArtworkBinding>) {
-        if let Some(shell) = self.shell() {
-            shell.present_full_artwork_group(artwork);
-        }
-    }
-
-    pub fn present_selected_dialog(&self, dialog: &impl IsA<adw::Dialog>) {
-        if let Some(shell) = self.shell() {
-            shell.present_selected_dialog(dialog);
-        }
-    }
-
-    pub fn present_playlist_context_menu(
-        &self,
-        target: &gtk::Widget,
-        playlist: library::PlaylistRow,
-        play: Option<crate::menus::media_menus::CollectionPlay>,
-        position: Option<(f64, f64)>,
-    ) {
-        if let Some(shell) = self.shell() {
-            let playing = crate::player::state::current_playback_track(
-                shell.player_ui.selected_playback().as_deref(),
-            )
-            .map(|track| track.media_uri);
-            crate::menus::media_menus::present_playlist_context_menu(
-                target, &shell, playlist, play, position, playing,
-            );
+        if let Some(selected) = self.selected_library() {
+            self.products
+                .source
+                .refresh_home(selected.source_id.clone(), kind);
         }
     }
 
     pub fn update_smart_playlist_pin(&self, summary: &library::SmartPlaylistRow) {
-        if let Some(shell) = self.shell() {
-            crate::shell::shell::navigation::update_sidebar_smart_playlist_pin_metadata(
-                &shell, summary,
-            );
-        }
-    }
-
-    pub fn set_favorite_category(&self, category: rufin_core::route::CollectionCategory) {
-        if let Some(shell) = self.shell() {
-            shell.set_favorite_category(category);
-        }
+        crate::shell::shell::navigation::update_sidebar_smart_playlist_pin_metadata(
+            &self.shell,
+            summary,
+        );
     }
 
     pub fn cycle_favorite_category(&self) {
-        if let Some(shell) = self.shell() {
-            shell.set_favorite_category(shell.navigation.favorite_category.get().next());
-        }
+        self.set_favorite_category(self.navigation.favorite_category.get().next());
     }
 
     pub fn bind_download_badge(&self, image: &gtk::Image, downloaded: bool) {
         self.downloads
-            .bind_download_badge(image, downloaded && !self.local_source);
+            .bind_download_badge(image, downloaded && !self.local_source());
     }
 
     pub fn register_current_route_track_selection(&self, selection: RouteCurrentTrackSelection) {
@@ -230,15 +142,15 @@ impl CatalogUi {
         self: &Rc<Self>,
         selection: TrackSelection,
     ) {
-        let shell = Rc::downgrade(self);
+        let page = Rc::downgrade(self);
         selection.connect_changed(move |changed_selection| {
             if changed_selection.selection().is_empty() {
                 return;
             }
-            let Some(shell) = shell.upgrade() else {
+            let Some(page) = page.upgrade() else {
                 return;
             };
-            for other in shell.track_selections.borrow().iter() {
+            for other in page.track_selections.borrow().iter() {
                 if !other.uses_selection(changed_selection) {
                     other.clear();
                 }
@@ -292,76 +204,36 @@ impl CatalogUi {
         self.current.replace(current);
         self.reapply_current_track();
     }
-}
 
-impl CatalogUi {
-    pub fn selected_library(&self) -> Option<&rufin_core::runtime::SelectedLibrary> {
-        self.selected.as_ref()
-    }
     /// Navigation for widgets that open routes from links.
     pub fn route_navigation(&self) -> Rc<dyn Fn(rufin_core::route::Route)> {
-        let shell = self.shell.clone();
+        let shell = Rc::downgrade(&self.shell);
         Rc::new(move |route| {
             if let Some(shell) = shell.upgrade() {
                 shell.open_route(route);
             }
         })
     }
-    pub fn navigate(&self, route: rufin_core::route::Route) {
-        if let Some(shell) = self.shell() {
-            shell.open_route(route);
-        }
-    }
+
     pub fn update_library_list_settings(
         &self,
         key: rufin_core::settings::LibraryListKey,
         update: impl FnOnce(&mut rufin_core::settings::LibraryListSettings),
     ) {
         if self.settings.update_library_list_settings(key, update) {
-            self.reconcile();
+            self.reconcile_mounted_route();
         }
     }
+
     pub fn library_settings_changed(&self) -> Rc<dyn Fn()> {
-        let shell = self.shell.clone();
+        let shell = Rc::downgrade(&self.shell);
         Rc::new(move || {
             if let Some(shell) = shell.upgrade() {
                 shell.reconcile_mounted_route();
             }
         })
     }
-    pub fn register_favorite_button(
-        &self,
-        key: crate::favorites::FavoriteControlKey,
-        button: &gtk::Button,
-    ) {
-        if let Some(favorites) = &self.favorites {
-            favorites.register_favorite_button(key, button);
-        }
-    }
-    pub fn register_dynamic_favorite_button(
-        &self,
-        key: Rc<dyn Fn() -> Option<crate::favorites::FavoriteControlKey>>,
-        button: &gtk::Button,
-    ) {
-        if let Some(favorites) = &self.favorites {
-            favorites.register_dynamic_favorite_button(key, button);
-        }
-    }
-    pub fn update_visible_favorite_buttons(
-        &self,
-        target: &library::FavoriteTarget,
-        favorite: bool,
-    ) {
-        if let Some(favorites) = &self.favorites {
-            favorites.update_visible_favorite_buttons(target, favorite);
-        }
-    }
-    /// Hearts change when the favorite is committed, from the publication that follows.
-    pub fn set_favorite(&self, target: library::FavoriteTarget, favorite: bool) {
-        if let Some(shell) = self.shell() {
-            shell.set_favorite(target, favorite);
-        }
-    }
+
     pub fn reapply_current_track(&self) {
         let current = self.current.borrow();
         self.media_playing_cells.borrow_mut().retain(|cell| {

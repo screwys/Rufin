@@ -41,7 +41,10 @@ impl PlayerUi {
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
-        let karaoke = self
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let karaoke = shell
             .settings
             .current
             .borrow()

@@ -930,7 +930,7 @@ impl ActivityCollections {
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
                 let row = item.borrow::<TrackRow>();
                 crate::menus::media_menus::play_target(
-                    &shell.playback,
+                    &shell.products.playback,
                     &track_play_request(row.track_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
@@ -968,7 +968,7 @@ impl ActivityCollections {
                 if let Some(catalog) = weak.upgrade()
                     && let Some(uri) = uris.borrow().get(child.index() as usize)
                 {
-                    catalog.navigate(if artist {
+                    catalog.open_route(if artist {
                         Route::ArtistDetail(uri.clone())
                     } else {
                         Route::AlbumDetail(uri.clone())

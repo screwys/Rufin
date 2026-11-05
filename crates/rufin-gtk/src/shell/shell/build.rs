@@ -339,15 +339,7 @@ pub async fn build(
             lyrics_state,
             player_view,
             player_right_panel,
-            Rc::clone(&settings_state),
-            products.playback.clone(),
-            products.lyrics.clone(),
-            &chrome.window,
-            &chrome.toast_overlay,
-            Rc::clone(&artwork),
             Rc::clone(&control_feedback),
-            products.library.clone(),
-            products.runtime.clone(),
             weak.clone(),
             &chrome.app_content_stack,
         ));
@@ -451,7 +443,7 @@ pub async fn build(
     connect_fullscreen_player_controls(&shell.player_ui);
     connect_player_controls(&shell);
     shell.attach_selected_ui_roots();
-    warm_audio_output_cache(&shell.player_ui);
+    warm_audio_output_cache(&shell);
     shell.update_layout();
     if defer_initial_route {
         shell.render_startup_loading_view();

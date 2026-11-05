@@ -77,7 +77,7 @@ impl CatalogUi {
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
         let favorite_count = read.view.favorites_len().unwrap_or(0);
         let favorite_model = crate::library::track_model::TrackCollectionModel::favorites(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             &view,
             favorite_rows,
         );
@@ -187,7 +187,7 @@ impl CatalogUi {
         let favorite_search = favorite.search();
         let filters = Rc::downgrade(&releases);
         let reread = PageReread::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             "mounted Artist route",
             &view,
             move |options| OpenOptions {
@@ -339,7 +339,7 @@ impl CatalogUi {
         };
         let filters = Rc::downgrade(&releases);
         let reread = PageReread::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             "mounted Discography route",
             &view,
             move |options| OpenOptions {
@@ -431,7 +431,7 @@ impl CatalogUi {
         };
         let context_id = rufin_core::view::context_base(read.view.route());
         let model = crate::library::track_model::TrackCollectionModel::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             &view,
             read,
         );
@@ -608,7 +608,7 @@ fn artist_detail_header_restored(
         &artist.row.name,
     );
     let radio = detail_radio_button();
-    let radio_controller = shell.playback.clone();
+    let radio_controller = shell.products.playback.clone();
     radio.connect_clicked(move |_| {
         radio_controller.play_radio(RadioPlayRequest::now(if album_artist {
             RadioSeed::AlbumArtist(artist_key)
@@ -627,7 +627,7 @@ fn artist_detail_header_restored(
     let album_shell = Rc::clone(shell);
     let album_uri = artist.row.media_uri.clone();
     albums.connect_clicked(move |_| {
-        album_shell.navigate(artist_discography_route(album_uri.clone(), album_artist))
+        album_shell.open_route(artist_discography_route(album_uri.clone(), album_artist))
     });
     counts.append(&albums);
     let (tracks, track_count) = artist_count_button(
@@ -637,7 +637,7 @@ fn artist_detail_header_restored(
     let track_shell = Rc::clone(shell);
     let track_uri = artist.row.media_uri.clone();
     tracks.connect_clicked(move |_| {
-        track_shell.navigate(artist_tracks_route(track_uri.clone(), album_artist))
+        track_shell.open_route(artist_tracks_route(track_uri.clone(), album_artist))
     });
     counts.append(&tracks);
     showcase.append_detail(&counts);
@@ -648,7 +648,12 @@ fn artist_detail_header_restored(
     let target = crate::widgets::selection::artist_play_request(&artist.row, album_artist);
     let play_shell = Rc::clone(shell);
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-        crate::menus::media_menus::play_target(&play_shell.playback, &target, placement, shuffled);
+        crate::menus::media_menus::play_target(
+            &play_shell.products.playback,
+            &target,
+            placement,
+            shuffled,
+        );
     });
     let controls = detail_playback_controls(
         &actions,
@@ -682,10 +687,10 @@ fn artist_detail_header_restored(
     let menu_play = Rc::clone(&play);
     let context_menu = Rc::new(move |target: &gtk::Widget, position| {
         let artist = menu_artist.borrow().row.clone();
-        if let Some(window) = menu_shell.shell() {
+        {
             present_artist_context_menu(
                 target,
-                &window,
+                menu_shell.shell(),
                 artist,
                 Some(Rc::clone(&menu_play)),
                 position,

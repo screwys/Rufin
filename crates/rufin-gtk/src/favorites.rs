@@ -87,9 +87,6 @@ fn icon_image_from_widget(widget: gtk::Widget) -> Option<gtk::Image> {
 }
 
 impl FavoriteSessionState {
-    pub fn register_favorite_button(&self, key: FavoriteControlKey, button: &gtk::Button) {
-        self.register_dynamic_favorite_button(Rc::new(move || Some(key.clone())), button);
-    }
     pub fn register_dynamic_favorite_button(
         &self,
         key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
@@ -119,6 +116,24 @@ impl FavoriteSessionState {
 }
 
 impl Shell {
+    /// Keeps `button`'s heart showing the favorite of the item `key` names while the button
+    /// lives.
+    pub(crate) fn register_dynamic_favorite_button(
+        &self,
+        key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
+        button: &gtk::Button,
+    ) {
+        if let Some(session) = self.selected_ui.session() {
+            session
+                .favorites
+                .register_dynamic_favorite_button(key, button);
+        }
+    }
+
+    pub(crate) fn register_favorite_button(&self, key: FavoriteControlKey, button: &gtk::Button) {
+        self.register_dynamic_favorite_button(Rc::new(move || Some(key.clone())), button);
+    }
+
     pub(crate) fn clear_favorite_controls(&self) {
         if let Some(session) = self.selected_ui.session() {
             session.favorites.clear_favorite_controls();

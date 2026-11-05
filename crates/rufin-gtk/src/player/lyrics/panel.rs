@@ -31,6 +31,9 @@ impl PlayerUi {
         self: &Rc<Self>,
         status: lyrics::JapaneseDictionaryStatus,
     ) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         use lyrics::JapaneseDictionaryStatus;
 
         let previous = self.lyrics.dictionary_toast.borrow_mut().take();
@@ -49,15 +52,11 @@ impl PlayerUi {
         let resource = "player/lyrics/dictionary.ui";
         let builder = crate::ui_resource::builder(resource);
         let toast: adw::Toast = crate::ui_resource::object(&builder, resource, id);
-        let shell = Rc::downgrade(self);
+        let lyrics = shell.products.lyrics.clone();
         toast.connect_button_clicked(move |_| {
-            if let Some(shell) = shell.upgrade() {
-                shell.lyrics_service.japanese_dictionary(true);
-            }
+            lyrics.japanese_dictionary(true);
         });
-        if let Some(overlay) = self.toast_overlay.upgrade() {
-            overlay.add_toast(toast.clone());
-        }
+        shell.chrome.toast_overlay.add_toast(toast.clone());
         *self.lyrics.dictionary_toast.borrow_mut() = Some(toast);
     }
 
@@ -107,7 +106,10 @@ impl PlayerUi {
     }
 
     fn render_lyrics_pane(self: &Rc<Self>, pane: &LyricsPane) {
-        let settings = self.settings.current.borrow();
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let settings = shell.settings.current.borrow();
         let current_media = current_playback_media_id(self.selected_playback().as_deref());
         let current_track_id = current_playback_track_id(self.selected_playback().as_deref());
         let Some(lyrics) = self.selected_lyrics() else {
@@ -118,7 +120,7 @@ impl PlayerUi {
         drop(lyrics);
         let writable = current_media
             .as_ref()
-            .is_some_and(|id| self.lyrics_service.current_writable(id));
+            .is_some_and(|id| shell.products.lyrics.current_writable(id));
         let seek_shell = Rc::downgrade(self);
         pane.render_projection(
             &projection,
@@ -136,6 +138,9 @@ impl PlayerUi {
     }
 
     pub fn save_current_lyrics(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let Some(current) = self
             .selected_playback()
             .as_deref()
@@ -155,42 +160,47 @@ impl PlayerUi {
         let offset_millis = lyrics.offset_millis.get();
         drop(lyrics);
         if self.should_save_lyrics_to_source(&media_id) {
-            self.lyrics_service
+            shell
+                .products
+                .lyrics
                 .save_current_to_source(media_id, offset_millis);
             return;
         }
-        let shell = Rc::clone(self);
         gtk::glib::spawn_future_local(async move {
             let dialog = gtk::FileDialog::builder()
                 .title(tr("Save Lyrics"))
                 .initial_name(lyrics_save_filename(&current.row.track.metadata.title))
                 .build();
-            let Some(window) = shell.window.upgrade() else {
-                return;
-            };
-            let Ok(file) = dialog.save_future(Some(&window)).await else {
+            let Ok(file) = dialog.save_future(Some(&shell.chrome.window)).await else {
                 return;
             };
             let Some(path) = file.path() else {
                 return;
             };
             shell
-                .lyrics_service
+                .products
+                .lyrics
                 .save_current(media_id, offset_millis, path);
         });
     }
 
     fn should_save_lyrics_to_source(&self, media_id: &playback::CurrentMediaId) -> bool {
-        self.settings
-            .current
-            .borrow()
-            .lyrics
-            .preferences
-            .save_lyrics_to_source
-            && self.lyrics_service.current_writable(media_id)
+        self.shell().is_some_and(|shell| {
+            shell
+                .settings
+                .current
+                .borrow()
+                .lyrics
+                .preferences
+                .save_lyrics_to_source
+                && shell.products.lyrics.current_writable(media_id)
+        })
     }
 
     pub fn present_lyrics_edit_dialog(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let Some(media_id) = current_playback_media_id(self.selected_playback().as_deref()) else {
             return;
         };
@@ -219,9 +229,7 @@ impl PlayerUi {
             save: gtk::Button,
         });
         dialog.set_content_width(lyrics_popup_content_width());
-        dialog.set_content_height(lyrics_popup_content_height(
-            self.window.upgrade().map_or(0, |window| window.height()),
-        ));
+        dialog.set_content_height(lyrics_popup_content_height(shell.chrome.window.height()));
         let weak = Rc::downgrade(self);
         let editor = Rc::new(crate::widgets::lyrics_editor::LyricsEditor::new(
             &content,
@@ -260,30 +268,27 @@ impl PlayerUi {
                 save.set_sensitive(!buffer.text(&start, &end, false).trim().is_empty());
             }
         });
-        let shell = Rc::clone(self);
+        let lyrics = shell.products.lyrics.clone();
         let close = dialog.downgrade();
         save.connect_clicked(move |_| {
             let text = editor.text();
             committed.set(true);
-            shell
-                .lyrics_service
-                .update_lyrics_text(media_id.clone(), text);
+            lyrics.update_lyrics_text(media_id.clone(), text);
             if let Some(close) = close.upgrade() {
                 close.close();
             }
         });
-        if let Some(window) = self.window.upgrade() {
-            present_light_dismiss_dialog(&dialog, &window);
-        }
+        present_light_dismiss_dialog(&dialog, &shell.chrome.window);
     }
     pub fn present_lyrics_search_dialog(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
         if let Some(dialog) = lyrics.search_dialog.borrow().as_ref() {
-            if let Some(window) = self.window.upgrade() {
-                present_light_dismiss_dialog(&dialog.dialog, &window);
-            }
+            present_light_dismiss_dialog(&dialog.dialog, &shell.chrome.window);
             dialog.title_entry.grab_focus();
             return;
         }
@@ -299,7 +304,7 @@ impl PlayerUi {
         let Some(media_id) = current_playback_media_id(self.selected_playback().as_deref()) else {
             return;
         };
-        if self.settings.current.borrow().application.private_mode {
+        if shell.settings.current.borrow().application.private_mode {
             return;
         }
 
@@ -313,9 +318,7 @@ impl PlayerUi {
             list: gtk::ListBox,
         });
         dialog.set_content_width(lyrics_popup_content_width());
-        dialog.set_content_height(lyrics_popup_content_height(
-            self.window.upgrade().map_or(0, |window| window.height()),
-        ));
+        dialog.set_content_height(lyrics_popup_content_height(shell.chrome.window.height()));
         artist_entry.set_text(&current.row.track.metadata.artist);
         title_entry.set_text(&current.row.track.metadata.title);
         for entry in [&artist_entry, &title_entry] {
@@ -366,9 +369,7 @@ impl PlayerUi {
         let edit_shell = Rc::clone(self);
         title_entry.connect_changed(move |_| edit_shell.schedule_lyrics_search());
 
-        if let Some(window) = self.window.upgrade() {
-            present_light_dismiss_dialog(&dialog, &window);
-        }
+        present_light_dismiss_dialog(&dialog, &shell.chrome.window);
         search_dialog.title_entry.grab_focus();
         self.schedule_lyrics_search();
     }
@@ -464,8 +465,12 @@ impl PlayerUi {
                 let preview_media = media_id.clone();
                 let preview_result = result.clone();
                 row.connect_activated(move |_| {
-                    preview_shell
-                        .lyrics_service
+                    let Some(shell) = preview_shell.shell() else {
+                        return;
+                    };
+                    shell
+                        .products
+                        .lyrics
                         .preview(preview_media.clone(), preview_result.clone());
                     if let Some(lyrics) = preview_shell.selected_lyrics()
                         && let Some(dialog) = lyrics.search_dialog.borrow().as_ref()
@@ -478,11 +483,17 @@ impl PlayerUi {
             let save_media = media_id.clone();
             let save_result = result.clone();
             button.connect_clicked(move |_| {
-                let shell = Rc::clone(&save_shell);
+                let player = Rc::clone(&save_shell);
+                let Some(shell) = player.shell() else {
+                    return;
+                };
                 let media_id = save_media.clone();
                 let result = save_result.clone();
-                if shell.should_save_lyrics_to_source(&media_id) {
-                    shell.lyrics_service.save_result_to_source(media_id, result);
+                if player.should_save_lyrics_to_source(&media_id) {
+                    shell
+                        .products
+                        .lyrics
+                        .save_result_to_source(media_id, result);
                     return;
                 }
                 gtk::glib::spawn_future_local(async move {
@@ -490,21 +501,18 @@ impl PlayerUi {
                         .title(tr("Save Lyrics"))
                         .initial_name(lyrics_save_filename(&result.track_name))
                         .build();
-                    let Some(window) = shell.window.upgrade() else {
-                        return;
-                    };
-                    let Ok(file) = dialog.save_future(Some(&window)).await else {
+                    let Ok(file) = dialog.save_future(Some(&shell.chrome.window)).await else {
                         return;
                     };
                     let Some(path) = file.path() else {
                         return;
                     };
-                    if let Some(lyrics) = shell.selected_lyrics()
+                    if let Some(lyrics) = player.selected_lyrics()
                         && let Some(dialog) = lyrics.search_dialog.borrow().as_ref()
                     {
                         dialog.status.set_text(&tr("Searching..."));
                     }
-                    shell.lyrics_service.save_result(media_id, result, path);
+                    shell.products.lyrics.save_result(media_id, result, path);
                 });
             });
             dialog.list.append(&row);

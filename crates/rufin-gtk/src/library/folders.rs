@@ -158,12 +158,12 @@ fn folder_page(
     let view = route_view(&read);
     let folder_sparse = crate::widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: 0 },
-        shell.runtime.clone(),
+        shell.products.runtime.clone(),
         folder_rows(&view, false),
     );
     let track_sparse = crate::widgets::sparse_model::SparseRouteModel::new(
         SparseSource::Query { count: 0 },
-        shell.runtime.clone(),
+        shell.products.runtime.clone(),
         folder_rows(&view, true),
     );
     view.show_states(&track_sparse);
@@ -258,7 +258,7 @@ fn folder_page(
         }
     };
     let reread = PageReread::new(
-        shell.runtime.clone(),
+        shell.products.runtime.clone(),
         "mounted Folder route",
         &view,
         crate::library::routes::list_inputs(&search),
@@ -398,7 +398,7 @@ fn folder_table(
                     id: folder.object_id.clone(),
                     name: folder.name.clone(),
                 });
-                activate_shell.navigate(Route::Folders { path: next });
+                activate_shell.open_route(Route::Folders { path: next });
             }
             FolderTableRow::Track(track) => {
                 let anchor = position.saturating_sub(folder_count);
@@ -406,7 +406,7 @@ fn folder_table(
                 else {
                     return;
                 };
-                activate_shell.playback.play_selection(
+                activate_shell.products.playback.play_selection(
                     rufin_core::playback::PlayRequest::captured(
                         input,
                         anchor,
@@ -853,7 +853,7 @@ fn install_folder_cell_activation(
             id: folder.object_id,
             name: folder.name,
         });
-        shell.navigate(Route::Folders { path: next });
+        shell.open_route(Route::Folders { path: next });
     });
     target.add_controller(click);
 }
@@ -913,7 +913,7 @@ fn folder_path_button(
     button.set_child(Some(&label));
     button.set_tooltip_text(Some(text));
     let shell = Rc::clone(shell);
-    button.connect_clicked(move |_| shell.navigate(Route::Folders { path: path.clone() }));
+    button.connect_clicked(move |_| shell.open_route(Route::Folders { path: path.clone() }));
     button
 }
 
@@ -931,7 +931,7 @@ fn folder_empty_view(shell: &Rc<CatalogUi>) -> gtk::Widget {
     refresh.add_css_class("pill");
     refresh.set_halign(gtk::Align::Center);
     let shell = Rc::clone(shell);
-    refresh.connect_clicked(move |_| shell.refresh());
+    refresh.connect_clicked(move |_| shell.replace_current_route_when_ready());
     view.append(&refresh);
     view.upcast()
 }

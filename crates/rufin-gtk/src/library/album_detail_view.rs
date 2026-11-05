@@ -65,7 +65,7 @@ impl CatalogUi {
                 self.route_width(),
                 PRIMARY_ROUTE_MARGIN_START,
             );
-        let model = TrackCollectionModel::new(self.runtime.clone(), &view, read);
+        let model = TrackCollectionModel::new(self.products.runtime.clone(), &view, read);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,
@@ -96,7 +96,7 @@ impl CatalogUi {
         });
 
         let radio = detail_radio_button();
-        let radio_controller = self.playback.clone();
+        let radio_controller = self.products.playback.clone();
         let radio_album = Rc::clone(&current_album);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(RadioSeed::Album(
@@ -128,7 +128,7 @@ impl CatalogUi {
         let actions = showcase_view.actions();
         actions.add_css_class("album-detail-actions");
         actions.set_halign(gtk::Align::Start);
-        let play_controller = self.playback.clone();
+        let play_controller = self.products.playback.clone();
         let play_tracks = track_projection.clone();
         let play_context_id = context_id.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
@@ -174,10 +174,10 @@ impl CatalogUi {
         let context_menu: crate::widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
                 let album = menu_album.borrow().row.clone();
-                if let Some(window) = menu_shell.shell() {
+                {
                     present_album_context_menu(
                         target,
-                        &window,
+                        menu_shell.shell(),
                         album,
                         None,
                         Some(Rc::clone(&menu_play)),

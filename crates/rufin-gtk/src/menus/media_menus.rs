@@ -1184,8 +1184,11 @@ pub fn present_playlist_context_menu(
     playlist: PlaylistRow,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
-    current: Option<String>,
 ) {
+    let current = crate::player::state::current_playback_track(
+        shell.player_ui.selected_playback().as_deref(),
+    )
+    .map(|track| track.media_uri);
     let in_folder = shell
         .products
         .library

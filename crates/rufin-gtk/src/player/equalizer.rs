@@ -277,7 +277,8 @@ impl Drop for Editor {
 }
 
 impl EqualizerSurface {
-    pub fn new(player: &Rc<crate::player::PlayerUi>) -> Self {
+    pub fn new(shell: &Rc<crate::shell::shell::Shell>) -> Self {
+        let player = &shell.player_ui;
         EqualizerPlot::static_type();
         GainTrackLayout::static_type();
         let resource = "player/equalizer.ui";
@@ -308,7 +309,7 @@ impl EqualizerSurface {
             reset: gtk::Button,
             error: gtk::Label,
         });
-        let output_selector = crate::player::outputs::audio_output_dropdown(player, 1);
+        let output_selector = crate::player::outputs::audio_output_dropdown(shell, 1);
         output_selector.set_halign(gtk::Align::Fill);
         output_selector.set_hexpand(true);
         output_host.append(&output_selector);
@@ -316,13 +317,13 @@ impl EqualizerSurface {
         output_name.set_ellipsize(gtk::pango::EllipsizeMode::End);
         output_name.set_max_width_chars(24);
         output_host.append(&output_name);
-        let view = player.playback_owner.equalizer_view(String::new());
+        let view = shell.products.playback.equalizer_view(String::new());
         let editor_widget = editor;
         let editor = Rc::new(Editor {
             root: root.downgrade(),
             player: Rc::downgrade(player),
-            owner: player.playback_owner.clone(),
-            runtime: player.runtime.clone(),
+            owner: shell.products.playback.clone(),
+            runtime: shell.products.runtime.clone(),
             feedback: player.control_feedback.clone(),
             view: RefCell::new(view.clone()),
             syncing: Cell::new(false),
@@ -1232,8 +1233,10 @@ impl Editor {
         self.output_selector.set_visible(!view.cast);
         self.output_name.set_visible(view.cast);
         if !view.cast && (output_changed || first) {
-            if let Some(player) = self.player.upgrade() {
-                let selected = player
+            if let Some(player) = self.player.upgrade()
+                && let Some(shell) = player.shell()
+            {
+                let selected = shell
                     .settings
                     .current
                     .borrow()

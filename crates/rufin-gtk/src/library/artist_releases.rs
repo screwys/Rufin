@@ -617,7 +617,7 @@ impl ArtistReleaseProjections {
         let columns = Rc::new(Cell::new(1));
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
         let counts = Rc::new(Cell::new(counts));
-        let sparse = view_model(shell.runtime.clone(), view, release_row, &mut read);
+        let sparse = view_model(shell.products.runtime.clone(), view, release_row, &mut read);
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
@@ -1149,7 +1149,7 @@ fn artist_route_list(
             .upgrade()
             .and_then(|section| section.sparse.peek_ready(position))
         {
-            shell.navigate(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()));
+            shell.open_route(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()));
         }
     });
     list.set_hexpand(true);

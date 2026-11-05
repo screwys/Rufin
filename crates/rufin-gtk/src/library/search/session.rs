@@ -97,6 +97,7 @@ impl SearchSession {
             });
         if result.kind == RecentSearchKind::Track {
             catalog
+                .products
                 .playback
                 .play_selection(rufin_core::playback::PlayRequest::uris(
                     vec![result.media_uri.clone()],
@@ -106,11 +107,11 @@ impl SearchSession {
         }
         let source = MediaDragSource::LiveCollection {
             media_uri: result.media_uri.clone(),
-            operations: catalog.source.clone(),
+            operations: catalog.products.source.clone(),
         };
-        let queue = catalog.playback.clone();
-        let library = catalog.library.clone();
-        catalog.runtime.spawn(async move {
+        let queue = catalog.products.playback.clone();
+        let library = catalog.products.library.clone();
+        catalog.products.runtime.spawn(async move {
             match source.play_request(&library).await {
                 Ok(mut request) => {
                     request.placement = placement;
@@ -135,7 +136,10 @@ impl SearchSession {
             .update_app_settings("recent search", |settings| {
                 settings.remember_search_result(result.clone())
             });
-        let receiver = catalog.source.prepare_collection(result.media_uri.clone());
+        let receiver = catalog
+            .products
+            .source
+            .prepare_collection(result.media_uri.clone());
         let is_current = catalog.current_check();
         let navigate = catalog.route_navigation();
         glib::spawn_future_local(async move {

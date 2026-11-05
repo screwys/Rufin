@@ -507,7 +507,7 @@ impl CatalogUi {
         let showcase_view =
             DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
         let radio = detail_radio_button();
-        let radio_controller = self.playback.clone();
+        let radio_controller = self.products.playback.clone();
         let radio_seed = RadioSeed::Album(album.album_key);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
@@ -532,7 +532,7 @@ impl CatalogUi {
         let play_target = crate::widgets::selection::album_play_request(&album);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             crate::menus::media_menus::play_target(
-                &play_shell.playback,
+                &play_shell.products.playback,
                 &play_target,
                 placement,
                 shuffled,
@@ -574,8 +574,8 @@ impl CatalogUi {
             let Some(album) = album else {
                 return;
             };
-            if let Some(window) = menu_shell.shell() {
-                present_album_context_menu(target, &window, album, None, None, position);
+            {
+                present_album_context_menu(target, menu_shell.shell(), album, None, None, position);
             }
         });
 
@@ -675,7 +675,7 @@ impl CatalogUi {
         button.set_child(Some(&labels));
         let shell = Rc::clone(self);
         let key = library::GenreKey::from_raw(genre.key);
-        button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(key)));
+        button.connect_clicked(move |_| shell.open_route(Route::GenreDetail(key)));
         button.upcast()
     }
 }
@@ -689,7 +689,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let play_key = track.track_key;
             let play = Rc::new(move |_| {
                 crate::menus::media_menus::play_target(
-                    &play_shell.playback,
+                    &play_shell.products.playback,
                     &track_play_request(play_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
@@ -745,12 +745,12 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
 fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => crate::menus::media_menus::play_target(
-            &shell.playback,
+            &shell.products.playback,
             &track_play_request(item.track.track_key),
             rufin_core::playback::QueuePlacement::Now,
             false,
         ),
-        HomeItem::Album(item) => shell.navigate(Route::AlbumDetail(item.album.media_uri.clone())),
+        HomeItem::Album(item) => shell.open_route(Route::AlbumDetail(item.album.media_uri.clone())),
     }
 }
 

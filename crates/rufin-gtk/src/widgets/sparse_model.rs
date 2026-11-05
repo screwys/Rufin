@@ -974,14 +974,6 @@ where
         self.model.order::<K, R>()
     }
 
-    pub fn seed(&self, rows: Vec<R>) {
-        self.model.seed::<K, R>(rows);
-    }
-
-    pub fn seed_matching(&self, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
-        self.seed_matching_at(0, rows, key)
-    }
-
     pub fn seed_matching_at(&self, first: usize, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
         let order = self.order();
         if order.keys().is_some_and(|keys| {
@@ -1011,11 +1003,6 @@ where
             .borrow_mut()
             .replace(self.model.cold_live_windows());
         self.start();
-    }
-
-    pub fn replace_order(&self, order: impl Into<SparseSource<K>>) {
-        self.cancel();
-        self.model.replace_order::<K, R>(order);
     }
 
     /// Takes a reread's order and its rows from `first`; a `refresh` reads the same list
@@ -1525,7 +1512,7 @@ mod tests {
                 runtime.handle().clone(),
                 load,
             );
-            route.seed(vec!["retained title".into()]);
+            route.seed_at(0, vec!["retained title".into()]);
             let route_weak = Rc::downgrade(&route);
             let order = Arc::downgrade(route.order().keys().unwrap());
             let row = Arc::downgrade(&route.ready(0).expect("seeded row"));

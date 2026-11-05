@@ -50,6 +50,7 @@ impl PlaylistDetailOwner {
             return None;
         };
         let source = catalog
+            .products
             .source
             .configuration(&sources::SourceId::new(summary.source_id.as_deref()?))?;
         source.detail_web_url("playlist", &summary.object_id).ok()
@@ -148,19 +149,21 @@ impl PlaylistDetailOwner {
     ) {
         match self {
             Self::Saved { summary, .. } => {
-                shell.present_playlist_context_menu(target, summary.clone(), Some(play), position)
+                crate::menus::media_menus::present_playlist_context_menu(
+                    target,
+                    shell,
+                    summary.clone(),
+                    Some(play),
+                    position,
+                )
             }
-            Self::Smart { summary, .. } => {
-                if let Some(window) = shell.shell() {
-                    present_smart_playlist_context_menu(
-                        target,
-                        &window,
-                        summary.clone(),
-                        Some(play),
-                        position,
-                    )
-                }
-            }
+            Self::Smart { summary, .. } => present_smart_playlist_context_menu(
+                target,
+                shell.shell(),
+                summary.clone(),
+                Some(play),
+                position,
+            ),
         }
     }
 }
@@ -195,12 +198,12 @@ impl CatalogUi {
         };
         let list_key = owner.key();
         let model = crate::library::track_model::TrackCollectionModel::new(
-            self.runtime.clone(),
+            self.products.runtime.clone(),
             &view,
             read,
         );
         let play_model = model.clone();
-        let play_queue = self.playback.clone();
+        let play_queue = self.products.playback.clone();
         let play_context = owner.target().context_id();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             play_model.play_source(
@@ -295,7 +298,7 @@ impl CatalogUi {
             let entries = Rc::clone(&entries);
             Rc::new(move || entries.resume_initial_demand()) as Rc<dyn Fn()>
         };
-        let play_queue = self.playback.clone();
+        let play_queue = self.products.playback.clone();
         let download_entries = Rc::clone(&entries);
         let reread_entries = Rc::clone(&entries);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
@@ -311,7 +314,7 @@ impl CatalogUi {
             move |apply_owner| {
                 let apply_entries = Rc::clone(&reread_entries);
                 let reread = PageReread::new(
-                    shell.runtime.clone(),
+                    shell.products.runtime.clone(),
                     "mounted Playlist route",
                     &view,
                     crate::library::routes::list_inputs(&reread_search),
@@ -442,7 +445,7 @@ impl CatalogUi {
                     drop.reject();
                 }
             });
-            let drop_menus = self.weak_shell();
+            let drop_menus = Rc::downgrade(self.shell());
             drop.connect_drop(move |_, value, _, _| {
                 let Some(menus) = drop_menus.upgrade() else {
                     return false;
@@ -488,7 +491,7 @@ impl CatalogUi {
                 let owner = Rc::clone(&owner_state);
                 Rc::new(move || {
                     let artwork = owner.borrow().artwork();
-                    shell.present_full_artwork(artwork);
+                    shell.present_full_artwork_group(artwork);
                 })
             },
         });
@@ -577,7 +580,7 @@ impl CatalogUi {
         showcase.clear_kind_controls();
         if let PlaylistDetailOwner::Saved { key, .. } = owner {
             let radio = detail_radio_button();
-            let controller = self.playback.clone();
+            let controller = self.products.playback.clone();
             let key = *key;
             radio.connect_clicked(move |_| {
                 controller.play_radio(rufin_core::playback::RadioPlayRequest::now(

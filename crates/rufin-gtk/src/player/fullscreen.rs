@@ -347,9 +347,10 @@ use crate::player::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation}
 use gtk::glib;
 
 fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
-    let Some(window) = shell.window.upgrade() else {
+    let Some(app) = shell.shell() else {
         return;
     };
+    let window = app.chrome.window.clone();
     let key = rufin_core::settings::LibraryListKey::FullscreenTracks;
     let resource = "player/fullscreen_settings.ui";
     let builder = crate::ui_resource::builder(resource);
@@ -375,13 +376,13 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
         }
     });
     crate::widgets::library_field_editor::populate_library_field_rows(
-        &shell.settings,
+        &app.settings,
         changed,
         key,
         &fields_group,
         &rows,
     );
-    let settings = shell.settings.current.borrow();
+    let settings = app.settings.current.borrow();
     let active = [
         settings.player_display.fullscreen_lyrics_visible,
         settings.player_display.fullscreen_visualizer_visible,
@@ -391,14 +392,14 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
     drop(settings);
     let weak = Rc::downgrade(shell);
     let display = crate::widgets::display::DisplayEditor::new(
-        &shell.settings.current.borrow().library_list(key).display,
+        &app.settings.current.borrow().library_list(key).display,
         move |display| {
-            if let Some(shell) = weak.upgrade() {
-                shell
-                    .settings
-                    .update_library_list_settings(key, |settings| {
-                        settings.display = display.clone()
-                    });
+            if let Some(shell) = weak.upgrade()
+                && let Some(app) = shell.shell()
+            {
+                app.settings.update_library_list_settings(key, |settings| {
+                    settings.display = display.clone()
+                });
                 shell.apply_fullscreen_display_settings();
                 shell.refresh_fullscreen_columns();
             }
@@ -426,8 +427,10 @@ fn present_fullscreen_settings(shell: &Rc<crate::player::PlayerUi>) {
             let Some(shell) = weak.upgrade() else {
                 return;
             };
-            shell
-                .settings
+            let Some(app) = shell.shell() else {
+                return;
+            };
+            app.settings
                 .update_app_settings("fullscreen display", |settings| {
                     let value = match index {
                         0 => &mut settings.player_display.fullscreen_lyrics_visible,
@@ -470,7 +473,11 @@ pub fn fullscreen_playback_refresh(
 }
 
 pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
-    if let Some(window) = shell.window.upgrade() {
+    let Some(app) = shell.shell() else {
+        return;
+    };
+    {
+        let window = app.chrome.window.clone();
         gtk::style_context_add_provider_for_display(
             &gtk::prelude::WidgetExt::display(&window),
             &shell.views.fullscreen_player.bar_tint,
@@ -588,9 +595,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
             glib::Propagation::Proceed
         }
     });
-    if let Some(window) = shell.window.upgrade() {
-        window.add_controller(key);
-    }
+    app.chrome.window.add_controller(key);
 
     let queue_tab_shell = Rc::downgrade(shell);
     shell
@@ -617,7 +622,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
                 return;
             };
             shell.views.fullscreen_player.equalizer.get_or_init(|| {
-                let equalizer = EqualizerSurface::new(&shell);
+                let equalizer = EqualizerSurface::new(&app);
                 panel.set_child(Some(&equalizer.root));
                 equalizer
             });
@@ -626,6 +631,9 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::player::PlayerUi>) {
 
 impl crate::player::PlayerUi {
     fn refresh_related_tracks(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let parts = &self.views.fullscreen_player;
         if !self.fullscreen_player_visible() {
             return;
@@ -657,14 +665,14 @@ impl crate::player::PlayerUi {
             return;
         };
         let cancellation = library::ReadCancellation::new();
-        let candidates = self.playback_owner.candidates(
+        let candidates = shell.products.playback.candidates(
             library::RadioSeed::Track(seed.clone()),
             20,
             cancellation.clone(),
         );
-        let catalog = self.catalog.clone();
+        let catalog = shell.products.library.clone();
         let read_cancellation = cancellation.clone();
-        let task = self.runtime.spawn(async move {
+        let task = shell.products.runtime.spawn(async move {
             let items = candidates
                 .await?
                 .into_iter()
@@ -736,7 +744,10 @@ impl crate::player::PlayerUi {
     }
 
     fn apply_fullscreen_display_settings(self: &Rc<Self>) {
-        let settings = self.settings.current.borrow();
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let settings = shell.settings.current.borrow();
         let parts = &self.views.fullscreen_player;
         crate::widgets::display::apply(
             &parts.root,
@@ -758,11 +769,14 @@ impl crate::player::PlayerUi {
     }
 
     fn refresh_fullscreen_background(&self) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let parts = &self.views.fullscreen_player;
         if !self.fullscreen_player_visible() || parts.animation_tick.borrow().is_some() {
             return;
         }
-        let settings = self.settings.current.borrow();
+        let settings = shell.settings.current.borrow();
         let dynamic = settings.player_display.fullscreen_dynamic_background;
         parts.background.set_visible(dynamic);
         if dynamic {
@@ -774,7 +788,8 @@ impl crate::player::PlayerUi {
         } else {
             parts.root.remove_css_class("artwork-background");
         }
-        if let Some(window) = self.window.upgrade() {
+        {
+            let window = shell.chrome.window.clone();
             if dynamic && self.fullscreen_player_visible() {
                 let color = parts.background.color();
                 if parts.bar_color.replace(Some(color)) != Some(color) {
@@ -843,15 +858,15 @@ impl crate::player::PlayerUi {
     }
 
     fn apply_fullscreen_responsive_layout(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let (width, height) = {
             let root = &self.views.fullscreen_player.root;
             if root.width() > 0 && root.height() > 0 {
                 (root.width(), root.height())
             } else {
-                (
-                    self.window.upgrade().map_or(0, |window| window.width()),
-                    self.window.upgrade().map_or(0, |window| window.height()),
-                )
+                (shell.chrome.window.width(), shell.chrome.window.height())
             }
         };
         self.apply_fullscreen_responsive_layout_for_size(width, height);
@@ -911,13 +926,16 @@ impl crate::player::PlayerUi {
     }
 
     fn apply_fullscreen_now_playing_cover(self: &Rc<Self>, presentation: &NowPlayingPresentation) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         let cover_size = self.fullscreen_player_cover_size();
         self.views
             .fullscreen_player
             .cover
             .set_square_size(cover_size);
         if presentation.current {
-            self.artwork.bind_playback_artwork_tile(
+            shell.artwork.bind_playback_artwork_tile(
                 &self.views.fullscreen_player.cover,
                 presentation.artwork.clone(),
                 cover_size,
@@ -981,7 +999,11 @@ impl crate::player::PlayerUi {
     }
 
     pub fn clear_fullscreen_player_cover(self: &Rc<Self>) {
-        self.artwork
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        shell
+            .artwork
             .clear_artwork_tile(&self.views.fullscreen_player.cover);
     }
 
@@ -1033,6 +1055,9 @@ impl crate::player::PlayerUi {
         let tick_shell = Rc::clone(self);
         let tick_started_at = Rc::clone(&started_at);
         let tick = root.add_tick_callback(move |root, clock| {
+            let Some(app) = tick_shell.shell() else {
+                return glib::ControlFlow::Break;
+            };
             let now = clock.frame_time();
             let start = tick_started_at.get().unwrap_or_else(|| {
                 tick_started_at.set(Some(now));
@@ -1064,9 +1089,9 @@ impl crate::player::PlayerUi {
                 } else {
                     tick_shell.views.fullscreen_player.set_slide_offset(0);
                     root.set_opacity(0.0);
-                    if let Some(window) = tick_shell.window.upgrade() {
-                        window.remove_css_class("fullscreen-artwork-bars");
-                    }
+                    app.chrome
+                        .window
+                        .remove_css_class("fullscreen-artwork-bars");
                 }
                 root.set_visible(opening);
                 tick_shell
@@ -1095,7 +1120,8 @@ impl crate::player::PlayerUi {
                     .map_or(0, |stack| stack.height()),
             )
             .max(
-                (self.window.upgrade().map_or(0, |window| window.height()) - BOTTOM_PLAYER_HEIGHT)
+                (self.shell().map_or(0, |shell| shell.chrome.window.height())
+                    - BOTTOM_PLAYER_HEIGHT)
                     .max(1),
             )
     }

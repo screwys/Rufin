@@ -108,7 +108,10 @@ pub fn submit_lyrics_search(shell: &Rc<PlayerUi>) {
         track_name = %track_name,
         "submitted manual lyric search"
     );
-    shell.lyrics_service.search(
+    let Some(window) = shell.shell() else {
+        return;
+    };
+    window.products.lyrics.search(
         dialog.media_id,
         LyricsQuery {
             artist_name,

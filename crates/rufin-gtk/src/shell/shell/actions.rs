@@ -326,11 +326,11 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     });
     add_window_action(shell, "previous-audio-output", &[], {
         let shell = Rc::clone(shell);
-        move || select_previous_audio_output(&shell.player_ui)
+        move || select_previous_audio_output(&shell)
     });
     add_window_action(shell, "next-audio-output", &[], {
         let shell = Rc::clone(shell);
-        move || select_next_audio_output(&shell.player_ui)
+        move || select_next_audio_output(&shell)
     });
     #[cfg(target_os = "macos")]
     let queue_accels = &["<Alt><Meta>u"][..];
@@ -740,7 +740,7 @@ pub(crate) fn toggle_mute_shortcut(shell: &Rc<Shell>) {
     else {
         return;
     };
-    shell.player_ui.playback_owner.set_muted(muted);
+    shell.products.playback.set_muted(muted);
     let title = if muted { tr("Muted") } else { tr("Unmuted") };
     shell.control_feedback.show_control_feedback_toast(title);
 }

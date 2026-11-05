@@ -69,12 +69,14 @@ impl PlayerUi {
         rerender_lyrics: bool,
         update: impl FnOnce(&mut lyrics::UserPreferences) -> bool,
     ) -> bool {
-        let updated = self
-            .settings
-            .update_app_settings(warning_action, |settings| {
-                update(&mut settings.lyrics.preferences)
-            })
-            .is_some();
+        let updated = self.shell().is_some_and(|shell| {
+            shell
+                .settings
+                .update_app_settings(warning_action, |settings| {
+                    update(&mut settings.lyrics.preferences)
+                })
+                .is_some()
+        });
         if !updated {
             return false;
         }
@@ -178,7 +180,16 @@ fn build_lyrics_settings(
     appearance_changed: Rc<dyn Fn()>,
     fullscreen: bool,
 ) -> adw::PreferencesPage {
-    let settings = shell.settings.current.borrow().lyrics.preferences.clone();
+    let Some(window_shell) = shell.shell() else {
+        return adw::PreferencesPage::new();
+    };
+    let settings = window_shell
+        .settings
+        .current
+        .borrow()
+        .lyrics
+        .preferences
+        .clone();
     let resource = "player/lyrics/settings.ui";
     crate::objects!(builder, resource, {
         page: adw::PreferencesPage,
@@ -221,7 +232,10 @@ fn build_lyrics_settings(
     let automatic_shell = Rc::clone(shell);
     let automatic_switch = automatic_toggle.clone();
     save_automatically.connect_activated(move |_| {
-        if automatic_shell
+        let Some(window_shell) = automatic_shell.shell() else {
+            return;
+        };
+        if window_shell
             .settings
             .current
             .borrow()
@@ -245,7 +259,7 @@ fn build_lyrics_settings(
         let shell = Rc::clone(&automatic_shell);
         let toggle = automatic_switch.clone();
         confirm.choose(
-            automatic_shell.window.upgrade().as_ref(),
+            Some(&window_shell.chrome.window),
             None::<&gtk::gio::Cancellable>,
             move |response| {
                 if response.as_str() != "confirm" {
@@ -265,7 +279,9 @@ fn build_lyrics_settings(
         if storage_shell.set_lyrics_setting("lyrics storage setting", false, |settings| {
             settings.save_lyrics_as_sidecar = button.is_active()
         }) {
-            storage_shell.lyrics_service.refresh_write_access();
+            if let Some(window_shell) = storage_shell.shell() {
+                window_shell.products.lyrics.refresh_write_access();
+            }
         }
     });
 
@@ -371,7 +387,10 @@ fn build_lyrics_settings(
     let color_title = highlight_color.title();
     color_button.connect_clicked(move |_| {
         let default_color = default_accent.color();
-        let initial = color_shell
+        let Some(window_shell) = color_shell.shell() else {
+            return;
+        };
+        let initial = window_shell
             .settings
             .current
             .borrow()
@@ -475,7 +494,16 @@ fn populate_provider_rows(
         }
     }
 
-    let settings = shell.settings.current.borrow().lyrics.preferences.clone();
+    let Some(window_shell) = shell.shell() else {
+        return;
+    };
+    let settings = window_shell
+        .settings
+        .current
+        .borrow()
+        .lyrics
+        .preferences
+        .clone();
     let enabled = settings.external_lyrics_providers;
     let mut providers = enabled.clone();
     providers.extend(
@@ -648,7 +676,7 @@ pub(crate) fn connect_lyrics_settings_controls(shell: &Rc<Shell>) {
                     (
                         player.lyrics.panel_visible.get(),
                         player.right_panel.visualizer_visible.get()
-                            && player.settings.current.borrow().right_panel.combined,
+                            && shell.settings.current.borrow().right_panel.combined,
                     )
                 };
                 let pages = match (lyrics, visualizer) {

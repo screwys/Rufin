@@ -830,10 +830,19 @@ use gtk::glib;
 use playback::TransportStatus;
 impl crate::player::PlayerUi {
     pub fn apply_visualizer_appearance(&self) {
-        let appearance = self.settings.current.borrow().visualizer.appearance.clone();
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        let appearance = shell
+            .settings
+            .current
+            .borrow()
+            .visualizer
+            .appearance
+            .clone();
         let sidebar_opacity = appearance.opacity
             * if self.lyrics.panel_visible.get()
-                && self.settings.current.borrow().right_panel.combined
+                && shell.settings.current.borrow().right_panel.combined
             {
                 appearance.sidebar_lyrics_opacity
             } else {
@@ -876,6 +885,9 @@ impl crate::player::PlayerUi {
     }
 
     pub fn sync_visualizer_state(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         self.apply_visualizer_appearance();
         if let Some(lyrics) = self.selected_lyrics() {
             lyrics
@@ -892,7 +904,7 @@ impl crate::player::PlayerUi {
             && self.right_sidebar_visible()
             && self.right_panel.visualizer_visible.get();
         let visible = fullscreen_visible || sidebar_visible;
-        self.playback_owner.set_visualizer_enabled(visible);
+        shell.products.playback.set_visualizer_enabled(visible);
         let active = visible
             && self.selected_playback().as_deref().is_some_and(|player| {
                 matches!(
@@ -912,6 +924,9 @@ impl crate::player::PlayerUi {
     }
 
     fn start_visualizer_tick(self: &Rc<Self>) {
+        let Some(shell) = self.shell() else {
+            return;
+        };
         if self.views.visualizer.tick.borrow().is_some() {
             return;
         }
@@ -922,27 +937,20 @@ impl crate::player::PlayerUi {
         let peaks = Rc::clone(&self.views.visualizer.peaks);
         let fullscreen_area = self.views.visualizer.fullscreen_area.clone();
         let sidebar_area = self.views.visualizer.sidebar_area.clone();
+        let window = shell.chrome.window.clone();
+        let settings = Rc::clone(&shell.settings);
         let shell = Rc::downgrade(self);
         let seen_generation = Cell::new(generation.get());
         let last_data_time = Cell::new(None);
         let last_frame_time = Cell::new(None);
         let next_frame_time = Cell::new(None::<f64>);
         let last_limit = Cell::new(0);
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
         let tick = window.add_tick_callback(move |_, clock| {
             let now = clock.frame_time();
-            let Some(owner) = shell.upgrade() else {
+            if shell.strong_count() == 0 {
                 return glib::ControlFlow::Break;
-            };
-            let limit = owner
-                .settings
-                .current
-                .borrow()
-                .visualizer
-                .fps_limit
-                .clamp(1, 180);
+            }
+            let limit = settings.current.borrow().visualizer.fps_limit.clamp(1, 180);
             if last_limit.replace(limit) != limit {
                 next_frame_time.set(None);
             }

@@ -18,18 +18,10 @@ pub struct SelectedPlaybackState {
     seek_preview_seconds: Option<u32>,
 }
 pub struct PlayerUi {
-    pub artwork: Rc<crate::widgets::artwork::ArtworkState>,
     pub control_feedback: Rc<crate::widgets::feedback::ControlFeedbackState>,
-    catalog: std::sync::Arc<library::Catalog>,
-    runtime: tokio::runtime::Handle,
     shell: Weak<Shell>,
     content_stack: gtk::glib::WeakRef<gtk::Stack>,
-    pub settings: Rc<crate::widgets::settings::SettingsState>,
-    pub playback_owner: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-    pub lyrics_service: rufin_core::lyrics::LyricsHandle,
     pub right_panel: right_panel::RightPanelWidgets,
-    window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
-    toast_overlay: gtk::glib::WeakRef<adw::ToastOverlay>,
     pub views: PlayerDesktopWidgets,
     pub controls: PlaybackState,
     pub lyrics: LyricsState,
@@ -43,31 +35,15 @@ impl PlayerUi {
         lyrics: LyricsState,
         views: PlayerDesktopWidgets,
         right_panel: right_panel::RightPanelWidgets,
-        settings: Rc<crate::widgets::settings::SettingsState>,
-        playback_owner: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-        lyrics_service: rufin_core::lyrics::LyricsHandle,
-        window: &gtk::ApplicationWindow,
-        toast_overlay: &adw::ToastOverlay,
-        artwork: Rc<crate::widgets::artwork::ArtworkState>,
         control_feedback: Rc<crate::widgets::feedback::ControlFeedbackState>,
-        catalog: std::sync::Arc<library::Catalog>,
-        runtime: tokio::runtime::Handle,
         shell: Weak<Shell>,
         content_stack: &gtk::Stack,
     ) -> Self {
         Self {
-            artwork,
             control_feedback,
-            catalog,
-            runtime,
             shell,
             content_stack: content_stack.downgrade(),
-            settings,
-            playback_owner,
-            lyrics_service,
             right_panel,
-            window: window.downgrade(),
-            toast_overlay: toast_overlay.downgrade(),
             views,
             controls,
             lyrics,
@@ -105,7 +81,8 @@ impl PlayerUi {
             controls.rating.set_rating(None, false);
         }
     }
-    fn shell(&self) -> Option<Rc<Shell>> {
+    /// The window, while it is open.
+    pub(crate) fn shell(&self) -> Option<Rc<Shell>> {
         self.shell.upgrade()
     }
 
@@ -252,7 +229,10 @@ impl PlayerUi {
 
 impl PlayerUi {
     pub fn update_playback_settings(self: &Rc<Self>, update: impl FnOnce(&mut PlaybackSettings)) {
-        if self
+        let Some(shell) = self.shell() else {
+            return;
+        };
+        if shell
             .settings
             .update_app_settings("playback settings", |settings| {
                 let previous = settings.playback.clone();
