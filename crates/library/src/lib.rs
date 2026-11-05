@@ -120,7 +120,7 @@ pub use keys::{
 };
 pub use local::{
     DownloadItem, DownloadStatus, FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite,
-    LocalLocatorWrite, LocalMediaLocation, MappingTrackRow,
+    LocalLocatorWrite, LocalMediaLocation, MappingTrackRow, Shown,
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;

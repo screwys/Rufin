@@ -12,7 +12,8 @@ use crate::catalog::snapshot::{
 };
 use crate::catalog::strings::StrId;
 use crate::catalog::views::{
-    Art, Context, Derived, Inputs, Played, Totals, date_text, favorite, known, rating, year_of,
+    Art, Context, Derived, Downloaded, Inputs, Played, Totals, date_text, favorite, known, rating,
+    year_of,
 };
 use crate::*;
 
@@ -539,6 +540,7 @@ struct Builder<'a> {
     snapshot: &'a Snapshot,
     covers: Arc<Derived>,
     derived: std::cell::OnceCell<Arc<Derived>>,
+    downloaded: std::cell::OnceCell<Arc<Downloaded>>,
     shape: &'a Shape,
     art: bool,
     /// Listens by smart playlist window.
@@ -560,6 +562,7 @@ impl<'a> Builder<'a> {
             context,
             snapshot,
             derived: std::cell::OnceCell::new(),
+            downloaded: std::cell::OnceCell::new(),
             shape,
             art,
             inputs,
@@ -569,6 +572,11 @@ impl<'a> Builder<'a> {
     fn derived(&self) -> &Derived {
         self.derived
             .get_or_init(|| self.catalog.derived(&self.context, None))
+    }
+
+    fn downloaded(&self) -> &Downloaded {
+        self.downloaded
+            .get_or_init(|| self.catalog.downloaded(&self.context))
     }
 
     fn track_art(&self, key: TrackKey) -> Option<Art> {
@@ -831,6 +839,7 @@ impl<'a> Builder<'a> {
         };
         let mut totals = self.derived().albums[slot as usize];
         totals.albums = u32::from(totals.tracks > 0);
+        totals.downloaded = self.downloaded().albums[slot as usize];
         let runs = snapshot.album_runs(record);
         let (release_date, date_added) =
             got.album_texts.get(&key.raw()).cloned().unwrap_or_default();
@@ -892,7 +901,8 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let totals = self.derived().artists[usize::from(album_artist)][slot as usize];
+        let mut totals = self.derived().artists[usize::from(album_artist)][slot as usize];
+        totals.downloaded = self.downloaded().artists[usize::from(album_artist)][slot as usize];
         Ok(Some(ArtistRow {
             artist_key: key,
             album_artist,
@@ -936,7 +946,11 @@ impl<'a> Builder<'a> {
             object_id: text(snapshot, record.object),
             media_uri: entity_uri(snapshot, record.source, kind.table().name, record.object),
             name: text(snapshot, record.name),
-            summary: self.derived().tags[slot as usize].summary(),
+            summary: Totals {
+                downloaded: self.downloaded().tags[slot as usize],
+                ..self.derived().tags[slot as usize]
+            }
+            .summary(),
             representative_artwork: artwork_binding
                 .is_none()
                 .then(|| galleries.get(&key).cloned())
@@ -1175,7 +1189,11 @@ impl<'a> Builder<'a> {
                         folder_key: Some(key),
                         object_id: text(self.snapshot, record.object),
                         name: text(self.snapshot, record.name),
-                        summary: self.derived().folders[slot as usize].summary(),
+                        summary: Totals {
+                            downloaded: self.downloaded().folders[slot as usize],
+                            ..self.derived().folders[slot as usize]
+                        }
+                        .summary(),
                         artwork_binding: got.own(Part::FolderArt, key.raw())?,
                     }))
                 }

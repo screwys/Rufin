@@ -3266,7 +3266,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 descending: true,
                 favorites_only: false,
                 activity: true,
-                downloaded_only: false
             }
         )
         .await,
@@ -3285,7 +3284,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 descending: true,
                 favorites_only: false,
                 activity: true,
-                downloaded_only: false
             }
         )
         .await,
@@ -3435,7 +3433,6 @@ async fn home_search_and_radio_results_stay_bounded() {
                 filter: ("").to_string(),
                 descending: descending,
                 favorites_only: false,
-                downloaded_only: false,
                 activity: true,
             },
         )

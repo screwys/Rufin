@@ -196,7 +196,8 @@ impl<'a> Context<'a> {
     }
 }
 
-/// Visible-track totals of one collection.
+/// Visible-track totals of one collection. Albums, artists, tags and folders count their
+/// downloads in [`Downloaded`]; playlists count their own.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Totals {
     pub(crate) tracks: u32,
@@ -211,9 +212,14 @@ impl Totals {
     fn add(&mut self, record: &TrackRec, played: Played) {
         self.tracks += 1;
         self.duration += u64::from(record.duration_ms);
-        self.downloaded += u32::from(record.flags & DOWNLOADED != 0);
         self.plays += u64::from(played.plays);
         self.last_played = self.last_played.max(played.last);
+    }
+
+    /// Adds a playlist's or smart playlist's track with its download.
+    fn add_member(&mut self, record: &TrackRec) {
+        self.add(record, Played::default());
+        self.downloaded += u32::from(record.flags & DOWNLOADED != 0);
     }
 
     pub(crate) fn summary(&self) -> crate::CollectionSummary {
@@ -374,6 +380,53 @@ impl Derived {
             }
         }
         derived
+    }
+}
+
+/// How many visible tracks of each collection are downloaded, from one pass over the
+/// downloaded tracks. A download rebuilds only this, not [`Derived`].
+pub(crate) struct Downloaded {
+    pub(crate) albums: Vec<u32>,
+    /// Track artists and album artists.
+    pub(crate) artists: [Vec<u32>; 2],
+    pub(crate) tags: Vec<u32>,
+    pub(crate) folders: Vec<u32>,
+}
+
+impl Downloaded {
+    fn build(context: &Context<'_>) -> Self {
+        let snapshot = context.snapshot;
+        let artists = snapshot.artists.records.len();
+        let mut downloaded = Self {
+            albums: vec![0; snapshot.albums.records.len()],
+            artists: [vec![0; artists], vec![0; artists]],
+            tags: vec![0; snapshot.tags.records.len()],
+            folders: vec![0; snapshot.folders.records.len()],
+        };
+        let mut tags = Vec::new();
+        for (_, record) in snapshot.tracks.iter() {
+            if record.flags & DOWNLOADED == 0 || !record.indexed() {
+                continue;
+            }
+            if let Some(album) = context.album_of(record) {
+                downloaded.albums[album as usize] += 1;
+            }
+            let runs = snapshot.track_runs(record);
+            for artist in dedup(runs[0]) {
+                downloaded.artists[0][artist as usize] += 1;
+            }
+            for artist in dedup(context.album_artists(record)) {
+                downloaded.artists[1][artist as usize] += 1;
+            }
+            context.tags_of(record, &mut tags);
+            for tag in &tags {
+                downloaded.tags[*tag as usize] += 1;
+            }
+            for folder in dedup(runs[3]) {
+                downloaded.folders[folder as usize] += 1;
+            }
+        }
+        downloaded
     }
 }
 
@@ -1106,7 +1159,7 @@ impl Context<'_> {
             if let Some(track) = self.snapshot.tracks.live(entry.track)
                 && (!scoped || self.in_folder(track, folder))
             {
-                totals.add(track, Played::default());
+                totals.add_member(track);
             }
         }
         totals
@@ -1126,14 +1179,14 @@ impl Context<'_> {
             Some(tracks) => self
                 .listed_tracks(tracks)
                 .into_iter()
-                .for_each(|slot| totals.add(&records[slot as usize], Played::default())),
+                .for_each(|slot| totals.add_member(&records[slot as usize])),
             None if definition.limit.is_some() => self
                 .evaluate(definition, inputs)
                 .into_iter()
-                .for_each(|slot| totals.add(&records[slot as usize], Played::default())),
+                .for_each(|slot| totals.add_member(&records[slot as usize])),
             None => self
                 .matching(definition, inputs)
-                .for_each(|(_, record)| totals.add(record, Played::default())),
+                .for_each(|(_, record)| totals.add_member(record)),
         }
         totals
     }
@@ -1336,14 +1389,13 @@ impl Context<'_> {
     }
 
     /// Whether a listed row passes a list read's filters. `filter` is as `filter_text` gives it.
-    fn list_keep(&self, read: &ListRead, derived: &Derived, filter: &str, key: i64) -> bool {
+    fn list_keep(&self, read: &ListRead, filter: &str, key: i64) -> bool {
         let snapshot = self.snapshot;
         match &read.kind {
             ListKind::Albums => snapshot.albums.slot(key).is_some_and(|slot| {
                 let record = &snapshot.albums.records[slot as usize];
                 self.album_matches(record, filter)
                     && (!read.favorites_only || favorite(record.flags) == Some(true))
-                    && (!read.downloaded_only || derived.albums[slot as usize].downloaded > 0)
             }),
             ListKind::ArtistAlbums {
                 release_class,
@@ -1367,21 +1419,17 @@ impl Context<'_> {
                 matched
                     && release_class.is_none_or(|wanted| wanted == class)
                     && (!read.favorites_only || favorite(record.flags) == Some(true))
-                    && (!read.downloaded_only || derived.albums[slot as usize].downloaded > 0)
             }),
-            ListKind::Artists { album_artist } => snapshot.artists.slot(key).is_some_and(|slot| {
+            ListKind::Artists { .. } => snapshot.artists.slot(key).is_some_and(|slot| {
                 let record = &snapshot.artists.records[slot as usize];
                 contains(snapshot.text(record.name), filter)
                     && (!read.favorites_only || favorite(record.flags) == Some(true))
-                    && (!read.downloaded_only
-                        || derived.artists[usize::from(*album_artist)][slot as usize].downloaded
-                            > 0)
             }),
             ListKind::Genres | ListKind::Moods => snapshot.tags.slot(key).is_some_and(|slot| {
                 contains(
                     snapshot.text(snapshot.tags.records[slot as usize].name),
                     filter,
-                ) && (!read.downloaded_only || derived.tags[slot as usize].downloaded > 0)
+                )
             }),
             ListKind::Playlists | ListKind::SmartPlaylists { .. } => true,
         }
@@ -1863,6 +1911,8 @@ pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> 
 #[derive(Default)]
 pub(crate) struct Views {
     derived: Vec<BuiltDerived>,
+    /// The facts and downloads it counts, and what it counts.
+    downloaded: Option<([u64; 2], Arc<Downloaded>)>,
     /// Most recently used last.
     orders: Vec<Order>,
     /// Members of the smart playlists pages opened most recently, oldest first.
@@ -1881,8 +1931,8 @@ struct OpenedSmart {
 const OPENED_SMART: usize = 8;
 
 struct BuiltDerived {
-    /// The facts, plays and downloads it counts.
-    stamp: [u64; 3],
+    /// The facts and plays it counts.
+    stamp: [u64; 2],
     folder: Option<u32>,
     derived: Arc<Derived>,
 }
@@ -1930,7 +1980,7 @@ impl ListRead {
                 self.favorites_only
                     || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
                 self.activity || sort.activity_sensitive(),
-                self.downloaded_only,
+                false,
                 self.kind == ListKind::Playlists,
             ],
         }
@@ -1948,7 +1998,6 @@ impl ListRead {
         let mut base = Self {
             filter: String::new(),
             favorites_only: false,
-            downloaded_only: false,
             ..self.clone()
         };
         if let ListKind::ArtistAlbums {
@@ -2007,11 +2056,10 @@ impl Catalog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Totals and borrowed pictures of the current facts, plays and downloads, scoped to a
-    /// music folder.
+    /// Totals and borrowed pictures of the current facts and plays, scoped to a music folder.
     pub(crate) fn derived(&self, context: &Context<'_>, folder: Option<u32>) -> Arc<Derived> {
         let snapshot = context.snapshot;
-        let stamp = [snapshot.facts, snapshot.plays, snapshot.downloads];
+        let stamp = [snapshot.facts, snapshot.plays];
         self.derive(context, folder, |built| {
             built.stamp == stamp && built.folder == folder
         })
@@ -2024,6 +2072,20 @@ impl Catalog {
         self.derive(context, None, |built| {
             built.stamp[0] == facts && built.folder.is_none()
         })
+    }
+
+    /// How many tracks of each collection are downloaded, kept while the facts and downloads
+    /// hold.
+    pub(crate) fn downloaded(&self, context: &Context<'_>) -> Arc<Downloaded> {
+        let stamp = [context.snapshot.facts, context.snapshot.downloads];
+        if let Some((built, downloaded)) = &self.views().downloaded
+            && *built == stamp
+        {
+            return downloaded.clone();
+        }
+        let downloaded = Arc::new(Downloaded::build(context));
+        self.views().downloaded = Some((stamp, downloaded.clone()));
+        downloaded
     }
 
     fn derive(
@@ -2048,7 +2110,7 @@ impl Catalog {
         }
         let derived = Arc::new(Derived::build(context, folder));
         let snapshot = context.snapshot;
-        let stamp = [snapshot.facts, snapshot.plays, snapshot.downloads];
+        let stamp = [snapshot.facts, snapshot.plays];
         let mut views = self.views();
         views.derived.retain(|built| {
             built.stamp[0] == stamp[0] && (built.stamp == stamp || built.folder.is_none())
@@ -2307,10 +2369,9 @@ impl Catalog {
         inputs: &Inputs,
         read_at: [u64; 5],
     ) -> Vec<i64> {
-        let folder = context.folder_slot(list.folder).flatten();
-        let derived = self.derived(context, folder);
         let Some(base) = list.unfiltered() else {
-            return context.list_order(list, &derived, inputs);
+            let folder = context.folder_slot(list.folder).flatten();
+            return context.list_order(list, &self.derived(context, folder), inputs);
         };
         let base = self.build_in(context, &Read::List(base), inputs, read_at);
         let filter = filter_text(&list.filter);
@@ -2318,7 +2379,7 @@ impl Catalog {
             Members::Keys(keys) => keys
                 .iter()
                 .map(|key| i64::from(*key))
-                .filter(|key| context.list_keep(list, &derived, &filter, *key))
+                .filter(|key| context.list_keep(list, &filter, *key))
                 .collect(),
             _ => Vec::new(),
         }

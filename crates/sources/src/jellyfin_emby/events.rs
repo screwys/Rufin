@@ -605,7 +605,6 @@ mod tests {
                         filter: ("").to_string(),
                         descending: false,
                         favorites_only: false,
-                        downloaded_only: false,
                         activity: false
                     }
                 )

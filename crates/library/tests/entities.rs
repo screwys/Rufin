@@ -1353,7 +1353,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 descending: false,
                 favorites_only: false,
                 activity: true,
-                downloaded_only: false
             }
         )
         .await,
@@ -1375,7 +1374,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 descending: false,
                 favorites_only: false,
                 activity: true,
-                downloaded_only: false
             }
         )
         .await,
@@ -1394,7 +1392,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 descending: false,
                 favorites_only: false,
                 activity: true,
-                downloaded_only: false
             }
         )
         .await,

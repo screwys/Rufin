@@ -82,7 +82,6 @@ pub struct ListRead {
     pub sort: LibraryField,
     pub descending: bool,
     pub favorites_only: bool,
-    pub downloaded_only: bool,
     pub activity: bool,
 }
 
@@ -186,7 +185,6 @@ impl ListRead {
             filter: String::new(),
             descending: false,
             favorites_only: false,
-            downloaded_only: false,
             activity: false,
         }
     }

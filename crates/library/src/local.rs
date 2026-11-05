@@ -16,6 +16,33 @@ pub(crate) fn whole_file_cue_sql(track: &str, details: &str) -> String {
               AND sibling.source_key={track}.source_key AND sibling.indexed=1 AND sibling.track_key<>{track}.track_key)")
 }
 
+/// A row read earlier, whose downloads [`Catalog::show_downloads`] shows as they are now.
+pub enum Shown<'a> {
+    Track(&'a mut crate::TrackRow),
+    Album(&'a mut crate::AlbumRow),
+    Artist(&'a mut crate::ArtistRow),
+    Tag(&'a mut crate::TagRow),
+    Folder(&'a mut crate::FolderRow),
+    Playlist(&'a mut crate::PlaylistRow),
+    Smart(&'a mut crate::SmartPlaylistRow),
+}
+
+impl crate::Row {
+    /// The row as [`Catalog::show_downloads`] shows its downloads; None for a playlist folder.
+    pub fn shown(&mut self) -> Option<Shown<'_>> {
+        Some(match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => Shown::Track(track),
+            Self::Album(album) | Self::AlbumHeading(album) => Shown::Album(album),
+            Self::Artist(artist) => Shown::Artist(artist),
+            Self::Tag(tag) => Shown::Tag(tag),
+            Self::Folder(folder) => Shown::Folder(folder),
+            Self::Playlist(crate::PlaylistListRow::Playlist(playlist)) => Shown::Playlist(playlist),
+            Self::Playlist(crate::PlaylistListRow::SmartPlaylist(smart)) => Shown::Smart(smart),
+            Self::Playlist(crate::PlaylistListRow::Folder(_)) => return None,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadItem {
@@ -394,30 +421,128 @@ impl Catalog {
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);
         let derived = self.derived(&context, None);
-        let totals = match item {
-            DownloadItem::Album { .. } => snapshot
-                .albums
-                .slot(owner)
-                .map(|slot| derived.albums[slot as usize]),
-            DownloadItem::Artist { album_artist, .. } => snapshot
-                .artists
-                .slot(owner)
-                .map(|slot| derived.artists[usize::from(*album_artist)][slot as usize]),
-            DownloadItem::Genre { .. } | DownloadItem::Mood { .. } => snapshot
-                .tags
-                .slot(owner)
-                .map(|slot| derived.tags[slot as usize]),
-            DownloadItem::Playlist { .. } => snapshot
-                .playlists
-                .get(owner)
-                .map(|playlist| context.playlist_totals(playlist, None)),
+        let downloaded = self.downloaded(&context);
+        let (total, done) = match item {
+            DownloadItem::Album { .. } => snapshot.albums.slot(owner).map(|slot| {
+                (
+                    derived.albums[slot as usize].tracks,
+                    downloaded.albums[slot as usize],
+                )
+            }),
+            DownloadItem::Artist { album_artist, .. } => {
+                let role = usize::from(*album_artist);
+                snapshot.artists.slot(owner).map(|slot| {
+                    (
+                        derived.artists[role][slot as usize].tracks,
+                        downloaded.artists[role][slot as usize],
+                    )
+                })
+            }
+            DownloadItem::Genre { .. } | DownloadItem::Mood { .. } => {
+                snapshot.tags.slot(owner).map(|slot| {
+                    (
+                        derived.tags[slot as usize].tracks,
+                        downloaded.tags[slot as usize],
+                    )
+                })
+            }
+            DownloadItem::Playlist { .. } => snapshot.playlists.get(owner).map(|playlist| {
+                let totals = context.playlist_totals(playlist, None);
+                (totals.tracks, totals.downloaded)
+            }),
             DownloadItem::Track { .. } | DownloadItem::SmartPlaylist { .. } => None,
         }
         .unwrap_or_default();
         Ok(DownloadStatus {
-            total: u64::from(totals.tracks),
-            downloaded: u64::from(totals.downloaded),
+            total: u64::from(total),
+            downloaded: u64::from(done),
         })
+    }
+
+    /// Shows the current downloads in rows read earlier: a track's copy and how many tracks of
+    /// a collection are downloaded. Smart playlists count their members as of `now`, the time
+    /// the page read them at; None reads them as of now.
+    pub async fn show_downloads(
+        &self,
+        rows: Vec<Shown<'_>>,
+        now: Option<i64>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<()> {
+        let smart = rows
+            .iter()
+            .filter_map(|row| match row {
+                Shown::Smart(row) => Some(row.smart_playlist_key.raw()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let smart = if smart.is_empty() {
+            self.loaded().await;
+            std::collections::HashMap::new()
+        } else {
+            let mut connection = self.acquire_loaded(cancellation).await?;
+            let now = now.unwrap_or_else(|| chrono::Utc::now().timestamp());
+            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now).await?
+        };
+        let snapshot = self.snapshot();
+        let context = crate::catalog::views::Context::new(&snapshot);
+        let downloaded = self.downloaded(&context);
+        let count =
+            |counts: &[u32], slot: Option<u32>| slot.map(|slot| i64::from(counts[slot as usize]));
+        for row in rows {
+            let (shown, current) = match row {
+                Shown::Track(row) => {
+                    if let Some(downloaded) = snapshot.downloaded(row.track_key) {
+                        row.is_downloaded = downloaded;
+                    }
+                    continue;
+                }
+                Shown::Album(row) => (
+                    &mut row.summary.downloaded_count,
+                    count(
+                        &downloaded.albums,
+                        snapshot.albums.slot(row.album_key.raw()),
+                    ),
+                ),
+                Shown::Artist(row) => (
+                    &mut row.summary.downloaded_count,
+                    count(
+                        &downloaded.artists[usize::from(row.album_artist)],
+                        snapshot.artists.slot(row.artist_key.raw()),
+                    ),
+                ),
+                Shown::Tag(row) => (
+                    &mut row.summary.downloaded_count,
+                    count(&downloaded.tags, snapshot.tags.slot(row.key)),
+                ),
+                Shown::Folder(row) => (
+                    &mut row.summary.downloaded_count,
+                    count(
+                        &downloaded.folders,
+                        row.folder_key
+                            .and_then(|key| snapshot.folders.slot(key.raw())),
+                    ),
+                ),
+                Shown::Playlist(row) => (
+                    &mut row.downloaded_count,
+                    snapshot
+                        .playlists
+                        .get(row.playlist_key.raw())
+                        .map(|playlist| {
+                            i64::from(context.playlist_totals(playlist, None).downloaded)
+                        }),
+                ),
+                Shown::Smart(row) => (
+                    &mut row.downloaded_count,
+                    smart
+                        .get(&row.smart_playlist_key.raw())
+                        .map(|totals| i64::from(totals.downloaded)),
+                ),
+            };
+            if let Some(current) = current {
+                *shown = current;
+            }
+        }
+        Ok(())
     }
 
     pub async fn downloaded_count(&self, source_id: Option<&str>) -> LibraryResult<usize> {

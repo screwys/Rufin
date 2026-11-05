@@ -87,6 +87,8 @@ pub struct View {
     /// The settings the view read with.
     settings: crate::settings::Committed,
     art: bool,
+    /// The header it shows; a reread that keeps the header keeps it.
+    header: Option<HeaderKey>,
     body: Body,
 }
 
@@ -171,6 +173,7 @@ impl SourceOwner {
                 options,
                 settings,
                 art,
+                header: None,
                 body: Body::Missing,
             },
             plan,
@@ -447,6 +450,7 @@ async fn read(
 ) -> LibraryResult<Opened> {
     let catalog = Arc::clone(&view.owner.shared.catalog);
     let named = header.is_some();
+    view.header = header.or(view.header);
     let (header, first, rows, favorites) = match plan {
         Plan::Rows(read) => {
             let order = catalog.order(&read, cancel).await?;
@@ -695,9 +699,9 @@ impl View {
     }
 
     /// What a committed change means for this page, which keeps the source and music folder
-    /// it opened with, as a web page names them. Favorites and ratings read it again only
-    /// where they order or filter its rows, and downloads where collections or a header count
-    /// them; the track rows that show them patch them in.
+    /// it opened with, as a web page names them. Favorites, ratings and downloads read it again
+    /// only where they order or filter its rows; the rows and header that show them show them
+    /// through `ShowsState` and [`library::Catalog::show_downloads`].
     pub fn refresh(&self, changed: &Changed) -> Refresh {
         self.refresh_selected(self.selected.as_ref(), changed)
     }
@@ -720,14 +724,46 @@ impl View {
         if !changed.items.is_empty() && self.states_reorder() {
             return refresh.max(Refresh::Reread);
         }
-        // Track rows show their downloads patched in; collection rows and headers count them.
-        if !changed.downloads.is_empty()
-            && (self.members().is_none_or(|read| read.downloaded_only)
-                || crate::collection_context::CollectionTarget::for_route(&self.route).is_some())
+        if !changed.downloads.is_empty() && self.members().is_some_and(|read| read.downloaded_only)
         {
             return refresh.max(Refresh::Reread);
         }
         refresh
+    }
+
+    /// The time its smart playlists count their members at, as its rows and header show them:
+    /// when the Smart Playlists list was read, or the Smart Playlist page opened.
+    pub fn smart_now(&self) -> Option<i64> {
+        match &self.body {
+            Body::Rows {
+                read:
+                    Read::List(ListRead {
+                        kind: ListKind::SmartPlaylists { now },
+                        ..
+                    }),
+                ..
+            } => Some(*now),
+            _ => self.options.smart_opened,
+        }
+    }
+
+    /// Its header read again as it is now, such as after a download; None when it shows none.
+    pub async fn header(&self, cancel: &ReadCancellation) -> LibraryResult<Option<Header>> {
+        if self.header.is_none() {
+            return Ok(None);
+        }
+        Ok(self
+            .catalog()
+            .fetch(
+                Fetch {
+                    header: self.header,
+                    art: self.art,
+                    ..Fetch::default()
+                },
+                cancel,
+            )
+            .await?
+            .header)
     }
 
     /// What playing the page whole queues, as its header Play does: everything it lists in
@@ -1409,6 +1445,7 @@ impl View {
             options,
             settings,
             art: self.art,
+            header: self.header,
             body: Body::Missing,
         }
     }
@@ -1440,6 +1477,26 @@ pub enum HomeItem {
 }
 
 impl HomeSection {
+    /// Its rows, as [`library::Catalog::show_downloads`] shows their downloads.
+    pub fn shown(&mut self) -> Vec<library::Shown<'_>> {
+        use library::Shown;
+        match self {
+            Self::Showcase(row) => vec![Shown::Album(&mut row.album)],
+            Self::Rows { rows, .. } | Self::Provider(library::HomeProviderSection { rows, .. }) => {
+                rows.tracks
+                    .iter_mut()
+                    .map(|row| Shown::Track(&mut row.track))
+                    .chain(
+                        rows.albums
+                            .iter_mut()
+                            .map(|row| Shown::Album(&mut row.album)),
+                    )
+                    .collect()
+            }
+            Self::Genres(genres) => genres.iter_mut().map(Shown::Tag).collect(),
+        }
+    }
+
     /// The block it shows; None for the server's own sections.
     pub fn block(&self) -> Option<HomeBlockKind> {
         match self {

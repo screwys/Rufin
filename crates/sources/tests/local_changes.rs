@@ -215,7 +215,6 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
-            downloaded_only: false,
             activity: false,
         },
     )
@@ -691,7 +690,6 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
-            downloaded_only: false,
             activity: false,
         },
     )
@@ -1052,7 +1050,6 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
-            downloaded_only: false,
             activity: false,
         },
     )
@@ -1581,7 +1578,6 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                     filter: ("").to_string(),
                     descending: descending,
                     favorites_only: false,
-                    downloaded_only: false,
                     activity: false,
                 },
             )
@@ -1719,7 +1715,6 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
-            downloaded_only: false,
             activity: false,
         },
     )

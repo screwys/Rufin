@@ -1632,7 +1632,6 @@ mod tests {
                 filter: ("AAA Rich Album").to_string(),
                 descending: false,
                 favorites_only: false,
-                downloaded_only: false,
                 activity: false,
             },
         )
@@ -1709,7 +1708,6 @@ mod tests {
                 filter: ("Track Artist").to_string(),
                 descending: false,
                 favorites_only: false,
-                downloaded_only: false,
                 activity: false,
             },
         )
