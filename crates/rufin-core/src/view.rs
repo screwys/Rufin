@@ -871,29 +871,25 @@ impl View {
         result: Option<&str>,
     ) -> Option<PlayRequest> {
         let section = self.home_sections()?.into_iter().nth(index)?;
-        let (id, selections) = match &section {
-            HomeSection::Showcase(album) => (
-                block_id(HomeBlockKind::Showcase),
+        let selections = match &section {
+            HomeSection::Showcase(album) => {
                 vec![MemberSelection::Collections(vec![Collection::Album(
                     album.album.album_key,
-                )])],
-            ),
-            HomeSection::Genres(genres) => (
-                block_id(HomeBlockKind::Genres),
-                genres
-                    .iter()
-                    .map(|genre| {
-                        MemberSelection::Collections(vec![Collection::Genre(
-                            library::GenreKey::from_raw(genre.key),
-                        )])
-                    })
-                    .collect(),
-            ),
-            HomeSection::Rows { block, .. } => (block_id(*block), section_selections(&section)),
-            HomeSection::Provider(provider) => (
-                format!("provider:{}", provider.section_id),
-                section_selections(&section),
-            ),
+                )])]
+            }
+            HomeSection::Genres(genres) => genres
+                .iter()
+                .map(|genre| {
+                    MemberSelection::Collections(vec![Collection::Genre(
+                        library::GenreKey::from_raw(genre.key),
+                    )])
+                })
+                .collect(),
+            HomeSection::Rows { .. } | HomeSection::Provider(_) => section_selections(&section),
+        };
+        let id = match &section {
+            HomeSection::Provider(provider) => format!("provider:{}", provider.section_id),
+            _ => section.block().map(block_id).unwrap_or_default(),
         };
         let source = self.selected.as_ref()?.source_id.as_str();
         Some(
@@ -1444,6 +1440,16 @@ pub enum HomeItem {
 }
 
 impl HomeSection {
+    /// The block it shows; None for the server's own sections.
+    pub fn block(&self) -> Option<HomeBlockKind> {
+        match self {
+            Self::Showcase(_) => Some(HomeBlockKind::Showcase),
+            Self::Genres(_) => Some(HomeBlockKind::Genres),
+            Self::Rows { block, .. } => Some(*block),
+            Self::Provider(_) => None,
+        }
+    }
+
     /// Its title as the page shows it.
     pub fn title(&self) -> String {
         use crate::settings::presentation::{home_block_title, home_provider_title};

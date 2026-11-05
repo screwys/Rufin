@@ -448,33 +448,11 @@ pub(super) fn home_sections(
     view: &View,
     block: Option<library::HomeBlockKind>,
 ) -> Vec<HomeSection> {
-    use library::HomeBlockKind;
     view.home_sections()
         .unwrap_or_default()
         .into_iter()
-        .filter(|section| {
-            block.is_none_or(|block| {
-                block
-                    == match section {
-                        HomeSection::Showcase(_) => HomeBlockKind::Showcase,
-                        HomeSection::Genres(_) => HomeBlockKind::Genres,
-                        HomeSection::Rows { block, .. } => *block,
-                        HomeSection::Provider(_) => return false,
-                    }
-            })
-        })
+        .filter(|section| block.is_none_or(|block| section.block() == Some(block)))
         .collect()
-}
-
-/// The block a Home section refreshes and pages by; None for the server's own sections.
-pub(super) fn home_block(section: &HomeSection) -> Option<library::HomeBlockKind> {
-    use library::HomeBlockKind;
-    match section {
-        HomeSection::Showcase(_) => Some(HomeBlockKind::Showcase),
-        HomeSection::Genres(_) => Some(HomeBlockKind::Genres),
-        HomeSection::Rows { block, .. } => Some(*block),
-        HomeSection::Provider(_) => None,
-    }
 }
 
 /// A Home section's rows, each with the title Home gives it.
@@ -525,7 +503,7 @@ pub(super) fn home_json(products: &ProductHandles, sections: &[HomeSection]) -> 
                 })
                 .collect::<Vec<_>>();
             let mut value = json!({"title":section.title(),"items":items});
-            if let Some(block) = home_block(section) {
+            if let Some(block) = section.block() {
                 value["block"] = json!(block);
             }
             value

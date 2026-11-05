@@ -462,7 +462,8 @@ pub(super) fn home(
             .iter()
             .enumerate()
             .map(|(number, section)| {
-                let block = page::home_block(section)
+                let block = section
+                    .block()
                     .and_then(|block| serde_json::to_value(block).ok())
                     .and_then(|block| block.as_str().map(str::to_owned))
                     .unwrap_or_default();
