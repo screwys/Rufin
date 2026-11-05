@@ -64,6 +64,17 @@ impl CollectionTarget {
         })
     }
 
+    /// What the collection is, as a queue names where it plays from.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Album(_) => localization::msgid("Album"),
+            Self::Artist { .. } => localization::msgid("Artist"),
+            Self::Genre(_) => localization::msgid("Genre"),
+            Self::Mood(_) => localization::msgid("Mood"),
+            Self::Playlist(_) | Self::SmartPlaylist(_) => localization::msgid("Playlist"),
+        }
+    }
+
     pub fn context_id(&self) -> String {
         match self {
             Self::Album(id) => format!("album:{id}"),

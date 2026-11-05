@@ -126,7 +126,14 @@ impl Row {
             Self::Album(album) | Self::AlbumHeading(album) => &album.summary,
             Self::Artist(artist) => &artist.summary,
             Self::Tag(tag) => &tag.summary,
-            Self::Playlist(_) | Self::Folder(_) => return false,
+            Self::Playlist(PlaylistListRow::Playlist(playlist)) => {
+                return playlist.track_count > 0
+                    && playlist.downloaded_count == playlist.track_count;
+            }
+            Self::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {
+                return smart.track_count > 0 && smart.downloaded_count == smart.track_count;
+            }
+            Self::Playlist(PlaylistListRow::Folder(_)) | Self::Folder(_) => return false,
         };
         summary.track_count > 0 && summary.downloaded_count == summary.track_count
     }

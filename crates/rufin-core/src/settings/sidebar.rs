@@ -430,10 +430,12 @@ mod tests {
 }
 
 /// A Home block as the block editor lists it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct HomeBlockRow {
     pub block: library::HomeBlockKind,
+    /// Its title, untranslated.
+    pub title: String,
     pub visible: bool,
     /// Whether it can be shown or hidden: the last visible block stays.
     pub can_toggle: bool,
@@ -448,6 +450,7 @@ pub(crate) fn home_block_rows(visible: &[library::HomeBlockKind]) -> Vec<HomeBlo
             let shown = visible.contains(&block);
             HomeBlockRow {
                 block,
+                title: super::presentation::home_block_title(block).into(),
                 visible: shown,
                 can_toggle: !shown || visible.len() > 1,
             }

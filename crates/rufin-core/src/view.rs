@@ -682,6 +682,10 @@ impl View {
         if !changed.items.is_empty() && self.states_reorder() {
             return refresh.max(Refresh::Reread);
         }
+        if !changed.downloads.is_empty() && self.members().is_some_and(|read| read.downloaded_only)
+        {
+            return refresh.max(Refresh::Reread);
+        }
         refresh
     }
 
@@ -780,6 +784,71 @@ impl View {
             }
             _ => None,
         })
+    }
+
+    /// What playing Home's section `index` queues: its rows in the order it shows them, from
+    /// its row `from`. None when the page is not Home or has no such section.
+    pub fn play_section(
+        &self,
+        index: usize,
+        from: usize,
+        placement: QueuePlacement,
+        shuffled: bool,
+    ) -> Option<PlayRequest> {
+        let section = self.home_sections()?.into_iter().nth(index)?;
+        let (id, selections) = match &section {
+            HomeSection::Showcase(album) => (
+                block_id(HomeBlockKind::Showcase),
+                vec![MemberSelection::Collections(vec![Collection::Album(
+                    album.album.album_key,
+                )])],
+            ),
+            HomeSection::Genres(genres) => (
+                block_id(HomeBlockKind::Genres),
+                genres
+                    .iter()
+                    .map(|genre| {
+                        MemberSelection::Collections(vec![Collection::Genre(
+                            library::GenreKey::from_raw(genre.key),
+                        )])
+                    })
+                    .collect(),
+            ),
+            HomeSection::Rows { block, .. } => (block_id(*block), section_selections(&section)),
+            HomeSection::Provider(provider) => (
+                format!("provider:{}", provider.section_id),
+                section_selections(&section),
+            ),
+        };
+        let source = self.selected.as_ref()?.source_id.as_str();
+        Some(
+            PlayRequest::captured(MemberSelection::Concat(selections), from, placement, false)
+                .with_context(format!("home:{source}:{id}").into())
+                .shuffled(shuffled),
+        )
+    }
+
+    /// Whether the page offers a letter index: it lists by a name its letter sections follow.
+    pub fn has_letter_sections(&self) -> bool {
+        let named = matches!(
+            self.order().0,
+            LibraryField::Title
+                | LibraryField::Artist
+                | LibraryField::AlbumArtist
+                | LibraryField::Album
+                | LibraryField::Genre
+        );
+        named
+            && self.route != Route::History
+            && match &self.body {
+                Body::Rows {
+                    read: Read::AlbumTracks(_),
+                    ..
+                }
+                | Body::Home(_)
+                | Body::Missing => false,
+                Body::Rows { .. } | Body::Releases { .. } | Body::Folders { .. } => true,
+            }
     }
 
     /// How many rows it lists; folders count their child folders and then their tracks.
@@ -1147,6 +1216,11 @@ impl View {
         seed: RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Opened> {
+        // A Smart Playlist page keeps the members it opened with.
+        let options = OpenOptions {
+            smart_opened: options.smart_opened.or(self.options.smart_opened),
+            ..options
+        };
         let settings = self.owner.shared.settings.committed();
         match (&self.body, &self.selected) {
             (Body::Folders { projection, .. }, Some(selected)) => {
@@ -1398,6 +1472,31 @@ pub fn home_sections(home: &HomePage, blocks: &[HomeBlockKind], filter: &str) ->
     }
     sections.extend(blocks.into_iter().filter_map(block));
     sections
+}
+
+/// A Home block's name in the context id of a section play.
+fn block_id(block: HomeBlockKind) -> String {
+    serde_json::to_value(block)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// What a section of tracks and albums plays: each track, then each album.
+fn section_selections(section: &HomeSection) -> Vec<MemberSelection> {
+    section
+        .items()
+        .into_iter()
+        .map(|item| match item {
+            HomeItem::Track(row) => MemberSelection::Keys {
+                source: None,
+                keys: vec![row.track.track_key].into(),
+            },
+            HomeItem::Album(row) => {
+                MemberSelection::Collections(vec![Collection::Album(row.album.album_key)])
+            }
+        })
+        .collect()
 }
 
 /// The collection or route a page's context id starts with; a play of the collection from

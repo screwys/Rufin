@@ -144,6 +144,22 @@ pub enum AccentPreference {
     Slate,
 }
 impl AccentPreference {
+    /// Its name, untranslated.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::System => localization::msgid("System"),
+            Self::Blue => localization::msgid("Blue"),
+            Self::Teal => localization::msgid("Teal"),
+            Self::Green => localization::msgid("Green"),
+            Self::Yellow => localization::msgid("Yellow"),
+            Self::Orange => localization::msgid("Orange"),
+            Self::Red => localization::msgid("Red"),
+            Self::Pink => localization::msgid("Pink"),
+            Self::Purple => localization::msgid("Purple"),
+            Self::Slate => localization::msgid("Slate"),
+        }
+    }
+
     pub fn color(self) -> Option<&'static str> {
         match self {
             Self::System => None,
