@@ -233,9 +233,6 @@ msgstr ""
 msgid "320 kbps"
 msgstr ""
 
-msgid "5 Latest Albums"
-msgstr ""
-
 msgid "6 hours"
 msgstr ""
 
@@ -384,9 +381,6 @@ msgid "Albums"
 msgstr ""
 
 msgid "All Music"
-msgstr ""
-
-msgid "All Playlists"
 msgstr ""
 
 msgid "All time"
@@ -1449,9 +1443,6 @@ msgid "Enter a server address, username, and password"
 msgstr ""
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
-msgstr ""
-
-msgid "Entire Library"
 msgstr ""
 
 msgid "Equalizer is controlled by the receiver"
