@@ -115,10 +115,21 @@ pub(super) fn row_data(
 ) -> Value {
     let mut value = page::row_json(products, row, true);
     value["menu"] = json!(rufin_core::menu::menu(&products.source, settings, row));
-    if let Some(route) = rufin_core::route::Route::of_row(row) {
+    if let Some(route) = opens(row) {
         value["page"] = json!(scope.at(route));
     }
     value
+}
+
+/// The page a collection row opens on the web: an artist opens their tracks, the artist page
+/// the web draws.
+fn opens(row: &Row) -> Option<rufin_core::route::Route> {
+    use rufin_core::route::Route;
+    Some(match Route::of_row(row)? {
+        Route::ArtistDetail(uri) => Route::ArtistTracks(uri),
+        Route::AlbumArtistDetail(uri) => Route::AlbumArtistTracks(uri),
+        route => route,
+    })
 }
 
 impl<'a> Shown<'a> {
@@ -143,15 +154,26 @@ impl<'a> Shown<'a> {
             }] = json!(title);
         }
         data["index"] = json!(index);
-        let opens = rufin_core::route::Route::of_row(&row).map(|route| list.at(route));
+        let opens = opens(&row).map(|route| list.at(route));
         let href = opens.as_ref().map_or_else(String::new, |token| {
             link(&HashMap::from([("page".to_owned(), token.json())]))
         });
+        // A track plays its list from it, anchored on the track and entry it shows; a Home
+        // track plays alone. A collection plays the page it opens.
         let play = match (&row, &opens) {
-            (Row::Track(_) | Row::AlbumTrack { .. }, _) | (_, None) => {
-                json!({"page":list,"index":index})
+            (Row::Track(track) | Row::AlbumTrack { track, .. }, _)
+                if list.route == rufin_core::route::Route::Home =>
+            {
+                json!({ "uris": [track.media_uri] })
             }
+            (Row::Track(track) | Row::AlbumTrack { track, .. }, _) => json!({
+                "page": list,
+                "index": index,
+                "anchor_uri": track.media_uri,
+                "anchor_entry": track.entry.as_ref().map(|entry| entry.key),
+            }),
             (_, Some(token)) => json!({ "page": token }),
+            (_, None) => json!({}),
         }
         .to_string();
         let previews = data["artwork_previews"]

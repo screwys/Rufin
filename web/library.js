@@ -224,6 +224,11 @@ async function loadLibrary(token, extra, signal, initialPage = null, knownTotal 
     return result;
   };
   rereadPage = async () => {
+    // Rows may have moved: a selection by position would name other entries.
+    selectionRequest?.abort();
+    selectionPending = Promise.resolve();
+    selectedTracks.clear();
+    selectionAnchor = 0;
     total = null;
     for (const page of pages.values()) page.remove();
     pages.clear();
@@ -503,13 +508,13 @@ function selectedRows() {
   return [...selectedTracks].sort(([a], [b]) => a - b).map(([, row]) => row);
 }
 
-// Plays the page from track row `index`, or the tracks selected with it.
-async function playSelection(index) {
+// Plays the page from track `row` at `index`, or the tracks selected with it.
+async function playSelection(index, row) {
   await selectionPending;
   const selected = selectedRows();
   return selected.length > 1
     ? playUris(selected.map((track) => track.uri))
-    : api("/queue", "POST", { page: opened, index, mode: "replace" });
+    : api("/queue", "POST", { page: opened, index, anchor_uri: row.uri, anchor_entry: row.id, mode: "replace" });
 }
 
 async function showTrackMenu(index, row, anchor, event) {
@@ -519,7 +524,7 @@ async function showTrackMenu(index, row, anchor, event) {
     uris = rows.map((row) => row.uri),
     menu = row.menu;
   const actions = [];
-  if (menu.play) actions.push([tr("Play"), () => playSelection(index)]);
+  if (menu.play) actions.push([tr("Play"), () => playSelection(index, row)]);
   if (menu.play_next) actions.push([tr("Play Next"), () => playUris(uris, "next")]);
   if (menu.play_later) actions.push([tr("Play Later"), () => playUris(uris, "append")]);
   if (menu.radio) actions.push(radioMenu(menu.radio));
@@ -575,7 +580,7 @@ function bindTracks(host, signal) {
           event.preventDefault();
           run(() => {
             const action = button.dataset.action;
-            if (action === "replace") return playSelection(index);
+            if (action === "replace") return playSelection(index, row);
             if (action === "next" || action === "append") return playUris([row.uri], action);
             if (action === "favorite") return setFavorite([row]);
             if (action === "menu") return showTrackMenu(index, row, button);
@@ -588,7 +593,7 @@ function bindTracks(host, signal) {
     tr.addEventListener(
       "dblclick",
       (event) => {
-        if (!event.target.closest("button")) run(() => playSelection(index));
+        if (!event.target.closest("button")) run(() => playSelection(index, row));
       },
       { signal },
     );
@@ -606,7 +611,7 @@ function bindTracks(host, signal) {
         if (event.target !== tr) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          if (event.key === "Enter") run(() => playSelection(index));
+          if (event.key === "Enter") run(() => playSelection(index, row));
           else selectTrack(index, event);
         } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
           event.preventDefault();
