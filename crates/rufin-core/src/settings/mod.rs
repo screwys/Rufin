@@ -937,7 +937,19 @@ pub(crate) fn persist_scrobbling_settings(
         if stored.secret_scope_id != scope {
             return Err("credential storage was reset".into());
         }
-        stored.scrobbling = prepared.scrobbling;
+        // Switches commit through their own edit, which may have landed meanwhile.
+        let mut scrobbling = prepared.scrobbling;
+        let kept = &stored.scrobbling;
+        for (account, kept) in [
+            (&mut scrobbling.lastfm, &kept.lastfm),
+            (&mut scrobbling.librefm, &kept.librefm),
+        ] {
+            account.enabled = kept.enabled;
+            account.now_playing_enabled = kept.now_playing_enabled;
+        }
+        scrobbling.listenbrainz.enabled = kept.listenbrainz.enabled;
+        scrobbling.listenbrainz.now_playing_enabled = kept.listenbrainz.now_playing_enabled;
+        stored.scrobbling = scrobbling;
         stored.scrobbling_credentials = prepared.scrobbling_credentials;
         stored.scrobbling_secrets_present = false;
         stored.ui.lastfm_api_key = prepared.ui.lastfm_api_key;
