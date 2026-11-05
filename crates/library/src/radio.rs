@@ -16,7 +16,10 @@ use crate::{
 const RADIO_LIMIT: usize = 500;
 const RADIO_EXTRA_EXCLUSION_LIMIT: usize = 500;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// What a radio starts from. Its serde form is the HTTP API's: `{kind: track, uri}`, or
+/// `{kind: album, artist, album_artist, genre or playlist, id}`.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(from = "SeedForm", into = "SeedForm")]
 pub enum RadioSeed {
     Track(String),
     Album(AlbumKey),
@@ -24,6 +27,43 @@ pub enum RadioSeed {
     AlbumArtist(ArtistKey),
     Genre(GenreKey),
     Playlist(PlaylistKey),
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum SeedForm {
+    Track { uri: String },
+    Album { id: AlbumKey },
+    Artist { id: ArtistKey },
+    AlbumArtist { id: ArtistKey },
+    Genre { id: GenreKey },
+    Playlist { id: PlaylistKey },
+}
+
+impl From<SeedForm> for RadioSeed {
+    fn from(form: SeedForm) -> Self {
+        match form {
+            SeedForm::Track { uri } => Self::Track(uri),
+            SeedForm::Album { id } => Self::Album(id),
+            SeedForm::Artist { id } => Self::Artist(id),
+            SeedForm::AlbumArtist { id } => Self::AlbumArtist(id),
+            SeedForm::Genre { id } => Self::Genre(id),
+            SeedForm::Playlist { id } => Self::Playlist(id),
+        }
+    }
+}
+
+impl From<RadioSeed> for SeedForm {
+    fn from(seed: RadioSeed) -> Self {
+        match seed {
+            RadioSeed::Track(uri) => Self::Track { uri },
+            RadioSeed::Album(id) => Self::Album { id },
+            RadioSeed::Artist(id) => Self::Artist { id },
+            RadioSeed::AlbumArtist(id) => Self::AlbumArtist { id },
+            RadioSeed::Genre(id) => Self::Genre { id },
+            RadioSeed::Playlist(id) => Self::Playlist { id },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]

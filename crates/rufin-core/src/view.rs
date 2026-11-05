@@ -12,6 +12,7 @@ use library::{
     ReadCancellation, RouteSeedWindow, Row, ScrollSection, SourceKey, TagRow,
 };
 
+use crate::playback::{PlayRequest, QueuePlacement};
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::SelectedLibrary;
 use crate::settings::app::Settings;
@@ -39,7 +40,9 @@ pub enum Reread {
     Releases,
 }
 
-#[derive(Clone, PartialEq)]
+/// How a route opens. Its serde form, with the route, names a web page.
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct OpenOptions {
     pub category: CollectionCategory,
     pub filter: String,
@@ -54,6 +57,8 @@ pub struct OpenOptions {
     /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
     /// the page opened with; plays and syncs change them on the next visit.
     pub smart_opened: Option<i64>,
+    /// The layout the page shows when not the saved one: the web shows lists as cards.
+    pub layout: Option<LibraryLayout>,
 }
 
 impl Default for OpenOptions {
@@ -69,6 +74,7 @@ impl Default for OpenOptions {
             history_source: None,
             release_filters: None,
             smart_opened: None,
+            layout: None,
         }
     }
 }
@@ -360,8 +366,10 @@ impl SourceOwner {
             Route::Albums => {
                 require_source()?;
                 let read = list(ListKind::Albums);
-                let detail =
-                    settings.library_list(LibraryListKey::Albums).layout == LibraryLayout::Detail;
+                let detail = options
+                    .layout
+                    .unwrap_or(settings.library_list(LibraryListKey::Albums).layout)
+                    == LibraryLayout::Detail;
                 (
                     None,
                     Plan::Rows(if detail {
@@ -646,6 +654,115 @@ impl View {
             sort,
             descending,
         )
+    }
+
+    /// The order it reads in: the field and whether it is descending.
+    pub fn order(&self) -> (LibraryField, bool) {
+        let (sort, descending, _) = read_order(&self.route, &self.options, &self.settings);
+        (sort, descending)
+    }
+
+    /// Whether plays change what it shows.
+    pub fn reads_activity(&self) -> bool {
+        read_order(&self.route, &self.options, &self.settings).2
+    }
+
+    /// What a committed change means for this page, which keeps the source and music folder
+    /// it opened with, as a web page names them. Favorites and ratings read it again only
+    /// where they order or filter its rows; the rows that show them patch them in.
+    pub fn refresh(&self, changed: &Changed) -> Refresh {
+        let refresh = changes(
+            &self.owner,
+            &self.route,
+            self.selected.as_ref(),
+            self.selected.as_ref(),
+            &self.options,
+            changed,
+        );
+        if !changed.items.is_empty() && self.states_reorder() {
+            return refresh.max(Refresh::Reread);
+        }
+        refresh
+    }
+
+    /// What playing the page whole queues, as its header Play does: everything it lists in
+    /// its order and filter, from a random track when shuffle is on. None when it lists no
+    /// tracks of its own.
+    pub fn play_all(&self, placement: QueuePlacement, shuffled: bool) -> Option<PlayRequest> {
+        Some(
+            PlayRequest::ordered(self.selection()?, 0, placement, true)
+                .with_context(self.context_id().into())
+                .shuffled(shuffled),
+        )
+    }
+
+    /// What playing the page from its track `key` at `index` among its tracks queues; `entry`
+    /// names a playlist entry. None when the page lists no tracks.
+    pub fn play_track(
+        &self,
+        key: library::TrackKey,
+        entry: Option<library::PlaylistEntryKey>,
+        index: usize,
+        placement: QueuePlacement,
+        shuffled: bool,
+    ) -> Option<PlayRequest> {
+        Some(
+            PlayRequest::captured(self.members()?.clone().selection(), index, placement, false)
+                .with_context(self.context_id().into())
+                .with_anchor(key, entry)
+                .shuffled(shuffled),
+        )
+    }
+
+    /// What playing row `index` queues: a track plays the page from it, and a track of the
+    /// Albums list in Detail layout plays its album from it. None for other rows.
+    pub async fn play(
+        &self,
+        index: usize,
+        placement: QueuePlacement,
+        shuffled: bool,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
+        let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
+        Ok(match self.item(index, cancel).await? {
+            Some(Item::Track { key, entry }) => {
+                self.play_track(key, entry, tracks, placement, shuffled)
+            }
+            // A History row names its listen; its row holds the track.
+            Some(Item::Listen(_)) => self
+                .rows(index..index + 1, cancel)
+                .await?
+                .into_iter()
+                .find_map(|row| match row {
+                    Row::Track(track) => Some(track.track_key),
+                    _ => None,
+                })
+                .and_then(|key| self.play_track(key, None, tracks, placement, shuffled)),
+            Some(Item::AlbumTrack { key, album, .. }) => {
+                let list = self
+                    .settings
+                    .library_list(LibraryListKey::AlbumDetailTracks);
+                let mut read = MemberRead::new(Collection::Album(album));
+                read.sort = Some(list.sort_key);
+                read.descending = list.descending;
+                self.catalog().uri(Item::Album(album)).map(|uri| {
+                    PlayRequest::captured(read.selection(), 0, placement, false)
+                        .with_context(
+                            context_id(
+                                &Route::AlbumDetail(uri),
+                                None,
+                                &OpenOptions::default(),
+                                list.sort_key,
+                                list.descending,
+                            )
+                            .into(),
+                        )
+                        .with_anchor(key, None)
+                        .shuffled(shuffled)
+                })
+            }
+            _ => None,
+        })
     }
 
     /// How many rows it lists; folders count their child folders and then their tracks.
@@ -1315,7 +1432,27 @@ pub fn refresh(
     changed: &Changed,
 ) -> Refresh {
     let current = owner.shared.selected();
-    let selected = current.as_ref().map(|selected| selected.source_key);
+    changes(
+        owner,
+        route,
+        opened_with,
+        current.as_ref(),
+        options,
+        changed,
+    )
+}
+
+/// What a committed change means for a page on `route`, opened while `opened_with` was
+/// selected, now that `current` is.
+fn changes(
+    owner: &SourceOwner,
+    route: &Route,
+    opened_with: Option<&SelectedLibrary>,
+    current: Option<&SelectedLibrary>,
+    options: &OpenOptions,
+    changed: &Changed,
+) -> Refresh {
+    let selected = current.map(|selected| selected.source_key);
     let affects = |source: Option<SourceKey>| source.is_none() || source == selected;
     let uses_source = route.uses_selected_source()
         && (route != &Route::Search || options.search_mode == library::SearchMode::Title);
@@ -1338,7 +1475,7 @@ pub fn refresh(
     for source in catalog {
         refresh = refresh.max(if unaffected(source) {
             Refresh::Nothing
-        } else if uses_source && opened_with.map(scope) != current.as_ref().map(scope) {
+        } else if uses_source && opened_with.map(scope) != current.map(scope) {
             Refresh::Reopen
         } else {
             Refresh::Reread

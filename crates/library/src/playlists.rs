@@ -130,6 +130,22 @@ impl Catalog {
         )
     }
 
+    /// The track a playlist entry holds, from its resident entries.
+    pub fn playlist_entry_track(
+        &self,
+        playlist: PlaylistKey,
+        entry: PlaylistEntryKey,
+    ) -> Option<TrackKey> {
+        let snapshot = self.snapshot();
+        let record = snapshot.playlists.get(playlist.raw())?;
+        let slot = record
+            .entries
+            .iter()
+            .find(|candidate| candidate.key == entry.raw())?
+            .track;
+        snapshot.tracks.key_of(slot).map(TrackKey::from_raw)
+    }
+
     /// Whether a playlist holds a track its source no longer lists, from its resident entries.
     pub fn playlist_holds_hidden(&self, playlist: PlaylistKey) -> bool {
         let snapshot = self.snapshot();

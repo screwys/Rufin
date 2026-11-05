@@ -29,6 +29,7 @@ mod waveform;
 pub use settings::SettingsHandle;
 
 pub mod lyrics;
+pub mod menu;
 
 pub mod metadata;
 pub mod open;
