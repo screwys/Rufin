@@ -95,16 +95,12 @@ impl CollectionTarget {
 }
 
 /// Whether what plays, in context `playing`, is the collection `context_id` names: the same id,
-/// or that id decorated after `|` (a page's filter and order), or after `:` for a playlist.
+/// or that id decorated after `|` (a page's filter and order), or also after `:` for a playlist.
 #[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn plays_context(context_id: &str, playing: &str) -> bool {
-    let decoration = if context_id.starts_with("playlist:") {
-        ':'
-    } else {
-        '|'
-    };
+    let playlist = context_id.starts_with("playlist:");
     playing == context_id
         || playing
             .strip_prefix(context_id)
-            .is_some_and(|suffix| suffix.starts_with(decoration))
+            .is_some_and(|suffix| suffix.starts_with('|') || (playlist && suffix.starts_with(':')))
 }
