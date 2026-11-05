@@ -1,6 +1,8 @@
 mod cover;
 mod ipc;
 
+pub(super) use ipc::SUPPORTED;
+
 use std::sync::{
     Arc, Mutex, Weak,
     mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel},
@@ -10,7 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use playback::{PlaybackProjection, TransportStatus, TransportView};
 use tracing::debug;
 
-use rufin_core::presence::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
+use super::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
+use crate::settings::SettingsFile;
 
 pub(crate) struct LatestSender<T> {
     value: Arc<Mutex<Option<T>>>,
@@ -115,9 +118,9 @@ impl ArtworkRequests {
     }
 }
 
-#[derive(Clone)]
-pub struct Discord {
+pub(super) struct Discord {
     inner: Arc<Inner>,
+    settings: SettingsFile,
 }
 
 struct Inner {
@@ -127,8 +130,6 @@ struct Inner {
 
 #[derive(Default)]
 struct State {
-    settings: Settings,
-    lastfm_api_key: String,
     activity: Option<Arc<Activity>>,
     artwork: ArtworkState,
     next_artwork_revision: u64,
@@ -149,41 +150,55 @@ enum ArtworkState {
     },
 }
 
+/// The presence settings and the Last.fm key, as committed.
+struct Committed {
+    settings: Settings,
+    lastfm_api_key: String,
+}
+
 impl Discord {
-    pub fn new() -> Self {
+    pub(super) fn new(settings: SettingsFile) -> Self {
         let (artwork, receiver) = latest_slot();
         let inner = Arc::new(Inner {
             state: Mutex::new(State::default()),
             artwork,
         });
         cover::start(ArtworkRequests { receiver });
-        Self { inner }
+        Self { inner, settings }
     }
 
-    pub fn update(
-        &self,
-        mut settings: Settings,
-        delivery_enabled: bool,
-        lastfm_api_key: &str,
-        projection: Option<&PlaybackProjection>,
-    ) {
-        settings.enabled &= delivery_enabled && ipc::SUPPORTED;
+    fn committed(&self) -> Committed {
+        let stored = self.settings.load();
+        let mut settings = stored.ui.rich_presence.clone();
+        settings.enabled &= !stored.ui.application.private_mode;
+        Committed {
+            settings,
+            lastfm_api_key: stored.ui.lastfm_api_key.clone(),
+        }
+    }
+
+    /// The presence settings changed.
+    pub(super) fn settings_changed(&self, projection: Option<&PlaybackProjection>) {
         let Ok(mut state) = self.inner.state.lock() else {
             return;
         };
-        state.settings = settings;
-        state.lastfm_api_key = lastfm_api_key.to_string();
         let transport = projection.map(PlaybackProjection::reporting_transport);
-        self.refresh(&mut state, transport.as_ref(), unix_now_millis());
+        self.refresh(
+            &mut state,
+            &self.committed(),
+            transport.as_ref(),
+            unix_now_millis(),
+        );
     }
 
-    pub fn observe(&self, projection: Option<&PlaybackProjection>) {
+    pub(super) fn observe(&self, projection: Option<&PlaybackProjection>) {
         let transport = projection.map(PlaybackProjection::reporting_transport);
         let view = transport.as_ref();
+        let committed = self.committed();
         let Ok(mut state) = self.inner.state.lock() else {
             return;
         };
-        if state.matches(view)
+        if state.matches(&committed.settings, view)
             && transport.as_ref().is_none_or(|transport| {
                 projection.is_none_or(|projection| {
                     transport.position_millis == projection.view.transport.position_millis
@@ -192,15 +207,21 @@ impl Discord {
         {
             return;
         }
-        self.refresh(&mut state, view, unix_now_millis());
+        self.refresh(&mut state, &committed, view, unix_now_millis());
     }
 
-    fn refresh(&self, state: &mut State, view: Option<&TransportView>, now_millis: u64) {
+    fn refresh(
+        &self,
+        state: &mut State,
+        committed: &Committed,
+        view: Option<&TransportView>,
+        now_millis: u64,
+    ) {
         let Some(view) = view else {
             self.clear(state);
             return;
         };
-        if state.settings.enabled
+        if committed.settings.enabled
             && matches!(
                 view.state,
                 TransportStatus::Resolving | TransportStatus::Buffering
@@ -212,7 +233,7 @@ impl Discord {
                     ArtworkState::Pending { key, .. }
                         if Some(key) != ArtworkKey::from_view(
                             view,
-                            &state.lastfm_api_key,
+                            &committed.lastfm_api_key,
                         ).as_ref()
                 )
             {
@@ -222,7 +243,7 @@ impl Discord {
             return;
         }
         let Some(mut activity) = Activity::new(
-            &state.settings,
+            &committed.settings,
             view,
             now_millis,
             APP_ICON_ASSET.to_string(),
@@ -230,7 +251,7 @@ impl Discord {
             self.clear(state);
             return;
         };
-        activity.large_image = self.artwork_image(state, view);
+        activity.large_image = self.artwork_image(state, &committed.lastfm_api_key, view);
         let activity = Arc::new(activity);
         state.activity = Some(Arc::clone(&activity));
         if !matches!(state.artwork, ArtworkState::Pending { .. }) {
@@ -248,8 +269,13 @@ impl Discord {
         }
     }
 
-    fn artwork_image(&self, state: &mut State, view: &TransportView) -> String {
-        let Some(key) = ArtworkKey::from_view(view, &state.lastfm_api_key) else {
+    fn artwork_image(
+        &self,
+        state: &mut State,
+        lastfm_api_key: &str,
+        view: &TransportView,
+    ) -> String {
+        let Some(key) = ArtworkKey::from_view(view, lastfm_api_key) else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
             return APP_ICON_ASSET.to_string();
@@ -285,12 +311,12 @@ impl Discord {
 }
 
 impl State {
-    fn matches(&self, view: Option<&TransportView>) -> bool {
+    fn matches(&self, settings: &Settings, view: Option<&TransportView>) -> bool {
         match (&self.activity, view) {
             (None, None) => true,
             (Some(_), None) => false,
             (None, Some(view)) => {
-                visible_playback_state(&self.settings, view.state).is_none()
+                visible_playback_state(settings, view.state).is_none()
                     || view
                         .current
                         .as_ref()

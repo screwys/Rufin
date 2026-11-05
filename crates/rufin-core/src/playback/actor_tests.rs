@@ -3,7 +3,7 @@ use super::super::{
     state::tests::{IdleBackend, seeded},
 };
 use super::*;
-use crate::playback::{Placement, PlayRequest, RadioPlayRequest};
+use crate::playback::{PlayRequest, QueuePlacement, RadioPlayRequest};
 use playback::{
     BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, QueueProvenance,
     TrackReference,
@@ -34,7 +34,7 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
         .unwrap();
     let mut updates = owner.updates.subscribe();
     assert!(!updates.recv().await.unwrap().unwrap().view.queue_loading);
-    for placement in [Placement::Now, Placement::End] {
+    for placement in [QueuePlacement::Now, QueuePlacement::End] {
         let (cancel, cancellation) = std::sync::mpsc::channel();
         playback.downgrade().post(move |player, sample| {
             player

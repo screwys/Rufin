@@ -521,7 +521,7 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        rufin_core::radio::play_saved_random(&self.source, settings, placement)
+        rufin_core::radio::play_saved_random(&self.playback, settings, placement)
             .await
             .map_err(error)
     }

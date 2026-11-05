@@ -670,13 +670,6 @@ impl PlaybackOwner {
         state.submit(&output, false);
         state.publish(&self.settings);
     }
-    pub fn equalizer_output(&self) -> String {
-        self.equalizer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .current_output
-            .clone()
-    }
     pub fn equalizer_view(&self, output: String) -> EqView {
         self.equalizer
             .lock()

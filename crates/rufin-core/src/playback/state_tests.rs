@@ -3,7 +3,7 @@ use super::super::{
     actor::{self, Message, Playback},
 };
 use super::*;
-use crate::playback::Placement;
+use crate::playback::QueuePlacement;
 use crate::{
     lyrics::LyricsService, settings::SettingsFile, source::SourceOwner, waveform::WaveformOwner,
 };
@@ -37,11 +37,13 @@ pub(in crate::playback) async fn seeded(
     let catalog = library::Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let page =
-        crate::playback::PlayRequest::from_input(library::QueueLoad::items(items), Placement::Now)
-            .prepare(&catalog, false, 0)
-            .await
-            .unwrap();
+    let page = crate::playback::PlayRequest::from_input(
+        library::QueueLoad::items(items),
+        QueuePlacement::Now,
+    )
+    .prepare(&catalog, false, 0)
+    .await
+    .unwrap();
     let mut sequence = Sequence::new();
     sequence.add_page(page, library::QueueReorderTarget::End, true);
     if let Some(request) = sequence.read_request() {
@@ -63,15 +65,9 @@ pub(in crate::playback) async fn seeded(
     catalog.save_queue(&sequence.snapshot()).await.unwrap();
     let runtime = tokio::runtime::Handle::current();
     let settings = SettingsFile::open(directory.path().join("settings.json")).unwrap();
-    let artwork = artwork::Artwork::new(
-        directory.path().join("artwork"),
-        runtime.clone(),
-        Arc::new(catalog.clone()),
-    )
-    .unwrap();
     let downloads = directory.path().join("downloads");
     let source = SourceOwner::open_dormant(
-        artwork.clone(),
+        directory.path().join("artwork"),
         Arc::new(catalog.clone()),
         downloads,
         settings.clone(),
@@ -81,7 +77,6 @@ pub(in crate::playback) async fn seeded(
         runtime.clone(),
         crate::source::SourceOutputs {
             events: async_channel::unbounded().0,
-            discovery: async_channel::unbounded().0,
             downloads: async_channel::unbounded().0,
         },
     );
@@ -119,10 +114,8 @@ pub(in crate::playback) async fn seeded(
         runtime,
         visualizer,
         visualizer_drain,
-        artwork,
         waveform,
         lyrics,
-        Arc::new(|_| {}),
         Vec::new,
         scrobbler,
         source,
@@ -229,7 +222,7 @@ async fn loaded_advancement_reuses_positions_without_a_store_read() {
                         .map(|index| batch_item(index, QueueProvenance::Manual))
                         .collect(),
                 ),
-                Placement::Now,
+                QueuePlacement::Now,
             )),
             &sample,
         )
@@ -276,7 +269,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(vec![batch_item(10, QueueProvenance::Manual)]),
-                Placement::Now,
+                QueuePlacement::Now,
             )),
             &sample,
         )
@@ -299,7 +292,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(vec![batch_item(20, QueueProvenance::Manual)]),
-                Placement::Now,
+                QueuePlacement::Now,
             )),
             &sample,
         )
@@ -404,7 +397,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
             .handle_command(
                 Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                     input.clone(),
-                    Placement::Now,
+                    QueuePlacement::Now,
                 )),
                 &sample,
             )
@@ -412,7 +405,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         if identity == "first" {
             first = Some((
                 session.pending_queue.as_ref().unwrap().0,
-                crate::playback::PlayRequest::from_input(input, Placement::Now)
+                crate::playback::PlayRequest::from_input(input, QueuePlacement::Now)
                     .prepare(&catalog, false, 0)
                     .await
                     .unwrap(),
@@ -439,7 +432,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
                         .map(|index| batch_item(index, QueueProvenance::Manual))
                         .collect(),
                 ),
-                Placement::Now,
+                QueuePlacement::Now,
             )),
             &sample,
         )
@@ -473,7 +466,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(vec![batch_item(999, QueueProvenance::Manual)]),
-                Placement::Now,
+                QueuePlacement::Now,
             )),
             &sample,
         )
@@ -740,7 +733,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
                 library::QueueLoad::items(vec![batch_item(10, QueueProvenance::Manual)]),
-                Placement::End,
+                QueuePlacement::End,
             )),
             &sample,
         )
@@ -866,7 +859,11 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
         local_period: "1970-01".into(),
     };
     for global_shuffle in [false, true] {
-        for placement in [Placement::Now, Placement::Next, Placement::Last] {
+        for placement in [
+            QueuePlacement::Now,
+            QueuePlacement::Next,
+            QueuePlacement::Last,
+        ] {
             for count in [1, 12] {
                 let existing = (1..=4)
                     .map(|id| batch_item(id, QueueProvenance::Manual))
@@ -943,12 +940,12 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                 };
                 let original = ordered(&before);
                 let result = ordered(&after);
-                if placement == Placement::Now {
+                if placement == QueuePlacement::Now {
                     assert_eq!(result.len(), count as usize);
                     assert_eq!(after.current_index, Some(0));
                 } else {
                     assert_eq!(after.current_index, before.current_index);
-                    let at = if placement == Placement::Next {
+                    let at = if placement == QueuePlacement::Next {
                         1
                     } else {
                         original.len()
@@ -1027,8 +1024,13 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             } else {
                 crate::playback::PlayRequest::captured
             };
-            let request = request(input, anchor, Placement::Now, collection_start && shuffled)
-                .with_context("collection".into());
+            let request = request(
+                input,
+                anchor,
+                QueuePlacement::Now,
+                collection_start && shuffled,
+            )
+            .with_context("collection".into());
             assert_eq!(
                 request.activation_context(shuffled).is_none(),
                 collection_start
@@ -1849,7 +1851,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
             .apply_batch(
                 crate::playback::PlayRequest::from_input(
                     library::QueueLoad::items(vec![batch_item(99, QueueProvenance::Manual)]),
-                    Placement::Now,
+                    QueuePlacement::Now,
                 ),
                 &sample,
             )
@@ -1892,7 +1894,7 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
     let page = crate::playback::PlayRequest::ordered(
         library::MemberRead::new(library::Collection::Playlist(key)).selection(),
         0,
-        Placement::Now,
+        QueuePlacement::Now,
         false,
     )
     .with_context("source".into())

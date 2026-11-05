@@ -1,4 +1,5 @@
 //! Clears application storage after the host has stopped its workers.
+use crate::string_error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,7 +35,7 @@ impl SettingsOwner {
             // A reset must report a locked keyring instead of accepting the session fallback.
             super::system_keyring_secret_store(&stored.secret_scope_id)
         } else {
-            self.secrets.current().map_err(error)?
+            self.secrets.current().map_err(string_error)?
         };
         Ok(StorageResetRequest {
             reset,
@@ -79,7 +80,7 @@ impl StorageResetRequest {
             keys.push(super::backup_password_key());
             keys.extend(connect_keys);
             for key in keys {
-                secrets.delete_secret(&key).map_err(error)?;
+                secrets.delete_secret(&key).map_err(string_error)?;
             }
             StoredSettings::default()
         };
@@ -87,11 +88,12 @@ impl StorageResetRequest {
         for root in roots {
             clear_directory(&root, &keep)?;
         }
-        fs::create_dir_all(paths.config_dir()).map_err(error)?;
+        fs::create_dir_all(paths.config_dir()).map_err(string_error)?;
         // Replace the whole document, including settings unknown to this version.
         super::write_private(
             &paths.settings_file(),
-            &serde_json::to_vec_pretty(&super::persistent_settings(&retained)).map_err(error)?,
+            &serde_json::to_vec_pretty(&super::persistent_settings(&retained))
+                .map_err(string_error)?,
         )
     }
 }
@@ -147,25 +149,21 @@ fn clear_directory(directory: &Path, keep: &[PathBuf]) -> Result<(), String> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(cause) => return Err(error(cause)),
+        Err(cause) => return Err(string_error(cause)),
     };
     for entry in entries {
-        let entry = entry.map_err(error)?;
+        let entry = entry.map_err(string_error)?;
         let path = entry.path();
         if keep.contains(&path) {
             continue;
         }
         if keep.iter().any(|kept| kept.starts_with(&path)) {
             clear_directory(&path, keep)?;
-        } else if entry.file_type().map_err(error)?.is_dir() {
-            fs::remove_dir_all(path).map_err(error)?;
+        } else if entry.file_type().map_err(string_error)?.is_dir() {
+            fs::remove_dir_all(path).map_err(string_error)?;
         } else {
-            fs::remove_file(path).map_err(error)?;
+            fs::remove_file(path).map_err(string_error)?;
         }
     }
     Ok(())
-}
-
-fn error(error: impl std::fmt::Display) -> String {
-    error.to_string()
 }

@@ -100,10 +100,7 @@ impl DetailLinkBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rufin_core::route::detail_links::{
-        album_row_artist_links, track_album_artist_links, track_artist_album_links,
-        track_artist_links,
-    };
+    use rufin_core::route::detail_links::{album_row_artist_links, track_artist_links};
 
     use library::{
         AlbumArtistLink, AlbumKey, AlbumRow, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
@@ -150,26 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_metadata_links_artist_and_album_destinations() {
-        let mut track = track("Artist");
-        track.links.artists = vec![credit(3, "Artist")];
-        track.metadata.album = "Album".to_string();
-        track.links.album_key = Some(AlbumKey::from_raw(8));
-        track.links.album_media_uri = Some(uri("album", 8));
-        let links = track_artist_album_links(&track);
-        assert_eq!(
-            links.route_for_link("0"),
-            Some(Route::ArtistDetail(uri("artist", 3)))
-        );
-        assert_eq!(
-            links.route_for_link("1"),
-            Some(Route::AlbumDetail(uri("album", 8)))
-        );
-    }
-
-    #[test]
-    fn album_and_track_album_artist_links_keep_all_credits() {
-        let credits = vec![credit(5, "First"), credit(6, "Second")];
+    fn album_artist_links_keep_all_credits() {
         let mut album = album();
         album.links.album_artists = vec![album_credit(5, "First"), album_credit(6, "Second")];
         let links = album_row_artist_links(&album);
@@ -180,17 +158,6 @@ mod tests {
         assert_eq!(
             links.route_for_link("1"),
             Some(Route::AlbumArtistDetail(uri("artist", 6)))
-        );
-        let mut track = track("First, Second");
-        track.links.album_artists = credits;
-        let links = track_album_artist_links(&track);
-        assert_eq!(
-            markup(&links),
-            r#"<a href="0" class="inline-detail-link">First</a>, <a href="1" class="inline-detail-link">Second</a>"#
-        );
-        assert_eq!(
-            links.route_for_link("0"),
-            Some(Route::AlbumArtistDetail(uri("artist", 5)))
         );
     }
 

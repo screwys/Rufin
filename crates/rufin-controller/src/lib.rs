@@ -96,8 +96,6 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
             paths,
             playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
-            Arc::new(|_| {}),
-            Arc::new(|_, _| {}),
         ))?;
         // An unattached presentation has no event backlog to retain.
         inputs.receivers.visualizer.close();

@@ -14,10 +14,11 @@ use rufin_connect::store::{self, Cursor, Row, Select, Store};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-use super::{ConnectOwner, error, session::SessionValue};
+use super::{ConnectOwner, session::SessionValue};
 use crate::settings::{
     ConfiguredSource, load_provider_secret, read_scrobbling, seal_credential, store_scrobbling,
 };
+use crate::string_error;
 
 const PAGE: usize = 512;
 /// Received rows apply kind by kind in this order, so parents come before their children.
@@ -98,8 +99,8 @@ impl Item {
         Ok(Self {
             id,
             parent,
-            digest: store::digest(digest).map_err(error)?,
-            value: serde_json::to_value(value).map_err(error)?,
+            digest: store::digest(digest).map_err(string_error)?,
+            value: serde_json::to_value(value).map_err(string_error)?,
             held: false,
         })
     }
@@ -289,20 +290,20 @@ impl Records {
         let recipient = self.key.to_public();
         let mut output =
             age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
-                .map_err(error)?
+                .map_err(string_error)?
                 .wrap_output(Vec::new())
-                .map_err(error)?;
-        output.write_all(bytes).map_err(error)?;
-        output.finish().map_err(error)
+                .map_err(string_error)?;
+        output.write_all(bytes).map_err(string_error)?;
+        output.finish().map_err(string_error)
     }
 
     pub(super) fn decrypt(&self, bytes: &[u8]) -> Result<Vec<u8>, String> {
         let mut input = age::Decryptor::new(bytes)
-            .map_err(error)?
+            .map_err(string_error)?
             .decrypt(std::iter::once(&self.key as &dyn age::Identity))
-            .map_err(error)?;
+            .map_err(string_error)?;
         let mut plain = Vec::new();
-        input.read_to_end(&mut plain).map_err(error)?;
+        input.read_to_end(&mut plain).map_err(string_error)?;
         Ok(plain)
     }
 
@@ -311,7 +312,7 @@ impl Records {
             .store
             .bodies("device")
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .filter_map(|row| {
                 let value = serde_json::from_value(row.value?).ok()?;
@@ -378,7 +379,7 @@ impl Records {
             .store
             .peers()
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .find(|row| row.device == peer)
             .map_or(0, |row| row.pulled))
@@ -447,7 +448,11 @@ impl Records {
             .filter(|change| kind(&change.id) == "session")
             .map(|change| (change.id.clone(), change.value.clone()))
             .collect::<Vec<_>>();
-        let sequence = self.store.write(changes, listened).await.map_err(error)?;
+        let sequence = self
+            .store
+            .write(changes, listened)
+            .await
+            .map_err(string_error)?;
         self.remember_sessions(sessions);
         Ok(sequence)
     }
@@ -460,7 +465,7 @@ impl Records {
         select: Select<'_>,
         tombstones: bool,
     ) -> Result<Vec<store::Change>, String> {
-        let stored = self.store.digests(select).await.map_err(error)?;
+        let stored = self.store.digests(select).await.map_err(string_error)?;
         let mut seen = HashSet::new();
         let mut changes = Vec::new();
         for item in items {
@@ -652,7 +657,7 @@ impl Records {
             .catalog
             .playlist_copies(Some(&keys))
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .pop()
         else {
             return Ok(Vec::new());
@@ -664,12 +669,12 @@ impl Records {
 
     /// Listens without a record, and tombstones for records of listens that are gone.
     async fn unrecorded_listens(&self) -> Result<(Vec<store::Change>, Option<i64>), String> {
-        let listens = self.catalog.listen_ids().await.map_err(error)?;
+        let listens = self.catalog.listen_ids().await.map_err(string_error)?;
         let listened = self
             .store
             .profile()
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .map(|row| row.listened);
         let last = listens
             .iter()
@@ -680,7 +685,7 @@ impl Records {
             .store
             .digests(Select::Kind("listen"))
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         let present = listens
             .iter()
             .map(|(id, _)| format!("listen:{id}"))
@@ -705,7 +710,7 @@ impl Records {
     /// Listens recorded since the last pass, and a few before: a listen can be written again
     /// with a longer listening time.
     async fn heard_listens(&self) -> Result<(Vec<store::Change>, Option<i64>), String> {
-        let profile = self.store.profile().await.map_err(error)?;
+        let profile = self.store.profile().await.map_err(string_error)?;
         let mut after = profile.map_or(0, |row| row.listened).saturating_sub(16);
         let mut changes = Vec::new();
         let mut last = None;
@@ -714,7 +719,7 @@ impl Records {
                 .catalog
                 .listens_after(library::ListenKey::from_raw(after), PAGE)
                 .await
-                .map_err(error)?;
+                .map_err(string_error)?;
             let Some(final_key) = listens.last().map(|listen| listen.listen_key) else {
                 break;
             };
@@ -732,12 +737,12 @@ impl Records {
             .store
             .digests(Select::Kind("analysis"))
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         let missing = self
             .catalog
             .analysis_hashes()
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .iter()
             .map(|hash| hex(hash))
             .filter(|hash| !stored.contains_key(&format!("analysis:{hash}")))
@@ -762,7 +767,11 @@ impl Records {
             },
             "listen" => match objects {
                 Some(ids) => {
-                    let listens = self.catalog.listens_by_id(ids).await.map_err(error)?;
+                    let listens = self
+                        .catalog
+                        .listens_by_id(ids)
+                        .await
+                        .map_err(string_error)?;
                     self.encode_listens(listens).await?
                 }
                 None => Vec::new(),
@@ -825,7 +834,7 @@ impl Records {
             .catalog
             .track_objects(uris)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .filter(|(_, source, _)| local.contains(source))
             .map(|(uri, source, object)| {
@@ -859,7 +868,7 @@ impl Records {
             .catalog
             .track_uris(&objects)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .filter_map(|(source, object, track)| Some((named.remove(&(source, object))?, track)))
             .collect())
@@ -896,6 +905,7 @@ impl Records {
         Ok(self
             .owner()?
             .settings
+            .file()
             .load()
             .sources
             .configured
@@ -913,7 +923,7 @@ impl Records {
         uris: Option<&[String]>,
         portable: Option<HashMap<String, String>>,
     ) -> Result<Vec<Item>, String> {
-        let states = self.catalog.user_states(uris).await.map_err(error)?;
+        let states = self.catalog.user_states(uris).await.map_err(string_error)?;
         let portable = match portable {
             Some(portable) => portable,
             None => {
@@ -980,7 +990,7 @@ impl Records {
         self.catalog
             .legacy_activity(keys)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .map(|record| {
                 Item::new(
@@ -1010,7 +1020,12 @@ impl Records {
         portable: Option<HashMap<String, String>>,
     ) -> Result<Vec<Item>, String> {
         let mut tracks = BTreeMap::<String, Vec<LyricsValue>>::new();
-        for row in self.catalog.picked_lyrics(uris).await.map_err(error)? {
+        for row in self
+            .catalog
+            .picked_lyrics(uris)
+            .await
+            .map_err(string_error)?
+        {
             tracks.entry(row.media_uri).or_default().push(LyricsValue {
                 authority: row.authority,
                 role: row.role,
@@ -1055,7 +1070,12 @@ impl Records {
 
     async fn playlist_items(&self) -> Result<Vec<Item>, String> {
         let mut items = Vec::new();
-        for playlist in self.catalog.playlist_copies(None).await.map_err(error)? {
+        for playlist in self
+            .catalog
+            .playlist_copies(None)
+            .await
+            .map_err(string_error)?
+        {
             let mosaic = self.portable_mosaic(playlist.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("playlist:{}", playlist.object_id),
@@ -1077,7 +1097,7 @@ impl Records {
     async fn portable_mosaic(&self, mosaic: Option<&str>) -> Result<Option<Vec<String>>, String> {
         match mosaic {
             Some(mosaic) => Ok(Some(
-                self.portable_all(serde_json::from_str(mosaic).map_err(error)?)
+                self.portable_all(serde_json::from_str(mosaic).map_err(string_error)?)
                     .await?,
             )),
             None => Ok(None),
@@ -1088,7 +1108,7 @@ impl Records {
         match mosaic {
             Some(uris) => serde_json::to_string(&self.local_all(&uris).await?)
                 .map(Some)
-                .map_err(error),
+                .map_err(string_error),
             None => Ok(None),
         }
     }
@@ -1104,7 +1124,7 @@ impl Records {
             .catalog
             .playlist_entry_copies(playlists, entries)
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         let portable = self
             .portable(
                 &copies
@@ -1142,7 +1162,12 @@ impl Records {
 
     async fn smart_items(&self) -> Result<Vec<Item>, String> {
         let mut items = Vec::new();
-        for smart in self.catalog.smart_playlist_copies().await.map_err(error)? {
+        for smart in self
+            .catalog
+            .smart_playlist_copies()
+            .await
+            .map_err(string_error)?
+        {
             let mosaic = self.portable_mosaic(smart.mosaic.as_deref()).await?;
             items.push(Item::new(
                 format!("smart:{}", smart.object_id),
@@ -1167,7 +1192,7 @@ impl Records {
         self.catalog
             .playlist_images(objects, objects.is_some())
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .map(|image| {
                 let digest = (&image.mime, &image.revision);
@@ -1191,7 +1216,7 @@ impl Records {
         self.catalog
             .analysis(hashes)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .map(|copy| {
                 Item::new(
@@ -1215,7 +1240,7 @@ impl Records {
         self.catalog
             .album_loudness_rows()
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .map(|(members, lufs, true_peak)| {
                 Item::new(
@@ -1233,8 +1258,8 @@ impl Records {
     /// profile key, so no unkeyed hash of a login is stored or sent.
     async fn settings_items(&self) -> Result<Vec<Item>, String> {
         let owner = self.owner()?;
-        let stored = owner.settings.load();
-        let secrets = Arc::clone(&owner.secrets);
+        let stored = owner.settings.file().load();
+        let secrets = Arc::clone(owner.settings.secrets());
         let device = self.device.clone();
         let key = blake3::derive_key("Rufin Connect setting digests", self.key_text().as_bytes());
         let mut items = tokio::task::spawn_blocking(move || {
@@ -1258,8 +1283,8 @@ impl Records {
                     &preference(&stored.ui, name)?,
                 )?);
             }
-            let scrobbling =
-                serde_json::to_value(read_scrobbling(&stored, secrets.as_ref())?).map_err(error)?;
+            let scrobbling = serde_json::to_value(read_scrobbling(&stored, secrets.as_ref())?)
+                .map_err(string_error)?;
             for service in SCROBBLING {
                 items.push(secret_item(
                     format!("setting:scrobbling:{service}"),
@@ -1270,7 +1295,7 @@ impl Records {
             Ok::<_, String>(items)
         })
         .await
-        .map_err(error)??;
+        .map_err(string_error)??;
         let config = owner.device_config();
         items.push(Item::new(
             "setting:relay".into(),
@@ -1306,7 +1331,7 @@ impl Records {
             self.store
                 .newer(rows)
                 .await
-                .map_err(error)?
+                .map_err(string_error)?
                 .into_iter()
                 .map(|row| (from.to_owned(), row)),
         );
@@ -1335,7 +1360,7 @@ impl Records {
             self.store
                 .receive(&applied, cursor(from, target))
                 .await
-                .map_err(error)?;
+                .map_err(string_error)?;
             self.remember_sessions(
                 applied
                     .into_iter()
@@ -1429,14 +1454,14 @@ impl Records {
                 .catalog
                 .playlist_copies(None)
                 .await
-                .map_err(error)?
+                .map_err(string_error)?
                 .into_iter()
                 .map(|playlist| playlist.object_id)
                 .chain(
                     self.catalog
                         .smart_playlist_copies()
                         .await
-                        .map_err(error)?
+                        .map_err(string_error)?
                         .into_iter()
                         .map(|smart| smart.object_id),
                 )
@@ -1499,7 +1524,7 @@ impl Records {
                 catalog
                     .put_playlist_folders(&folders)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 let keys =
                     resident_keys(catalog, CatalogKind::PlaylistFolder, &gone("folder:")).await?;
                 catalog
@@ -1511,7 +1536,7 @@ impl Records {
                     )
                     .await
                     .map(drop)
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "playlist" => {
                 let mut playlists = Vec::new();
@@ -1528,7 +1553,7 @@ impl Records {
                 catalog
                     .put_playlist_copies(&playlists)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 let keys =
                     resident_keys(catalog, CatalogKind::Playlist, &gone("playlist:")).await?;
                 catalog
@@ -1540,7 +1565,7 @@ impl Records {
                     )
                     .await
                     .map(drop)
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "smart" => {
                 let mut playlists = Vec::new();
@@ -1557,7 +1582,7 @@ impl Records {
                 catalog
                     .put_smart_playlist_copies(&playlists)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 let keys =
                     resident_keys(catalog, CatalogKind::SmartPlaylist, &gone("smart:")).await?;
                 catalog
@@ -1569,7 +1594,7 @@ impl Records {
                     )
                     .await
                     .map(drop)
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "artwork" => {
                 let mut images = Vec::new();
@@ -1580,12 +1605,15 @@ impl Records {
                         let value: ArtworkValue = decode(row)?;
                         let bytes = base64::engine::general_purpose::STANDARD
                             .decode(value.bytes.ok_or("The image is missing")?)
-                            .map_err(error)?;
+                            .map_err(string_error)?;
                         Some((bytes, value.mime))
                     };
                     images.push((object(row, "artwork:")?, image));
                 }
-                catalog.put_playlist_images(images).await.map_err(error)
+                catalog
+                    .put_playlist_images(images)
+                    .await
+                    .map_err(string_error)
             }
             "entry" => {
                 let values = live
@@ -1617,12 +1645,12 @@ impl Records {
                 catalog
                     .put_playlist_entries(&entries)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 catalog
                     .remove_playlist_entries_by_object(&gone("entry:"))
                     .await
                     .map(|_| ())
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "state" => {
                 let uris = rows
@@ -1647,7 +1675,7 @@ impl Records {
                         changed_at: value.changed_at,
                     });
                 }
-                catalog.put_user_states(&states).await.map_err(error)
+                catalog.put_user_states(&states).await.map_err(string_error)
             }
             "lyrics" => {
                 let uris = rows
@@ -1678,7 +1706,10 @@ impl Records {
                         .collect();
                     tracks.push((uri, picked));
                 }
-                catalog.replace_picked_lyrics(&tracks).await.map_err(error)
+                catalog
+                    .replace_picked_lyrics(&tracks)
+                    .await
+                    .map_err(string_error)
             }
             "listen" => {
                 let mut listens = live
@@ -1706,11 +1737,14 @@ impl Records {
                         map(uri);
                     }
                 }
-                catalog.import_listens(&listens).await.map_err(error)?;
+                catalog
+                    .import_listens(&listens)
+                    .await
+                    .map_err(string_error)?;
                 catalog
                     .delete_listens(&gone("listen:"))
                     .await
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "legacy" => {
                 let mut records = Vec::new();
@@ -1731,12 +1765,18 @@ impl Records {
                         album: value.album,
                     });
                 }
-                catalog.put_legacy_activity(&records).await.map_err(error)?;
+                catalog
+                    .put_legacy_activity(&records)
+                    .await
+                    .map_err(string_error)?;
                 let keys = gone("legacy:")
                     .iter()
                     .map(|key| legacy_key(key))
                     .collect::<Result<Vec<_>, String>>()?;
-                catalog.delete_legacy_activity(&keys).await.map_err(error)
+                catalog
+                    .delete_legacy_activity(&keys)
+                    .await
+                    .map_err(string_error)
             }
             "analysis" => {
                 let copies = live
@@ -1760,7 +1800,7 @@ impl Records {
                     .put_analysis_copies(&copies)
                     .await
                     .map(drop)
-                    .map_err(error)
+                    .map_err(string_error)
             }
             "album-loudness" => {
                 let values = live
@@ -1772,7 +1812,7 @@ impl Records {
                 catalog
                     .put_album_loudness_rows(&values)
                     .await
-                    .map_err(error)
+                    .map_err(string_error)
             }
             _ => Ok(()),
         }
@@ -1813,7 +1853,7 @@ impl Records {
                     let value = row.value.clone().ok_or("The preference is missing")?;
                     let name = name.to_owned();
                     owner
-                        .settings_apply
+                        .settings
                         .update_preferences(move |ui| set_preference(ui, &name, value))?;
                 }
                 "scrobbling" if !row.deleted => {
@@ -1835,7 +1875,7 @@ impl Records {
         }
         for (integration, id) in forgotten {
             if integration {
-                owner.settings_apply.restore(
+                owner.settings.restore(
                     |stored| {
                         stored
                             .sources
@@ -1847,13 +1887,14 @@ impl Records {
                 )?;
             } else if owner
                 .settings
+                .file()
                 .load()
                 .sources
                 .configured
                 .iter()
                 .any(|source| source.configuration.source_id == id)
             {
-                owner.source.forget_source(id).await.map_err(error)?;
+                owner.source.forget_source(id).await.map_err(string_error)?;
             }
         }
         Ok(())
@@ -1866,14 +1907,14 @@ impl Records {
         owner: &Arc<ConnectOwner>,
         sources: Vec<(bool, SourceId, SourceValue)>,
     ) -> Result<(), String> {
-        let stored = owner.settings.load();
+        let stored = owner.settings.file().load();
         let configured = stored
             .sources
             .configured
             .iter()
             .map(|source| source.configuration.source_id.clone())
             .collect::<std::collections::HashSet<_>>();
-        let secrets = Arc::clone(&owner.secrets);
+        let secrets = Arc::clone(owner.settings.secrets());
         let device = self.device.clone();
         let names = self.devices();
         let prepared = tokio::task::spawn_blocking(move || {
@@ -1901,7 +1942,7 @@ impl Records {
                 .collect::<Result<Vec<_>, String>>()
         })
         .await
-        .map_err(error)??;
+        .map_err(string_error)??;
         // Only a source whose configuration changed sets the sources up again.
         if prepared.is_empty() {
             return Ok(());
@@ -1914,7 +1955,7 @@ impl Records {
             .map(|(_, source)| source.configuration.clone())
             .collect::<Vec<_>>();
         let catalog = Arc::clone(&self.catalog);
-        let settings = owner.settings_apply.clone();
+        let settings = owner.settings.clone();
         owner
             .source
             .restore_user_state(true, true, || async move {
@@ -1958,7 +1999,7 @@ impl Records {
                     )
                 })
                 .await
-                .map_err(error)??;
+                .map_err(string_error)??;
                 for (_, source) in prepared {
                     let configuration = &source.configuration;
                     catalog
@@ -1968,7 +2009,7 @@ impl Records {
                             &configuration.name,
                         )
                         .await
-                        .map_err(error)?;
+                        .map_err(string_error)?;
                 }
                 Ok(())
             })
@@ -2001,19 +2042,19 @@ impl Records {
         service: &str,
         value: ScrobblingValue,
     ) -> Result<(), String> {
-        let file = owner.settings.clone();
-        let secrets = Arc::clone(&owner.secrets);
+        let file = owner.settings.file().clone();
+        let secrets = Arc::clone(owner.settings.secrets());
         let service = service.to_owned();
         let prepared = tokio::task::spawn_blocking(move || {
             let mut prepared = crate::settings::StoredSettings::clone(&file.load());
             let mut settings = serde_json::to_value(read_scrobbling(&prepared, secrets.as_ref())?)
-                .map_err(error)?;
+                .map_err(string_error)?;
             let mut account = value.account;
             let secret: BTreeMap<String, String> = value
                 .secret
                 .map(|secret| serde_json::from_str(&secret))
                 .transpose()
-                .map_err(error)?
+                .map_err(string_error)?
                 .unwrap_or_default();
             for descriptor in crate::scrobbling::secret_descriptors()
                 .iter()
@@ -2024,13 +2065,13 @@ impl Records {
             }
             settings[&service] = account;
             let settings: crate::scrobbling::Settings =
-                serde_json::from_value(settings).map_err(error)?;
+                serde_json::from_value(settings).map_err(string_error)?;
             store_scrobbling(&mut prepared, secrets.as_ref(), &settings)?;
             Ok::<_, String>(prepared)
         })
         .await
-        .map_err(error)??;
-        owner.settings_apply.restore(
+        .map_err(string_error)??;
+        owner.settings.restore(
             |stored| {
                 stored.scrobbling = prepared.scrobbling;
                 stored.scrobbling_credentials = prepared.scrobbling_credentials;
@@ -2056,8 +2097,9 @@ impl Records {
         if let Some(sealed) = value.get("secret").and_then(Value::as_str) {
             let sealed = base64::engine::general_purpose::STANDARD
                 .decode(sealed)
-                .map_err(error)?;
-            value["secret"] = json!(String::from_utf8(self.decrypt(&sealed)?).map_err(error)?);
+                .map_err(string_error)?;
+            value["secret"] =
+                json!(String::from_utf8(self.decrypt(&sealed)?).map_err(string_error)?);
         }
         Ok(())
     }
@@ -2106,7 +2148,7 @@ impl rufin_connect::sync::Values for Records {
 
 /// A setting item whose digest covers its secret as a hash keyed with `key`.
 fn secret_item(id: String, value: &impl Serialize, key: &[u8; 32]) -> Result<Item, String> {
-    let value = serde_json::to_value(value).map_err(error)?;
+    let value = serde_json::to_value(value).map_err(string_error)?;
     let mut digest = value.clone();
     if let Some(secret) = digest.get("secret").and_then(Value::as_str) {
         digest["secret"] = json!(blake3::keyed_hash(key, secret.as_bytes()).to_hex().as_str());
@@ -2130,7 +2172,7 @@ async fn resident_keys(
     catalog
         .catalog_keys(kind, None, objects, &library::ReadCancellation::new())
         .await
-        .map_err(error)
+        .map_err(string_error)
 }
 
 fn object(row: &Row, prefix: &str) -> Result<String, String> {
@@ -2141,7 +2183,8 @@ fn object(row: &Row, prefix: &str) -> Result<String, String> {
 }
 
 fn decode<T: DeserializeOwned>(row: &Row) -> Result<T, String> {
-    serde_json::from_value(row.value.clone().ok_or("The record value is missing")?).map_err(error)
+    serde_json::from_value(row.value.clone().ok_or("The record value is missing")?)
+        .map_err(string_error)
 }
 
 pub(super) fn hex(bytes: &[u8]) -> String {
@@ -2177,11 +2220,10 @@ fn source_value(
     let configuration = &source.configuration;
     let owner = match configuration.kind.as_str() {
         "local" => Some(device.to_owned()),
-        "peer" => {
-            serde_json::from_str::<Value>(&configuration.provider_payload).map_err(error)?["device"]
-                .as_str()
-                .map(str::to_owned)
-        }
+        "peer" => serde_json::from_str::<Value>(&configuration.provider_payload)
+            .map_err(string_error)?["device"]
+            .as_str()
+            .map(str::to_owned),
         _ => None,
     };
     if owner.is_some() {
@@ -2304,7 +2346,7 @@ fn preference(ui: &crate::settings::Settings, name: &str) -> Result<Value, Strin
         "prefer_distinct_track_covers" => json!(ui.application.prefer_distinct_track_covers),
         "use_sort_tags" => json!(ui.application.use_sort_tags),
         "external_metadata_enabled" => json!(ui.application.external_metadata_enabled),
-        "sidebar.pins" => serde_json::to_value(&ui.sidebar.pins).map_err(error)?,
+        "sidebar.pins" => serde_json::to_value(&ui.sidebar.pins).map_err(string_error)?,
         "lyrics.suppressed_auto_lyrics" => json!(ui.lyrics.suppressed_auto_lyrics_track_ids),
         _ => Value::Null,
     })
@@ -2316,7 +2358,7 @@ fn set_preference(
     value: Value,
 ) -> Result<(), String> {
     fn read<T: DeserializeOwned>(value: Value) -> Result<T, String> {
-        serde_json::from_value(value).map_err(error)
+        serde_json::from_value(value).map_err(string_error)
     }
     match name {
         "prefer_distinct_track_covers" => {
@@ -2352,7 +2394,7 @@ fn scrobbling_value(settings: &Value, service: &str) -> Result<ScrobblingValue, 
         secret: (!secret.is_empty())
             .then(|| serde_json::to_string(&secret))
             .transpose()
-            .map_err(error)?,
+            .map_err(string_error)?,
     })
 }
 

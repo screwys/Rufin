@@ -596,7 +596,7 @@ impl GstEngine {
 
     fn prepare_incoming(&mut self, next: &PreparedNext) {
         // The output takes one stream while passed through: no overlap or second player.
-        if !next.stream.allows_preloading || self.active_pipeline().is_bitstream() {
+        if self.active_pipeline().is_bitstream() {
             self.clear_incoming();
             return;
         }
@@ -619,9 +619,6 @@ impl GstEngine {
                 return None;
             }
             let current = shared.current.as_ref()?;
-            if !current.stream.allows_preloading {
-                return None;
-            }
             let should_prepare = match next.transition {
                 NextTransition::Crossfade { .. } => true,
                 NextTransition::Gapless => gapless_uses_separate_pipeline(current, next),
@@ -2767,11 +2764,10 @@ impl GstEngine {
                 .as_ref()
                 .filter(|next| {
                     (next.transition == NextTransition::Gapless || bitstream)
-                        && next.stream.allows_preloading
-                        && shared.current.as_ref().is_some_and(|current| {
-                            current.stream.allows_preloading
-                                && current.stream.uri() == next.stream.uri()
-                        })
+                        && shared
+                            .current
+                            .as_ref()
+                            .is_some_and(|current| current.stream.uri() == next.stream.uri())
                 })
                 .cloned();
             if let Some(next) = next.as_ref() {
@@ -3398,11 +3394,7 @@ pub(super) fn handle_about_to_finish(
 }
 
 fn about_to_finish_may_query(shared: &SharedBackendState, slot: Slot, id: PipelineId) -> bool {
-    shared.pipeline_is_current(slot, id)
-        && shared
-            .current
-            .as_ref()
-            .is_some_and(|current| current.stream.allows_preloading)
+    shared.pipeline_is_current(slot, id) && shared.current.is_some()
 }
 
 fn about_to_finish_action_for_pipeline(
@@ -3468,8 +3460,6 @@ fn gapless_preload_should_run(
         return false;
     };
     (next.transition == NextTransition::Gapless || bitstream)
-        && next.stream.allows_preloading
-        && current.stream.allows_preloading
         && current.stream.window().is_none()
         && !gapless_uses_separate_pipeline(current, next)
 }
@@ -5447,41 +5437,6 @@ mod tests {
             about_to_finish_action_for_pipeline(&mut shared, &mut gapless, Slot::Primary, pipeline, true),
             AboutToFinishAction::Preload(preloaded) if *preloaded == next
         ));
-    }
-
-    #[test]
-    fn streams_without_preloading_keep_the_next_reserved() {
-        let mut gapless = GaplessPlayback::default();
-        let pipeline = PipelineId(5);
-        let current_run = RunId::new(10);
-        let next = PreparedNext::new(
-            RunId::new(11),
-            ResolvedStream::new("file:///music/next.flac"),
-            NextTransition::Gapless,
-        );
-        let mut shared = SharedBackendState::new();
-        shared.active = Slot::Primary;
-        shared.current = Some(PreparedRun {
-            run: current_run,
-            stream: PreparedStream::from(ResolvedStream::new("file:///music/current.mod"))
-                .without_preloading(),
-        });
-        shared.next = Some(next.clone());
-        shared.set_pipeline_id(Slot::Primary, Some(pipeline));
-
-        assert!(!about_to_finish_may_query(&shared, Slot::Primary, pipeline));
-        assert_eq!(
-            about_to_finish_action_for_pipeline(
-                &mut shared,
-                &mut gapless,
-                Slot::Primary,
-                pipeline,
-                true
-            ),
-            AboutToFinishAction::Ignore
-        );
-        assert_eq!(shared.next, Some(next));
-        assert!(gapless.pending.is_none());
     }
 
     #[test]

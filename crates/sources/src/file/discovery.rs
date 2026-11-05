@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek};
 use std::path::Path;
-use std::sync::OnceLock;
 
 use gstreamer_pbutils::gst::{self, glib::translate::IntoGlib};
 use gstreamer_pbutils::prelude::*;
@@ -145,13 +144,6 @@ fn image_from_info(info: &DiscovererInfo, picture_index: u32) -> SourceResult<Im
         bytes: mapped.as_slice().to_vec(),
         content_type,
     })
-}
-
-fn ensure_gstreamer_initialized() -> Result<(), String> {
-    static INITIALIZED: OnceLock<Result<(), String>> = OnceLock::new();
-    INITIALIZED
-        .get_or_init(|| gst::init().map_err(|error| error.to_string()))
-        .clone()
 }
 
 fn metadata_from_info(info: &DiscovererInfo) -> Option<Metadata> {
@@ -578,6 +570,7 @@ fn tag_bpm(tags: &ScopedTags) -> Option<u16> {
 mod tests {
 
     use super::*;
+    use audio_processing::ensure_gstreamer_initialized;
 
     #[test]
     fn tag_precedence_and_extended_comments_map_to_mka_metadata() {

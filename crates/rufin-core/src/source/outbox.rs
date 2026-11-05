@@ -1,17 +1,19 @@
-//! Delivers favorites and ratings to their servers. The feature runs only while deliveries wait:
-//! the operation that queues one wakes it, and so does a refresh that may have made a server
-//! reachable. It retries deferred ones when they are due.
+//! Delivers favorites and ratings to their servers while a configured server takes them. A
+//! queued delivery wakes it, and so does a refresh that may have made a server reachable. It
+//! retries deferred ones when they are due.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use library::{Delivery, DeliveryKind, SourceKind};
+use library::{Catalog, Change, Delivery, DeliveryKind, Scope, SourceKind, SourcePhase};
 use sources::{SourceEntityKind, SourceError, SourceId};
 use tracing::info;
 
 use super::{Shared, SourceOwner, source_error_is_temporary, unix_seconds};
+use crate::features::{Feature, Pass};
 use crate::runtime::{SourceEvent, SourceNotice, SourceNoticeKind};
+use crate::settings::StoredSettings;
 
 /// How long a server that could not take a delivery waits before the next try.
 const RETRY_SECONDS: i64 = 30;
@@ -21,36 +23,86 @@ fn keeps_copy(kind: SourceKind, delivery: &Delivery) -> bool {
     delivery.kind == DeliveryKind::Rating && kind.keeps_rating(delivery.value.unwrap_or(0))
 }
 
-/// Delivers what is due, then waits for the next due time or for a delivery just queued.
-pub(super) async fn run(shared: Weak<Shared>) {
-    let Some(catalog) = shared.upgrade().map(|shared| shared.catalog.clone()) else {
-        return;
-    };
-    catalog.loaded().await;
-    loop {
-        let Some(owner) = shared.upgrade().map(|shared| SourceOwner { shared }) else {
-            return;
-        };
-        let next = match owner.shared.catalog.next_delivery_at().await {
-            Ok(next) => next,
-            Err(error) => {
-                owner.shared.warn_nonfatal(&error.to_string());
-                Some(unix_seconds().saturating_add(RETRY_SECONDS))
-            }
-        };
-        let delay = next.map(|next| next.saturating_sub(unix_seconds()).max(0) as u64);
-        if delay == Some(0) {
-            owner.deliver_due().await;
-            continue;
+pub(crate) struct Outbox {
+    shared: Weak<Shared>,
+    /// The pass that runs when the next deferred delivery is due.
+    retry: Mutex<Option<tokio::task::AbortHandle>>,
+}
+
+impl Outbox {
+    pub(super) fn new(shared: Weak<Shared>) -> Self {
+        Self {
+            shared,
+            retry: Mutex::new(None),
         }
-        let wake = Arc::clone(&owner.shared.outbox);
-        drop(owner);
-        let woken = wake.notified();
-        match delay {
-            Some(delay) => {
-                let _ = tokio::time::timeout(Duration::from_secs(delay), woken).await;
+    }
+}
+
+impl Feature for Outbox {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        settings.sources.configured.iter().any(|source| {
+            source.configuration.is(|kind| {
+                kind.delivers(DeliveryKind::Favorite) || kind.delivers(DeliveryKind::Rating)
+            })
+        })
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Held { .. }
+                | Scope::Source {
+                    phase: SourcePhase::Completed,
+                    ..
+                }
+        )
+    }
+
+    /// Delivers what is due, then waits for the next due time.
+    fn apply(self: Arc<Self>, _: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            loop {
+                let Some(owner) = self.shared.upgrade().map(|shared| SourceOwner { shared }) else {
+                    return;
+                };
+                let next = match owner.shared.catalog.next_delivery_at().await {
+                    Ok(next) => next,
+                    Err(error) => {
+                        owner.shared.warn_nonfatal(&error.to_string());
+                        Some(unix_seconds().saturating_add(RETRY_SECONDS))
+                    }
+                };
+                let delay = next.map(|next| next.saturating_sub(unix_seconds()).max(0) as u64);
+                if delay == Some(0) {
+                    owner.deliver_due().await;
+                    continue;
+                }
+                let retry = delay.map(|delay| {
+                    let outbox = Arc::clone(&self);
+                    owner
+                        .shared
+                        .runtime
+                        .spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(delay)).await;
+                            outbox.apply(None).await;
+                        })
+                        .abort_handle()
+                });
+                let previous = std::mem::replace(
+                    &mut *self.retry.lock().unwrap_or_else(|p| p.into_inner()),
+                    retry,
+                );
+                if let Some(previous) = previous {
+                    previous.abort();
+                }
+                return;
             }
-            None => woken.await,
+        })
+    }
+
+    fn stopped(&self) {
+        if let Some(retry) = self.retry.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            retry.abort();
         }
     }
 }

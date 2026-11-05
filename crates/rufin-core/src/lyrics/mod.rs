@@ -170,21 +170,31 @@ impl LyricsService {
             search_lane: Arc::new(Semaphore::new(1)),
             write_lane: Arc::new(Semaphore::new(1)),
         });
-        let mut committed = settings.changes();
-        let owner = Arc::downgrade(&service);
-        service.runtime.spawn(async move {
-            let mut previous = Arc::clone(&committed.borrow_and_update());
-            while committed.changed().await.is_ok() {
-                let current = Arc::clone(&committed.borrow_and_update());
-                let Some(service) = owner.upgrade() else {
-                    return;
-                };
+        crate::settings::follow(
+            &service.runtime,
+            settings,
+            Arc::downgrade(&service),
+            |service, previous, current| {
                 if previous.ui.lyrics != current.ui.lyrics
                     || previous.ui.application.private_mode != current.ui.application.private_mode
                 {
-                    service.settings_changed(&previous, &current);
+                    service.settings_changed(previous, current);
                 }
-                previous = current;
+                std::future::ready(())
+            },
+        );
+        // Lyrics an edit saved show at once when they are the current track's.
+        let mut edits = service.source_owner.lyrics_edits();
+        let edited = Arc::downgrade(&service);
+        service.runtime.spawn(async move {
+            while edits.changed().await.is_ok() {
+                let edit = edits.borrow_and_update().clone();
+                let Some(service) = edited.upgrade() else {
+                    return;
+                };
+                if let Some((uri, text)) = edit {
+                    service.accept_edited(&uri, &text).await;
+                }
             }
         });
         service
@@ -223,7 +233,7 @@ impl LyricsService {
                     context.playable = current.context.playable.take();
                     let write_check = media_changed.then(|| context.clone());
                     current.context = context;
-                    (media_changed.then(|| current_event(current)), write_check)
+                    (media_changed.then(|| current_lyrics(current)), write_check)
                 } else {
                     cancel_current_work(&mut state);
                     let request = self.next_request.fetch_add(1, Ordering::AcqRel);
@@ -237,14 +247,14 @@ impl LyricsService {
                         automatic_attempted: false,
                         writable: false,
                     };
-                    let event = Some(current_event(&current));
+                    let event = Some(current_lyrics(&current));
                     state.current = Some(current);
                     state.search = None;
                     (event, Some(write_check))
                 }
             };
         if let Some(event) = event {
-            self.publish(event);
+            self.publish_current(event);
         }
         if let Some(context) = write_check {
             self.check_write_access(context);
@@ -323,9 +333,9 @@ impl LyricsService {
                     return;
                 }
                 current.writable = writable;
-                current_event(current)
+                current_lyrics(current)
             };
-            service.publish(event);
+            service.publish_current(event);
         });
     }
 
@@ -438,7 +448,7 @@ impl LyricsService {
         state.current = None;
         state.search = None;
         drop(state);
-        self.publish(LyricsEvent::Current(CurrentLyrics::Cleared));
+        self.publish_current(CurrentLyrics::Cleared);
     }
 
     fn load(self: &Arc<Self>, media_id: CurrentMediaId) {
@@ -513,9 +523,9 @@ impl LyricsService {
             else {
                 return;
             };
-            (current_event(current), current.bundle.clone())
+            (current_lyrics(current), current.bundle.clone())
         };
-        self.publish(event);
+        self.publish_current(event);
         let service = Arc::clone(self);
         let task = self.runtime.spawn(async move {
             if !service.matches_current(id) {
@@ -1012,11 +1022,11 @@ impl LyricsService {
                 current.content = content;
                 current.bundle = Some(Arc::clone(&bundle));
                 current.loading &= !complete;
-                let event = current_event(current);
+                let event = current_lyrics(current);
                 if complete {
                     state.current_task = None;
                 }
-                service.publish(event);
+                service.publish_current(event);
                 return;
             }
         })
@@ -1033,11 +1043,11 @@ impl LyricsService {
                 return;
             };
             current.loading = false;
-            let event = current_event(current);
+            let event = current_lyrics(current);
             state.current_task = None;
             event
         };
-        self.publish(event);
+        self.publish_current(event);
     }
 
     fn matches_current(&self, request: u64) -> bool {
@@ -1276,9 +1286,9 @@ impl LyricsService {
                 !current.writable,
             )
         };
-        self.publish(LyricsEvent::Current(CurrentLyrics::Loading {
+        self.publish_current(CurrentLyrics::Loading {
             media_id: request.0.context.media.id.clone(),
-        }));
+        });
         Some(request)
     }
 
@@ -1339,7 +1349,7 @@ impl LyricsService {
         Some((LyricsRequest::new(current.request, context, plan), sidecar))
     }
 
-    pub(crate) async fn accept_edited(self: &Arc<Self>, uri: &str, text: &str) {
+    async fn accept_edited(self: &Arc<Self>, uri: &str, text: &str) {
         let media_id = self
             .state
             .lock()
@@ -1447,10 +1457,11 @@ impl LyricsService {
     }
 
     fn publish(&self, event: LyricsEvent) {
-        if let LyricsEvent::Current(current) = &event {
-            self.current.send_replace(current.clone());
-        }
         let _ = self.events.try_send(event);
+    }
+
+    fn publish_current(&self, current: CurrentLyrics) {
+        self.current.send_replace(current);
     }
 }
 
@@ -1653,17 +1664,17 @@ impl LyricsHandle {
     }
 }
 
-fn current_event(current: &CurrentDocument) -> LyricsEvent {
+fn current_lyrics(current: &CurrentDocument) -> CurrentLyrics {
     if current.loading && current.bundle.is_none() {
-        LyricsEvent::Current(CurrentLyrics::Loading {
+        CurrentLyrics::Loading {
             media_id: current.context.media.id.clone(),
-        })
+        }
     } else {
-        LyricsEvent::Current(CurrentLyrics::Ready {
+        CurrentLyrics::Ready {
             media_id: current.context.media.id.clone(),
             content: current.content.clone(),
             origin: current.bundle.as_ref().map(|bundle| bundle.origin),
-        })
+        }
     }
 }
 
@@ -1858,7 +1869,7 @@ mod tests {
             })
             .await
             .expect("download record");
-        let (events, received) = async_channel::unbounded();
+        let (events, _) = async_channel::unbounded();
         let runtime = tokio::runtime::Handle::current();
         let settings = crate::settings::SettingsFile::memory();
         settings
@@ -1868,12 +1879,7 @@ mod tests {
             })
             .unwrap();
         let source_owner = crate::source::SourceOwner::open_dormant(
-            artwork::Artwork::new(
-                directory.path().join("artwork"),
-                runtime.clone(),
-                Arc::new(catalog.clone()),
-            )
-            .unwrap(),
+            directory.path().join("artwork"),
             Arc::new(catalog.clone()),
             directory.path().join("downloads"),
             settings.clone(),
@@ -1883,7 +1889,6 @@ mod tests {
             runtime,
             crate::source::SourceOutputs {
                 events: async_channel::unbounded().0,
-                discovery: async_channel::unbounded().0,
                 downloads: async_channel::unbounded().0,
             },
         );
@@ -1932,18 +1937,20 @@ mod tests {
                     provenance: playback::QueueProvenance::Manual,
                 }),
             })));
+            let mut current = service.handle().current();
             service.handle().load(media_id.clone());
             let document = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 loop {
-                    if let LyricsEvent::Current(CurrentLyrics::Ready {
+                    if let CurrentLyrics::Ready {
                         media_id: actual,
                         content: Some(CurrentLyricsContent::Document { document, .. }),
                         origin: Some(LyricsOrigin::Local),
-                    }) = received.recv().await.expect("lyrics event")
+                    } = current.borrow_and_update().clone()
                         && actual == media_id
                     {
                         break document;
                     }
+                    current.changed().await.expect("lyrics state");
                 }
             })
             .await
@@ -2048,18 +2055,20 @@ mod tests {
                 provenance: playback::QueueProvenance::Manual,
             }),
         })));
+        let mut current = service.handle().current();
         service.handle().load(cue_media_id.clone());
         let document = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                if let LyricsEvent::Current(CurrentLyrics::Ready {
+                if let CurrentLyrics::Ready {
                     media_id,
                     content: Some(CurrentLyricsContent::Document { document, .. }),
                     origin: Some(LyricsOrigin::Native),
-                }) = received.recv().await.expect("cached CUE event")
+                } = current.borrow_and_update().clone()
                     && media_id == cue_media_id
                 {
                     break document;
                 }
+                current.changed().await.expect("lyrics state");
             }
         })
         .await

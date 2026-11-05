@@ -460,21 +460,6 @@ impl Catalog {
             .bind(source).bind(path).fetch_optional(&mut *connection).await?)
     }
 
-    /// Listed albums and tracks of a source.
-    pub async fn source_counts(
-        &self,
-        source: SourceKey,
-        _cancellation: &ReadCancellation,
-    ) -> LibraryResult<(usize, usize)> {
-        Ok(self
-            .all_source_counts()
-            .await?
-            .into_iter()
-            .find(|(id, _)| self.source_id(source).as_ref() == Some(id))
-            .map(|(_, counts)| counts)
-            .unwrap_or_default())
-    }
-
     /// Listed albums and tracks of every source.
     pub async fn all_source_counts(
         &self,

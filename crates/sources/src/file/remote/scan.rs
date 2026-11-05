@@ -555,15 +555,13 @@ impl walk::FileSource for FileSource {
                 _ => return Ok(walk::CueRead::Unreadable),
             };
             self.locate_track(&mut backing, &backing_file);
-            let duration = backing.track.metadata.duration_millis as u64;
-            for (position, cue) in entry.tracks.iter().enumerate() {
-                let end = entry
-                    .tracks
-                    .get(position + 1)
-                    .map_or(duration, |next| next.index_start_ms);
-                if cue.index_start_ms >= end || end > duration {
-                    return Ok(walk::CueRead::Rejected);
-                }
+            let Some(segments) = crate::file::cue::cue_segments(
+                entry,
+                backing.track.metadata.duration_millis as u64,
+            ) else {
+                return Ok(walk::CueRead::Rejected);
+            };
+            for (cue, end) in segments {
                 // The relative CUE name supplies Local's album/tag fallbacks; URLs never become native paths.
                 let mut track = crate::file::cue::cue_track(
                     std::path::Path::new(&relative),

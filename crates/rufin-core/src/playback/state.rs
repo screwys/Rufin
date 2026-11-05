@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 use tokio::task::JoinHandle;
 
-use crate::playback::Placement;
+use crate::playback::QueuePlacement;
 use playback::{
     BackendCommand, BackendEvent, BackendState, NextTransition, PlaybackOutput, PlaybackSettings,
     PlaybackTransitionMode, PreparedNext, PreparedStream, QueueProvenance, QueueRepeatMode,
@@ -293,7 +293,7 @@ pub(super) struct Player {
     next_plan: Option<NextPlan>,
     restored_paused: bool,
     next_run_number: u64,
-    candidate_tasks: HashMap<u64, (Placement, JoinHandle<()>)>,
+    candidate_tasks: HashMap<u64, (QueuePlacement, JoinHandle<()>)>,
     settings: PlaybackSettings,
     playback_output: PlaybackOutput,
     output_volume: f64,
@@ -818,19 +818,19 @@ impl Player {
                     &library::ReadCancellation::new(),
                 )
                 .await
-                .map_err(super::string_error)
+                .map_err(crate::string_error)
         });
     }
 
     fn start_candidates(
         &mut self,
-        placement: Placement,
+        placement: QueuePlacement,
         provenance: QueueProvenance,
         candidates: impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>>
         + Send
         + 'static,
     ) {
-        if matches!(placement, Placement::Replace { .. }) {
+        if matches!(placement, QueuePlacement::Replace { .. }) {
             self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
             self.auto_dj_waiting_for_continuation = false;
@@ -879,7 +879,7 @@ impl Player {
     fn cancel_candidate_tasks(&mut self, replacement_only: bool) {
         let was_loading = self.queue_loading();
         self.candidate_tasks.retain(|_, (placement, task)| {
-            if !replacement_only || matches!(placement, Placement::Replace { .. }) {
+            if !replacement_only || matches!(placement, QueuePlacement::Replace { .. }) {
                 task.abort();
                 false
             } else {
@@ -900,7 +900,7 @@ impl Player {
         {
             return Ok(());
         }
-        if matches!(request.placement, Placement::Replace { .. }) {
+        if matches!(request.placement, QueuePlacement::Replace { .. }) {
             self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
             self.auto_dj_waiting_for_continuation = false;
@@ -1337,7 +1337,7 @@ impl Player {
             return Ok(true);
         }
         self.apply_batch(
-            crate::playback::PlayRequest::from_input(load, Placement::End),
+            crate::playback::PlayRequest::from_input(load, QueuePlacement::End),
             sample,
         )?;
         Ok(true)
@@ -1390,7 +1390,7 @@ impl Player {
         request: crate::playback::PlayRequest,
         _sample: &ClockSample,
     ) -> Result<(), SequenceError> {
-        let replacing = matches!(request.placement, Placement::Replace { .. });
+        let replacing = matches!(request.placement, QueuePlacement::Replace { .. });
         let loading_changed = !self.queue_loading;
         self.queue_loading = true;
         if self.pending_queue.is_some() && !replacing {
@@ -1403,8 +1403,8 @@ impl Player {
             self.queue_transport = None;
         }
         let completion = match request.placement {
-            Placement::Replace { .. } => QueueCompletion::Replace,
-            Placement::AfterCurrent => QueueCompletion::Insert {
+            QueuePlacement::Replace { .. } => QueueCompletion::Replace,
+            QueuePlacement::AfterCurrent => QueueCompletion::Insert {
                 target: self
                     .sequence
                     .selected()
@@ -1414,7 +1414,7 @@ impl Player {
                         )
                     }),
             },
-            Placement::End => QueueCompletion::Insert {
+            QueuePlacement::End => QueueCompletion::Insert {
                 target: QueueReorderTarget::End,
             },
         };
@@ -1443,7 +1443,7 @@ impl Player {
             let result = request
                 .prepare(&catalog, shuffled, super::random_u64())
                 .await
-                .map_err(super::string_error);
+                .map_err(crate::string_error);
             playback.post(move |player, sample| {
                 if let Err(error) = player.complete_queue(id, result, sample) {
                     player.report_error(error.to_string());
@@ -1484,7 +1484,7 @@ impl Player {
                         .map(|row| (entries[row.position].0, row.track.clone()))
                         .collect()
                 })
-                .map_err(super::string_error);
+                .map_err(crate::string_error);
             playback.post(move |player, sample| player.complete_queue_metadata(result, sample));
         }));
     }
@@ -1729,7 +1729,7 @@ impl Player {
             self.queue_transport.get_or_insert(TransportStatus::Stopped);
         }
         self.request_queue(
-            crate::playback::PlayRequest::from_input(input, Placement::End),
+            crate::playback::PlayRequest::from_input(input, QueuePlacement::End),
             QueueCompletion::Insert {
                 target: match target {
                     QueueReorderTarget::Before(i) => self

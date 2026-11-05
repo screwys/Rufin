@@ -85,15 +85,7 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
             .is_err()
     );
     assert!(
-        source
-            .apply_local_change(
-                &catalog,
-                initial.0,
-                LocalLiveChange::Paths {
-                    paths: vec![track],
-                    rename: None
-                }
-            )
+        apply_paths(&source, &catalog, vec![track], None)
             .await
             .is_err()
     );
@@ -156,15 +148,7 @@ async fn one_local_path_republishes_only_its_component() {
     assert_eq!(before.len(), 2);
 
     write_silent_wav(&second, 2).expect("edit second WAV");
-    source
-        .apply_local_change(
-            &catalog,
-            first_publication.0,
-            LocalLiveChange::Paths {
-                paths: vec![second.clone()],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![second.clone()], None)
         .await
         .expect("exact change");
     let changed = sources::published(&mut updates).expect("catalog update");
@@ -272,15 +256,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         "cancelled no-op does not publish"
     );
     fs::write(&image, b"changed-image").expect("change image");
-    source
-        .apply_local_change(
-            &catalog,
-            initial.0,
-            LocalLiveChange::Paths {
-                paths: vec![image],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![image], None)
         .await
         .expect("image change");
     let publication = sources::published(&mut updates).expect("catalog update");
@@ -441,10 +417,11 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let removed = sources::published(&mut updates).expect("catalog update");
     assert_eq!(
         catalog
-            .source_counts(removed.0, &ReadCancellation::new())
+            .all_source_counts()
             .await
             .unwrap()
-            .1,
+            .get(&catalog.source_id(removed.0).unwrap())
+            .map_or(0, |counts| counts.1),
         0
     );
     let malformed = root.path().join("truncated.wma");
@@ -827,7 +804,7 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
         )
         .await
         .unwrap();
-    let first = sources::published(&mut updates).expect("catalog update");
+    sources::published(&mut updates).expect("catalog update");
     let uri = library::normalize_direct_media_uri(
         url::Url::from_file_path(path.canonicalize().unwrap())
             .unwrap()
@@ -864,15 +841,7 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
         "unchanged observations stay quiet"
     );
     fs::write(&cover, b"changed image bytes").unwrap();
-    source
-        .apply_local_change(
-            &catalog,
-            first.0,
-            LocalLiveChange::Paths {
-                paths: vec![cover],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![cover], None)
         .await
         .unwrap();
     let update = sources::published(&mut updates).expect("catalog update");
@@ -1091,15 +1060,7 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
     .remove(0);
     for changed in [&covers[1], &covers[0]] {
         fs::write(changed, b"replacement artwork").unwrap();
-        source
-            .apply_local_change(
-                &catalog,
-                initial.0,
-                LocalLiveChange::Paths {
-                    paths: vec![changed.clone()],
-                    rename: None,
-                },
-            )
+        apply_paths(&source, &catalog, vec![changed.clone()], None)
             .await
             .unwrap();
         let update = sources::published(&mut updates).expect("catalog update");
@@ -1284,7 +1245,7 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
         )
         .await
         .unwrap();
-    let initial = sources::published(&mut updates).expect("catalog update");
+    sources::published(&mut updates).expect("catalog update");
     let borrower_uri = url::Url::from_file_path(&paths[1]).unwrap().to_string();
     let before = catalog
         .tracks_by_uris(&([(&borrower_uri).to_string()]), &ReadCancellation::new())
@@ -1302,15 +1263,7 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
         } else {
             fs::write(&cover, b"replacement image").unwrap();
         }
-        source
-            .apply_local_change(
-                &catalog,
-                initial.0,
-                LocalLiveChange::Paths {
-                    paths: vec![cover.clone()],
-                    rename: None,
-                },
-            )
+        apply_paths(&source, &catalog, vec![cover.clone()], None)
             .await
             .unwrap();
         let update = sources::published(&mut updates).expect("catalog update");
@@ -1696,15 +1649,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
     assert_eq!(track_count(&catalog, &initial).await, 1);
 
     fs::write(&media, b"temporarily unreadable media content").expect("damage backing media");
-    source
-        .apply_local_change(
-            &catalog,
-            initial.0,
-            LocalLiveChange::Paths {
-                paths: vec![cue.clone()],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![cue.clone()], None)
         .await
         .expect("transient CUE change");
     assert!(
@@ -1714,15 +1659,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
     assert_eq!(track_count(&catalog, &initial).await, 1);
 
     fs::write(&cue, "this is not a cue sheet").expect("reject CUE");
-    source
-        .apply_local_change(
-            &catalog,
-            initial.0,
-            LocalLiveChange::Paths {
-                paths: vec![cue],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![cue], None)
         .await
         .expect("rejected CUE change");
     let rejected = sources::published(&mut updates).expect("catalog update");
@@ -1821,15 +1758,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
     assert_eq!(album_genres(&catalog, albums[0]).await, ["Folk", "Jazz"]);
 
     set_genre(&first, "Electronic").expect("change one Track genre");
-    source
-        .apply_local_change(
-            &catalog,
-            initial.0,
-            LocalLiveChange::Paths {
-                paths: vec![first],
-                rename: None,
-            },
-        )
+    apply_paths(&source, &catalog, vec![first], None)
         .await
         .expect("exact Track change");
     sources::published(&mut updates).expect("catalog update");
@@ -1903,15 +1832,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         .expect("remove native identity enrichment");
     stored.close().await.unwrap();
     fs::rename(&old, &new).expect("rename file");
-    source
-        .apply_local_change(
-            &catalog,
-            initial.0,
-            LocalLiveChange::Paths {
-                paths: vec![old.clone(), new.clone()],
-                rename: Some((old, new)),
-            },
-        )
+    apply_paths(&source, &catalog, vec![old.clone(), new.clone()], Some((old, new)))
         .await
         .expect("exact rename");
     let changed = sources::published(&mut updates).expect("catalog update");
@@ -2068,15 +1989,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
         }
         if source_id == "test-source" {
             write_silent_wav(&root.path().join("first.wav"), 2).unwrap();
-            source
-                .apply_local_change(
-                    &catalog,
-                    source_key,
-                    LocalLiveChange::Paths {
-                        paths: vec![root.path().join("first.wav")],
-                        rename: None,
-                    },
-                )
+            apply_paths(&source, &catalog, vec![root.path().join("first.wav")], None)
                 .await
                 .unwrap();
             assert!(catalog.remove_source(source.source_id()).await.unwrap());
@@ -2186,4 +2099,16 @@ async fn stored_files(catalog: &Catalog, source: &str) -> Vec<library::LocalFile
         .into_iter()
         .map(|row| row.file)
         .collect()
+}
+
+async fn apply_paths(
+    source: &Source,
+    catalog: &Catalog,
+    paths: Vec<std::path::PathBuf>,
+    rename: Option<(std::path::PathBuf, std::path::PathBuf)>,
+) -> sources::SourceResult<()> {
+    let (paths, rename) = LocalLiveChange::path_strings(paths, rename);
+    source
+        .apply_file_paths(catalog, &paths, rename.as_ref(), &|| false)
+        .await
 }

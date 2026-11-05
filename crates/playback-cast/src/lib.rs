@@ -19,9 +19,7 @@ use playback::{
     BackendCommand, BackendError, BackendEvent, BackendFailure, EventWaker, PlaybackBackend,
     ProcessingRequest, RemoteOutput, RemoteOutputProtocol,
 };
-use relay::{
-    ArtworkResolver, RelayServer, available_networks, network_address, network_binding_for,
-};
+use relay::{RelayServer, available_networks, network_address, network_binding_for};
 use upnp::UpnpController;
 use upnp_transport::UpnpDevice;
 
@@ -33,7 +31,6 @@ pub struct CastManager {
     targets: Mutex<HashMap<String, DiscoveredTarget>>,
     proxy_media: Arc<AtomicBool>,
     network_interface: Mutex<Option<String>>,
-    artwork_resolver: ArtworkResolver,
 }
 
 pub fn network_addresses() -> Result<Vec<std::net::IpAddr>, String> {
@@ -41,26 +38,12 @@ pub fn network_addresses() -> Result<Vec<std::net::IpAddr>, String> {
         .map(|interfaces| interfaces.into_iter().map(|(_, address)| address).collect())
 }
 
-impl Default for CastManager {
-    fn default() -> Self {
-        Self::new(false, None, |_| None)
-    }
-}
-
 impl CastManager {
-    pub fn new(
-        proxy_media: bool,
-        network_interface: Option<String>,
-        artwork_resolver: impl Fn(&playback::PreparedStream) -> Option<std::path::PathBuf>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
+    pub fn new(proxy_media: bool, network_interface: Option<String>) -> Self {
         Self {
             targets: Mutex::new(HashMap::new()),
             proxy_media: Arc::new(AtomicBool::new(proxy_media)),
             network_interface: Mutex::new(network_interface),
-            artwork_resolver: Arc::new(artwork_resolver),
         }
     }
 
@@ -181,7 +164,6 @@ impl CastManager {
             target,
             Arc::clone(&self.proxy_media),
             network_interface,
-            Arc::clone(&self.artwork_resolver),
             processing,
         )
     }
@@ -204,7 +186,6 @@ impl CastPlaybackBackend {
         target: DiscoveredTarget,
         proxy_media: Arc<AtomicBool>,
         network_interface: Option<String>,
-        artwork_resolver: ArtworkResolver,
         processing: tokio::sync::watch::Receiver<ProcessingRequest>,
     ) -> Result<Self, String> {
         let (selected_local_address, bound_network_interface) =
@@ -216,8 +197,7 @@ impl CastPlaybackBackend {
                 (None, None)
             };
         let relay =
-            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?
-                .with_artwork_resolver(artwork_resolver);
+            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?;
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
                 let device = if device.local_address() == selected_local_address

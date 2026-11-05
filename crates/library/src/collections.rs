@@ -73,6 +73,18 @@ impl AlbumReleaseClass {
             .unwrap_or(Self::Album)
     }
 }
+/// Release type tags as albums keep them: trimmed, lowercase and without repeats.
+pub fn normalize_release_types(types: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
+    let mut values = Vec::new();
+    for release_type in types {
+        let value = release_type.as_ref().trim().to_lowercase();
+        if !value.is_empty() && !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    values
+}
+
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct CollectionSummary {

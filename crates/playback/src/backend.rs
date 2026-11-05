@@ -82,7 +82,6 @@ pub struct PreparedStream {
     pub loudness: Option<TrackLoudness>,
     pub row: Option<std::sync::Arc<crate::QueueRow>>,
     pub artwork_path: Option<Arc<PathBuf>>,
-    pub allows_preloading: bool,
 }
 
 impl PreparedStream {
@@ -92,13 +91,7 @@ impl PreparedStream {
             loudness,
             row: None,
             artwork_path: None,
-            allows_preloading: true,
         }
-    }
-
-    pub fn without_preloading(mut self) -> Self {
-        self.allows_preloading = false;
-        self
     }
 
     pub fn with_row(

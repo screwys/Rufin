@@ -207,14 +207,20 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Takes the service switches from `other`; the accounts stay.
-    pub fn copy_switches(&mut self, other: &Settings) {
-        self.lastfm.enabled = other.lastfm.enabled;
-        self.lastfm.now_playing_enabled = other.lastfm.now_playing_enabled;
-        self.librefm.enabled = other.librefm.enabled;
-        self.librefm.now_playing_enabled = other.librefm.now_playing_enabled;
-        self.listenbrainz.enabled = other.listenbrainz.enabled;
-        self.listenbrainz.now_playing_enabled = other.listenbrainz.now_playing_enabled;
+    /// Whether `other` names the same accounts with the same secrets; the switches may differ.
+    pub fn same_accounts(&self, other: &Settings) -> bool {
+        let names = |settings: &Settings| {
+            [
+                settings.lastfm.username.clone(),
+                settings.lastfm.api_key.clone(),
+                settings.librefm.username.clone(),
+                settings.listenbrainz.username.clone(),
+            ]
+        };
+        names(self) == names(other)
+            && SECRET_DESCRIPTORS
+                .iter()
+                .all(|descriptor| descriptor.value(self) == descriptor.value(other))
     }
 
     pub fn sanitize(&mut self) {

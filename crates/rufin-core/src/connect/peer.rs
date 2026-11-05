@@ -1,15 +1,12 @@
 //! The peer source over the media protocol: this device answers for its own Local sources from
 //! its Store, and asks the device that owns a peer source here.
-use super::{ConnectOwner, Stream, error};
+use super::{ConnectOwner, Stream};
+use crate::string_error;
 use futures_util::future::BoxFuture;
 use rufin_connect::media::{PeerByteMetadata, PeerByteResponse};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sources::{PeerAudio, SourceError, SourceId, SourceResult};
-use std::{
-    io::Read as _,
-    pin::Pin,
-    sync::{Arc, Weak},
-};
+use std::{io::Read as _, pin::Pin, sync::Weak};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// A read of the catalog of one of the owner's Local sources.
@@ -23,7 +20,7 @@ pub(super) enum Read {
 }
 
 /// Asks the device that owns a peer source.
-pub(super) struct Link(pub(super) Weak<ConnectOwner>);
+pub(crate) struct Link(pub(crate) Weak<ConnectOwner>);
 
 impl Link {
     async fn stream(&self, device: &str, request: Stream) -> SourceResult<PeerByteResponse> {
@@ -37,7 +34,7 @@ impl Link {
         network
             .stream_request(device, serde_json::to_vec(&request)?)
             .await
-            .map_err(|failure| SourceError::Network(error(failure)))
+            .map_err(|failure| SourceError::Network(string_error(failure)))
     }
 
     async fn read<T: DeserializeOwned>(
@@ -173,7 +170,7 @@ impl sources::PeerLink for Link {
 impl ConnectOwner {
     /// Answers a request on the media protocol.
     pub(super) async fn answer_stream(&self, body: &[u8]) -> Result<PeerByteResponse, String> {
-        match serde_json::from_slice(body).map_err(error)? {
+        match serde_json::from_slice(body).map_err(string_error)? {
             Stream::Catalog { source, read } => {
                 self.local_source(&source)?;
                 let answer = match read {
@@ -181,7 +178,7 @@ impl ConnectOwner {
                         self.catalog
                             .source_marker(&source)
                             .await
-                            .map_err(error)?
+                            .map_err(string_error)?
                             .as_bytes(),
                     ),
                     Read::Ids => {
@@ -193,7 +190,7 @@ impl ConnectOwner {
                             .catalog
                             .source_track_ids(&source)
                             .await
-                            .map_err(error)?;
+                            .map_err(string_error)?;
                         serde_json::to_vec(&(ids, clock))
                     }
                     Read::ChangedSince { since } => serde_json::to_vec(
@@ -201,14 +198,14 @@ impl ConnectOwner {
                             .catalog
                             .source_changed_since(&source, since)
                             .await
-                            .map_err(error)?,
+                            .map_err(string_error)?,
                     ),
                     Read::Observations { ids } => {
                         let mut tracks = self
                             .catalog
                             .source_observations(&source, &ids)
                             .await
-                            .map_err(error)?;
+                            .map_err(string_error)?;
                         for track in &mut tracks {
                             let image = sources::NativeImageRef::new(
                                 format!("track:{}", track.object_id),
@@ -218,13 +215,13 @@ impl ConnectOwner {
                             );
                             track.artwork_binding = Some(
                                 sources::native_artwork_binding(source.as_str(), &image)
-                                    .map_err(error)?,
+                                    .map_err(string_error)?,
                             );
                         }
                         serde_json::to_vec(&tracks)
                     }
                 }
-                .map_err(error)?;
+                .map_err(string_error)?;
                 Ok(PeerByteResponse {
                     metadata: serde_json::Value::Null,
                     reader: Box::pin(std::io::Cursor::new(answer)),
@@ -252,6 +249,7 @@ impl ConnectOwner {
     /// Only this device's own Local sources are served.
     fn local_source(&self, source: &SourceId) -> Result<(), String> {
         self.settings
+            .file()
             .load()
             .sources
             .configured
@@ -266,7 +264,7 @@ impl ConnectOwner {
         self.catalog
             .track_uris(&[(source.clone(), object.to_owned())])
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .pop()
             .map(|(_, _, uri)| uri)
             .ok_or_else(|| "The requested track is unavailable on this device".into())
@@ -287,7 +285,7 @@ impl ConnectOwner {
             .catalog
             .track_artwork_bindings(&[uri], &library::ReadCancellation::new())
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .pop();
         let bytes = match binding {
             Some(binding) => {
@@ -326,7 +324,7 @@ impl ConnectOwner {
             .catalog
             .playable_by_object(source, object)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .and_then(|playable| playable.local_uri())
             .ok_or("The requested file is unavailable on this device")?;
         let path = library::file_media_path(&location);
@@ -342,7 +340,7 @@ impl ConnectOwner {
             } else {
                 sources::resolve_document_stream(&location)
                     .await
-                    .map_err(error)?
+                    .map_err(string_error)?
             };
             if let Some((start, end)) = window {
                 // An empty interval must never widen into the whole recording.
@@ -355,12 +353,12 @@ impl ConnectOwner {
             }
             let reader = tokio::task::spawn_blocking(move || {
                 audio_processing::TranscodedAudioReader::new(&stream, encoding.into(), || false)
-                    .map_err(error)
+                    .map_err(string_error)
             })
             .await
-            .map_err(error)??;
+            .map_err(string_error)??;
             return Ok(PeerByteResponse {
-                metadata: serde_json::to_value(metadata).map_err(error)?,
+                metadata: serde_json::to_value(metadata).map_err(string_error)?,
                 reader: blocking_reader(reader),
             });
         }
@@ -370,7 +368,7 @@ impl ConnectOwner {
             Some(path) => {
                 let (file, reader) = rufin_connect::media::open_file(&path, start)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 metadata.length = Some(file.length);
                 metadata.validator = file.validator;
                 Box::pin(reader.take(end(file.length).saturating_sub(start)))
@@ -378,8 +376,11 @@ impl ConnectOwner {
             None => {
                 let (reader, length, validator) = tokio::task::spawn_blocking(move || {
                     use std::io::Seek;
-                    let mut reader = sources::open_document_input(&location).map_err(error)?;
-                    let length = reader.seek(std::io::SeekFrom::End(0)).map_err(error)?;
+                    let mut reader =
+                        sources::open_document_input(&location).map_err(string_error)?;
+                    let length = reader
+                        .seek(std::io::SeekFrom::End(0))
+                        .map_err(string_error)?;
                     let validator = sources::stat_document(&location).ok().and_then(|entry| {
                         entry.revision.map(|revision| {
                             blake3::hash(
@@ -392,7 +393,7 @@ impl ConnectOwner {
                     });
                     reader
                         .seek(std::io::SeekFrom::Start(start))
-                        .map_err(error)?;
+                        .map_err(string_error)?;
                     Ok::<_, String>((
                         reader.take(end(length).saturating_sub(start)),
                         length,
@@ -400,7 +401,7 @@ impl ConnectOwner {
                     ))
                 })
                 .await
-                .map_err(error)??;
+                .map_err(string_error)??;
                 metadata.length = Some(length);
                 metadata.validator = validator;
                 blocking_reader(reader)
@@ -408,7 +409,7 @@ impl ConnectOwner {
         };
         metadata.offset = start;
         Ok(PeerByteResponse {
-            metadata: serde_json::to_value(metadata).map_err(error)?,
+            metadata: serde_json::to_value(metadata).map_err(string_error)?,
             reader,
         })
     }
@@ -437,9 +438,4 @@ fn blocking_reader(
         receiver.recv().await.map(|chunk| (chunk, receiver))
     });
     Box::pin(tokio_util::io::StreamReader::new(Box::pin(stream)))
-}
-
-/// Installed at each start; the sources' peer source asks through it.
-pub(super) fn install(owner: &Arc<ConnectOwner>) {
-    sources::install_peer_link(Arc::new(Link(Arc::downgrade(owner))));
 }

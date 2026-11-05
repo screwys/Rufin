@@ -1,22 +1,19 @@
 //! Rufin Connect: pairing, the records paired devices sync and the sync folder. Connect is on
 //! exactly when `connect.sqlite` holds its profile row.
 mod folder;
-mod peer;
+pub(crate) mod peer;
 mod records;
 mod session;
 
-use crate::{
-    playback::PlaybackOwner,
-    settings::{SettingsFile, SettingsOwner},
-    source::SourceOwner,
-};
+use crate::string_error;
+use crate::{playback::PlaybackOwner, settings::SettingsOwner, source::SourceOwner};
 use age::secrecy::ExposeSecret;
 use records::{DeviceValue, Receiving, Records};
 use rufin_connect::{
     ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, Store, network::REMOVED_FROM_PROFILE,
     store::Cursor, sync::Frame,
 };
-use secrets::{SecretKey, SecretStore, SwitchableSecretStore};
+use secrets::{SecretKey, SecretStore};
 use serde::{Deserialize, Serialize};
 pub use session::Continuation;
 pub(crate) use session::{Observed, Observing};
@@ -361,9 +358,7 @@ struct Session {
 pub struct ConnectOwner {
     directory: PathBuf,
     catalog: Arc<library::Catalog>,
-    settings: SettingsFile,
-    settings_apply: SettingsOwner,
-    secrets: Arc<SwitchableSecretStore>,
+    settings: SettingsOwner,
     source: Arc<SourceOwner>,
     pub(crate) playback: Arc<PlaybackOwner>,
     lyrics: crate::lyrics::LyricsHandle,
@@ -384,9 +379,7 @@ impl ConnectOwner {
     pub(crate) fn new(
         directory: PathBuf,
         catalog: Arc<library::Catalog>,
-        settings: SettingsFile,
-        settings_apply: SettingsOwner,
-        secrets: Arc<SwitchableSecretStore>,
+        settings: SettingsOwner,
         source: Arc<SourceOwner>,
         playback: Arc<PlaybackOwner>,
         lyrics: crate::lyrics::LyricsHandle,
@@ -406,8 +399,6 @@ impl ConnectOwner {
             directory,
             catalog,
             settings,
-            settings_apply,
-            secrets,
             source,
             playback,
             lyrics,
@@ -437,7 +428,6 @@ impl ConnectOwner {
 
     /// Resumes Connect when it was on. With Connect off this is one `stat`.
     pub(crate) fn start(self: &Arc<Self>) {
-        peer::install(self);
         let owner = Arc::clone(self);
         self.runtime.spawn(async move {
             let _action = owner.actions.lock().await;
@@ -448,15 +438,18 @@ impl ConnectOwner {
     }
 
     async fn resume(self: &Arc<Self>) -> Result<(), String> {
-        let Some((store, row)) = Store::open(&self.store_path()).await.map_err(error)? else {
+        let Some((store, row)) = Store::open(&self.store_path())
+            .await
+            .map_err(string_error)?
+        else {
             return Ok(());
         };
         let Some(key) = self.profile_key(&row.profile).await? else {
             // A keyring that cannot be read now keeps the key for a later start.
-            if !self.secrets.is_persistent() {
+            if !self.settings.secrets().is_persistent() {
                 return Err(KEYRING_UNAVAILABLE.into());
             }
-            store.delete().await.map_err(error)?;
+            store.delete().await.map_err(string_error)?;
             return Err(
                 "The Connect profile key is unavailable. Pair with a trusted device again".into(),
             );
@@ -490,10 +483,10 @@ impl ConnectOwner {
     fn save(&self, edit: impl FnOnce(&mut DeviceConfig)) -> Result<(), String> {
         let mut config = self.device_config();
         edit(&mut config);
-        std::fs::create_dir_all(&self.directory).map_err(error)?;
+        std::fs::create_dir_all(&self.directory).map_err(string_error)?;
         crate::settings::write_private(
             &self.directory.join("device.json"),
-            &serde_json::to_vec(&config).map_err(error)?,
+            &serde_json::to_vec(&config).map_err(string_error)?,
         )?;
         self.status.send_modify(|status| {
             status.settings = settings_of(
@@ -521,7 +514,7 @@ impl ConnectOwner {
             return Ok(reference);
         }
         let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes).map_err(error)?;
+        getrandom::fill(&mut bytes).map_err(string_error)?;
         let reference = bytes
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -533,36 +526,39 @@ impl ConnectOwner {
     }
 
     async fn secret(&self, key: SecretKey) -> Result<Option<String>, String> {
-        let secrets = Arc::clone(&self.secrets);
-        tokio::task::spawn_blocking(move || secrets.load_secret(&key).map_err(error))
+        let secrets = Arc::clone(self.settings.secrets());
+        tokio::task::spawn_blocking(move || secrets.load_secret(&key).map_err(string_error))
             .await
-            .map_err(error)?
+            .map_err(string_error)?
     }
 
     async fn save_secret(&self, key: SecretKey, value: String) -> Result<(), String> {
-        let secrets = Arc::clone(&self.secrets);
-        tokio::task::spawn_blocking(move || secrets.save_secret(&key, &value).map_err(error))
+        let secrets = Arc::clone(self.settings.secrets());
+        tokio::task::spawn_blocking(move || secrets.save_secret(&key, &value).map_err(string_error))
             .await
-            .map_err(error)?
+            .map_err(string_error)?
     }
 
     async fn delete_secret(&self, key: SecretKey) -> Result<(), String> {
-        let secrets = Arc::clone(&self.secrets);
-        tokio::task::spawn_blocking(move || secrets.delete_secret(&key).map_err(error))
+        let secrets = Arc::clone(self.settings.secrets());
+        tokio::task::spawn_blocking(move || secrets.delete_secret(&key).map_err(string_error))
             .await
-            .map_err(error)?
+            .map_err(string_error)?
     }
 
     async fn credentials(&self) -> Result<Credentials, String> {
         let key = identity_key(&self.identity_reference()?);
         match self.secret(key.clone()).await? {
-            Some(value) => serde_json::from_str(&value).map_err(error),
+            Some(value) => serde_json::from_str(&value).map_err(string_error),
             None => {
                 let credentials = Credentials::generate();
-                self.save_secret(key, serde_json::to_string(&credentials).map_err(error)?)
-                    .await?;
+                self.save_secret(
+                    key,
+                    serde_json::to_string(&credentials).map_err(string_error)?,
+                )
+                .await?;
                 // An identity kept only for this run would make the device another one later.
-                if !self.secrets.is_persistent() {
+                if !self.settings.secrets().is_persistent() {
                     return Err(KEYRING_UNAVAILABLE.into());
                 }
                 Ok(credentials)
@@ -573,7 +569,7 @@ impl ConnectOwner {
     async fn profile_key(&self, profile: &str) -> Result<Option<age::x25519::Identity>, String> {
         self.secret(profile_key(&self.identity_reference()?, profile))
             .await?
-            .map(|key| key.parse().map_err(error))
+            .map(|key| key.parse().map_err(string_error))
             .transpose()
     }
 
@@ -587,7 +583,7 @@ impl ConnectOwner {
             if let Some(network) = current.as_ref() {
                 return Ok(Arc::clone(network));
             }
-            std::fs::create_dir_all(&self.directory).map_err(error)?;
+            std::fs::create_dir_all(&self.directory).map_err(string_error)?;
             let credentials = self.credentials().await?;
             let config = self.device_config();
             let (network, mut events) = ConnectNetwork::spawn(
@@ -600,9 +596,9 @@ impl ConnectOwner {
                 credentials,
             )
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
             let identity = network.identity();
-            let invitation = network.invitation().await.map_err(error)?;
+            let invitation = network.invitation().await.map_err(string_error)?;
             self.status.send_modify(|status| {
                 status.identity = Some(identity);
                 status.invitation = Some(invitation);
@@ -651,10 +647,10 @@ impl ConnectOwner {
                 values: records.clone(),
             }))
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         network.set_devices(records.trusted());
         let folder = folder
-            .map(|folder| serde_json::from_str(&folder).map_err(error))
+            .map(|folder| serde_json::from_str(&folder).map_err(string_error))
             .transpose()?;
         let session = Arc::new(Session {
             profile: profile.clone(),
@@ -697,28 +693,28 @@ impl ConnectOwner {
                 }
             },
         );
+        let settings = crate::settings::follow(
+            &self.runtime,
+            self.settings.file(),
+            Arc::downgrade(self),
+            |owner, previous, current| {
+                let now = records::shared_settings(current);
+                let changed = now.is_none() || now != records::shared_settings(previous);
+                async move {
+                    if changed {
+                        owner.settings_changed().await;
+                    }
+                }
+            },
+        );
         self.runtime.spawn({
             let stop = stop.clone();
             async move {
                 stop.cancelled().await;
                 follow.abort();
+                settings.abort();
             }
         });
-        let weak = Arc::downgrade(self);
-        let mut changes = self.settings_apply.changes();
-        let mut shared = records::shared_settings(&self.settings.load());
-        self.runtime
-            .spawn(stop.clone().run_until_cancelled_owned(async move {
-                while changes.changed().await.is_ok() {
-                    let Some(owner) = weak.upgrade() else { return };
-                    let now = records::shared_settings(&owner.settings.load());
-                    if now.is_some() && now == shared {
-                        continue;
-                    }
-                    shared = now;
-                    owner.settings_changed().await;
-                }
-            }));
         let weak = Arc::downgrade(self);
         self.runtime
             .spawn(stop.clone().run_until_cancelled_owned(async move {
@@ -779,7 +775,7 @@ impl ConnectOwner {
     ) -> futures_util::future::BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
             let network = self.network().await?;
-            let presence = serde_json::to_vec(&Request::Presence).map_err(error)?;
+            let presence = serde_json::to_vec(&Request::Presence).map_err(string_error)?;
             let probe = {
                 let mut probes = self.probes.lock().unwrap();
                 let latest = probes.entry(peer.to_owned()).or_default();
@@ -789,11 +785,11 @@ impl ConnectOwner {
             let answer = network
                 .test_connection(peer, presence)
                 .await
-                .map_err(error)
+                .map_err(string_error)
                 .and_then(|(route, bytes)| {
                     serde_json::from_slice::<Presence>(&bytes)
                         .map(|presence| (route, presence))
-                        .map_err(error)
+                        .map_err(string_error)
                 });
             if self.probes.lock().unwrap().get(peer) == Some(&probe) {
                 self.update_device(peer, |device| match &answer {
@@ -876,14 +872,17 @@ impl ConnectOwner {
         joining: bool,
     ) -> Result<u64, String> {
         let after = records.pulled(peer).await?;
-        let mut pull = network.pull(peer, profile, after).await.map_err(error)?;
+        let mut pull = network
+            .pull(peer, profile, after)
+            .await
+            .map_err(string_error)?;
         let total = pull.total;
         let mut receiving = Receiving::default();
         let mut applied = 0;
         // A page is applied once the next frame arrived, so the last one stores with the end.
         let mut page = Vec::new();
         loop {
-            let (rows, end) = match pull.next().await.map_err(error)? {
+            let (rows, end) = match pull.next().await.map_err(string_error)? {
                 Frame::Page(rows) if page.is_empty() => {
                     page = rows;
                     continue;
@@ -921,7 +920,7 @@ impl ConnectOwner {
         name: String,
     ) -> Result<(), String> {
         let _action = self.actions.lock().await;
-        let identity: age::x25519::Identity = key.parse().map_err(error)?;
+        let identity: age::x25519::Identity = key.parse().map_err(string_error)?;
         self.status.send_modify(|status| {
             status.pairing = None;
             status.connecting = true;
@@ -941,7 +940,7 @@ impl ConnectOwner {
             self.clear_data().await?;
             let store = Store::create(&self.store_path(), &network.identity())
                 .await
-                .map_err(error)?;
+                .map_err(string_error)?;
             let records = Records::new(self, store, network.identity(), identity.clone());
             // Until the host's own record arrives.
             records.add_device(
@@ -957,10 +956,14 @@ impl ConnectOwner {
                 .receive_from(&network, &records, &profile, &host, true)
                 .await;
             if let Err(error) = pulled {
-                records.store.clone().delete().await.map_err(self::error)?;
+                records.store.clone().delete().await.map_err(string_error)?;
                 return Err(error);
             }
-            records.store.turn_on(&profile).await.map_err(error)?;
+            records
+                .store
+                .turn_on(&profile)
+                .await
+                .map_err(string_error)?;
             Ok(records.store.clone())
         }
         .await;
@@ -986,13 +989,13 @@ impl ConnectOwner {
     /// Rufin playlists, favorites, activity, the queue, every cache, this device's secrets
     /// and the settings. Connect's own keys stay; the joined profile holds them.
     async fn clear_data(&self) -> Result<(), String> {
-        let stored = self.settings.load();
+        let stored = self.settings.file().load();
         self.source
             .restore_user_state(true, true, || async {
                 let playback = Arc::clone(&self.playback);
                 tokio::task::spawn_blocking(move || playback.shutdown())
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 let result = async {
                     // Playlists go first, so forgetting a source finds no entries holding its
                     // tracks and deletes them all.
@@ -1005,29 +1008,31 @@ impl ConnectOwner {
                             queue: true,
                         })
                         .await
-                        .map_err(error)?;
+                        .map_err(string_error)?;
                     for source in &stored.sources.configured {
                         self.source
                             .forget_source(source.configuration.source_id.clone())
                             .await
-                            .map_err(error)?;
+                            .map_err(string_error)?;
                     }
                     for kind in crate::runtime::CacheKind::ALL {
                         kind.clear(&self.catalog, self.source.downloads(), &self.lyrics)
                             .await?;
                     }
-                    let secrets = Arc::clone(&self.secrets);
-                    let backup =
-                        crate::settings::backup_password_store(&stored, self.settings.config_dir());
+                    let secrets = Arc::clone(self.settings.secrets());
+                    let backup = crate::settings::backup_password_store(
+                        &stored,
+                        self.settings.file().config_dir(),
+                    );
                     let keys = crate::settings::device_secrets(&stored);
-                    let settings = self.settings_apply.clone();
+                    let settings = self.settings.clone();
                     tokio::task::spawn_blocking(move || {
                         for key in keys {
-                            secrets.delete_secret(&key).map_err(error)?;
+                            secrets.delete_secret(&key).map_err(string_error)?;
                         }
                         backup
                             .delete_secret(&crate::settings::backup_password_key())
-                            .map_err(error)?;
+                            .map_err(string_error)?;
                         settings.restore(
                             |current| {
                                 let mut cleared = crate::settings::StoredSettings::default();
@@ -1044,7 +1049,7 @@ impl ConnectOwner {
                         )
                     })
                     .await
-                    .map_err(error)?
+                    .map_err(string_error)?
                 }
                 .await;
                 self.playback.start();
@@ -1059,7 +1064,7 @@ impl ConnectOwner {
         let network = self.network.lock().await.take();
         let ended = self.end(network.as_deref(), removed).await;
         let closed = match &network {
-            Some(network) => network.shutdown().await.map_err(error),
+            Some(network) => network.shutdown().await.map_err(string_error),
             None => Ok(()),
         };
         let config = self.device_config();
@@ -1102,7 +1107,7 @@ impl ConnectOwner {
             }
         }
         if let Some(network) = network {
-            network.serve(None).await.map_err(error)?;
+            network.serve(None).await.map_err(string_error)?;
         }
         session
             .records
@@ -1110,7 +1115,7 @@ impl ConnectOwner {
             .clone()
             .delete()
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         self.delete_secret(profile_key(&self.identity_reference()?, &session.profile))
             .await
     }
@@ -1151,8 +1156,8 @@ impl ConnectOwner {
         .await?;
         let store = Store::create(&self.store_path(), &network.identity())
             .await
-            .map_err(error)?;
-        store.turn_on(&profile).await.map_err(error)?;
+            .map_err(string_error)?;
+        store.turn_on(&profile).await.map_err(string_error)?;
         self.begin(store, profile, key, None).await
     }
 
@@ -1269,11 +1274,16 @@ impl ConnectOwner {
         };
         if network
             .matches_configuration(config.nearby, config.relay.as_deref(), config.public_relay)
-            .map_err(error)?
+            .map_err(string_error)?
         {
             return Ok(());
         }
-        current.take().unwrap().shutdown().await.map_err(error)?;
+        current
+            .take()
+            .unwrap()
+            .shutdown()
+            .await
+            .map_err(string_error)?;
         drop(current);
         let network = self.network().await?;
         if let Some(session) = self.session() {
@@ -1285,7 +1295,7 @@ impl ConnectOwner {
                     values: session.records.clone(),
                 }))
                 .await
-                .map_err(error)?;
+                .map_err(string_error)?;
             network.set_devices(session.records.trusted());
         }
         Ok(())
@@ -1299,14 +1309,14 @@ impl ConnectOwner {
             .clone()
             .ok_or_else(|| localization::tr("Connect is not enabled"))?;
         let answer = network
-            .request(peer, serde_json::to_vec(&request).map_err(error)?)
+            .request(peer, serde_json::to_vec(&request).map_err(string_error)?)
             .await
-            .map_err(error)?;
-        serde_json::from_slice(&answer).map_err(error)
+            .map_err(string_error)?;
+        serde_json::from_slice(&answer).map_err(string_error)
     }
 
     async fn answer(&self, body: &[u8]) -> Result<Vec<u8>, String> {
-        let answer = match serde_json::from_slice(body).map_err(error)? {
+        let answer = match serde_json::from_slice(body).map_err(string_error)? {
             Request::Presence => {
                 let session = self.active()?;
                 let playing = self
@@ -1324,11 +1334,16 @@ impl ConnectOwner {
                     .map(|network| network.addresses())
                     .unwrap_or_default();
                 serde_json::to_value(Presence {
-                    sequence: session.records.store.sequence().await.map_err(error)?,
+                    sequence: session
+                        .records
+                        .store
+                        .sequence()
+                        .await
+                        .map_err(string_error)?,
                     playing,
                     addresses,
                 })
-                .map_err(error)?
+                .map_err(string_error)?
             }
             Request::Control { command } => {
                 let playback = Arc::clone(&self.playback);
@@ -1358,22 +1373,24 @@ impl ConnectOwner {
                     Control::Clear { include_current } => playback.clear(include_current),
                 })
                 .await
-                .map_err(error)?;
+                .map_err(string_error)?;
                 serde_json::Value::Null
             }
             Request::Cast(cast) => {
                 self.receive_cast(cast).await?;
                 serde_json::Value::Null
             }
-            Request::Queue => serde_json::to_value(self.answer_queue().await?).map_err(error)?,
+            Request::Queue => {
+                serde_json::to_value(self.answer_queue().await?).map_err(string_error)?
+            }
             Request::QueuePage {
                 offset,
                 limit,
                 filter,
             } => serde_json::to_value(self.answer_queue_page(offset, limit, filter).await?)
-                .map_err(error)?,
+                .map_err(string_error)?,
         };
-        serde_json::to_vec(&answer).map_err(error)
+        serde_json::to_vec(&answer).map_err(string_error)
     }
 
     async fn event(self: &Arc<Self>, network: &Arc<ConnectNetwork>, event: NetworkEvent) {
@@ -1426,7 +1443,7 @@ impl ConnectOwner {
                 });
                 if matches {
                     self.status.send_modify(|status| status.pairing = None);
-                    self.failed(self::error(error));
+                    self.failed(string_error(error));
                 }
             }
             NetworkEvent::Paired {
@@ -1632,7 +1649,7 @@ impl ConnectOwner {
                 });
                 if let Err(error) = self.network().await?.begin_pairing(&invitation).await {
                     self.status.send_modify(|status| status.connecting = false);
-                    return Err(self::error(error).into());
+                    return Err(string_error(error).into());
                 }
             }
             Action::Invite { peer } => {
@@ -1645,7 +1662,7 @@ impl ConnectOwner {
                 });
                 if let Err(error) = self.network().await?.invite(&peer).await {
                     self.status.send_modify(|status| status.connecting = false);
-                    return Err(self::error(error).into());
+                    return Err(string_error(error).into());
                 }
             }
             Action::Pair {
@@ -1673,7 +1690,7 @@ impl ConnectOwner {
                     .await?
                     .confirm_pairing(&session, approve)
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 self.status.send_modify(|status| {
                     if let Some(pairing) = &mut status.pairing
                         && pairing.session == session
@@ -1735,7 +1752,7 @@ impl ConnectOwner {
                 public_relay,
             } => {
                 if let Some(relay) = &relay {
-                    reqwest::Url::parse(relay).map_err(error)?;
+                    reqwest::Url::parse(relay).map_err(string_error)?;
                 }
                 self.save(|config| {
                     config.nearby = nearby;
@@ -1755,11 +1772,11 @@ impl ConnectOwner {
                             .as_ref()
                             .map(serde_json::to_string)
                             .transpose()
-                            .map_err(error)?
+                            .map_err(string_error)?
                             .as_deref(),
                     )
                     .await
-                    .map_err(error)?;
+                    .map_err(string_error)?;
                 self.status
                     .send_modify(|status| status.settings.folder = folder.clone());
                 folder::watch(self, &session);
@@ -1806,10 +1823,6 @@ fn profile_key(identity_ref: &str, profile: &str) -> SecretKey {
         format!("{identity_ref}:{profile}"),
         "Rufin Connect profile key",
     )
-}
-
-fn error(error: impl std::fmt::Display) -> String {
-    error.to_string()
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]

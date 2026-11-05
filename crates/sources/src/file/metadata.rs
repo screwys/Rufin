@@ -1735,7 +1735,7 @@ mod tests {
         catalog.close().await.unwrap();
 
         let catalog = library::Catalog::open(&database_path).await.unwrap();
-        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None, None).unwrap();
         source
             .acquire_catalog(
                 &catalog,
@@ -1806,7 +1806,7 @@ mod tests {
         drop(source);
         catalog.close().await.unwrap();
         let catalog = library::Catalog::open(&database_path).await.unwrap();
-        let source = crate::Source::open(configuration.clone(), None, None).unwrap();
+        let source = crate::Source::open(configuration.clone(), None, None, None).unwrap();
         source
             .acquire_catalog(
                 &catalog,

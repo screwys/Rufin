@@ -269,6 +269,22 @@ FILE "album.flac" WAVE
     }
 }
 
+/// Each track of one CUE file with where it ends in its backing media; `None` when a track
+/// starts at or after its end, or ends past the media.
+pub(crate) fn cue_segments(file: &CueFile, duration_millis: u64) -> Option<Vec<(&CueTrack, u64)>> {
+    file.tracks
+        .iter()
+        .enumerate()
+        .map(|(position, cue)| {
+            let end = file
+                .tracks
+                .get(position + 1)
+                .map_or(duration_millis, |next| next.index_start_ms);
+            (cue.index_start_ms < end && end <= duration_millis).then_some((cue, end))
+        })
+        .collect()
+}
+
 pub(crate) fn cue_track(
     cue_path: &Path,
     album_title: Option<&str>,

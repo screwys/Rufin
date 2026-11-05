@@ -28,7 +28,6 @@ use crate::widgets::mounted_route::route_current_track;
 pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: ProductReceivers) {
     let ProductReceivers {
         source,
-        source_discovery,
         downloads,
         visualizer,
         waveform,
@@ -51,9 +50,29 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
         }
     });
 
+    // The configured sources and the selection, the operation and server discovery each
+    // come from their own state in the source owner, read again on every change.
     let event_shell = Rc::clone(shell);
+    let mut configured = shell.products.source.configuration_changes();
     glib::spawn_future_local(async move {
-        while let Ok(update) = source_discovery.recv().await {
+        while configured.changed().await.is_ok() {
+            apply_source_configuration(&event_shell);
+        }
+    });
+
+    let event_shell = Rc::clone(shell);
+    let mut operation = shell.products.source.operation();
+    glib::spawn_future_local(async move {
+        while operation.changed().await.is_ok() {
+            let current = operation.borrow_and_update().clone();
+            apply_source_operation(&event_shell, current);
+        }
+    });
+
+    let event_shell = Rc::clone(shell);
+    let discovery = shell.products.source.subscribe_discovery();
+    glib::spawn_future_local(async move {
+        while let Ok(update) = discovery.next().await {
             apply_source_discovery(&event_shell, update);
         }
     });
@@ -119,6 +138,15 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 
     let event_shell = Rc::clone(shell);
+    let mut current_lyrics = shell.products.lyrics.current();
+    glib::spawn_future_local(async move {
+        while current_lyrics.changed().await.is_ok() {
+            let current = current_lyrics.borrow_and_update().clone();
+            event_shell.player_ui.apply_current_lyrics(current);
+        }
+    });
+
+    let event_shell = Rc::clone(shell);
     glib::spawn_future_local(async move {
         while let Ok(update) = release_updates.recv().await {
             apply_release_update(&event_shell, update);
@@ -126,23 +154,25 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 }
 
-fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
-    match event {
-        SourceEvent::Configured(configured) => apply_configured_sources(shell, configured),
-        SourceEvent::Selected {
-            configured,
-            selected,
-        } => {
-            let added = matches!(
-                *shell.source.operation.borrow(),
-                SourceOperation::Adding { .. }
-            );
-            apply_selected_source(shell, configured, selected);
-            if added {
-                shell.complete_add_server_dialog();
+/// The configured sources or the selection changed.
+fn apply_source_configuration(shell: &Rc<Shell>) {
+    let configured = shell.products.source.list_sources();
+    match shell.products.source.selected_library() {
+        Some(selected) if selected_changed(shell, &selected) => {
+            apply_selected_source(shell, configured, selected)
+        }
+        Some(_) => apply_configured_sources(shell, configured),
+        None => {
+            apply_configured_sources(shell, configured);
+            if shell.selected_library().is_some() {
+                release_selected_source(shell);
             }
         }
-        SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
+    }
+}
+
+fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
+    match event {
         SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
         SourceEvent::PlaylistSourceMismatch(source_id) => {
             let source_name = shell
@@ -159,7 +189,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
                 &[("source", &source_name)],
             ));
         }
-        SourceEvent::ReleaseSelected => release_selected_source(shell),
     }
 }
 
@@ -185,16 +214,19 @@ fn apply_configured_sources(
     shell.player_ui.update_bottom_player();
 }
 
+fn selected_changed(shell: &Rc<Shell>, selected: &rufin_core::runtime::SelectedLibrary) -> bool {
+    shell.selected_library().as_deref().is_none_or(|previous| {
+        previous.source_key != selected.source_key
+            || previous.music_folder_key != selected.music_folder_key
+            || previous.music_folder_object_id != selected.music_folder_object_id
+    })
+}
+
 fn apply_selected_source(
     shell: &Rc<Shell>,
     configured: rufin_core::runtime::source::ConfiguredSources,
     selected: rufin_core::runtime::SelectedLibrary,
 ) {
-    let changed = shell.selected_library().as_deref().is_none_or(|previous| {
-        previous.source_key != selected.source_key
-            || previous.music_folder_key != selected.music_folder_key
-            || previous.music_folder_object_id != selected.music_folder_object_id
-    });
     *shell.source.configured.borrow_mut() = configured;
     shell
         .selected_ui
@@ -202,7 +234,7 @@ fn apply_selected_source(
     shell.search_session.set_selected(Some(selected));
     shell.refresh_playlist_picker();
     let route = shell.navigation.routes.borrow().current().clone();
-    if changed && shell.route_uses_selected_source(&route) {
+    if shell.route_uses_selected_source(&route) {
         shell.replace_current_route_when_ready();
     }
     if !shell.startup.route_revealed.get() && !shell.source.operation.borrow().blocks_library() {
@@ -267,6 +299,13 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let previously_blocked = previous_operation.blocks_library();
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
+    // An added server ends the add once it is selected.
+    if matches!(previous_operation, SourceOperation::Adding { .. })
+        && matches!(operation, SourceOperation::Idle)
+        && shell.products.source.selected_library().is_some()
+    {
+        shell.complete_add_server_dialog();
+    }
     if matches!(
         operation,
         SourceOperation::Idle | SourceOperation::Failed { .. }
@@ -706,9 +745,6 @@ fn apply_lyrics_event(shell: &Rc<Shell>, event: rufin_core::lyrics::LyricsEvent)
     match event {
         rufin_core::lyrics::LyricsEvent::JapaneseDictionaryChanged(status) => {
             shell.player_ui.apply_japanese_dictionary_status(status)
-        }
-        rufin_core::lyrics::LyricsEvent::Current(projection) => {
-            shell.player_ui.apply_current_lyrics(projection)
         }
         rufin_core::lyrics::LyricsEvent::SearchFinished {
             media_id,

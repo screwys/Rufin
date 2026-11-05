@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use sources::{ImageSize, SourceError, SourceImageRequest};
 use tokio::runtime::Handle;
@@ -14,13 +14,13 @@ pub(crate) enum FetchOutcome {
 
 #[derive(Clone)]
 pub(crate) struct FetchContext {
-    source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+    source_resolver: Arc<SourceResolver>,
     catalog: Arc<library::Catalog>,
 }
 
 impl FetchContext {
     pub(crate) fn new(
-        source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+        source_resolver: Arc<SourceResolver>,
         catalog: Arc<library::Catalog>,
     ) -> Self {
         Self {
@@ -34,13 +34,7 @@ impl FetchContext {
     }
 
     fn source(&self, source_id: &sources::SourceId) -> Result<Arc<sources::Source>, String> {
-        let resolver = self
-            .source_resolver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
-            .ok_or_else(|| "artwork source is unavailable".to_string())?;
-        resolver(source_id).ok_or_else(|| "artwork source is unavailable".to_string())
+        (self.source_resolver)(source_id).ok_or_else(|| "artwork source is unavailable".to_string())
     }
 
     pub(crate) fn fetch(

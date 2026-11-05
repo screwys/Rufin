@@ -162,10 +162,11 @@ struct DeliveryTarget {
     settings: TargetSettings,
 }
 
-/// The accounts the worker sends for, with their secrets, and the committed settings they were
-/// read from. The service switches and private mode are read from the settings when sending.
+/// The accounts' credentials the worker sends with, and the committed settings they were read
+/// from. The switches, the accounts' names and private mode are read from the committed
+/// settings when sending; credentials read from settings that name other accounts are not used.
 struct Accounts {
-    settings: Settings,
+    credentials: Settings,
     read_from: Option<Arc<StoredSettings>>,
 }
 
@@ -179,10 +180,21 @@ impl DeliveryState {
         self.accounts.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// The accounts with the committed switches.
+    /// The committed settings with the accounts' credentials.
     fn current(&self, stored: &StoredSettings) -> Settings {
-        let mut settings = self.accounts().settings.clone();
-        settings.copy_switches(&stored.scrobbling);
+        let mut settings = stored.scrobbling_runtime_settings();
+        let accounts = self.accounts();
+        if accounts
+            .read_from
+            .as_ref()
+            .is_some_and(|read_from| read_from.same_scrobbling_accounts(stored))
+        {
+            for descriptor in super::secret_descriptors() {
+                *descriptor.value_mut(&mut settings) =
+                    descriptor.value(&accounts.credentials).to_owned();
+            }
+        }
+        settings.sanitize();
         settings
     }
 
@@ -346,15 +358,13 @@ impl Scrobbler {
         runtime: tokio::runtime::Handle,
         settings: SettingsFile,
     ) -> Self {
-        let mut accounts = settings.load().scrobbling_runtime_settings();
-        accounts.sanitize();
         Self {
             catalog,
             runtime,
             state: Arc::new(DeliveryState {
                 settings,
                 accounts: Mutex::new(Accounts {
-                    settings: accounts,
+                    credentials: Settings::default(),
                     read_from: None,
                 }),
             }),
@@ -387,11 +397,11 @@ impl Scrobbler {
         settings.sanitize();
         let (previous, current, reauthorized) = {
             let mut accounts = self.state.accounts();
-            let previous = known_accounts(&accounts.settings);
+            let previous = known_accounts(&accounts.credentials);
             let current = known_accounts(&settings);
-            let reauthorized = reauthorized_accounts(&accounts.settings, &settings);
+            let reauthorized = reauthorized_accounts(&accounts.credentials, &settings);
             *accounts = Accounts {
-                settings,
+                credentials: settings,
                 read_from: Some(read_from),
             };
             (previous, current, reauthorized)
@@ -942,7 +952,8 @@ mod tests {
         let settings_file = SettingsFile::memory();
         settings_file
             .edit(|stored| {
-                stored.scrobbling.copy_switches(&settings);
+                stored.scrobbling = settings.clone();
+                stored.ui.lastfm_api_key = settings.lastfm.api_key.clone();
                 Ok(())
             })
             .unwrap();

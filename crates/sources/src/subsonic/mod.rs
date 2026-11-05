@@ -40,17 +40,6 @@ struct PlaylistSnapshot {
     entries: Vec<library::PlaylistEntryObservation>,
 }
 
-fn normalize_release_types(values: Vec<String>) -> Vec<String> {
-    let mut result = Vec::new();
-    for value in values {
-        let value = value.trim().to_lowercase();
-        if !value.is_empty() && !result.contains(&value) {
-            result.push(value);
-        }
-    }
-    result
-}
-
 const SOURCE_CONFIG_VERSION: u32 = 1;
 const NAVIDROME_LIBRARY_VERSION: u32 = 1;
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::LocalSource;
 use super::media::read_media;
-use crate::file::cue::{CueSheet, cue_track, parse_cue_sheet};
+use crate::file::cue::{CueSheet, cue_segments, cue_track, parse_cue_sheet};
 use crate::file::media::{self as media, MediaRead, ScannedTrack};
 use crate::file::walk;
 use crate::source::SourceProgress;
@@ -216,16 +216,8 @@ fn read_cue_tracks(
                 .to_string_lossy()
                 .into_owned()
         });
-        let duration_millis = backing.track.metadata.duration_millis as u64;
-        for (position, cue) in file.tracks.iter().enumerate() {
-            let end = file
-                .tracks
-                .get(position + 1)
-                .map(|next| next.index_start_ms)
-                .unwrap_or(duration_millis);
-            if cue.index_start_ms >= end || end > duration_millis {
-                return None;
-            }
+        let segments = cue_segments(&file, backing.track.metadata.duration_millis as u64)?;
+        for (cue, end) in segments {
             let mut track = cue_track(
                 cue_path,
                 album_title.as_deref(),

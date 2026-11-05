@@ -470,7 +470,7 @@ fn discovered_track(
                 .unwrap_or(&album)
                 .to_lowercase(),
             is_compilation: metadata.is_compilation,
-            release_types: normalize_release_types(metadata.release_types),
+            release_types: library::normalize_release_types(metadata.release_types),
         }),
         sort_text: metadata
             .sort_title
@@ -788,18 +788,7 @@ fn album_release_types(tag: Option<&Tag>) -> Vec<String> {
                 .map(ToString::to_string),
         );
     }
-    normalize_release_types(values)
-}
-
-fn normalize_release_types(values: Vec<String>) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for value in values {
-        let value = value.trim().to_lowercase();
-        if !value.is_empty() && !normalized.contains(&value) {
-            normalized.push(value);
-        }
-    }
-    normalized
+    library::normalize_release_types(values)
 }
 
 fn album_compilation(tag: Option<&Tag>, release_types: &[String]) -> Option<bool> {

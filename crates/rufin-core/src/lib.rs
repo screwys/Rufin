@@ -39,3 +39,7 @@ pub use playback::equalizer::{
     EqCastFormat, EqEdit, EqPresetFormat, EqPresetSummary, EqSubscription, EqView,
     EqualizerPreferences,
 };
+
+pub(crate) fn string_error(error: impl std::fmt::Display) -> String {
+    error.to_string()
+}

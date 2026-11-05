@@ -1,39 +1,46 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_channel::Receiver;
-use library::{Change, Scope, SourceKey, TrackKey};
+use library::{Catalog, Change, Scope, SourceKey, TrackKey};
 use sources::{SourceConfiguration, SourceError};
 
 use super::{Shared, SourceOwner};
-use crate::features::follow;
+use crate::features::{Feature, Pass};
 use crate::runtime::source::SourceOperation;
+use crate::settings::StoredSettings;
 use sources::{SourceProgress, SourceProgressStage};
 
-impl SourceOwner {
-    /// Installs automatic artwork and lyrics downloads while either is on: one pass over every
-    /// source when installed, then fetches for the tracks the change feed reports as added.
-    pub(crate) fn asset_downloads_changed(&self) {
-        let (artwork, lyrics) = self.shared.settings.cache_downloads();
-        let mut installed = self
-            .shared
-            .asset_downloads
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if let Some(task) = installed.take() {
-            task.abort();
-            self.publish_asset_operation(SourceOperation::Idle);
-        }
-        if artwork || lyrics {
-            *installed = Some(follow(
-                &self.shared.runtime,
-                &self.shared.catalog,
-                Arc::downgrade(&self.shared),
-                download_added,
-            ));
-        }
+/// Automatic artwork and lyrics downloads while either is on: one pass over every source when
+/// they start, then fetches for the tracks the change feed reports as added.
+pub(crate) struct Assets(pub(crate) Weak<Shared>);
+
+impl Feature for Assets {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        let application = &settings.ui.application;
+        application.download_artwork_automatically || application.download_lyrics_automatically
     }
 
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(scope, Scope::Reload | Scope::Tracks { .. })
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            if let Some(shared) = self.0.upgrade() {
+                download_added(shared, changes).await;
+            }
+        })
+    }
+
+    fn stopped(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            SourceOwner { shared }.publish_asset_operation(SourceOperation::Idle);
+        }
+    }
+}
+
+impl SourceOwner {
     /// Fetches artwork and lyrics for every source, or only for these tracks.
     async fn download_assets(&self, only: Option<&BTreeMap<SourceKey, Vec<TrackKey>>>) {
         let (artwork, lyrics) = self.shared.settings.cache_downloads();
@@ -104,14 +111,14 @@ impl SourceOwner {
                         Some(keys) => catalog
                             .track_key_artwork_bindings(keys)
                             .await
-                            .map_err(super::string_error)?,
+                            .map_err(crate::string_error)?,
                         None => break,
                     },
                     None => {
                         let page = catalog
                             .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
                             .await
-                            .map_err(super::string_error)?;
+                            .map_err(crate::string_error)?;
                         if page.is_empty() {
                             break;
                         }
@@ -127,7 +134,7 @@ impl SourceOwner {
                         .artwork
                         .cache_source(&binding)
                         .await
-                        .map_err(super::string_error)?;
+                        .map_err(crate::string_error)?;
                     completed += 1;
                     report(completed);
                 }
@@ -139,7 +146,7 @@ impl SourceOwner {
                 let page = catalog
                     .uncached_source_lyrics_page(source_key, after, keys, &cancel_read)
                     .await
-                    .map_err(super::string_error)?;
+                    .map_err(crate::string_error)?;
                 if page.is_empty() {
                     break;
                 }
@@ -182,12 +189,7 @@ impl SourceOwner {
         {
             return;
         }
-        self.shared.operation.send_replace(operation.clone());
-        let _ = self
-            .shared
-            .outputs
-            .events
-            .try_send(crate::runtime::SourceEvent::Operation(operation));
+        self.shared.operation.send_replace(operation);
     }
 }
 

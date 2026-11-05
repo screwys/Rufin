@@ -155,7 +155,7 @@ pub(super) fn album_from_json(
             musicbrainz_release_group_id: None,
             album_artists: album_artists,
             genres: genre_credits_from_item(source, album),
-            release_types: normalize_release_types(json::strings(&album["releaseTypes"])),
+            release_types: library::normalize_release_types(json::strings(&album["releaseTypes"])),
             ..Default::default()
         },
         user_data: library::NativeUserState {

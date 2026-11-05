@@ -157,8 +157,6 @@ impl AndroidRuntime {
                 paths.clone(),
                 playback_gstreamer::start_backend,
                 playback_gstreamer::available_audio_outputs,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
             ))
             .map_err(error)?;
         let player = Arc::new(crate::player::AndroidPlayer::new(

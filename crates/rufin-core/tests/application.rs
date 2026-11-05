@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use playback::{BackendCommand, BackendError, BackendEvent, PlaybackBackend};
@@ -38,14 +37,15 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                     paths.clone(),
                     |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                     Vec::new,
-                    Arc::new(|_| {}),
-                    Arc::new(|_, _| {}),
                 )))
                 .unwrap()
                 .unwrap();
             assert!(!inputs.temporary_store);
-            assert_eq!(inputs.settings.load().application.private_mode, reopening);
-            let settings = inputs.settings.clone();
+            assert_eq!(
+                inputs.products.settings.load().application.private_mode,
+                reopening
+            );
+            let settings = inputs.products.settings.clone();
             runtime
                 .block_on(runtime.spawn_blocking(move || {
                     settings.set_private_mode(true).unwrap();

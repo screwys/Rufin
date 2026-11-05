@@ -22,6 +22,7 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
         .contains(&position_millis)
 }
 
+use crate::string_error;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -47,6 +48,8 @@ use crate::waveform::{WaveformMedia, WaveformOwner};
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PlaybackOwner {
+    /// This owner, for the work it hands out that comes back to it.
+    this: std::sync::Weak<PlaybackOwner>,
     catalog: Arc<Catalog>,
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
@@ -56,7 +59,6 @@ pub struct PlaybackOwner {
     waveform: Arc<WaveformOwner>,
     pub(crate) loudness: Arc<LoudnessAnalysisOwner>,
     pub(crate) lyrics: Arc<LyricsService>,
-    observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
     pub(crate) source: Arc<SourceOwner>,
@@ -94,6 +96,68 @@ enum PlaybackStoreWork {
         snapshot: EqualizerPreferences,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+}
+
+/// Follows the source owner: when the selected source changes the queue's rows read again and
+/// analysis turns to it, a switch stops the analysis it runs, and streams resolve again when
+/// the folder mappings change.
+async fn follow_source(
+    owner: std::sync::Weak<PlaybackOwner>,
+    mut configured: tokio::sync::watch::Receiver<()>,
+    mut operation: tokio::sync::watch::Receiver<crate::runtime::source::SourceOperation>,
+) {
+    let mappings = |owner: &PlaybackOwner| {
+        owner
+            .settings
+            .load()
+            .sources
+            .configured
+            .iter()
+            .map(|configured| configured.local_access.clone())
+            .collect::<Vec<_>>()
+    };
+    let Some((mut selected, mut mapped)) = owner
+        .upgrade()
+        .map(|owner| (owner.source.selected_library(), mappings(&owner)))
+    else {
+        return;
+    };
+    loop {
+        tokio::select! {
+            changed = configured.changed() => {
+                let (Ok(()), Some(owner)) = (changed, owner.upgrade()) else {
+                    return;
+                };
+                let now = owner.source.selected_library();
+                if now != selected {
+                    selected = now;
+                    owner.library_changed(None);
+                    if owner.ebu_r128() {
+                        owner.loudness.library_changed();
+                    }
+                }
+                let now = mappings(&owner);
+                if now != mapped {
+                    mapped = now;
+                    if let Err(error) = owner.stream_inputs_changed() {
+                        debug!(%error, "could not resolve streams again");
+                    }
+                }
+            }
+            changed = operation.changed() => {
+                let switching = matches!(
+                    *operation.borrow_and_update(),
+                    crate::runtime::source::SourceOperation::Switching { .. }
+                );
+                let (Ok(()), Some(owner)) = (changed, owner.upgrade()) else {
+                    return;
+                };
+                if switching {
+                    owner.loudness.cancel();
+                }
+            }
+        }
+    }
 }
 
 fn enqueue_queue_save(
@@ -143,10 +207,8 @@ impl PlaybackOwner {
         runtime: tokio::runtime::Handle,
         visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
         visualizer_drain: Receiver<VisualizerPublication>,
-        artwork: artwork::Artwork,
         waveform: Arc<WaveformOwner>,
         lyrics: Arc<LyricsService>,
-        observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
         audio_outputs: fn() -> Vec<playback::AudioOutput>,
         scrobbler: Arc<Scrobbler>,
         source: Arc<SourceOwner>,
@@ -168,16 +230,8 @@ impl PlaybackOwner {
         let ui = stored.ui.clone();
         let (store_sender, store_receiver) = async_channel::unbounded();
         let (report_sender, report_receiver) = async_channel::unbounded();
-        let artwork_settings = settings.clone();
-        let cast_artwork = artwork.clone();
-        let cast_artwork_path = move |stream: &playback::PreparedStream| {
-            let binding = stream.row.as_ref()?.track.artwork_binding.as_deref()?;
-            cast_artwork.cache_only_file(
-                &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(binding), 512)
-                    .with_external(artwork_settings.load().ui.artwork_policy()),
-            )
-        };
-        let owner = Arc::new(Self {
+        let owner = Arc::new_cyclic(|this| Self {
+            this: this.clone(),
             catalog,
             loudness: LoudnessAnalysisOwner::new(
                 runtime.clone(),
@@ -191,7 +245,6 @@ impl PlaybackOwner {
             visualizer_drain,
             waveform,
             lyrics,
-            observe_playback,
             audio_outputs,
             scrobbler,
             source,
@@ -205,7 +258,6 @@ impl PlaybackOwner {
             cast: playback_cast::CastManager::new(
                 ui.application.cast_proxy_enabled,
                 ui.cast_network_interface,
-                cast_artwork_path,
             ),
             output: Mutex::new(playback::PlaybackOutput::Local),
             plex_targets: Mutex::new(std::collections::HashMap::new()),
@@ -227,12 +279,6 @@ impl PlaybackOwner {
                 std::future::ready(())
             },
         );
-        follow(
-            &owner.runtime,
-            &owner.catalog,
-            weak.clone(),
-            crate::loudness::follow,
-        );
         owner.runtime.spawn(async move {
             while let Ok((source_id, report)) = report_receiver.recv().await {
                 let Some(owner) = weak.upgrade() else { break };
@@ -248,17 +294,20 @@ impl PlaybackOwner {
                 }
             }
         });
-        let weak = Arc::downgrade(&owner);
-        let mut committed = owner.settings.changes();
-        owner.runtime.spawn(async move {
-            let mut previous = Arc::clone(&committed.borrow_and_update());
-            while committed.changed().await.is_ok() {
-                let current = Arc::clone(&committed.borrow_and_update());
-                let Some(owner) = weak.upgrade() else { break };
+        crate::settings::follow(
+            &owner.runtime,
+            &owner.settings,
+            Arc::downgrade(&owner),
+            |owner, previous, current| {
                 owner.settings_changed(&previous.ui, &current.ui);
-                previous = current;
-            }
-        });
+                std::future::ready(())
+            },
+        );
+        owner.runtime.spawn(follow_source(
+            Arc::downgrade(&owner),
+            owner.source.configuration_changes(),
+            owner.source.operation(),
+        ));
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
             let mut failed_queue_save = None;
@@ -325,18 +374,10 @@ impl PlaybackOwner {
         });
     }
 
-    pub async fn waveform_cache_usage(&self) -> Result<library::CacheUsage, String> {
-        self.catalog
-            .waveform_cache_usage()
-            .await
-            .map_err(string_error)
-    }
-
     fn take_active(&self) -> Option<Playback> {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();
         self.publish_current_media(None);
-        (self.observe_playback)(None);
         self.updates.clear();
         active
     }
@@ -345,7 +386,6 @@ impl PlaybackOwner {
         if current_media_changed {
             self.publish_current_media(projection.view.transport.current.clone().map(Arc::new));
         }
-        (self.observe_playback)(Some(&projection));
         self.updates.publish(projection);
     }
 
@@ -490,6 +530,13 @@ impl PlaybackOwner {
         let catalog = Arc::clone(&self.catalog);
         let source_owner = Arc::clone(&self.source);
         let local = self.settings.local_configuration();
+        // A cast receiver shows the cover the cache holds.
+        let cast_artwork = (!self.playback_output().is_local()).then(|| {
+            (
+                self.source.artwork().clone(),
+                self.settings.load().ui.artwork_policy(),
+            )
+        });
         self.runtime.spawn(async move {
             let playable = match catalog.playable(occurrence.track.track_key).await {
                 Ok(Some(playable)) => Arc::new(playable),
@@ -518,7 +565,27 @@ impl PlaybackOwner {
                 },
             )
             .await
-            .map(|stream| prepare_media_stream(stream, track_loudness(&playable), occurrence));
+            .map(|stream| {
+                let mut stream =
+                    prepare_media_stream(stream, track_loudness(&playable), occurrence);
+                if let Some((artwork, policy)) = cast_artwork {
+                    stream.artwork_path = stream
+                        .row
+                        .as_ref()
+                        .and_then(|row| row.track.artwork_binding.as_deref())
+                        .and_then(|binding| {
+                            artwork.cache_only_file(
+                                &artwork::ArtworkRequest::new(
+                                    artwork::ArtworkBinding::opaque(binding),
+                                    512,
+                                )
+                                .with_external(policy),
+                            )
+                        })
+                        .map(Arc::new);
+                }
+                stream
+            });
             playback.post(move |player, sample| match result {
                 Ok(stream) => player.stream_resolved(run, stream),
                 Err(error) => player.stream_failed(run, error, sample),
@@ -588,9 +655,6 @@ impl PlaybackOwner {
         }
         self.send(Command::UpdateSettings(settings));
     }
-    pub(crate) fn cancel_loudness_analysis(&self) {
-        self.loudness.cancel();
-    }
     pub(crate) fn stream_inputs_changed(&self) -> Result<(), String> {
         let active = self
             .active()
@@ -605,14 +669,6 @@ impl PlaybackOwner {
             active.downgrade().post(move |player, sample| {
                 player.library_changed(changes.as_deref(), sample);
             });
-        }
-    }
-
-    /// A source was selected: the queue's rows read again, and loudness analysis turns to it.
-    pub(crate) fn source_selected(&self) {
-        self.library_changed(None);
-        if self.ebu_r128() {
-            self.loudness.library_changed();
         }
     }
 
@@ -1360,9 +1416,6 @@ fn empty_clock_sample() -> ClockSample {
 }
 fn external_source_reporting_enabled(private_mode: bool) -> bool {
     !private_mode
-}
-fn string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
 }
 
 #[cfg(test)]

@@ -143,15 +143,9 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         .save_secret(&crate::settings::provider_secret_key(&credential), &login)
         .unwrap();
     let secrets = Arc::new(secrets::SwitchableSecretStore::new(memory));
-    let artwork = artwork::Artwork::new(
-        root.path().join("artwork"),
-        runtime.clone(),
-        Arc::clone(&catalog),
-    )
-    .unwrap();
     let downloads = root.path().join("downloads");
     let source = SourceOwner::open_dormant(
-        artwork.clone(),
+        root.path().join("artwork"),
         catalog.clone(),
         downloads,
         settings.clone(),
@@ -159,7 +153,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         runtime.clone(),
         crate::source::SourceOutputs {
             events: async_channel::unbounded().0,
-            discovery: async_channel::unbounded().0,
             downloads: async_channel::unbounded().0,
         },
     );
@@ -195,10 +188,8 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         runtime,
         visualizer,
         visualizer_drain,
-        artwork,
         waveform,
         lyrics,
-        Arc::new(|_| {}),
         Vec::new,
         scrobbler,
         source,
@@ -239,6 +230,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         client,
         connection: Mutex::new((source, context)),
         source_owner: Arc::clone(source_owner),
+        owner: Arc::downgrade(&owner),
         settings: owner.settings.clone(),
         output: PlaybackOutput::Remote(RemoteOutput {
             id: "receiver".into(),

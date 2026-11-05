@@ -73,6 +73,28 @@ pub struct ConfiguredSources {
     pub document_roots: Vec<sources::DocumentRoot>,
 }
 
+/// Whether the track a URI names, or the given or selected source, rates in half stars.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn source_half_stars_enabled(
+    sources: ConfiguredSources,
+    media_uri: String,
+    source_id: Option<String>,
+) -> bool {
+    sources.half_stars_enabled(&media_uri, source_id.as_deref())
+}
+
+/// Whether lyrics search offers to keep server lyrics: automatic lyrics downloads are off, the
+/// offer was not dismissed and a source keeps lyrics on a server.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn shows_lyrics_cache_prompt(
+    application: crate::settings::ApplicationPreferences,
+    sources: Vec<SourceSummary>,
+) -> bool {
+    !application.download_lyrics_automatically
+        && !application.lyrics_cache_prompt_dismissed
+        && sources.iter().any(|source| source.kind != "local")
+}
+
 impl ConfiguredSources {
     pub fn half_stars_enabled(&self, media_uri: &str, source_id: Option<&str>) -> bool {
         let uri_source = library::source_entity_parts(media_uri).map(|(source, _, _)| source);

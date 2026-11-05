@@ -95,7 +95,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let config = settings
             .configuration(SourceId::new("webdav:partial"), "webdav", "DAV".into())
             .unwrap();
-        let source = crate::Source::open(config, None, None).unwrap();
+        let source = crate::Source::open(config, None, None, None).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let catalog = Catalog::open(directory.path().join("library.sqlite3"))
             .await
@@ -214,7 +214,7 @@ async fn dav_refresh_reads_collections_whose_hrefs_escape_names_differently() {
     let config = settings
         .configuration(SourceId::new("webdav:escaped"), "webdav", "DAV".into())
         .unwrap();
-    let source = crate::Source::open(config, None, None).unwrap();
+    let source = crate::Source::open(config, None, None, None).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let catalog = Catalog::open(directory.path().join("library.sqlite3"))
         .await
@@ -305,7 +305,7 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
             "Nextcloud".into(),
         )
         .unwrap();
-    let source = crate::Source::open(config, None, None).unwrap();
+    let source = crate::Source::open(config, None, None, None).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let catalog = Catalog::open(directory.path().join("library.sqlite3"))
         .await

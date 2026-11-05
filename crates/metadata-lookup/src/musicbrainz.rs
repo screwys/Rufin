@@ -446,22 +446,11 @@ fn release_metadata_from_group(group: &Value) -> Option<AlbumReleaseMetadata> {
                 .map(ToString::to_string),
         );
     }
-    let release_types = normalize_release_types(raw_types);
+    let release_types = library::normalize_release_types(raw_types);
     if release_types.is_empty() {
         return None;
     }
     Some(AlbumReleaseMetadata { release_types })
-}
-
-fn normalize_release_types(types: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
-    let mut values = Vec::new();
-    for release_type in types {
-        let value = release_type.as_ref().trim().to_ascii_lowercase();
-        if !value.is_empty() && !values.iter().any(|existing| existing == &value) {
-            values.push(value);
-        }
-    }
-    values
 }
 
 #[cfg(test)]

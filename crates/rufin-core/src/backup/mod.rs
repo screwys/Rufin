@@ -5,15 +5,14 @@ pub mod format;
 use crate::{
     playback::PlaybackOwner,
     settings::{
-        SettingsError, SettingsFile, SettingsOwner, StoredSettings, backup_password_key,
-        backup_password_store, load_provider_secret, read_scrobbling, seal_credential,
-        store_scrobbling,
+        SettingsError, SettingsOwner, StoredSettings, backup_password_key, backup_password_store,
+        load_provider_secret, read_scrobbling, seal_credential, store_scrobbling,
     },
     source::SourceOwner,
 };
 use async_channel::Receiver;
 use gio::prelude::*;
-use secrets::{SecretStore, SwitchableSecretStore};
+use secrets::SecretStore;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -45,9 +44,7 @@ struct PlaylistPins {
 pub struct BackupOwner {
     default_directory: std::path::PathBuf,
     catalog: Arc<library::Catalog>,
-    settings: SettingsFile,
-    settings_apply: SettingsOwner,
-    secrets: Arc<SwitchableSecretStore>,
+    settings: SettingsOwner,
     source: Arc<SourceOwner>,
     playback: Arc<PlaybackOwner>,
     runtime: tokio::runtime::Handle,
@@ -57,9 +54,7 @@ pub struct BackupOwner {
 impl BackupOwner {
     pub(crate) fn new(
         catalog: Arc<library::Catalog>,
-        settings: SettingsFile,
-        settings_apply: SettingsOwner,
-        secrets: Arc<SwitchableSecretStore>,
+        settings: SettingsOwner,
         source: Arc<SourceOwner>,
         playback: Arc<PlaybackOwner>,
         runtime: tokio::runtime::Handle,
@@ -69,8 +64,6 @@ impl BackupOwner {
             default_directory,
             catalog,
             settings,
-            settings_apply,
-            secrets,
             source,
             playback,
             runtime,
@@ -84,7 +77,7 @@ impl BackupOwner {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 let Some(owner) = weak.upgrade() else { return };
-                let backup = owner.settings.load().ui.application.backup.clone();
+                let backup = owner.settings.file().load().ui.application.backup.clone();
                 if !backup.enabled || backup.schedule.due_at(now()).is_none() {
                     continue;
                 }
@@ -110,7 +103,7 @@ impl BackupOwner {
         scheduled: bool,
         contents: Option<format::BackupContents>,
     ) -> Result<tempfile::TempPath, String> {
-        let stored = self.settings.load();
+        let stored = self.settings.file().load();
         if scheduled
             && stored.ui.application.backup.encrypt
             && passphrase.as_ref().is_none_or(|v| v.is_empty())
@@ -123,7 +116,7 @@ impl BackupOwner {
             let snapshot = stored.clone();
             Some(
                 tokio::task::spawn_blocking(move || {
-                    saved_logins(&snapshot, owner.secrets.as_ref())
+                    saved_logins(&snapshot, owner.settings.secrets().as_ref())
                         .and_then(|value| serde_json::to_vec(&value).map_err(|e| e.to_string()))
                 })
                 .await
@@ -178,13 +171,13 @@ impl BackupOwner {
     }
     async fn scheduled(&self) -> Result<(), String> {
         let _lane = self.lane.lock().await;
-        let settings = self.settings.load().ui.application.backup.clone();
+        let settings = self.settings.file().load().ui.application.backup.clone();
         if !settings.enabled || settings.schedule.due_at(now()).is_none() {
             return Ok(());
         }
         let passphrase = if settings.encrypt {
-            let stored = self.settings.load();
-            let config_dir = self.settings.config_dir().to_path_buf();
+            let stored = self.settings.file().load();
+            let config_dir = self.settings.file().config_dir().to_path_buf();
             tokio::task::spawn_blocking(move || {
                 backup_password_store(&stored, &config_dir)
                     .load_secret(&backup_password_key())
@@ -203,7 +196,11 @@ impl BackupOwner {
             .as_deref()
             .filter(|uri| uri.starts_with("content://"))
         {
-            let receipts_path = self.settings.config_dir().join("document-backups.json");
+            let receipts_path = self
+                .settings
+                .file()
+                .config_dir()
+                .join("document-backups.json");
             let mut receipts = document_backup_receipts(&receipts_path)?;
             let bytes = fs::metadata(&output)
                 .map_err(|error| error.to_string())?
@@ -218,7 +215,7 @@ impl BackupOwner {
                 bytes,
             });
             save_document_backup_receipts(&receipts_path, &receipts)?;
-            self.settings.update(|stored| {
+            self.settings.file().update(|stored| {
                 if stored.ui.application.backup.schedule.schedule_id
                     == settings.schedule.schedule_id
                 {
@@ -274,7 +271,7 @@ impl BackupOwner {
                 None,
             )
             .map_err(|e| e.to_string())?;
-        self.settings.update(|stored| {
+        self.settings.file().update(|stored| {
             if stored.ui.application.backup.schedule.schedule_id == settings.schedule.schedule_id {
                 stored.ui.application.backup.schedule.last_successful_at = Some(completed);
             }
@@ -293,7 +290,7 @@ impl BackupOwner {
     ) -> Result<library::BackupRestoreReport, String> {
         let _lane = self.lane.lock().await;
         let contents = preview.contents.intersect(preview.staged.manifest.contents);
-        let previous = self.settings.load();
+        let previous = self.settings.file().load();
         let incoming = if contents.settings {
             let raw =
                 serde_json::from_slice(&preview.staged.settings().map_err(|e| e.to_string())?)
@@ -348,14 +345,7 @@ impl BackupOwner {
                     if contents.settings || contents.saved_logins || contents.playlists {
                         let owner = self.clone();
                         report.warnings = tokio::task::spawn_blocking(move || {
-                            restore_preferences_and_logins(
-                                &owner.settings,
-                                &owner.settings_apply,
-                                owner.secrets.as_ref(),
-                                incoming,
-                                pins,
-                                logins,
-                            )
+                            restore_preferences_and_logins(&owner.settings, incoming, pins, logins)
                         })
                         .await
                         .map_err(|e| e.to_string())?;
@@ -419,7 +409,7 @@ impl BackupOwner {
         contents: format::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
         let (send, receive) = async_channel::bounded(1);
-        let settings = self.settings.clone();
+        let settings = self.settings.file().clone();
         self.runtime.spawn_blocking(move || {
             let result = (|| {
                 let (input, passphrase) = open()?;
@@ -516,9 +506,12 @@ impl BackupOwner {
                 if passphrase.is_empty() {
                     return Err("The scheduled backup password cannot be empty".to_string());
                 }
-                backup_password_store(&owner.settings.load(), owner.settings.config_dir())
-                    .save_secret(&backup_password_key(), &passphrase)
-                    .map_err(|error| error.to_string())
+                backup_password_store(
+                    &owner.settings.file().load(),
+                    owner.settings.file().config_dir(),
+                )
+                .save_secret(&backup_password_key(), &passphrase)
+                .map_err(|error| error.to_string())
             })
             .await
             .map_err(|error| error.to_string())?
@@ -594,16 +587,14 @@ impl BackupPreview {
 }
 
 fn restore_preferences_and_logins(
-    file: &SettingsFile,
-    settings_apply: &SettingsOwner,
-    secrets: &dyn SecretStore,
+    settings: &SettingsOwner,
     incoming: Option<StoredSettings>,
     pins: Option<PlaylistPins>,
     logins: Option<SavedLogins>,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
     if (incoming.is_some() || pins.is_some())
-        && let Err(error) = settings_apply.restore(
+        && let Err(error) = settings.restore(
             |current| {
                 if let Some(mut incoming) = incoming {
                     preserve_destination_settings(current, &mut incoming)?;
@@ -625,9 +616,14 @@ fn restore_preferences_and_logins(
         return warnings;
     }
     if let Some(logins) = logins {
-        let mut restored = StoredSettings::clone(&file.load());
-        restore_logins(secrets, &mut restored, logins, &mut warnings);
-        if let Err(error) = settings_apply.restore(
+        let mut restored = StoredSettings::clone(&settings.file().load());
+        restore_logins(
+            settings.secrets().as_ref(),
+            &mut restored,
+            logins,
+            &mut warnings,
+        );
+        if let Err(error) = settings.restore(
             |current| {
                 copy_scrobbling_logins(&restored, current);
                 for source in current.sources.connections_mut() {
@@ -930,7 +926,7 @@ fn restore_logins(
 mod tests {
     use super::*;
     use crate::settings::SecretStorageMode;
-    use crate::settings::{ConfiguredSource, Credential, provider_secret_key};
+    use crate::settings::{ConfiguredSource, Credential, SettingsFile, provider_secret_key};
     use secrets::{ConfigSecretStore, MemorySecretStore};
 
     fn source(id: &str, reference: &str) -> ConfiguredSource {
@@ -994,10 +990,6 @@ mod tests {
         let mut incoming = StoredSettings::clone(&file.load());
         incoming.ui.application.private_mode = true;
         incoming.scrobbling.listenbrainz.enabled = false;
-        let secrets = Arc::new(secrets::SwitchableSecretStore::new(Arc::new(
-            ConfigSecretStore::new(directory.path().join("secrets.json")),
-        )));
-        let settings_apply = (*SettingsOwner::new(file.clone(), secrets)).clone();
         let changes = file.changes();
         let initial = changes.borrow().secrets_revision;
         let committed = || {
@@ -1015,22 +1007,19 @@ mod tests {
             writing,
             resume: Mutex::new(resumed),
         };
+        let settings_apply = (*SettingsOwner::new(
+            file.clone(),
+            Arc::new(secrets::SwitchableSecretStore::new(Arc::new(store))),
+        ))
+        .clone();
         let mut logins = SavedLogins::default();
         logins.sources.insert(
             sources::SourceId::new("exact"),
             Some("restored-login".into()),
         );
-        let restore_file = file.clone();
         let restore_apply = settings_apply.clone();
         let restored = std::thread::spawn(move || {
-            restore_preferences_and_logins(
-                &restore_file,
-                &restore_apply,
-                &store,
-                Some(incoming),
-                None,
-                Some(logins),
-            )
+            restore_preferences_and_logins(&restore_apply, Some(incoming), None, Some(logins))
         });
         written.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(file.load().ui.application.private_mode);

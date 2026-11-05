@@ -6,11 +6,9 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    Discoverer, DiscovererResult, Metadata, ensure_gstreamer_initialized, gst, image_from_info,
-    metadata_from_info,
-};
+use super::{Discoverer, DiscovererResult, Metadata, gst, image_from_info, metadata_from_info};
 use crate::{ImageBytes, SourceError};
+use audio_processing::ensure_gstreamer_initialized;
 
 #[derive(Serialize, Deserialize)]
 struct Request<'a> {

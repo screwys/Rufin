@@ -1,7 +1,8 @@
 //! Playlist routing and publication.
 use crate::runtime::SourceEvent;
 use crate::runtime::source::PlaylistExport;
-use crate::source::{SourceOwner, string_error};
+use crate::source::SourceOwner;
+use crate::string_error;
 use async_channel::Receiver;
 use futures_util::{StreamExt, TryStreamExt};
 use library::{Catalog, PlaylistEntryKey, PlaylistKey, ReadCancellation, SourceKey};

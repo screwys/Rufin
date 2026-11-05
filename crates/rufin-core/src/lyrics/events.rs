@@ -40,7 +40,6 @@ impl Default for CurrentLyrics {
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub enum LyricsEvent {
     JapaneseDictionaryChanged(::lyrics::JapaneseDictionaryStatus),
-    Current(CurrentLyrics),
     SearchFinished {
         media_id: CurrentMediaId,
         query: LyricsQuery,
@@ -101,7 +100,6 @@ impl LyricsEvent {
             Self::SearchFinished { media_id, .. }
             | Self::Saved { media_id, .. }
             | Self::SourceSaveFailed { media_id, .. } => Some(media_id.clone()),
-            Self::Current(current) => current.media_id(),
             Self::JapaneseDictionaryChanged(_) => None,
         }
     }

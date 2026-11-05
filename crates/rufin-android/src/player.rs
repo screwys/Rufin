@@ -140,9 +140,7 @@ impl AndroidPlayer {
         let (events, operations) = async_channel::unbounded();
         products.runtime.spawn(async move {
             while let Ok(event) = lyrics_events.recv().await {
-                if !matches!(event, rufin_core::lyrics::LyricsEvent::Current(_))
-                    && events.send(event).await.is_err()
-                {
+                if events.send(event).await.is_err() {
                     break;
                 }
             }

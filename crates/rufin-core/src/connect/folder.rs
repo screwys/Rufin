@@ -12,7 +12,8 @@ use std::{
 
 use rufin_connect::store::{Cursor, Row};
 
-use super::{ConnectOwner, Receiving, Session, SyncFolder, error};
+use super::{ConnectOwner, Receiving, Session, SyncFolder};
+use crate::string_error;
 
 const ROOT: &str = "Rufin Connect";
 const SUFFIX: &str = ".rcs";
@@ -157,7 +158,7 @@ async fn write_own(
         .store
         .profile()
         .await
-        .map_err(error)?
+        .map_err(string_error)?
         .ok_or("Connect is not enabled")?
         .written;
     let directory = [ROOT, &session.profile, &records.device].map(str::to_owned);
@@ -169,7 +170,11 @@ async fn write_own(
     folder
         .write(owner, &directory, &name, seal(session, &rows)?)
         .await?;
-    records.store.set_written(last).await.map_err(error)?;
+    records
+        .store
+        .set_written(last)
+        .await
+        .map_err(string_error)?;
     let segments = folder.list(&directory).await?;
     if segments.len() > SEGMENTS {
         let (rows, last) = own_rows(session, 0).await?;
@@ -196,14 +201,14 @@ async fn own_rows(session: &Arc<Session>, mut after: i64) -> Result<(Vec<Row>, i
             .store
             .rows_after(after, PAGE, Some(&records.device))
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         let Some(last) = page.last().map(|row| row.sequence) else {
             break;
         };
         after = last;
         rufin_connect::sync::Values::encode(records.as_ref(), &mut page)
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         rows.extend(
             page.into_iter()
                 .filter(|row| row.deleted || row.value.is_some()),
@@ -219,7 +224,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<u64, Str
         .store
         .peers()
         .await
-        .map_err(error)?
+        .map_err(string_error)?
         .into_iter()
         .map(|peer| (peer.device, peer.read))
         .collect::<std::collections::HashMap<_, _>>();
@@ -281,7 +286,7 @@ async fn read_others(session: &Arc<Session>, folder: &Folder) -> Result<u64, Str
 fn seal(session: &Session, rows: &[Row]) -> Result<Vec<u8>, String> {
     let mut plain = Vec::new();
     for row in rows {
-        serde_json::to_writer(&mut plain, row).map_err(error)?;
+        serde_json::to_writer(&mut plain, row).map_err(string_error)?;
         plain.push(b'\n');
     }
     session.records.encrypt(&plain)
@@ -289,10 +294,10 @@ fn seal(session: &Session, rows: &[Row]) -> Result<Vec<u8>, String> {
 
 fn open(session: &Session, bytes: &[u8]) -> Result<Vec<Row>, String> {
     String::from_utf8(session.records.decrypt(bytes)?)
-        .map_err(error)?
+        .map_err(string_error)?
         .lines()
         .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_str(line).map_err(error))
+        .map(|line| serde_json::from_str(line).map_err(string_error))
         .collect()
 }
 
@@ -326,7 +331,7 @@ impl Folder {
                 tokio::task::spawn_blocking(move || match std::fs::read_dir(&path) {
                     Ok(entries) => entries
                         .map(|entry| {
-                            let entry = entry.map_err(error)?;
+                            let entry = entry.map_err(string_error)?;
                             Ok((
                                 entry.file_name().to_string_lossy().into_owned(),
                                 entry.path().to_string_lossy().into_owned(),
@@ -334,17 +339,19 @@ impl Folder {
                         })
                         .collect::<Result<Vec<_>, String>>(),
                     Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-                    Err(cause) => Err(error(cause)),
+                    Err(cause) => Err(string_error(cause)),
                 })
                 .await
-                .map_err(error)??
+                .map_err(string_error)??
             }
             Self::Document(root) => {
                 let (root, directory) = (root.clone(), directory.to_vec());
                 tokio::task::spawn_blocking(move || {
-                    let mut current = sources::stat_document(&root).map_err(error)?;
+                    let mut current = sources::stat_document(&root).map_err(string_error)?;
                     for part in &directory {
-                        match sources::find_document_child(&current.uri, part).map_err(error)? {
+                        match sources::find_document_child(&current.uri, part)
+                            .map_err(string_error)?
+                        {
                             Some(child) => current = child,
                             None => return Ok(Vec::new()),
                         }
@@ -352,7 +359,8 @@ impl Folder {
                     let mut files = Vec::new();
                     let mut offset = 0;
                     loop {
-                        let page = sources::list_documents(&current.uri, offset).map_err(error)?;
+                        let page =
+                            sources::list_documents(&current.uri, offset).map_err(string_error)?;
                         files.extend(
                             page.entries
                                 .into_iter()
@@ -366,14 +374,14 @@ impl Folder {
                     }
                 })
                 .await
-                .map_err(error)??
+                .map_err(string_error)??
             }
             Self::Connection(source, root) => source
                 .file_connection()
-                .map_err(error)?
+                .map_err(string_error)?
                 .list_folder_files(&relative(root, directory), SUFFIX)
                 .await
-                .map_err(error)?,
+                .map_err(string_error)?,
         };
         Ok(files
             .into_iter()
@@ -383,30 +391,30 @@ impl Folder {
 
     async fn read(&self, handle: &str) -> Result<Vec<u8>, String> {
         match self {
-            Self::Path(_) => tokio::fs::read(handle).await.map_err(error),
+            Self::Path(_) => tokio::fs::read(handle).await.map_err(string_error),
             Self::Document(_) => {
                 let handle = handle.to_owned();
                 tokio::task::spawn_blocking(move || {
                     let mut bytes = Vec::new();
                     sources::open_document_input(&handle)
-                        .map_err(error)?
+                        .map_err(string_error)?
                         .read_to_end(&mut bytes)
-                        .map_err(error)?;
+                        .map_err(string_error)?;
                     Ok(bytes)
                 })
                 .await
-                .map_err(error)?
+                .map_err(string_error)?
             }
             Self::Connection(source, _) => {
-                let file = tempfile::NamedTempFile::new().map_err(error)?;
+                let file = tempfile::NamedTempFile::new().map_err(string_error)?;
                 source
                     .file_connection()
-                    .map_err(error)?
+                    .map_err(string_error)?
                     .copy_file(handle, file.path())
                     .await
-                    .map_err(error)?
+                    .map_err(string_error)?
                     .ok_or("The sync folder file is gone")?;
-                tokio::fs::read(file.path()).await.map_err(error)
+                tokio::fs::read(file.path()).await.map_err(string_error)
             }
         }
     }
@@ -423,21 +431,23 @@ impl Folder {
                 let path = directory
                     .iter()
                     .fold(root.clone(), |path, part| path.join(part));
-                tokio::fs::create_dir_all(&path).await.map_err(error)?;
+                tokio::fs::create_dir_all(&path)
+                    .await
+                    .map_err(string_error)?;
                 tokio::fs::write(path.join(name), bytes)
                     .await
-                    .map_err(error)
+                    .map_err(string_error)
             }
             Self::Document(root) => {
                 let file = staged(owner, &bytes)?;
                 let (root, directory, name) = (root.clone(), directory.to_vec(), name.to_owned());
                 tokio::task::spawn_blocking(move || {
-                    let parent =
-                        sources::create_document_directories(&root, &directory).map_err(error)?;
-                    match sources::find_document_child(&parent.uri, &name).map_err(error)? {
+                    let parent = sources::create_document_directories(&root, &directory)
+                        .map_err(string_error)?;
+                    match sources::find_document_child(&parent.uri, &name).map_err(string_error)? {
                         Some(existing) => sources::save_document(&existing.uri, file.path(), None)
                             .map(|_| ())
-                            .map_err(error),
+                            .map_err(string_error),
                         None => sources::create_document(
                             &parent.uri,
                             &name,
@@ -445,50 +455,50 @@ impl Folder {
                             file.path(),
                         )
                         .map(|_| ())
-                        .map_err(error),
+                        .map_err(string_error),
                     }
                 })
                 .await
-                .map_err(error)?
+                .map_err(string_error)?
             }
             Self::Connection(source, root) => {
                 let file = staged(owner, &bytes)?;
-                let files = source.file_connection().map_err(error)?;
+                let files = source.file_connection().map_err(string_error)?;
                 files
                     .write_file(
                         &format!("{}/{name}", relative(root, directory)),
                         file.path(),
                     )
                     .await
-                    .map_err(error)
+                    .map_err(string_error)
             }
         }
     }
 
     async fn delete(&self, handle: &str) -> Result<(), String> {
         match self {
-            Self::Path(_) => tokio::fs::remove_file(handle).await.map_err(error),
+            Self::Path(_) => tokio::fs::remove_file(handle).await.map_err(string_error),
             Self::Document(_) => {
                 let handle = handle.to_owned();
                 tokio::task::spawn_blocking(move || sources::delete_document(&handle))
                     .await
-                    .map_err(error)?
-                    .map_err(error)
+                    .map_err(string_error)?
+                    .map_err(string_error)
             }
             Self::Connection(source, _) => source
                 .file_connection()
-                .map_err(error)?
+                .map_err(string_error)?
                 .remove_file(handle)
                 .await
-                .map_err(error),
+                .map_err(string_error),
         }
     }
 }
 
 /// A segment in a file the document host and file connections upload from.
 fn staged(owner: &ConnectOwner, bytes: &[u8]) -> Result<tempfile::NamedTempFile, String> {
-    let mut file = tempfile::NamedTempFile::new_in(&owner.directory).map_err(error)?;
-    file.write_all(bytes).map_err(error)?;
+    let mut file = tempfile::NamedTempFile::new_in(&owner.directory).map_err(string_error)?;
+    file.write_all(bytes).map_err(string_error)?;
     Ok(file)
 }
 

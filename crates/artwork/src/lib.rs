@@ -4,9 +4,9 @@
 //! avoids duplicate work, prioritizes requests, and caches original files.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 
 use md5_digest::{Digest, Md5};
 use sources::{ImageSize, Source, SourceId};
@@ -29,7 +29,8 @@ pub use decode::{
 };
 pub use selection::ArtworkBinding;
 
-pub(crate) type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
+/// Gives a source's current client to fetch its pictures.
+pub type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExternalPolicy {
     pub allow_cached: bool,
@@ -235,7 +236,6 @@ pub enum ArtworkError {
 #[derive(Clone)]
 pub struct Artwork {
     pipeline: Arc<pipeline::Pipeline>,
-    source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
 }
 
 impl Artwork {
@@ -329,11 +329,6 @@ impl Artwork {
             .map_err(|error| std::io::Error::other(error.to_string()))?
     }
 
-    /// Keys are relative to the existing v1 cache layout, never filesystem paths.
-    pub fn cache_file(&self, key: &str) -> Result<Option<PathBuf>, ArtworkError> {
-        Ok(self.pipeline.cache().file(key)?)
-    }
-
     /// Refresh live images and jobs after a changed import batch, preserving files on disk.
     pub fn invalidate_decoded_cache(&self) {
         self.pipeline.invalidate_decoded_cache();
@@ -343,29 +338,23 @@ impl Artwork {
         self.pipeline.cache_revision()
     }
 
+    /// Creates the cache's directories, so a cache there can open.
+    pub fn prepare(cache_root: impl AsRef<Path>) -> Result<(), ArtworkError> {
+        cache::current_layout(cache_root.as_ref())?;
+        Ok(())
+    }
+
     pub fn new(
         cache_root: impl AsRef<Path>,
         runtime: Handle,
         catalog: Arc<library::Catalog>,
+        sources: impl Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync + 'static,
     ) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
-        let source_resolver = Arc::new(Mutex::new(None));
-        let pipeline =
-            pipeline::Pipeline::new(&cache_root, runtime, Arc::clone(&source_resolver), catalog)?;
+        let pipeline = pipeline::Pipeline::new(&cache_root, runtime, Arc::new(sources), catalog)?;
         Ok(Self {
             pipeline: Arc::new(pipeline),
-            source_resolver,
         })
-    }
-
-    pub fn install_source_resolver(
-        &self,
-        resolver: impl Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync + 'static,
-    ) {
-        *self
-            .source_resolver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(resolver));
     }
 
     pub fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
@@ -443,6 +432,7 @@ mod tests {
             directory.path().join("covers"),
             runtime.handle().clone(),
             runtime.block_on(catalog(&directory)),
+            |_| None,
         )
         .unwrap();
         let key = |encoded: Vec<u8>| {
@@ -512,6 +502,7 @@ mod tests {
             directory.path().join("covers"),
             runtime.handle().clone(),
             runtime.block_on(catalog(&directory)),
+            |_| None,
         )
         .unwrap();
         let encoded =
@@ -521,10 +512,16 @@ mod tests {
         let identity_without_resolver = artwork.key(&request);
         let resolutions = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&resolutions);
-        artwork.install_source_resolver(move |_| {
-            observed.fetch_add(1, Ordering::Relaxed);
-            None
-        });
+        let artwork = Artwork::new(
+            directory.path().join("covers"),
+            runtime.handle().clone(),
+            runtime.block_on(catalog(&directory)),
+            move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+                None
+            },
+        )
+        .unwrap();
 
         let identity_with_resolver = artwork.key(&request);
         let _cache_only = artwork.key(&request.clone().cache_only());
@@ -581,7 +578,13 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("covers");
         let catalog = catalog(&directory).await;
-        let artwork = Artwork::new(&root, Handle::current(), Arc::clone(&catalog)).unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        let artwork = Artwork::new(&root, Handle::current(), Arc::clone(&catalog), move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        })
+        .unwrap();
         let encoded = sources::native_artwork_binding(
             "source",
             &sources::NativeImageRef::new("cover", Some("revision".into())),
@@ -604,12 +607,6 @@ mod tests {
                 png.get_ref(),
             )
             .unwrap();
-        let resolutions = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&resolutions);
-        artwork.install_source_resolver(move |_| {
-            observed.fetch_add(1, Ordering::Relaxed);
-            None
-        });
 
         let mut fallback = vec![library::ArtworkCandidate::new(
             library::ArtworkImage::Artist {
@@ -774,7 +771,8 @@ mod tests {
         assert_eq!(artwork.key(&request), key);
         artwork.clear_cache(&catalog, &[]).await.unwrap();
         assert!(!original.exists());
-        let reopened = Artwork::new(&root, Handle::current(), Arc::clone(&catalog)).unwrap();
+        let reopened =
+            Artwork::new(&root, Handle::current(), Arc::clone(&catalog), |_| None).unwrap();
         let restored = catalog
             .artwork_bindings(
                 &[library::source_entity_uri(
@@ -807,18 +805,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_native_cache_miss_resolves_its_source_in_the_worker() {
         let directory = tempfile::tempdir().unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
         let artwork = Artwork::new(
             directory.path().join("covers"),
             Handle::current(),
             catalog(&directory).await,
+            move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+                None
+            },
         )
         .unwrap();
-        let resolutions = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&resolutions);
-        artwork.install_source_resolver(move |_| {
-            observed.fetch_add(1, Ordering::Relaxed);
-            None
-        });
         let mut native = sources::NativeImageRef::new("cover", None);
         native.blur_hash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
         let encoded = sources::native_artwork_binding("source", &native).unwrap();
@@ -841,18 +839,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_cache_only_miss_never_resolves_a_source() {
         let directory = tempfile::tempdir().unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
         let artwork = Artwork::new(
             directory.path().join("covers"),
             Handle::current(),
             catalog(&directory).await,
+            move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+                None
+            },
         )
         .unwrap();
-        let resolutions = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&resolutions);
-        artwork.install_source_resolver(move |_| {
-            observed.fetch_add(1, Ordering::Relaxed);
-            None
-        });
         let encoded =
             sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
                 .unwrap();
@@ -878,18 +876,18 @@ mod tests {
         .write_to(&mut encoded_image, image::ImageFormat::Jpeg)
         .unwrap();
         std::fs::write(&image, encoded_image.into_inner()).unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
         let artwork = Artwork::new(
             directory.path().join("covers"),
             Handle::current(),
             catalog(&directory).await,
+            move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+                None
+            },
         )
         .unwrap();
-        let resolutions = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&resolutions);
-        artwork.install_source_resolver(move |_| {
-            observed.fetch_add(1, Ordering::Relaxed);
-            None
-        });
         let encoded = sources::LocalImageRef::File {
             source_id: SourceId::new("configured-local"),
             path: image.to_string_lossy().into_owned(),

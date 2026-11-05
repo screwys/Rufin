@@ -5,7 +5,6 @@ use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::process::{Command, ExitCode};
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::{
     fs,
@@ -60,8 +59,6 @@ fn main() -> ExitCode {
 
     let initial_settings = settings.load().ui.clone();
     let bootstrap = move || async move {
-        let discord = Arc::new(desktop_integration::Discord::new());
-        let presence = Arc::clone(&discord);
         app::runtime_inputs(
             diagnostics,
             !updated_restart,
@@ -69,15 +66,6 @@ fn main() -> ExitCode {
             paths::roots(),
             playback_gstreamer::start_backend,
             playback_gstreamer::available_audio_outputs,
-            Arc::new(move |projection| presence.observe(projection)),
-            Arc::new(move |settings, projection| {
-                discord.update(
-                    settings.rich_presence.clone(),
-                    !settings.application.private_mode,
-                    &settings.lastfm_api_key,
-                    projection,
-                )
-            }),
         )
         .await
     };

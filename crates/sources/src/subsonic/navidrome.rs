@@ -22,7 +22,8 @@ use crate::remote_json::{boolean, field, id, items, strings};
 use crate::source::{SourceProgress, SourceProgressStage};
 use crate::{SourceError, SourceResult};
 
-use super::{ImageRef, SubsonicSource, normalize_release_types};
+use super::{ImageRef, SubsonicSource};
+use library::normalize_release_types;
 
 const NAVIDROME_PAGE_SIZE: usize = 1_000;
 const NAVIDROME_JSON_MAX_BYTES: usize = 16 * 1024 * 1024;

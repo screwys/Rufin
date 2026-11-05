@@ -122,18 +122,8 @@ impl ApplicationAppearance {
     }
 }
 
-fn selected_theme<'a>(preference: &ThemePreference, themes: &'a [Theme]) -> Option<&'a Theme> {
-    let id = match preference {
-        ThemePreference::System => return None,
-        ThemePreference::Light => "builtin:light",
-        ThemePreference::Dark => "builtin:dark",
-        ThemePreference::Named(id) => id,
-    };
-    themes.iter().find(|theme| theme.id == id)
-}
-
 fn color_scheme(preference: &ThemePreference, themes: &[Theme]) -> adw::ColorScheme {
-    match selected_theme(preference, themes).map(|theme| theme.mode) {
+    match preference.selected(themes).map(|theme| theme.mode) {
         None => adw::ColorScheme::PreferLight,
         Some(Mode::Light) => adw::ColorScheme::ForceLight,
         Some(Mode::Dark) => adw::ColorScheme::ForceDark,
@@ -165,7 +155,7 @@ fn append_accent(css: &mut String, color: &str, foreground: &str) {
 
 fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
     let mut css = String::from(":root {\n");
-    let theme = selected_theme(&settings.appearance.theme_preference, themes);
+    let theme = settings.appearance.theme_preference.selected(themes);
     if let Some(theme) = theme {
         // Light and Dark keep inheriting the system accent when no override is selected.
         if matches!(

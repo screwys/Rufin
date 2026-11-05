@@ -235,9 +235,7 @@ impl EditSession {
                 None
             }
         };
-        if let Ok(playback) = owner.shared.playback() {
-            playback.lyrics.accept_edited(&self.media_uri, &text).await;
-        }
+        owner.lyrics_edited(&self.media_uri, &text);
         Ok(revision)
     }
 }

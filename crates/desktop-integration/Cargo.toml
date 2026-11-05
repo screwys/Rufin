@@ -12,16 +12,13 @@ publish.workspace = true
 
 [dependencies]
 app-identity.workspace = true
-metadata-lookup.workspace = true
 artwork.workspace = true
 gio.workspace = true
 glib = { workspace = true, features = ["v2_66"] }
-library.workspace = true
 blake3.workspace = true
 localization.workspace = true
 playback.workspace = true
 rufin-core.workspace = true
-serde_json.workspace = true
 tracing.workspace = true
 url.workspace = true
 
@@ -49,6 +46,7 @@ apple-cf.workspace = true
 mediaplayer.workspace = true
 
 [dev-dependencies]
+library.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -14,11 +14,14 @@ use crate::source::SourceOwner;
 
 /// Plays the saved Random Play settings in the selected library. True means nothing matched.
 pub async fn play_saved_random(
-    owner: &SourceOwner,
+    queue: &Arc<crate::playback::PlaybackOwner>,
     settings: RandomPlaySettings,
     placement: crate::playback::QueuePlacement,
 ) -> Result<bool, String> {
-    owner
+    let queue = Arc::clone(queue);
+    queue
+        .source
+        .clone()
         .reply(move |owner, catalog| async move {
             let selected = owner.selected_library().ok_or("No source selected")?;
             let genre = saved_random_genre(
@@ -43,7 +46,6 @@ pub async fn play_saved_random(
                         .map_or(0, |duration| duration.as_nanos() as i64),
                 },
             };
-            let queue = owner.shared.playback()?;
             queue_random(
                 &catalog,
                 selected.source_key,

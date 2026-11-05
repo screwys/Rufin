@@ -14,7 +14,6 @@ use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
 
 use super::{Shared, SourceOwner, configured_source};
-use crate::runtime::SourceEvent;
 
 /// While a source's changes keep coming, clients hear of them at most this often.
 const PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
@@ -315,13 +314,7 @@ impl SourceOwner {
             if let Err(error) = shared.load_source_counts().await {
                 shared.warn_nonfatal(&error);
             }
-            let _ = shared
-                .outputs
-                .events
-                .send(SourceEvent::Configured(
-                    shared.configured_sources(shared.selected().as_ref()),
-                ))
-                .await;
+            shared.configured();
         }
         let _ = shared.feed.changed.send(Arc::new(changed));
     }

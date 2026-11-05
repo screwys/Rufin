@@ -394,10 +394,6 @@ impl Settings {
         self.application.notifications_enabled
     }
 
-    pub fn shows_external_site_links(&self) -> bool {
-        self.application.external_site_links.enabled
-    }
-
     pub fn allows_external_metadata_lookup(&self) -> bool {
         self.application.external_metadata_enabled && !self.application.private_mode
     }
@@ -477,13 +473,6 @@ impl Settings {
         self.download_settings(source_id)
             .directory
             .and_then(|directory| directory.native().map(PathBuf::from))
-    }
-
-    pub fn download_location(
-        &self,
-        source_id: &SourceId,
-    ) -> Option<crate::downloads::DownloadDirectory> {
-        self.download_settings(source_id).directory
     }
 
     pub fn download_settings(&self, source_id: &SourceId) -> SourceDownloadSettings {

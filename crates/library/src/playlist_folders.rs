@@ -222,31 +222,6 @@ impl Catalog {
             .map(|(_, key, name)| (PlaylistFolderKey::from_raw(key), name))
             .collect()
     }
-
-    pub async fn playlist_folder_by_id(
-        &self,
-        id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<PlaylistFolderRow>> {
-        self.loaded().await;
-        let key = self
-            .snapshot()
-            .playlist_folders
-            .values()
-            .find(|folder| folder.object == id)
-            .map(|folder| PlaylistFolderKey::from_raw(folder.key));
-        let Some(key) = key else {
-            return Ok(None);
-        };
-        Ok(self
-            .rows_of(&[Item::PlaylistFolder(key)], true, cancellation)
-            .await?
-            .into_iter()
-            .find_map(|row| match row {
-                Row::Playlist(PlaylistListRow::Folder(row)) => Some(row),
-                _ => None,
-            }))
-    }
 }
 
 /// A playlist folder by object id.

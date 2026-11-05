@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use rufin_core::presence::Activity;
+use crate::presence::Activity;
 use serde_json::{Value, json};
 use tracing::debug;
 
@@ -173,7 +173,7 @@ mod transport {
 
 use transport::IpcStream;
 
-pub(crate) const SUPPORTED: bool = cfg!(any(unix, windows));
+pub(crate) const SUPPORTED: bool = cfg!(all(any(unix, windows), not(target_os = "android")));
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
@@ -392,8 +392,8 @@ fn read_response(stream: &mut IpcStream) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presence::{APP_ICON_ASSET, LinkType, Settings};
     use playback::TransportStatus;
-    use rufin_core::presence::{APP_ICON_ASSET, LinkType, Settings};
 
     #[test]
     fn lastfm_album_url_uses_the_album_display_artist() {

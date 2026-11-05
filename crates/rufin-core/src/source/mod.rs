@@ -11,6 +11,7 @@ mod pins;
 pub mod search;
 pub use integrations::FileIntegration;
 
+use crate::string_error;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -35,8 +36,6 @@ use sources::{
 };
 use tracing::{info, warn};
 
-use crate::features::follow;
-use crate::playback::PlaybackOwner;
 use crate::settings::{
     ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, fresh_source_id,
     load_provider_secret, platform_secret_store, seal_credential,
@@ -47,7 +46,6 @@ const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 #[derive(Clone)]
 pub(crate) struct SourceOutputs {
     pub(crate) events: Sender<SourceEvent>,
-    pub(crate) discovery: Sender<DiscoveryUpdate>,
     pub(crate) downloads: Sender<crate::downloads::DownloadEvent>,
 }
 
@@ -114,19 +112,16 @@ pub(crate) struct Shared {
     operation: tokio::sync::watch::Sender<SourceOperation>,
     feed: feed::Feed,
     configuration_changed: tokio::sync::watch::Sender<()>,
+    /// The last lyrics an edit saved: the track's URI and the text.
+    lyrics_edited: tokio::sync::watch::Sender<Option<(String, String)>>,
     discovery: tokio::sync::watch::Sender<Option<DiscoveryUpdate>>,
     selected: Mutex<Option<SelectedLibrary>>,
     catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     selection_intent: Mutex<Weak<AtomicBool>>,
     connection: Mutex<Option<tokio::task::AbortHandle>>,
     album_release: Mutex<Option<tokio::task::AbortHandle>>,
-    /// Wakes the outbox for deliveries just queued.
-    outbox: Arc<tokio::sync::Notify>,
-    /// Automatic artwork and lyrics downloads, while either is on.
-    asset_downloads: Mutex<Option<tokio::task::AbortHandle>>,
     /// The edits of each playlist, which run one at a time.
     playlist_edits: Mutex<HashMap<library::PlaylistKey, Arc<tokio::sync::Mutex<()>>>>,
-    playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
     pub(crate) started: AtomicBool,
 }
@@ -175,26 +170,19 @@ impl Shared {
     }
 
     pub(crate) async fn send(&self, event: SourceEvent) {
-        if matches!(
-            &event,
-            SourceEvent::Configured(_)
-                | SourceEvent::Selected { .. }
-                | SourceEvent::ReleaseSelected
-        ) {
-            self.configuration_changed.send_replace(());
-        }
         let _ = self.outputs.events.send(event).await;
+    }
+
+    /// The configured sources, the selection or the folder mappings changed.
+    pub(crate) fn configured(&self) {
+        self.configuration_changed.send_replace(());
     }
 
     fn publish_operation(&self, operation: SourceOperation) {
         if matches!(
             operation,
             SourceOperation::Idle | SourceOperation::Refreshing { .. }
-        ) && self
-            .asset_downloads
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
+        ) && self.settings.cache_downloads() != (false, false)
             && matches!(
                 *self.operation.borrow(),
                 SourceOperation::Downloading { .. }
@@ -202,23 +190,11 @@ impl Shared {
         {
             return;
         }
-        self.operation.send_replace(operation.clone());
-        let _ = self
-            .outputs
-            .events
-            .try_send(SourceEvent::Operation(operation));
+        self.operation.send_replace(operation);
     }
 
     pub(crate) fn warn_nonfatal(&self, message: &str) {
         warn!(message, "source operation was ignored");
-    }
-
-    pub(crate) fn playback(&self) -> Result<Arc<PlaybackOwner>, String> {
-        self.playback
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .upgrade()
-            .ok_or_else(|| "Playback is unavailable".to_string())
     }
 
     async fn retire_changed_clients(&self, credentials_replaced: bool) -> Result<(), String> {
@@ -386,7 +362,7 @@ impl Shared {
 impl SourceOwner {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn open_dormant(
-        artwork: Artwork,
+        artwork_dir: std::path::PathBuf,
         catalog: Arc<Catalog>,
         downloads_root: std::path::PathBuf,
         settings: SettingsFile,
@@ -408,14 +384,31 @@ impl SourceOwner {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let (feed, notices) = feed::Feed::open();
+        // A cache that cannot be used where it belongs is kept in a temporary folder.
+        let artwork_dir = match Artwork::prepare(&artwork_dir) {
+            Ok(()) => artwork_dir,
+            Err(error) => {
+                warn!(%error, "could not use the artwork cache; startup will continue with a temporary cache");
+                let started = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_nanos());
+                std::env::temp_dir().join(format!("rufin-artwork-{}-{started}", std::process::id()))
+            }
+        };
         Arc::new_cyclic(|owner| {
             // Artwork fetches and each download ask this owner for a source's current client.
             let artwork_owner = owner.clone();
-            artwork.install_source_resolver(move |source_id| {
-                artwork_owner
-                    .upgrade()
-                    .and_then(|owner: Arc<Self>| owner.client(source_id).ok())
-            });
+            let artwork = Artwork::new(
+                &artwork_dir,
+                runtime.clone(),
+                Arc::clone(&catalog),
+                move |source_id| {
+                    artwork_owner
+                        .upgrade()
+                        .and_then(|owner: Arc<Self>| owner.client(source_id).ok())
+                },
+            )
+            .expect("the artwork cache opens in its prepared folder");
             let downloads = Downloads::new(
                 artwork.clone(),
                 downloads_root,
@@ -428,6 +421,7 @@ impl SourceOwner {
             let shared = Arc::new(Shared {
                 feed,
                 configuration_changed: tokio::sync::watch::channel(()).0,
+                lyrics_edited: tokio::sync::watch::channel(None).0,
                 home_showcase_variation: home_variation,
                 home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
                 artwork,
@@ -446,10 +440,7 @@ impl SourceOwner {
                 selection_intent: Mutex::new(Weak::new()),
                 connection: Mutex::new(None),
                 album_release: Mutex::new(None),
-                outbox: Arc::new(tokio::sync::Notify::new()),
-                asset_downloads: Mutex::new(None),
                 playlist_edits: Mutex::new(HashMap::new()),
-                playback: Mutex::new(Weak::new()),
                 connect: Mutex::new(Weak::new()),
                 started: AtomicBool::new(false),
             });
@@ -462,57 +453,54 @@ impl SourceOwner {
         })
     }
 
-    pub(crate) fn attach_playback(&self, playback: &Arc<PlaybackOwner>) {
-        *self
-            .shared
-            .playback
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(playback);
+    pub(crate) fn artwork(&self) -> &Artwork {
+        &self.shared.artwork
     }
 
     pub(crate) fn downloads(&self) -> &Downloads {
         &self.shared.downloads
     }
 
+    /// The source features that run while they are wanted.
+    pub(crate) fn features(&self) -> Vec<Arc<dyn crate::features::Feature>> {
+        let shared = Arc::downgrade(&self.shared);
+        vec![
+            Arc::new(mosaics::Mosaics::new(shared.clone())),
+            Arc::new(crate::playlist_files::Links(shared.clone())),
+            Arc::new(outbox::Outbox::new(shared.clone())),
+            Arc::new(download::Assets(shared)),
+            self.shared.downloads.rules(),
+        ]
+    }
+
     pub(crate) fn start(&self) -> Result<(), String> {
         if self.shared.started.swap(true, Ordering::AcqRel) {
             return Err("the source owner is already running".to_string());
         }
+        // The Catalog resolves tracks through the saved folder mappings, whichever writer
+        // saved them: an edit here, a restore or a Connect join.
         self.publish_local_access();
-        let shared = &self.shared;
-        let (runtime, catalog, weak) = (&shared.runtime, &shared.catalog, Arc::downgrade(shared));
-        follow(
-            runtime,
-            catalog,
-            weak.clone(),
-            crate::playlist_files::follow,
-        );
-        mosaics::follow(shared);
-        runtime.spawn(outbox::run(weak.clone()));
-        runtime.spawn(crate::playlist_files::check_links(weak.clone()));
-        // Automatic artwork and lyrics downloads follow their switches.
-        let switches = |stored: &crate::settings::StoredSettings| {
-            let application = &stored.ui.application;
-            (
-                application.download_artwork_automatically,
-                application.download_lyrics_automatically,
-            )
+        let mappings = |stored: &crate::settings::StoredSettings| {
+            stored
+                .sources
+                .configured
+                .iter()
+                .map(|configured| configured.local_access.clone())
+                .collect::<Vec<_>>()
         };
-        let mut committed = shared.settings.changes();
-        let mut previous = switches(&committed.borrow_and_update());
-        self.asset_downloads_changed();
-        runtime.spawn(async move {
-            while committed.changed().await.is_ok() {
-                let current = switches(&committed.borrow_and_update());
-                let Some(shared) = weak.upgrade() else {
-                    return;
-                };
-                if current != previous {
-                    Self { shared }.asset_downloads_changed();
+        crate::settings::follow(
+            &self.shared.runtime,
+            &self.shared.settings,
+            Arc::downgrade(&self.shared),
+            move |shared, previous, current| {
+                if mappings(previous) != mappings(current) {
+                    let owner = SourceOwner { shared };
+                    owner.publish_local_access();
+                    owner.shared.configured();
                 }
-                previous = current;
-            }
-        });
+                std::future::ready(())
+            },
+        );
         if let Some(source_id) = self
             .shared
             .settings
@@ -531,15 +519,6 @@ impl SourceOwner {
 
     pub(crate) async fn close_storage(&self) {
         self.shared.started.store(false, Ordering::Release);
-        let downloads = self
-            .shared
-            .asset_downloads
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
-        if let Some(downloads) = downloads {
-            downloads.abort();
-        }
         self.release_selected().await;
         self.shared
             .clients
@@ -590,12 +569,7 @@ impl SourceOwner {
                 });
             }
         }
-        self.shared
-            .send(SourceEvent::Configured(
-                self.shared
-                    .configured_sources(self.shared.selected().as_ref()),
-            ))
-            .await;
+        self.shared.configured();
         self.publish_operation(SourceOperation::Idle).await;
         result
     }
@@ -794,9 +768,6 @@ impl SourceOwner {
                     }
                 });
             }
-            if let Ok(playback) = owner.shared.playback() {
-                playback.source_selected();
-            }
         });
         *self
             .shared
@@ -861,12 +832,7 @@ impl SourceOwner {
             stored.sources.selected_source_id = Some(selected.source_id.clone());
             Ok(())
         })?;
-        self.shared
-            .send(SourceEvent::Selected {
-                configured: self.shared.configured_sources(Some(&selected)),
-                selected: selected.clone(),
-            })
-            .await;
+        self.shared.configured();
         self.publish_operation(SourceOperation::Idle).await;
         self.shared.present_refresh(&selected.source_id);
         if let Some(source) = source {
@@ -901,7 +867,7 @@ impl SourceOwner {
             .take()
             .is_some();
         if released {
-            self.shared.send(SourceEvent::ReleaseSelected).await;
+            self.shared.configured();
         }
     }
 
@@ -910,9 +876,6 @@ impl SourceOwner {
             if let Some(job) = job.lock().unwrap_or_else(|p| p.into_inner()).take() {
                 job.abort();
             }
-        }
-        if let Ok(playback) = self.shared.playback() {
-            playback.cancel_loudness_analysis();
         }
     }
 
@@ -1028,7 +991,6 @@ impl SourceOwner {
             return;
         }
         if let Ok(playlist_files) = &result {
-            self.shared.outbox.notify_one();
             self.import_playlist_pins_once(source_id).await;
             if *playlist_files {
                 crate::playlist_files::discover(self, source_id).await;
@@ -1351,12 +1313,7 @@ impl SourceOwner {
                 self.install_connected_edit(configured, connected).await
             }
         }?;
-        self.shared
-            .send(SourceEvent::Configured(
-                self.shared
-                    .configured_sources(self.shared.selected().as_ref()),
-            ))
-            .await;
+        self.shared.configured();
         Ok(())
     }
 
@@ -1612,6 +1569,17 @@ impl SourceOwner {
         self.shared.operation.subscribe()
     }
 
+    /// The lyrics edits save: the track's URI and the text.
+    pub(crate) fn lyrics_edits(&self) -> tokio::sync::watch::Receiver<Option<(String, String)>> {
+        self.shared.lyrics_edited.subscribe()
+    }
+
+    pub(crate) fn lyrics_edited(&self, uri: &str, text: &str) {
+        self.shared
+            .lyrics_edited
+            .send_replace(Some((uri.to_owned(), text.to_owned())));
+    }
+
     pub fn configuration_changes(&self) -> tokio::sync::watch::Receiver<()> {
         self.shared.configuration_changed.subscribe()
     }
@@ -1636,19 +1604,6 @@ impl SourceOwner {
             )
             .await
             .map_err(string_error)
-    }
-
-    pub fn selected_source_summary(&self) -> Option<(SourceId, String)> {
-        let source_id = self
-            .shared
-            .selected
-            .lock()
-            .unwrap()
-            .as_ref()?
-            .source_id
-            .clone();
-        let name = self.shared.settings.source_name(&source_id);
-        Some((source_id, name))
     }
 
     pub fn selected_library(&self) -> Option<SelectedLibrary> {
@@ -1697,7 +1652,6 @@ impl SourceOwner {
         let owner = self.clone();
         let publish = move |update: DiscoveryUpdate| {
             owner.shared.discovery.send_replace(Some(update.clone()));
-            let _ = owner.shared.outputs.discovery.try_send(update);
         };
         publish(DiscoveryUpdate {
             provider,
@@ -1903,14 +1857,7 @@ impl SourceOwner {
                 owner.shared.warn_nonfatal(&error);
                 return;
             }
-            owner
-                .shared
-                .send(SourceEvent::Configured(
-                    owner
-                        .shared
-                        .configured_sources(owner.shared.selected().as_ref()),
-                ))
-                .await;
+            owner.shared.configured();
         });
     }
 }
@@ -2048,12 +1995,7 @@ impl SourceOwner {
                         let _ = selected_owner.select_source(selected).await;
                     });
                 }
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(
-                        owner.shared.configured_sources(None),
-                    ))
-                    .await;
+                owner.shared.configured();
             }
         });
         receiver
@@ -2110,12 +2052,7 @@ impl SourceOwner {
             .await
             .map_err(string_error)?;
         if created {
-            self.shared
-                .send(SourceEvent::Configured(
-                    self.shared
-                        .configured_sources(self.shared.selected().as_ref()),
-                ))
-                .await;
+            self.shared.configured();
         }
         self.client(&configuration.source_id)
     }
@@ -2279,10 +2216,10 @@ impl SourceOwner {
                 return Ok(LocalAccessStatus::default());
             };
             let cancellation = ReadCancellation::new();
-            let (_, total_track_count) = catalog
-                .source_counts(source, &cancellation)
-                .await
-                .map_err(string_error)?;
+            let (_, total_track_count) = owner
+                .shared
+                .cached_source_counts(&source_id)
+                .unwrap_or_default();
             let matched_track_count = match configured.local_access {
                 Some(access) => catalog
                     .mapping_formula_match_count(
@@ -2350,12 +2287,7 @@ impl SourceOwner {
                 });
                 Ok(())
             })?;
-            owner.publish_local_access();
-            owner.shared.playback()?.stream_inputs_changed()?;
-            owner
-                .shared
-                .send(SourceEvent::Configured(owner.list_sources()))
-                .await;
+
             Ok(())
         })
         .recv()
@@ -2365,7 +2297,7 @@ impl SourceOwner {
     }
 
     /// Hands the saved folder mappings to the Catalog, which resolves tracks through them.
-    pub(crate) fn publish_local_access(&self) {
+    fn publish_local_access(&self) {
         let rules = self
             .shared
             .settings
@@ -2405,19 +2337,6 @@ impl SourceOwner {
                 }
                 Ok(())
             });
-            owner.publish_local_access();
-            let _ = owner
-                .shared
-                .playback()
-                .and_then(|playback| playback.stream_inputs_changed());
-            owner
-                .shared
-                .send(SourceEvent::Configured(
-                    owner
-                        .shared
-                        .configured_sources(owner.shared.selected().as_ref()),
-                ))
-                .await;
         });
     }
 }
@@ -2485,12 +2404,7 @@ impl SourceOwner {
             owner
                 .remove_source_resources(&source_id, configured.and_then(|item| item.credential))
                 .await;
-            owner
-                .shared
-                .send(SourceEvent::Configured(
-                    owner.shared.configured_sources(None),
-                ))
-                .await;
+            owner.shared.configured();
             let _ = sender.try_send(removed);
         });
         receiver
@@ -2711,10 +2625,7 @@ impl SourceOwner {
                     current.music_folder_key = key;
                     current.music_folder_object_id = folder_object_id;
                 }
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(owner.list_sources()))
-                    .await;
+                owner.shared.configured();
                 owner.notice(feed::Notice::Scope(source_key));
                 let downloads_owner = owner.clone();
                 owner.shared.runtime.spawn(async move {
@@ -2766,9 +2677,6 @@ impl SourceOwner {
             .set_favorite(&target, favorite, deliver)
             .await
             .map_err(string_error)?;
-        if deliver {
-            self.shared.outbox.notify_one();
-        }
         Ok(())
     }
 
@@ -2795,7 +2703,6 @@ impl SourceOwner {
             return;
         }
         if deliver {
-            self.shared.outbox.notify_one();
             return;
         }
         let FavoriteTarget::Track(uri) = &target else {
@@ -2887,10 +2794,17 @@ impl SourceOwner {
             .transpose()?
             .flatten();
 
+        let connect = self
+            .shared
+            .connect
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         let mut source = Source::open(
             configured.configuration.clone(),
             credential.clone(),
             Some(stored.jellyfin_device_id.clone()),
+            Some(Arc::new(crate::connect::peer::Link(connect))),
         )
         .map_err(string_error)?;
         self.bind_plex_login(&configured, &mut source)?;
@@ -3274,10 +3188,6 @@ pub(crate) fn source_access_unavailable() -> String {
     "Live source access is unavailable. Check the saved credentials and refresh.".to_string()
 }
 
-pub(crate) fn string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
-}
-
 fn unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3316,12 +3226,7 @@ mod source_tests {
             })
             .unwrap();
         let owner = SourceOwner::open_dormant(
-            Artwork::new(
-                directory.path().join("artwork"),
-                runtime.clone(),
-                Arc::clone(&catalog),
-            )
-            .unwrap(),
+            directory.path().join("artwork"),
             Arc::clone(&catalog),
             directory.path().join("downloads"),
             settings,
@@ -3329,7 +3234,6 @@ mod source_tests {
             runtime,
             SourceOutputs {
                 events: async_channel::unbounded().0,
-                discovery: async_channel::unbounded().0,
                 downloads: async_channel::unbounded().0,
             },
         );
@@ -3337,10 +3241,16 @@ mod source_tests {
             configured[0].configuration.clone(),
             Some(secret.clone()),
             None,
+            None,
         )
         .unwrap();
-        let mut second =
-            Source::open(configured[1].configuration.clone(), Some(secret), None).unwrap();
+        let mut second = Source::open(
+            configured[1].configuration.clone(),
+            Some(secret),
+            None,
+            None,
+        )
+        .unwrap();
         owner.bind_plex_login(&configured[0], &mut first).unwrap();
         owner.bind_plex_login(&configured[1], &mut second).unwrap();
         let detached = first.plex_login().unwrap();
@@ -3416,12 +3326,7 @@ mod source_tests {
         let runtime = tokio::runtime::Handle::current();
         let (events, receiver) = async_channel::unbounded();
         let owner = SourceOwner::open_dormant(
-            Artwork::new(
-                directory.path().join("artwork"),
-                runtime.clone(),
-                Arc::clone(&catalog),
-            )
-            .unwrap(),
+            directory.path().join("artwork"),
             Arc::clone(&catalog),
             directory.path().join("downloads"),
             SettingsFile::memory(),
@@ -3431,7 +3336,6 @@ mod source_tests {
             runtime,
             SourceOutputs {
                 events,
-                discovery: async_channel::unbounded().0,
                 downloads: async_channel::unbounded().0,
             },
         );
@@ -3457,7 +3361,7 @@ mod source_tests {
             .unwrap();
         owner.cache_connected(
             &configured,
-            Arc::new(Source::open(configuration, None, None).unwrap()),
+            Arc::new(Source::open(configuration, None, None, None).unwrap()),
         );
         let other_id = SourceId::new("other");
         catalog
@@ -3477,7 +3381,7 @@ mod source_tests {
             .unwrap();
         owner.cache_connected(
             &other,
-            Arc::new(Source::open(other.configuration.clone(), None, None).unwrap()),
+            Arc::new(Source::open(other.configuration.clone(), None, None, None).unwrap()),
         );
         let first = owner.shared.begin_refresh(&source_id, false, true).unwrap();
         let second = owner.shared.begin_refresh(&other_id, false, true).unwrap();
@@ -3549,12 +3453,6 @@ mod source_tests {
                 *owner.shared.operation.borrow(),
                 SourceOperation::Idle
             ));
-            while let Ok(event) = receiver.try_recv() {
-                assert!(!matches!(
-                    event,
-                    SourceEvent::Operation(SourceOperation::Failed { .. })
-                ));
-            }
         }
         owner
             .finish_refresh(
@@ -3635,14 +3533,8 @@ mod source_tests {
                     .unwrap(),
             );
             let runtime = tokio::runtime::Handle::current();
-            let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
-                Artwork::new(
-                    directory.path().join("artwork"),
-                    runtime.clone(),
-                    Arc::clone(&catalog),
-                )
-                .unwrap(),
+                directory.path().join("artwork"),
                 Arc::clone(&catalog),
                 directory.path().join("downloads"),
                 SettingsFile::memory(),
@@ -3651,12 +3543,11 @@ mod source_tests {
                 ))),
                 runtime,
                 SourceOutputs {
-                    events,
-                    discovery: async_channel::unbounded().0,
+                    events: async_channel::unbounded().0,
                     downloads: async_channel::unbounded().0,
                 },
             );
-            let mut connected = if already_configured {
+            let connected = if already_configured {
                 let source_id = SourceId::new("restored-source");
                 owner
                     .shared
@@ -3686,57 +3577,49 @@ mod source_tests {
             } else {
                 Some(owner.configure_source(SourceSetup::Local { roots: vec![music] }))
             };
+            let mut operation = owner.operation();
             tokio::time::timeout(Duration::from_secs(10), async {
-                let mut scanned = false;
-                let mut selected = None;
-                let mut refreshing = false;
                 loop {
-                    match receiver.recv().await.unwrap() {
-                        SourceEvent::Operation(SourceOperation::Adding { progress }) => {
+                    let current = operation.borrow_and_update().clone();
+                    let selected = owner.selected_library().map(|library| library.source_id);
+                    match current {
+                        SourceOperation::Adding { progress } => {
                             assert_eq!(progress.stage, SourceProgressStage::Connecting);
                             assert!(selected.is_none());
                         }
-                        SourceEvent::Selected {
-                            selected: library, ..
-                        } => {
-                            assert!(!refreshing, "selection must precede the initial scan");
-                            selected = Some(library.source_id);
+                        SourceOperation::Refreshing { source_id, .. } => {
+                            assert_eq!(
+                                selected.as_ref(),
+                                Some(&source_id),
+                                "selection must precede the initial scan"
+                            );
                         }
-                        SourceEvent::Operation(SourceOperation::Idle) => {
-                            assert!(selected.is_some());
-                            if refreshing {
-                                assert!(scanned, "the empty scan reports its track count");
-                                break;
-                            }
+                        SourceOperation::Idle
+                            if selected.as_ref().is_some_and(|source_id| {
+                                catalog
+                                    .cached_source(source_id.as_str())
+                                    .is_some_and(|source| source.catalog_complete)
+                            }) =>
+                        {
+                            break;
                         }
-                        SourceEvent::Operation(SourceOperation::Refreshing {
-                            source_id,
-                            progress,
-                        }) => {
-                            assert_eq!(selected.as_ref(), Some(&source_id));
-                            if let Some(connected) = connected.take() {
-                                let library = connected.try_recv().unwrap().unwrap();
-                                assert_eq!(library.source_id, source_id);
-                                assert_eq!(
-                                    owner.list_sources().selected_source_id,
-                                    Some(source_id)
-                                );
-                            }
-                            refreshing = true;
-                            scanned |= progress.stage == SourceProgressStage::Tracks
-                                && progress.completed == 0;
-                        }
-                        SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
-                            panic!("{message}")
-                        }
+                        SourceOperation::Failed { message, .. } => panic!("{message}"),
                         _ => {}
                     }
+                    operation.changed().await.unwrap();
                 }
             })
             .await
             .unwrap_or_else(|_| {
                 panic!("initial scan did not finish, already_configured={already_configured}")
             });
+            if let Some(connected) = connected {
+                let library = connected.recv().await.unwrap().unwrap();
+                assert_eq!(
+                    owner.list_sources().selected_source_id,
+                    Some(library.source_id)
+                );
+            }
             assert!(matches!(
                 *owner.shared.operation.borrow(),
                 SourceOperation::Idle
@@ -3845,12 +3728,7 @@ mod source_tests {
             })));
             let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
-                Artwork::new(
-                    directory.path().join("artwork"),
-                    runtime.clone(),
-                    Arc::clone(&catalog),
-                )
-                .unwrap(),
+                directory.path().join("artwork"),
                 Arc::clone(&catalog),
                 directory.path().join("downloads"),
                 settings,
@@ -3858,7 +3736,6 @@ mod source_tests {
                 runtime,
                 SourceOutputs {
                     events,
-                    discovery: async_channel::unbounded().0,
                     downloads: async_channel::unbounded().0,
                 },
             );
@@ -3876,20 +3753,10 @@ mod source_tests {
                 .unwrap();
             assert_eq!(selected, source_id);
             drop(selected);
-            let published = tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
-                    if let SourceEvent::Selected {
-                        configured,
-                        selected,
-                    } = receiver.recv().await.unwrap()
-                    {
-                        assert_eq!(configured.local_access[0].album_count, 0);
-                        break selected;
-                    }
-                }
-            })
-            .await
-            .expect("cached selection must not wait for credentials");
+            assert_eq!(owner.list_sources().local_access[0].album_count, 0);
+            let published = owner
+                .selected_library()
+                .expect("cached selection must not wait for credentials");
             assert_eq!(published.source_id, source_id);
             assert_eq!(published.source_key, source_key);
             assert_eq!(published.music_folders[0].name, "New Folder");
@@ -4058,12 +3925,16 @@ mod source_tests {
                 let selected_id = local_id.clone();
                 let selection =
                     tokio::spawn(async move { selecting.select_source(selected_id).await });
+                let mut configured = owner.configuration_changes();
                 let replacement = tokio::time::timeout(Duration::from_secs(2), async {
                     loop {
-                        match receiver.recv().await.unwrap() {
-                            SourceEvent::Selected { selected, .. } => break selected,
-                            _ => {}
+                        if let Some(selected) = owner
+                            .selected_library()
+                            .filter(|selected| selected.source_id == local_id)
+                        {
+                            break selected;
                         }
+                        configured.changed().await.unwrap();
                     }
                 })
                 .await
@@ -4163,14 +4034,9 @@ mod source_tests {
             }
             let runtime = tokio::runtime::Handle::current();
             let (events, receiver) = async_channel::unbounded();
-            let receiver = keep_receiver.then_some(receiver);
+            let _receiver = keep_receiver.then_some(receiver);
             let owner = SourceOwner::open_dormant(
-                Artwork::new(
-                    directory.path().join("artwork"),
-                    runtime.clone(),
-                    Arc::clone(&catalog),
-                )
-                .unwrap(),
+                directory.path().join("artwork"),
                 Arc::clone(&catalog),
                 directory.path().join("downloads"),
                 settings.clone(),
@@ -4180,7 +4046,6 @@ mod source_tests {
                 runtime,
                 SourceOutputs {
                     events,
-                    discovery: async_channel::unbounded().0,
                     downloads: async_channel::unbounded().0,
                 },
             );
@@ -4229,22 +4094,6 @@ mod source_tests {
             assert_eq!(owner.list_sources().sources.len(), 1);
             assert!(owner.shared.selected().is_none());
             assert!(catalog.source_key(&second).is_none());
-            if let Some(receiver) = receiver {
-                let mut assignments = Vec::new();
-                while let Ok(event) = receiver.try_recv() {
-                    match event {
-                        SourceEvent::Selected { selected, .. } => {
-                            assignments.push(Some(selected.source_id))
-                        }
-                        SourceEvent::ReleaseSelected => assignments.push(None),
-                        _ => {}
-                    }
-                }
-                assert_eq!(
-                    assignments,
-                    vec![Some(first.clone()), Some(second.clone()), None]
-                );
-            }
             owner.shared.clients.lock().unwrap().clear();
             owner.shared.cancel_selection();
 

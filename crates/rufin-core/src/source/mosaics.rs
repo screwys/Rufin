@@ -5,11 +5,13 @@
 //! removed pictures come with the list read again.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
-use library::{Change, MosaicOwner, Scope};
+use library::{Catalog, Change, MosaicOwner, Scope};
 
 use super::Shared;
+use crate::features::{Feature, Pass};
+use crate::settings::StoredSettings;
 
 #[derive(Default)]
 struct Picks {
@@ -19,17 +21,47 @@ struct Picks {
     own: Vec<u64>,
 }
 
-pub(super) fn follow(shared: &Arc<Shared>) {
-    let state = Arc::new(Mutex::new(Picks::default()));
-    crate::features::follow(
-        &shared.runtime,
-        &shared.catalog,
-        Arc::downgrade(shared),
-        move |shared, changes| pick(shared, Arc::clone(&state), changes),
-    );
+pub(crate) struct Mosaics {
+    shared: Weak<Shared>,
+    picks: Mutex<Picks>,
 }
 
-async fn pick(shared: Arc<Shared>, state: Arc<Mutex<Picks>>, changes: Option<Vec<Arc<Change>>>) {
+impl Mosaics {
+    pub(super) fn new(shared: Weak<Shared>) -> Self {
+        Self {
+            shared,
+            picks: Mutex::default(),
+        }
+    }
+}
+
+impl Feature for Mosaics {
+    fn wanted(&self, _: &StoredSettings, _: &Catalog) -> bool {
+        true
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Playlists
+                | Scope::Collections { .. }
+                | Scope::Playlist { .. }
+                | Scope::Smart { .. }
+                | Scope::Tracks { .. }
+        )
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            if let Some(shared) = self.shared.upgrade() {
+                pick(shared, &self.picks, changes).await;
+            }
+        })
+    }
+}
+
+async fn pick(shared: Arc<Shared>, state: &Mutex<Picks>, changes: Option<Vec<Arc<Change>>>) {
     let catalog = &shared.catalog;
     let (mut wanted, own) = {
         let mut picks = state.lock().unwrap_or_else(|p| p.into_inner());

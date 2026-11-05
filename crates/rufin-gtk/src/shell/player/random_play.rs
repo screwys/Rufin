@@ -295,10 +295,10 @@ fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
 }
 
 fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlacement) {
-    let owner = shell.products.source.clone();
+    let queue = shell.products.playback.clone();
     let feedback = Rc::clone(&shell.control_feedback);
     glib::spawn_future_local(async move {
-        match rufin_core::radio::play_saved_random(&owner, settings, placement).await {
+        match rufin_core::radio::play_saved_random(&queue, settings, placement).await {
             Ok(true) => {
                 let resource = "player/random_play.ui";
                 let builder = crate::ui_resource::builder(resource);

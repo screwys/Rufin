@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use playback::{BackendCommand, BackendError, BackendEvent, PlaybackBackend};
@@ -35,8 +34,6 @@ fn controller_http_api_and_browser_share_application_operations() {
                 paths.clone(),
                 |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                 Vec::new,
-                Arc::new(|_| {}),
-                Arc::new(|_, _| {}),
             )))
             .unwrap()
             .unwrap();
@@ -59,7 +56,7 @@ fn controller_http_api_and_browser_share_application_operations() {
         runtime.block_on(exercise_desktop_controller(&inputs));
         runtime.block_on(exercise_http_api(
             inputs.products.clone(),
-            inputs.settings.clone(),
+            inputs.products.settings.clone(),
             directory.path(),
         ));
         inputs.receivers.visualizer.close();
@@ -80,11 +77,15 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     let controller = Controller::new(inputs.products.clone());
     let mut status = controller.status();
     assert!(status.borrow().address.is_none());
-    let settings = inputs.settings.load().web_controller.clone();
+    let settings = inputs.products.settings.load().web_controller.clone();
     assert!(!settings.enabled);
     assert_eq!(settings.port, 1717);
-    inputs.settings.set_controller_port(0).unwrap();
-    inputs.settings.set_controller_enabled(true).unwrap();
+    inputs.products.settings.set_controller_port(0).unwrap();
+    inputs
+        .products
+        .settings
+        .set_controller_enabled(true)
+        .unwrap();
     let started = controller_status(&mut status, |state| state.address.is_some()).await;
     assert_eq!(started.token.len(), 64);
     let address = started.address.unwrap();
@@ -117,6 +118,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
 
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let settings = inputs
+        .products
         .settings
         .set_controller_port(occupied.local_addr().unwrap().port())
         .unwrap();
@@ -151,7 +153,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     .await;
     assert!(closed.is_ok(), "rebinding closes existing event streams");
 
-    inputs.settings.set_controller_port(0).unwrap();
+    inputs.products.settings.set_controller_port(0).unwrap();
     let rebound = controller_status(&mut status, |state| {
         state.address.is_some() && state.address != fallback.address
     })
@@ -210,7 +212,11 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
         reopened.token, regenerated,
         "regenerated token survives host restart"
     );
-    inputs.settings.set_controller_enabled(false).unwrap();
+    inputs
+        .products
+        .settings
+        .set_controller_enabled(false)
+        .unwrap();
     controller_status(&mut status, |state| state.address.is_none()).await;
     assert!(
         client

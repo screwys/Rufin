@@ -50,6 +50,26 @@ async fn wait_for_authorization(
     session.map_err(|_| AUTHORIZATION_TASK_FAILED.to_string())?
 }
 
+/// Recorded listens are sent as they are heard while an account is signed in.
+pub(crate) struct Listens(pub(crate) std::sync::Weak<Scrobbler>);
+
+impl crate::features::Feature for Listens {
+    fn wanted(&self, settings: &crate::settings::StoredSettings, _: &library::Catalog) -> bool {
+        settings.scrobbling_secrets_present || !settings.scrobbling_credentials.is_empty()
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(scope, Scope::Listened { .. })
+    }
+
+    fn apply(self: Arc<Self>, _: Option<Vec<Arc<Change>>>) -> crate::features::Pass {
+        if let Some(scrobbler) = self.0.upgrade() {
+            scrobbler.wake();
+        }
+        Box::pin(std::future::ready(()))
+    }
+}
+
 #[derive(Clone)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ScrobblingOwner {
@@ -57,7 +77,6 @@ pub struct ScrobblingOwner {
     secrets: Arc<SwitchableSecretStore>,
     runtime: tokio::runtime::Handle,
     scrobbler: Arc<Scrobbler>,
-    settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
     /// Held while the accounts' secrets are read or written.
     credential_work: Arc<Mutex<()>>,
     /// Set while a read of the secrets waits to start.
@@ -70,48 +89,23 @@ impl ScrobblingOwner {
         secrets: Arc<SwitchableSecretStore>,
         runtime: tokio::runtime::Handle,
         scrobbler: Arc<Scrobbler>,
-        catalog: &library::Catalog,
-        settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
     ) -> Arc<Self> {
-        // Recorded listens are sent as they are heard.
-        crate::features::follow(
-            &runtime,
-            catalog,
-            Arc::downgrade(&scrobbler),
-            |scrobbler, changes| {
-                let listened = |change: &Arc<Change>| {
-                    change
-                        .scopes
-                        .iter()
-                        .any(|scope| matches!(scope, Scope::Listened { .. }))
-                };
-                if changes.is_none_or(|changes| changes.iter().any(listened)) {
-                    scrobbler.wake();
-                }
-                std::future::ready(())
-            },
-        );
         let owner = Arc::new(Self {
             settings,
             secrets,
             runtime,
             scrobbler,
-            settings_committed,
             credential_work: Arc::new(Mutex::new(())),
             reload_queued: Arc::new(AtomicBool::new(false)),
         });
         // The worker reads the switches and private mode when it sends; the secrets are read
         // again when the settings name other accounts, as a restore or Connect does.
-        let mut committed = owner.settings.changes();
-        let weak = Arc::downgrade(&owner);
-        owner.runtime.spawn(async move {
-            let mut previous = Arc::clone(&committed.borrow_and_update());
-            while committed.changed().await.is_ok() {
-                let current = Arc::clone(&committed.borrow_and_update());
-                let Some(owner) = weak.upgrade() else {
-                    return;
-                };
-                if owner.scrobbler.stale(&current) {
+        crate::settings::follow(
+            &owner.runtime,
+            &owner.settings,
+            Arc::downgrade(&owner),
+            |owner, previous, current| {
+                if owner.scrobbler.stale(current) {
                     owner.reload_credentials();
                 }
                 if previous.ui.application.private_mode != current.ui.application.private_mode
@@ -119,9 +113,9 @@ impl ScrobblingOwner {
                 {
                     owner.scrobbler.wake();
                 }
-                previous = current;
-            }
-        });
+                std::future::ready(())
+            },
+        );
         owner
     }
 
@@ -148,7 +142,7 @@ impl ScrobblingOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let read_from = self.settings.load();
-        let settings = crate::settings::startup_scrobbling_settings(&self.settings, &self.secrets);
+        let settings = load_scrobbling_settings(&self.settings, &self.secrets);
         if !read_from.same_scrobbling_accounts(&self.settings.load()) {
             return;
         }
@@ -162,7 +156,6 @@ impl ScrobblingOwner {
         if let Err(error) = self.scrobbler.install(settings, self.settings.load()) {
             warn!(%error, "could not update external scrobbling settings");
         }
-        (self.settings_committed)(&self.settings.load().ui);
         Ok(preferences(&self.scrobbler.settings()))
     }
 

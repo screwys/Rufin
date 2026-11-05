@@ -111,6 +111,23 @@ pub enum ThemePreference {
     Dark,
     Named(String),
 }
+
+impl ThemePreference {
+    /// The theme this preference shows, if any: Light and Dark are the built-in themes; System
+    /// follows the platform.
+    pub fn selected<'a>(
+        &self,
+        themes: &'a [crate::themes::Theme],
+    ) -> Option<&'a crate::themes::Theme> {
+        let id = match self {
+            Self::System => return None,
+            Self::Light => "builtin:light",
+            Self::Dark => "builtin:dark",
+            Self::Named(id) => id,
+        };
+        themes.iter().find(|theme| theme.id == id)
+    }
+}
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum AccentPreference {
@@ -360,13 +377,11 @@ impl LibraryListSettings {
     /// Whether `field` can be shown or hidden in `layout`. A row keeps one column, where
     /// Tools counts as one.
     pub fn can_toggle_field(&self, layout: LibraryLayout, field: LibraryField) -> bool {
-        let column =
-            |field: LibraryField| field == LibraryField::Tools || row_field_is_usable(field);
         let fields = self.fields(layout);
         layout == LibraryLayout::Grid
             || !fields.contains(&field)
-            || !column(field)
-            || fields.iter().filter(|field| column(**field)).count() > 1
+            || !row_column(field)
+            || fields.iter().filter(|field| row_column(**field)).count() > 1
     }
 
     /// Shows or hides `field` in `layout`. A shown field goes before Tools; the queue's row
@@ -1074,17 +1089,16 @@ fn sanitize_required_fields(
     }
 }
 fn ensure_usable_row_field(fields: &mut Vec<LibraryField>, fallback: Vec<LibraryField>) {
-    if fields.iter().any(|field| row_field_is_usable(*field)) {
+    if fields.iter().any(|field| row_column(*field)) {
         return;
     }
-    if let Some(field) = fallback
-        .into_iter()
-        .find(|field| row_field_is_usable(*field))
-    {
+    if let Some(field) = fallback.into_iter().find(|field| row_column(*field)) {
         fields.push(field);
     }
 }
-fn row_field_is_usable(field: LibraryField) -> bool {
+
+/// Whether `field` is a column a row can keep alone; Tools counts as one.
+fn row_column(field: LibraryField) -> bool {
     !matches!(
         field,
         LibraryField::RowIndex
@@ -1092,7 +1106,6 @@ fn row_field_is_usable(field: LibraryField) -> bool {
             | LibraryField::TrackNumber
             | LibraryField::DiscNumber
             | LibraryField::Favorite
-            | LibraryField::Tools
     )
 }
 

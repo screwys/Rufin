@@ -101,6 +101,7 @@ pub use catalog::{
 pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,
     AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice, GenreChoice,
+    normalize_release_types,
 };
 pub use db::{Catalog, ReadCancellation};
 pub use favorites::{Delivery, DeliveryKind, FavoriteTarget, NativeUserState, UserMediaStateWrite};

@@ -18,6 +18,8 @@ pub(super) struct PlexPlayback {
     client: PlexClient,
     connection: Mutex<(Arc<Source>, PlexCompanionContext)>,
     source_owner: Arc<SourceOwner>,
+    /// The playback owner that left for this player, which takes it back.
+    owner: std::sync::Weak<super::PlaybackOwner>,
     settings: SettingsFile,
     output: PlaybackOutput,
     playback: Playback,
@@ -1161,6 +1163,7 @@ impl PlaybackOwner {
             client,
             connection: Mutex::new((source, context)),
             source_owner: Arc::clone(&self.source),
+            owner: self.this.clone(),
             settings: self.settings.clone(),
             output: output.clone(),
             playback: active.clone(),
@@ -1300,7 +1303,7 @@ impl PlaybackOwner {
                             tokio::time::Instant::now()
                         });
                         if since.elapsed() >= std::time::Duration::from_secs(5) {
-                            if let Ok(owner) = observed.source_owner.shared.playback() {
+                            if let Some(owner) = observed.owner.upgrade() {
                                 let observed = observed.clone();
                                 tokio::task::spawn_blocking(move || {
                                     if !observed.cancelled.load(Ordering::Acquire)

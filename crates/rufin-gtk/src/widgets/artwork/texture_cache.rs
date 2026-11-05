@@ -243,6 +243,7 @@ mod tests {
                 root.path().join("covers"),
                 runtime.handle().clone(),
                 std::sync::Arc::new(catalog),
+                |_| None,
             )
             .unwrap();
             std::array::from_fn(|index| {

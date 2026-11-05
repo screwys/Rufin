@@ -1,11 +1,9 @@
-use crate::SettingsHandle;
 use library::{FolderChoice, FolderKey, SourceKey};
 use std::sync::Arc;
 
-use super::source::{ConfiguredSources, SourceOperation};
 use super::{DiagnosticsHandle, ProductHandles, ProductReceivers};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct SelectedLibrary {
     pub source_id: sources::SourceId,
     pub source_key: SourceKey,
@@ -15,15 +13,8 @@ pub struct SelectedLibrary {
 }
 
 pub enum SourceEvent {
-    Configured(ConfiguredSources),
-    Selected {
-        configured: ConfiguredSources,
-        selected: SelectedLibrary,
-    },
-    Operation(SourceOperation),
     Notice(SourceNotice),
     PlaylistSourceMismatch(sources::SourceId),
-    ReleaseSelected,
 }
 
 pub struct VisualizerPublication {
@@ -49,9 +40,6 @@ pub struct RuntimeInputs {
     pub secret_storage_fallbacks: async_channel::Receiver<crate::settings::KeyringSecretStore>,
     pub diagnostics: DiagnosticsHandle,
     pub products: ProductHandles,
-    pub settings: SettingsHandle,
     pub receivers: ProductReceivers,
-    pub configured_sources: ConfiguredSources,
-    pub source_operation: SourceOperation,
     pub release_history: super::ReleaseHistory,
 }

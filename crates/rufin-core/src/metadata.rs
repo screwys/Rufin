@@ -5,8 +5,9 @@ mod editor;
 mod lyrics;
 mod review;
 mod scan;
+use crate::source::SourceOwner;
 use crate::source::feed::Notice;
-use crate::source::{SourceOwner, string_error};
+use crate::string_error;
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
 pub use details::{

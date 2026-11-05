@@ -339,23 +339,11 @@ impl SelectedFeed {
                     .await
             }
             SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }) => {
+                let (paths, rename) = LocalLiveChange::path_strings(paths, rename);
                 self.source
-                    .apply_file_paths(
-                        catalog,
-                        &paths
-                            .iter()
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .collect::<Vec<_>>(),
-                        rename
-                            .map(|(a, b)| {
-                                (
-                                    a.to_string_lossy().into_owned(),
-                                    b.to_string_lossy().into_owned(),
-                                )
-                            })
-                            .as_ref(),
-                        &|| self.cancelled.load(Ordering::Acquire),
-                    )
+                    .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
+                        self.cancelled.load(Ordering::Acquire)
+                    })
                     .await
             }
         }
@@ -644,6 +632,18 @@ pub enum LocalLiveChange {
 }
 
 impl LocalLiveChange {
+    /// The changed paths and rename as the file pipeline names them.
+    pub(crate) fn path_strings(
+        paths: Vec<PathBuf>,
+        rename: Option<(PathBuf, PathBuf)>,
+    ) -> (Vec<String>, Option<(String, String)>) {
+        let text = |path: PathBuf| path.to_string_lossy().into_owned();
+        (
+            paths.into_iter().map(text).collect(),
+            rename.map(|(from, to)| (text(from), text(to))),
+        )
+    }
+
     pub(crate) fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (Self::Rescan, _) | (_, Self::Rescan) => Self::Rescan,
@@ -1085,10 +1085,13 @@ impl Source {
         }
     }
 
+    /// Opens a configured source. A peer source reaches its device through `peer`, Rufin
+    /// Connect's link.
     pub fn open(
         configuration: SourceConfiguration,
         credential: Option<String>,
         jellyfin_device_id: Option<String>,
+        peer: Option<Arc<dyn crate::PeerLink>>,
     ) -> SourceResult<Self> {
         let implementation = match configuration.kind.as_str() {
             "plex" => Implementation::Plex(crate::plex::open(&configuration, credential)?),
@@ -1107,7 +1110,7 @@ impl Source {
             "navidrome" | "subsonic" => {
                 Implementation::OpenSubsonic(crate::subsonic::open(&configuration, credential)?)
             }
-            "peer" => Implementation::Peer(crate::peer::PeerSource::open(&configuration)?),
+            "peer" => Implementation::Peer(crate::peer::PeerSource::open(&configuration, peer)?),
             kind => {
                 return Err(SourceError::InvalidConfig(format!(
                     "unknown source kind {kind}"
@@ -1992,7 +1995,7 @@ impl Source {
         .await
     }
 
-    async fn apply_file_paths(
+    pub(crate) async fn apply_file_paths(
         &self,
         catalog: &Catalog,
         paths: &[String],
@@ -2346,37 +2349,6 @@ impl Source {
             | Implementation::Peer(_) => {}
         }
         feed
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn apply_local_change(
-        &self,
-        catalog: &Catalog,
-        _source: library::SourceKey,
-        change: LocalLiveChange,
-    ) -> SourceResult<bool> {
-        match change {
-            LocalLiveChange::Paths { paths, rename } => self
-                .apply_file_paths(
-                    catalog,
-                    &paths
-                        .iter()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .collect::<Vec<_>>(),
-                    rename
-                        .map(|(a, b)| {
-                            (
-                                a.to_string_lossy().into_owned(),
-                                b.to_string_lossy().into_owned(),
-                            )
-                        })
-                        .as_ref(),
-                    &|| false,
-                )
-                .await
-                .map(|()| true),
-            LocalLiveChange::Rescan => Ok(false),
-        }
     }
 
     pub async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
@@ -2784,7 +2756,7 @@ mod refresh_laws {
         let source = Arc::new(Source::open(SourceConfiguration {
             source_id: SourceId::new("retired-jellyfin"), kind:"jellyfin".into(), name:"Music".into(),
             provider_payload:serde_json::json!({"version":1,"base_url":format!("http://{address}"),"server_id":"server","user_id":"user","username":"listener","trust_invalid_cert":false,"use_jellyfin_instant_mix":false}).to_string(),
-        }, Some("token".into()), Some("device".into())).unwrap());
+        }, Some("token".into()), Some("device".into()), None).unwrap());
         let weak = Arc::downgrade(&source);
         let feed = source.start_selected_feed(&tokio::runtime::Handle::current(), false);
         tokio::time::timeout(std::time::Duration::from_secs(2), pending)
@@ -2825,6 +2797,7 @@ mod refresh_laws {
             },
             Some("token".to_string()),
             Some("device".to_string()),
+            None,
         )
         .expect("open Jellyfin source");
 
@@ -2843,6 +2816,7 @@ mod refresh_laws {
             }
             .configuration(SourceId::new("smb:test"), "smb", "SMB".into())
             .unwrap(),
+            None,
             None,
             None,
         )

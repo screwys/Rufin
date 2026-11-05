@@ -1,5 +1,6 @@
 //! Constructs Rufin's product owners and connects their concrete event lanes.
 
+use crate::string_error;
 use std::sync::Arc;
 
 use crate::runtime::{DiagnosticsHandle, ProductHandles, ProductReceivers, RuntimeInputs};
@@ -43,10 +44,6 @@ pub async fn runtime_inputs<StartBackend>(
     paths: Paths,
     start_backend: StartBackend,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
-    observe_playback: Arc<dyn Fn(Option<&playback::PlaybackProjection>) + Send + Sync>,
-    observe_settings: Arc<
-        dyn Fn(&crate::settings::Settings, Option<&playback::PlaybackProjection>) + Send + Sync,
-    >,
 ) -> Result<RuntimeInputs, String>
 where
     StartBackend: Fn(
@@ -60,6 +57,15 @@ where
     let secret_storage_fallbacks = settings.secret_storage_fallbacks.1.clone();
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&settings)));
+    // Source credentials saved before they were sealed are sealed once; the keyring may wait.
+    let (legacy_settings, legacy_secrets) = (settings.clone(), Arc::clone(&secrets));
+    runtime.spawn_blocking(move || {
+        if let Err(error) =
+            crate::settings::migrate_source_credentials(&legacy_settings, legacy_secrets.as_ref())
+        {
+            warn!(%error, "could not migrate saved source credentials");
+        }
+    });
     let store_path = paths.store_file();
     let (catalog, temporary_store) = match library::Catalog::open_installation(
         &store_path,
@@ -93,6 +99,17 @@ where
         library.set_use_sort_tags(application.use_sort_tags);
     };
     display(&library, &stored.ui.application);
+    crate::settings::follow(
+        &runtime,
+        &settings,
+        Arc::downgrade(&library),
+        move |library, previous, current| {
+            if previous.ui.application != current.ui.application {
+                display(&library, &current.ui.application);
+            }
+            std::future::ready(())
+        },
+    );
     let scrobbler = Arc::new(Scrobbler::new(
         library.as_ref().clone(),
         runtime.clone(),
@@ -102,26 +119,9 @@ where
     let (source_events, source_receiver) = unbounded();
     let (visualizer_events, visualizer_receiver) = bounded(1);
     let (download_events, download_receiver) = unbounded();
-    let (discovery_events, discovery_receiver) = unbounded();
     let (waveform_events, waveform_receiver) = unbounded();
     let (lyrics_events, lyrics_receiver) = unbounded();
     let (release_update_events, release_update_receiver) = unbounded();
-    let artwork = match artwork::Artwork::new(
-        paths.artwork_dir(),
-        runtime.clone(),
-        Arc::clone(&library),
-    ) {
-        Ok(artwork) => artwork,
-        Err(error) => {
-            warn!(%error, "could not use the artwork cache; startup will continue with a temporary cache");
-            artwork::Artwork::new(
-                temporary_artwork_dir(),
-                runtime.clone(),
-                Arc::clone(&library),
-            )
-            .map_err(string_error)?
-        }
-    };
     let release_updates = ReleaseUpdateOwner::new(
         settings.clone(),
         runtime.clone(),
@@ -132,7 +132,7 @@ where
     let release_history = release_updates.initial_history();
 
     let source = SourceOwner::open_dormant(
-        artwork.clone(),
+        paths.artwork_dir(),
         library.clone(),
         paths.downloads_dir(),
         settings.clone(),
@@ -140,37 +140,43 @@ where
         runtime.clone(),
         SourceOutputs {
             events: source_events.clone(),
-            discovery: discovery_events,
             downloads: download_events,
         },
     );
+    let artwork = source.artwork().clone();
+    // Recent search results show the pictures their rows have once the Catalog is loaded.
     if !stored.ui.recent_search_results.is_empty() {
-        let uris = stored
-            .ui
-            .recent_search_results
-            .iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>();
-        match library
-            .artwork_bindings(&uris, &library::ReadCancellation::new())
-            .await
-        {
-            Ok(bindings) => {
-                if let Err(error) = settings.update(|stored| {
-                    for (recent, binding) in
-                        stored.ui.recent_search_results.iter_mut().zip(bindings)
-                    {
-                        if binding.is_some() {
-                            recent.artwork_binding = binding;
+        let (library, settings) = (Arc::clone(&library), settings.clone());
+        runtime.spawn(async move {
+            library.loaded().await;
+            let uris = settings
+                .load()
+                .ui
+                .recent_search_results
+                .iter()
+                .map(|row| row.media_uri.clone())
+                .collect::<Vec<_>>();
+            match library
+                .artwork_bindings(&uris, &library::ReadCancellation::new())
+                .await
+            {
+                Ok(bindings) => {
+                    if let Err(error) = settings.update(|stored| {
+                        for (recent, binding) in
+                            stored.ui.recent_search_results.iter_mut().zip(bindings)
+                        {
+                            if binding.is_some() {
+                                recent.artwork_binding = binding;
+                            }
                         }
+                        Ok(())
+                    }) {
+                        warn!(%error, "could not update recent search artwork");
                     }
-                    Ok(())
-                }) {
-                    warn!(%error, "could not update recent search artwork");
                 }
+                Err(error) => warn!(%error, "could not read recent search artwork"),
             }
-            Err(error) => warn!(%error, "could not read recent search artwork"),
-        }
+        });
     }
     let waveform = WaveformOwner::new(
         runtime.clone(),
@@ -192,71 +198,42 @@ where
         runtime.clone(),
         visualizer_events,
         visualizer_receiver.clone(),
-        artwork.clone(),
         Arc::clone(&waveform),
         Arc::clone(&lyrics),
-        observe_playback,
         audio_outputs,
         Arc::clone(&scrobbler),
         Arc::clone(&source),
         start_backend,
     );
-    let observed_playback = Arc::clone(&playback);
-    let settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync> =
-        Arc::new(move |settings| {
-            observe_settings(settings, observed_playback.current_projection().as_ref())
-        });
-    settings_committed(&stored.ui);
     playback.start();
+    crate::presence::follow(&runtime, &settings, &playback);
     let scrobbling = ScrobblingOwner::new(
         settings.clone(),
         Arc::clone(&secrets),
         runtime.clone(),
-        scrobbler,
-        &library,
-        Arc::clone(&settings_committed),
+        Arc::clone(&scrobbler),
     );
     scrobbling.start();
 
-    source.attach_playback(&playback);
+    let mut features = source.features();
+    features.push(Arc::new(crate::loudness::Normalization(Arc::downgrade(
+        &playback,
+    ))));
+    features.push(Arc::new(crate::scrobbling::Listens(Arc::downgrade(
+        &scrobbler,
+    ))));
+    crate::features::run(&runtime, &settings, &library, features);
 
-    let settings_library = Arc::downgrade(&library);
     let settings_handle = SettingsOwner::new(settings.clone(), Arc::clone(&secrets));
-    // The Catalog and the client observer follow the committed settings; the owners follow
-    // them themselves.
-    let mut committed = settings.changes();
-    runtime.spawn(async move {
-        let mut previous = Arc::clone(&committed.borrow_and_update());
-        while committed.changed().await.is_ok() {
-            let current = Arc::clone(&committed.borrow_and_update());
-            let Some(library) = settings_library.upgrade() else {
-                return;
-            };
-            if previous.ui.application != current.ui.application {
-                display(&library, &current.ui.application);
-            }
-            if previous.ui.rich_presence != current.ui.rich_presence
-                || previous.ui.application.private_mode != current.ui.application.private_mode
-                || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
-            {
-                settings_committed(&current.ui);
-            }
-            previous = current;
-        }
-    });
-
     let backup = crate::backup::BackupOwner::new(
         Arc::clone(&library),
-        settings.clone(),
         settings_handle.as_ref().clone(),
-        Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
         runtime.clone(),
         paths.data_dir().join("backups"),
     );
     backup.start();
-    let stored = settings.load();
 
     // Source rows follow the settings once the Catalog is loaded; the first screen does not
     // wait for it.
@@ -279,9 +256,7 @@ where
     let connect = crate::connect::ConnectOwner::new(
         paths.connect_dir(),
         Arc::clone(&library),
-        settings.clone(),
         settings_handle.as_ref().clone(),
-        Arc::clone(&secrets),
         Arc::clone(&source),
         Arc::clone(&playback),
         lyrics.handle(),
@@ -316,18 +291,14 @@ where
             release_updates,
             scrobbling,
         },
-        settings: settings_handle,
         receivers: ProductReceivers {
             source: source_receiver,
-            source_discovery: discovery_receiver,
             downloads: download_receiver,
             visualizer: visualizer_receiver,
             waveform: waveform_receiver,
             lyrics: lyrics_receiver,
             release_updates: release_update_receiver,
         },
-        configured_sources: source.list_sources(),
-        source_operation: source.operation().borrow().clone(),
         release_history,
     })
 }
@@ -340,15 +311,4 @@ pub fn startup_settings(paths: &Paths) -> SettingsFile {
         warn!(%error, "could not use saved settings; startup will continue with defaults");
         SettingsFile::memory_at(paths.config_dir())
     })
-}
-
-fn string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
-}
-
-fn temporary_artwork_dir() -> std::path::PathBuf {
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!("rufin-artwork-{}-{started}", std::process::id()))
 }

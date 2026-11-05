@@ -653,12 +653,6 @@ impl View {
         )
     }
 
-    /// The list settings of the route, as the view read with them.
-    pub fn list_settings(&self) -> LibraryListSettings {
-        self.settings
-            .library_list(library_list_key(&self.route, self.options.category))
-    }
-
     /// How many rows it lists; folders count their child folders and then their tracks.
     pub fn len(&self) -> usize {
         match &self.body {
@@ -1260,8 +1254,13 @@ pub fn context_id(
     sort: LibraryField,
     descending: bool,
 ) -> String {
+    // History lists every source's plays or one source's; each is its own context.
+    let history = match (route, &options.history_source) {
+        (Route::History, Some(source)) => format!("|history={}", source.as_str()),
+        _ => String::new(),
+    };
     format!(
-        "{}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}",
+        "{}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}{history}",
         context_base(route),
         options.filter,
         selected.map_or("", |selected| selected.source_id.as_str()),

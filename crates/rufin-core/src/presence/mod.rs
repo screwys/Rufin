@@ -1,5 +1,6 @@
-//! Rich-presence settings and Discord activity construction.
-//! Platform hosts own authentication and delivery.
+//! Rich presence: what plays, shown as Discord activity on desktop while it is on.
+
+mod discord;
 
 use std::sync::Arc;
 
@@ -74,6 +75,45 @@ impl Settings {
             self.client_id = DEFAULT_CLIENT_ID.to_string();
         }
     }
+}
+
+/// Shows playback through the platform's presence sink: Discord IPC on desktop, none elsewhere.
+pub(crate) fn follow(
+    runtime: &tokio::runtime::Handle,
+    settings: &crate::settings::SettingsFile,
+    playback: &Arc<crate::playback::PlaybackOwner>,
+) {
+    if !discord::SUPPORTED {
+        return;
+    }
+    let sink = Arc::new(discord::Discord::new(settings.clone()));
+    sink.settings_changed(None);
+    let mut updates = playback.updates.subscribe();
+    let observer = Arc::clone(&sink);
+    runtime.spawn(async move {
+        while let Ok(projection) = updates.recv().await {
+            observer.observe(projection.as_ref());
+        }
+    });
+    let playback = Arc::downgrade(playback);
+    crate::settings::follow(
+        runtime,
+        settings,
+        Arc::downgrade(&sink),
+        move |sink, previous, current| {
+            let (previous, current) = (&previous.ui, &current.ui);
+            if previous.rich_presence != current.rich_presence
+                || previous.application.private_mode != current.application.private_mode
+                || previous.lastfm_api_key != current.lastfm_api_key
+            {
+                let projection = playback
+                    .upgrade()
+                    .and_then(|playback| playback.current_projection());
+                sink.settings_changed(projection.as_ref());
+            }
+            std::future::ready(())
+        },
+    );
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

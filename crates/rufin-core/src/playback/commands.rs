@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-pub use library::{QueuePlacement as Placement, QueueReorderTarget};
+pub use library::{QueuePlacement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
 use playback::{QueueProvenance, TrackReference};
-
-pub type QueuePlacement = Placement;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayRequest {
@@ -149,7 +147,7 @@ impl PlayRequest {
     }
     pub fn activation_context(&self, shuffled: bool) -> Option<(String, library::TrackKey, usize)> {
         if !self.reactivate
-            || !matches!(self.placement, Placement::Replace { .. })
+            || !matches!(self.placement, QueuePlacement::Replace { .. })
             || self.start == QueueStart::Shuffled
             || (self.start == QueueStart::RandomIfShuffled && shuffled)
         {
@@ -170,7 +168,7 @@ impl PlayRequest {
             return None;
         };
         let anchor_index = match self.placement {
-            Placement::Replace { anchor_index } => anchor_index,
+            QueuePlacement::Replace { anchor_index } => anchor_index,
             _ => 0,
         };
         let key = self
@@ -214,12 +212,12 @@ impl PlayRequest {
         shuffled: bool,
         seed: u64,
     ) -> library::LibraryResult<QueueBatch> {
-        let replacing = matches!(self.placement, Placement::Replace { .. });
+        let replacing = matches!(self.placement, QueuePlacement::Replace { .. });
         let random_start = replacing && shuffled && self.start == QueueStart::RandomIfShuffled;
         let selected = if random_start { None } else { self.anchor };
         let mut batch = catalog.queue_entries(self.input, selected).await?;
         let fallback = match self.placement {
-            Placement::Replace { anchor_index } => anchor_index,
+            QueuePlacement::Replace { anchor_index } => anchor_index,
             _ => 0,
         };
         let selected = if self.start == QueueStart::Shuffled {

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{
     AnalyzedLoudness, DecodeError, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
@@ -16,8 +16,9 @@ use playback::{LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{debug, info, warn};
 
+use crate::features::{Feature, Pass};
 use crate::playback::{PlaybackOwner, prepare_stream};
-use crate::settings::SettingsFile;
+use crate::settings::{SettingsFile, StoredSettings};
 use crate::source::SourceOwner;
 
 struct ActiveAnalysis {
@@ -48,39 +49,59 @@ pub(crate) struct LoudnessAnalysisOwner {
 
 type Failed = Mutex<HashMap<TrackKey, Option<[u8; 32]>>>;
 
-/// While normalization is EBU R128, tracks added to the selected source, or a listing of it that
-/// changed something, start a pass over what is missing.
-pub(crate) async fn follow(playback: Arc<PlaybackOwner>, changes: Option<Vec<Arc<Change>>>) {
-    if !playback.ebu_r128() {
-        return;
+/// Analysis while normalization is EBU R128: tracks added to the selected source, or a listing
+/// of it that changed something, start a pass over what is missing.
+pub(crate) struct Normalization(pub(crate) Weak<PlaybackOwner>);
+
+impl Feature for Normalization {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        settings.ui.playback.loudness_normalization == playback::LoudnessNormalization::EbuR128
     }
-    let Some(changes) = changes else {
-        playback.loudness.start();
-        return;
-    };
-    let selected = playback
-        .source
-        .selected_library()
-        .map(|selected| selected.source_key);
-    let changed = changes
-        .iter()
-        .flat_map(|change| &change.scopes)
-        .any(|scope| match scope {
-            Scope::Reload => true,
-            Scope::Tracks {
-                source: Some(source),
-                added: tracks,
-                ..
-            } => !tracks.is_empty() && Some(*source) == selected,
-            // A listing that changed tracks may have given them new audio hashes.
-            Scope::Source {
-                key,
-                phase: SourcePhase::Completed,
-            } => Some(*key) == selected,
-            _ => false,
-        });
-    if changed {
-        playback.loudness.library_changed();
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Tracks { .. }
+                | Scope::Source {
+                    phase: SourcePhase::Completed,
+                    ..
+                }
+        )
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        Box::pin(async move {
+            let Some(playback) = self.0.upgrade() else {
+                return;
+            };
+            let Some(changes) = changes else {
+                playback.loudness.start();
+                return;
+            };
+            let selected = playback
+                .source
+                .selected_library()
+                .map(|selected| selected.source_key);
+            let changed =
+                changes
+                    .iter()
+                    .flat_map(|change| &change.scopes)
+                    .any(|scope| match scope {
+                        Scope::Reload => true,
+                        Scope::Tracks {
+                            source: Some(source),
+                            added: tracks,
+                            ..
+                        } => !tracks.is_empty() && Some(*source) == selected,
+                        // A listing that changed tracks may have given them new audio hashes.
+                        Scope::Source { key, .. } => Some(*key) == selected,
+                        _ => false,
+                    });
+            if changed {
+                playback.loudness.library_changed();
+            }
+        })
     }
 }
 

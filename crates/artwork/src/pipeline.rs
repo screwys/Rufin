@@ -145,7 +145,7 @@ impl Pipeline {
     pub(crate) fn new(
         cache_root: &Path,
         runtime: Handle,
-        source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+        source_resolver: Arc<SourceResolver>,
         catalog: Arc<library::Catalog>,
     ) -> Result<Self, ArtworkError> {
         let cache = FilesystemCache::new(cache_root.to_path_buf())?;
@@ -1077,7 +1077,7 @@ mod tests {
             runtime: Handle::current(),
             cache,
             fetch: FetchContext::new(
-                Arc::new(Mutex::new(None)),
+                Arc::new(|_: &sources::SourceId| None),
                 Arc::new(
                     library::Catalog::open(directory.path().join("library.sqlite3"))
                         .await
@@ -1142,7 +1142,7 @@ mod tests {
             Pipeline::new(
                 &directory.path().join("covers"),
                 Handle::current(),
-                Arc::new(Mutex::new(None)),
+                Arc::new(|_: &sources::SourceId| None),
                 Arc::new(
                     library::Catalog::open(directory.path().join("library.sqlite3"))
                         .await

@@ -195,9 +195,7 @@ impl StoredSettings {
     /// Whether `other` names the same scrobbling accounts and secrets; the switches may
     /// differ.
     pub(crate) fn same_scrobbling_accounts(&self, other: &Self) -> bool {
-        let mut accounts = other.scrobbling.clone();
-        accounts.copy_switches(&self.scrobbling);
-        accounts == self.scrobbling
+        self.scrobbling.same_accounts(&other.scrobbling)
             && other.scrobbling_credentials == self.scrobbling_credentials
             && other.scrobbling_secrets_present == self.scrobbling_secrets_present
             && other.ui.lastfm_api_key == self.ui.lastfm_api_key
@@ -210,6 +208,35 @@ impl StoredSettings {
         settings.lastfm.api_key = self.ui.lastfm_api_key.clone();
         settings
     }
+}
+
+/// Runs `pass` with the previous and the committed settings on every change while its owner
+/// lives, as `features::follow` does for the Catalog's changes.
+pub(crate) fn follow<T, Pass, Done>(
+    runtime: &tokio::runtime::Handle,
+    settings: &SettingsFile,
+    owner: std::sync::Weak<T>,
+    mut pass: Pass,
+) -> tokio::task::AbortHandle
+where
+    T: Send + Sync + 'static,
+    Pass: FnMut(Arc<T>, &StoredSettings, &StoredSettings) -> Done + Send + 'static,
+    Done: std::future::Future<Output = ()> + Send,
+{
+    let mut committed = settings.changes();
+    runtime
+        .spawn(async move {
+            let mut previous = Arc::clone(&committed.borrow_and_update());
+            while committed.changed().await.is_ok() {
+                let current = Arc::clone(&committed.borrow_and_update());
+                let Some(owner) = owner.upgrade() else {
+                    return;
+                };
+                pass(owner, &previous, &current).await;
+                previous = current;
+            }
+        })
+        .abort_handle()
 }
 
 #[derive(Clone)]
@@ -333,17 +360,6 @@ impl SettingsFile {
         )
     }
 
-    pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
-        self.committed
-            .borrow()
-            .sources
-            .configured
-            .iter()
-            .find(|source| &source.configuration.source_id == source_id)
-            .map(|source| source.configuration.name.clone())
-            .unwrap_or_default()
-    }
-
     pub(crate) fn playback_stream_quality(&self) -> StreamQuality {
         self.committed.borrow().ui.playback.stream_quality
     }
@@ -406,30 +422,24 @@ impl SettingsFile {
         Ok(output)
     }
 
+    /// Commits an edit once it is saved, or returns the error. The edit sees the committed
+    /// settings and nothing commits between it and its publication.
     pub(crate) fn update<T>(
         &self,
         operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
-        let previous = self.load();
-        let mut next = StoredSettings::clone(&previous);
-        let output = operation(&mut next)?;
-        next.prepare()?;
-        let changed = next != *saved;
-        if changed {
-            self.persist(&next)?;
-        }
-        *saved = next.clone();
         let _writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
         let current = self.load();
-        // Preference edits can arrive while a background transaction writes to disk.
-        // Keep those newer edits when publishing the committed source or configuration.
-        merge_preference_edits(&mut next.ui, &previous.ui, &current.ui)?;
-        merge_preference_edits(
-            &mut next.scrobbling,
-            &previous.scrobbling,
-            &current.scrobbling,
-        )?;
+        let mut next = StoredSettings::clone(&current);
+        let output = operation(&mut next)?;
+        next.prepare()?;
+        {
+            let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
+            if next != *saved {
+                self.persist(&next)?;
+                *saved = next.clone();
+            }
+        }
         if next != *current {
             self.committed.send_replace(Arc::new(next));
         }
@@ -456,21 +466,6 @@ impl SettingsFile {
             .as_ref()
             .map_or(Ok(()), |path| write_settings(path, value))
     }
-}
-
-fn merge_preference_edits<T: Serialize + serde::de::DeserializeOwned + PartialEq>(
-    next: &mut T,
-    previous: &T,
-    current: &T,
-) -> Result<(), String> {
-    if previous != current {
-        let mut merged = serde_json::to_value(&*next).map_err(|e| e.to_string())?;
-        let previous = serde_json::to_value(previous).map_err(|e| e.to_string())?;
-        let current = serde_json::to_value(current).map_err(|e| e.to_string())?;
-        merge_settings(&mut merged, &previous, &current);
-        *next = serde_json::from_value(merged).map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
 
 impl StoredSettings {
@@ -508,6 +503,14 @@ impl SettingsOwner {
 
     pub(crate) fn new(file: SettingsFile, secrets: Arc<SwitchableSecretStore>) -> Arc<Self> {
         Arc::new(Self { file, secrets })
+    }
+
+    pub(crate) fn file(&self) -> &SettingsFile {
+        &self.file
+    }
+
+    pub(crate) fn secrets(&self) -> &Arc<SwitchableSecretStore> {
+        &self.secrets
     }
 
     /// Writes restored settings. `credentials_changed` says the secrets they name were
@@ -874,8 +877,6 @@ pub(crate) fn persist_scrobbling_settings(
         if stored.secret_scope_id != scope {
             return Err("credential storage was reset".into());
         }
-        // The switches stay as they are committed.
-        prepared.scrobbling.copy_switches(&stored.scrobbling);
         stored.scrobbling = prepared.scrobbling;
         stored.scrobbling_credentials = prepared.scrobbling_credentials;
         stored.scrobbling_secrets_present = false;
@@ -920,17 +921,8 @@ pub(crate) fn load_scrobbling_settings(
     }
 }
 
-pub(crate) fn startup_scrobbling_settings(
-    file: &SettingsFile,
-    secrets: &Arc<SwitchableSecretStore>,
-) -> ScrobblingSettings {
-    if let Err(error) = migrate_source_credentials(file, secrets.as_ref()) {
-        warn!(%error, "could not migrate saved source credentials");
-    }
-    load_scrobbling_settings(file, secrets)
-}
-
-fn migrate_source_credentials(
+/// Seals source credentials saved before they were sealed.
+pub(crate) fn migrate_source_credentials(
     file: &SettingsFile,
     secrets: &dyn SecretStore,
 ) -> Result<(), String> {
@@ -1197,7 +1189,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn pending_settings_update_leaves_committed_values_readable_and_serializes_saves() {
+    fn pending_settings_update_leaves_committed_values_readable_and_serializes_writers() {
         use std::sync::mpsc;
         use std::time::Duration;
 
@@ -1224,6 +1216,7 @@ mod tests {
         let reader_file = file.clone();
         let reader = std::thread::spawn(move || read.send(reader_file.load()).unwrap());
         let observed = result.recv_timeout(Duration::from_secs(5));
+        // A writer that starts meanwhile sees the pending one's result; so does an edit.
         let next_file = file.clone();
         let next_writer = std::thread::spawn(move || {
             next_file.update(|stored| {
@@ -1232,19 +1225,21 @@ mod tests {
                 Ok(previous_shuffle)
             })
         });
-        // Editing preferences must not wait for a background save to finish.
-        file.edit(|stored| {
-            stored.ui.window_width = Some(1234);
-            stored.ui.window_height = Some(800);
-            Ok(())
-        })
-        .unwrap();
-        let edited_width = file.load().ui.window_width;
+        let edit_file = file.clone();
+        let editor = std::thread::spawn(move || {
+            edit_file.edit(|stored| {
+                stored.ui.window_width = Some(1234);
+                stored.ui.window_height = Some(800);
+                Ok(stored.ui.shuffle_enabled)
+            })
+        });
         // Always release the writer, including when a blocked reader times out.
         release.send(()).unwrap();
         writer.join().unwrap().unwrap();
         reader.join().unwrap();
         assert!(next_writer.join().unwrap().unwrap());
+        assert!(editor.join().unwrap().unwrap());
+        let edited_width = file.load().ui.window_width;
         assert_eq!(observed.unwrap(), initial);
         assert_eq!(edited_width, Some(1234));
         let committed = file.load();

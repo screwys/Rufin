@@ -10,7 +10,10 @@ use async_channel::Receiver;
 use gio::prelude::*;
 use library::{PlaylistFileLink, PlaylistKey, PlaylistPathMode, Scope, SourceId};
 
-use crate::source::{Shared, SourceOwner, string_error};
+use crate::features::{Feature, Pass};
+use crate::settings::StoredSettings;
+use crate::source::{Shared, SourceOwner};
+use crate::string_error;
 
 const LOCAL_CONFLICT: &str =
     "Both the playlist and its file have changed. Reload the file or save the Rufin version.";
@@ -20,45 +23,53 @@ pub(crate) const FILE_CONFLICT: &str =
 /// How often linked files are checked for changes made outside Rufin.
 const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Saves linked playlists a Change touched, when their links are marked changed and save
-/// automatically. The edit itself marks its link changed.
-pub(crate) async fn follow(shared: Arc<Shared>, changes: Option<Vec<Arc<library::Change>>>) {
-    let catalog = &shared.catalog;
-    let mut edited = changes
-        .iter()
-        .flatten()
-        .flat_map(|change| &change.scopes)
-        .filter_map(|scope| match scope {
-            Scope::Playlist { key, .. } if catalog.is_linked(*key) => Some(*key),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    edited.sort_unstable();
-    edited.dedup();
-    let owner = SourceOwner { shared };
-    for playlist in edited {
-        after_edit(&owner, playlist).await;
-    }
-}
-
-/// Checks linked files for changes made outside Rufin, after the Catalog loaded and every five
+/// Linked playlist files while there are any. Linked playlists an edit touched are saved when
+/// their links are marked changed and save automatically; the edit itself marks its link
+/// changed. Files are checked for changes made outside Rufin when it starts and every five
 /// minutes.
-pub(crate) async fn check_links(shared: Weak<Shared>) {
-    let Some(catalog) = shared.upgrade().map(|shared| shared.catalog.clone()) else {
-        return;
-    };
-    catalog.loaded().await;
-    drop(catalog);
-    let mut interval = tokio::time::interval(CHECK_INTERVAL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
-        interval.tick().await;
-        let Some(shared) = shared.upgrade() else {
-            return;
-        };
-        if shared.catalog.has_linked_playlists() {
-            refresh_links(&SourceOwner { shared }, None).await;
-        }
+pub(crate) struct Links(pub(crate) Weak<Shared>);
+
+impl Feature for Links {
+    fn wanted(&self, _: &StoredSettings, catalog: &library::Catalog) -> bool {
+        catalog.has_linked_playlists()
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload | Scope::Playlist { .. } | Scope::PlaylistLink { .. }
+        )
+    }
+
+    fn period(&self) -> Option<Duration> {
+        Some(CHECK_INTERVAL)
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<library::Change>>>) -> Pass {
+        Box::pin(async move {
+            let Some(shared) = self.0.upgrade() else {
+                return;
+            };
+            let Some(changes) = changes else {
+                refresh_links(&SourceOwner { shared }, None).await;
+                return;
+            };
+            let catalog = &shared.catalog;
+            let mut edited = changes
+                .iter()
+                .flat_map(|change| &change.scopes)
+                .filter_map(|scope| match scope {
+                    Scope::Playlist { key, .. } if catalog.is_linked(*key) => Some(*key),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            edited.sort_unstable();
+            edited.dedup();
+            let owner = SourceOwner { shared };
+            for playlist in edited {
+                after_edit(&owner, playlist).await;
+            }
+        })
     }
 }
 

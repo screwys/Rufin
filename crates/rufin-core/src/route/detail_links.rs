@@ -198,36 +198,6 @@ pub fn metadata_links(
 
 pub use crate::settings::presentation::joined_credits;
 
-pub fn track_album_artist_links(track: &TrackView) -> DetailLinks {
-    let text = joined_credits(&track.links.album_artists);
-    DetailLinks::artist_text(
-        &text,
-        &track.links.album_artists,
-        |credit: &TrackArtistLink| credit.media_uri.clone(),
-        |credit| credit.name.as_str(),
-        true,
-    )
-}
-
-pub fn track_artist_album_links(track: &TrackView) -> DetailLinks {
-    let mut links = track_artist_links(track);
-    if track.metadata.album.trim().is_empty() {
-        return links;
-    }
-    if !links.text.is_empty() {
-        links.text.push_str(" / ");
-    }
-    let start = links.text.len();
-    links.text.push_str(&track.metadata.album);
-    if let Some(album_uri) = &track.links.album_media_uri {
-        links.links.push(DetailLink {
-            range: start..links.text.len(),
-            route: Route::AlbumDetail(album_uri.clone()),
-        });
-    }
-    links
-}
-
 pub fn album_artist_links(album: &AlbumView) -> DetailLinks {
     album_credit_links(&album.metadata.artist, &album.row.links.album_artists)
 }

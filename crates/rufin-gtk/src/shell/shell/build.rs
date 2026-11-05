@@ -141,19 +141,18 @@ pub async fn build(
         secret_storage_fallbacks,
         diagnostics,
         products,
-        settings: settings_handle,
         receivers,
-        configured_sources,
-        source_operation,
         release_history,
     } = inputs;
     temporary_storage_banner.set_revealed(temporary_store);
+    let settings_handle = std::sync::Arc::clone(&products.settings);
     let settings = settings_handle.load();
     appearance.apply(&settings);
     info!(
         elapsed_ms = loaded_at.elapsed().as_millis(),
         "loaded music source presentation"
     );
+    let configured_sources = products.source.list_sources();
     let defer_initial_route = configured_sources.selected_source_id.is_some();
     let settings_state = Rc::new(SettingsState::new(settings_handle));
     let navigation = NavigationState::new(
@@ -162,7 +161,7 @@ pub async fn build(
     let selected_ui = SelectedUiState::new();
     let source = Rc::new(SourceState {
         configured: RefCell::new(configured_sources),
-        operation: RefCell::new(source_operation),
+        operation: RefCell::new(products.source.operation().borrow().clone()),
         discovered_servers: RefCell::new(Vec::new()),
         discovery_status: RefCell::new(rufin_core::runtime::source::DiscoveryStatus::Idle),
         discovery_running: Cell::new(false),

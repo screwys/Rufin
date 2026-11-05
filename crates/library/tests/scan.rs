@@ -148,10 +148,7 @@ async fn reopening_preserves_accepted_source_rows_and_noop_refresh() {
     let reopened = Catalog::open(&path).await.unwrap();
     let mut changes = super::support::Changes::of(&reopened);
     assert_eq!(
-        reopened
-            .source_counts(publication.0, &ReadCancellation::default())
-            .await
-            .unwrap(),
+        reopened.all_source_counts().await.unwrap()[&reopened.source_id(publication.0).unwrap()],
         (1, 2)
     );
     let update = write_small_catalog(&reopened, &mut changes, "same", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/47f24da63989b3586adaa7682d88f1bb","image":{"kind":"native","source_id":"source","item_id":"art","tag":null},"blur_hash":null}]"#).await;

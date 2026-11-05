@@ -142,7 +142,11 @@ impl ProductHandles {
                 .await
                 .map_err(|error| error.to_string()),
             CacheKind::JapaneseDictionary => self.lyrics.dictionary_cache_usage().await,
-            CacheKind::Waveforms => self.playback.waveform_cache_usage().await,
+            CacheKind::Waveforms => self
+                .library
+                .waveform_cache_usage()
+                .await
+                .map_err(|error| error.to_string()),
             CacheKind::Loudness => self
                 .library
                 .loudness_cache_usage()

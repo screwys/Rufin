@@ -16,10 +16,15 @@ use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
-use crate::settings::SettingsFile;
+use crate::features::{Feature, Pass};
+use crate::settings::{SettingsFile, StoredSettings};
 
 mod quality;
-pub use quality::{DOWNLOAD_BITRATES, download_bitrates};
+pub use quality::{
+    DEFAULT_DOWNLOAD_BITRATE, DOWNLOAD_BITRATES, download_bitrates, download_quality_shows_bitrate,
+    download_quality_shows_channels, download_quality_with_bitrate, download_quality_with_channels,
+    download_quality_with_codec,
+};
 mod storage;
 mod track_download;
 pub use storage::DownloadDirectory;
@@ -558,6 +563,12 @@ pub struct DownloadRules {
     pub latest_five_albums: bool,
 }
 
+/// Whether `rule` is on in `rules`.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn download_rules_contain(rules: DownloadRules, rule: DownloadRule) -> bool {
+    rules.contains(rule)
+}
+
 impl DownloadRules {
     pub fn is_empty(self) -> bool {
         !self.entire_library && !self.favorites && !self.all_playlists && !self.latest_five_albums
@@ -789,9 +800,47 @@ struct Actor {
     next_job: u64,
 }
 
+/// The rules while a source has some: the changes that touch a source with rules reconcile
+/// them.
+struct Rules(async_channel::WeakSender<Command>);
+
+impl Feature for Rules {
+    fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
+        settings
+            .ui
+            .downloads
+            .iter()
+            .any(|source| !source.rules.is_empty())
+    }
+
+    fn hears(&self, scope: &Scope) -> bool {
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Tracks { .. }
+                | Scope::Collections { .. }
+                | Scope::Source { .. }
+                | Scope::State { .. }
+                | Scope::Playlist { entries: true, .. }
+                | Scope::Playlists
+        )
+    }
+
+    fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
+        if let Some(commands) = self.0.upgrade() {
+            let _ = commands.try_send(Command::LibraryChanged(changes));
+        }
+        Box::pin(std::future::ready(()))
+    }
+}
+
 impl Downloads {
     pub fn default_directory(&self) -> &Path {
         &self.root
+    }
+
+    pub(crate) fn rules(&self) -> Arc<dyn Feature> {
+        Arc::new(Rules(self.commands.downgrade()))
     }
 
     pub fn new(
@@ -811,14 +860,6 @@ impl Downloads {
             commands,
             status: changes,
         };
-        // The rules hear every Change; the follow ends with the download actor.
-        let commands = downloads.commands.downgrade();
-        runtime.spawn(catalog.follow(move |heard| {
-            let sent = commands
-                .upgrade()
-                .is_some_and(|commands| commands.try_send(Command::LibraryChanged(heard)).is_ok());
-            std::future::ready(sent)
-        }));
         runtime.spawn(run(
             Actor {
                 artwork,
@@ -3661,6 +3702,7 @@ mod tests {
                 root.join("artwork"),
                 tokio::runtime::Handle::current(),
                 Arc::new(catalog.clone()),
+                |_| None,
             )
             .unwrap(),
             root: Arc::new(root.to_path_buf()),

@@ -2,10 +2,11 @@
 //! queue; "Continue from" restores another device's queue here, and casting sends this
 //! device's queue to another device, which streams its playback state back.
 use super::{
-    ConnectOwner, Control, Presence, Request, Session, Stream, error,
+    ConnectOwner, Control, Presence, Request, Session, Stream,
     records::{Copy as TrackCopy, Item, Records},
 };
 use crate::playback::state::ContinuedListen;
+use crate::string_error;
 use library::{QueuePlacement, QueueProvenance, QueueReorderTarget, QueueRepeatMode};
 use rufin_connect::{
     media::PeerByteResponse,
@@ -98,8 +99,8 @@ pub(crate) struct Observing {
 impl Observing {
     /// The next frame; none when the receiver ended the stream.
     pub(crate) async fn next(&mut self) -> Result<Option<Observed>, String> {
-        match self.lines.next_line().await.map_err(error)? {
-            Some(line) => serde_json::from_str(&line).map(Some).map_err(error),
+        match self.lines.next_line().await.map_err(string_error)? {
+            Some(line) => serde_json::from_str(&line).map(Some).map_err(string_error),
             None => Ok(None),
         }
     }
@@ -123,7 +124,7 @@ impl Records {
             self.store
                 .bodies("session")
                 .await
-                .map_err(error)?
+                .map_err(string_error)?
                 .into_iter()
                 .map(|row| (row.id, row.value))
                 .collect(),
@@ -152,17 +153,21 @@ impl Records {
     /// This device's queue and session records as the Store last saved them. The queue is
     /// encoded again only when it changed.
     pub(super) async fn session_changes(&self) -> Result<Vec<store::Change>, String> {
-        let auto_dj = self.owner()?.settings.load().ui.auto_dj_enabled;
-        let queue = self.catalog.restore_queue().await.map_err(error)?;
-        let revision = store::digest(&(&queue.entries, &queue.order)).map_err(error)?;
+        let auto_dj = self.owner()?.settings.file().load().ui.auto_dj_enabled;
+        let queue = self.catalog.restore_queue().await.map_err(string_error)?;
+        let revision = store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?;
         let ids = [
             format!("queue:{}", self.device),
             format!("session:{}", self.device),
         ];
-        let stored = self.store.digests(Select::Ids(&ids)).await.map_err(error)?;
+        let stored = self
+            .store
+            .digests(Select::Ids(&ids))
+            .await
+            .map_err(string_error)?;
         let shape = (&revision, queue.repeat_mode, queue.shuffled, auto_dj);
         let mut items = Vec::new();
-        if stored.get(&ids[0]) != Some(&store::digest(&shape).map_err(error)?) {
+        if stored.get(&ids[0]) != Some(&store::digest(&shape).map_err(string_error)?) {
             let value = QueueValue {
                 revision: revision.clone(),
                 items: self.queue_items(&queue.entries).await?,
@@ -250,7 +255,7 @@ impl Records {
                 self.catalog
                     .tracks(page, &library::ReadCancellation::new())
                     .await
-                    .map_err(error)?
+                    .map_err(string_error)?
                     .into_iter()
                     .map(|track| (track.track_key, track)),
             );
@@ -320,7 +325,7 @@ impl Records {
             .catalog
             .queue_entries(load, None)
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .entries)
     }
 
@@ -345,7 +350,7 @@ impl Records {
             .store
             .bodies("queue")
             .await
-            .map_err(error)?
+            .map_err(string_error)?
             .into_iter()
             .find(|row| row.id == id)
             .and_then(|row| serde_json::from_value::<QueueValue>(row.value?).ok())
@@ -500,7 +505,7 @@ impl ConnectOwner {
         let playback = Arc::clone(&self.playback);
         tokio::task::spawn_blocking(move || playback.send_cast_auto_dj(auto_dj))
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         Ok(true)
     }
 
@@ -528,7 +533,7 @@ impl ConnectOwner {
             playing,
             repeat: queue.repeat_mode,
             shuffle: queue.shuffled,
-            auto_dj: self.settings.load().ui.auto_dj_enabled,
+            auto_dj: self.settings.file().load().ui.auto_dj_enabled,
             placement,
             target: target.flatten(),
             listen,
@@ -558,7 +563,7 @@ impl ConnectOwner {
                 .await?;
             return tokio::task::spawn_blocking(move || playback.send_cast_auto_dj(cast.auto_dj))
                 .await
-                .map_err(error);
+                .map_err(string_error);
         };
         let input = library::QueueLoad::Captured(entries.into());
         tokio::task::spawn_blocking(move || match cast.target {
@@ -569,7 +574,7 @@ impl ConnectOwner {
             ),
         })
         .await
-        .map_err(error)
+        .map_err(string_error)
     }
 
     pub(crate) async fn control(&self, peer: &str, command: Control) -> Result<(), String> {
@@ -583,7 +588,8 @@ impl ConnectOwner {
     pub(crate) async fn queue(&self, peer: &str) -> Result<Vec<library::QueueEntry>, String> {
         let records = Arc::clone(&self.active()?.records);
         let items: Vec<QueueItem> =
-            serde_json::from_value(self.request(peer, Request::Queue).await?).map_err(error)?;
+            serde_json::from_value(self.request(peer, Request::Queue).await?)
+                .map_err(string_error)?;
         records.entries(items).await
     }
 
@@ -614,7 +620,7 @@ impl ConnectOwner {
             )
             .await?,
         )
-        .map_err(error)?;
+        .map_err(string_error)?;
         let (positions, items): (Vec<_>, Vec<_>) = page.rows.into_iter().unzip();
         let entries = records.entries(items).await?;
         Ok((
@@ -660,9 +666,12 @@ impl ConnectOwner {
             .clone()
             .ok_or_else(|| localization::tr("Connect is not enabled"))?;
         let response = network
-            .stream_request(peer, serde_json::to_vec(&Stream::Observe).map_err(error)?)
+            .stream_request(
+                peer,
+                serde_json::to_vec(&Stream::Observe).map_err(string_error)?,
+            )
             .await
-            .map_err(error)?;
+            .map_err(string_error)?;
         Ok(Observing {
             lines: tokio::io::BufReader::new(response.reader).lines(),
         })
