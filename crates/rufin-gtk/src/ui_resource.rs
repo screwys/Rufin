@@ -4,7 +4,6 @@ use gtk::prelude::*;
 /// Where the compiled interface definitions and styles live.
 pub(crate) const UI_PREFIX: &str = "/io/github/screwys/Rufin/ui/";
 
-#[macro_export]
 macro_rules! composite_box {
     ($vis:vis $name:ident, $imp:ident, $gtype:literal, $resource:literal, {
         $($field:ident: $type:ty),+ $(,)?
@@ -55,7 +54,6 @@ macro_rules! composite_box {
     };
 }
 
-#[macro_export]
 macro_rules! objects {
     ($builder:expr, $resource:expr, { $($name:ident: $type:ty),+ $(,)? }) => {
         $(
@@ -64,6 +62,8 @@ macro_rules! objects {
         )+
     };
 }
+
+pub(crate) use {composite_box, objects};
 
 /// Loads an interface definition by its path below the interface prefix.
 pub(crate) fn builder(resource: &str) -> gtk::Builder {

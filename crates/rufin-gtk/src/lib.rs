@@ -12,6 +12,7 @@ mod preferences;
 mod ratings;
 mod shell;
 mod ui_resource;
+pub(crate) use ui_resource::{composite_box, objects};
 mod widgets;
 
 pub use shell::{
