@@ -610,9 +610,6 @@ impl MetadataBatch {
             )
             .await;
         if matches!(result, Ok(()) | Err(Error::PartiallySaved { .. })) {
-            if source.is_none() {
-                super::EditSession::direct_files_saved(&self.source);
-            }
             if invalidated.load(std::sync::atomic::Ordering::Relaxed) {
                 super::EditSession::artwork_saved(&self.source, source, since);
             }

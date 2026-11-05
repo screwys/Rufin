@@ -66,8 +66,6 @@ impl Changes {
 /// Changes core announces that no Write states.
 #[derive(Debug)]
 pub(crate) enum Notice {
-    /// Every page reads again, such as after a file outside every source changed.
-    All,
     /// A source's pages must read again after this instant, such as after an invalidated
     /// cover. Goes out at once unless the source went out since.
     Source(SourceKey, Instant),
@@ -124,7 +122,11 @@ impl Pending {
     fn add(&mut self, change: &Change) {
         for scope in &change.scopes {
             match scope {
-                Scope::Reload | Scope::Display => self.changed.all = true,
+                // Tracks outside every source show on any page, such as a file opened
+                // directly or a playlist's entry.
+                Scope::Reload | Scope::Display | Scope::Tracks { source: None, .. } => {
+                    self.changed.all = true
+                }
                 Scope::Tracks {
                     source: Some(source),
                     ..
@@ -163,8 +165,7 @@ impl Pending {
                     self.held.remove(key);
                     self.now.remove(key);
                 }
-                Scope::Tracks { source: None, .. }
-                | Scope::Rekey { .. }
+                Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Held { .. }
                 | Scope::Lyrics { .. }
@@ -175,7 +176,6 @@ impl Pending {
 
     fn notice(&mut self, notice: Notice, published: &HashMap<SourceKey, Instant>) {
         match notice {
-            Notice::All => self.changed.all = true,
             Notice::Source(source, since) => {
                 if published.get(&source).is_none_or(|last| *last < since) {
                     self.held.insert(source);

@@ -223,15 +223,6 @@ impl EditSession {
         }
     }
 
-    /// A file outside every source changed. Its Write names no source, so the selected
-    /// source's pages read again, or every page when none is selected.
-    pub(super) fn direct_files_saved(owner: &SourceOwner) {
-        owner.notice(match owner.shared.selected() {
-            Some(selected) => Notice::Source(selected.source_key, Instant::now()),
-            None => Notice::All,
-        });
-    }
-
     async fn save(
         &self,
         owner: &SourceOwner,
@@ -307,19 +298,6 @@ impl EditSession {
         );
         if saved && invalidated {
             Self::artwork_saved(owner, self.source.as_ref(), since);
-        }
-        if saved
-            && self.source.is_none()
-            && let EditDestination::Files(target) = &self.destination
-            && owner
-                .shared
-                .catalog
-                .track_source_by_uri(target.media_uri(), &library::ReadCancellation::new())
-                .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
-                .is_none()
-        {
-            Self::direct_files_saved(owner);
         }
         result?;
         if let Some(lyrics) = lyrics {
