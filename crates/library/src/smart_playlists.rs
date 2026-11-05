@@ -600,10 +600,11 @@ impl Catalog {
         .await?;
         let changed = row.is_some();
         if let Some(row) = row {
+            let object = row.5.clone();
             write.put_smart(row);
             // The image itself is read by key.
             if artwork.is_some() {
-                write.changed(crate::catalog::write::Scope::Smart { key });
+                write.changed(crate::catalog::write::Scope::Smart { key, object });
             }
         }
         write.commit().await?;
@@ -642,13 +643,18 @@ pub struct SmartPlaylistCopy {
 }
 
 impl Catalog {
-    /// Every smart playlist by object id.
-    pub async fn smart_playlist_copies(&self) -> LibraryResult<Vec<SmartPlaylistCopy>> {
+    /// Smart playlists by object id, all of them or those of these object ids.
+    pub async fn smart_playlist_copies(
+        &self,
+        objects: Option<&[String]>,
+    ) -> LibraryResult<Vec<SmartPlaylistCopy>> {
         let mut connection = self.acquire_reader().await?;
         let rows: Vec<(String, String, Option<String>, String, Option<String>)> = sqlx::query_as(
             "SELECT smart.object_id,smart.name,folder.object_id,smart.definition_json,smart.mosaic FROM smart_playlists smart
-             LEFT JOIN playlist_folders folder ON folder.folder_key=smart.playlist_folder_key ORDER BY smart.object_id",
+             LEFT JOIN playlist_folders folder ON folder.folder_key=smart.playlist_folder_key
+             WHERE ?1 IS NULL OR smart.object_id IN(SELECT value FROM json_each(?1)) ORDER BY smart.object_id",
         )
+        .bind(objects.map(serde_json::to_string).transpose()?)
         .fetch_all(&mut *connection)
         .await?;
         Ok(rows

@@ -109,25 +109,14 @@ impl Catalog {
             .track_count
     }
 
-    /// The object ids of these playlists and smart playlists, from their resident records.
-    pub fn playlist_objects(
-        &self,
-        playlists: &[PlaylistKey],
-        smart: &[crate::SmartPlaylistKey],
-    ) -> (Vec<String>, Vec<String>) {
+    /// The object ids of these playlists, from their resident records.
+    pub fn playlist_objects(&self, playlists: &[PlaylistKey]) -> Vec<String> {
         let snapshot = self.snapshot();
-        (
-            playlists
-                .iter()
-                .filter_map(|key| snapshot.playlists.get(key.raw()))
-                .map(|record| snapshot.text(record.object).to_owned())
-                .collect(),
-            smart
-                .iter()
-                .filter_map(|key| snapshot.smart_playlists.get(&key.raw()))
-                .map(|smart| smart.object.clone())
-                .collect(),
-        )
+        playlists
+            .iter()
+            .filter_map(|key| snapshot.playlists.get(key.raw()))
+            .map(|record| snapshot.text(record.object).to_owned())
+            .collect()
     }
 
     /// The track a playlist entry holds, from its resident entries.
@@ -1242,20 +1231,20 @@ impl Catalog {
         Ok(count)
     }
 
-    /// Rufin playlists by object id, all of them or those of `playlists`.
+    /// Rufin playlists by object id, all of them or those of these object ids.
     pub async fn playlist_copies(
         &self,
-        playlists: Option<&[PlaylistKey]>,
+        objects: Option<&[String]>,
     ) -> LibraryResult<Vec<PlaylistCopy>> {
         let mut connection = self.acquire_reader().await?;
         let rows: Vec<(String, String, Option<String>, i64, Option<String>)> = sqlx::query_as(
             "SELECT playlist.object_id,coalesce(playlist.name,''),folder.object_id,playlist.created_at,playlist.mosaic
              FROM playlists playlist LEFT JOIN playlist_folders folder ON folder.folder_key=playlist.playlist_folder_key
              WHERE playlist.owner='rufin' AND playlist.source_key IS NULL
-               AND (?1 IS NULL OR playlist.playlist_key IN(SELECT value FROM json_each(?1)))
+               AND (?1 IS NULL OR playlist.object_id IN(SELECT value FROM json_each(?1)))
              ORDER BY playlist.object_id",
         )
-        .bind(playlists.map(serde_json::to_string).transpose()?)
+        .bind(objects.map(serde_json::to_string).transpose()?)
         .fetch_all(&mut *connection)
         .await?;
         Ok(rows
@@ -1553,7 +1542,10 @@ pub(crate) async fn write_playlist_artwork(
     if let Some(row) = smart {
         let key = crate::SmartPlaylistKey::from_raw(row.0);
         write.put_smart(row);
-        write.changed(Scope::Smart { key });
+        write.changed(Scope::Smart {
+            key,
+            object: image.object_id.clone(),
+        });
     }
     Ok(())
 }

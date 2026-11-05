@@ -87,8 +87,10 @@ pub enum Scope {
     },
     /// Playlists were added, removed or moved. A rename is a `Playlist` scope.
     Playlists,
+    /// A smart playlist changed or went. `object` names it, also after it went.
     Smart {
         key: SmartPlaylistKey,
+        object: String,
     },
     /// Playlist folders.
     Folders,
@@ -1556,8 +1558,16 @@ impl<'a> Write<'a> {
         if listed && !scopes.contains(&Scope::Playlists) {
             scopes.push(Scope::Playlists);
         }
-        scopes.extend(user.smart.iter().map(|(key, _)| Scope::Smart {
-            key: SmartPlaylistKey::from_raw(*key),
+        scopes.extend(user.smart.iter().filter_map(|(key, smart)| {
+            let object = smart
+                .as_ref()
+                .or_else(|| snapshot.smart_playlists.get(key))?
+                .object
+                .clone();
+            Some(Scope::Smart {
+                key: SmartPlaylistKey::from_raw(*key),
+                object,
+            })
         }));
         if user.folders.is_some() {
             scopes.push(Scope::Folders);

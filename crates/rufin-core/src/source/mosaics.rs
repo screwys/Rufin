@@ -142,7 +142,7 @@ fn members_changed(
             Scope::Playlist { key, entries: true } => {
                 picks.insert(MosaicOwner::Playlist(*key));
             }
-            Scope::Smart { key } => {
+            Scope::Smart { key, .. } => {
                 *listed = true;
                 picks.insert(MosaicOwner::Smart(*key));
             }

@@ -696,7 +696,7 @@ pub(super) async fn merge_local_file_uris_on(
         ("playlists", "playlist_key"),
         ("smart_playlists", "smart_playlist_key"),
     ] {
-        let keys: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH aliases AS(
+        let keys: Vec<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH aliases AS(
             SELECT json_extract(value,'$[0]') previous,json_extract(value,'$[1]') current FROM json_each(?1)
         ) UPDATE {table} AS owner SET mosaic=(
             SELECT json_group_array(uri ORDER BY ordinal) FROM (
@@ -704,9 +704,9 @@ pub(super) async fn merge_local_file_uris_on(
                        min(CAST(chosen.key AS INTEGER)) ordinal
                 FROM json_each(owner.mosaic) chosen GROUP BY uri)
         ) WHERE EXISTS(
-            SELECT 1 FROM json_each(owner.mosaic) chosen JOIN aliases ON aliases.previous=chosen.value) RETURNING {key}")))
+            SELECT 1 FROM json_each(owner.mosaic) chosen JOIN aliases ON aliases.previous=chosen.value) RETURNING {key},object_id")))
             .bind(serde_json::to_string(aliases)?).fetch_all(write.connection().await?).await?;
-        for key in keys {
+        for (key, object) in keys {
             write.changed(if table == "playlists" {
                 Scope::Playlist {
                     key: crate::PlaylistKey::from_raw(key),
@@ -715,6 +715,7 @@ pub(super) async fn merge_local_file_uris_on(
             } else {
                 Scope::Smart {
                     key: crate::SmartPlaylistKey::from_raw(key),
+                    object,
                 }
             });
         }

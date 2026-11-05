@@ -566,7 +566,7 @@ impl Records {
                 }
                 // Playlists were added or removed, and their entries with them.
                 Scope::Playlists => kinds.extend(["playlist", "entry", "artwork"]),
-                Scope::Smart { key } => smart.push(*key),
+                Scope::Smart { object, .. } => smart.push(object.clone()),
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Analysis { hash } => hashes.push(*hash),
                 Scope::Queue => queue = true,
@@ -584,7 +584,7 @@ impl Records {
         playlists.dedup();
         smart.sort_unstable();
         smart.dedup();
-        let (playlists, smart) = self.catalog.playlist_objects(&playlists, &smart);
+        let playlists = self.catalog.playlist_objects(&playlists);
         for (kind, objects) in [("playlist", &playlists), ("smart", &smart)] {
             if !objects.is_empty() && !kinds.contains(&kind) {
                 written.extend(self.compare_ids(kind, objects.clone()).await?);
@@ -669,17 +669,11 @@ impl Records {
         key: library::PlaylistKey,
     ) -> Result<Vec<store::Change>, String> {
         let keys = [key];
-        let Some(playlist) = self
-            .catalog
-            .playlist_copies(Some(&keys))
-            .await
-            .map_err(string_error)?
-            .pop()
-        else {
+        let Some(object) = self.catalog.playlist_objects(&keys).pop() else {
             return Ok(Vec::new());
         };
         let items = self.entry_items(Some(&keys), None).await?;
-        let parent = format!("playlist:{}", playlist.object_id);
+        let parent = format!("playlist:{object}");
         self.diff(items, Select::Parent(&parent), true).await
     }
 
@@ -810,9 +804,9 @@ impl Records {
                 None => self.lyrics_items(None, None).await?,
             },
             "folder" => self.folder_items().await?,
-            "playlist" => self.playlist_items().await?,
+            "playlist" => self.playlist_items(objects).await?,
             "entry" => self.entry_items(None, objects).await?,
-            "smart" => self.smart_items().await?,
+            "smart" => self.smart_items(objects).await?,
             "artwork" => self.artwork_items(objects).await?,
             "analysis" => {
                 let hashes = objects
@@ -1084,11 +1078,11 @@ impl Records {
             .collect()
     }
 
-    async fn playlist_items(&self) -> Result<Vec<Item>, String> {
+    async fn playlist_items(&self, objects: Option<&[String]>) -> Result<Vec<Item>, String> {
         let mut items = Vec::new();
         for playlist in self
             .catalog
-            .playlist_copies(None)
+            .playlist_copies(objects)
             .await
             .map_err(string_error)?
         {
@@ -1176,11 +1170,11 @@ impl Records {
             .collect()
     }
 
-    async fn smart_items(&self) -> Result<Vec<Item>, String> {
+    async fn smart_items(&self, objects: Option<&[String]>) -> Result<Vec<Item>, String> {
         let mut items = Vec::new();
         for smart in self
             .catalog
-            .smart_playlist_copies()
+            .smart_playlist_copies(objects)
             .await
             .map_err(string_error)?
         {
@@ -1475,7 +1469,7 @@ impl Records {
                 .map(|playlist| playlist.object_id)
                 .chain(
                     self.catalog
-                        .smart_playlist_copies()
+                        .smart_playlist_copies(None)
                         .await
                         .map_err(string_error)?
                         .into_iter()

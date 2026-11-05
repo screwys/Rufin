@@ -166,27 +166,29 @@ impl Catalog {
         let mut write = self.write().await?;
         for (owner, picks) in mosaics {
             let (table, column, key) = owner.row();
-            let source = if matches!(owner, MosaicOwner::Tag(_)) {
-                "source_key"
+            let (source, object) = if matches!(owner, MosaicOwner::Tag(_)) {
+                ("source_key", "''")
             } else {
-                "NULL"
+                ("NULL", "object_id")
             };
-            let changed: Option<Option<crate::SourceKey>> =
-                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                    "UPDATE {table} SET mosaic=?2 WHERE {column}=?1 AND mosaic IS NOT ?2 RETURNING {source}"
+            let changed: Option<(Option<crate::SourceKey>, String)> =
+                sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET mosaic=?2 WHERE {column}=?1 AND mosaic IS NOT ?2 RETURNING {source},{object}"
                 )))
                 .bind(key)
                 .bind(serde_json::to_string(picks)?)
                 .fetch_optional(write.connection().await?)
                 .await?;
             match (owner, changed) {
-                (_, None) | (MosaicOwner::Tag(_), Some(None)) => {}
+                (_, None) | (MosaicOwner::Tag(_), Some((None, _))) => {}
                 (MosaicOwner::Playlist(key), _) => write.changed(Scope::Playlist {
                     key: *key,
                     entries: false,
                 }),
-                (MosaicOwner::Smart(key), _) => write.changed(Scope::Smart { key: *key }),
-                (MosaicOwner::Tag(_), Some(Some(source))) => {
+                (MosaicOwner::Smart(key), Some((_, object))) => {
+                    write.changed(Scope::Smart { key: *key, object })
+                }
+                (MosaicOwner::Tag(_), Some((Some(source), _))) => {
                     write.changed(Scope::Collections { source })
                 }
             }
