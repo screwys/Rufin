@@ -55,7 +55,7 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 pub mod session;
 use crate::widgets::lyrics_snippet::LyricsSnippetView;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 #[expect(clippy::large_enum_variant, reason = "bounded prepared Search rows")]
 enum SearchItem {
     Track(library::TrackRow, Option<library::LyricsSnippet>),
@@ -687,21 +687,55 @@ impl SearchRouteProjection {
         }
     }
 
-    /// Shows committed downloads in the shown tracks.
-    fn show_downloads(&self, changes: &[library::DownloadChange]) {
-        for change in changes {
-            self.update_matching(
-                |row| {
-                    matches!(row, SearchItem::Track(row, _)
-                        if row.track_key == change.track && row.is_downloaded != change.downloaded)
-                },
-                |row| {
-                    if let SearchItem::Track(row, _) = row {
-                        change.show_in(row);
-                    }
-                },
-            );
-        }
+    /// Shows the current downloads in the shown results: a track's copy and how many tracks of
+    /// an album or artist are downloaded.
+    fn show_downloads(&self) {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let read = self
+            .models
+            .iter()
+            .flat_map(|model| {
+                (0..model.n_items()).filter_map(|position| model.item(position).and_downcast())
+            })
+            .filter_map(|item: RowItem| {
+                let row = item.value::<Arc<SearchItem>>()?;
+                Some((item, row))
+            })
+            .collect::<Vec<_>>();
+        let mut rows = read
+            .iter()
+            .map(|(_, row)| SearchItem::clone(row))
+            .collect::<Vec<_>>();
+        let catalog = Arc::clone(&shell.products.library);
+        let task = shell.products.runtime.spawn(async move {
+            let shown = rows
+                .iter_mut()
+                .map(|row| match row {
+                    SearchItem::Track(row, _) => library::Shown::Track(row),
+                    SearchItem::Album(row) => library::Shown::Album(row),
+                    SearchItem::Artist(row) => library::Shown::Artist(row),
+                })
+                .collect();
+            catalog
+                .show_downloads(shown, None, &ReadCancellation::new())
+                .await
+                .map(|()| rows)
+        });
+        glib::spawn_future_local(async move {
+            let Ok(Ok(rows)) = task.await else { return };
+            // A result shown again since keeps what it read.
+            for ((item, read), row) in read.into_iter().zip(rows) {
+                if row != *read
+                    && item
+                        .value::<Arc<SearchItem>>()
+                        .is_some_and(|current| Arc::ptr_eq(&current, &read))
+                {
+                    item.replace(Arc::new(row), true);
+                }
+            }
+        });
     }
 
     /// Shows committed favorites and ratings in the shown results; the session's own copy
@@ -918,7 +952,9 @@ impl CatalogUi {
         .with_states(Rc::new(move |items, downloads| {
             if let Some(projection) = states_projection.upgrade() {
                 projection.show_states(items);
-                projection.show_downloads(downloads);
+                if !downloads.is_empty() {
+                    projection.show_downloads();
+                }
             }
         }))
         .with_search(projection.search.clone())

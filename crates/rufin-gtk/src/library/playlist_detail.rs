@@ -465,7 +465,7 @@ impl CatalogUi {
                 owner.replace(next);
             }) as Rc<dyn Fn(Option<library::Header>)>
         };
-        let reads = reads(apply_owner);
+        let reads = reads(Rc::clone(&apply_owner));
         let resume = {
             let shell = Rc::downgrade(self);
             let reads = reads.clone();
@@ -488,6 +488,7 @@ impl CatalogUi {
             })
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_rows(&rows)
+            .with_header(apply_owner)
     }
 
     fn append_playlist_detail_kind_controls(

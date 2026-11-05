@@ -251,6 +251,52 @@ impl HomeRouteProjection {
         }
     }
 
+    /// Shows the current downloads in the showcase album and the rows Home shows.
+    fn show_downloads(&self) {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let sections = self.sections();
+        let read = sections
+            .iter()
+            .map(|view| view.mounted.data.borrow().clone())
+            .collect::<Vec<_>>();
+        let mut showcase = self.showcase.borrow().clone();
+        let mut items = read.clone();
+        let catalog = std::sync::Arc::clone(&shell.products.library);
+        let task = shell.products.runtime.spawn(async move {
+            let shown = showcase
+                .iter_mut()
+                .map(|row| library::Shown::Album(&mut row.album))
+                .chain(items.iter_mut().flatten().map(|item| match item {
+                    HomeItem::Track(item) => library::Shown::Track(&mut item.track),
+                    HomeItem::Album(item) => library::Shown::Album(&mut item.album),
+                }))
+                .collect();
+            catalog
+                .show_downloads(shown, None, &library::ReadCancellation::new())
+                .await
+                .map(|()| (showcase, items))
+        });
+        let home = self.clone();
+        glib::spawn_future_local(async move {
+            let Ok(Ok((showcase, items))) = task.await else {
+                return;
+            };
+            if let (Some(shown), Some(showcase)) = (&mut *home.showcase.borrow_mut(), showcase)
+                && shown.album.album_key == showcase.album.album_key
+            {
+                shown.album.summary = showcase.album.summary;
+            }
+            // A section Home showed again since keeps what it read.
+            for ((view, read), items) in sections.iter().zip(read).zip(items) {
+                if *view.mounted.data.borrow() == read {
+                    view.mounted.replace(items);
+                }
+            }
+        });
+    }
+
     /// Shows Home's sections in the order core composed them.
     fn apply(&self, sections: Vec<HomeSection>) {
         let Some(shell) = self.shell.upgrade() else {
@@ -394,7 +440,12 @@ impl CatalogUi {
         let states = projection.clone();
         MountedRoute::new(widget, Rc::new(|| {}))
             .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
-            .with_states(Rc::new(move |changes, _| states.show_states(changes)))
+            .with_states(Rc::new(move |changes, downloads| {
+                states.show_states(changes);
+                if !downloads.is_empty() {
+                    states.show_downloads();
+                }
+            }))
     }
 
     fn home_section_view(

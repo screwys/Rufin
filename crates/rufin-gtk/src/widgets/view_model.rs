@@ -1308,31 +1308,61 @@ impl Rows<Row> {
         );
     }
 
-    /// Shows committed downloads in the track rows of their tracks.
-    pub fn show_downloads(&self, changes: &[library::DownloadChange]) {
-        if changes.is_empty() {
+    /// Shows the current downloads in the rows read so far: a track's copy and how many tracks
+    /// of a collection are downloaded.
+    pub fn show_downloads(&self, catalog: &Arc<library::Catalog>) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
+            return;
+        };
+        let read = self.with(|state| {
+            state
+                .ready
+                .iter()
+                .map(|(position, row)| (*position, Arc::clone(row)))
+                .collect::<Vec<_>>()
+        });
+        if read.is_empty() {
             return;
         }
-        let track = |row: &Row| match row {
-            Row::Track(track) | Row::AlbumTrack { track, .. } => Some(track.track_key),
-            _ => None,
-        };
-        self.update(
-            |row| {
-                track(row).is_some_and(|key| {
-                    changes
-                        .iter()
-                        .any(|change| change.track == key && change.downloaded != row.downloaded())
-                })
-            },
-            |row| {
-                if let Row::Track(track) | Row::AlbumTrack { track, .. } = row {
-                    for change in changes {
-                        change.show_in(track);
-                    }
+        let mut rows = read
+            .iter()
+            .map(|(_, row)| Row::clone(row))
+            .collect::<Vec<_>>();
+        let now = self.view().and_then(|view| view.smart_now());
+        let catalog = Arc::clone(catalog);
+        let task = runtime.spawn(async move {
+            catalog
+                .show_downloads(
+                    rows.iter_mut().filter_map(Row::shown).collect(),
+                    now,
+                    &ReadCancellation::new(),
+                )
+                .await
+                .map(|()| rows)
+        });
+        let list = self.list.downgrade();
+        glib::spawn_future_local(async move {
+            let rows = match task.await {
+                Ok(Ok(rows)) => rows,
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "failed to show downloads");
+                    return;
                 }
-            },
-        );
+                Err(_) => return,
+            };
+            let Some(list) = list.upgrade() else { return };
+            let shown = Self::from_list(&list);
+            // A row read again since keeps what it read.
+            for ((position, read), row) in read.into_iter().zip(rows) {
+                if shown
+                    .ready(position)
+                    .is_some_and(|current| Arc::ptr_eq(&current, &read))
+                {
+                    shown.set_ready(position, row);
+                }
+            }
+        });
     }
 
     /// The tracks at `positions`, for selections; a folder's child folders come first.

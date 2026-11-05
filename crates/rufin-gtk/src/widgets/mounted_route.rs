@@ -49,8 +49,11 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
 pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
-/// Shows committed favorites, ratings and downloads in what a route shows outside its rows.
+/// Shows committed favorites, ratings and downloads in what a route shows outside its rows and
+/// header.
 pub type MountedStates = Rc<dyn Fn(&[library::StateChange], &[library::DownloadChange])>;
+/// Shows a route's header read again, such as after a download.
+pub type MountedHeader = Rc<dyn Fn(Option<library::Header>)>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
 #[derive(Clone)]
@@ -188,6 +191,7 @@ pub struct MountedRoute {
     view: Option<std::sync::Arc<rufin_core::view::View>>,
     /// Shows committed favorites and ratings in what the route shows outside its rows.
     pub states: Option<MountedStates>,
+    pub header: Option<MountedHeader>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
 
@@ -206,6 +210,7 @@ impl MountedRoute {
             rows: Vec::new(),
             view: None,
             states: None,
+            header: None,
             home_page_apply: None,
         }
     }
@@ -287,17 +292,24 @@ impl MountedRoute {
         self
     }
 
+    pub fn with_header(mut self, header: MountedHeader) -> Self {
+        self.header = Some(header);
+        self
+    }
+
     pub fn with_home_page_apply(mut self, apply: MountedHomePageApply) -> Self {
         self.home_page_apply = Some(apply);
         self
     }
 
     /// Shows committed favorites, ratings and downloads in what the route shows; its View says
-    /// when they make it read again instead.
+    /// when they make it read again instead. Downloads show as the Catalog counts them now.
     pub fn show_changes(
         &self,
         items: &[library::StateChange],
         downloads: &[library::DownloadChange],
+        catalog: &std::sync::Arc<library::Catalog>,
+        runtime: &tokio::runtime::Handle,
     ) {
         if items.is_empty() && downloads.is_empty() {
             return;
@@ -307,7 +319,22 @@ impl MountedRoute {
         }
         for rows in &self.rows {
             rows.show_states(items);
-            rows.show_downloads(downloads);
+            if !downloads.is_empty() {
+                rows.show_downloads(catalog);
+            }
+        }
+        if let (false, Some(show), Some(view)) =
+            (downloads.is_empty(), self.header.clone(), self.view())
+        {
+            let task =
+                runtime.spawn(async move { view.header(&library::ReadCancellation::new()).await });
+            glib::spawn_future_local(async move {
+                match task.await {
+                    Ok(Ok(header)) => show(header),
+                    Ok(Err(error)) => tracing::warn!(%error, "failed to read header again"),
+                    Err(_) => {}
+                }
+            });
         }
     }
 

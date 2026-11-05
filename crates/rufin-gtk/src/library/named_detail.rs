@@ -116,16 +116,17 @@ impl CatalogUi {
             play_label: id.play_label(),
         });
         let tracks = grouped.tracks().clone();
-        // A reread shows the header's counts, such as how many tracks are downloaded.
+        // A reread, or a header read after a download, shows the header's counts.
         let header = Rc::clone(&current);
-        let reads = tracks.page_reads(
-            |_| {},
-            move |read| {
-                if let Some(library::Header::Tag(summary)) = read {
-                    header.replace(summary);
-                }
-            },
-        );
+        let shown: crate::widgets::mounted_route::MountedHeader = Rc::new(move |read| {
+            if let Some(library::Header::Tag(summary)) = read {
+                header.replace(summary);
+            }
+        });
+        let reads = tracks.page_reads(|_| {}, {
+            let shown = Rc::clone(&shown);
+            move |read| shown(read)
+        });
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = tracks.clone();
@@ -139,6 +140,7 @@ impl CatalogUi {
         };
         MountedRoute::new(grouped.widget(), resume)
             .with_rows(&rows)
+            .with_header(shown)
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(grouped.search())
             .with_layout_cycle(grouped.layout_cycle())

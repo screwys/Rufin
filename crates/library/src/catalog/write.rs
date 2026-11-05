@@ -126,15 +126,6 @@ pub struct DownloadChange {
     pub downloaded: bool,
 }
 
-impl DownloadChange {
-    /// Shows the download in a track row of the same track.
-    pub fn show_in(&self, row: &mut crate::TrackRow) {
-        if row.track_key == self.track {
-            row.is_downloaded = self.downloaded;
-        }
-    }
-}
-
 /// A track, album or artist whose shown favorite or rating changed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]

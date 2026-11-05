@@ -1477,26 +1477,6 @@ pub enum HomeItem {
 }
 
 impl HomeSection {
-    /// Its rows, as [`library::Catalog::show_downloads`] shows their downloads.
-    pub fn shown(&mut self) -> Vec<library::Shown<'_>> {
-        use library::Shown;
-        match self {
-            Self::Showcase(row) => vec![Shown::Album(&mut row.album)],
-            Self::Rows { rows, .. } | Self::Provider(library::HomeProviderSection { rows, .. }) => {
-                rows.tracks
-                    .iter_mut()
-                    .map(|row| Shown::Track(&mut row.track))
-                    .chain(
-                        rows.albums
-                            .iter_mut()
-                            .map(|row| Shown::Album(&mut row.album)),
-                    )
-                    .collect()
-            }
-            Self::Genres(genres) => genres.iter_mut().map(Shown::Tag).collect(),
-        }
-    }
-
     /// The block it shows; None for the server's own sections.
     pub fn block(&self) -> Option<HomeBlockKind> {
         match self {

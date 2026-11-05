@@ -161,30 +161,16 @@ impl CatalogUi {
         let menu_shell = Rc::clone(self);
         let menu_album = Rc::clone(&current_album);
         let menu_play = Rc::clone(&play);
-        let menu_rows = rows.clone();
         let context_menu: crate::widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
-                let mut album = menu_album.borrow().row.clone();
-                // The tracks shown say whether the album is downloaded now.
-                let summary = &mut album.summary;
-                if menu_rows.len() as i64 == summary.track_count
-                    && let Some(downloaded) = (0..menu_rows.len())
-                        .map(|position| menu_rows.ready(position).map(|row| row.downloaded()))
-                        .collect::<Option<Vec<_>>>()
-                {
-                    summary.downloaded_count =
-                        downloaded.iter().filter(|shown| **shown).count() as i64;
-                }
-                {
-                    present_album_context_menu(
-                        target,
-                        menu_shell.shell(),
-                        album,
-                        None,
-                        Some(Rc::clone(&menu_play)),
-                        position,
-                    );
-                }
+                present_album_context_menu(
+                    target,
+                    menu_shell.shell(),
+                    menu_album.borrow().row.clone(),
+                    None,
+                    Some(Rc::clone(&menu_play)),
+                    position,
+                );
             });
 
         showcase_view.replace_external_links(album_external_links(self, &album));
@@ -259,9 +245,15 @@ impl CatalogUi {
                 }
             },
         );
+        let header_album = Rc::clone(&current_album);
         MountedRoute::new(route_stack.upcast(), resume)
             .with_rows(&rows)
             .with_states(states)
+            .with_header(Rc::new(move |header| {
+                if let Some(::library::Header::Album(album)) = header {
+                    header_album.replace(*album);
+                }
+            }))
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(track_projection.search())
             .with_layout_cycle(layout_cycle)
