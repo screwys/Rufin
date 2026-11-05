@@ -9578,7 +9578,6 @@ dependencies = [
  "artwork",
  "askama",
  "async-channel",
- "audio-processing",
  "axum",
  "base64 0.23.1",
  "blake3",

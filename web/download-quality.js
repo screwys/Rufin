@@ -1,45 +1,39 @@
 import { run, tr } from "./ui.js";
 
+// Shows a download quality as the app offers it ({value, bitrate, channels}) and posts each
+// edit; `change(quality, edit)` returns what the app made of it.
 export function qualityControls(root, initial, change) {
   const format = root.querySelector('[data-quality="format"]');
   const bitrate = root.querySelector('[data-quality="bitrate"]');
   const value = root.querySelector('[data-quality="bitrate-value"]');
   const channels = root.querySelector('[data-quality="channels"]');
   const lower = Number(bitrate.min), upper = Number(bitrate.max);
-  let current, rate;
-  function visible() {
-    root.querySelector('[data-quality-row="bitrate"]').hidden = ["original", "flac"].includes(format.value);
-    root.querySelector('[data-quality-row="channels"]').hidden = format.value === "original";
-  }
-  function showRate() {
-    value.textContent = rate == null ? tr("Default") : `${rate} kbps`;
-  }
-  function set(quality) {
-    current = quality;
-    const profile = quality === "mp3" ? { codec: "mp3", bitrate_kbps: null, channels: "preserve" } : quality?.transcoded;
+  let current;
+  function set(view) {
+    current = view;
+    const profile = view.value?.transcoded;
+    const rate = profile?.bitrate_kbps ?? null;
     format.value = profile?.codec || "original";
-    rate = profile ? profile.bitrate_kbps : 128;
-    bitrate.min = Math.min(lower, rate ?? 128);
-    bitrate.max = Math.max(upper, rate ?? 128);
-    bitrate.value = String(rate ?? 128);
+    if (rate != null) {
+      bitrate.min = Math.min(lower, rate);
+      bitrate.max = Math.max(upper, rate);
+      bitrate.value = String(rate);
+    }
+    value.textContent = rate == null ? tr("Default") : `${rate} kbps`;
     channels.value = profile?.channels || "preserve";
-    showRate();
-    visible();
+    root.querySelector('[data-quality-row="bitrate"]').hidden = !view.bitrate;
+    root.querySelector('[data-quality-row="channels"]').hidden = !view.channels;
   }
   bitrate.addEventListener("input", () => {
-    rate = Number(bitrate.value);
-    showRate();
+    value.textContent = `${bitrate.value} kbps`;
   });
-  for (const field of [format, bitrate, channels]) field.addEventListener("change", () => run(async () => {
-    if (field === bitrate) rate = Number(bitrate.value);
-    if (field === format && rate == null) rate = 128;
-    const quality = format.value === "original" ? "original" : { transcoded: {
-      codec: format.value,
-      bitrate_kbps: format.value === "flac" ? null : rate,
-      channels: channels.value,
-    } };
-    visible();
-    try { set(await change(quality) ?? quality); }
+  const edits = [
+    [format, () => ({ codec: format.value === "original" ? null : format.value })],
+    [bitrate, () => ({ bitrate_kbps: Number(bitrate.value) })],
+    [channels, () => ({ channels: channels.value })],
+  ];
+  for (const [field, edit] of edits) field.addEventListener("change", () => run(async () => {
+    try { set(await change(current.value, edit())); }
     catch (error) { set(current); throw error; }
   }));
   set(initial);

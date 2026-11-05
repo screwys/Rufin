@@ -231,19 +231,12 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/smart-playlists/tracks", get(smart_tracks))
 }
 
+/// The theme and colors the app shows: `theme` is the selected theme's color scheme, or
+/// System when the app follows the platform.
 pub(super) fn appearance_data(products: &ProductHandles) -> Value {
-    let settings = products.settings.load();
     let colors = products.appearance.borrow();
-    let theme = match settings.appearance.theme_preference {
-        rufin_core::settings::ThemePreference::System => "System",
-        rufin_core::settings::ThemePreference::Light => "Light",
-        rufin_core::settings::ThemePreference::Dark => "Dark",
-        rufin_core::settings::ThemePreference::Named(_) => colors
-            .get("color-scheme")
-            .map(String::as_str)
-            .unwrap_or("System"),
-    };
-    json!({"theme":theme,"accent":settings.appearance.accent_preference,"colors":*colors})
+    let theme = colors.get("color-scheme").map_or("System", String::as_str);
+    json!({"theme":theme,"accent":products.settings.load().appearance.accent_preference,"colors":*colors})
 }
 
 async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {

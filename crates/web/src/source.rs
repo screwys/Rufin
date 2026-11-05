@@ -56,30 +56,57 @@ async fn download(
     }
     let input: Input = body(request).await?;
     products.source.download_media(
-        rufin_core::downloads::DownloadSubject::Prepared {
-            context_id: "api".into(),
-            title: None,
-        },
+        rufin_core::downloads::DownloadSubject::for_media_uris(
+            "track-selection",
+            None,
+            &input.uris,
+        ),
         input.uris,
     );
     Ok(accepted())
+}
+
+/// A download quality as its control shows it: the quality and which of its parts it offers.
+fn quality_view(quality: sources::DownloadQuality) -> Value {
+    json!({"value":quality,"bitrate":rufin_core::downloads::download_quality_shows_bitrate(quality),"channels":rufin_core::downloads::download_quality_shows_channels(quality)})
 }
 
 async fn download_quality(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
+    /// One change to the quality the control shows.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Edit {
+        Codec(Option<library::AudioCodec>),
+        BitrateKbps(u32),
+        Channels(library::AudioChannels),
+    }
     #[derive(Deserialize)]
     struct Input {
         source: sources::SourceId,
         quality: sources::DownloadQuality,
+        edit: Option<Edit>,
     }
     let input: Input = body(request).await?;
+    use rufin_core::downloads::{
+        download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
+    };
+    let quality = match input.edit {
+        None => input.quality,
+        Some(Edit::Codec(codec)) => download_quality_with_codec(input.quality, codec),
+        Some(Edit::BitrateKbps(kbps)) => download_quality_with_bitrate(input.quality, kbps),
+        Some(Edit::Channels(channels)) => download_quality_with_channels(input.quality, channels),
+    };
     products
         .settings
-        .set_download_quality(input.source, input.quality)
+        .set_download_quality(input.source, quality)
         .map_err(bad_request)?;
-    Ok(accepted())
+    Ok(json_response(
+        StatusCode::ACCEPTED,
+        json!({"accepted":true,"quality":quality,"download_quality":quality_view(quality)}),
+    ))
 }
 
 async fn file_integrations(
@@ -141,7 +168,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             "library": selected.as_ref().and_then(|source|source.music_folder_object_id.clone()),
             "new_playlist_current": products.settings.load().application.new_playlist_current,
             "libraries": selected.as_ref().map(|source|source.music_folders.iter().map(|folder|json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>()).unwrap_or_default(),
-            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"owns_playlists":s.owns_playlists,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality})).collect::<Vec<_>>()
+            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"owns_playlists":s.owns_playlists,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality,"download_quality":quality_view(products.settings.download_settings(s.id.clone()).quality)})).collect::<Vec<_>>()
         }),
     ))
 }
