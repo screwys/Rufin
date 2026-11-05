@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.library.LyricsSnippet
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
@@ -531,7 +530,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }
                         SummaryFact("rufin-tracks-symbolic", "Tracks", trackCountText(item.row.trackCount))
-                        SummaryFact("rufin-preferences-system-time-symbolic", "Duration", clockText(item.row.durationMillis))
+                        SummaryFact("rufin-preferences-system-time-symbolic", "Duration", item.row.durationText)
                     }
                     FlowRow {
                         ShowcaseAction("rufin-media-playback-start-symbolic", "Play album", { onPlay(false) }, { onPlay(true) })
@@ -577,7 +576,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
             item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.row.isTrack && item.row.durationMillis > 0UL) Text(clockText(item.row.durationMillis),
+                if (item.row.isTrack && item.row.durationMillis > 0UL) Text(item.row.durationText,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member) }
                     ?: PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) })

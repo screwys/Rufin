@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.core.AndroidBrowseRow
 import io.github.screwys.rufin.shared.library.AlbumRow
@@ -100,7 +99,7 @@ internal val AndroidBrowseRow.album: String
 internal val AndroidBrowseRow.subtitle: String
     get() = track?.let { "${it.artist} · ${it.album}" }
         ?: albumRow?.artist
-        ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · ${clockText(durationMillis)}" }
+        ?: playlistFolder?.let { "${io.github.screwys.rufin.core.trackCountText(trackCount)} · $durationText" }
         ?: recent?.subtitle ?: ""
 
 /** The key of the track, album or artist whose favorite and rating the row shows. */
@@ -110,28 +109,8 @@ internal val AndroidBrowseRow.stateKey: Long?
 internal val AndroidBrowseRow.favorite: Boolean
     get() = (track?.state ?: albumRow?.state ?: artistRow?.state)?.favorite == true
 
-private val AndroidBrowseRow.summary get() = albumRow?.summary ?: artistRow?.summary ?: tag?.summary
-
-internal val AndroidBrowseRow.durationMillis: ULong
-    get() = (track?.durationMillis ?: summary?.durationMillis ?: playlist?.durationMillis ?: smartPlaylist?.durationMillis
-        ?: playlistFolder?.durationMillis ?: 0L).coerceAtLeast(0).toULong()
-
 internal val AndroidBrowseRow.year: Long?
     get() = track?.year ?: albumRow?.year
-
-internal val AndroidBrowseRow.trackCount: ULong
-    get() = if (track != null) 1UL else (summary?.trackCount ?: playlist?.trackCount ?: smartPlaylist?.trackCount
-        ?: playlistFolder?.trackCount ?: 0L).coerceAtLeast(0).toULong()
-
-internal val AndroidBrowseRow.artworkIdentity: ByteArray?
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Folder -> item.artwork
-        is AndroidBrowseItem.Recent -> item.row.artworkBinding
-        is AndroidBrowseItem.Library -> track?.artworkBinding ?: albumRow?.artworkBinding ?: artistRow?.artworkBinding
-            ?: genre?.let { it.artworkBinding ?: it.representativeArtwork.firstOrNull() }
-            ?: tag?.representativeArtwork?.firstOrNull()
-            ?: playlist?.artworkBinding ?: smartPlaylist?.artworkBinding ?: playlistFolder?.artworkBinding
-    }
 
 internal val AndroidBrowseRow.sourceId: String?
     get() = track?.sourceId ?: genre?.sourceId ?: playlist?.sourceId

@@ -228,11 +228,45 @@ pub struct AndroidBrowseRow {
     pub context_id: Option<String>,
     /// A track with its copy, or a collection whose tracks are all downloaded.
     pub downloaded: bool,
+    /// What a track or collection row shows of its length and picture: one for a track.
+    pub track_count: u64,
+    pub duration_millis: u64,
+    /// The duration in core's format: a track's clock time, a collection's units.
+    pub duration_text: String,
+    pub artwork_identity: Option<Vec<u8>>,
 }
 
 impl AndroidBrowseRow {
     pub(crate) fn new(item: AndroidBrowseItem) -> Self {
+        use rufin_core::settings::presentation::{format_duration, format_duration_units};
+        let (track_count, duration_millis, duration_text, artwork_identity) = match &item {
+            AndroidBrowseItem::Library {
+                row: Row::Track(track) | Row::AlbumTrack { track, .. },
+            } => {
+                let millis = track.duration_millis.max(0) as u64;
+                let text = format_duration((millis / 1_000) as u32);
+                (1, millis, text, track.artwork_binding.clone())
+            }
+            AndroidBrowseItem::Library { row } => row.collection().map_or_else(
+                || (0, 0, String::new(), None),
+                |shown| {
+                    let millis = shown.duration_millis.max(0) as u64;
+                    (
+                        shown.track_count.max(0) as u64,
+                        millis,
+                        format_duration_units((millis / 1_000) as u32),
+                        shown.artwork.first().map(|binding| binding.to_vec()),
+                    )
+                },
+            ),
+            AndroidBrowseItem::Folder { artwork } => (0, 0, String::new(), artwork.clone()),
+            AndroidBrowseItem::Recent { row } => (0, 0, String::new(), row.artwork_binding.clone()),
+        };
         Self {
+            track_count,
+            duration_millis,
+            duration_text,
+            artwork_identity,
             item,
             fields: Vec::new(),
             display_title: None,

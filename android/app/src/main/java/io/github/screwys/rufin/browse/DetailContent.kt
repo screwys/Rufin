@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.browse
 
-import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
@@ -264,7 +263,7 @@ private fun DetailHeader(
                         item.row.year?.let { DetailFact("rufin-x-office-calendar-symbolic", it.toString(), "Year") }
                         DetailFact("rufin-tracks-symbolic", trackCountText(item.row.trackCount), "Tracks")
                         if (item.row.durationMillis > 0UL || playlist)
-                            DetailFact("rufin-preferences-system-time-symbolic", clockText(item.row.durationMillis), "Duration")
+                            DetailFact("rufin-preferences-system-time-symbolic", item.row.durationText, "Duration")
                     }
                 }
                 if (playlist) {
