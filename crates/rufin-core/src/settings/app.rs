@@ -537,23 +537,6 @@ impl Settings {
 
 pub type SettingsHandle = Arc<super::SettingsOwner>;
 
-#[cfg_attr(feature = "bindings", uniffi::export)]
-impl SettingsOwner {
-    /// Shows `blocks` on Home, in this order. Hiding the last visible block is refused, so Home
-    /// always shows one. Returns whether the blocks changed.
-    pub fn set_home_blocks(&self, blocks: Vec<HomeBlockKind>) -> Result<bool, SettingsError> {
-        let mut changed = false;
-        self.update_preferences(|ui| {
-            if !blocks.is_empty() && ui.application.home_blocks != blocks {
-                ui.application.home_blocks = blocks;
-                changed = true;
-            }
-            Ok(())
-        })?;
-        Ok(changed)
-    }
-}
-
 pub fn default_home_blocks() -> Vec<HomeBlockKind> {
     HomeBlockKind::all().to_vec()
 }

@@ -147,18 +147,20 @@ impl DownloadsState {
     }
 }
 
+/// What a download rule is called.
+pub fn download_rule_title(rule: rufin_core::downloads::DownloadRule) -> &'static str {
+    use rufin_core::downloads::DownloadRule;
+    match rule {
+        DownloadRule::EntireLibrary => localization::msgid("Entire Library"),
+        DownloadRule::Favorites => localization::msgid("Favorites"),
+        DownloadRule::AllPlaylists => localization::msgid("All Playlists"),
+        DownloadRule::LatestFiveAlbums => localization::msgid("5 Latest Albums"),
+    }
+}
+
 pub fn download_subject_title(subject: &DownloadSubject) -> String {
     match subject {
-        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::EntireLibrary) => {
-            tr("Entire Library")
-        }
-        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::Favorites) => tr("Favorites"),
-        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::AllPlaylists) => {
-            tr("All Playlists")
-        }
-        DownloadSubject::Rule(rufin_core::downloads::DownloadRule::LatestFiveAlbums) => {
-            tr("5 Latest Albums")
-        }
+        DownloadSubject::Rule(rule) => tr(download_rule_title(*rule)),
         DownloadSubject::Prepared { title, .. } => title.clone().unwrap_or_else(|| tr("Selection")),
     }
 }

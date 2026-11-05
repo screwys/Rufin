@@ -162,7 +162,7 @@ pub(super) fn items(shell: &Shell) -> Vec<PreferencesSearchItem> {
         add(
             &mut items,
             Page::Downloads,
-            tr(super::library::download_rule_title(rule)),
+            tr(crate::downloads::download_rule_title(rule)),
             &tr(super::library::download_rule_subtitle(rule)),
             "",
             None,

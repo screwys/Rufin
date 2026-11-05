@@ -10,108 +10,73 @@ pub fn populate_home_block_rows(
         }
     }
 
-    let visible_blocks = shell
-        .settings
-        .current
-        .borrow()
-        .application
-        .home_blocks
-        .clone();
-    let ordered_blocks = home_block_row_order(&visible_blocks);
-    for (position, block) in ordered_blocks.into_iter().enumerate() {
-        let active = visible_blocks.contains(&block);
-        let visible_index = visible_blocks
-            .iter()
-            .position(|candidate| *candidate == block);
-        let visible_shell = Rc::clone(shell);
-        let visible_expander = expander.downgrade();
-        let visible_rows = Rc::clone(rows);
-        let on_visible = move |requested| {
-            let mut blocks = visible_shell
-                .settings
-                .current
-                .borrow()
-                .application
-                .home_blocks
-                .clone();
-            if requested == blocks.contains(&block) {
-                return;
-            }
-            if requested {
-                let order = home_block_row_order(&blocks);
-                insert_home_block_in_order(&mut blocks, block, &order);
-            } else {
-                blocks.retain(|candidate| *candidate != block);
-            }
-            visible_shell.set_home_blocks(blocks);
-            if let Some(expander) = visible_expander.upgrade() {
-                populate_home_block_rows(&visible_shell, &expander, &visible_rows);
+    let blocks = shell.settings.persistence.home_block_rows();
+    let visible_count = blocks.iter().filter(|row| row.visible).count();
+    for (position, home_block) in blocks.into_iter().enumerate() {
+        let block = home_block.block;
+        let visible_index = home_block.visible.then_some(position);
+        // Each edit is core's; the rows read again after it lands.
+        let commit = {
+            let shell = Rc::clone(shell);
+            let expander = expander.downgrade();
+            let rows = Rc::downgrade(rows);
+            move |result| {
+                if !shell.commit_home_blocks(result) {
+                    return false;
+                }
+                if let (Some(expander), Some(rows)) = (expander.upgrade(), rows.upgrade()) {
+                    populate_home_block_rows(&shell, &expander, &rows);
+                }
+                true
             }
         };
-
-        let move_shell = Rc::clone(shell);
-        let move_expander = expander.downgrade();
-        let move_rows = Rc::clone(rows);
-        let on_move = move |delta: isize| {
-            let mut blocks = move_shell
-                .settings
-                .current
-                .borrow()
-                .application
-                .home_blocks
-                .clone();
-            let Some(index) = blocks.iter().position(|candidate| *candidate == block) else {
-                return;
-            };
-            let next = if delta < 0 {
-                index.saturating_sub(1)
-            } else {
-                (index + 1).min(blocks.len().saturating_sub(1))
-            };
-            if next == index {
-                return;
-            }
-            blocks.swap(index, next);
-            move_shell.set_home_blocks(blocks);
-            if let Some(expander) = move_expander.upgrade() {
-                populate_home_block_rows(&move_shell, &expander, &move_rows);
+        let on_visible = {
+            let shell = Rc::clone(shell);
+            let commit = commit.clone();
+            move |requested| {
+                commit(
+                    shell
+                        .settings
+                        .persistence
+                        .set_home_block_visible(block, requested),
+                );
             }
         };
-
-        let drop_shell = Rc::clone(shell);
-        let drop_expander = expander.downgrade();
-        let drop_rows = Rc::downgrade(rows);
-        let on_drop = move |source_id: String, after| {
-            let Some(source_block) = home_block_from_drag_id(&source_id) else {
-                return false;
-            };
-            let (Some(expander), Some(rows)) = (drop_expander.upgrade(), drop_rows.upgrade())
-            else {
-                return false;
-            };
-            let mut blocks = drop_shell
-                .settings
-                .current
-                .borrow()
-                .application
-                .home_blocks
-                .clone();
-            if !reorder_home_blocks(&mut blocks, source_block, block, after) {
-                return false;
+        let on_move = {
+            let shell = Rc::clone(shell);
+            let commit = commit.clone();
+            move |delta: isize| {
+                commit(
+                    shell
+                        .settings
+                        .persistence
+                        .move_home_block(block, delta as i32),
+                );
             }
-            drop_shell.set_home_blocks(blocks);
-            populate_home_block_rows(&drop_shell, &expander, &rows);
-            true
+        };
+        let on_drop = {
+            let shell = Rc::clone(shell);
+            move |source_id: String, after| {
+                let Some(source) = home_block_from_drag_id(&source_id) else {
+                    return false;
+                };
+                commit(
+                    shell
+                        .settings
+                        .persistence
+                        .reorder_home_block(source, block, after),
+                )
+            }
         };
 
         let row = reorder_row(
             ReorderRowPresentation {
-                title: tr(rufin_core::settings::presentation::home_block_title(block)),
-                subtitle: visibility_position_subtitle(active, position),
-                visible: active,
-                visible_sensitive: !active || visible_blocks.len() > 1,
+                title: tr(&home_block.title),
+                subtitle: visibility_position_subtitle(home_block.visible, position),
+                visible: home_block.visible,
+                visible_sensitive: home_block.can_toggle,
                 up_sensitive: visible_index.is_some_and(|index| index > 0),
-                down_sensitive: visible_index.is_some_and(|index| index + 1 < visible_blocks.len()),
+                down_sensitive: visible_index.is_some_and(|index| index + 1 < visible_count),
                 drag_id: home_block_drag_id(block).to_string(),
             },
             on_visible,
@@ -123,66 +88,9 @@ pub fn populate_home_block_rows(
         rows.borrow_mut().push(row.downgrade());
     }
 }
-pub fn home_block_row_order(visible_blocks: &[HomeBlockKind]) -> Vec<HomeBlockKind> {
-    let mut blocks = visible_blocks.to_vec();
-    for block in HomeBlockKind::all() {
-        if !blocks.contains(&block) {
-            blocks.push(block);
-        }
-    }
-    blocks
-}
-pub fn insert_home_block_in_order(
-    blocks: &mut Vec<HomeBlockKind>,
-    block: HomeBlockKind,
-    order: &[HomeBlockKind],
-) {
-    if blocks.contains(&block) {
-        return;
-    }
-    let target_order = order
-        .iter()
-        .position(|candidate| *candidate == block)
-        .unwrap_or(usize::MAX);
-    let insert_at = blocks
-        .iter()
-        .position(|candidate| {
-            order
-                .iter()
-                .position(|ordered| ordered == candidate)
-                .unwrap_or(usize::MAX)
-                > target_order
-        })
-        .unwrap_or(blocks.len());
-    blocks.insert(insert_at, block);
-}
 pub fn visibility_position_subtitle(visible: bool, position: usize) -> String {
     let visibility = if visible { tr("Visible") } else { tr("Hidden") };
     format!("{visibility} · {} {}", tr("Position"), position + 1)
-}
-pub fn reorder_home_blocks(
-    blocks: &mut Vec<HomeBlockKind>,
-    source: HomeBlockKind,
-    target: HomeBlockKind,
-    after: bool,
-) -> bool {
-    if source == target {
-        return false;
-    }
-    let before = blocks.clone();
-    let Some(source_index) = blocks.iter().position(|block| *block == source) else {
-        return false;
-    };
-    let block = blocks.remove(source_index);
-    let Some(mut target_index) = blocks.iter().position(|block| *block == target) else {
-        blocks.insert(source_index.min(blocks.len()), block);
-        return false;
-    };
-    if after {
-        target_index += 1;
-    }
-    blocks.insert(target_index.min(blocks.len()), block);
-    *blocks != before
 }
 pub fn home_block_drag_id(block: HomeBlockKind) -> &'static str {
     match block {

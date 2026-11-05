@@ -678,7 +678,7 @@ fn add_download_rules(
     let mut rows = Vec::new();
     for rule in DownloadRule::ALL {
         let row = adw::ActionRow::builder()
-            .title(tr(download_rule_title(rule)))
+            .title(tr(crate::downloads::download_rule_title(rule)))
             .subtitle(tr(download_rule_subtitle(rule)))
             .build();
         row.set_visible(rules.contains(rule));
@@ -750,7 +750,7 @@ fn add_download_rules(
     for (rule, row) in rows {
         let action_name = download_rule_action_name(rule);
         menu.append(
-            Some(&tr(download_rule_title(rule))),
+            Some(&tr(crate::downloads::download_rule_title(rule))),
             Some(&format!("download-rules.{action_name}")),
         );
         let action = gio::SimpleAction::new(action_name, None);
@@ -833,15 +833,6 @@ fn confirm_remove_download_rule(
             }
         },
     );
-}
-
-pub(super) fn download_rule_title(rule: DownloadRule) -> &'static str {
-    match rule {
-        DownloadRule::EntireLibrary => msgid("Entire Library"),
-        DownloadRule::Favorites => msgid("Favorites"),
-        DownloadRule::AllPlaylists => msgid("All Playlists"),
-        DownloadRule::LatestFiveAlbums => msgid("5 Latest Albums"),
-    }
 }
 
 pub(super) fn download_rule_subtitle(rule: DownloadRule) -> &'static str {

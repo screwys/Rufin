@@ -2,7 +2,6 @@ use crate::shell::shell::Shell;
 use crate::shell::shell::layout::{ActiveLayoutProfile, ResolvedLeftSidebarMode, resolve_layout};
 use adw::prelude::*;
 use rufin_core::runtime::ScrobblingPreferences;
-use rufin_core::settings::HomeBlockKind;
 use rufin_core::settings::SecretStorageMode;
 use rufin_core::settings::{LeftSidebarMode, RightSidebarMode};
 use std::rc::Rc;
@@ -88,19 +87,24 @@ impl Shell {
         });
     }
 
-    /// Saves Home's blocks; Home reads again to show them in core's order.
-    pub(super) fn set_home_blocks(self: &Rc<Self>, blocks: Vec<HomeBlockKind>) {
-        match self.settings.persistence.set_home_blocks(blocks) {
+    /// Takes a Home block edit from core; Home reads again to show it. False when nothing
+    /// changed.
+    pub(super) fn commit_home_blocks(
+        self: &Rc<Self>,
+        result: Result<bool, rufin_core::settings::SettingsError>,
+    ) -> bool {
+        match result {
             Ok(true) => {
                 self.settings.sync();
             }
-            Ok(false) => return,
+            Ok(false) => return false,
             Err(error) => {
                 warn!(%error, action = "home block settings", "failed to save settings");
-                return;
+                return false;
             }
         }
         self.refresh_mounted_home();
+        true
     }
 }
 

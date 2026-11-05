@@ -780,18 +780,12 @@ impl SearchPopup {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let settings = shell.settings.persistence.load();
         let show = self.session.mode() == library::SearchMode::Lyrics
             && !self.session.query().is_empty()
-            && !settings.application.download_lyrics_automatically
-            && !settings.application.lyrics_cache_prompt_dismissed
-            && shell
-                .source
-                .configured
-                .borrow()
-                .sources
-                .iter()
-                .any(|source| source.kind != "local");
+            && rufin_core::runtime::source::shows_lyrics_cache_prompt(
+                shell.settings.current.borrow().application.clone(),
+                shell.source.configured.borrow().sources.clone(),
+            );
         self.lyrics_cache_prompt.set_visible(show);
         self.resize();
     }

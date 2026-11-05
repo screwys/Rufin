@@ -1,7 +1,10 @@
 use crate::widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
 use adw::prelude::*;
-use library::{AudioChannels, AudioCodec, AudioEncoding};
-use rufin_core::downloads::DOWNLOAD_BITRATES;
+use library::{AudioChannels, AudioCodec};
+use rufin_core::downloads::{
+    DOWNLOAD_BITRATES, download_quality_shows_bitrate, download_quality_shows_channels,
+    download_quality_with_bitrate, download_quality_with_channels, download_quality_with_codec,
+};
 use sources::DownloadQuality;
 use std::{cell::Cell, rc::Rc};
 
@@ -86,9 +89,8 @@ pub(crate) fn rows(
                     .position(|channel| *channel == encoding.channels)
                     .unwrap() as u32
             }));
-            bitrate
-                .set_visible(encoding.is_some_and(|encoding| encoding.codec != AudioCodec::Flac));
-            channels.set_visible(encoding.is_some());
+            bitrate.set_visible(download_quality_shows_bitrate(quality));
+            channels.set_visible(download_quality_shows_channels(quality));
             updating.set(false);
         })
     };
@@ -115,25 +117,16 @@ pub(crate) fn rows(
                 .checked_sub(1)
                 .and_then(|index| codecs.get(index as usize))
                 .copied();
-            let quality = codec.map_or(DownloadQuality::Original, |codec| {
-                DownloadQuality::Transcoded(AudioEncoding {
-                    codec,
-                    bitrate_kbps: if codec == AudioCodec::Flac {
-                        None
-                    } else if current
-                        .get()
-                        .encoding()
-                        .is_none_or(|previous| previous.codec != codec)
-                    {
-                        rate.get().or(Some(128))
-                    } else {
-                        rate.get()
-                    },
-                    channels: channel_choices[channels.selected() as usize],
-                })
-            });
-            bitrate.set_visible(codec.is_some_and(|codec| codec != AudioCodec::Flac));
-            channels.set_visible(codec.is_some());
+            let mut quality = download_quality_with_codec(current.get(), codec);
+            if let Some(rate) = rate.get() {
+                quality = download_quality_with_bitrate(quality, rate);
+            }
+            let quality = download_quality_with_channels(
+                quality,
+                channel_choices[channels.selected() as usize],
+            );
+            bitrate.set_visible(download_quality_shows_bitrate(quality));
+            channels.set_visible(download_quality_shows_channels(quality));
             if current.replace(quality) != quality {
                 changed(quality, set.clone());
             }
