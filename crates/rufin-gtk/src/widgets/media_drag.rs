@@ -59,19 +59,7 @@ impl CollectionTargets {
                     let collections = selected_parent_collections(catalog, read, ranges).await?;
                     targets.extend(collections.into_iter().filter_map(|collection| {
                         let target = CollectionTarget::of(catalog, &collection)?;
-                        Some(if let library::Collection::Smart { .. } = collection {
-                            let mut members = library::MemberRead::new(collection);
-                            members.folder = read.folder;
-                            PlayRequest::ordered(
-                                members.selection(),
-                                0,
-                                rufin_core::playback::QueuePlacement::Now,
-                                true,
-                            )
-                            .with_context(target.context_id().into())
-                        } else {
-                            collection_play_request(collection, &target)
-                        })
+                        Some(collection_play_request(collection, &target))
                     }));
                 }
                 Ok(targets)
