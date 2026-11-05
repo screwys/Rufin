@@ -30,6 +30,17 @@ pub struct AndroidSortField {
     pub title: String,
 }
 
+impl AndroidSortField {
+    pub(super) fn of(field: LibraryField) -> Self {
+        Self {
+            id: field,
+            title: localization::tr(rufin_core::settings::presentation::library_field_title(
+                field,
+            )),
+        }
+    }
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct AndroidFieldValue {
     pub id: LibraryField,
@@ -99,31 +110,46 @@ impl AndroidArtistLink {
     }
 }
 
+/// An opened view and what it read when it opened.
 #[derive(uniffi::Record)]
-pub struct AndroidBrowsePage {
+pub struct AndroidOpened {
+    pub view: Arc<super::AndroidView>,
     pub count: u64,
     pub rows: Vec<AndroidBrowseRow>,
     pub summary: Option<AndroidDetailSummary>,
     pub groups: Vec<AndroidArtistReleaseGroup>,
     pub favorite_rows: Vec<AndroidBrowseRow>,
+    pub home: Vec<AndroidHomeSection>,
 }
 
+#[derive(uniffi::Enum)]
+pub enum AndroidHomeSectionKind {
+    Showcase,
+    Rows,
+    Genres,
+}
+
+/// One Home section: its title, its rows and the block a refresh reads again.
+#[derive(uniffi::Record)]
+pub struct AndroidHomeSection {
+    pub title: String,
+    pub kind: AndroidHomeSectionKind,
+    pub refresh: Option<library::HomeBlockKind>,
+    pub rows: Vec<AndroidBrowseRow>,
+}
+
+/// What a detail page's header shows besides its row: its pictures, credited artists, label
+/// and links, and an artist's favorite tracks count.
 #[derive(uniffi::Record)]
 pub struct AndroidDetailSummary {
     pub row: AndroidBrowseRow,
     pub artwork_bindings: Vec<Vec<u8>>,
     pub artist_text: String,
     pub artist_links: Vec<AndroidArtistLink>,
+    /// What the collection is, untranslated: an album's release class, Artist, Playlist.
     pub label: String,
-    pub mode: Route,
-    pub album_count: u64,
     pub links: Vec<AndroidDetailLink>,
-    pub favorite_route: Option<Route>,
     pub favorite_total: u64,
-    pub discography_route: Option<Route>,
-    pub tracks_route: Option<Route>,
-    pub show_track_images: bool,
-    pub show_track_header: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -160,7 +186,7 @@ pub struct AndroidScrollSection {
 
 #[derive(uniffi::Record)]
 pub struct AndroidCollectionCategory {
-    pub id: String,
+    pub category: CollectionCategory,
     pub title: String,
     pub icon_name: String,
 }
@@ -200,10 +226,8 @@ pub struct AndroidBrowseRow {
     /// The page the row opens, and the context id a play of that page carries.
     pub route: Option<Route>,
     pub context_id: Option<String>,
-    pub section: String,
-    pub section_id: String,
-    pub section_kind: String,
-    pub section_refreshable: bool,
+    /// A track with its copy, or a collection whose tracks are all downloaded.
+    pub downloaded: bool,
 }
 
 impl AndroidBrowseRow {
@@ -216,19 +240,7 @@ impl AndroidBrowseRow {
             pin: None,
             route: None,
             context_id: None,
-            section: String::new(),
-            section_id: String::new(),
-            section_kind: String::new(),
-            section_refreshable: false,
-        }
-    }
-
-    pub(super) fn track(&self) -> Option<&library::TrackRow> {
-        match &self.item {
-            AndroidBrowseItem::Library {
-                row: Row::Track(track) | Row::AlbumTrack { track, .. },
-            } => Some(track),
-            _ => None,
+            downloaded: false,
         }
     }
 
@@ -256,10 +268,12 @@ impl From<Row> for AndroidBrowseRow {
             _ => None,
         };
         let route = Route::of_row(&row);
+        let downloaded = row.downloaded();
         let item = AndroidBrowseItem::Library { row };
         Self {
             pin,
             display_title,
+            downloaded,
             ..match route {
                 Some(route) => Self::opening(item, route),
                 None => Self::new(item),
@@ -299,5 +313,26 @@ pub fn show_state(
             field.text = rufin_core::settings::presentation::row_field(library, field.id);
         }
     }
+    Some(row)
+}
+
+/// `row` showing a committed download of its track; None when it shows another track, or this
+/// one as it is.
+#[uniffi::export]
+pub fn show_download(
+    mut row: AndroidBrowseRow,
+    change: library::DownloadChange,
+) -> Option<AndroidBrowseRow> {
+    let AndroidBrowseItem::Library {
+        row: Row::Track(track) | Row::AlbumTrack { track, .. },
+    } = &mut row.item
+    else {
+        return None;
+    };
+    if track.track_key != change.track || track.is_downloaded == change.downloaded {
+        return None;
+    }
+    change.show_in(track);
+    row.downloaded = change.downloaded;
     Some(row)
 }

@@ -316,7 +316,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
             } })
     }
     playlist?.let { item -> PlaylistPickerSheet(player.model, player.model.browse, item, player) { playlist = null } }
-    metadataEditor?.let { item -> MetadataEditorScreen(player.model, item.row.kind, item.row.mediaUri) { metadataEditor = null } }
+    metadataEditor?.row?.metadataItem?.let { item -> MetadataEditorScreen(player.model, item) { metadataEditor = null } }
 }
 
 @Composable

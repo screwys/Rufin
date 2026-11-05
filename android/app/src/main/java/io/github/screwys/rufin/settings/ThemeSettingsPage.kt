@@ -20,7 +20,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.screwys.rufin.core.AndroidAccentOption
+import io.github.screwys.rufin.shared.rufin_core.AccentPreference
+import io.github.screwys.rufin.shared.rufin_core.ThemePreference
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.RufinIcon
@@ -33,43 +34,41 @@ internal fun ThemeSettingsPage(preferences: PreferencesConnection) {
         return
     }
     val systemDark = isSystemInDarkTheme()
-    val themes = listOf("system" to translate("System"), "light" to translate("Light"), "dark" to translate("Dark")) +
-        settings.themes.filter { it.id != "builtin:light" && it.id != "builtin:dark" }.map { it.id to it.name }
+    val themes = listOf(ThemePreference.System to translate("System"), ThemePreference.Light to translate("Light"),
+        ThemePreference.Dark to translate("Dark")) +
+        settings.themes.filter { it.id != "builtin:light" && it.id != "builtin:dark" }.map { ThemePreference.Named(it.id) to it.name }
     LazyVerticalGrid(GridCells.Adaptive(96.dp), Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalPlayerBottomPadding.current),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(themes, key = { it.first }) { (id, title) ->
-            val themeId = when (id) {
-                "system" -> if (systemDark) "builtin:dark" else "builtin:light"
-                "light" -> "builtin:light"
-                "dark" -> "builtin:dark"
-                else -> id
+        items(themes, key = { it.second + it.first.toString() }) { (choice, title) ->
+            val themeId = when (choice) {
+                is ThemePreference.System -> if (systemDark) "builtin:dark" else "builtin:light"
+                is ThemePreference.Light -> "builtin:light"
+                is ThemePreference.Dark -> "builtin:dark"
+                is ThemePreference.Named -> choice.v1
             }
             val theme = settings.themes.find { it.id == themeId }
-            val selected = settings.themeId == id
-            val standard = id == "system" || id == "light" || id == "dark"
+            val selected = settings.theme == choice
+            val standard = choice !is ThemePreference.Named
             val colors = MaterialTheme.colorScheme
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Surface(Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton) { preferences.selectTheme(id) }
+                Surface(Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton) { preferences.selectTheme(choice) }
                     .semantics { contentDescription = title },
                     shape = RoundedCornerShape(12.dp), color = colors.surfaceContainer,
                     border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outlineVariant)) {
                     ThemePreview(theme, theme?.dark ?: systemDark,
-                        standard && settings.accentId == "System",
+                        standard && settings.accent == AccentPreference.SYSTEM,
                         Modifier.padding(5.dp).fillMaxWidth().aspectRatio(9f / 16f))
                 }
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f).padding(start = 2.dp),
                         style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (standard || (theme?.accents?.size ?: 0) > 1) {
-                        ThemeAccentMenu(
-                            options = if (standard) settings.accents else theme!!.accents,
-                            selected = if (standard) settings.accentId else theme!!.accentId,
-                            standard = standard,
-                            dark = theme?.dark ?: systemDark,
-                            select = { if (standard) preferences.selectAccent(it) else preferences.selectThemeAccent(id, it) },
-                        )
-                    }
+                    if (standard) ThemeAccentMenu(
+                        settings.accents.map { AccentEntry(translate(it.title), it.color, it.accent == settings.accent) { preferences.selectAccent(it.accent) } },
+                        theme?.dark ?: systemDark)
+                    else if ((theme?.accents?.size ?: 0) > 1) ThemeAccentMenu(
+                        theme!!.accents.map { AccentEntry(it.name, it.color, it.id == theme.accentId) { preferences.selectThemeAccent(themeId, it.id) } },
+                        theme.dark)
                 }
             }
         }
@@ -79,16 +78,18 @@ internal fun ThemeSettingsPage(preferences: PreferencesConnection) {
     }
 }
 
+/** One accent color a menu offers. */
+private class AccentEntry(val name: String, val color: String?, val selected: Boolean, val select: () -> Unit)
+
 @Composable
-private fun ThemeAccentMenu(options: List<AndroidAccentOption>, selected: String?, standard: Boolean, dark: Boolean, select: (String) -> Unit) {
+private fun ThemeAccentMenu(options: List<AccentEntry>, dark: Boolean) {
     var expanded by remember { mutableStateOf(false) }
-    val current = options.find { it.id == selected } ?: options.first()
+    val current = options.find { it.selected } ?: options.first()
     val label = translate("Accent color")
-    val currentName = if (standard) translate(current.id) else current.name
     Box {
         IconButton({ expanded = true }, Modifier.semantics {
             contentDescription = label
-            stateDescription = currentName
+            stateDescription = current.name
         }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 AccentSwatch(current.color, dark)
@@ -98,12 +99,12 @@ private fun ThemeAccentMenu(options: List<AndroidAccentOption>, selected: String
         DropdownMenu(expanded, { expanded = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(if (standard) translate(option.id) else option.name) },
+                    text = { Text(option.name) },
                     leadingIcon = { AccentSwatch(option.color, dark) },
                     trailingIcon = {
-                        if (option.id == current.id) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp))
+                        if (option === current) RufinIcon("rufin-object-select-symbolic", null, Modifier.size(18.dp))
                     },
-                    onClick = { select(option.id); expanded = false },
+                    onClick = { option.select(); expanded = false },
                 )
             }
         }

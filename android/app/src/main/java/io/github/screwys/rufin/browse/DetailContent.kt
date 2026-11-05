@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
@@ -80,15 +81,17 @@ internal fun DetailContent(
         }
         return
     }
-    val headerItem = remember(summary, page.displaySettings, page.downloadRevision) { BrowseItem(summary.row, 0UL, null, page.displaySettings, downloadRevision = page.downloadRevision) }
-    val artist = summary.mode.kind == "ArtistDetail" || summary.mode.kind == "AlbumArtistDetail"
-    val releasesVisible = summary.showsReleases
+    val route = page.location.route
+    val headerItem = remember(summary, page.displaySettings) { BrowseItem(summary.row, 0UL, null, page.displaySettings) }
+    val artist = route is Route.ArtistDetail || route is Route.AlbumArtistDetail
+    val releasesVisible = route.showsReleases
+    fun images(fields: List<AndroidSortField>) = fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = maxWidth
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
             if (page.options.preparing) item("detail-loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             item("detail-header") {
-                DetailHeader(summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
+                DetailHeader(route, summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
             }
             page.options.preparationError?.let { message -> item("detail-error") {
                 io.github.screwys.rufin.ui.ErrorNotice(message, Modifier.padding(horizontal = 16.dp))
@@ -96,7 +99,7 @@ internal fun DetailContent(
             if (artist && favorites != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))
-                    if (summary.showTrackHeader) FieldHeader(favoritesPage.fields, favoritesPage.displaySettings?.size)
+                    if (favoritesPage.displaySettings?.showHeader != false) FieldHeader(favoritesPage.fields, favoritesPage.displaySettings?.size)
                     val visibleRows = if (favorites.loadState.refresh is LoadState.Loading)
                         minOf(summary.favoriteTotal, 4UL).toInt() else minOf(favorites.itemCount, 4)
                     val baseHeight = when (favoritesPage.displaySettings?.size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> 64.dp }
@@ -107,7 +110,7 @@ internal fun DetailContent(
                         items(favorites.itemCount, key = favorites.itemKey { "${it.row.key}:${it.index}" }) { index ->
                             val item = favorites[index]
                             if (item == null) Spacer(Modifier.height(64.dp)) else FieldRow(item.copy(displaySettings = favoritesPage.options.displaySettings ?: favoritesPage.displaySettings), player,
-                                summary.showTrackImages, favoritesPage.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                                images(favoritesPage.fields), favoritesPage.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                         }
                         item { DetailLoadState(favorites.loadState.append, favorites::retry) }
                     }
@@ -165,12 +168,12 @@ internal fun DetailContent(
                         }
                     }
                 } else {
-                    if (summary.showTrackHeader) item("detail-track-header") { FieldHeader(page.fields, display?.size) }
+                    if (display?.showHeader != false) item("detail-track-header") { FieldHeader(page.fields, display?.size) }
                     items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
                         val item = rows[index]
                         if (item == null) Spacer(Modifier.height(48.dp))
                         else FieldRow(item.copy(displaySettings = display), player,
-                            summary.showTrackImages, page.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                            images(page.fields), page.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                     }
                 }
                 item { DetailLoadState(rows.loadState.refresh, rows::retry); DetailLoadState(rows.loadState.append, rows::retry) }
@@ -185,22 +188,26 @@ internal fun DetailContent(
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun DetailHeader(
-    summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
+    route: Route, summary: AndroidDetailSummary, item: BrowseItem, player: PlayerConnection,
     onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onOpenRoute: (Route, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
     onRadio: (BrowseItem) -> Unit,
 ) {
     val projected = favoriteItem(player.model, item)
-    if (summary.mode.kind in setOf("ArtistDiscography", "AlbumArtistDiscography", "ArtistTracks", "AlbumArtistTracks", "ArtistFavoriteTracks", "AlbumArtistFavoriteTracks")) {
+    val albumCount = (item.row.artistRow?.summary?.albumCount ?: 0L).coerceAtLeast(0).toULong()
+    val playlist = item.row.playlist != null || item.row.smartPlaylist != null
+    val sectionTitle = when (route) {
+        is Route.ArtistDiscography, is Route.AlbumArtistDiscography -> "Discography"
+        is Route.ArtistFavoriteTracks, is Route.AlbumArtistFavoriteTracks -> "Favorite tracks"
+        is Route.ArtistTracks, is Route.AlbumArtistTracks -> "Tracks"
+        else -> null
+    }
+    if (sectionTitle != null) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).then(showcasePaint(item.row.key)).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(translate(when {
-                summary.mode.kind.endsWith("Discography") -> "Discography"
-                summary.mode.kind.endsWith("FavoriteTracks") -> "Favorite tracks"
-                else -> "Tracks"
-            }).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(translate(sectionTitle).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true)
-            Text("${albumCountText(summary.albumCount)} / ${trackCountText(item.row.trackCount)}",
+            Text("${albumCountText(albumCount)} / ${trackCountText(item.row.trackCount)}",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
@@ -213,7 +220,7 @@ private fun DetailHeader(
                 Box(Modifier.size(coverSize).pointerInput(item.row.key) { detectTapGestures(onLongPress = { onMenu(item) }) }) {
                     DetailHeaderCover(summary, player, coverSize)
                 }
-                if (summary.links.isNotEmpty() && item.row.kind !in setOf("playlist", "smart_playlist")) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+                if (summary.links.isNotEmpty() && !playlist) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
                     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         summary.links.forEach { link ->
                             IconButton({ onLink(link) }, Modifier.size(32.dp).semantics { contentDescription = translate(link.title) }) {
@@ -226,12 +233,12 @@ private fun DetailHeader(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(translate(summary.label).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    if (item.row.kind in setOf("album", "artist", "genre")) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+                    if (item.row.albumRow != null || item.row.artistRow != null || item.row.genre != null) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
                         PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                     }
                 }
                 BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true)
-                if (item.row.kind == "album" && summary.artistText.isNotBlank()) {
+                if (item.row.albumRow != null && summary.artistText.isNotBlank()) {
                     val linkColor = MaterialTheme.colorScheme.onSurface
                     val credited = buildAnnotatedString {
                         append(summary.artistText)
@@ -244,21 +251,23 @@ private fun DetailHeader(
                     Text(credited, Modifier.rufinMarquee(), maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = linkColor)
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (item.row.kind == "artist") {
-                        DetailFact("rufin-albums-symbolic", albumCountText(summary.albumCount), "Albums") {
-                            summary.discographyRoute?.let { onOpenRoute(it, translate("Albums")) }
+                    if (route is Route.ArtistDetail || route is Route.AlbumArtistDetail) {
+                        DetailFact("rufin-albums-symbolic", albumCountText(albumCount), "Albums") {
+                            onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistDiscography(route.v1)
+                                else Route.ArtistDiscography((route as Route.ArtistDetail).v1), translate("Albums"))
                         }
                         DetailFact("rufin-tracks-symbolic", trackCountText(item.row.trackCount), "Tracks") {
-                            summary.tracksRoute?.let { onOpenRoute(it, translate("Tracks")) }
+                            onOpenRoute(if (route is Route.AlbumArtistDetail) Route.AlbumArtistTracks(route.v1)
+                                else Route.ArtistTracks((route as Route.ArtistDetail).v1), translate("Tracks"))
                         }
                     } else {
                         item.row.year?.let { DetailFact("rufin-x-office-calendar-symbolic", it.toString(), "Year") }
                         DetailFact("rufin-tracks-symbolic", trackCountText(item.row.trackCount), "Tracks")
-                        if (item.row.durationMillis > 0UL || item.row.kind in setOf("playlist", "smart_playlist"))
-                            DetailFact("rufin-preferences-system-time-symbolic", detailDuration(item.row.durationMillis), "Duration")
+                        if (item.row.durationMillis > 0UL || playlist)
+                            DetailFact("rufin-preferences-system-time-symbolic", clockText(item.row.durationMillis), "Duration")
                     }
                 }
-                if (item.row.kind in setOf("playlist", "smart_playlist")) {
+                if (playlist) {
                     player.model.sources?.sources?.find { it.id == item.row.sourceId }?.let { source ->
                         val link = summary.links.firstOrNull()
                         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
@@ -273,7 +282,7 @@ private fun DetailHeader(
                     ShowcaseAction("rufin-media-playback-start-symbolic", "Play", { onPlay(item, QueuePlacement.Replace(0UL), false) }, { onPlay(item, QueuePlacement.Replace(0UL), true) })
                     ShowcaseAction("rufin-mail-forward-symbolic", "Play Next", { onPlay(item, QueuePlacement.AfterCurrent, false) }, { onPlay(item, QueuePlacement.AfterCurrent, true) })
                     ShowcaseAction("rufin-go-last-symbolic", "Play Later", { onPlay(item, QueuePlacement.End, false) }, { onPlay(item, QueuePlacement.End, true) })
-                    if (item.row.kind in setOf("album", "artist"))
+                    if (item.row.albumRow != null || item.row.artistRow != null)
                         ShowcaseAction(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
                             { onFavorite(projected) }, tint = if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 }
@@ -423,8 +432,3 @@ private fun DetailLoadState(state: LoadState, retry: () -> Unit) {
     }
 }
 
-private fun detailDuration(millis: ULong): String {
-    val seconds = millis / 1000UL
-    return if (seconds >= 3600UL) "${seconds / 3600UL}:${((seconds / 60UL) % 60UL).toString().padStart(2, '0')}:${(seconds % 60UL).toString().padStart(2, '0')}"
-    else "${seconds / 60UL}:${(seconds % 60UL).toString().padStart(2, '0')}"
-}

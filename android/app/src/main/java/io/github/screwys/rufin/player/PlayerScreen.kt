@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.clockText
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
@@ -438,8 +439,8 @@ private fun PlayerProgress(player: PlayerConnection) {
                 layout(placeable.width - inset, placeable.height) { placeable.placeRelative(-inset / 2, 0) }
             }.semantics { contentDescription = positionLabel })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(playerTime(displayedPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(playerTime(current.transport.durationMillis), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(clockText(displayedPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(clockText(current.transport.durationMillis), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -501,8 +502,3 @@ internal fun RefillSpinner(size: Dp, color: Color = LocalContentColor.current) {
         color, 3.dp, color.copy(alpha = .15f), StrokeCap.Round)
 }
 
-private fun playerTime(millis: ULong): String {
-    val seconds = millis / 1000UL
-    return if (seconds >= 3600UL) "${seconds / 3600UL}:${((seconds / 60UL) % 60UL).toString().padStart(2, '0')}:${(seconds % 60UL).toString().padStart(2, '0')}"
-    else "${seconds / 60UL}:${(seconds % 60UL).toString().padStart(2, '0')}"
-}

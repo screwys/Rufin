@@ -61,10 +61,9 @@ internal enum class BrowseSwipeAction(val icon: String) {
     }
 
     fun availableFor(item: BrowseItem): Boolean = when (this) {
-        Favorite -> item.row.kind in setOf("track", "album", "album_header", "artist")
-        PlayLater, PlayNext, AddToPlaylist -> item.row.kind != "playlist_folder" && (item.row.kind == "track" || item.row.route != null)
-        PlayRadio, PlayRadioNext, PlayRadioLater -> item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "playlist")
-        Download -> item.row.kind != "playlist_folder" && (item.row.kind == "track" || item.row.route != null)
+        Favorite -> item.row.target != null
+        PlayLater, PlayNext, AddToPlaylist, Download -> item.row.playlistFolder == null && (item.row.isTrack || item.row.route != null)
+        PlayRadio, PlayRadioNext, PlayRadioLater -> item.row.target != null || item.row.genre != null || item.row.playlist != null
     }
 }
 

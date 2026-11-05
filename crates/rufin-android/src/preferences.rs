@@ -14,6 +14,15 @@ pub struct AndroidAccentOption {
     pub color: Option<String>,
 }
 
+/// One of the standard accent colors.
+#[derive(uniffi::Record)]
+pub struct AndroidAccentChoice {
+    pub accent: AccentPreference,
+    /// Its name, untranslated.
+    pub title: String,
+    pub color: Option<String>,
+}
+
 #[derive(uniffi::Record)]
 pub struct AndroidThemeOption {
     pub id: String,
@@ -32,11 +41,11 @@ pub struct AndroidLanguageOption {
 
 #[derive(uniffi::Record)]
 pub struct AndroidPreferencesState {
-    pub theme_id: String,
-    pub accent_id: String,
+    pub theme: ThemePreference,
+    pub accent: AccentPreference,
     pub language: String,
     pub themes: Vec<AndroidThemeOption>,
-    pub accents: Vec<AndroidAccentOption>,
+    pub accents: Vec<AndroidAccentChoice>,
     pub languages: Vec<AndroidLanguageOption>,
     pub errors: Vec<String>,
 }
@@ -62,36 +71,15 @@ impl AndroidPreferences {
     }
 }
 
-fn accent_id(accent: AccentPreference) -> &'static str {
-    match accent {
-        AccentPreference::System => "System",
-        AccentPreference::Blue => "Blue",
-        AccentPreference::Teal => "Teal",
-        AccentPreference::Green => "Green",
-        AccentPreference::Yellow => "Yellow",
-        AccentPreference::Orange => "Orange",
-        AccentPreference::Red => "Red",
-        AccentPreference::Pink => "Pink",
-        AccentPreference::Purple => "Purple",
-        AccentPreference::Slate => "Slate",
-    }
-}
-
 fn state(
     settings: &AppearancePreferences,
     themes: &[rufin_core::themes::Theme],
     errors: &[String],
     languages: &[String],
 ) -> AndroidPreferencesState {
-    let theme_id = match &settings.theme_preference {
-        ThemePreference::System => "system".into(),
-        ThemePreference::Light => "light".into(),
-        ThemePreference::Dark => "dark".into(),
-        ThemePreference::Named(id) => id.clone(),
-    };
     AndroidPreferencesState {
-        theme_id,
-        accent_id: accent_id(settings.accent_preference).into(),
+        theme: settings.theme_preference.clone(),
+        accent: settings.accent_preference,
         language: settings.language.clone(),
         themes: themes
             .iter()
@@ -127,9 +115,9 @@ fn state(
             .collect(),
         accents: AccentPreference::ALL
             .into_iter()
-            .map(|accent| AndroidAccentOption {
-                id: accent_id(accent).into(),
-                name: localization::tr(accent_id(accent)),
+            .map(|accent| AndroidAccentChoice {
+                accent,
+                title: accent.title().into(),
                 color: accent.color().map(str::to_string),
             })
             .collect(),

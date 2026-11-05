@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.downloads
 
+import io.github.screwys.rufin.shared.rufin_core.downloadRulesContain
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -77,7 +78,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             }
             SettingsGroup {
             DownloadRule.entries.forEach { rule -> SettingsRow(rule.title(), trailing = {
-                Switch(source.settings.rules.enabled(rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
+                Switch(downloadRulesContain(source.settings.rules, rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
             }) }
             }
             SettingsGroup(translate("Downloaded")) {

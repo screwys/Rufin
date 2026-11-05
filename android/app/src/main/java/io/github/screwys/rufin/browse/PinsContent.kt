@@ -75,5 +75,5 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
         { playlist = item; action = null }, { metadata = item; action = null },
         onNavigate = { route, title, source -> action = null; browse.openLinkedRoute(route, title, source) }) }
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
-    metadata?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(model, item.row.kind, item.row.mediaUri) { metadata = null } }
+    metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(model, item) { metadata = null } }
 }

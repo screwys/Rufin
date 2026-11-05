@@ -296,7 +296,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         }
         if (route != null) {
             sourceIdForUri(mediaUri)?.takeIf { it != sources?.selectedSourceId }?.let { sourceOwner?.selectSource(it) }
-            browse.openRoute(route, title, kind)
+            browse.openRoute(route, title)
         } else connectedService().playRequest {
             library.playRows("overview:$period:$mediaUri", listOf(mediaUri), 0UL, QueuePlacement.Replace(0UL), false, translate("Listening overview"))
         }

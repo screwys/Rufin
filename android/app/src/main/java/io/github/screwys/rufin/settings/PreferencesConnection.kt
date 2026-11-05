@@ -130,9 +130,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         translationRevision += 1
     }
 
-    fun selectTheme(id: String) = connection.runAction { withContext(Dispatchers.IO) {
-        settings?.setTheme(when (id) { "system" -> ThemePreference.System; "light" -> ThemePreference.Light; "dark" -> ThemePreference.Dark; else -> ThemePreference.Named(id) })
-    } }
+    fun selectTheme(theme: ThemePreference) = connection.runAction { withContext(Dispatchers.IO) { settings?.setTheme(theme) } }
     private var settings: SettingsOwner? = null
     private var scrobbling: ScrobblingOwner? = null
     fun changePreference(edit: SettingsOwner.() -> Unit) = connection.runAction {
@@ -140,11 +138,11 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
     }
     fun nativeSettings(): SettingsOwner = checkNotNull(settings)
     fun nativeScrobbling(): ScrobblingOwner = checkNotNull(scrobbling)
-    fun selectAccent(id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setAccent(AccentPreference.valueOf(id.uppercase())) } }
-    fun changeSecretStorage(mode: String) = connection.runAction {
+    fun selectAccent(accent: AccentPreference) = connection.runAction { withContext(Dispatchers.IO) { settings?.setAccent(accent) } }
+    fun changeSecretStorage(mode: SecretStorageMode) = connection.runAction {
         val source = connection.connectedService().runtime.value!!.getOrThrow().source()
         try {
-            source.changeSecretStorage(SecretStorageMode.valueOf(mode))
+            source.changeSecretStorage(mode)
         } finally { source.destroy() }
     }
     fun selectThemeAccent(theme: String, id: String) = connection.runAction { withContext(Dispatchers.IO) { settings?.setThemeAccent(theme, id) } }

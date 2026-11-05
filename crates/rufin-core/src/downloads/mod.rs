@@ -3946,7 +3946,6 @@ mod tests {
 #[derive(Clone, Default)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DownloadStatus {
-    pub revision: u64,
     pub queue_revision: u64,
     pub paused: bool,
     pub queues: Vec<DownloadQueueSummary>,
@@ -3978,7 +3977,6 @@ impl DownloadEvents {
     fn update(&self, event: &DownloadEvent) {
         self.status.send_if_modified(|state| {
             match event {
-                DownloadEvent::Changed { .. } => state.revision += 1,
                 DownloadEvent::Notice(message) => state.notice = Some(message.clone()),
                 DownloadEvent::Queue { summary, paused } => {
                     state.paused = *paused;
@@ -3994,7 +3992,9 @@ impl DownloadEvents {
                         state.queues.sort_by(|a, b| a.source_id.cmp(&b.source_id));
                     }
                 }
-                DownloadEvent::Feedback(_) | DownloadEvent::SubjectChanged { .. } => return false,
+                DownloadEvent::Changed { .. }
+                | DownloadEvent::Feedback(_)
+                | DownloadEvent::SubjectChanged { .. } => return false,
             }
             true
         });

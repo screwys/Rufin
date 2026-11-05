@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
@@ -49,10 +51,10 @@ internal fun MediaDetailsDialog(
     player: PlayerConnection, onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val initial = remember(item.row.mediaUri, item.row.kind) {
-        when (item.row.kind) {
-            "album", "album_header" -> MediaDetailsItem.Album(item.row.mediaUri)
-            "artist" -> MediaDetailsItem.Artist(item.row.mediaUri, item.row.route is Route.AlbumArtistDetail)
+    val initial = remember(item.row.target, item.row.route) {
+        when (val target = item.row.target) {
+            is FavoriteTarget.Album -> MediaDetailsItem.Album(target.v1)
+            is FavoriteTarget.Artist -> MediaDetailsItem.Artist(target.v1, item.row.route is Route.AlbumArtistDetail)
             else -> MediaDetailsItem.Track(item.row.mediaUri)
         }
     }
@@ -67,18 +69,13 @@ internal fun MediaDetailsDialog(
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { failure = error }
     }
-    val kind = when (target) {
-        is MediaDetailsItem.Track -> "track"
-        is MediaDetailsItem.Album -> "album"
-        is MediaDetailsItem.Artist -> "artist"
+    val editor = when (val id = target) {
+        is MediaDetailsItem.Track -> MetadataItemId.Track(id.v1)
+        is MediaDetailsItem.Album -> MetadataItemId.Album(id.v1)
+        is MediaDetailsItem.Artist -> MetadataItemId.Artist(id.mediaUri)
     }
-    val mediaUri = when (val id = target) {
-        is MediaDetailsItem.Track -> id.v1
-        is MediaDetailsItem.Album -> id.v1
-        is MediaDetailsItem.Artist -> id.mediaUri
-    }
-    val heading = data?.heading ?: translate(when (kind) {
-        "album" -> "Album details"; "artist" -> "Artist details"; else -> "Track details"
+    val heading = data?.heading ?: translate(when (target) {
+        is MediaDetailsItem.Album -> "Album details"; is MediaDetailsItem.Artist -> "Artist details"; is MediaDetailsItem.Track -> "Track details"
     })
     fun back() {
         if (history.isEmpty()) onDismiss()
@@ -166,6 +163,6 @@ internal fun MediaDetailsDialog(
                 } ?: Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         }
-        if (editing) MetadataEditorScreen(model, kind, mediaUri) { editing = false; revision++ }
+        if (editing) MetadataEditorScreen(model, editor) { editing = false; revision++ }
     }
 }

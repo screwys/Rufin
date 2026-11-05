@@ -161,7 +161,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     PreferenceChoice(translate("Casting network"), preferences.castNetworkInterface.orEmpty(),
                         listOf("" to translate("Automatic")) + castNetworks.map { it.id to "${it.name} (${it.address})" },
                         select = { network -> preferences.changePreference { setCastNetworkInterface(network.takeIf { it.isNotEmpty() }) } })
-                    PreferenceChoice(translate("Secret storage"), state.secretStorageMode.name, listOf(SecretStorageMode.SYSTEM_KEYRING.name to translate("System keyring"), SecretStorageMode.CONFIG_FILE.name to translate("Legacy")), select = preferences::changeSecretStorage)
+                    PreferenceChoice(translate("Secret storage"), state.secretStorageMode, listOf(SecretStorageMode.SYSTEM_KEYRING to translate("System keyring"), SecretStorageMode.CONFIG_FILE to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
                 BackupsPage(model, preferences, embedded = true) { navigate(MoreDestination.BackupSettings) }
             }

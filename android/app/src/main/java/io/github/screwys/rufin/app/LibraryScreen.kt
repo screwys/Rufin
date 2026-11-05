@@ -240,7 +240,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         route.id != "Search" && (route.id == browse.rootId || browse.configuredRoutes.any { it.id == route.id })
     }.associate { route -> key(route.id) {
         val options = remember(route.id) { browse.optionsFor(route.id) }
-        val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, route.id, options) }
+        val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
         val lifetime = rememberCoroutineScope()
         val page = remember(route.route, options) { BrowsePage(model, browse, location, options, lifetime) }
         LaunchedEffect(page) { page.observe() }
@@ -255,7 +255,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val pinsLifetime = rememberCoroutineScope()
     val pinsPage = remember(model, browse) {
         val options = BrowseOptions()
-        val location = BrowseLocation(Route.Home, "Pins", "Pins", options)
+        val location = BrowseLocation(Route.Home, "Pins", options)
         BrowsePage(model, browse, location, options, pinsLifetime, pins = true)
     }
     LaunchedEffect(pinsPage) { pinsPage.observe() }
@@ -465,7 +465,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                 } else
                                 browse.routes.firstOrNull { it.id == routeId }?.let { route ->
                                 val options = remember(route.id) { browse.optionsFor(route.id) }
-                                val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, route.id, options) }
+                                val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, options) }
                                 routeState.SaveableStateProvider(route.id) {
                                     BrowsePageContent(model, browse, player, location, options, !fullPlayer && !browse.detail && route.id == browse.rootId,
                                         { menu = it }, { playlist = it }, { scrolled = it }, owner = rootPages[route.id])
@@ -541,7 +541,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     if (createFolder) PlaylistFolderNameDialog(model, browse, smartPlaylistList, { createFolder = false })
     if (createSmartPlaylist) SmartPlaylistEditor(model, browse, { createSmartPlaylist = false }, folder = playlistFolder?.key)
-    metadata?.let { item -> MetadataEditorScreen(model, item.row.kind, item.row.mediaUri) { metadata = null } }
+    metadata?.row?.metadataItem?.let { item -> MetadataEditorScreen(model, item) { metadata = null } }
     if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !random) {
         ConnectPairingPrompt(model) { openMore(MoreDestination.Connect) }
     }
@@ -593,41 +593,50 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     owner: BrowsePage? = null,
 ) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(location.kind, model.sources?.selectedSourceId) {
-        if (location.kind == "History" && model.sources?.selectedSourceId == null && options.category == "current") options.category = "all"
+    LaunchedEffect(location.route, model.sources?.selectedSourceId) {
+        if (location.route is Route.History && model.sources?.selectedSourceId == null) options.historyCurrent = false
     }
     val page = owner ?: remember(location.route, options, pins) { BrowsePage(model, browse, location, options, scope, pins) }
     if (owner == null) LaunchedEffect(page) { page.observe() }
     DisposableEffect(page) { onDispose { page.active = false } }
     SideEffect { page.active = active; if (active) browse.visiblePage = page }
     val rows = page.pages.collectAsLazyPagingItems()
-    if (page.summary?.showsReleases != true && page.homeRows.isEmpty() && rows.itemSnapshotList.items.isEmpty() &&
+    if (!(page.summary != null && location.route.showsReleases) && page.homeSections.isEmpty() && rows.itemSnapshotList.items.isEmpty() &&
         (page.loading || rows.loadState.refresh is LoadState.Loading)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
     val summary = page.summary
-    val choices = when (location.kind) {
-        "Favorites" -> browse.categories
-        "artist" -> browse.categories.filter { it.id != "artists" }
+    val choices = when {
+        location.route is Route.Favorites -> browse.categories
+        location.route.showsReleases -> browse.categories.filter { it.category != CollectionCategory.ARTISTS }
         else -> emptyList()
     }
+    val display = options.displaySettings ?: page.displaySettings ?: rows.itemSnapshotList.items.firstOrNull()?.displaySettings
+    val covers = if (display != null) display.layout == LibraryLayout.GRID else page.covers
     Column(Modifier.fillMaxSize()) {
-        if (location.kind == "History") {
+        if (location.route is Route.History) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(options.category != "current", { options.category = "all" }, label = { Text(translate("All")) })
-                if (model.sources?.selectedSourceId != null) FilterChip(options.category == "current", { options.category = "current" },
+                FilterChip(!options.historyCurrent, { options.historyCurrent = false }, label = { Text(translate("All")) })
+                if (model.sources?.selectedSourceId != null) FilterChip(options.historyCurrent, { options.historyCurrent = true },
                     label = { Text(model.selectedSourceName) })
             }
-            HistoryRows(rows, page, player, browse, onMenu, onPlaylist, onScrolled)
+            // History shows cards in Grid layout, as on the desktop.
+            if (covers) Box(Modifier.weight(1f)) {
+                BrowseContent(rows, emptyList(), player, false, location in browse.details, true,
+                    browse::open, onMenu, { _, _ -> }, browse::refreshSection, browse::favorite, onPlaylist, { if (active) onScrolled(it) },
+                    displaySize = display?.size ?: DisplaySize.DEFAULT, gridSpacing = display?.gridSpacing ?: DisplaySize.DEFAULT,
+                    onPlayItem = { item, shuffled -> browse.play(item, shuffled = shuffled) }, loading = page.loading,
+                    onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
+            } else HistoryRows(rows, page, player, browse, onMenu, onPlaylist, onScrolled)
             return@Column
         }
-        if (location.kind in listOf("Folders", "folder")) FolderNavigation(model, browse, page)
+        if (location.route is Route.Folders) FolderNavigation(model, browse, page)
         if (summary != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
             DetailContent(summary, page, rows, player, page.favoritesPage, page.releaseGroups,
                 browse::open, onMenu, { item, placement, shuffled -> page.play(placement, shuffled, item.row.title) }, browse::favorite,
-                onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
+                onPlaylist, { route, title -> browse.openRoute(route, title, summary.row.title) },
                 onLink = { link -> model.runAction {
                     openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
                 } }, onScrolled, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
@@ -635,21 +644,19 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         }
         if (choices.isNotEmpty()) LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            itemsIndexed(choices, key = { _, option -> option.id }) { _, option ->
-                FilterChip(options.category == option.id, { options.category = option.id; options.sort = null; options.displaySettings = null },
+            itemsIndexed(choices, key = { _, option -> option.category.name }) { _, option ->
+                FilterChip(options.category == option.category, { options.category = option.category; options.sort = null; options.displaySettings = null },
                     label = { Text(option.title) })
             }
         }
         Box(Modifier.weight(1f)) {
-            val display = options.displaySettings ?: page.displaySettings ?: rows.itemSnapshotList.items.firstOrNull()?.displaySettings
-            val covers = if (display != null) display.layout == LibraryLayout.GRID else page.covers
-            BrowseContent(rows, page.homeRows, player, location.kind == "Home", location in browse.details, covers,
-                browse::open, onMenu, { id, shuffled -> page.playSection(id, shuffled) }, browse::refreshSection,
+            BrowseContent(rows, page.homeSections, player, location.route is Route.Home, location in browse.details, covers,
+                browse::open, onMenu, { section, shuffled -> page.playSection(section, shuffled) }, browse::refreshSection,
                 browse::favorite, onPlaylist, { if (active) onScrolled(it) }, page.scrollSections,
                 display?.size ?: DisplaySize.DEFAULT, display?.gridSpacing ?: DisplaySize.DEFAULT, { item, shuffled -> browse.play(item, shuffled = shuffled) }, page.fields,
                 page.supportsLetterIndex, page::letterPosition, page.sortSelection?.descending ?: false,
                 page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) },
-                emptyIcon = if (location.kind in listOf("Folders", "folder")) "rufin-folders-symbolic" else null)
+                emptyIcon = if (location.route is Route.Folders) "rufin-folders-symbolic" else null)
         }
     }
 }

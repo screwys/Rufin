@@ -150,7 +150,7 @@ private fun RandomGenreSheet(model: RufinConnection, browse: BrowseConnection, o
     val route = browse.routes.firstOrNull { it.id == "Genres" }?.route
     val rows = remember(library, route, filter) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, route, filter, downloads = model.downloads) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, route, filter) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (rows.loadState.refresh as? LoadState.Error)?.error ?: (rows.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }

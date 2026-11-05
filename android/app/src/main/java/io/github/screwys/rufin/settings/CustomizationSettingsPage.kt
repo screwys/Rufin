@@ -48,14 +48,14 @@ internal fun CustomizationSettingsPage(preferences: PreferencesConnection, brows
 }
 
 @Composable
-internal fun PreferenceChoice(title: String, selected: String, options: List<Pair<String, String>>,
-    preview: (@Composable (String) -> Unit)? = null, enabled: (String) -> Boolean = { true },
-    trailingAction: (@Composable () -> Unit)? = null, select: (String) -> Unit,
+internal fun <T> PreferenceChoice(title: String, selected: T, options: List<Pair<T, String>>,
+    preview: (@Composable (T) -> Unit)? = null, enabled: (T) -> Boolean = { true },
+    trailingAction: (@Composable () -> Unit)? = null, select: (T) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     SettingsRow(
         title,
-        summary = options.find { it.first == selected }?.second ?: selected,
+        summary = options.find { it.first == selected }?.second ?: selected.toString(),
         leading = preview?.let { { it(selected) } },
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -67,7 +67,7 @@ internal fun PreferenceChoice(title: String, selected: String, options: List<Pai
     )
     if (expanded) AlertDialog(onDismissRequest = { expanded = false }, title = { Text(title) }, text = {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-            items(options, key = { it.first }) { (id, name) ->
+            items(options, key = { it.first.toString() }) { (id, name) ->
                 ListItem(headlineContent = { Text(name) },
                     leadingContent = preview?.let { { it(id) } },
                     trailingContent = { RadioButton(selected == id, null) },

@@ -1,26 +1,26 @@
-use std::ops::Range;
 use std::sync::Arc;
 mod commands;
 mod details;
-mod queries;
 mod records;
 mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
-    AndroidBrowseItem, AndroidBrowsePage, AndroidBrowseRow, AndroidCollectionCategory,
-    AndroidDetailLink, AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue,
-    AndroidMusicFolder, AndroidMusicFolderState, AndroidPinPage, AndroidPlaylistImport,
-    AndroidRouteDescriptor, AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
+    AndroidBrowseItem, AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink,
+    AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
+    AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
+    AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting,
+    AndroidScrollSection, AndroidSortField,
 };
 
 use library::{Collection, MemberSelection, ReadCancellation, Row};
-use rufin_core::view::{OpenOptions, Opened, View, library_list_key};
+use rufin_core::collection_context::CollectionTarget;
+use rufin_core::playback::{PlayRequest, QueuePlacement};
+use rufin_core::view::{OpenOptions, View, library_list_key};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
-    runtime::SelectedLibrary,
     settings::{
         LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, SidebarPin,
-        SidebarRouteItem, layout::DisplaySize, presentation::ARTIST_RELEASE_TITLES,
+        SidebarRouteItem, layout::DisplaySize,
     },
 };
 
@@ -89,220 +89,86 @@ fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> Androi
     }
 }
 
-fn context_caption(
-    route: &Route,
+/// What a play names in the queue: `title`, of the collection `target` is.
+fn caption(
+    target: Option<CollectionTarget>,
     title: Option<String>,
 ) -> Option<Arc<library::QueueContextTitle>> {
-    let kind = match route {
-        Route::AlbumDetail(_) => Some("Album"),
-        Route::ArtistDetail(_)
-        | Route::ArtistDiscography(_)
-        | Route::ArtistTracks(_)
-        | Route::ArtistFavoriteTracks(_)
-        | Route::AlbumArtistDetail(_)
-        | Route::AlbumArtistDiscography(_)
-        | Route::AlbumArtistTracks(_)
-        | Route::AlbumArtistFavoriteTracks(_) => Some("Artist"),
-        Route::PlaylistDetail(_) | Route::SmartPlaylistDetail(_) => Some("Playlist"),
-        Route::GenreDetail(_) => Some("Genre"),
-        Route::MoodDetail(_) => Some("Mood"),
-        _ => None,
-    };
     title.map(|title| {
         Arc::new(library::QueueContextTitle {
-            kind: kind.map(Arc::from),
+            kind: target.map(|target| target.kind().into()),
             title: title.into(),
         })
     })
 }
 
-fn home_section(row: &mut AndroidBrowseRow, block: library::HomeBlockKind) {
-    row.section_id = serde_json::to_value(block)
-        .expect("Home block serialization")
-        .as_str()
-        .expect("Home block name")
-        .to_string();
-    row.section = localization::tr(rufin_core::settings::presentation::home_block_title(block));
-    row.section_kind = if block == library::HomeBlockKind::Showcase {
-        "showcase"
-    } else if block == library::HomeBlockKind::Genres {
-        "genres"
-    } else {
-        "section"
+/// The album or artist a detail route shows, and whether it is read as an album artist.
+fn detail_identity(route: &Route) -> Option<(&str, bool)> {
+    match route {
+        Route::AlbumDetail(uri)
+        | Route::ArtistDetail(uri)
+        | Route::ArtistDiscography(uri)
+        | Route::ArtistTracks(uri)
+        | Route::ArtistFavoriteTracks(uri) => Some((uri, false)),
+        Route::AlbumArtistDetail(uri)
+        | Route::AlbumArtistDiscography(uri)
+        | Route::AlbumArtistTracks(uri)
+        | Route::AlbumArtistFavoriteTracks(uri) => Some((uri, true)),
+        _ => None,
     }
-    .into();
-    row.section_refreshable = block.section_kind().is_some();
 }
 
-/// What a Home row plays.
-fn home_selection(row: &AndroidBrowseRow) -> Option<MemberSelection> {
-    let AndroidBrowseItem::Library { row } = &row.item else {
-        return None;
+/// `row` showing `fields`; `index` is its place among the page's rows of its kind.
+fn shown_row(row: Row, fields: &[LibraryField], index: usize) -> AndroidBrowseRow {
+    let fields = if matches!(row, Row::AlbumHeading(_)) {
+        Vec::new()
+    } else {
+        fields
+            .iter()
+            .map(|field| AndroidFieldValue {
+                id: *field,
+                text: if *field == LibraryField::RowIndex {
+                    (index + 1).to_string()
+                } else {
+                    rufin_core::settings::presentation::row_field(&row, *field)
+                },
+            })
+            .collect()
     };
-    Some(match row {
-        Row::Album(album) => MemberSelection::Collections(vec![Collection::Album(album.album_key)]),
-        Row::Track(track) => MemberSelection::Keys {
-            source: None,
-            keys: vec![track.track_key].into(),
-        },
-        Row::Tag(genre) => MemberSelection::Collections(vec![Collection::Genre(
-            library::GenreKey::from_raw(genre.key),
-        )]),
-        _ => return None,
-    })
+    AndroidBrowseRow {
+        fields,
+        ..row.into()
+    }
 }
 
+/// A route a client shows, open: its rows on demand, its plays and what a change means for it.
 #[derive(uniffi::Object)]
-pub struct AndroidBrowseQuery {
-    selected: Option<SelectedLibrary>,
-    catalog: Arc<library::Catalog>,
+pub struct AndroidView {
+    view: Arc<View>,
     runtime: tokio::runtime::Handle,
     playback: Arc<rufin_core::playback::PlaybackOwner>,
-    source: rufin_core::runtime::SourceHandle,
     settings: rufin_core::SettingsHandle,
-    route: Route,
-    options: OpenOptions,
-    sort: LibraryField,
-    descending: bool,
-    display: LibraryListSettings,
-    album_tracks: LibraryListSettings,
-    artist_tracks: LibraryListSettings,
-    view: tokio::sync::OnceCell<Arc<View>>,
-    /// Home's rows in the order core composes its sections; None for other pages.
-    home: std::sync::OnceLock<Option<Vec<AndroidBrowseRow>>>,
+    source: rufin_core::runtime::SourceHandle,
+    /// The fields its rows show, and the fields an artist's favorite tracks show.
+    fields: Vec<LibraryField>,
+    favorite_fields: Vec<LibraryField>,
 }
 
-/// Search results; each row shows the row fields of its category's list (`fields`, in
-/// `CollectionCategory::ALL` order), as GTK's search does.
-fn search_rows(
-    mut rows: library::SearchResults,
-    fields: [Vec<LibraryField>; 3],
-) -> Vec<AndroidBrowseRow> {
-    let [tracks, albums, artists] = fields;
-    let shown = |rows: Vec<Row>, fields: &[LibraryField]| {
-        rows.into_iter()
-            .enumerate()
-            .map(|(index, row)| AndroidBrowseQuery::shown_row(row, fields, index))
-            .collect::<Vec<_>>()
-    };
-    let lyrics = &mut rows.lyrics;
-    rows.tracks
-        .into_iter()
-        .enumerate()
-        .map(|(index, track)| AndroidBrowseRow {
-            lyrics_snippet: lyrics.remove(&track.track_key),
-            ..AndroidBrowseQuery::shown_row(Row::Track(track), &tracks, index)
-        })
-        .chain(shown(
-            rows.albums.into_iter().map(Row::Album).collect(),
-            &albums,
-        ))
-        .chain(shown(
-            rows.artists.into_iter().map(Row::Artist).collect(),
-            &artists,
-        ))
-        .collect()
-}
-
-impl AndroidBrowseQuery {
-    fn selected(&self) -> &SelectedLibrary {
-        self.selected
-            .as_ref()
-            .expect("Source-scoped query has a selected library")
+impl AndroidView {
+    fn key(&self) -> LibraryListKey {
+        library_list_key(self.view.route(), self.view.options().category)
     }
 
-    fn detail_identity(&self) -> Option<(&str, bool)> {
-        match &self.route {
-            Route::AlbumDetail(uri)
-            | Route::ArtistDetail(uri)
-            | Route::ArtistDiscography(uri)
-            | Route::ArtistTracks(uri)
-            | Route::ArtistFavoriteTracks(uri) => Some((uri, false)),
-            Route::AlbumArtistDetail(uri)
-            | Route::AlbumArtistDiscography(uri)
-            | Route::AlbumArtistTracks(uri)
-            | Route::AlbumArtistFavoriteTracks(uri) => Some((uri, true)),
-            _ => None,
-        }
-    }
-    fn album_detail_layout(&self) -> bool {
-        self.display.layout == LibraryLayout::Detail
-            && library_list_key(&self.route, self.options.category) == LibraryListKey::Albums
-    }
-
-    async fn open(&self, cancel: &ReadCancellation) -> library::LibraryResult<Opened> {
-        self.source
-            .open(
-                self.route.clone(),
-                self.selected.clone(),
-                self.options.clone(),
-                library::RouteSeedWindow::top(),
-                true,
-                cancel,
-            )
-            .await
-    }
-
-    async fn view(&self, cancel: &ReadCancellation) -> library::LibraryResult<&View> {
-        self.view
-            .get_or_try_init(|| async { Ok(self.open(cancel).await?.view) })
-            .await
-            .map(Arc::as_ref)
-    }
-
-    /// The fields the page's rows show in its layout.
-    fn shown_fields(&self) -> &[LibraryField] {
-        if matches!(
-            self.route,
-            Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
-        ) {
-            self.favorite_fields()
-        } else {
-            self.display.fields(self.display.layout)
-        }
-    }
-
-    /// The fields an artist's favorite tracks show, on the artist's page and their own: they
-    /// show as rows.
-    fn favorite_fields(&self) -> &[LibraryField] {
-        &self.artist_tracks.row_fields
-    }
-
-    /// `row` showing `fields`; `index` is its place among the page's rows of its kind.
-    fn shown_row(row: Row, fields: &[LibraryField], index: usize) -> AndroidBrowseRow {
-        let fields = if matches!(row, Row::AlbumHeading(_)) {
-            Vec::new()
-        } else {
-            fields
-                .iter()
-                .map(|field| AndroidFieldValue {
-                    id: *field,
-                    text: if *field == LibraryField::RowIndex {
-                        (index + 1).to_string()
-                    } else {
-                        rufin_core::settings::presentation::row_field(&row, *field)
-                    },
-                })
-                .collect()
-        };
-        AndroidBrowseRow {
-            fields,
-            ..row.into()
-        }
-    }
-
-    /// The rows of `view` that start at `first`.
-    fn browse_rows(&self, view: &View, rows: Vec<Row>, first: usize) -> Vec<AndroidBrowseRow> {
-        let folders = view.folder_len().unwrap_or(0);
-        let releases = view.release_counts().map(|(counts, _)| counts);
-        let fields = self.shown_fields();
+    /// The rows of the view that start at `first`.
+    fn rows_from(&self, rows: Vec<Row>, first: usize) -> Vec<AndroidBrowseRow> {
+        let folders = self.view.folder_len().unwrap_or(0);
         rows.into_iter()
             .zip(first..)
             .map(|(row, position)| match row {
-                Row::Track(_) => Self::shown_row(row, fields, position.saturating_sub(folders)),
-                Row::AlbumTrack { index, .. } => Self::shown_row(row, fields, index as usize),
+                Row::Track(_) => shown_row(row, &self.fields, position.saturating_sub(folders)),
+                Row::AlbumTrack { index, .. } => shown_row(row, &self.fields, index as usize),
                 Row::Folder(folder) => {
-                    let Route::Folders { path } = &self.route else {
+                    let Route::Folders { path } = self.view.route() else {
                         unreachable!("Folder rows belong to a folder route")
                     };
                     let mut path = path.clone();
@@ -317,154 +183,451 @@ impl AndroidBrowseQuery {
                         Route::Folders { path },
                     )
                 }
-                Row::Album(_) if releases.is_some() => {
-                    let mut end = 0;
-                    let class = releases
-                        .unwrap_or_default()
-                        .iter()
-                        .position(|count| {
-                            end += count;
-                            position < end
-                        })
-                        .unwrap_or(ARTIST_RELEASE_TITLES.len() - 1);
-                    AndroidBrowseRow {
-                        section_id: class.to_string(),
-                        section: localization::tr(ARTIST_RELEASE_TITLES[class]),
-                        section_kind: "artist_release".into(),
-                        ..Self::shown_row(row, fields, position)
-                    }
-                }
-                row => Self::shown_row(row, fields, position),
+                row => shown_row(row, &self.fields, position),
             })
             .collect()
     }
 
-    async fn rows(
-        &self,
-        range: Range<usize>,
-        cancel: &ReadCancellation,
-    ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let view = self.view(cancel).await?;
-        if let Some(rows) = self.home_rows(view) {
-            let range = range.start.min(rows.len())..range.end.min(rows.len());
-            return Ok(rows[range].to_vec());
-        }
-        let first = range.start;
-        Ok(self.browse_rows(view, view.rows(range, cancel).await?, first))
+    /// Home's sections as rows, in core's order and with its titles.
+    fn home_sections(&self) -> Vec<AndroidHomeSection> {
+        use library::HomeBlockKind;
+        use rufin_core::settings::layout::{HOME_ALBUM_FIELDS, HOME_TRACK_FIELDS};
+        use rufin_core::view::{HomeItem, HomeSection};
+        // Home cards show GTK's Home labels.
+        let album_card = |album: library::HomeAlbumRow| AndroidBrowseRow {
+            display_title: Some(album.title),
+            ..shown_row(Row::Album(album.album), &HOME_ALBUM_FIELDS, 0)
+        };
+        let track_card = |track: library::HomeTrackRow| AndroidBrowseRow {
+            display_title: Some(track.title),
+            ..shown_row(Row::Track(track.track), &HOME_TRACK_FIELDS, 0)
+        };
+        let refreshable = |block: HomeBlockKind| block.section_kind().map(|_| block);
+        self.view
+            .home_sections()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|section| {
+                let title = section.title();
+                let items = || {
+                    section
+                        .items()
+                        .into_iter()
+                        .map(|item| match item {
+                            HomeItem::Track(row) => track_card(*row),
+                            HomeItem::Album(row) => album_card(*row),
+                        })
+                        .collect()
+                };
+                let (kind, refresh, rows) = match &section {
+                    HomeSection::Showcase(row) => (
+                        AndroidHomeSectionKind::Showcase,
+                        refreshable(HomeBlockKind::Showcase),
+                        vec![album_card(row.as_ref().clone())],
+                    ),
+                    HomeSection::Rows { block, .. } => {
+                        (AndroidHomeSectionKind::Rows, refreshable(*block), items())
+                    }
+                    HomeSection::Provider(_) => (AndroidHomeSectionKind::Rows, None, items()),
+                    HomeSection::Genres(genres) => (
+                        AndroidHomeSectionKind::Genres,
+                        refreshable(HomeBlockKind::Genres),
+                        genres
+                            .iter()
+                            .cloned()
+                            .map(|row| Row::Tag(row).into())
+                            .collect(),
+                    ),
+                };
+                AndroidHomeSection {
+                    title,
+                    kind,
+                    refresh,
+                    rows,
+                }
+            })
+            .collect()
     }
 
-    /// Home's rows, section after section; None when the page is not Home.
-    fn home_rows(&self, view: &View) -> Option<&[AndroidBrowseRow]> {
-        use library::HomeBlockKind;
-        use rufin_core::view::HomeSection;
-        self.home
-            .get_or_init(|| {
-                use rufin_core::settings::layout::{HOME_ALBUM_FIELDS, HOME_TRACK_FIELDS};
-                // Home cards show GTK's Home labels.
-                let album_card = |album: library::HomeAlbumRow| AndroidBrowseRow {
-                    display_title: Some(album.title),
-                    ..Self::shown_row(Row::Album(album.album), &HOME_ALBUM_FIELDS, 0)
-                };
-                let track_card = |track: library::HomeTrackRow| AndroidBrowseRow {
-                    display_title: Some(track.title),
-                    ..Self::shown_row(Row::Track(track.track), &HOME_TRACK_FIELDS, 0)
-                };
-                let in_block = |mut row: AndroidBrowseRow, block| {
-                    home_section(&mut row, block);
-                    row
-                };
-                let mut rows = Vec::new();
-                for section in view.home_sections()? {
-                    match section {
-                        HomeSection::Showcase(row) => {
-                            rows.push(in_block(album_card(*row), HomeBlockKind::Showcase))
-                        }
-                        HomeSection::Rows {
-                            block,
-                            rows: section,
-                        } => {
-                            rows.extend(
-                                section
-                                    .tracks
-                                    .into_iter()
-                                    .map(|row| in_block(track_card(row), block)),
-                            );
-                            rows.extend(
-                                section
-                                    .albums
-                                    .into_iter()
-                                    .map(|row| in_block(album_card(row), block)),
-                            );
-                        }
-                        HomeSection::Provider(section) => {
-                            let id = format!("provider:{}", section.section_id);
-                            let title = rufin_core::settings::presentation::home_provider_title(
-                                &section.section_id,
-                                section.title.as_deref(),
-                            );
-                            let provider = |row: AndroidBrowseRow| AndroidBrowseRow {
-                                section: title.clone(),
-                                section_id: id.clone(),
-                                section_kind: "section".into(),
-                                ..row
-                            };
-                            rows.extend(
-                                section
-                                    .rows
-                                    .tracks
-                                    .into_iter()
-                                    .map(|row| provider(track_card(row))),
-                            );
-                            rows.extend(
-                                section
-                                    .rows
-                                    .albums
-                                    .into_iter()
-                                    .map(|row| provider(album_card(row))),
-                            );
-                        }
-                        HomeSection::Genres(genres) => {
-                            rows.extend(genres.into_iter().map(|row| AndroidBrowseRow {
-                                section: localization::tr("Featured genres"),
-                                section_id: "Genres".into(),
-                                section_kind: "genres".into(),
-                                ..Row::Tag(row).into()
-                            }));
-                        }
-                    }
-                }
-                Some(rows)
-            })
-            .as_deref()
+    fn play_request(&self, request: Option<PlayRequest>) -> Result<(), AndroidError> {
+        self.playback
+            .play_selection(request.ok_or_else(|| error("Track is no longer in this route"))?);
+        Ok(())
     }
 }
 
 #[uniffi::export]
-impl AndroidBrowseQuery {
-    /// The tracks the page plays whole, under its filters. An artist page plays its tracks.
-    pub async fn selection(self: Arc<Self>) -> Result<Arc<MemberSelection>, AndroidError> {
+impl AndroidView {
+    pub fn route(&self) -> Route {
+        self.view.route().clone()
+    }
+
+    /// Rows `offset` onwards, at most `limit` and 256.
+    pub async fn rows(
+        self: Arc<Self>,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let route = match self.route.clone() {
-                Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
-                    Route::ArtistTracks(uri)
-                }
-                Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
-                    Route::AlbumArtistTracks(uri)
-                }
-                route => route,
-            };
-            let options = OpenOptions {
-                category: CollectionCategory::Tracks,
-                ..self.options.clone()
-            };
-            self.source
-                .selection(&route, self.selected.as_ref(), &options, &cancel)
+            let offset = usize::try_from(offset).map_err(error)?;
+            let rows = self
+                .view
+                .rows(offset..offset + limit.min(256) as usize, &cancel)
                 .await
-                .map_err(error)?
-                .map(Arc::new)
-                .ok_or_else(|| error("Choose a collection"))
+                .map_err(error)?;
+            Ok(self.rows_from(rows, offset))
         })
         .await
+    }
+
+    /// Whether a committed change means the page reads again. Rows show favorites, ratings and
+    /// a track's download through `show_state` and `show_download`; a page of collections
+    /// reads again for their download counts.
+    pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
+        self.view.refresh(&changed) != rufin_core::view::Refresh::Nothing
+            || (!changed.downloads.is_empty() && self.view.members().is_none())
+    }
+
+    /// The context id the page's plays carry.
+    pub fn context_id(&self) -> String {
+        self.view.context_id()
+    }
+
+    /// Plays the page from its row `index`. A track of the Albums list in Detail layout plays
+    /// its album, which `context_title` names.
+    pub async fn play(
+        self: Arc<Self>,
+        index: u64,
+        shuffled: bool,
+        context_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let runtime = self.runtime.clone();
+        run_read(&runtime, move |cancel| async move {
+            let index = usize::try_from(index).map_err(error)?;
+            let request = self
+                .view
+                .play(index, QueuePlacement::Now, shuffled, &cancel)
+                .await
+                .map_err(error)?;
+            // A track of the Albums list in Detail layout plays its album.
+            let target = if self.view.album_spans().is_some() {
+                Some(CollectionTarget::Album(String::new()))
+            } else {
+                CollectionTarget::for_route(self.view.route())
+            };
+            self.play_request(
+                request.map(|request| request.with_context_title(caption(target, context_title))),
+            )
+        })
+        .await
+    }
+
+    /// Plays or queues the page whole, as its header does.
+    pub fn play_all(
+        &self,
+        placement: QueuePlacement,
+        shuffled: bool,
+        context_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let target = CollectionTarget::for_route(self.view.route());
+        self.playback.play_selection(
+            self.view
+                .play_all(placement, shuffled)
+                .ok_or_else(|| error("Choose a collection"))?
+                .with_context_title(caption(target, context_title)),
+        );
+        Ok(())
+    }
+
+    /// Plays Home's section `index` from its row `from`, which `context_title` names.
+    pub fn play_section(
+        &self,
+        index: u64,
+        from: u64,
+        shuffled: bool,
+        context_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let request = self.view.play_section(
+            usize::try_from(index).map_err(error)?,
+            usize::try_from(from).map_err(error)?,
+            QueuePlacement::Now,
+            shuffled,
+        );
+        self.play_request(
+            request.map(|request| request.with_context_title(caption(None, context_title))),
+        )
+    }
+
+    /// Home's section titles, in their order.
+    pub fn home_titles(&self) -> Vec<String> {
+        self.view
+            .home_sections()
+            .unwrap_or_default()
+            .iter()
+            .map(rufin_core::view::HomeSection::title)
+            .collect()
+    }
+
+    /// The folder an album or artist page's folder link opens, resolved when it is chosen.
+    pub async fn folder_uri(&self) -> Result<String, AndroidError> {
+        let (uri, album_artist) =
+            detail_identity(self.view.route()).ok_or_else(|| error("Choose an album or artist"))?;
+        self.source
+            .collection_folder_uri(
+                uri.to_owned(),
+                album_artist,
+                self.view
+                    .selected()
+                    .and_then(|selected| selected.music_folder_key),
+            )
+            .recv()
+            .await
+            .map_err(error)?
+            .map_err(error)
+    }
+
+    pub fn has_letter_sections(&self) -> bool {
+        self.view.has_letter_sections()
+    }
+
+    pub async fn sections(self: Arc<Self>) -> Result<Vec<AndroidScrollSection>, AndroidError> {
+        let runtime = self.runtime.clone();
+        run_read(&runtime, move |cancel| async move {
+            Ok(self
+                .view
+                .sections(&cancel)
+                .await
+                .map_err(error)?
+                .into_iter()
+                .map(|section| AndroidScrollSection {
+                    title: section.title,
+                    index: section.index,
+                })
+                .collect())
+        })
+        .await
+    }
+
+    pub fn supports_downloaded_filter(&self) -> bool {
+        rufin_core::view::supports_downloaded_filter(
+            self.view.route(),
+            self.view.options().category,
+        )
+    }
+
+    pub fn supports_favorite_filter(&self) -> bool {
+        rufin_core::view::supports_favorite_filter(self.view.route(), self.view.options().category)
+    }
+
+    pub fn breadcrumbs(&self) -> Vec<AndroidBreadcrumb> {
+        let Route::Folders { path } = self.view.route() else {
+            return Vec::new();
+        };
+        let mut items = vec![AndroidBreadcrumb {
+            title: localization::tr("Folders"),
+            route: Route::Folders { path: Vec::new() },
+        }];
+        items.extend(
+            path.iter()
+                .enumerate()
+                .map(|(index, item)| AndroidBreadcrumb {
+                    title: item.name.clone(),
+                    route: Route::Folders {
+                        path: path[..=index].to_vec(),
+                    },
+                }),
+        );
+        items
+    }
+
+    pub fn sort_fields(&self) -> Vec<AndroidSortField> {
+        rufin_core::settings::available_sort_fields(self.key())
+            .iter()
+            .map(|field| AndroidSortField::of(*field))
+            .collect()
+    }
+
+    /// The list's display settings, in the order the page reads.
+    pub fn display_settings(&self) -> AndroidBrowseDisplay {
+        let key = self.key();
+        let mut display = self.settings.load().library_list(key);
+        (display.sort_key, display.descending) = self.view.order();
+        browse_display(key, &display)
+    }
+
+    /// The fields the page's rows show, by title.
+    pub fn fields(&self) -> Vec<AndroidSortField> {
+        self.fields
+            .iter()
+            .map(|field| AndroidSortField::of(*field))
+            .collect()
+    }
+}
+
+impl AndroidLibrary {
+    /// The fields a page on `route` shows in its layout. An artist's favorite tracks show as
+    /// rows, on the artist's page and their own.
+    fn shown_fields(&self, route: &Route, key: LibraryListKey) -> Vec<LibraryField> {
+        if matches!(
+            route,
+            Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
+        ) {
+            return self.favorite_fields();
+        }
+        let display = self.settings.load().library_list(key);
+        display.fields(display.layout).to_vec()
+    }
+
+    fn favorite_fields(&self) -> Vec<LibraryField> {
+        self.settings
+            .load()
+            .library_list(LibraryListKey::ArtistTracks)
+            .row_fields
+    }
+}
+
+#[uniffi::export]
+impl AndroidLibrary {
+    /// Opens `route` with these options and reads its first rows, its header unless it is
+    /// `embedded`, an artist's release groups and favorite tracks, and Home's sections.
+    /// `previous`, the view this one replaces, reads again in place when it lists the same
+    /// route in the same library, so an open Smart Playlist keeps its members.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open(
+        self: Arc<Self>,
+        route: Route,
+        category: CollectionCategory,
+        filter: String,
+        sort: Option<LibraryField>,
+        descending: bool,
+        favorites_only: bool,
+        downloaded_only: bool,
+        history_current: bool,
+        previous: Option<Arc<AndroidView>>,
+        embedded: bool,
+    ) -> Result<AndroidOpened, AndroidError> {
+        let selected = self.source.selected_library();
+        let options = OpenOptions {
+            category,
+            filter,
+            sort,
+            descending: sort.map(|_| descending),
+            favorites_only,
+            downloaded_only,
+            history_source: selected
+                .as_ref()
+                .filter(|_| history_current)
+                .map(|selected| selected.source_id.clone()),
+            ..Default::default()
+        };
+        let runtime = self.runtime.clone();
+        run_read(&runtime, move |cancel| async move {
+            let scope = |selected: Option<&rufin_core::runtime::SelectedLibrary>| {
+                selected.map(|selected| (selected.source_key, selected.music_folder_key))
+            };
+            let seed = library::RouteSeedWindow::top();
+            let opened = match previous.filter(|previous| {
+                *previous.view.route() == route
+                    && scope(previous.view.selected()) == scope(selected.as_ref())
+            }) {
+                Some(previous) => previous.view.reread(options, seed, &cancel).await,
+                None => {
+                    self.source
+                        .open(route.clone(), selected, options, seed, true, &cancel)
+                        .await
+                }
+            }
+            .map_err(error)?;
+            let key = library_list_key(&route, category);
+            let view = Arc::new(AndroidView {
+                fields: self.shown_fields(&route, key),
+                favorite_fields: self.favorite_fields(),
+                view: opened.view,
+                runtime: self.runtime.clone(),
+                playback: self.playback.clone(),
+                settings: self.settings.clone(),
+                source: self.source.clone(),
+            });
+            let rows = view.rows_from(opened.rows, opened.first);
+            let groups = view
+                .view
+                .release_counts()
+                .map(|(counts, _)| {
+                    let mut index = 0;
+                    rufin_core::settings::presentation::ARTIST_RELEASE_TITLES
+                        .iter()
+                        .zip(counts)
+                        .enumerate()
+                        .map(|(class, (title, total))| {
+                            let group = AndroidArtistReleaseGroup {
+                                id: class.to_string(),
+                                title: (*title).into(),
+                                total: total as u64,
+                                index,
+                            };
+                            index += total as u64;
+                            group
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let favorite_rows = opened
+                .favorites
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| shown_row(row, &view.favorite_fields, index))
+                .collect();
+            let header = opened
+                .header
+                .filter(|_| !view.view.is_missing() && !embedded);
+            let summary = match header {
+                Some(header) => Some(self.detail_summary(&view, header).await?),
+                None => None,
+            };
+            Ok(AndroidOpened {
+                count: view.view.len() as u64,
+                rows,
+                summary,
+                groups,
+                favorite_rows,
+                home: view.home_sections(),
+                view,
+            })
+        })
+        .await
+    }
+
+    /// Plays or queues what `route` lists, as its page's header does.
+    pub async fn play_route(
+        self: Arc<Self>,
+        route: Route,
+        placement: QueuePlacement,
+        shuffled: bool,
+        context_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let opened = self
+            .clone()
+            .open(
+                route,
+                CollectionCategory::Tracks,
+                String::new(),
+                None,
+                false,
+                false,
+                false,
+                false,
+                None,
+                true,
+            )
+            .await?;
+        opened.view.play_all(placement, shuffled, context_title)
+    }
+
+    /// Plays or queues one track.
+    pub fn play_track(&self, media_uri: String, placement: QueuePlacement, shuffled: bool) {
+        self.playback
+            .play_selection(PlayRequest::uris(vec![media_uri], placement).shuffled(shuffled));
     }
 }

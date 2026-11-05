@@ -1,143 +1,61 @@
 use super::records::AndroidDetailLink;
 use super::*;
 
-#[uniffi::export]
-impl AndroidBrowseQuery {
-    /// The fields the page's rows show, by title.
-    pub fn fields(&self) -> Vec<AndroidSortField> {
-        self.shown_fields()
-            .iter()
-            .map(|field| AndroidSortField {
-                id: *field,
-                title: localization::tr(rufin_core::settings::presentation::library_field_title(
-                    *field,
-                )),
-            })
-            .collect()
-    }
-
-    pub async fn detail_source_uri(&self) -> Result<String, AndroidError> {
-        let (uri, album_artist) = self
-            .detail_identity()
-            .ok_or_else(|| error("Choose an album or artist"))?;
-        self.source
-            .collection_folder_uri(
-                uri.to_string(),
-                album_artist,
-                self.selected().music_folder_key,
-            )
-            .recv()
-            .await
-            .map_err(error)?
-            .map_err(error)
-    }
-
-    pub async fn initial_page(
-        self: Arc<Self>,
-        embedded: bool,
-    ) -> Result<AndroidBrowsePage, AndroidError> {
-        let runtime = self.runtime.clone();
-        run_read(&runtime, move |cancel| async move {
-            let opened = self.open(&cancel).await.map_err(error)?;
-            let view = &opened.view;
-            if let Some(rows) = self.home_rows(view) {
-                let rows = rows.to_vec();
-                let _ = self.view.set(opened.view);
-                return Ok(AndroidBrowsePage {
-                    count: rows.len() as u64,
-                    rows,
-                    summary: None,
-                    groups: Vec::new(),
-                    favorite_rows: Vec::new(),
-                });
-            }
-            let rows = self.browse_rows(view, opened.rows, opened.first);
-            let mut groups = Vec::new();
-            if let Some((counts, _)) = view.release_counts() {
-                let mut index = 0;
-                for (class, (title, total)) in ARTIST_RELEASE_TITLES.iter().zip(counts).enumerate()
-                {
-                    groups.push(AndroidArtistReleaseGroup {
-                        id: class.to_string(),
-                        title: (*title).into(),
-                        total: total as u64,
-                        index,
-                    });
-                    index += total as u64;
-                }
-            }
-            let favorite_rows = opened
-                .favorites
-                .unwrap_or_default()
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| Self::shown_row(row, self.favorite_fields(), index))
-                .collect();
-            let favorite_total = view.favorites_len().unwrap_or(0) as u64;
-            let count = view.len() as u64;
-            let header = opened.header.filter(|_| !view.is_missing() && !embedded);
-            let _ = self.view.set(opened.view);
-            let summary = match header {
-                Some(header) => Some(self.detail_summary(header, favorite_total).await?),
-                None => None,
-            };
-            Ok(AndroidBrowsePage {
-                count,
-                rows,
-                summary,
-                groups,
-                favorite_rows,
-            })
-        })
-        .await
-    }
-}
-
-impl AndroidBrowseQuery {
-    async fn detail_summary(
+impl AndroidLibrary {
+    /// What a detail page's header shows of `header`.
+    pub(super) async fn detail_summary(
         &self,
+        view: &AndroidView,
         header: library::Header,
-        favorite_total: u64,
     ) -> Result<AndroidDetailSummary, AndroidError> {
         use library::{Header, PlaylistListRow, TagKind};
-        let catalog = &self.catalog;
-        let folder = self
-            .selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key);
-        let named = match &header {
-            Header::Playlist(row) => Some((
-                row.artwork_binding.iter().cloned().collect(),
-                "Playlist",
-                Row::Playlist(PlaylistListRow::Playlist(row.as_ref().clone())),
-            )),
-            Header::Smart(row) => Some((
-                row.artwork_binding.iter().cloned().collect(),
-                "Playlist",
-                Row::Playlist(PlaylistListRow::SmartPlaylist(row.as_ref().clone())),
-            )),
-            Header::Tag(row) => Some(if row.kind == TagKind::Genre {
-                (
-                    row.artwork_binding
-                        .as_ref()
-                        .map(std::slice::from_ref)
-                        .unwrap_or(&row.representative_artwork)
-                        .to_vec(),
-                    "Genre",
-                    Row::Tag(row.clone()),
-                )
-            } else {
-                (
-                    row.representative_artwork.clone(),
-                    "Mood",
-                    Row::Tag(row.clone()),
-                )
-            }),
-            _ => None,
+        let summary = |row: Row, artwork_bindings, label: &str, links| AndroidDetailSummary {
+            row: row.into(),
+            artwork_bindings,
+            artist_text: String::new(),
+            artist_links: Vec::new(),
+            label: label.into(),
+            links,
+            favorite_total: view.view.favorites_len().unwrap_or(0) as u64,
         };
-        if let Some((artwork_bindings, label, row)) = named {
-            let links = if let Header::Playlist(playlist) = &header {
-                playlist
+        let (uri, album_artist) = detail_identity(view.view.route()).unwrap_or_default();
+        let link_settings = self.settings.load().application.external_site_links.clone();
+        let configuration = library::source_entity_parts(uri)
+            .and_then(|(source_id, _, _)| self.source.configuration(&source_id));
+        // A local folder link resolves when the page opens; without a folder it goes.
+        let local = link_settings.enabled
+            && link_settings.server
+            && configuration
+                .as_ref()
+                .is_some_and(|source| source.is_local());
+        let folder_uri = if local {
+            let folder = view
+                .view
+                .selected()
+                .and_then(|selected| selected.music_folder_key);
+            self.source
+                .collection_folder_uri(uri.to_owned(), album_artist, folder)
+                .recv()
+                .await
+                .map_err(error)?
+                .ok()
+        } else {
+            None
+        };
+        let links = |links: Vec<rufin_core::detail_links::DetailLink>| {
+            links
+                .into_iter()
+                .filter_map(|mut link| {
+                    if local && link.url.is_none() {
+                        link.url = Some(folder_uri.clone()?);
+                    }
+                    Some(link.into())
+                })
+                .collect::<Vec<AndroidDetailLink>>()
+        };
+        Ok(match header {
+            Header::Playlist(playlist) => {
+                let links = playlist
                     .source_id
                     .as_ref()
                     .and_then(|id| {
@@ -154,147 +72,62 @@ impl AndroidBrowseQuery {
                         )
                     })
                     .into_iter()
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            let show_track_images = self
-                .display
-                .row_fields
-                .iter()
-                .any(|field| matches!(field, LibraryField::Image | LibraryField::TitleMerged));
-            return Ok(AndroidDetailSummary {
-                row: row.into(),
-                artwork_bindings,
-                artist_text: String::new(),
-                artist_links: Vec::new(),
-                label: label.into(),
-                mode: self.route.clone(),
-                album_count: 0,
-                links,
-                favorite_route: None,
-                favorite_total: 0,
-                discography_route: None,
-                tracks_route: Some(self.route.clone()),
-                show_track_images,
-                show_track_header: self.display.display.show_header,
-            });
-        }
-        let (uri, album_artist) = self.detail_identity().expect("album or artist detail");
-        let uri = uri.to_string();
-        let configuration = library::source_entity_parts(&uri)
-            .and_then(|(source_id, _, _)| self.source.configuration(&source_id));
-        let link_settings = self.settings.load().application.external_site_links.clone();
-        let local_folder_link = link_settings.enabled
-            && link_settings.server
-            && configuration
-                .as_ref()
-                .is_some_and(|source| source.is_local());
-        let folder_uri = if local_folder_link {
-            match catalog
-                .collection_source_path_bounds(&uri, album_artist, folder)
-                .await
-                .map_err(error)?
-            {
-                Some((first, last)) => configuration
-                    .as_ref()
-                    .unwrap()
-                    .detail_folder_uri(&first, &last)
-                    .map_err(error)?,
-                None => None,
+                    .collect();
+                let artwork = playlist.artwork_binding.iter().cloned().collect();
+                summary(
+                    Row::Playlist(PlaylistListRow::Playlist(*playlist)),
+                    artwork,
+                    "Playlist",
+                    links,
+                )
             }
-        } else {
-            None
-        };
-        let present_links = |links: Vec<rufin_core::detail_links::DetailLink>| {
-            links
-                .into_iter()
-                .filter_map(|mut link| {
-                    if local_folder_link && link.url.is_none() {
-                        link.url = Some(folder_uri.clone()?);
-                    }
-                    Some(link.into())
-                })
-                .collect::<Vec<AndroidDetailLink>>()
-        };
-        if let Header::Album(album) = header {
-            let links = present_links(rufin_core::detail_links::album_external_links(
-                &link_settings,
-                configuration.as_ref(),
-                &album,
-            ));
-            let show_track_images = self
-                .display
-                .row_fields
-                .iter()
-                .any(|field| matches!(field, LibraryField::Image | LibraryField::TitleMerged));
-            let credited = rufin_core::route::detail_links::album_artist_links(&album);
-            let artist_text = credited.display_text().to_string();
-            let artist_links = AndroidArtistLink::from_detail_links(&credited)?;
-            let artwork_bindings = album.row.artwork_binding.iter().cloned().collect();
-            return Ok(AndroidDetailSummary {
-                artwork_bindings,
-                row: Row::Album(album.row).into(),
-                artist_text,
-                artist_links,
-                label: "Album".into(),
-                mode: self.route.clone(),
-                album_count: 1,
-                links,
-                favorite_route: None,
-                favorite_total: 0,
-                discography_route: None,
-                tracks_route: Some(Route::AlbumDetail(uri)),
-                show_track_images,
-                show_track_header: self.display.display.show_header,
-            });
-        }
-        let Header::Artist(artist) = header else {
-            unreachable!("artist detail")
-        };
-        let links = present_links(rufin_core::detail_links::artist_external_links(
-            &link_settings,
-            configuration.as_ref(),
-            &artist,
-        ));
-        let album_count = artist.row.summary.album_count.max(0) as u64;
-        let artwork_bindings = artist.row.artwork_binding.iter().cloned().collect();
-        let row = Row::Artist(artist.row).into();
-        let favorite_route = if album_artist {
-            Route::AlbumArtistFavoriteTracks(uri.clone())
-        } else {
-            Route::ArtistFavoriteTracks(uri.clone())
-        };
-        let discography_route = if album_artist {
-            Route::AlbumArtistDiscography(uri.clone())
-        } else {
-            Route::ArtistDiscography(uri.clone())
-        };
-        let tracks_route = if album_artist {
-            Route::AlbumArtistTracks(uri)
-        } else {
-            Route::ArtistTracks(uri)
-        };
-        let show_track_images = self
-            .artist_tracks
-            .row_fields
-            .iter()
-            .any(|field| matches!(field, LibraryField::Image | LibraryField::TitleMerged));
-        Ok(AndroidDetailSummary {
-            artwork_bindings,
-            row,
-            artist_text: String::new(),
-            artist_links: Vec::new(),
-            label: "Artist".into(),
-            mode: self.route.clone(),
-            album_count,
-            links,
-            favorite_route: Some(favorite_route),
-            favorite_total,
-            discography_route: Some(discography_route),
-            tracks_route: Some(tracks_route),
-            show_track_images,
-            show_track_header: self.artist_tracks.display.show_header,
+            Header::Smart(smart) => {
+                let artwork = smart.artwork_binding.iter().cloned().collect();
+                summary(
+                    Row::Playlist(PlaylistListRow::SmartPlaylist(*smart)),
+                    artwork,
+                    "Playlist",
+                    Vec::new(),
+                )
+            }
+            Header::Tag(tag) => {
+                let (artwork, label) = match (&tag.artwork_binding, tag.kind) {
+                    (Some(binding), TagKind::Genre) => (vec![binding.clone()], "Genre"),
+                    (None, TagKind::Genre) => (tag.representative_artwork.clone(), "Genre"),
+                    (_, TagKind::Mood) => (tag.representative_artwork.clone(), "Mood"),
+                };
+                summary(Row::Tag(tag), artwork, label, Vec::new())
+            }
+            Header::Album(album) => {
+                let credited = rufin_core::route::detail_links::album_artist_links(&album);
+                let links = links(rufin_core::detail_links::album_external_links(
+                    &link_settings,
+                    configuration.as_ref(),
+                    &album,
+                ));
+                let label = rufin_core::settings::presentation::album_release_title(
+                    album.row.release_class,
+                );
+                AndroidDetailSummary {
+                    artist_text: credited.display_text().to_string(),
+                    artist_links: AndroidArtistLink::from_detail_links(&credited)?,
+                    ..summary(
+                        Row::Album(album.row.clone()),
+                        album.row.artwork_binding.iter().cloned().collect(),
+                        label,
+                        links,
+                    )
+                }
+            }
+            Header::Artist(artist) => {
+                let links = links(rufin_core::detail_links::artist_external_links(
+                    &link_settings,
+                    configuration.as_ref(),
+                    &artist,
+                ));
+                let artwork = artist.row.artwork_binding.iter().cloned().collect();
+                summary(Row::Artist(artist.row), artwork, "Artist", links)
+            }
         })
     }
 }

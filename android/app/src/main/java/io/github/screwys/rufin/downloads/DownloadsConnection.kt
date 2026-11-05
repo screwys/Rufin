@@ -21,12 +21,6 @@ internal fun DownloadRule.title() = translate(when (this) {
     DownloadRule.ALL_PLAYLISTS -> "All Playlists"
     DownloadRule.LATEST_FIVE_ALBUMS -> "5 Latest Albums"
 })
-internal fun DownloadRules.enabled(rule: DownloadRule) = when (rule) {
-    DownloadRule.ENTIRE_LIBRARY -> entireLibrary
-    DownloadRule.FAVORITES -> favorites
-    DownloadRule.ALL_PLAYLISTS -> allPlaylists
-    DownloadRule.LATEST_FIVE_ALBUMS -> latestFiveAlbums
-}
 internal fun DownloadSubject.title() = when (this) {
     is DownloadSubject.Rule -> v1.title()
     is DownloadSubject.Prepared -> title ?: translate("Downloads")

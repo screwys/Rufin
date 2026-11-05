@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.metadata
 
+import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -41,10 +42,10 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri: String, onDismiss: () -> Unit) {
+internal fun MetadataEditorScreen(model: RufinConnection, item: MetadataItemId, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val connection = remember(model, kind, mediaUri) { MetadataConnection(model, context, kind, mediaUri, scope, onDismiss) }
+    val connection = remember(model, item) { MetadataConnection(model, context, item, scope, onDismiss) }
     LaunchedEffect(connection) { connection.open() }
     DisposableEffect(connection) { onDispose { connection.close() } }
     var page by remember { mutableIntStateOf(0) }
@@ -88,7 +89,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
                             if (state.selectedCount == 1UL) Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
                         }
                         when (page) {
-                            0 -> MetadataFields(connection, state, editable, kind)
+                            0 -> MetadataFields(connection, state, editable, item is MetadataItemId.Track)
                             1 -> MetadataArtwork(connection, state, editable) { import.launch(arrayOf("image/*")) }
                         }
                     } else if (connection.failure == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -117,14 +118,14 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 }
 
 @Composable
-private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, kind: String) {
+private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, track: Boolean) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
                 DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp)); Text(if (kind == "track" || connection.batch != null) translate("Search by AcoustID") else translate("Lookup"))
+                Spacer(Modifier.width(8.dp)); Text(if (track || connection.batch != null) translate("Search by AcoustID") else translate("Lookup"))
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->

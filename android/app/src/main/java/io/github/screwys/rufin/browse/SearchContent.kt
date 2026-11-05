@@ -3,6 +3,8 @@ package io.github.screwys.rufin.browse
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.library.SearchMode
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.showsLyricsCachePrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -77,10 +79,7 @@ internal fun SearchContent(
         val settings = preferences.applicationSettings
         val showLyricsCachePrompt = browse.searchText.isNotBlank() &&
             browse.searchMode == SearchMode.LYRICS &&
-            settings != null &&
-            !settings.downloadLyricsAutomatically &&
-            !settings.lyricsCachePromptDismissed &&
-            model.sources?.sources?.any { it.kind != "local" } == true
+            settings != null && showsLyricsCachePrompt(settings, model.sources?.sources.orEmpty())
         if (showLyricsCachePrompt) {
             Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Surface(
@@ -134,7 +133,7 @@ private fun SearchResults(
         val searchFlow = remember(browse) { snapshotFlow { browse.searchRows }.map { PagingData.from(it) } }
         val rows = searchFlow.collectAsLazyPagingItems()
         BrowseContent(rows, emptyList(), player, false, false, false, browse::open, onMenu,
-            browse::playSection, browse::refreshSection, browse::favorite, onPlaylist, onScrolled,
+            { _, _ -> }, browse::refreshSection, browse::favorite, onPlaylist, onScrolled,
             loading = browse.loading, onRadio = { browse.radio(it, QueuePlacement.Replace(0UL)) })
         return
     }
@@ -152,16 +151,16 @@ private fun SearchResults(
                 if (browse.recentSearchRows.isNotEmpty()) TextButton(browse::clearRecentSearches) { Text(translate("Clear")) }
             }
         }
-        items(browse.recentSearchRows, key = { "${it.row.kind}:${it.row.mediaUri}" }) { item ->
+        items(browse.recentSearchRows, key = { "${it.row.recent?.kind}:${it.row.mediaUri}" }) { item ->
             val pixels = with(LocalDensity.current) { 50.dp.roundToPx() }
             val artwork = rememberArtwork(item.row.artworkIdentity, player, pixels)
             BrowseSwipeActions(item, true) {
             ListItem(
                 headlineContent = { BrowseTitle(item, player = player) },
                 supportingContent = {
-                    Text(listOf(item.row.subtitle, translate(when (item.row.kind) {
-                        "album" -> "Album"
-                        "artist" -> "Artist"
+                    Text(listOf(item.row.subtitle, translate(when (item.row.target) {
+                        is FavoriteTarget.Album -> "Album"
+                        is FavoriteTarget.Artist -> "Artist"
                         else -> "Track"
                     })).filter(String::isNotBlank).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
@@ -186,5 +185,5 @@ private fun SearchResults(
             { browse.removeRecentSearch(item); selected = null },
             onNavigate = { route, title, source -> selected = null; browse.openLinkedRoute(route, title, source) })
     }
-    metadata?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(player.model, item.row.kind, item.row.mediaUri) { metadata = null } }
+    metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(player.model, item) { metadata = null } }
 }

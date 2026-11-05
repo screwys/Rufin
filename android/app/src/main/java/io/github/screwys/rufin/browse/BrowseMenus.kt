@@ -16,6 +16,9 @@ import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.shared.library.DownloadItem
 import io.github.screwys.rufin.shared.library.DownloadStatus
 import io.github.screwys.rufin.shared.library.MemberSelection
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
+import io.github.screwys.rufin.shared.rufin_core.sourceHalfStarsEnabled
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -93,7 +96,7 @@ internal val AndroidBrowseRow.downloadItem: DownloadItem?
         is Route.MoodDetail -> DownloadItem.Mood(target.v1)
         is Route.PlaylistDetail -> DownloadItem.Playlist(target.v1)
         is Route.SmartPlaylistDetail -> DownloadItem.SmartPlaylist(target.v1)
-        else -> if (kind == "track") DownloadItem.Track(mediaUri) else null
+        else -> if (isTrack) DownloadItem.Track(mediaUri) else null
     }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -230,16 +233,16 @@ internal fun BrowseMenuSheet(
     }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
-    val canRate = item.row.kind in setOf("track", "album", "album_header", "artist")
+    val canRate = item.row.target != null
     var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
     var ratingVisible by remember { mutableStateOf(false) }
-    val halfStars = model.sources?.sources?.firstOrNull { it.id == (item.row.sourceId ?: model.sources?.selectedSourceId) }?.halfStarsEnabled == true
+    val halfStars = model.sources?.let { sourceHalfStarsEnabled(it, item.row.mediaUri, item.row.sourceId) } == true
     LaunchedEffect(item.row.item, browse.library) {
         if (canRate) ratingVisible = withContext(Dispatchers.IO) {
             model.connectedService().runtime.value!!.getOrThrow().settings().use { it.applicationPreferences().contextMenu.ratingVisible }
         }
         if (item.row.item is AndroidBrowseItem.Recent) {
-            try { rating = browse.library?.rating(favoriteTarget(item.row.kind, item.row.mediaUri)) }
+            try { rating = item.row.target?.let { browse.library?.rating(it) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { model.runAction { throw error } }
         }
@@ -247,7 +250,7 @@ internal fun BrowseMenuSheet(
     val downloadItem = item.row.downloadItem
     val downloadFolder = (item.row.route as? Route.Folders)?.takeIf { item.row.item is AndroidBrowseItem.Folder }
     var downloaded by remember(downloadItem, downloadFolder, browse.library) { mutableStateOf<DownloadStatus?>(null) }
-    LaunchedEffect(downloadItem, downloadFolder, browse.library, model.downloads.state?.revision) {
+    LaunchedEffect(downloadItem, downloadFolder, browse.library) {
         try {
             downloaded = when {
                 downloadItem != null -> browse.library?.itemDownloadStatus(downloadItem)
@@ -274,7 +277,7 @@ internal fun BrowseMenuSheet(
         MediaMenuBackdrop(item.row.artworkIdentity, player) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 8.dp, bottom = 16.dp)) {
             BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
-            if (item.row.kind == "track" && item.row.mediaUri == playingUri) {
+            if (item.row.isTrack && item.row.mediaUri == playingUri) {
                 val (shuffle, autoDj, repeat) = playbackControls
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     BrowsePrimaryAction("rufin-shuffle-symbolic",
@@ -289,9 +292,9 @@ internal fun BrowseMenuSheet(
                 MediaMenuDivider()
             }
             BrowseMenuHeader(projected, player,
-                onFavorite = if (item.row.kind in setOf("track", "album", "album_header", "artist")) ({ browse.favorite(projected) }) else null,
+                onFavorite = if (item.row.target != null) ({ browse.favorite(projected) }) else null,
                 onDetails = if (canRate) ({ details = true }) else null)
-            val playable = item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "mood", "playlist", "smart_playlist", "folder")
+            val playable = item.row.playlistFolder == null
             if (playable) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -304,12 +307,12 @@ internal fun BrowseMenuSheet(
                     BrowsePrimaryAction("rufin-go-last-symbolic", "Play Later", Modifier.weight(1f),
                         shuffle = { browse.play(item, QueuePlacement.End, true); onDismiss() }) { browse.play(item, QueuePlacement.End); onDismiss() }
                 }
-                val radioLabel = when (item.row.kind) {
-                    "track" -> "Track radio"
-                    "album", "album_header" -> "Album radio"
-                    "artist" -> "Artist radio"
-                    "genre" -> "Genre radio"
-                    "playlist" -> "Playlist radio"
+                val radioLabel = when {
+                    item.row.target is FavoriteTarget.Track -> "Track radio"
+                    item.row.target is FavoriteTarget.Album -> "Album radio"
+                    item.row.target is FavoriteTarget.Artist -> "Artist radio"
+                    item.row.genre != null -> "Genre radio"
+                    item.row.playlist != null -> "Playlist radio"
                     else -> null
                 }
                 radioLabel?.let { label ->
@@ -348,7 +351,7 @@ internal fun BrowseMenuSheet(
                         BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
                 }
             }
-            if (item.row.kind in setOf("track", "album", "album_header", "artist")) {
+            if (item.row.target != null) {
                 BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
             }
@@ -371,7 +374,7 @@ internal fun BrowseMenuSheet(
             if (canRate && ratingVisible) {
                 MediaMenuDivider()
                 MenuRating(rating, halfStars) { value -> model.runAction {
-                    withContext(Dispatchers.IO) { model.sourceOwner?.setRating(favoriteTarget(item.row.kind, item.row.mediaUri), value) }
+                    withContext(Dispatchers.IO) { item.row.target?.let { model.sourceOwner?.setRating(it, value) } }
                     onDismiss()
                 } }
             }
@@ -413,7 +416,7 @@ internal fun BrowseMenuSheet(
 
 @Composable
 internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavorite: (() -> Unit)? = null, onDetails: (() -> Unit)? = null) {
-    val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.kind == "track" || it != item.row.title }.orEmpty())
+    val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.isTrack || it != item.row.title }.orEmpty())
         .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
     CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, item.row.favorite, player, onFavorite, onDetails) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
@@ -548,7 +551,7 @@ internal fun PlaylistPickerSheet(
     val library = browse.library
     val pages = remember(library, filter, folderKind) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind, model.downloads) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (pages.loadState.refresh as? LoadState.Error)?.error ?: (pages.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
@@ -623,8 +626,8 @@ internal fun PlaylistPickerSheet(
 }
 
 private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): MemberSelection =
-    if (item.row.kind == "track") MemberSelection.fromUris(listOf(item.row.mediaUri))
-    else library.targetQuery(item.row.route!!).use { it.selection() }
+    if (item.row.isTrack) MemberSelection.fromUris(listOf(item.row.mediaUri))
+    else library.routeSelection(item.row.route!!)
 
 @Composable
 internal fun PlaylistCreateSheet(
@@ -671,14 +674,12 @@ internal fun PlaylistCreateSheet(
 internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
     private val folderKind: Boolean? = null,
-    private val downloads: io.github.screwys.rufin.downloads.DownloadsConnection,
 ) : PagingSource<Int, BrowseItem>() {
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
-            val downloadRevision = downloads.state?.revision
             fun items(rows: List<AndroidBrowseRow>) = rows.mapIndexed { index, row ->
-                BrowseItem(row, (offset + index).toULong(), null, downloadRevision = downloadRevision)
+                BrowseItem(row, (offset + index).toULong(), null)
             }
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
@@ -698,14 +699,14 @@ internal class BrowseChoiceSource(
                     is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
                     else -> route
                 }
-                val query = library.browse(tracks, "tracks", filter, LibraryField.TITLE, false, false, false, null)
+                val opened = library.open(tracks, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false, false, null, true)
                 try {
-                    val count = query.count().toInt()
-                    val rows = query.page(offset.toULong(), params.loadSize.toUInt())
+                    val count = opened.count.toInt()
+                    val rows = opened.view.rows(offset.toULong(), params.loadSize.toUInt())
                     LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
-                } finally { query.destroy() }
+                } finally { opened.view.destroy() }
             }
         }
     } catch (cancelled: CancellationException) { throw cancelled }

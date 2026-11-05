@@ -33,10 +33,7 @@ impl AndroidLibrary {
         &self,
         path: Vec<rufin_core::route::FolderPathItem>,
     ) -> Result<library::DownloadStatus, AndroidError> {
-        let selection = self
-            .target_query(Route::Folders { path })?
-            .selection()
-            .await?;
+        let selection = self.route_selection(Route::Folders { path }).await?;
         let MemberSelection::Members { mut read, .. } = Arc::unwrap_or_clone(selection) else {
             unreachable!("A folder lists its tracks")
         };
@@ -69,19 +66,19 @@ impl AndroidLibrary {
         media_uri: String,
         remove: bool,
     ) -> Result<(), AndroidError> {
-        let query = route
-            .as_ref()
-            .map(|route| self.target_query(route.clone()))
-            .transpose()?;
+        let selection = match &route {
+            Some(route) => Some(self.route_selection(route.clone()).await?),
+            None => None,
+        };
         // A download takes a collection in every music folder; a folder's tracks and a smart
         // playlist's members are the ones of the folder they are read in.
         let every_music_folder = !matches!(route, Some(Route::Folders { .. }));
         let source = self.source.clone();
         self.runtime
             .spawn(async move {
-                let selection = match query {
-                    Some(query) => {
-                        let mut selection = query.selection().await?.as_ref().clone();
+                let selection = match selection {
+                    Some(selection) => {
+                        let mut selection = Arc::unwrap_or_clone(selection);
                         if let MemberSelection::Members { read, .. } = &mut selection
                             && every_music_folder
                             && !matches!(read.collection, Collection::Smart { .. })
@@ -109,76 +106,6 @@ impl AndroidLibrary {
             })
             .await
             .map_err(error)?
-    }
-}
-
-impl AndroidLibrary {
-    pub(super) fn browse_query(
-        &self,
-        route: Route,
-        category: String,
-        filter: String,
-        sort: Option<LibraryField>,
-        descending: bool,
-        favorites_only: bool,
-        downloaded_only: bool,
-        previous: Option<Arc<AndroidBrowseQuery>>,
-    ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
-        let history_current_only = category == "current";
-        let category = CollectionCategory::from_name(&category);
-        let settings = self.settings.load();
-        let display = settings.library_list(library_list_key(&route, category));
-        let (sort, descending) = sort.map_or((display.sort_key, display.descending), |sort| {
-            (sort, descending)
-        });
-        let selected = self.source.selected_library();
-        if selected.is_none()
-            && !matches!(
-                route,
-                Route::Playlists
-                    | Route::PlaylistDetail(_)
-                    | Route::SmartPlaylists
-                    | Route::SmartPlaylistDetail(_)
-                    | Route::PlaylistFolder { .. }
-            )
-            && (!matches!(route, Route::History) || history_current_only)
-        {
-            return Err(error("No source selected"));
-        }
-        let options = OpenOptions {
-            category,
-            filter,
-            sort: Some(sort),
-            descending: Some(descending),
-            favorites_only,
-            downloaded_only,
-            history_source: selected
-                .as_ref()
-                .filter(|_| history_current_only)
-                .map(|selected| selected.source_id.clone()),
-            // A Smart Playlist page keeps the members it opened with while it stays open.
-            smart_opened: previous
-                .filter(|previous| previous.route == route)
-                .and_then(|previous| previous.view.get()?.options().smart_opened),
-            ..Default::default()
-        };
-        Ok(Arc::new(AndroidBrowseQuery {
-            selected,
-            catalog: self.catalog.clone(),
-            runtime: self.runtime.clone(),
-            playback: self.playback.clone(),
-            source: self.source.clone(),
-            settings: self.settings.clone(),
-            route,
-            options,
-            sort,
-            descending,
-            display,
-            album_tracks: settings.library_list(LibraryListKey::AlbumDetailTracks),
-            artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
-            view: tokio::sync::OnceCell::new(),
-            home: std::sync::OnceLock::new(),
-        }))
     }
 }
 
@@ -236,12 +163,12 @@ impl AndroidLibrary {
     pub fn set_browse_display(
         &self,
         route: Route,
-        category: String,
+        category: CollectionCategory,
         layout: LibraryLayout,
         size: DisplaySize,
         grid_spacing: DisplaySize,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
-        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        let key = library_list_key(&route, category);
         self.settings
             .update_library_list_settings(key, |settings| {
                 settings.layout = layout;
@@ -255,11 +182,11 @@ impl AndroidLibrary {
     pub fn show_browse_field(
         &self,
         route: Route,
-        category: String,
+        category: CollectionCategory,
         field: LibraryField,
         shown: bool,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
-        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        let key = library_list_key(&route, category);
         self.update_browse_fields(key, |settings| {
             settings.show_field(key, settings.layout, field, shown);
         })
@@ -269,11 +196,11 @@ impl AndroidLibrary {
     pub fn move_browse_field(
         &self,
         route: Route,
-        category: String,
+        category: CollectionCategory,
         field: LibraryField,
         up: bool,
     ) -> Result<AndroidBrowseDisplay, AndroidError> {
-        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        let key = library_list_key(&route, category);
         self.update_browse_fields(key, |settings| {
             settings.move_field(settings.layout, field, if up { -1 } else { 1 });
         })
@@ -282,11 +209,11 @@ impl AndroidLibrary {
     pub fn set_browse_sort(
         &self,
         route: Route,
-        category: String,
+        category: CollectionCategory,
         sort: LibraryField,
         descending: bool,
     ) -> Result<(), AndroidError> {
-        let key = library_list_key(&route, CollectionCategory::from_name(&category));
+        let key = library_list_key(&route, category);
         self.settings
             .update_library_list_settings(key, |settings| {
                 settings.sort_key = sort;
@@ -296,15 +223,15 @@ impl AndroidLibrary {
         Ok(())
     }
 
+    /// Plays the radio of the track `track` names, or of the collection `route` shows.
     pub async fn play_radio(
         &self,
-        kind: String,
-        media_uri: String,
+        track: Option<String>,
         route: Option<Route>,
         placement: rufin_core::playback::QueuePlacement,
     ) -> Result<(), AndroidError> {
-        let seed = if kind == "track" {
-            library::RadioSeed::Track(media_uri)
+        let seed = if let Some(track) = track {
+            library::RadioSeed::Track(track)
         } else {
             let route = route.ok_or_else(|| error("Choose a radio seed"))?;
             self.catalog.loaded().await;
@@ -338,8 +265,10 @@ impl AndroidLibrary {
         Ok(self.settings.changes().borrow().ui.sidebar.is_pinned(&pin))
     }
 
-    pub async fn refresh_home(&self, section_id: String) -> Result<(), AndroidError> {
-        let kind = serde_json::from_value(serde_json::Value::String(section_id)).map_err(error)?;
+    pub async fn refresh_home(&self, block: library::HomeBlockKind) -> Result<(), AndroidError> {
+        let kind = block
+            .section_kind()
+            .ok_or_else(|| error("This section has no refresh"))?;
         let selected = self
             .source
             .selected_library()
@@ -450,7 +379,7 @@ impl AndroidLibrary {
         CollectionCategory::ALL
             .into_iter()
             .map(|category| AndroidCollectionCategory {
-                id: category.name().into(),
+                category,
                 title: localization::tr(category.title()),
                 icon_name: category.icon_name().into(),
             })
@@ -531,62 +460,6 @@ impl AndroidLibrary {
             .into_iter()
             .map(route_descriptor)
             .collect()
-    }
-
-    pub fn browse(
-        &self,
-        route: Route,
-        category: String,
-        filter: String,
-        sort: Option<LibraryField>,
-        descending: bool,
-        favorites_only: bool,
-        downloaded_only: bool,
-        previous: Option<Arc<AndroidBrowseQuery>>,
-    ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
-        self.browse_query(
-            route,
-            category,
-            filter,
-            sort,
-            descending,
-            favorites_only,
-            downloaded_only,
-            previous,
-        )
-    }
-
-    pub async fn search(
-        &self,
-        text: String,
-        mode: library::SearchMode,
-    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
-        let selected = self.source.selected_library();
-        let source = self.source.clone();
-        let catalog = self.catalog.clone();
-        let fields = {
-            let stored = self.settings.changes();
-            let stored = stored.borrow();
-            CollectionCategory::ALL
-                .map(|category| stored.ui.library_list(category.key()).row_fields)
-        };
-        self.runtime
-            .spawn(async move {
-                rufin_core::source::search::acquire_search(
-                    &source,
-                    &catalog,
-                    selected.as_ref(),
-                    mode,
-                    text,
-                    60,
-                    ReadCancellation::new(),
-                )
-                .await
-            })
-            .await
-            .map_err(error)?
-            .map(|rows| search_rows(rows, fields))
-            .map_err(error)
     }
 
     pub async fn prepare_collection(&self, media_uri: String) -> Result<(), AndroidError> {
@@ -744,16 +617,29 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub fn target_query(&self, route: Route) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
-        self.browse_query(
-            route,
-            "tracks".into(),
-            String::new(),
-            None,
-            false,
-            false,
-            false,
-            None,
-        )
+    /// The tracks `route` lists, for a download or a playlist: an artist page lists the
+    /// artist's tracks.
+    pub async fn route_selection(
+        &self,
+        route: Route,
+    ) -> Result<Arc<MemberSelection>, AndroidError> {
+        let route = match route {
+            Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => Route::ArtistTracks(uri),
+            Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
+                Route::AlbumArtistTracks(uri)
+            }
+            route => route,
+        };
+        let source = self.source.clone();
+        let selected = source.selected_library();
+        run_read(&self.runtime, move |cancel| async move {
+            source
+                .selection(&route, selected.as_ref(), &OpenOptions::default(), &cancel)
+                .await
+                .map_err(error)?
+                .map(Arc::new)
+                .ok_or_else(|| error("Choose a collection"))
+        })
+        .await
     }
 }

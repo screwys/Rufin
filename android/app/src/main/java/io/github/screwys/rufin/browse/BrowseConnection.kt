@@ -5,6 +5,10 @@ import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.shared.library.SearchMode
+import io.github.screwys.rufin.shared.library.FavoriteTarget
+import io.github.screwys.rufin.shared.library.HomeBlockKind
+import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
+import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.ui.userMessage
 
@@ -19,7 +23,9 @@ internal enum class AppSection { Browse, Search, Pins, More }
 internal class BrowseOptions {
     var preparing by mutableStateOf(false)
     var preparationError by mutableStateOf<String?>(null)
-    var category by mutableStateOf("tracks")
+    var category by mutableStateOf(CollectionCategory.TRACKS)
+    /** History lists the selected source's plays rather than every source's. */
+    var historyCurrent by mutableStateOf(false)
     var filter by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
     var downloadedOnly by mutableStateOf(false)
@@ -29,14 +35,14 @@ internal class BrowseOptions {
 }
 
 internal data class BrowseLocation(
-    val route: Route, val title: String, val kind: String = "",
+    val route: Route, val title: String,
     val options: BrowseOptions = BrowseOptions(),
     val playbackTitle: String = title,
 )
-internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val query: AndroidBrowseQuery?,
-    val displaySettings: AndroidBrowseDisplay? = null, val fromPins: Boolean = false,
-    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null,
-    val downloadRevision: ULong? = null)
+/** A row and where it shows: its place in `view`, or in Home's `section`, or among search results. */
+internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val view: AndroidView?,
+    val displaySettings: AndroidBrowseDisplay? = null, val section: ULong? = null,
+    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null)
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -82,23 +88,22 @@ internal class BrowseConnection(private val connection: RufinConnection, private
 
     fun optionsFor(rootId: String): BrowseOptions = routeOptions.getOrPut(rootId) { BrowseOptions() }
     private val currentOptions get() = details.lastOrNull()?.options ?: optionsFor(rootId)
-    var category: String
+    var category: CollectionCategory
         get() = currentOptions.category
         set(value) { currentOptions.category = value }
     var filter: String
         get() = currentOptions.filter
         set(value) { currentOptions.filter = value }
     val scrollSections get() = visiblePage?.scrollSections.orEmpty()
-    val homeRows get() = visiblePage?.homeRows.orEmpty()
     val loading get() = if (section == AppSection.Search) searchLoading else visiblePage?.loading == true
     val detail get() = details.isNotEmpty()
     val collectionCategories get() = when {
         !detail && rootId == "Favorites" -> categories
-        details.lastOrNull()?.kind == "artist" -> categories.filter { it.id != "artists" }
+        details.lastOrNull()?.route?.showsReleases == true -> categories.filter { it.category != CollectionCategory.ARTISTS }
         else -> emptyList()
     }
     val current get() = details.lastOrNull() ?: routes.firstOrNull { it.id == rootId }
-        ?.let { BrowseLocation(it.route, it.title, it.id, optionsFor(it.id)) }
+        ?.let { BrowseLocation(it.route, it.title, optionsFor(it.id)) }
 
     private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
         val library: AndroidLibrary?, val source: ConfiguredSources?, val changes: Int, val submission: Int)
@@ -153,13 +158,12 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     searchLoading = true
                     try {
                         searchRows = withContext(Dispatchers.Default) {
-                            val downloadRevision = connection.downloads.state?.revision
                             val rows = context.library.search(context.text, context.mode)
-                            val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
+                            val order = rows.filter { it.isTrack }.map { it.mediaUri }
                             val capture = if (context.mode == SearchMode.LYRICS) "search:lyrics:${context.text}"
                                 else "search:${context.source?.selectedSourceId}:title:${context.text}"
                             rows.mapIndexed { index, row ->
-                                BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text, downloadRevision = downloadRevision)
+                                BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
                             }
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
@@ -208,19 +212,19 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val index = details.indexOfLast { it.route == route }
         if (index >= 0) details = details.take(index + 1)
         else if (routes.any { it.id == "Folders" && it.route == route }) chooseRoot("Folders")
-        else details = details.dropLast(1) + BrowseLocation(route, title, "folder", currentOptions)
+        else details = details.dropLast(1) + BrowseLocation(route, title, currentOptions)
     }
-    fun openRoute(route: Route, title: String, kind: String = "", playbackTitle: String = title) {
+    fun openRoute(route: Route, title: String, playbackTitle: String = title) {
         section = AppSection.Browse
-        val options = BrowseOptions().also { it.category = if (kind in listOf("artist", "ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) "albums" else "tracks" }
-        details = details + BrowseLocation(route, title, kind, options, playbackTitle)
+        val options = BrowseOptions().also { it.category = if (route.showsReleases) CollectionCategory.ALBUMS else CollectionCategory.TRACKS }
+        details = details + BrowseLocation(route, title, options, playbackTitle)
     }
     fun openLinkedRoute(route: Route, title: String, sourceId: String?) {
         if (sourceId == null || sourceId == connection.sources?.selectedSourceId) {
-            openRoute(route, title, route.kind)
+            openRoute(route, title)
         } else connection.runAction {
             connection.sourceOwner?.selectSource(sourceId)
-            openRoute(route, title, route.kind)
+            openRoute(route, title)
         }
     }
     fun open(item: BrowseItem) {
@@ -228,11 +232,12 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         connection.runAction {
             item.row.sourceId?.takeIf { it != connection.sources?.selectedSourceId }?.let { source -> connection.sourceOwner?.selectSource(source) }
             section = AppSection.Browse
+            val target = item.row.target
             val options = BrowseOptions().also {
-                it.category = if (item.row.kind == "artist") "albums" else "tracks"
-                it.preparing = item.searchContext != null && item.row.kind in setOf("album", "artist")
+                it.category = if (route.showsReleases) CollectionCategory.ALBUMS else CollectionCategory.TRACKS
+                it.preparing = item.searchContext != null && (target is FavoriteTarget.Album || target is FavoriteTarget.Artist)
             }
-            details = details + BrowseLocation(route, item.row.title, item.row.kind, options)
+            details = details + BrowseLocation(route, item.row.title, options)
             rememberSearchResult(item)
             if (options.preparing) scope.launch {
                 try { library?.prepareCollection(item.row.mediaUri) }
@@ -243,19 +248,24 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
     }
 
-    private suspend fun loadRecentSearches(bridge: AndroidLibrary): List<BrowseItem> = withContext(Dispatchers.IO) {
+    private suspend fun loadRecentSearches(bridge: AndroidLibrary): List<BrowseItem> =
         bridge.recentSearchResults().mapIndexed { index, row ->
-            BrowseItem(row, index.toULong(), null, searchContext = "recent:${row.kind}:${row.mediaUri}", contextTitle = translate("Recent searches"))
+            BrowseItem(row, index.toULong(), null, searchContext = "recent:${row.recent?.kind?.name?.lowercase()}:${row.mediaUri}",
+                contextTitle = translate("Recent searches"))
         }
-    }
 
     private fun rememberSearchResult(item: BrowseItem) {
         if (item.searchContext == null) return
         val bridge = library ?: return
         connection.runAction {
+            val kind = when (item.row.target) {
+                is FavoriteTarget.Track -> RecentSearchKind.TRACK
+                is FavoriteTarget.Album -> RecentSearchKind.ALBUM
+                is FavoriteTarget.Artist -> RecentSearchKind.ARTIST
+                null -> return@runAction
+            }
             if (withContext(Dispatchers.IO) { bridge.rememberSearchResult(io.github.screwys.rufin.shared.rufin_core.RecentSearchResult(
-                io.github.screwys.rufin.shared.rufin_core.RecentSearchKind.valueOf(item.row.kind.uppercase()),
-                item.row.mediaUri, item.row.title, item.row.subtitle, item.row.artworkIdentity)) }) {
+                kind, item.row.mediaUri, item.row.title, item.row.subtitle, item.row.artworkIdentity)) }) {
                 recentSearchRows = loadRecentSearches(bridge)
             }
         }
@@ -263,7 +273,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
 
     fun removeRecentSearch(item: BrowseItem) = connection.runAction {
         val bridge = library ?: return@runAction
-        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(item.row.kind, item.row.mediaUri) }) {
+        val recent = item.row.recent ?: return@runAction
+        if (withContext(Dispatchers.IO) { bridge.removeSearchResult(recent.kind, recent.mediaUri) }) {
             recentSearchRows = loadRecentSearches(bridge)
         }
     }
@@ -273,34 +284,33 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         if (withContext(Dispatchers.IO) { bridge.clearSearchResults() }) recentSearchRows = emptyList()
     }
     fun play(item: BrowseItem, placement: QueuePlacement = QueuePlacement.Replace(0UL), shuffled: Boolean = false) = connection.runAction {
-        val service = connection.connectedService()
-        service.playRequest {
-        if (item.row.kind != "track") {
-            item.row.route?.let { route -> library?.targetQuery(route)?.use { it.playAll(placement, shuffled, item.row.title) } }
-            return@playRequest
-        }
-        if (item.fromPins) {
-            library?.playRows("pin:${item.row.key}", listOf(item.row.mediaUri), 0UL, placement, shuffled, translate("Pins"))
-            return@playRequest
-        }
-        if (item.query != null && placement is QueuePlacement.Replace) item.query.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
-        else {
-            val order = item.searchOrder?.takeIf { placement is QueuePlacement.Replace } ?: listOf(item.row.mediaUri)
-            library?.playRows(item.searchContext ?: "track:${item.row.mediaUri}", order,
-                order.indexOf(item.row.mediaUri).toULong(), placement, shuffled, item.contextTitle ?: item.row.title)
-        }
+        val library = library ?: return@runAction
+        connection.connectedService().playRequest {
+            val replace = placement is QueuePlacement.Replace
+            when {
+                !item.row.isTrack -> item.row.route?.let { library.playRoute(it, placement, shuffled, item.row.title) }
+                replace && item.section != null && item.view != null ->
+                    item.view.playSection(item.section, item.index, shuffled, item.contextTitle)
+                replace && item.view != null ->
+                    item.view.play(item.index, shuffled, if (item.row.isAlbumTrack) item.row.album else item.contextTitle)
+                replace && item.searchContext != null -> {
+                    val order = item.searchOrder ?: listOf(item.row.mediaUri)
+                    library.playRows(item.searchContext, order, order.indexOf(item.row.mediaUri).toULong(), placement, shuffled,
+                        item.contextTitle ?: item.row.title)
+                }
+                else -> library.playTrack(item.row.mediaUri, placement, shuffled)
+            }
         }
         rememberSearchResult(item)
     }
     fun favorite(item: BrowseItem) {
         val value = !item.row.favorite
-        connection.runAction {
-            connection.sourceOwner?.setFavoriteWithResult(favoriteTarget(item.row.kind, item.row.mediaUri), value)
-        }
+        val target = item.row.target ?: return
+        connection.runAction { connection.sourceOwner?.setFavoriteWithResult(target, value) }
     }
     fun radio(item: BrowseItem, placement: QueuePlacement) = connection.runAction {
         connection.connectedService().playRequest {
-            library?.playRadio(item.row.kind, item.row.mediaUri, item.row.route, placement)
+            library?.playRadio((item.row.target as? FavoriteTarget.Track)?.v1, item.row.route, placement)
         }
     }
     fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {
@@ -322,13 +332,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             labelsVersion++
         }
     }
-    fun playSection(id: String, shuffled: Boolean = false) = connection.runAction {
-        val query = visiblePage?.homeRows?.firstOrNull { it.row.sectionId == id }?.query ?: return@runAction
-        connection.connectedService().playRequest { query.playSection(id, QueuePlacement.Replace(0UL), shuffled,
-            visiblePage?.homeRows?.firstOrNull { it.row.sectionId == id }?.row?.section) }
-    }
-    fun refreshSection(id: String) = connection.runAction {
-        library?.refreshHome(id)
+    fun refreshSection(block: HomeBlockKind) = connection.runAction {
+        library?.refreshHome(block)
         refresh()
     }
 }

@@ -1,35 +1,119 @@
 use super::*;
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
-fn search_kind(kind: &str) -> Result<RecentSearchKind, AndroidError> {
-    match kind {
-        "track" => Ok(RecentSearchKind::Track),
-        "album" => Ok(RecentSearchKind::Album),
-        "artist" => Ok(RecentSearchKind::Artist),
-        _ => Err(error("Choose a search result")),
-    }
+/// Search results; each row shows the row fields of its category's list (`fields`, in
+/// `CollectionCategory::ALL` order), as GTK's search does.
+fn search_rows(
+    mut rows: library::SearchResults,
+    fields: [Vec<LibraryField>; 3],
+) -> Vec<AndroidBrowseRow> {
+    let [tracks, albums, artists] = fields;
+    let shown = |rows: Vec<Row>, fields: &[LibraryField]| {
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, row)| shown_row(row, fields, index))
+            .collect::<Vec<_>>()
+    };
+    let lyrics = &mut rows.lyrics;
+    rows.tracks
+        .into_iter()
+        .enumerate()
+        .map(|(index, track)| AndroidBrowseRow {
+            lyrics_snippet: lyrics.remove(&track.track_key),
+            ..shown_row(Row::Track(track), &tracks, index)
+        })
+        .chain(shown(
+            rows.albums.into_iter().map(Row::Album).collect(),
+            &albums,
+        ))
+        .chain(shown(
+            rows.artists.into_iter().map(Row::Artist).collect(),
+            &artists,
+        ))
+        .collect()
 }
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub fn recent_search_results(&self) -> Vec<AndroidBrowseRow> {
-        self.settings
-            .load()
-            .recent_search_results
-            .iter()
-            .map(|row| {
-                let route = match row.kind {
-                    RecentSearchKind::Album => Some(Route::AlbumDetail(row.media_uri.clone())),
-                    RecentSearchKind::Artist => Some(Route::ArtistDetail(row.media_uri.clone())),
-                    RecentSearchKind::Track => None,
-                };
-                let item = AndroidBrowseItem::Recent { row: row.clone() };
-                match route {
-                    Some(route) => AndroidBrowseRow::opening(item, route),
-                    None => AndroidBrowseRow::new(item),
-                }
+    pub async fn search(
+        &self,
+        text: String,
+        mode: library::SearchMode,
+    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
+        let selected = self.source.selected_library();
+        let source = self.source.clone();
+        let catalog = self.catalog.clone();
+        let fields = {
+            let settings = self.settings.load();
+            CollectionCategory::ALL.map(|category| settings.library_list(category.key()).row_fields)
+        };
+        self.runtime
+            .spawn(async move {
+                rufin_core::source::search::acquire_search(
+                    &source,
+                    &catalog,
+                    selected.as_ref(),
+                    mode,
+                    text,
+                    60,
+                    ReadCancellation::new(),
+                )
+                .await
             })
-            .collect()
+            .await
+            .map_err(error)?
+            .map(|rows| search_rows(rows, fields))
+            .map_err(error)
+    }
+
+    /// The remembered search results, each showing whether it is downloaded.
+    pub async fn recent_search_results(&self) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
+        let recent = self.settings.load().recent_search_results.clone();
+        let catalog = self.catalog.clone();
+        run_read(&self.runtime, move |cancel| async move {
+            catalog.loaded().await;
+            let items = recent
+                .iter()
+                .filter_map(|row| catalog.item(&row.media_uri))
+                .collect::<Vec<_>>();
+            let downloaded = catalog
+                .rows_of(&items, false, &cancel)
+                .await
+                .map_err(error)?
+                .into_iter()
+                .filter_map(|row| {
+                    let uri = match &row {
+                        Row::Track(track) => track.media_uri.clone(),
+                        Row::Album(album) => album.media_uri.clone(),
+                        Row::Artist(artist) => artist.media_uri.clone(),
+                        _ => return None,
+                    };
+                    row.downloaded().then_some(uri)
+                })
+                .collect::<std::collections::HashSet<_>>();
+            Ok(recent
+                .into_iter()
+                .map(|row| {
+                    let route = match row.kind {
+                        RecentSearchKind::Album => Some(Route::AlbumDetail(row.media_uri.clone())),
+                        RecentSearchKind::Artist => {
+                            Some(Route::ArtistDetail(row.media_uri.clone()))
+                        }
+                        RecentSearchKind::Track => None,
+                    };
+                    let shown = downloaded.contains(&row.media_uri);
+                    let item = AndroidBrowseItem::Recent { row };
+                    AndroidBrowseRow {
+                        downloaded: shown,
+                        ..match route {
+                            Some(route) => AndroidBrowseRow::opening(item, route),
+                            None => AndroidBrowseRow::new(item),
+                        }
+                    }
+                })
+                .collect())
+        })
+        .await
     }
 
     pub fn remember_search_result(&self, row: RecentSearchResult) -> Result<bool, AndroidError> {
@@ -38,11 +122,11 @@ impl AndroidLibrary {
 
     pub fn remove_search_result(
         &self,
-        kind: String,
+        kind: RecentSearchKind,
         media_uri: String,
     ) -> Result<bool, AndroidError> {
         self.settings
-            .remove_search_result(search_kind(&kind)?, &media_uri)
+            .remove_search_result(kind, &media_uri)
             .map_err(error)
     }
 
