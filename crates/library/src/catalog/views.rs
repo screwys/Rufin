@@ -1563,7 +1563,7 @@ impl Context<'_> {
     ) -> Played {
         use crate::SmartPlaylistRuleField as F;
         match period {
-            Some(listens) if field != F::Played => listens
+            Some(listens) => listens
                 .get(&i64::from(record.key))
                 .copied()
                 .unwrap_or_default(),
@@ -1849,7 +1849,12 @@ pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> 
         .match_all
         .iter()
         .chain(&definition.match_any)
-        .any(|rule| matches!(rule.field, F::PlayCount | F::SkipCount | F::LastPlayed));
+        .any(|rule| {
+            matches!(
+                rule.field,
+                F::Played | F::PlayCount | F::SkipCount | F::LastPlayed
+            )
+        });
     (sorted || ruled).then_some(seconds)
 }
 
