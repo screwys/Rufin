@@ -7068,8 +7068,8 @@ dependencies = [
  "process-memory",
  "rufin-controller",
  "rufin-core",
- "rufin-gtk",
  "tracing",
+ "ui",
  "windows-updater",
 ]
 
@@ -7190,39 +7190,6 @@ dependencies = [
  "url",
  "windows-updater",
  "wiremock",
-]
-
-[[package]]
-name = "rufin-gtk"
-version = "0.16.6"
-dependencies = [
- "app-identity",
- "artwork",
- "ashpd",
- "async-channel",
- "audio-processing",
- "desktop-integration",
- "directories",
- "glib-build-tools",
- "gtk4",
- "libadwaita",
- "library",
- "localization",
- "lyrics",
- "playback",
- "process-memory",
- "proptest",
- "pulldown-cmark",
- "regex",
- "roxmltree 0.21.1",
- "rufin-core",
- "serde",
- "serde_json",
- "sources",
- "tempfile",
- "tokio",
- "tracing",
- "web",
 ]
 
 [[package]]
@@ -9170,6 +9137,39 @@ dependencies = [
  "memoffset",
  "tempfile",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ui"
+version = "0.16.6"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "ashpd",
+ "async-channel",
+ "audio-processing",
+ "desktop-integration",
+ "directories",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "playback",
+ "process-memory",
+ "proptest",
+ "pulldown-cmark",
+ "regex",
+ "roxmltree 0.21.1",
+ "rufin-core",
+ "serde",
+ "serde_json",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "web",
 ]
 
 [[package]]

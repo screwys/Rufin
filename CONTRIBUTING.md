@@ -85,7 +85,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `rufin-controller` | headless executable with optional HTTP access |
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `rufin-gtk` | the GTK desktop client: window composition, pages, player, menus, editors, preferences and resources |
+| `ui` | the GTK desktop client: window composition, pages, player, menus, editors, preferences and resources |
 | `web` | HTTP routes, server lifetime and embedded browser presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |
