@@ -348,7 +348,6 @@ pub async fn build(
         Shell {
             search_session: Rc::new(crate::library::SearchSession::new(
                 products.source.clone(),
-                products.library.clone(),
                 products.runtime.clone(),
             )),
             web_controller,

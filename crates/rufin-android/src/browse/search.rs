@@ -42,28 +42,31 @@ impl AndroidLibrary {
     ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let selected = self.source.selected_library();
         let source = self.source.clone();
-        let catalog = self.catalog.clone();
         let fields = {
             let settings = self.settings.load();
             CollectionCategory::ALL.map(|category| settings.library_list(category.key()).row_fields)
         };
-        self.runtime
-            .spawn(async move {
-                rufin_core::source::search::acquire_search(
-                    &source,
-                    &catalog,
-                    selected.as_ref(),
-                    mode,
-                    text,
-                    60,
-                    ReadCancellation::new(),
+        let options = OpenOptions {
+            filter: text,
+            search_mode: mode,
+            ..Default::default()
+        };
+        run_read(&self.runtime, move |cancel| async move {
+            let opened = source
+                .open(
+                    Route::Search,
+                    selected,
+                    options,
+                    library::RouteSeedWindow::top(),
+                    true,
+                    &cancel,
                 )
                 .await
-            })
-            .await
-            .map_err(error)?
-            .map(|rows| search_rows(rows, fields))
-            .map_err(error)
+                .map_err(error)?;
+            let results = opened.view.search_results().cloned().unwrap_or_default();
+            Ok(search_rows(results, fields))
+        })
+        .await
     }
 
     /// The remembered search results, each showing whether it is downloaded.

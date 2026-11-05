@@ -189,51 +189,6 @@ impl SearchItem {
     fn is_downloaded(&self) -> bool {
         matches!(self, Self::Track(row, _) if crate::widgets::library_fields::TrackPresentation::download_badge(row))
     }
-    fn numeric_field(&self, field: LibraryField) -> Option<i64> {
-        match self {
-            Self::Track(row, _) => match field {
-                LibraryField::Year => row.year,
-                LibraryField::Duration => Some(row.duration_millis),
-                // By the UTC day shown, so a day's tracks fall back to title order.
-                LibraryField::DateAdded => row.date_added.map(|seconds| seconds.div_euclid(86_400)),
-                LibraryField::PlayCount => Some(row.state.play_count),
-                LibraryField::UserRating => row.state.rating,
-                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
-                _ => None,
-            },
-            Self::Album(row) => match field {
-                LibraryField::Year => row.year,
-                LibraryField::Duration => Some(row.summary.duration_millis),
-                LibraryField::PlayCount => Some(row.state.play_count),
-                LibraryField::UserRating => row.state.rating,
-                LibraryField::SongCount => Some(row.summary.track_count),
-                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
-                _ => None,
-            },
-            Self::Artist(row) => match field {
-                LibraryField::Duration => Some(row.summary.duration_millis),
-                LibraryField::PlayCount => Some(row.state.play_count),
-                LibraryField::AlbumCount => Some(row.summary.album_count),
-                LibraryField::SongCount => Some(row.summary.track_count),
-                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
-                _ => None,
-            },
-        }
-    }
-    fn date_field(&self, field: LibraryField) -> Option<&str> {
-        match self {
-            Self::Track(row, _) => match field {
-                LibraryField::ReleaseDate => row.release_date.as_deref(),
-                _ => None,
-            },
-            Self::Album(row) => match field {
-                LibraryField::ReleaseDate => row.release_date.as_deref(),
-                LibraryField::DateAdded => row.date_added.as_deref(),
-                _ => None,
-            },
-            Self::Artist(_) => None,
-        }
-    }
     fn favorite(&self) -> Option<(library::FavoriteTarget, bool)> {
         Some(match self {
             Self::Track(row, _) => (
@@ -591,7 +546,6 @@ impl SearchRouteProjection {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        self.sort_model(category);
         let collection = search_collection(
             &shell,
             self.models[category as usize].clone(),
@@ -755,13 +709,8 @@ impl SearchRouteProjection {
         }
     }
 
-    fn apply(&self, mut items: [Vec<SearchItem>; 3]) {
+    fn apply(&self, items: [Vec<SearchItem>; 3]) {
         for index in 0..3 {
-            if let Some(shell) = self.shell.upgrade() {
-                let category = CollectionCategory::ALL[index];
-                let settings = shell.settings.current.borrow().library_list(category.key());
-                sort_search_items(&mut items[index], settings.sort_key, settings.descending);
-            }
             let additions = items[index]
                 .iter()
                 .cloned()
@@ -777,12 +726,10 @@ impl SearchRouteProjection {
 
     fn resume(&self) {
         self.sync();
-        for category in CollectionCategory::ALL {
-            self.sort_model(category);
-        }
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
+        self.session.resort(&shell.settings.current.borrow());
         if let Some(active) = self.active.borrow().as_ref() {
             let settings = shell
                 .settings
@@ -792,25 +739,6 @@ impl SearchRouteProjection {
             active.collection.apply_settings(&settings);
             active.toolbar.apply(active.category.key(), &settings);
         }
-    }
-
-    fn sort_model(&self, category: CollectionCategory) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        let settings = shell.settings.current.borrow().library_list(category.key());
-        let model = &self.models[category as usize];
-        let mut items = (0..model.n_items())
-            .filter_map(|position| {
-                crate::widgets::view_model::item_at::<SearchItem>(model, position)
-            })
-            .collect::<Vec<_>>();
-        sort_search_items(&mut items, settings.sort_key, settings.descending);
-        let additions = items
-            .into_iter()
-            .map(|row| RowItem::new(Arc::new(row), true))
-            .collect::<Vec<_>>();
-        model.splice(0, model.n_items(), &additions);
     }
 
     fn cycle_category(&self) {
@@ -832,26 +760,6 @@ impl SearchRouteProjection {
             active.toolbar.cycle_layout();
         }
     }
-}
-
-fn sort_search_items(items: &mut [SearchItem], field: LibraryField, descending: bool) {
-    items.sort_by(|left, right| {
-        compare_optional(left.numeric_field(field), right.numeric_field(field))
-            .then_with(|| compare_optional(left.date_field(field), right.date_field(field)))
-            .then_with(|| {
-                left.field(field)
-                    .to_lowercase()
-                    .cmp(&right.field(field).to_lowercase())
-            })
-            .then_with(|| left.title().cmp(right.title()))
-    });
-    if descending {
-        items.reverse();
-    }
-}
-
-fn compare_optional<T: Ord>(left: Option<T>, right: Option<T>) -> std::cmp::Ordering {
-    left.cmp(&right)
 }
 
 fn collection_category_tabs(
@@ -1394,22 +1302,6 @@ mod tests {
         assert_eq!(
             CollectionCategory::Artists.next(),
             CollectionCategory::Tracks
-        );
-    }
-
-    #[test]
-    fn optional_search_values_follow_native_sort_direction() {
-        assert_eq!(
-            compare_optional::<i64>(None, Some(1)),
-            std::cmp::Ordering::Less
-        );
-        assert_eq!(
-            compare_optional(Some(1_i64), None),
-            std::cmp::Ordering::Greater
-        );
-        assert_eq!(
-            compare_optional(Some(1_i64), Some(2)),
-            std::cmp::Ordering::Less
         );
     }
 

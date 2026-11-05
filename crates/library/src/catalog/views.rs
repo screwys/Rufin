@@ -2544,6 +2544,71 @@ impl Catalog {
         Ok(keys)
     }
 
+    /// Orders search results as the Tracks, Albums and Artists lists sort: by `sorts`, a field
+    /// and whether it descends, in that order of categories.
+    pub fn sort_search(
+        &self,
+        results: &mut crate::SearchResults,
+        sorts: [(LibraryField, bool); 3],
+    ) {
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot);
+        let derived = self.derived(&context, None);
+        let [
+            (tracks, tracks_descending),
+            (albums, albums_descending),
+            (artists, descending),
+        ] = sorts;
+        let sort = tracks.sort();
+        let mut rows = results
+            .tracks
+            .iter()
+            .enumerate()
+            .filter_map(|(position, row)| {
+                let slot = snapshot.tracks.slot(row.track_key.raw())?;
+                Some(context.sorted(sort, position, (slot, 0, 0)))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| {
+            compare_tracks(sort, tracks_descending, a, b).then(a.position.cmp(&b.position))
+        });
+        reorder(&mut results.tracks, rows.iter().map(|row| row.position));
+        let mut rows = results
+            .albums
+            .iter()
+            .enumerate()
+            .filter_map(|(position, row)| {
+                let slot = snapshot.albums.slot(row.album_key.raw())?;
+                let record = &snapshot.albums.records[slot as usize];
+                Some((position, context.album_row(&derived, slot, record)))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|(_, a), (_, b)| compare_albums(albums, albums_descending, a, b));
+        reorder(
+            &mut results.albums,
+            rows.iter().map(|(position, _)| *position),
+        );
+        let mut rows = results
+            .artists
+            .iter()
+            .enumerate()
+            .filter_map(|(position, row)| {
+                let slot = snapshot.artists.slot(row.artist_key.raw())?;
+                let record = &snapshot.artists.records[slot as usize];
+                let mut listed = ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
+                listed.totals = derived.artists[usize::from(row.album_artist)][slot as usize];
+                listed.rating = rating(record.rating, record.native_rating);
+                listed.favorite = favorite(record.flags) == Some(true);
+                Some((position, listed))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|(_, a), (_, b)| compare_named(artists, descending, a, b));
+        reorder(
+            &mut results.artists,
+            rows.iter().map(|(position, _)| *position),
+        );
+    }
+
     /// Letter sections of an order, for lists by name.
     pub fn sections(&self, order: &Order) -> Vec<crate::ScrollSection> {
         let snapshot = self.snapshot();
@@ -2902,4 +2967,14 @@ impl Catalog {
             })
             .collect())
     }
+}
+
+/// `rows` in the order of `positions`, then the rows they leave out.
+fn reorder<T>(rows: &mut Vec<T>, positions: impl Iterator<Item = usize>) {
+    let mut taken = std::mem::take(rows)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    rows.extend(positions.filter_map(|position| taken[position].take()));
+    rows.extend(taken.into_iter().flatten());
 }

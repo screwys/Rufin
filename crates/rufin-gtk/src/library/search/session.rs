@@ -31,8 +31,9 @@ pub const SEARCH_PREVIEW_LIMIT: usize = 30;
 /// One current query shared by the header and the Search route.
 pub struct SearchSession {
     source: rufin_core::runtime::SourceHandle,
-    catalog: Arc<library::Catalog>,
     runtime: tokio::runtime::Handle,
+    /// The Search page that found the shown results.
+    view: RefCell<Option<Arc<rufin_core::view::View>>>,
     selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
     mode: Cell<library::SearchMode>,
@@ -60,15 +61,11 @@ impl SearchSession {
         }
     }
 
-    pub fn new(
-        source: rufin_core::runtime::SourceHandle,
-        catalog: Arc<library::Catalog>,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
+    pub fn new(source: rufin_core::runtime::SourceHandle, runtime: tokio::runtime::Handle) -> Self {
         Self {
             source,
-            catalog,
             runtime,
+            view: RefCell::new(None),
             selected: RefCell::new(None),
             query: RefCell::new(String::new()),
             mode: Cell::new(library::SearchMode::Title),
@@ -242,6 +239,7 @@ impl SearchSession {
 
     fn schedule(self: &Rc<Self>) {
         self.cancel();
+        self.view.replace(None);
         self.items.replace(Default::default());
         self.revision.set(self.revision.get().wrapping_add(1));
         if self.query.borrow().is_empty()
@@ -287,29 +285,62 @@ impl SearchSession {
             self.revision.set(self.revision.get().wrapping_add(1));
             self.notify();
         }
-        let query = self.query();
-        let mode = self.mode();
-        let weak = Rc::downgrade(self);
+        let options = rufin_core::view::OpenOptions {
+            filter: self.query(),
+            search_mode: self.mode(),
+            ..Default::default()
+        };
         let source = self.source.clone();
-        let catalog = self.catalog.clone();
         let task = self.runtime.spawn(async move {
-            rufin_core::source::search::acquire_search(
-                &source,
-                &catalog,
-                selected.as_ref(),
-                mode,
-                query,
-                60,
-                cancellation,
+            source
+                .open(
+                    Route::Search,
+                    selected,
+                    options,
+                    library::RouteSeedWindow::top(),
+                    true,
+                    &cancellation,
+                )
+                .await
+        });
+        self.show(task, generation);
+    }
+
+    /// Sorts the shown results again when `settings` change how their lists sort.
+    pub fn resort(self: &Rc<Self>, settings: &rufin_core::settings::app::Settings) {
+        let Some(view) = self.view.borrow().clone() else {
+            return;
+        };
+        if view.settings_reread(settings).is_none() {
+            return;
+        }
+        self.cancel();
+        let generation = self.generation.get();
+        let cancellation = ReadCancellation::new();
+        self.cancellation.replace(Some(cancellation.clone()));
+        let task = self.runtime.spawn(async move {
+            view.reread(
+                view.options().clone(),
+                library::RouteSeedWindow::top(),
+                &cancellation,
             )
             .await
         });
+        self.show(task, generation);
+    }
+
+    /// Shows what the Search page `task` reads, unless another read started since.
+    fn show(
+        self: &Rc<Self>,
+        task: tokio::task::JoinHandle<library::LibraryResult<rufin_core::view::Opened>>,
+        generation: u64,
+    ) {
+        let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let result = task
                 .await
                 .map_err(|error| error.to_string())
-                .and_then(|rows| rows)
-                .map(cached_items);
+                .and_then(|opened| opened.map_err(|error| error.to_string()));
             let Some(session) = weak.upgrade() else {
                 return;
             };
@@ -318,8 +349,11 @@ impl SearchSession {
             }
             session.cancellation.borrow_mut().take();
             match result {
-                Ok(items) => {
-                    session.items.replace(items);
+                Ok(opened) => {
+                    session.items.replace(cached_items(
+                        opened.view.search_results().cloned().unwrap_or_default(),
+                    ));
+                    session.view.replace(Some(opened.view));
                     session.status.set("results");
                 }
                 Err(error) => {

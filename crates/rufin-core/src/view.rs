@@ -9,7 +9,7 @@ use library::{
     AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomeAlbumRow,
     HomeBlockKind, HomePage, HomeProviderSection, HomeSectionRows, HomeTrackRow, Item,
     LibraryError, LibraryResult, ListKind, ListRead, MemberRead, MemberSelection, Read,
-    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SourceKey, TagRow,
+    ReadCancellation, RouteSeedWindow, Row, ScrollSection, SearchResults, SourceKey, TagRow,
 };
 
 use crate::playback::{PlayRequest, QueuePlacement};
@@ -119,6 +119,8 @@ enum Body {
         track_len: usize,
     },
     Home(Box<HomePage>),
+    /// What a search found, each kind in its list's sort.
+    Search(Box<SearchResults>),
     /// The collection the route names is gone or empty, or the route lists nothing itself.
     Missing,
 }
@@ -148,6 +150,7 @@ enum Plan {
         tracks: MemberRead,
     },
     Home(Box<HomePage>),
+    Search(Box<SearchResults>),
     Missing,
 }
 
@@ -460,8 +463,18 @@ impl SourceOwner {
                     .await?;
                 (None, Plan::Home(Box::new(home)))
             }
-            // Search reads its results itself.
-            Route::Search => (None, Plan::Missing),
+            Route::Search => {
+                let mut results = crate::source::search::search(
+                    self,
+                    selected,
+                    options.search_mode,
+                    options.filter.clone(),
+                    cancel,
+                )
+                .await?;
+                catalog.sort_search(&mut results, search_sorts(settings));
+                (None, Plan::Search(Box::new(results)))
+            }
         };
         Ok((header, plan))
     }
@@ -614,6 +627,10 @@ async fn read(
         }
         Plan::Home(home) => {
             view.body = Body::Home(home);
+            (None, 0, Vec::new(), None)
+        }
+        Plan::Search(results) => {
+            view.body = Body::Search(results);
             (None, 0, Vec::new(), None)
         }
         Plan::Missing => (None, 0, Vec::new(), None),
@@ -973,6 +990,7 @@ impl View {
                     ..
                 }
                 | Body::Home(_)
+                | Body::Search(_)
                 | Body::Missing => false,
                 Body::Rows { .. } | Body::Releases { .. } | Body::Folders { .. } => true,
             }
@@ -988,7 +1006,7 @@ impl View {
                 track_len,
                 ..
             } => folder_len + track_len,
-            Body::Home(_) | Body::Missing => 0,
+            Body::Home(_) | Body::Search(_) | Body::Missing => 0,
         }
     }
 
@@ -1011,6 +1029,14 @@ impl View {
             &self.settings.application.home_blocks,
             &self.options.filter,
         ))
+    }
+
+    /// What a search found, each kind in its list's sort.
+    pub fn search_results(&self) -> Option<&SearchResults> {
+        match &self.body {
+            Body::Search(results) => Some(results),
+            _ => None,
+        }
     }
 
     /// How many child folders come before a folder's tracks.
@@ -1087,7 +1113,7 @@ impl View {
                 }
                 Ok(rows)
             }
-            Body::Home(_) | Body::Missing => Ok(Vec::new()),
+            Body::Home(_) | Body::Search(_) | Body::Missing => Ok(Vec::new()),
         }
     }
 
@@ -1266,6 +1292,9 @@ impl View {
             Body::Home(_) => {
                 self.settings.application.home_blocks != current.application.home_blocks
             }
+            Body::Search(_) => CollectionCategory::ALL
+                .into_iter()
+                .any(|category| order(category.key())),
             _ if matches!(
                 self.route,
                 Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
@@ -1307,7 +1336,8 @@ impl View {
     /// Reads the page again with `options` and current settings. A folder keeps the folder it
     /// opened, so new child folders show when the route opens again. Album, artist track, genre
     /// and mood pages and Discography read their rows again and keep their header, so a
-    /// collection that is gone reads as empty.
+    /// collection that is gone reads as empty. A search with the same query sorts what it found
+    /// again.
     pub async fn reread(
         &self,
         options: OpenOptions,
@@ -1354,6 +1384,13 @@ impl View {
                     members.collection.clone(),
                 );
                 let plan = Plan::Rows(Read::Members(members));
+                read(self.again(options, settings), plan, None, seed, cancel).await
+            }
+            (Body::Search(results), _) if options == self.options => {
+                let mut results = results.clone();
+                self.catalog()
+                    .sort_search(&mut results, search_sorts(&settings));
+                let plan = Plan::Search(results);
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Releases { .. }, _)
@@ -1966,6 +2003,14 @@ fn folder_tracks(
     read.filter.clone_from(&options.filter);
     read.activity = activity;
     read
+}
+
+/// The sorts of the Tracks, Albums and Artists lists, which order search results.
+fn search_sorts(settings: &Settings) -> [(LibraryField, bool); 3] {
+    CollectionCategory::ALL.map(|category| {
+        let list = settings.library_list(category.key());
+        (list.sort_key, list.descending)
+    })
 }
 
 /// An artist's releases, searched and ordered as `options` and the release list settings ask.
