@@ -56,7 +56,6 @@ impl AlbumCover {
                         shell.shell(),
                         album.clone(),
                         None,
-                        None,
                         position,
                     );
                 }
@@ -75,8 +74,8 @@ impl AlbumCover {
                     && let Some(album) = row.borrow().clone()
                 {
                     crate::menus::media_menus::play_target(
-                        &shell.products.playback,
-                        &crate::widgets::selection::album_play_request(&album),
+                        &shell.products,
+                        &crate::widgets::selection::PlayTarget::album(&album),
                         placement,
                         false,
                     );

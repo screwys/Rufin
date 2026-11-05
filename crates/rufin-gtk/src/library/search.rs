@@ -7,13 +7,14 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::widgets::selection::PlayTarget;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use library::{ReadCancellation, SearchResults};
 use localization::{msgid, tr};
-use rufin_core::playback::{PlayRequest, QueuePlacement};
+use rufin_core::playback::QueuePlacement;
 
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
@@ -115,13 +116,13 @@ impl SearchItem {
         }
     }
     fn drag_source(&self, _: &CatalogUi) -> Option<MediaDragSource> {
-        Some(MediaDragSource::capture_target(self.play_request()))
+        Some(MediaDragSource::capture_target(self.play_target()))
     }
-    fn play_request(&self) -> rufin_core::playback::PlayRequest {
+    fn play_target(&self) -> PlayTarget {
         match self {
-            Self::Track(row, _) => PlayRequest::track(row.track_key, QueuePlacement::Now),
-            Self::Album(row) => crate::widgets::selection::album_play_request(row),
-            Self::Artist(row) => crate::widgets::selection::artist_play_request(row, false),
+            Self::Track(row, _) => PlayTarget::Track(row.track_key),
+            Self::Album(row) => PlayTarget::album(&row),
+            Self::Artist(row) => PlayTarget::artist(row, false),
         }
     }
 
@@ -257,9 +258,12 @@ impl SearchItem {
             .update_app_settings("recent search", |settings| {
                 settings.remember_search_result(self.recent_result())
             });
-        let mut request = self.play_request();
-        request.placement = placement;
-        shell.products.playback.play_selection(request);
+        crate::menus::media_menus::play_target(
+            &shell.products,
+            &self.play_target(),
+            placement,
+            false,
+        );
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
         if matches!(self, Self::Track(..)) {
@@ -275,7 +279,7 @@ impl SearchItem {
         position: Option<(f64, f64)>,
         is_current: Rc<dyn Fn() -> bool>,
     ) {
-        if present_collection_selection_menu(target, shell.shell(), self.play_request(), position) {
+        if present_collection_selection_menu(target, shell.shell(), self.play_target(), position) {
             return;
         }
         let media_uri = match self {
@@ -302,7 +306,7 @@ impl SearchItem {
             }
             match item {
                 Self::Album(row) => {
-                    present_album_context_menu(&target, &menus, row, None, None, position)
+                    present_album_context_menu(&target, &menus, row, None, position)
                 }
                 Self::Artist(row) => {
                     present_artist_context_menu(&target, &menus, row, None, position)
@@ -416,12 +420,8 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
 
     fn bind(&self, _: u32, item: SearchItem) {
         self.snippet.bind(item.lyrics());
-        let target = match &item {
-            SearchItem::Track(row, _) => PlayRequest::track(row.track_key, QueuePlacement::Now),
-            SearchItem::Album(row) => crate::widgets::selection::album_play_request(&row),
-            SearchItem::Artist(row) => crate::widgets::selection::artist_play_request(&row, false),
-        };
-        self.body.bind_playing_target(&self.shell, target);
+        self.body
+            .bind_playing_target(&self.shell, item.play_target());
         self.body
             .bind(item.title(), |field| item.field_links(field));
         let favorite = item.favorite();
@@ -981,14 +981,11 @@ fn search_collection(
             .filter_map(|position| {
                 crate::widgets::view_model::item_at::<SearchItem>(&model, position)
             })
-            .map(|item| item.play_request())
+            .map(|item| item.play_target())
             .collect::<Vec<_>>();
-        targets
-            .iter()
-            .any(|target| target.selection() == clicked.selection())
-            .then_some(crate::widgets::media_drag::CollectionTargets::Ready(
-                targets,
-            ))
+        targets.iter().any(|target| target == clicked).then_some(
+            crate::widgets::media_drag::CollectionTargets::Ready(targets),
+        )
     }));
     let shell = Rc::clone(shell);
     LibraryCollectionProjection::new(

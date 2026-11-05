@@ -9,7 +9,6 @@ use library::{
     AlbumRow, ArtistRow, FavoriteTarget, PlaylistRow, RadioSeed, SmartPlaylistRow, TagRow,
     TrackLinks, TrackRow, TrackView,
 };
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
 use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
@@ -24,7 +23,7 @@ use rufin_core::playlists::SmartPlaylistChange;
 use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
 
-use crate::widgets::selection::collection_play_request;
+use crate::widgets::selection::PlayTarget;
 use rufin_core::playback::PlayRequest;
 pub type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
 
@@ -38,10 +37,11 @@ pub fn add_drag_to_playlist(
     source: crate::widgets::media_drag::MediaDragSource,
 ) -> bool {
     let catalog = Arc::clone(&shell.products.library);
+    let owner = shell.products.source.clone();
     let task = shell
         .products
         .runtime
-        .spawn(async move { source.playlist_input(&catalog).await });
+        .spawn(async move { source.playlist_input(&catalog, &owner).await });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let Some((selection, title, preview_uris)) = task.await.ok().and_then(Result::ok) else {
@@ -72,16 +72,24 @@ pub fn add_drag_to_playlist(
     true
 }
 
-/// Plays `target` at `placement`, shuffled when asked.
+/// Plays `target` at `placement`, shuffled when asked: a collection row plays the page it
+/// opens, as that page's header does.
 pub(crate) fn play_target(
-    playback: &rufin_core::playback::PlaybackOwner,
-    target: &PlayRequest,
+    products: &rufin_core::runtime::ProductHandles,
+    target: &PlayTarget,
     placement: QueuePlacement,
     shuffled: bool,
 ) {
-    let mut request = target.clone().shuffled(shuffled);
-    request.placement = placement;
-    playback.play_selection(request);
+    let target = target.clone();
+    let source = products.source.clone();
+    let playback = products.playback.clone();
+    products.runtime.spawn(async move {
+        match target.request(&source, placement, shuffled).await {
+            Ok(Some(request)) => playback.play_selection(request),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not play the collection"),
+        }
+    });
 }
 
 pub(crate) fn download(shell: &Shell, payload: &crate::widgets::media_drag::MediaDragSource) {
@@ -89,7 +97,7 @@ pub(crate) fn download(shell: &Shell, payload: &crate::widgets::media_drag::Medi
     let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match payload.resolve(&catalog).await {
+        match payload.resolve(&catalog, &source).await {
             Ok((uris, subject)) => source.download_media(subject, uris),
             Err(error) => tracing::warn!(%error, "failed to identify download tracks"),
         }
@@ -101,7 +109,7 @@ fn remove_download(shell: &Shell, payload: &crate::widgets::media_drag::MediaDra
     let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match payload.resolve(&catalog).await {
+        match payload.resolve(&catalog, &source).await {
             Ok((uris, _)) => source.remove_download_media(uris),
             Err(error) => tracing::warn!(%error, "failed to identify downloaded tracks"),
         }
@@ -128,7 +136,7 @@ pub fn present_track_menu(
         && present_collection_selection_menu(
             target,
             shell,
-            PlayRequest::track(track.track_key, QueuePlacement::Now),
+            crate::widgets::selection::PlayTarget::Track(track.track_key),
             position,
         )
     {
@@ -161,7 +169,7 @@ pub fn present_track_menu(
         append_loaded_play(
             &surface,
             shell,
-            PlayRequest::track(track.track_key, QueuePlacement::Now),
+            crate::widgets::selection::PlayTarget::Track(track.track_key),
             None,
         );
     }
@@ -174,7 +182,9 @@ pub fn present_track_menu(
     crate::playlists::picker::append_to_menu(
         &surface,
         shell,
-        MediaDragSource::capture_target(PlayRequest::track(track.track_key, QueuePlacement::Now)),
+        MediaDragSource::capture_target(crate::widgets::selection::PlayTarget::Track(
+            track.track_key,
+        )),
     );
     if track.access.cue_path.is_none()
         && (track.source_key.is_some() || track.media_uri.starts_with("file:"))
@@ -200,7 +210,7 @@ pub fn present_track_menu(
         &track.media_uri,
         track.source_id.as_deref(),
     );
-    let playback = PlayRequest::track(track.track_key, QueuePlacement::Now);
+    let playback = crate::widgets::selection::PlayTarget::Track(track.track_key);
     install_download_actions(
         &surface,
         shell,
@@ -260,8 +270,8 @@ fn append_queue_entry_actions(
         &shell.settings.current.borrow().application.context_menu,
         move |placement, shuffled| match (placement, occurrence_id) {
             _ if shuffled => play_target(
-                &play_shell.products.playback,
-                &PlayRequest::track(track, QueuePlacement::Now),
+                &play_shell.products,
+                &crate::widgets::selection::PlayTarget::Track(track),
                 placement,
                 true,
             ),
@@ -461,10 +471,9 @@ pub fn present_playlist_entry_menu(
     install_download_actions(
         &surface,
         shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(PlayRequest::track(
-            row.track_key,
-            QueuePlacement::Now,
-        )),
+        &crate::widgets::media_drag::MediaDragSource::capture_target(
+            crate::widgets::selection::PlayTarget::Track(row.track_key),
+        ),
         Some(&row.media_uri),
         true,
         row.is_downloaded,
@@ -525,7 +534,7 @@ pub fn present_track_selection_menu(
 pub fn present_collection_selection_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
-    clicked: PlayRequest,
+    clicked: PlayTarget,
     position: Option<(f64, f64)>,
 ) -> bool {
     let Some((surface, _)) = collection_selection_surface(target, shell, clicked, position) else {
@@ -538,7 +547,7 @@ pub fn present_collection_selection_menu(
 fn collection_selection_surface(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
-    clicked: PlayRequest,
+    clicked: PlayTarget,
     position: Option<(f64, f64)>,
 ) -> Option<(
     ContextMenuSurface,
@@ -555,13 +564,11 @@ fn collection_selection_surface(
         let targets = metadata_targets.clone();
         let shell = Rc::clone(&metadata_shell);
         let catalog = shell.products.library.clone();
+        let source = shell.products.source.clone();
         let task = shell.products.runtime.spawn(async move {
-            targets.resolve(&catalog).await.map(|targets| {
+            targets.requests(&catalog, &source).await.map(|requests| {
                 library::MemberSelection::Concat(
-                    targets
-                        .into_iter()
-                        .filter_map(|target| target.selection())
-                        .collect(),
+                    requests.iter().filter_map(PlayRequest::selection).collect(),
                 )
             })
         });
@@ -590,16 +597,21 @@ fn collection_selection_surface(
         move |placement, shuffled| {
             let payload = play_payload.clone();
             let catalog = play_shell.products.library.clone();
-            let task = play_shell
-                .products
-                .runtime
-                .spawn(async move { payload.play_request(&catalog).await });
+            let source = play_shell.products.source.clone();
+            let playback = play_shell.products.playback.clone();
+            let task = play_shell.products.runtime.spawn(async move {
+                let mut request = payload
+                    .play_request(&catalog, &source)
+                    .await?
+                    .shuffled(shuffled);
+                request.placement = placement;
+                playback.play_selection(request);
+                Ok::<_, String>(())
+            });
             let shell = Rc::clone(&play_shell);
             glib::spawn_future_local(async move {
                 match task.await {
-                    Ok(Ok(request)) => {
-                        play_target(&shell.products.playback, &request, placement, shuffled)
-                    }
+                    Ok(Ok(())) => {}
                     Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
                     Err(error) => shell
                         .control_feedback
@@ -616,7 +628,7 @@ fn collection_selection_surface(
 fn present_playlist_selection_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
-    clicked: PlayRequest,
+    clicked: PlayTarget,
     position: Option<(f64, f64)>,
     in_folder: bool,
 ) -> bool {
@@ -905,14 +917,10 @@ pub fn present_album_context_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
     album: AlbumRow,
-    playback_context: Option<String>,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    let base = crate::widgets::selection::album_play_request(&album);
-    let playback = playback_context
-        .map(|context| base.clone().with_context(context.into()))
-        .unwrap_or(base);
+    let playback = PlayTarget::album(&album);
     if present_collection_selection_menu(target, shell, playback.clone(), position) {
         return;
     }
@@ -942,7 +950,7 @@ pub fn present_album_context_menu(
     crate::playlists::picker::append_to_menu(
         &surface,
         shell,
-        MediaDragSource::capture_target(crate::widgets::selection::album_play_request(&album)),
+        MediaDragSource::capture_target(PlayTarget::album(&album)),
     );
     append_metadata_action(
         &surface,
@@ -979,9 +987,7 @@ pub fn present_album_context_menu(
     install_download_actions(
         &surface,
         shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(
-            crate::widgets::selection::album_play_request(&album),
-        ),
+        &crate::widgets::media_drag::MediaDragSource::capture_target(PlayTarget::album(&album)),
         Some(&album.media_uri),
         false,
         album.summary.downloaded(),
@@ -1020,7 +1026,7 @@ pub fn present_artist_context_menu(
     if present_collection_selection_menu(
         target,
         shell,
-        crate::widgets::selection::artist_play_request(&artist, artist.album_artist),
+        PlayTarget::artist(&artist, artist.album_artist),
         position,
     ) {
         return;
@@ -1044,7 +1050,7 @@ pub fn present_artist_context_menu(
             ),
         },
     );
-    let playback = crate::widgets::selection::artist_play_request(&artist, artist.album_artist);
+    let playback = PlayTarget::artist(&artist, artist.album_artist);
     append_loaded_play(&surface, shell, playback.clone(), play);
     append_radio(
         &surface,
@@ -1128,10 +1134,7 @@ pub fn present_genre_context_menu(
     position: Option<(f64, f64)>,
 ) {
     let key = library::GenreKey::from_raw(genre.key);
-    let playback = collection_play_request(
-        library::Collection::Genre(key),
-        &CollectionTarget::Genre(key),
-    );
+    let playback = PlayTarget::Route(Route::GenreDetail(key));
     if present_collection_selection_menu(target, shell, playback.clone(), position) {
         return;
     }
@@ -1158,8 +1161,7 @@ pub fn present_mood_context_menu(
     position: Option<(f64, f64)>,
 ) {
     let key = library::MoodKey::from_raw(mood.key);
-    let playback =
-        collection_play_request(library::Collection::Mood(key), &CollectionTarget::Mood(key));
+    let playback = PlayTarget::Route(Route::MoodDetail(key));
     if present_collection_selection_menu(target, shell, playback.clone(), position) {
         return;
     }
@@ -1199,10 +1201,7 @@ pub fn present_playlist_context_menu(
             key: playlist.playlist_key,
         })
         .is_some();
-    let playback = collection_play_request(
-        library::Collection::Playlist(playlist.playlist_key),
-        &CollectionTarget::Playlist(playlist.playlist_key),
-    );
+    let playback = PlayTarget::Route(Route::PlaylistDetail(playlist.playlist_key));
     if present_playlist_selection_menu(target, shell, playback.clone(), position, in_folder) {
         return;
     }
@@ -1340,14 +1339,14 @@ pub fn present_smart_playlist_context_menu(
     if present_playlist_selection_menu(
         target,
         shell,
-        crate::widgets::selection::smart_play_request(playlist.smart_playlist_key),
+        PlayTarget::smart(playlist.smart_playlist_key),
         position,
         in_folder,
     ) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "smart-playlist", position);
-    let playback = crate::widgets::selection::smart_play_request(playlist.smart_playlist_key);
+    let playback = PlayTarget::smart(playlist.smart_playlist_key);
     append_loaded_play(&surface, shell, playback.clone(), play);
     install_sidebar_pin_action(&surface, shell, Some(playlist.pin()));
     append_export_action(
@@ -1457,7 +1456,7 @@ pub(crate) fn install_sidebar_pin_action(
 fn append_loaded_play(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    target: PlayRequest,
+    target: PlayTarget,
     play: Option<CollectionPlay>,
 ) {
     let play_shell = Rc::clone(shell);
@@ -1465,7 +1464,7 @@ fn append_loaded_play(
         &shell.settings.current.borrow().application.context_menu,
         move |placement, shuffled| match &play {
             Some(play) => play(placement, shuffled),
-            None => play_target(&play_shell.products.playback, &target, placement, shuffled),
+            None => play_target(&play_shell.products, &target, placement, shuffled),
         },
     );
 }

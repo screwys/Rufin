@@ -1,14 +1,9 @@
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use library::PlaylistKey;
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::QueuePlacement;
 use std::{cell::RefCell, sync::Arc};
-pub(crate) type CollectionSelection = Box<
-    dyn Fn(
-        &rufin_core::playback::PlayRequest,
-        &gtk::Bitset,
-    ) -> Option<crate::widgets::media_drag::CollectionTargets>,
->;
+pub(crate) type CollectionSelection =
+    Box<dyn Fn(&PlayTarget, &gtk::Bitset) -> Option<crate::widgets::media_drag::CollectionTargets>>;
 mod position_selection_imp {
     use super::*;
 
@@ -234,7 +229,7 @@ impl PositionSelectionModel {
 
     pub(crate) fn collection_selection(
         &self,
-        target: &rufin_core::playback::PlayRequest,
+        target: &PlayTarget,
         positions: &gtk::Bitset,
     ) -> Option<crate::widgets::media_drag::CollectionTargets> {
         if let Some(capture) = self.imp().collection_selection.borrow().as_ref() {
@@ -320,49 +315,66 @@ fn selected_positions(positions: &gtk::Bitset) -> impl Iterator<Item = u32> + '_
         .flat_map(|(iter, first)| std::iter::once(first).chain(iter))
 }
 
-/// Plays `scope` whole, carrying the context id of `target`, the collection it reads.
-pub fn collection_play_request(
-    scope: library::Collection,
-    target: &CollectionTarget,
-) -> rufin_core::playback::PlayRequest {
-    rufin_core::playback::PlayRequest::ordered(
-        library::MemberRead::new(scope).selection(),
-        0,
-        QueuePlacement::Now,
-        true,
-    )
-    .with_context(target.context_id().into())
+/// What a row plays: the page a collection row opens, played whole as that page's header plays
+/// it, or one track with no context.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlayTarget {
+    Route(rufin_core::route::Route),
+    Track(library::TrackKey),
 }
 
-pub fn smart_play_request(key: library::SmartPlaylistKey) -> rufin_core::playback::PlayRequest {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |value| value.as_secs() as i64);
-    collection_play_request(
-        library::Collection::Smart { key, now },
-        &CollectionTarget::SmartPlaylist(key),
-    )
-}
+impl PlayTarget {
+    /// The page an album row opens.
+    pub fn album(row: &library::AlbumRow) -> Self {
+        Self::Route(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()))
+    }
 
-pub fn album_play_request(row: &library::AlbumRow) -> rufin_core::playback::PlayRequest {
-    collection_play_request(
-        library::Collection::Album(row.album_key),
-        &CollectionTarget::Album(row.media_uri.clone()),
-    )
-}
+    /// The page an artist row opens, read as an album artist or as an artist.
+    pub fn artist(row: &library::ArtistRow, album_artist: bool) -> Self {
+        let uri = row.media_uri.clone();
+        Self::Route(if album_artist {
+            rufin_core::route::Route::AlbumArtistDetail(uri)
+        } else {
+            rufin_core::route::Route::ArtistDetail(uri)
+        })
+    }
 
-pub fn artist_play_request(
-    row: &library::ArtistRow,
-    album_artist: bool,
-) -> rufin_core::playback::PlayRequest {
-    collection_play_request(
-        library::Collection::Artist {
-            key: row.artist_key,
-            album_artist,
-        },
-        &CollectionTarget::Artist {
-            id: row.media_uri.clone(),
-            album_artist,
-        },
-    )
+    /// A smart playlist's page.
+    pub fn smart(key: library::SmartPlaylistKey) -> Self {
+        Self::Route(rufin_core::route::Route::SmartPlaylistDetail(key))
+    }
+
+    /// The context id its plays carry before a page's filter and order; None for a track.
+    pub fn context(&self) -> Option<String> {
+        match self {
+            Self::Route(route) => Some(rufin_core::view::context_base(route)),
+            Self::Track(_) => None,
+        }
+    }
+
+    /// What playing it at `placement` queues, in the selected library. None when its page lists
+    /// nothing.
+    pub async fn request(
+        &self,
+        source: &rufin_core::runtime::SourceHandle,
+        placement: QueuePlacement,
+        shuffled: bool,
+    ) -> Result<Option<rufin_core::playback::PlayRequest>, String> {
+        match self {
+            Self::Track(key) => Ok(Some(
+                rufin_core::playback::PlayRequest::track(*key, placement).shuffled(shuffled),
+            )),
+            Self::Route(route) => source
+                .play_route(
+                    route,
+                    source.selected_library().as_ref(),
+                    &rufin_core::view::OpenOptions::default(),
+                    placement,
+                    shuffled,
+                    &library::ReadCancellation::new(),
+                )
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    }
 }

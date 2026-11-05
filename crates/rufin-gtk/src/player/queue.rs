@@ -419,8 +419,9 @@ fn enqueue_media_drop(
         return true;
     }
     let catalog = window.products.library.clone();
+    let owner = window.products.source.clone();
     window.products.runtime.spawn(async move {
-        let Ok(input) = source.track_selection(&catalog).await else {
+        let Ok(input) = source.track_selection(&catalog, &owner).await else {
             return;
         };
         queue.insert(input, target);

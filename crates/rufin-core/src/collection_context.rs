@@ -45,6 +45,25 @@ impl CollectionTarget {
         })
     }
 
+    /// The detail route that shows the collection.
+    pub fn route(&self) -> Route {
+        match self {
+            Self::Album(uri) => Route::AlbumDetail(uri.clone()),
+            Self::Artist {
+                id,
+                album_artist: false,
+            } => Route::ArtistDetail(id.clone()),
+            Self::Artist {
+                id,
+                album_artist: true,
+            } => Route::AlbumArtistDetail(id.clone()),
+            Self::Genre(key) => Route::GenreDetail(*key),
+            Self::Mood(key) => Route::MoodDetail(*key),
+            Self::Playlist(key) => Route::PlaylistDetail(*key),
+            Self::SmartPlaylist(key) => Route::SmartPlaylistDetail(*key),
+        }
+    }
+
     /// The collection `collection` reads, naming albums and artists by the URI `catalog`
     /// holds for them. Sources, folder objects and history are no collection here.
     pub fn of(catalog: &library::Catalog, collection: &library::Collection) -> Option<Self> {

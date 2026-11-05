@@ -111,8 +111,9 @@ impl SearchSession {
         };
         let queue = catalog.products.playback.clone();
         let library = catalog.products.library.clone();
+        let owner = catalog.products.source.clone();
         catalog.products.runtime.spawn(async move {
-            match source.play_request(&library).await {
+            match source.play_request(&library, &owner).await {
                 Ok(mut request) => {
                     request.placement = placement;
                     queue.play_selection(request);

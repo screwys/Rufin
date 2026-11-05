@@ -15,9 +15,8 @@ use crate::menus::media_menus::{
     present_playlist_context_menu, present_smart_playlist_context_menu,
 };
 use crate::widgets::cover_controls::cover_play_only_hover_controls;
-use crate::widgets::selection::collection_play_request;
+use crate::widgets::selection::PlayTarget;
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::playback::PlayRequest;
 
 use crate::widgets::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
@@ -529,33 +528,12 @@ impl SidebarPinItem {
     fn route(&self) -> Route {
         Route::of_row(&self.row).expect("pin_rows returns pinned collections only")
     }
-    fn playback_target(&self) -> Option<PlayRequest> {
-        let key = self.key();
-        let collection = match self.pin {
-            SidebarPin::Album { .. } => {
-                library::Collection::Album(library::AlbumKey::from_raw(key))
-            }
-            SidebarPin::Artist { album_artist, .. } => library::Collection::Artist {
-                key: library::ArtistKey::from_raw(key),
-                album_artist,
-            },
-            SidebarPin::Genre { .. } => {
-                library::Collection::Genre(library::GenreKey::from_raw(key))
-            }
-            SidebarPin::Playlist { .. } => {
-                library::Collection::Playlist(library::PlaylistKey::from_raw(key))
-            }
-            SidebarPin::SmartPlaylist { .. } => {
-                return Some(crate::widgets::selection::smart_play_request(
-                    library::SmartPlaylistKey::from_raw(key),
-                ));
-            }
-            SidebarPin::PlaylistFolder { .. } => return None,
-        };
-        Some(collection_play_request(
-            collection,
-            &CollectionTarget::for_route(&self.route()).expect("pin route"),
-        ))
+    /// What the pin plays: the page it opens; a playlist folder plays nothing.
+    fn playback_target(&self) -> Option<PlayTarget> {
+        match self.route() {
+            Route::PlaylistFolder { .. } => None,
+            route => Some(PlayTarget::Route(route)),
+        }
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
         self.summary()
@@ -589,7 +567,7 @@ impl SidebarPinItem {
             let menus = &shell;
             match row {
                 library::Row::Album(row) => {
-                    present_album_context_menu(&target, menus, row, None, None, position)
+                    present_album_context_menu(&target, menus, row, None, position)
                 }
                 library::Row::Artist(row) => {
                     present_artist_context_menu(&target, menus, row, None, position)
@@ -1233,7 +1211,7 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
                 return;
             };
             crate::menus::media_menus::play_target(
-                &playback_shell.products.playback,
+                &playback_shell.products,
                 &playback_target,
                 QueuePlacement::Now,
                 false,
@@ -1448,7 +1426,7 @@ fn install_playlist_pin_drop(
 fn install_sidebar_pin_double_click(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
-    playback: PlayRequest,
+    playback: PlayTarget,
 ) {
     let click = gtk::GestureClick::new();
     click.set_button(1);
@@ -1459,7 +1437,7 @@ fn install_sidebar_pin_double_click(
         if presses >= 2 && presses % 2 == 0 {
             gesture.set_state(gtk::EventSequenceState::Claimed);
             crate::menus::media_menus::play_target(
-                &shell.products.playback,
+                &shell.products,
                 &playback,
                 QueuePlacement::Now,
                 false,
@@ -1522,7 +1500,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
 
 fn sidebar_pin_transport_button(
     shell: &Rc<Shell>,
-    target: &PlayRequest,
+    target: &PlayTarget,
     icon_name: &str,
     label: &str,
     placement: QueuePlacement,
@@ -1533,7 +1511,7 @@ fn sidebar_pin_transport_button(
     let target = target.clone();
     button.connect_clicked(move |_| {
         let Some(shell) = shell.upgrade() else { return };
-        crate::menus::media_menus::play_target(&shell.products.playback, &target, placement, false);
+        crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
     });
     button
 }

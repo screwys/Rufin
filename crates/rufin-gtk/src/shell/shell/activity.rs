@@ -13,7 +13,6 @@ use gtk::{gdk, gio, glib};
 use library::{ActivityOverview, CalendarActivityPeriod, TrackRow};
 use localization::{tr, tr_with};
 use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
-use rufin_core::playback::{PlayRequest, QueuePlacement};
 use rufin_core::route::Route;
 use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{
@@ -668,8 +667,8 @@ impl ActivityView {
                         && let Some(uri) = top
                     {
                         crate::menus::media_menus::play_target(
-                            &shell.products.playback,
-                            &PlayRequest::track(uri, QueuePlacement::Now),
+                            &shell.products,
+                            &crate::widgets::selection::PlayTarget::Track(uri),
                             rufin_core::playback::QueuePlacement::Now,
                             false,
                         );
@@ -942,8 +941,8 @@ impl ActivityCollections {
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
                 let row = item.borrow::<TrackRow>();
                 crate::menus::media_menus::play_target(
-                    &shell.products.playback,
-                    &PlayRequest::track(row.track_key, QueuePlacement::Now),
+                    &shell.products,
+                    &crate::widgets::selection::PlayTarget::Track(row.track_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
                 );
@@ -1038,7 +1037,7 @@ impl ActivityCollections {
             self.artist_cells.borrow_mut().push(cell);
         }
         for (position, row) in data.albums.iter().take(limit).enumerate() {
-            let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount], None);
+            let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount]);
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);

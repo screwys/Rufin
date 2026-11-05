@@ -571,7 +571,7 @@ impl RowList {
 
     pub(crate) fn collection_selection(
         &self,
-        target: &rufin_core::playback::PlayRequest,
+        target: &crate::widgets::selection::PlayTarget,
         positions: &gtk::Bitset,
     ) -> Option<crate::widgets::media_drag::CollectionTargets> {
         use glib::subclass::prelude::ObjectSubclassIsExt;

@@ -167,7 +167,6 @@ impl CatalogUi {
                     target,
                     menu_shell.shell(),
                     menu_album.borrow().row.clone(),
-                    None,
                     Some(Rc::clone(&menu_play)),
                     position,
                 );

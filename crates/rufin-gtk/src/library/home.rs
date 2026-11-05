@@ -8,7 +8,7 @@ use library::{
     HomeAlbumRow, HomeProviderSection, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow,
 };
 use localization::{album_count_text, msgid, tr, track_count_text};
-use rufin_core::playback::{PlayRequest, QueuePlacement, RadioPlayRequest};
+use rufin_core::playback::RadioPlayRequest;
 
 use crate::favorites::{
     favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
@@ -549,7 +549,7 @@ impl CatalogUi {
         install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
             let _shell = drag_shell.upgrade()?;
             let source = MediaDragSource::capture_target(
-                crate::widgets::selection::album_play_request(&drag_album),
+                crate::widgets::selection::PlayTarget::album(&drag_album),
             );
             Some((source, drag_title.clone()))
         });
@@ -557,10 +557,10 @@ impl CatalogUi {
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
-        let play_target = crate::widgets::selection::album_play_request(&album);
+        let play_target = crate::widgets::selection::PlayTarget::album(&album);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             crate::menus::media_menus::play_target(
-                &play_shell.products.playback,
+                &play_shell.products,
                 &play_target,
                 placement,
                 shuffled,
@@ -600,7 +600,7 @@ impl CatalogUi {
                 return;
             };
             {
-                present_album_context_menu(target, menu_shell.shell(), album, None, None, position);
+                present_album_context_menu(target, menu_shell.shell(), album, None, position);
             }
         });
 
@@ -714,8 +714,8 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let play_key = track.track_key;
             let play = Rc::new(move |_| {
                 crate::menus::media_menus::play_target(
-                    &play_shell.products.playback,
-                    &PlayRequest::track(play_key, QueuePlacement::Now),
+                    &play_shell.products,
+                    &crate::widgets::selection::PlayTarget::Track(play_key),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
                 );
@@ -745,11 +745,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
         HomeItem::Album(item) => {
             let mut album = item.album;
             album.title = item.title;
-            let cell = AlbumGridCell::new(
-                shell,
-                &rufin_core::settings::layout::HOME_ALBUM_FIELDS,
-                None,
-            );
+            let cell = AlbumGridCell::new(shell, &rufin_core::settings::layout::HOME_ALBUM_FIELDS);
             cell.bind(0, album);
             (
                 cell.widget(),
@@ -768,8 +764,8 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
 fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => crate::menus::media_menus::play_target(
-            &shell.products.playback,
-            &PlayRequest::track(item.track.track_key, QueuePlacement::Now),
+            &shell.products,
+            &crate::widgets::selection::PlayTarget::Track(item.track.track_key),
             rufin_core::playback::QueuePlacement::Now,
             false,
         ),

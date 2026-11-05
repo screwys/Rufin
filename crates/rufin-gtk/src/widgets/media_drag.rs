@@ -1,7 +1,6 @@
-use crate::widgets::selection::collection_play_request;
 use crate::widgets::{
     artwork::ArtworkTile,
-    selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot},
+    selection::{PlayTarget, PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot},
 };
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -14,7 +13,7 @@ use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
 pub enum CollectionTargets {
-    Ready(Vec<PlayRequest>),
+    Ready(Vec<PlayTarget>),
     Parents(Vec<(library::ListRead, Vec<Range<usize>>)>),
 }
 
@@ -29,16 +28,23 @@ impl CollectionTargets {
                 .sum(),
         }
     }
+    /// The playlists and smart playlists it names.
     pub async fn collections(
         &self,
         catalog: &library::Catalog,
     ) -> Result<Vec<library::Collection>, String> {
+        use rufin_core::route::Route;
         match self {
             Self::Ready(targets) => targets
                 .iter()
-                .map(|target| match target.selection() {
-                    Some(library::MemberSelection::Members { read, .. }) => Ok(read.collection),
-                    _ => Err("Selection does not contain collections".into()),
+                .map(|target| match target {
+                    PlayTarget::Route(Route::PlaylistDetail(key)) => {
+                        Ok(library::Collection::Playlist(*key))
+                    }
+                    PlayTarget::Route(Route::SmartPlaylistDetail(key)) => {
+                        Ok(library::Collection::Smart { key: *key, now: 0 })
+                    }
+                    _ => Err("Selection does not contain playlists".into()),
                 })
                 .collect(),
             Self::Parents(reads) => {
@@ -50,21 +56,39 @@ impl CollectionTargets {
             }
         }
     }
-    pub async fn resolve(&self, catalog: &library::Catalog) -> Result<Vec<PlayRequest>, String> {
+    /// What each selected row plays.
+    pub async fn resolve(&self, catalog: &library::Catalog) -> Result<Vec<PlayTarget>, String> {
         match self {
             Self::Ready(targets) => Ok(targets.clone()),
             Self::Parents(reads) => {
                 let mut targets = Vec::new();
                 for (read, ranges) in reads {
                     let collections = selected_parent_collections(catalog, read, ranges).await?;
-                    targets.extend(collections.into_iter().filter_map(|collection| {
-                        let target = CollectionTarget::of(catalog, &collection)?;
-                        Some(collection_play_request(collection, &target))
+                    targets.extend(collections.iter().filter_map(|collection| {
+                        Some(PlayTarget::Route(
+                            CollectionTarget::of(catalog, collection)?.route(),
+                        ))
                     }));
                 }
                 Ok(targets)
             }
         }
+    }
+    /// What playing every selected row queues, each as its page plays.
+    pub async fn requests(
+        &self,
+        catalog: &library::Catalog,
+        source: &rufin_core::runtime::SourceHandle,
+    ) -> Result<Vec<PlayRequest>, String> {
+        let mut requests = Vec::new();
+        for target in self.resolve(catalog).await? {
+            requests.extend(
+                target
+                    .request(source, rufin_core::playback::QueuePlacement::Now, false)
+                    .await?,
+            );
+        }
+        Ok(requests)
     }
 }
 
@@ -80,30 +104,6 @@ async fn selected_parent_collections(
         .map_err(|error| error.to_string())
 }
 
-/// The collection a collection row lists, compared by key: a smart playlist at any time.
-fn row_collection(row: &library::Row) -> Option<library::Collection> {
-    use library::{Collection, PlaylistListRow, Row, TagKind};
-    Some(match row {
-        Row::Album(album) => Collection::Album(album.album_key),
-        Row::Artist(artist) => Collection::Artist {
-            key: artist.artist_key,
-            album_artist: artist.album_artist,
-        },
-        Row::Tag(tag) if tag.kind == TagKind::Genre => {
-            Collection::Genre(library::GenreKey::from_raw(tag.key))
-        }
-        Row::Tag(tag) => Collection::Mood(library::MoodKey::from_raw(tag.key)),
-        Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
-            Collection::Playlist(playlist.playlist_key)
-        }
-        Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => Collection::Smart {
-            key: smart.smart_playlist_key,
-            now: 0,
-        },
-        _ => return None,
-    })
-}
-
 /// Lets a drag of a selected collection row carry the selected rows of `rows`' list.
 pub fn install_parent_selection(rows: &crate::widgets::view_model::Rows<library::Row>) {
     let weak = rows.list_model().downgrade();
@@ -114,16 +114,11 @@ pub fn install_parent_selection(rows: &crate::widgets::view_model::Rows<library:
             else {
                 return None;
             };
-            let Some(library::MemberSelection::Members { read: dragged, .. }) = dragged.selection()
-            else {
+            let PlayTarget::Route(dragged) = dragged else {
                 return None;
             };
-            let same = |row: &library::Row| match (row_collection(row), &dragged.collection) {
-                (
-                    Some(library::Collection::Smart { key: left, .. }),
-                    library::Collection::Smart { key: right, .. },
-                ) => left == *right,
-                (left, right) => left.as_ref() == Some(right),
+            let same = |row: &library::Row| {
+                rufin_core::route::Route::of_row(row).as_ref() == Some(dragged)
             };
             let position = rows.ready_position(same)?;
             positions.contains(position).then(|| {
@@ -337,7 +332,7 @@ pub enum MediaDragSource {
         operations: rufin_core::runtime::source::SourceHandle,
     },
     Target {
-        target: PlayRequest,
+        target: PlayTarget,
     },
     Targets {
         targets: CollectionTargets,
@@ -352,7 +347,7 @@ pub enum MediaDragSource {
 }
 
 impl MediaDragSource {
-    pub fn capture_target(target: PlayRequest) -> Self {
+    pub fn capture_target(target: PlayTarget) -> Self {
         Self::Target { target }
     }
 
@@ -453,7 +448,7 @@ fn capture_collection_selection(
 
 pub fn selected_collection_targets(
     widget: &gtk::Widget,
-    target: &PlayRequest,
+    target: &PlayTarget,
 ) -> Option<CollectionTargets> {
     let selection = widget
         .ancestor(gtk::GridView::static_type())
@@ -537,6 +532,7 @@ impl MediaDragSource {
     pub async fn track_selection(
         &self,
         catalog: &library::Catalog,
+        source: &rufin_core::runtime::SourceHandle,
     ) -> Result<library::MemberSelection, String> {
         match self {
             Self::Targets {
@@ -555,7 +551,7 @@ impl MediaDragSource {
                 media_uris: uris, ..
             } => Ok(library::MemberSelection::Uris((uris.to_vec()).into())),
             _ => Ok(self
-                .play_request(catalog)
+                .play_request(catalog, source)
                 .await?
                 .selection()
                 .expect("song-backed collection drag")),
@@ -565,8 +561,9 @@ impl MediaDragSource {
     pub async fn playlist_input(
         &self,
         catalog: &library::Catalog,
+        source: &rufin_core::runtime::SourceHandle,
     ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
-        let selection = self.track_selection(catalog).await?;
+        let selection = self.track_selection(catalog, source).await?;
         let title = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
             Self::PlaylistEntries(_) => localization::tr("Playlist"),
@@ -579,16 +576,28 @@ impl MediaDragSource {
         Ok((selection, title, preview))
     }
 
-    pub async fn play_request(&self, catalog: &library::Catalog) -> Result<PlayRequest, String> {
+    pub async fn play_request(
+        &self,
+        catalog: &library::Catalog,
+        source: &rufin_core::runtime::SourceHandle,
+    ) -> Result<PlayRequest, String> {
         let placement = rufin_core::playback::QueuePlacement::Now;
+        let gone = || "Nothing to play here".to_string();
         Ok(match self {
             Self::LiveCollection {
                 media_uri,
                 operations,
-            } => prepare_live_collection(catalog, operations, media_uri).await?,
-            Self::Target { target } => target.clone(),
+            } => prepare_live_collection(catalog, operations, media_uri)
+                .await?
+                .request(source, placement, false)
+                .await?
+                .ok_or_else(gone)?,
+            Self::Target { target } => target
+                .request(source, placement, false)
+                .await?
+                .ok_or_else(gone)?,
             Self::Targets { targets } => {
-                PlayRequest::group(targets.resolve(catalog).await?, placement)
+                PlayRequest::group(targets.requests(catalog, source).await?, placement)
             }
             Self::Selection(selection) => {
                 PlayRequest::ordered(selection.input.clone(), 0, placement, false)
@@ -606,6 +615,7 @@ impl MediaDragSource {
     pub async fn resolve(
         &self,
         catalog: &library::Catalog,
+        source: &rufin_core::runtime::SourceHandle,
     ) -> Result<(Vec<String>, DownloadSubject), String> {
         let mut prepared = None;
         let uris = match self {
@@ -614,7 +624,7 @@ impl MediaDragSource {
                 media_uris: uris, ..
             } => uris.to_vec(),
             _ => {
-                let request = self.play_request(catalog).await?;
+                let request = self.play_request(catalog, source).await?;
                 let selection = request.selection().expect("song-backed collection drag");
                 prepared = Some(request);
                 catalog
@@ -625,10 +635,17 @@ impl MediaDragSource {
         };
         let subject = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => {
-                let target = prepared.as_ref().expect("prepared collection");
-                let title = selection_title(target.selection().as_ref());
+                let request = prepared.as_ref().expect("prepared collection");
+                let title = selection_title(request.selection().as_ref());
+                let context = match self {
+                    Self::Target { target } => target.context(),
+                    Self::LiveCollection { media_uri, .. } => {
+                        live_collection(catalog, media_uri)?.context()
+                    }
+                    _ => None,
+                };
                 DownloadSubject::Prepared {
-                    context_id: target.context().map(str::to_string).unwrap_or_else(|| {
+                    context_id: context.unwrap_or_else(|| {
                         format!("track:{}", uris.first().map_or("", String::as_str))
                     }),
                     title: Some(title),
@@ -664,34 +681,28 @@ fn selection_title(selection: Option<&library::MemberSelection>) -> String {
     }
 }
 
+/// The page a live search result opens, once its source has its collection.
 async fn prepare_live_collection(
     catalog: &library::Catalog,
     operations: &rufin_core::runtime::source::SourceHandle,
     media_uri: &str,
-) -> Result<PlayRequest, String> {
+) -> Result<PlayTarget, String> {
     operations
         .prepare_collection(media_uri.to_string())
         .recv()
         .await
         .map_err(|error| error.to_string())??;
-    let (scope, target) = match catalog.item(media_uri) {
-        Some(library::Item::Album(key)) => (
-            library::Collection::Album(key),
-            CollectionTarget::Album(media_uri.to_owned()),
-        ),
-        Some(library::Item::Artist { key, .. }) => (
-            library::Collection::Artist {
-                key,
-                album_artist: false,
-            },
-            CollectionTarget::Artist {
-                id: media_uri.to_owned(),
-                album_artist: false,
-            },
-        ),
+    live_collection(catalog, media_uri)
+}
+
+/// The page a live search result opens.
+fn live_collection(catalog: &library::Catalog, media_uri: &str) -> Result<PlayTarget, String> {
+    let uri = media_uri.to_owned();
+    Ok(PlayTarget::Route(match catalog.item(media_uri) {
+        Some(library::Item::Album(_)) => rufin_core::route::Route::AlbumDetail(uri),
+        Some(library::Item::Artist { .. }) => rufin_core::route::Route::ArtistDetail(uri),
         _ => return Err("Collection is no longer available".to_string()),
-    };
-    Ok(collection_play_request(scope, &target))
+    }))
 }
 
 #[cfg(test)]

@@ -548,12 +548,9 @@ pub fn album_collection_projection(
         Rc::new(move |layout| {
             let models = models.borrow().clone();
             match layout {
-                LibraryLayout::Row => LibraryPresentationProjection::Row(album_table(
-                    &shell,
-                    models.albums(),
-                    key,
-                    None,
-                )),
+                LibraryLayout::Row => {
+                    LibraryPresentationProjection::Row(album_table(&shell, models.albums(), key))
+                }
                 LibraryLayout::Detail if key.supports_layout(LibraryLayout::Detail) => {
                     LibraryPresentationProjection::AlbumDetail(album_detail_list(
                         &shell,
@@ -657,7 +654,7 @@ pub fn album_grid(
     collection_grid_with_demand(
         sparse.list_model(),
         &fields,
-        move |fields| AlbumGridCell::new(&cell_shell, fields, None),
+        move |fields| AlbumGridCell::new(&cell_shell, fields),
         move |_, album: AlbumRow| {
             activate_shell.open_route(Route::AlbumDetail(album.media_uri.clone()))
         },
@@ -733,7 +730,6 @@ pub fn album_table<M>(
     shell: &Rc<CatalogUi>,
     model: M,
     key: LibraryListKey,
-    playback_context: Option<String>,
 ) -> CollectionTableProjection
 where
     M: IsA<gio::ListModel> + Clone + 'static,
@@ -741,14 +737,13 @@ where
     let fields = shell.settings.current.borrow().library_list(key).row_fields;
     let activate_shell = Rc::clone(shell);
     let column_shell = Rc::clone(shell);
-    let column_playback_context = playback_context;
     dynamic_collection_table(
         shell,
         key,
         model,
         &fields,
         Vec::new(),
-        move |field| album_column(&column_shell, field, column_playback_context.clone()),
+        move |field| album_column(&column_shell, field),
         |field| column_fit_width(field, column_width(field)),
         true,
         Some(Box::new(move |_, album: AlbumRow| {

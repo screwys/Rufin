@@ -19,7 +19,7 @@ use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::localization::localized_column;
 
-use rufin_core::playback::PlayRequest;
+use crate::widgets::selection::PlayTarget;
 
 use super::table_links::mapped_track_link_column;
 use crate::widgets::library_fields::{
@@ -38,7 +38,7 @@ const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 pub fn bind_collection_title<T: Clone + 'static>(
     factory: &gtk::SignalListItemFactory,
     shell: &Rc<CatalogUi>,
-    target: impl Fn(&T) -> Option<PlayRequest> + 'static,
+    target: impl Fn(&T) -> Option<PlayTarget> + 'static,
 ) {
     let bindings = Rc::new(RefCell::new(HashMap::<
         usize,
@@ -79,7 +79,7 @@ mod collection_index_cell_imp {
     pub struct CollectionIndexCell {
         pub(super) overlay: std::cell::OnceCell<gtk::Overlay>,
         pub(super) playing: std::cell::OnceCell<Rc<super::super::grid_cells::MediaPlayingBinding>>,
-        pub(super) target: RefCell<Option<PlayRequest>>,
+        pub(super) target: RefCell<Option<PlayTarget>>,
         pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
     }
 
@@ -121,7 +121,7 @@ impl CollectionIndexCell {
             let target = cell.imp().target.borrow().clone();
             if let (Some(shell), Some(target)) = (cell.imp().shell.borrow().upgrade(), target) {
                 crate::menus::media_menus::play_target(
-                    &shell.products.playback,
+                    &shell.products,
                     &target,
                     library::QueuePlacement::Replace { anchor_index: 0 },
                     false,
@@ -135,7 +135,7 @@ impl CollectionIndexCell {
         cell
     }
 
-    fn bind(&self, position: u32, target: Option<PlayRequest>) {
+    fn bind(&self, position: u32, target: Option<PlayTarget>) {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
         let imp = self.imp();
         set_track_row_index_text(
@@ -179,20 +179,12 @@ fn set_placeholder_favorite(button: &gtk::Button, favorite: Option<bool>) {
     button.set_sensitive(favorite.is_some());
 }
 
-pub fn album_column(
-    shell: &Rc<CatalogUi>,
-    field: LibraryField,
-    playback_context: Option<String>,
-) -> gtk::ColumnViewColumn {
+pub fn album_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
     factory.connect_setup(move |_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-            item.set_child(Some(&AlbumTableCell::new(
-                &shell,
-                field,
-                playback_context.clone(),
-            )));
+            item.set_child(Some(&AlbumTableCell::new(&shell, field)));
         }
     });
     connect_row_bind(&factory, |item| {
@@ -254,7 +246,6 @@ mod album_table_cell_imp {
         pub(super) row: RefCell<Option<std::sync::Arc<AlbumRow>>>,
         pub(super) field: std::cell::Cell<Option<LibraryField>>,
         pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
-        pub(super) playback_context: RefCell<Option<String>>,
         pub(super) title_playing:
             RefCell<Option<Rc<super::super::grid_cells::MediaPlayingBinding>>>,
     }
@@ -284,18 +275,11 @@ glib::wrapper! {
 }
 
 impl AlbumTableCell {
-    pub(crate) fn new(
-        shell: &Rc<CatalogUi>,
-        field: LibraryField,
-        playback_context: Option<String>,
-    ) -> Self {
+    pub(crate) fn new(shell: &Rc<CatalogUi>, field: LibraryField) -> Self {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
         let cell: Self = glib::Object::new();
         cell.imp().field.set(Some(field));
         cell.imp().shell.replace(Rc::downgrade(shell));
-        cell.imp()
-            .playback_context
-            .replace(playback_context.clone());
         let view = match field {
             LibraryField::RowIndex => AlbumCellView::Index(CollectionIndexCell::new(shell)),
             LibraryField::Image => AlbumCellView::Image(RecycledArtworkCell::new(48)),
@@ -334,16 +318,13 @@ impl AlbumTableCell {
         };
         if field != LibraryField::RowIndex {
             let weak = cell.downgrade();
-            let context = playback_context.clone();
             install_media_drag_source(view.widget(), move || {
                 let cell = weak.upgrade()?;
-                let _shell = cell.imp().shell.borrow().upgrade()?;
                 let row = cell.imp().row.borrow().clone()?;
-                let target = crate::widgets::selection::album_play_request(&row);
-                let target = context.as_ref().map_or(target.clone(), |context| {
-                    target.with_context(context.as_str().into())
-                });
-                Some((MediaDragSource::capture_target(target), row.title.clone()))
+                Some((
+                    MediaDragSource::capture_target(PlayTarget::album(&row)),
+                    row.title.clone(),
+                ))
             });
             let weak = cell.downgrade();
             install_context_menu_openers(
@@ -359,7 +340,6 @@ impl AlbumTableCell {
                                 target,
                                 shell.shell(),
                                 (*row).clone(),
-                                playback_context.clone(),
                                 None,
                                 position,
                             );
@@ -394,15 +374,7 @@ impl AlbumTableCell {
             return;
         };
         let view = imp.view.borrow();
-        let target = row.as_ref().map(|row| {
-            let target = crate::widgets::selection::album_play_request(&row);
-            imp.playback_context
-                .borrow()
-                .as_ref()
-                .map_or(target.clone(), |context| {
-                    target.with_context(context.as_str().into())
-                })
-        });
+        let target = row.as_deref().map(PlayTarget::album);
         if let Some(playing) = imp.title_playing.borrow().as_ref() {
             playing.bind(&shell, target.clone());
         }
@@ -468,10 +440,7 @@ pub fn artist_column(
     match field {
         LibraryField::RowIndex => {
             mapped_row_index_column::<ArtistRow>(shell, column_width(field), move |row| {
-                Some(crate::widgets::selection::artist_play_request(
-                    row,
-                    album_artist,
-                ))
+                Some(PlayTarget::artist(row, album_artist))
             })
         }
         LibraryField::Image => artist_image_column(shell, album_artist),
@@ -783,7 +752,7 @@ pub fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
 pub fn mapped_row_index_column<T: Clone + 'static>(
     shell: &Rc<CatalogUi>,
     width: i32,
-    target: impl Fn(&T) -> Option<PlayRequest> + 'static,
+    target: impl Fn(&T) -> Option<PlayTarget> + 'static,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
@@ -898,9 +867,9 @@ fn install_artist_list_item_context_menu(
         item,
         Rc::new(move |artist: ArtistRow| {
             let target = if album_artist {
-                crate::widgets::selection::artist_play_request(&artist, true)
+                PlayTarget::artist(&artist, true)
             } else {
-                crate::widgets::selection::artist_play_request(&artist, false)
+                PlayTarget::artist(&artist, false)
             };
             Some((target, artist.name))
         }),
@@ -924,7 +893,7 @@ fn install_collection_cell_drag<T: Clone + 'static>(
     widget: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     item: &gtk::ListItem,
-    target: Rc<dyn Fn(T) -> Option<(PlayRequest, String)>>,
+    target: Rc<dyn Fn(T) -> Option<(PlayTarget, String)>>,
 ) {
     let shell = Rc::downgrade(shell);
     let item = item.downgrade();
@@ -940,7 +909,7 @@ pub fn artwork_column<T, F>(
     title: &str,
     width: i32,
     candidates: F,
-    drag: Option<Rc<dyn Fn(T) -> Option<(PlayRequest, String)>>>,
+    drag: Option<Rc<dyn Fn(T) -> Option<(PlayTarget, String)>>>,
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
@@ -1055,10 +1024,7 @@ where
     let factory = gtk::SignalListItemFactory::new();
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
         bind_collection_title::<ArtistRow>(&factory, shell, move |row| {
-            Some(crate::widgets::selection::artist_play_request(
-                row,
-                album_artist,
-            ))
+            Some(PlayTarget::artist(row, album_artist))
         });
     }
     let shell = Rc::clone(shell);

@@ -1,6 +1,7 @@
 use crate::widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
+use crate::widgets::selection::PlayTarget;
 use crate::widgets::view_model::item_at_from_item;
 use std::rc::Rc;
 
@@ -9,7 +10,6 @@ use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{ArtistRow, Row, TagKind, TagRow};
 use localization::msgid;
-use rufin_core::collection_context::CollectionTarget;
 
 use crate::library::CatalogUi;
 use crate::library::{LibraryLayout, LibraryListKey};
@@ -134,7 +134,7 @@ impl CatalogUi {
 }
 
 pub trait CollectionRow: library::ShowsState + Clone + PartialEq + Send + Sync + 'static {
-    fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest>;
+    fn playback(&self, key: LibraryListKey) -> Option<PlayTarget>;
     fn downloaded(&self) -> bool;
     fn projection(
         shell: &Rc<CatalogUi>,
@@ -186,8 +186,8 @@ pub trait NamedCollectionRow: CollectionRow {
 }
 
 impl CollectionRow for ArtistRow {
-    fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
-        Some(crate::widgets::selection::artist_play_request(
+    fn playback(&self, key: LibraryListKey) -> Option<PlayTarget> {
+        Some(PlayTarget::artist(
             self,
             key == LibraryListKey::AlbumArtists,
         ))
@@ -205,23 +205,8 @@ impl CollectionRow for ArtistRow {
 }
 
 impl CollectionRow for TagRow {
-    fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
-        let (scope, target) = match self.kind {
-            TagKind::Genre => {
-                let key = library::GenreKey::from_raw(self.key);
-                (
-                    library::Collection::Genre(key),
-                    CollectionTarget::Genre(key),
-                )
-            }
-            TagKind::Mood => {
-                let key = library::MoodKey::from_raw(self.key);
-                (library::Collection::Mood(key), CollectionTarget::Mood(key))
-            }
-        };
-        Some(crate::widgets::selection::collection_play_request(
-            scope, &target,
-        ))
+    fn playback(&self, _key: LibraryListKey) -> Option<PlayTarget> {
+        Some(PlayTarget::Route(NamedCollectionRow::route(self)))
     }
 
     fn downloaded(&self) -> bool {
@@ -285,15 +270,10 @@ impl NamedCollectionRow for TagRow {
 }
 
 impl CollectionRow for library::PlaylistListRow {
-    fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
+    fn playback(&self, _key: LibraryListKey) -> Option<PlayTarget> {
         match self {
-            Self::Playlist(row) => Some(crate::widgets::selection::collection_play_request(
-                library::Collection::Playlist(row.playlist_key),
-                &CollectionTarget::Playlist(row.playlist_key),
-            )),
-            Self::SmartPlaylist(row) => Some(crate::widgets::selection::smart_play_request(
-                row.smart_playlist_key,
-            )),
+            Self::Playlist(row) => Some(PlayTarget::Route(Route::PlaylistDetail(row.playlist_key))),
+            Self::SmartPlaylist(row) => Some(PlayTarget::smart(row.smart_playlist_key)),
             Self::Folder(_) => None,
         }
     }
@@ -548,7 +528,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             move |shell, item, placement| {
                 if let Some(target) = item.playback(key) {
                     crate::menus::media_menus::play_target(
-                        &shell.products.playback,
+                        &shell.products,
                         &target,
                         placement,
                         false,

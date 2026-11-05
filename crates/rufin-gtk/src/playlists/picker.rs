@@ -128,8 +128,9 @@ fn read_destinations(
         .as_deref()
         .map(|selected| selected.source_key);
     let catalog = shell.products.library.clone();
+    let owner = shell.products.source.clone();
     let task = shell.products.runtime.spawn(async move {
-        let (selection, title, preview_uris) = source.playlist_input(&catalog).await?;
+        let (selection, title, preview_uris) = source.playlist_input(&catalog, &owner).await?;
         let playlists = catalog
             .playlist_destinations(source_key, &library::ReadCancellation::new())
             .await

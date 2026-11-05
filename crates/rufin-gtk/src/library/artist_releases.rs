@@ -390,7 +390,7 @@ impl ArtistRouteListCell {
                 crate::widgets::table_header::HeaderCell::new(&title, Some(*field), position)
                     .upcast()
             } else {
-                AlbumTableCell::new(shell, *field, None).upcast()
+                AlbumTableCell::new(shell, *field).upcast()
             };
             self.append(&widget);
             imp.table_cells.borrow_mut().push(widget);
@@ -870,14 +870,9 @@ fn artist_route_list(
     let selection_models = model.model().expect("Artist section models");
     let selection = crate::widgets::selection::PositionSelectionModel::new(model);
     selection.set_collection_selection(Box::new(move |target, positions| {
-        let Some(library::MemberSelection::Members {
-            read:
-                library::MemberRead {
-                    collection: library::Collection::Album(key),
-                    ..
-                },
-            ..
-        }) = target.selection()
+        let crate::widgets::selection::PlayTarget::Route(rufin_core::route::Route::AlbumDetail(
+            uri,
+        )) = target
         else {
             return None;
         };
@@ -908,7 +903,7 @@ fn artist_route_list(
         }
         let sparse = sparse?;
         let dragged = sparse.ready_position(
-            |row| matches!(row, library::Row::Album(album) if album.album_key == key),
+            |row| matches!(row, library::Row::Album(album) if &album.media_uri == uri),
         )?;
         if selected.size() < 2 || !selected.contains(dragged) {
             return None;
@@ -1037,7 +1032,7 @@ fn artist_route_list(
                     state.set_homogeneous(true);
                     state.add_css_class("album-grid");
                     for _ in 0..columns {
-                        let cell = AlbumGridCell::new(&bind_shell, &bind_fields.borrow(), None);
+                        let cell = AlbumGridCell::new(&bind_shell, &bind_fields.borrow());
                         cell.enable_card_activation();
                         let widget = cell.widget();
                         let wrapper = cards::collection_grid_card_inset(

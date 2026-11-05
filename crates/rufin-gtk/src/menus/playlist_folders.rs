@@ -2,6 +2,7 @@ use crate::shell::shell::Shell;
 use crate::widgets::interactions::ContextMenuSurface;
 use adw::prelude::*;
 use localization::msgid;
+use rufin_core::route::Route;
 use std::rc::Rc;
 
 pub fn folder_name_dialog(
@@ -279,12 +280,9 @@ pub fn playlist_drag_matches(
     smart: bool,
 ) -> bool {
     use crate::widgets::media_drag::{CollectionTargets, MediaDragSource};
-    let matches_target = |target: &rufin_core::playback::PlayRequest| match target.selection() {
-        Some(library::MemberSelection::Members { read, .. }) => match read.collection {
-            library::Collection::Playlist(_) => !smart,
-            library::Collection::Smart { .. } => smart,
-            _ => false,
-        },
+    let matches_target = |target: &crate::widgets::selection::PlayTarget| match target {
+        crate::widgets::selection::PlayTarget::Route(Route::PlaylistDetail(_)) => !smart,
+        crate::widgets::selection::PlayTarget::Route(Route::SmartPlaylistDetail(_)) => smart,
         _ => false,
     };
     match source {

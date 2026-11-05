@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use super::cards;
 use super::collections::collection_grid_field_label;
-use rufin_core::playback::PlayRequest;
+use crate::widgets::selection::PlayTarget;
 
 use crate::library::track_selection::TrackSelection;
 use crate::widgets::detail_links::DetailLinkBinding;
@@ -645,13 +645,6 @@ fn selected_position(selection: &gtk::SelectionModel) -> u32 {
     }
 }
 
-fn album_playback_target(album: &library::AlbumRow, context: Option<&str>) -> PlayRequest {
-    let target = crate::widgets::selection::album_play_request(album);
-    context
-        .map(|context| target.clone().with_context(context.into()))
-        .unwrap_or(target)
-}
-
 pub struct TrackGridCell<T: crate::widgets::library_fields::TrackPresentation = library::TrackRow> {
     body: CollectionGridCardCell,
     shell: std::rc::Weak<CatalogUi>,
@@ -711,12 +704,12 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                     action_shell.upgrade(),
                     action_current.borrow().as_ref().cloned(),
                 ) {
-                    let mut request = PlayRequest::track(
-                        row.track_key().expect("catalog song key"),
-                        QueuePlacement::Now,
+                    shell.products.playback.play_selection(
+                        rufin_core::playback::PlayRequest::track(
+                            row.track_key().expect("catalog song key"),
+                            placement,
+                        ),
                     );
-                    request.placement = placement;
-                    shell.products.playback.play_selection(request);
                 }
             });
         }
@@ -732,9 +725,8 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                 Some(selection) => {
                     MediaDragSource::selection(selection.dragged_tracks_for(track.media_uri()))
                 }
-                None => MediaDragSource::capture_target(PlayRequest::track(
+                None => MediaDragSource::capture_target(PlayTarget::Track(
                     track.track_key().expect("catalog song key"),
-                    QueuePlacement::Now,
                 )),
             };
             Some((source, track.title().to_string()))
@@ -771,10 +763,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
             .bind(row.title(), |value| (self.field)(position, &row, value));
         self.body.bind_playing_target(
             &shell,
-            PlayRequest::track(
-                row.track_key().expect("catalog song key"),
-                QueuePlacement::Now,
-            ),
+            PlayTarget::Track(row.track_key().expect("catalog song key")),
         );
         self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
@@ -811,7 +800,6 @@ pub struct AlbumGridCell {
     cover: ArtworkTile,
     favorite: gtk::Button,
     current: Rc<RefCell<Option<AlbumRow>>>,
-    context: Option<String>,
 }
 
 impl AlbumGridCell {
@@ -845,7 +833,7 @@ impl AlbumGridCell {
         self.body.card.add_controller(click);
     }
 
-    pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], context: Option<String>) -> Self {
+    pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(RefCell::new(None::<AlbumRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play album"));
         let cover_host = controls.imp().cover_host.get();
@@ -859,17 +847,14 @@ impl AlbumGridCell {
         cover_host.append(&cover.widget());
         let drag_current = Rc::clone(&current);
         let drag_shell = Rc::downgrade(shell);
-        let drag_context = context.clone();
         let drag_artwork = cover.drag_paintable_source();
         install_compact_media_drag_source(&body.card, &drag_artwork, move || {
             let _shell = drag_shell.upgrade()?;
             let row = drag_current.borrow();
             let row = row.as_ref()?;
-            let target = album_playback_target(&row, drag_context.as_deref());
-            let source = MediaDragSource::capture_target(target);
+            let source = MediaDragSource::capture_target(PlayTarget::album(row));
             Some((source, row.title.clone()))
         });
-        let menu_context = context.clone();
         install_grid_context(
             shell,
             &current,
@@ -877,25 +862,17 @@ impl AlbumGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_album_context_menu(
-                    target,
-                    shell.shell(),
-                    row,
-                    menu_context.clone(),
-                    None,
-                    point,
-                )
+                present_album_context_menu(target, shell.shell(), row, None, point)
             },
         );
-        let play_context = context.clone();
         install_grid_play(
             shell,
             &current,
             [play, play_next, play_last],
             move |shell, row, placement| {
                 crate::menus::media_menus::play_target(
-                    &shell.products.playback,
-                    &album_playback_target(&row, play_context.as_deref()),
+                    &shell.products,
+                    &PlayTarget::album(&row),
                     placement,
                     false,
                 );
@@ -911,7 +888,6 @@ impl AlbumGridCell {
             cover,
             favorite,
             current,
-            context,
         }
     }
 }
@@ -955,9 +931,9 @@ impl ArtistGridCell {
             let row = drag_current.borrow();
             let row = row.as_ref()?;
             let target = if album_artist {
-                crate::widgets::selection::artist_play_request(&row, true)
+                PlayTarget::artist(&row, true)
             } else {
-                crate::widgets::selection::artist_play_request(&row, false)
+                PlayTarget::artist(&row, false)
             };
             let source = MediaDragSource::capture_target(target);
             Some((source, row.name.clone()))
@@ -978,16 +954,11 @@ impl ArtistGridCell {
             [play, play_next, play_last],
             move |shell, row, placement| {
                 let target = if album_artist {
-                    crate::widgets::selection::artist_play_request(&row, true)
+                    PlayTarget::artist(&row, true)
                 } else {
-                    crate::widgets::selection::artist_play_request(&row, false)
+                    PlayTarget::artist(&row, false)
                 };
-                crate::menus::media_menus::play_target(
-                    &shell.products.playback,
-                    &target,
-                    placement,
-                    false,
-                );
+                crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
             },
         );
         install_grid_favorite(shell, &current, &favorite, |row| {
@@ -1016,9 +987,9 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         self.body.bind_playing_target(
             &shell,
             if self.album_artist {
-                crate::widgets::selection::artist_play_request(&row, true)
+                PlayTarget::artist(&row, true)
             } else {
-                crate::widgets::selection::artist_play_request(&row, false)
+                PlayTarget::artist(&row, false)
             },
         );
         shell.artwork.bind_artwork_tile(
@@ -1067,7 +1038,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
             return;
         };
         self.body
-            .bind_playing_target(&shell, album_playback_target(&row, self.context.as_deref()));
+            .bind_playing_target(&shell, PlayTarget::album(&row));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -1134,17 +1105,12 @@ impl MediaPlayingBinding {
         binding
     }
 
-    pub fn bind(&self, shell: &CatalogUi, target: Option<PlayRequest>) {
-        self.target.replace(target.and_then(|target| {
-            target
-                .context()
-                .map(|context| MediaPlayingTarget::Collection(context.to_string()))
-                .or_else(|| match target.selection() {
-                    Some(library::MemberSelection::Keys { keys, .. }) if keys.len() == 1 => {
-                        Some(MediaPlayingTarget::Track(keys[0]))
-                    }
-                    _ => None,
-                })
+    pub fn bind(&self, shell: &CatalogUi, target: Option<PlayTarget>) {
+        self.target.replace(target.map(|target| match target {
+            PlayTarget::Track(key) => MediaPlayingTarget::Track(key),
+            PlayTarget::Route(route) => {
+                MediaPlayingTarget::Collection(rufin_core::view::context_base(&route))
+            }
         }));
         self.refresh(shell.current.borrow().as_ref());
     }
@@ -1234,7 +1200,7 @@ impl CollectionGridCardCell {
         self.card.imp().folder_icon.set_visible(folder);
     }
 
-    pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlayRequest) {
+    pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlayTarget) {
         let mut binding = self.playing_target.borrow_mut();
         let binding = binding.get_or_insert_with(|| MediaPlayingBinding::new(shell, &self.title));
         binding.bind(shell, Some(target));

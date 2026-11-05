@@ -570,15 +570,10 @@ fn artist_detail_header_restored(
     let actions = showcase.actions();
     actions.add_css_class("artist-detail-actions");
     actions.set_halign(gtk::Align::Start);
-    let target = crate::widgets::selection::artist_play_request(&artist.row, album_artist);
+    let target = crate::widgets::selection::PlayTarget::artist(&artist.row, album_artist);
     let play_shell = Rc::clone(shell);
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-        crate::menus::media_menus::play_target(
-            &play_shell.products.playback,
-            &target,
-            placement,
-            shuffled,
-        );
+        crate::menus::media_menus::play_target(&play_shell.products, &target, placement, shuffled);
     });
     let controls = detail_playback_controls(
         &actions,
@@ -723,23 +718,6 @@ mod tests {
                 .copied()
                 .collect::<Vec<_>>();
             assert_eq!(rows, albums);
-        }
-    }
-
-    #[test]
-    fn artist_and_album_artist_play_requests_keep_distinct_role_identity() {
-        let key = library::ArtistKey::from_raw(7);
-        for album_artist in [false, true] {
-            let request = crate::widgets::selection::collection_play_request(
-                library::Collection::Artist { key, album_artist },
-                &rufin_core::collection_context::CollectionTarget::Artist {
-                    id: "artist-uri".into(),
-                    album_artist,
-                },
-            );
-            assert!(
-                matches!(request.selection(), Some(library::MemberSelection::Members { read: library::MemberRead { collection: library::Collection::Artist { key: value, album_artist: role }, .. }, .. }) if value == key && role == album_artist)
-            );
         }
     }
 }
