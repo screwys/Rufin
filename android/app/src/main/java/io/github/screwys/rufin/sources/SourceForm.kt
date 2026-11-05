@@ -18,6 +18,7 @@ internal class SourceForm {
     var trustInvalidCertificate by mutableStateOf(false)
     var instantMix by mutableStateOf(true)
     var halfStars by mutableStateOf(false)
+    var offersHalfStarSetting by mutableStateOf(false)
     var manualEmby by mutableStateOf(false)
     var subsonicAuth by mutableStateOf("password")
     var fileAuth by mutableStateOf("password")
@@ -36,6 +37,7 @@ internal class SourceForm {
         kind = saved.source.kind; name = saved.source.name; integration = editable.integration
         replaceHeaders = false
         halfStars = saved.source.halfStarsEnabled
+        offersHalfStarSetting = saved.source.offersHalfStarSetting
         url = saved.credentials.serverUrl
         username = saved.credentials.username
         trustInvalidCertificate = saved.credentials.trustInvalidCert

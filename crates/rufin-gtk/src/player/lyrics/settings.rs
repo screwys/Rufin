@@ -704,26 +704,5 @@ fn selected_source_uses_local_lyrics_storage(shell: &Shell) -> bool {
         .sources
         .iter()
         .find(|source| source.id == source_id)
-        .is_some_and(|source| {
-            source.kind == "local"
-                || matches!(source.kind.as_str(), "navidrome" | "subsonic")
-                    && selected_source_has_local_access(shell)
-        })
-}
-fn selected_source_has_local_access(shell: &Shell) -> bool {
-    let Some(source_id) = shell
-        .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_id.clone())
-    else {
-        return false;
-    };
-    shell
-        .source
-        .configured
-        .borrow()
-        .local_access
-        .iter()
-        .find(|summary| summary.source_id == source_id)
-        .is_some_and(|summary| summary.access.is_some())
+        .is_some_and(|source| source.stores_lyrics_locally)
 }

@@ -3015,6 +3015,24 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     });
 }
 
+fn source_summary(configured: &ConfiguredSource) -> SourceSummary {
+    let configuration = &configured.configuration;
+    SourceSummary {
+        id: configuration.source_id.clone(),
+        kind: configuration.kind.clone(),
+        name: configuration.name.clone(),
+        half_stars_enabled: half_stars_enabled(configured),
+        owns_playlists: configuration.is(library::SourceKind::owns_playlists),
+        supports_playlist_public: configuration.is(library::SourceKind::playlist_public),
+        file_library: configuration.is(library::SourceKind::file_library),
+        offers_half_star_setting: configuration.is(library::SourceKind::offers_half_star_setting),
+        stores_lyrics_locally: configuration.is(|kind| {
+            kind == library::SourceKind::Local
+                || kind.subsonic() && configured.local_access.is_some()
+        }),
+    }
+}
+
 fn configured_sources(
     stored: &StoredSettings,
     selected: Option<&SelectedLibrary>,
@@ -3024,28 +3042,7 @@ fn configured_sources(
         .sources
         .configured
         .iter()
-        .map(|configured| SourceSummary {
-            id: configured.configuration.source_id.clone(),
-            kind: configured.configuration.kind.clone(),
-            name: configured.configuration.name.clone(),
-            half_stars_enabled: half_stars_enabled(configured),
-            owns_playlists: configured
-                .configuration
-                .is(library::SourceKind::owns_playlists),
-            supports_playlist_public: configured
-                .configuration
-                .is(library::SourceKind::playlist_public),
-            file_library: configured
-                .configuration
-                .is(library::SourceKind::file_library),
-            offers_half_star_setting: configured
-                .configuration
-                .is(library::SourceKind::offers_half_star_setting),
-            stores_lyrics_locally: configured.configuration.is(|kind| {
-                kind == library::SourceKind::Local
-                    || kind.subsonic() && configured.local_access.is_some()
-            }),
-        })
+        .map(source_summary)
         .collect::<Vec<_>>();
     let local_folders = stored
         .sources
@@ -3143,21 +3140,11 @@ fn source_refresh_error_text(error: &SourceError) -> String {
     }
 }
 
-fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource, String> {
+fn editable_source(configured: &ConfiguredSource) -> Result<EditableSource, String> {
+    let configuration = &configured.configuration;
     let mut editable = EditableSource {
         integration: false,
-        source: SourceSummary {
-            id: configuration.source_id.clone(),
-            kind: configuration.kind.clone(),
-            name: configuration.name.clone(),
-            half_stars_enabled: configuration.is(library::SourceKind::half_stars),
-            owns_playlists: configuration.is(library::SourceKind::owns_playlists),
-            supports_playlist_public: configuration.is(library::SourceKind::playlist_public),
-            file_library: configuration.is(library::SourceKind::file_library),
-            offers_half_star_setting: configuration
-                .is(library::SourceKind::offers_half_star_setting),
-            stores_lyrics_locally: configuration.is(|kind| kind == library::SourceKind::Local),
-        },
+        source: source_summary(configured),
         credentials: CredentialPreset {
             source_name: configuration.name.clone(),
             server_url: String::new(),
@@ -4347,8 +4334,7 @@ impl SourceOwner {
             )
             .find(|(source, _)| source.configuration.source_id == source_id)
             .map(|(source, integration)| {
-                let mut form =
-                    editable_source(&source.configuration).map_err(SourceError::Other)?;
+                let mut form = editable_source(source).map_err(SourceError::Other)?;
                 form.integration = integration;
                 Ok(form)
             })

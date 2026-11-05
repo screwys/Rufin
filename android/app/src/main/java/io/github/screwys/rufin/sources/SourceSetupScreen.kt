@@ -103,7 +103,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                 }
                 } }
             } else if (form.kind == "local") Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (sourceId != null) SourceRatingSettings(setup)
+                if (form.offersHalfStarSetting) SourceRatingSettings(setup)
                 SettingsGroup {
                     SettingsRow(translate("Music"), leading = { RufinIcon("rufin-folders-symbolic", null) },
                         trailing = { RufinIcon("rufin-go-next-symbolic", null) },
@@ -151,7 +151,7 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
                     "plex" -> item { PlexSourceForm(setup, sourceId != null, browser) }
                     "webdav", "smb" -> item { FileSourceForm(setup, sourceId != null, browser) }
                 }
-                if (sourceId != null && form.kind in setOf("navidrome", "subsonic")) item { SourceRatingSettings(setup) }
+                if (form.offersHalfStarSetting) item { SourceRatingSettings(setup) }
                 item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     setup.code?.let { code -> Text(code, style = MaterialTheme.typography.headlineLarge) }
                     setup.browserUrl?.takeUnless { setup.authorized || setup.choosingProfiles }?.let { url ->

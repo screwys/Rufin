@@ -99,7 +99,9 @@ pub fn shows_lyrics_cache_prompt(
 ) -> bool {
     !application.download_lyrics_automatically
         && !application.lyrics_cache_prompt_dismissed
-        && sources.iter().any(|source| source.kind != "local")
+        && sources.iter().any(|source| {
+            library::SourceKind::parse(&source.kind) != Some(library::SourceKind::Local)
+        })
 }
 
 impl ConfiguredSources {

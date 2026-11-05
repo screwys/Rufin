@@ -60,7 +60,7 @@ pub fn configured_source_kind_display_name(kind: &str) -> String {
 }
 
 pub fn half_stars_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::SwitchRow> {
-    if !matches!(source.kind.as_str(), "navidrome" | "subsonic" | "local") {
+    if !source.offers_half_star_setting {
         return None;
     }
     let row = adw::SwitchRow::builder()
@@ -80,7 +80,7 @@ pub fn half_stars_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::
 
 pub fn playlist_auto_save_row(shell: &Rc<Shell>, source: &SourceSummary) -> Option<adw::SwitchRow> {
     use adw::prelude::*;
-    if !matches!(source.kind.as_str(), "local" | "smb" | "webdav") {
+    if !source.file_library {
         return None;
     }
     let resource = "preferences/dialogs/playlist_file.ui";
