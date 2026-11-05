@@ -21,20 +21,10 @@ use crate::library::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
 use crate::widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
-use crate::widgets::mounted_route::{RouteView, view_model};
-use crate::widgets::sparse_model::{
-    SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
-};
-use rufin_core::view::{Opened, View};
+use crate::widgets::view_model::{RowItem, Rows, connect_row_bind};
+use rufin_core::view::Opened;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
-
-fn release_row(row: library::Row) -> Option<library::AlbumRow> {
-    match row {
-        library::Row::Album(album) => Some(album),
-        _ => None,
-    }
-}
 
 /// The read of an artist page's releases, for its selections. A page whose artist is gone
 /// has none.
@@ -57,7 +47,9 @@ pub struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
-    pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    pub sparse: Rows<library::Row>,
+    /// The releases read the page shows, for clearing a selection read in another one.
+    release_read: RefCell<Option<library::ListRead>>,
     surface: gtk::Widget,
     scroll: crate::widgets::mounted_route::NativeListScroll,
     layout: Rc<Cell<LibraryLayout>>,
@@ -70,7 +62,7 @@ pub struct ArtistReleaseProjections {
 }
 
 struct ArtistAlbumProjection {
-    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    sparse: Rows<library::Row>,
     start: Cell<usize>,
     count: Cell<usize>,
     source_present: Cell<bool>,
@@ -123,7 +115,7 @@ mod artist_rows_model_imp {
     pub(super) struct ArtistRowsModel {
         pub(super) owner: RefCell<Weak<ArtistAlbumProjection>>,
         pub(super) count: Cell<u32>,
-        pub(super) items: RefCell<HashMap<u32, glib::WeakRef<SparseObjectItem>>>,
+        pub(super) items: RefCell<HashMap<u32, glib::WeakRef<RowItem>>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for ArtistRowsModel {
@@ -134,7 +126,7 @@ mod artist_rows_model_imp {
     impl ObjectImpl for ArtistRowsModel {}
     impl ListModelImpl for ArtistRowsModel {
         fn item_type(&self) -> glib::Type {
-            SparseObjectItem::static_type()
+            RowItem::static_type()
         }
         fn n_items(&self) -> u32 {
             self.count.get()
@@ -152,7 +144,7 @@ mod artist_rows_model_imp {
             if let Some(item) = items.get(&position).and_then(glib::WeakRef::upgrade) {
                 return Some(item.upcast());
             }
-            let item = SparseObjectItem::new(
+            let item = RowItem::new(
                 Arc::new(self.owner.borrow().upgrade()?.row_at(position)),
                 true,
             );
@@ -228,7 +220,7 @@ mod artist_route_list_cell_imp {
         pub(super) kind: Cell<ArtistCellKind>,
         pub(super) table_fields: RefCell<Vec<LibraryField>>,
         pub(super) table_cells: RefCell<Vec<gtk::Widget>>,
-        pub(super) bound_items: RefCell<Vec<crate::widgets::sparse_model::SparseObjectItem>>,
+        pub(super) bound_items: RefCell<Vec<crate::widgets::view_model::RowItem>>,
     }
 
     #[glib::object_subclass]
@@ -453,7 +445,7 @@ impl ArtistAlbumProjection {
     fn new(
         shell: &Rc<CatalogUi>,
         title: &'static str,
-        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+        sparse: Rows<library::Row>,
         start: usize,
         count: usize,
         layout: Rc<Cell<LibraryLayout>>,
@@ -605,8 +597,7 @@ impl ArtistReleaseProjections {
         shell: &Rc<CatalogUi>,
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
-        view: &RouteView,
-        mut read: Opened,
+        read: &mut Opened,
     ) -> Self {
         let settings = shell
             .settings
@@ -617,7 +608,8 @@ impl ArtistReleaseProjections {
         let columns = Rc::new(Cell::new(1));
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
         let counts = Rc::new(Cell::new(counts));
-        let sparse = view_model(shell.products.runtime.clone(), view, release_row, &mut read);
+        let release = release_read(&read.view);
+        let sparse = Rows::over_view(shell.products.runtime.clone(), read);
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
@@ -628,7 +620,7 @@ impl ArtistReleaseProjections {
                     let section = ArtistAlbumProjection::new(
                         shell,
                         title,
-                        Rc::clone(&sparse),
+                        sparse.clone(),
                         start,
                         count,
                         Rc::clone(&layout),
@@ -664,7 +656,7 @@ impl ArtistReleaseProjections {
         });
         let favorite_rows = favorite_widget
             .as_ref()
-            .map_or_else(gio::ListStore::new::<SparseObjectItem>, |widget| {
+            .map_or_else(gio::ListStore::new::<RowItem>, |widget| {
                 static_artist_route_model(widget.clone())
             });
         empty.set_visible(
@@ -684,7 +676,7 @@ impl ArtistReleaseProjections {
         let rows = gtk::FlattenListModel::new(Some(model_sections));
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
         let (list, apply_grid_fields, scroll) =
-            artist_route_list(shell, rows, Rc::clone(&grid_fields), Rc::clone(view));
+            artist_route_list(shell, rows, Rc::clone(&grid_fields), sparse.clone());
         let selection = list.model().expect("Artist selection");
         let weak_selection = selection.downgrade();
         sparse
@@ -737,6 +729,7 @@ impl ArtistReleaseProjections {
             counts,
             selection,
             sparse,
+            release_read: RefCell::new(release),
             surface: owner.upcast(),
             scroll,
             layout,
@@ -761,47 +754,27 @@ impl ArtistReleaseProjections {
         self.sections.get(index).map(|section| section.search())
     }
 
-    pub fn resume_initial_demand(&self) {
-        self.sparse.resume_initial_demand();
-    }
-
-    /// Where a reread starts so the releases on screen stay.
-    pub fn live_window(&self) -> library::RouteSeedWindow {
-        self.sparse.live_window()
-    }
-
     pub fn filters(&self) -> [String; 6] {
         std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
     }
 
-    /// Shows a reread's releases over the view it replaces; false when it has none because the
-    /// artist is gone. The selection goes when the releases are read in another order or
-    /// filter, or their count changes, since its positions then name other releases.
-    pub fn replace_page(&self, previous: &View, read: Opened) -> bool {
-        let Some(releases) = release_read(&read.view) else {
-            return false;
-        };
+    /// Shows the sections of releases the rows took. The selection goes when the releases are
+    /// read in another order or filter, or their count changes, since its positions then name
+    /// other releases.
+    pub fn take(&self, read: &Opened) {
+        let releases = release_read(&read.view);
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
-        if self.counts.replace(counts) != counts || release_read(previous) != Some(releases) {
+        if self.counts.replace(counts) != counts
+            || self.release_read.replace(releases.clone()) != releases
+        {
             self.selection.unselect_all();
         }
-        self.sparse.replace_prepared_at(
-            SparseSource::Query {
-                count: counts.iter().sum(),
-            },
-            read.first,
-            read.rows.into_iter().filter_map(release_row).collect(),
-            Vec::new(),
-            read.view.same_list(previous),
-            |row| row.album_key,
-        );
         let mut start = 0;
         for (index, section) in self.sections.iter().enumerate() {
             section.set_range(start, counts[index], source_counts[index]);
             start += counts[index];
         }
         self.sync_empty();
-        true
     }
 
     pub fn set_favorite_present(&self, present: bool) {
@@ -875,8 +848,8 @@ fn normalized_artist_layout(layout: LibraryLayout) -> LibraryLayout {
     reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
 )]
 fn static_artist_route_model(widget: gtk::Widget) -> gio::ListStore {
-    let model = gio::ListStore::new::<SparseObjectItem>();
-    model.append(&SparseObjectItem::new(
+    let model = gio::ListStore::new::<RowItem>();
+    model.append(&RowItem::new(
         Arc::new(ArtistRouteRow::Static { widget }),
         true,
     ));
@@ -887,7 +860,7 @@ fn artist_route_list(
     shell: &Rc<CatalogUi>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
-    view: RouteView,
+    releases: Rows<library::Row>,
 ) -> (
     gtk::ListView,
     Rc<dyn Fn(&[LibraryField])>,
@@ -929,18 +902,20 @@ fn artist_route_list(
                 section_positions.shift_left(first);
                 section_positions.shift_right(section.start.get() as u32);
                 selected.union(&section_positions);
-                sparse = Some(Rc::clone(&section.sparse));
+                sparse = Some(section.sparse.clone());
             }
             offset += model.n_items();
         }
         let sparse = sparse?;
-        let dragged = sparse.ready_position(|row| row.album_key == key)?;
+        let dragged = sparse.ready_position(
+            |row| matches!(row, library::Row::Album(album) if album.album_key == key),
+        )?;
         if selected.size() < 2 || !selected.contains(dragged) {
             return None;
         }
         Some(crate::widgets::media_drag::CollectionTargets::Parents(
             vec![(
-                release_read(&view.borrow())?,
+                release_read(&*releases.view()?)?,
                 crate::widgets::selection::selected_ranges(&selected),
             )],
         ))
@@ -963,11 +938,11 @@ fn artist_route_list(
     });
     let bind_fields = Rc::clone(&fields);
     let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(row) = crate::widgets::sparse_model::item_at_from_item::<ArtistRouteRow>(item)
+        let Some(row) = crate::widgets::view_model::item_at_from_item::<ArtistRouteRow>(item)
         else {
             return;
         };
@@ -1017,10 +992,10 @@ fn artist_route_list(
                     .sparse
                     .list_model()
                     .item(position as u32)
-                    .and_downcast::<SparseObjectItem>();
+                    .and_downcast::<RowItem>();
                 let row = value
                     .as_ref()
-                    .and_then(|item| item.value::<Arc<library::AlbumRow>>());
+                    .and_then(|item| item.part::<library::AlbumRow>().map(Arc::new));
                 for cell in state.imp().table_cells.borrow().iter() {
                     cell.downcast_ref::<AlbumTableCell>()
                         .unwrap()
@@ -1097,14 +1072,12 @@ fn artist_route_list(
                     slot.widget.set_visible(true);
                     slot.widget.add_css_class("row-pending");
                     let position = start + offset;
-                    let value = model
-                        .item(position as u32)
-                        .and_downcast::<SparseObjectItem>();
+                    let value = model.item(position as u32).and_downcast::<RowItem>();
                     if let Some(album) = value
                         .as_ref()
-                        .and_then(|item| item.value::<Arc<library::AlbumRow>>())
+                        .and_then(|item| item.part::<library::AlbumRow>())
                     {
-                        slot.cell.bind(position as u32, (*album).clone());
+                        slot.cell.bind(position as u32, album);
                         slot.widget.remove_css_class("row-pending");
                     } else {
                         slot.cell.clear();
@@ -1141,15 +1114,18 @@ fn artist_route_list(
         };
         let Some(ArtistRouteRow::AlbumTable {
             section, position, ..
-        }) = crate::widgets::sparse_model::item_at::<ArtistRouteRow>(&activate_model, position)
+        }) = crate::widgets::view_model::item_at::<ArtistRouteRow>(&activate_model, position)
         else {
             return;
         };
         if let Some(row) = section
             .upgrade()
-            .and_then(|section| section.sparse.peek_ready(position))
+            .and_then(|section| section.sparse.ready(position))
+            && let library::Row::Album(album) = row.as_ref()
         {
-            shell.open_route(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()));
+            shell.open_route(rufin_core::route::Route::AlbumDetail(
+                album.media_uri.clone(),
+            ));
         }
     });
     list.set_hexpand(true);
@@ -1250,7 +1226,7 @@ mod tests {
     #[test]
     fn section_body_updates_leave_header_item_in_place() {
         let rows: ArtistRowsModel = glib::Object::new();
-        let header = SparseObjectItem::new(0_u8, true);
+        let header = RowItem::new(0_u8, true);
         rows.imp().count.set(1);
         rows.imp().items.borrow_mut().insert(0, header.downgrade());
         let identity = rows.item(0).unwrap();

@@ -491,19 +491,17 @@ impl Shell {
     /// Rereads or reopens the mounted route when a committed change touches it.
     pub(crate) fn refresh_mounted_route(self: &Rc<Self>, changed: &Changed) {
         let route = self.navigation.routes.borrow().current().clone();
-        let selected = self
+        let Some(view) = self
             .route_viewport
             .mounted_route
             .borrow()
             .as_ref()
-            .and_then(|entry| entry.selected.clone());
-        match rufin_core::view::refresh(
-            &self.products.source,
-            &route,
-            selected.as_ref(),
-            &self.route_options(&route),
-            changed,
-        ) {
+            .and_then(|entry| entry.view.view())
+        else {
+            return;
+        };
+        let current = self.products.source.selected_library();
+        match view.refresh_selected(current.as_ref(), changed) {
             Refresh::Nothing => {}
             Refresh::Reread if route == Route::Home => self.refresh_mounted_home(),
             Refresh::Reread => self.refresh_mounted_catalog(),
@@ -696,7 +694,8 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(false);
     }
 
-    pub(crate) fn show_states_in_mounted_route(&self, items: &[library::StateChange]) {
+    /// Shows committed favorites, ratings and downloads in the mounted route.
+    pub(crate) fn show_changes_in_mounted_route(&self, changed: &Changed) {
         if let Some(view) = self
             .route_viewport
             .mounted_route
@@ -704,22 +703,7 @@ impl Shell {
             .as_ref()
             .map(|entry| entry.view.clone())
         {
-            view.show_states(items);
-        }
-    }
-
-    pub(crate) fn apply_download_change_to_mounted_route(
-        &self,
-        event: &rufin_core::downloads::DownloadEvent,
-    ) {
-        let apply = self
-            .route_viewport
-            .mounted_route
-            .borrow()
-            .as_ref()
-            .and_then(|entry| entry.view.download_change.clone());
-        if let Some(apply) = apply {
-            apply(event);
+            view.show_changes(&changed.items, &changed.downloads);
         }
     }
 
@@ -773,7 +757,6 @@ impl Shell {
                 RoutePosition::capture(adjustment, previous.view.item_scroll().as_ref()),
             );
         }
-        self.clear_favorite_controls();
         self.clear_current_route_selections();
         previous
     }

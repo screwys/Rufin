@@ -1,7 +1,5 @@
 use super::{MetadataView, build_editor_view};
-use crate::widgets::sparse_model::{
-    SparseLoad, SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
-};
+use crate::widgets::view_model::{RowItem, Rows, connect_row_bind};
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use rufin_core::metadata::{
@@ -32,7 +30,7 @@ struct BatchView {
     current: RefCell<Option<MetadataView>>,
     active_selection: RefCell<gtk::Bitset>,
     task: RefCell<Option<gtk::glib::JoinHandle<()>>>,
-    rows: Rc<SparseRouteModel<u64, MetadataTrackSummary>>,
+    rows: Rows<MetadataTrackSummary>,
     runtime: tokio::runtime::Handle,
     on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
     opening_lookup: Cell<bool>,
@@ -89,22 +87,17 @@ pub fn build_batch_dialog(
         }
     });
     let load_batch = batch.clone();
-    let load: SparseLoad<u64, MetadataTrackSummary> = Rc::new(move |_, range, _| {
-        let batch = load_batch.clone();
-        Box::pin(async move {
-            batch
-                .tracks(range.start as u64, range.len() as u64)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    });
-    let rows = SparseRouteModel::new(
-        SparseSource::Query {
-            count: batch.track_count() as usize,
-        },
-        runtime.clone(),
-        load,
-    );
+    let load: crate::widgets::view_model::PageReader<MetadataTrackSummary> =
+        Rc::new(move |range, _| {
+            let batch = load_batch.clone();
+            Box::pin(async move {
+                batch
+                    .tracks(range.start as u64, range.len() as u64)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+        });
+    let rows = Rows::paged(runtime.clone(), batch.track_count() as usize, load);
     let selection = gtk::MultiSelection::new(Some(rows.list_model()));
     selection.select_all();
     select_all.set_active(true);
@@ -423,13 +416,7 @@ impl BatchView {
             gtk::glib::spawn_future_local(async move {
                 if let Ok(updated) = batch.tracks(first as u64, 192).await {
                     for row in updated {
-                        if rows
-                            .peek_ready(row.index as usize)
-                            .is_some_and(|current| current.as_ref() == &row)
-                        {
-                            continue;
-                        }
-                        rows.update_ready(row.index as usize, |current| *current = row.clone());
+                        rows.set_ready(row.index as usize, row);
                     }
                 }
             });
@@ -444,12 +431,12 @@ pub(super) fn track_factory() -> gtk::SignalListItemFactory {
         let track = MetadataTrackRow::new();
         item.set_child(Some(&track));
     });
-    connect_sparse_bind(&factory, |object| {
+    connect_row_bind(&factory, |object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
         let track = item.child().and_downcast::<MetadataTrackRow>().unwrap();
         let row = item
             .item()
-            .and_downcast::<SparseObjectItem>()
+            .and_downcast::<RowItem>()
             .and_then(|item| item.value::<Arc<MetadataTrackSummary>>());
         if let Some(row) = row {
             track.imp().title.set_label(&row.title);

@@ -92,37 +92,6 @@ impl CollectionTarget {
             Self::SmartPlaylist(key) => format!("smart-playlist:{key}"),
         }
     }
-
-    /// The collection a context id names. A keyed id decorated with a page's filter or order
-    /// reads as nothing; an album or artist id keeps its decoration and so matches no row.
-    fn parse(context_id: &str) -> Option<Self> {
-        let (kind, id) = context_id.split_once(':')?;
-        let key = || id.parse::<i64>().ok();
-        Some(match kind {
-            "album" => Self::Album(id.to_owned()),
-            "artist" | "album-artist" => Self::Artist {
-                id: id.to_owned(),
-                album_artist: kind == "album-artist",
-            },
-            "genre" => Self::Genre(library::GenreKey::from_raw(key()?)),
-            "mood" => Self::Mood(library::MoodKey::from_raw(key()?)),
-            "playlist" => Self::Playlist(library::PlaylistKey::from_raw(key()?)),
-            "smart-playlist" => Self::SmartPlaylist(library::SmartPlaylistKey::from_raw(key()?)),
-            _ => return None,
-        })
-    }
-
-    /// The collection a download event marks downloaded or not.
-    pub fn downloaded(event: &crate::downloads::DownloadEvent) -> Option<(Self, bool)> {
-        let crate::downloads::DownloadEvent::SubjectChanged {
-            subject: crate::downloads::DownloadSubject::Prepared { context_id, .. },
-            downloaded,
-        } = event
-        else {
-            return None;
-        };
-        Some((Self::parse(context_id)?, *downloaded))
-    }
 }
 
 /// Whether what plays, in context `playing`, is the collection `context_id` names: the same id,

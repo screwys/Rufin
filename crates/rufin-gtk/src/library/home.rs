@@ -210,14 +210,48 @@ impl ShownHomeSection {
 #[derive(Clone)]
 struct HomeRouteProjection {
     shell: std::rc::Weak<CatalogUi>,
-    /// The showcase album, for its menu and download counts.
+    /// The showcase album, for its menu and download counts, and its hearts.
     showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
+    hearts: Rc<RefCell<Vec<gtk::Button>>>,
     shown: Rc<RefCell<Vec<(HomeSectionId, ShownHomeSection)>>>,
     content: gtk::Box,
     empty: gtk::Widget,
 }
 
 impl HomeRouteProjection {
+    /// Shows committed favorites and ratings in the rows and hearts Home shows.
+    fn show_states(&self, changes: &[library::StateChange]) {
+        use library::ShowsState;
+        if let Some(showcase) = &mut *self.showcase.borrow_mut() {
+            for change in changes {
+                if let Some(state) = showcase.album.state_mut(change) {
+                    change.show_in(state);
+                    for heart in self.hearts.borrow().iter() {
+                        crate::favorites::set_favorite_button_active(heart, change.favorite);
+                    }
+                }
+            }
+        }
+        for view in self.sections() {
+            view.mounted.update(|item| {
+                let mut changed = false;
+                for change in changes {
+                    let state = match item {
+                        HomeItem::Track(item) => item.track.state_mut(change),
+                        HomeItem::Album(item) => item.album.state_mut(change),
+                    };
+                    if let Some(state) = state
+                        && !change.shown_in(state)
+                    {
+                        change.show_in(state);
+                        changed = true;
+                    }
+                }
+                changed
+            });
+        }
+    }
+
     /// Shows Home's sections in the order core composed them.
     fn apply(&self, sections: Vec<HomeSection>) {
         let Some(shell) = self.shell.upgrade() else {
@@ -285,7 +319,7 @@ impl HomeRouteProjection {
                 None,
             )),
             HomeSection::Showcase(row) => ShownHomeSection::Built(
-                shell.home_showcase(&row, Rc::clone(&self.showcase)),
+                shell.home_showcase(&row, Rc::clone(&self.showcase), &self.hearts),
                 HomeSection::Showcase(row),
             ),
             HomeSection::Genres(genres) => {
@@ -350,6 +384,7 @@ impl CatalogUi {
         let projection = HomeRouteProjection {
             shell: Rc::downgrade(self),
             showcase: Rc::new(RefCell::new(None)),
+            hearts: Rc::new(RefCell::new(Vec::new())),
             shown: Rc::new(RefCell::new(Vec::new())),
             content,
             empty,
@@ -357,68 +392,10 @@ impl CatalogUi {
         projection.apply(sections);
         let widget = route_scroller_widget(scroller);
         let apply = projection.clone();
-        let download = projection.clone();
-
-        let download_counts = projection.clone();
-
-        let counts = crate::library::collection_download_change(move |target, downloaded| {
-            let rufin_core::collection_context::CollectionTarget::Album(uri) = target else {
-                return;
-            };
-            if let Some(showcase) = &mut *download_counts.showcase.borrow_mut()
-                && showcase.album.media_uri == *uri
-            {
-                showcase.album.summary.downloaded_count = if downloaded {
-                    showcase.album.summary.track_count
-                } else {
-                    0
-                };
-            }
-            for view in download_counts.sections() {
-                view.mounted.update(|item| {
-                    if let HomeItem::Album(item) = item
-                        && item.album.media_uri == *uri
-                        && (item.album.summary.downloaded_count == item.album.summary.track_count)
-                            != downloaded
-                    {
-                        item.album.summary.downloaded_count = if downloaded {
-                            item.album.summary.track_count
-                        } else {
-                            0
-                        };
-                        true
-                    } else {
-                        false
-                    }
-                });
-            }
-        });
+        let states = projection.clone();
         MountedRoute::new(widget, Rc::new(|| {}))
             .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
-            .with_download_change(Rc::new(move |event| {
-                let rufin_core::downloads::DownloadEvent::Changed {
-                    media_uri: uri,
-                    downloaded,
-                } = event
-                else {
-                    return;
-                };
-                let (uri, downloaded) = (uri.as_str(), *downloaded);
-                for view in download.sections() {
-                    view.mounted.update(|item| {
-                        if let HomeItem::Track(item) = item
-                            && item.track.media_uri == uri
-                            && item.track.is_downloaded != downloaded
-                        {
-                            item.track.is_downloaded = downloaded;
-                            true
-                        } else {
-                            false
-                        }
-                    });
-                }
-            }))
-            .with_download_change(counts)
+            .with_states(Rc::new(move |changes, _| states.show_states(changes)))
     }
 
     fn home_section_view(
@@ -493,6 +470,7 @@ impl CatalogUi {
         self: &Rc<Self>,
         item: &HomeAlbumRow,
         showcase: Rc<RefCell<Option<HomeAlbumRow>>>,
+        hearts: &RefCell<Vec<gtk::Button>>,
     ) -> gtk::Widget {
         let width = crate::library::route_layout::home_album_content_width_for(self.route_width());
         let mut album = item.album.clone();
@@ -553,11 +531,8 @@ impl CatalogUi {
             .as_ref()
             .expect("Home album has a Favorite cover control")
             .clone();
+        hearts.replace(vec![favorite.clone(), hover_favorite.clone()]);
         for button in [favorite, hover_favorite] {
-            self.register_favorite_button(
-                crate::favorites::album_favorite_key(&album.media_uri),
-                &button,
-            );
             let favorite_shell = Rc::clone(self);
             let favorite_media_uri = album.media_uri.clone();
             button.connect_clicked(move |button| {
@@ -705,7 +680,6 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 field,
                 None,
             );
-            cell.follow_favorites();
             cell.bind(0, track);
             (
                 cell.widget(),
@@ -726,7 +700,6 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 &rufin_core::settings::layout::HOME_ALBUM_FIELDS,
                 None,
             );
-            cell.follow_favorites();
             cell.bind(0, album);
             (
                 cell.widget(),

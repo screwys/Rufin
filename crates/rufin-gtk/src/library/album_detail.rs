@@ -6,7 +6,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use glib::subclass::prelude::*;
 use gtk::{gio, glib};
-use library::{AlbumKey, AlbumRow, Row, TrackRow};
+use library::{Row, TrackRow};
 use localization::track_count_text;
 use rufin_core::playback::QueuePlacement;
 
@@ -20,12 +20,10 @@ use crate::widgets::interactions::install_context_menu_openers;
 
 use super::collection_context::present_track_context_menu;
 use crate::widgets::library_fields::opaque_artwork;
-use crate::widgets::mounted_route::{ItemScrollPosition, NativeListScroll, RouteView, view_model};
-use crate::widgets::sparse_model::{
-    SparseObjectItem, SparseObjectModel, SparseRouteModel, SparseSource, connect_sparse_bind,
-};
+use crate::widgets::mounted_route::{ItemScrollPosition, NativeListScroll};
+use crate::widgets::view_model::{RowItem, RowList, Rows, connect_row_bind};
 use rufin_core::settings::presentation::track_row_field;
-use rufin_core::view::{Opened, View};
+use rufin_core::view::Opened;
 
 const ALBUM_TRACK_HEIGHT: i32 = 36;
 
@@ -59,9 +57,10 @@ struct AlbumDetailRowMetrics {
     spacing: i32,
 }
 
+/// The Albums list: album rows, or in Detail layout album headings and their tracks.
 #[derive(Clone)]
 pub enum AlbumCollectionModels {
-    Rows(Rc<SparseRouteModel<AlbumKey, AlbumRow>>),
+    Rows(Rows<Row>),
     Detail(AlbumDetailModel),
 }
 #[derive(Clone)]
@@ -71,57 +70,51 @@ pub struct AlbumDetailModel {
 struct AlbumDetailModelInner {
     native: DetailRowsModel,
     /// Album headings and their tracks.
-    rows: Rc<SparseRouteModel<(), Row>>,
+    rows: Rows<Row>,
     initial_position: Cell<usize>,
-    folder: Option<library::FolderKey>,
-}
-
-fn album_row(row: Row) -> Option<AlbumRow> {
-    match row {
-        Row::Album(album) => Some(album),
-        _ => None,
-    }
-}
-
-fn detail_row(row: Row) -> Option<Row> {
-    matches!(row, Row::AlbumHeading(_) | Row::AlbumTrack { .. }).then_some(row)
 }
 
 impl AlbumCollectionModels {
-    pub fn new(runtime: &tokio::runtime::Handle, view: &RouteView, mut read: Opened) -> Self {
-        if let Some(spans) = read.view.album_spans().cloned() {
-            let native = DetailRowsModel::new(Arc::new(DetailLayout::new(spans, [0, 0])));
-            let rows = view_model(runtime.clone(), view, detail_row, &mut read);
-            native
-                .imp()
-                .source
-                .set(rows.list_model())
-                .expect("Detail source");
-            return Self::Detail(AlbumDetailModel {
-                inner: Rc::new(AlbumDetailModelInner {
-                    native,
-                    rows,
-                    initial_position: Cell::new(read.first),
-                    folder: read
-                        .view
-                        .selected()
-                        .and_then(|selected| selected.music_folder_key),
-                }),
-            });
-        }
-        let rows = view_model(runtime.clone(), view, album_row, &mut read);
-        crate::widgets::media_drag::install_parent_selection(&rows, view, |row| {
-            Some(crate::widgets::selection::album_play_request(row))
-        });
-        Self::Rows(rows)
+    pub fn new(runtime: &tokio::runtime::Handle, read: &mut Opened) -> Self {
+        let first = read.first;
+        let spans = read.view.album_spans().cloned();
+        Self::over(Rows::over_view(runtime.clone(), read), first, spans)
+    }
+
+    /// The layout of `rows` with album `spans` in Detail layout, which shows from `first`.
+    fn over(rows: Rows<Row>, first: usize, spans: Option<Arc<[library::AlbumSpan]>>) -> Self {
+        let Some(spans) = spans else {
+            crate::widgets::media_drag::install_parent_selection(&rows);
+            return Self::Rows(rows);
+        };
+        let native = DetailRowsModel::new(Arc::new(DetailLayout::new(spans, [0, 0])));
+        native
+            .imp()
+            .source
+            .set(rows.list_model())
+            .expect("Detail source");
+        Self::Detail(AlbumDetailModel {
+            inner: Rc::new(AlbumDetailModelInner {
+                native,
+                rows,
+                initial_position: Cell::new(first),
+            }),
+        })
     }
     pub fn is_detail(&self) -> bool {
         matches!(self, Self::Detail(_))
     }
-    pub fn albums(&self) -> SparseObjectModel {
+    /// The rows of either layout.
+    pub fn rows(&self) -> &Rows<Row> {
+        match self {
+            Self::Rows(rows) => rows,
+            Self::Detail(detail) => &detail.inner.rows,
+        }
+    }
+    pub fn albums(&self) -> RowList {
         self.album_rows().expect("Album rows").list_model()
     }
-    pub fn album_rows(&self) -> Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>> {
+    pub fn album_rows(&self) -> Option<Rows<Row>> {
         if let Self::Rows(rows) = self {
             Some(rows.clone())
         } else {
@@ -136,54 +129,31 @@ impl AlbumCollectionModels {
     }
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Rows(rows) => rows.len() == 0,
+            Self::Rows(rows) => rows.is_empty(),
             Self::Detail(detail) => detail.inner.native.layout().spans.is_empty(),
         }
     }
-    pub fn resume_initial_demand(&self) {
-        match self {
-            Self::Rows(rows) => rows.resume_initial_demand(),
-            Self::Detail(detail) => detail.inner.rows.resume_initial_demand(),
+    /// Lays out a reread the rows took, in the layout it was read for.
+    pub fn take(&self, read: &Opened) -> Option<Self> {
+        let spans = read.view.album_spans().cloned();
+        if self.is_detail() != spans.is_some() {
+            return Some(Self::over(self.rows().clone(), read.first, spans));
         }
+        self.take_spans(read);
+        None
     }
-    /// Where a reread starts so the rows on screen stay.
-    pub fn live_window(&self) -> library::RouteSeedWindow {
-        match self {
-            Self::Rows(rows) => rows.live_window(),
-            Self::Detail(detail) => detail.inner.rows.live_window(),
-        }
-    }
-    /// Takes a reread over the view it replaces.
-    pub fn replace_prepared(&self, previous: &View, read: Opened) -> bool {
-        let count = read.view.len();
-        let refresh = read.view.same_list(previous);
-        match (self, read.view.album_spans().cloned()) {
-            (Self::Rows(rows), None) => rows.replace_prepared_at(
-                SparseSource::Query { count },
-                read.first,
-                read.rows.into_iter().filter_map(album_row).collect(),
-                Vec::new(),
-                refresh,
-                |row| row.album_key,
-            ),
-            (Self::Detail(detail), Some(spans)) => {
-                let inner = &detail.inner;
-                let previous = inner.native.layout();
-                let layout = Arc::new(DetailLayout::new(spans, previous.minimum));
-                inner.initial_position.set(read.first);
-                inner.native.imp().layout.replace(Some(layout));
-                let replaced = inner.rows.replace_prepared_at(
-                    SparseSource::Query { count },
-                    read.first,
-                    read.rows.into_iter().filter_map(detail_row).collect(),
-                    Vec::new(),
-                    refresh,
-                    |_| (),
-                );
-                inner.native.changed(previous.count);
-                replaced
-            }
-            _ => false,
+
+    fn take_spans(&self, read: &Opened) {
+        if let (Self::Detail(detail), Some(spans)) = (self, read.view.album_spans().cloned()) {
+            let inner = &detail.inner;
+            let previous = inner.native.layout();
+            inner.initial_position.set(read.first);
+            inner
+                .native
+                .imp()
+                .layout
+                .replace(Some(Arc::new(DetailLayout::new(spans, previous.minimum))));
+            inner.native.changed(previous.count);
         }
     }
 }
@@ -282,9 +252,9 @@ mod detail_rows_imp {
 
     #[derive(Default)]
     pub(super) struct DetailRowsModel {
-        pub(super) source: std::cell::OnceCell<SparseObjectModel>,
+        pub(super) source: std::cell::OnceCell<RowList>,
         pub(super) layout: RefCell<Option<Arc<DetailLayout>>>,
-        pub(super) spacers: RefCell<BTreeMap<u32, glib::WeakRef<SparseObjectItem>>>,
+        pub(super) spacers: RefCell<BTreeMap<u32, glib::WeakRef<RowItem>>>,
     }
 
     #[glib::object_subclass]
@@ -296,7 +266,7 @@ mod detail_rows_imp {
     impl ObjectImpl for DetailRowsModel {}
     impl ListModelImpl for DetailRowsModel {
         fn item_type(&self) -> glib::Type {
-            SparseObjectItem::static_type()
+            RowItem::static_type()
         }
         fn n_items(&self) -> u32 {
             self.layout
@@ -317,7 +287,7 @@ mod detail_rows_imp {
             if let Some(item) = spacers.get(&position).and_then(glib::WeakRef::upgrade) {
                 return Some(item.upcast());
             }
-            let item = SparseObjectItem::new((), true);
+            let item = RowItem::new((), true);
             spacers.insert(position, item.downgrade());
             Some(item.upcast())
         }
@@ -357,11 +327,7 @@ struct NativeDetailCell {
 }
 
 impl NativeDetailCell {
-    fn new(
-        shell: &Rc<CatalogUi>,
-        fields: &[LibraryField],
-        folder: Option<library::FolderKey>,
-    ) -> Rc<Self> {
+    fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], rows: &Rows<Row>) -> Rc<Self> {
         let builder = crate::ui_resource::builder("routes/album_detail_row.ui");
         crate::objects!(
             &builder,
@@ -376,7 +342,7 @@ impl NativeDetailCell {
         );
         let (titles, header_cells) = album_track_header(fields);
         header.append(&titles);
-        let slot = AlbumTrackSlot::new(shell, fields, folder);
+        let slot = AlbumTrackSlot::new(shell, fields, rows);
         track.append(&slot.widget);
         Rc::new(Self {
             item: glib::WeakRef::new(),
@@ -567,7 +533,7 @@ impl AlbumDetailListInner {
         }
         let row = item
             .item()
-            .and_downcast::<SparseObjectItem>()
+            .and_downcast::<RowItem>()
             .and_then(|item| item.value::<Arc<Row>>());
         let local = position - first;
         let pending = row.is_none();
@@ -667,7 +633,7 @@ impl AlbumDetailListInner {
                     .rows
                     .list_model()
                     .item(flat as u32)
-                    .and_downcast::<SparseObjectItem>()
+                    .and_downcast::<RowItem>()
             });
             panel.bind(shell, item, genres);
         }
@@ -911,7 +877,7 @@ impl AlbumDetailVirtualList {
             ) else {
                 return;
             };
-            let cell = NativeDetailCell::new(&shell, &inner.fields, inner.model.folder);
+            let cell = NativeDetailCell::new(&shell, &inner.fields, &inner.model.rows);
             cell.item.set(Some(item));
             item.set_child(Some(&cell.root));
             inner
@@ -933,7 +899,7 @@ impl AlbumDetailVirtualList {
             }
         });
         let weak = Rc::downgrade(&inner);
-        connect_sparse_bind(&factory, move |item| {
+        connect_row_bind(&factory, move |item| {
             let (Some(inner), Some(item)) = (weak.upgrade(), item.downcast_ref::<gtk::ListItem>())
             else {
                 return;
@@ -1141,7 +1107,7 @@ struct AlbumSidePanel {
     cover: super::cards::AlbumCover,
     cover_host: gtk::Stack,
     binding: RefCell<Option<Arc<Row>>>,
-    item: RefCell<Option<SparseObjectItem>>,
+    item: RefCell<Option<RowItem>>,
     skeleton: gtk::Box,
     title: gtk::Label,
     artist: crate::widgets::detail_links::DetailLinkBinding,
@@ -1197,7 +1163,7 @@ impl AlbumSidePanel {
         self.skeleton
             .set_size_request(metrics.cover_size, metrics.cover_size);
     }
-    fn bind(&self, shell: &CatalogUi, item: Option<SparseObjectItem>, genres: bool) {
+    fn bind(&self, shell: &CatalogUi, item: Option<RowItem>, genres: bool) {
         self.genres.set_visible(genres);
         let row = item
             .as_ref()
@@ -1279,11 +1245,7 @@ enum AlbumTrackField {
 }
 
 impl AlbumTrackSlot {
-    fn new(
-        shell: &Rc<CatalogUi>,
-        fields: &[LibraryField],
-        folder: Option<library::FolderKey>,
-    ) -> Self {
+    fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], rows: &Rows<Row>) -> Self {
         let widget = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
         widget.add_css_class("album-detail-track-row");
         widget.set_hexpand(true);
@@ -1321,6 +1283,7 @@ impl AlbumTrackSlot {
         install_context_menu_openers(&widget, Rc::clone(&menu));
         let row = Rc::clone(&current);
         let click_shell = Rc::downgrade(shell);
+        let click_rows = rows.clone();
         let click = gtk::GestureClick::new();
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         click.set_button(1);
@@ -1331,7 +1294,7 @@ impl AlbumTrackSlot {
                 && let Some(track) = row
             {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                play_album_track(&shell, &track, folder);
+                play_album_track(&shell, &click_rows, &track);
             }
         });
         widget.add_controller(click);
@@ -1369,13 +1332,14 @@ impl AlbumTrackSlot {
                     LibraryField::RowIndex => {
                         let row = Rc::clone(&current);
                         let play_shell = Rc::downgrade(shell);
+                        let play_rows = rows.clone();
                         let cell =
                             crate::widgets::recycled_cells::track_row_index_cell("", move |_| {
                                 let row = row.borrow().clone();
                                 if let Some(shell) = play_shell.upgrade()
                                     && let Some(track) = row
                                 {
-                                    play_album_track(&shell, &track, folder);
+                                    play_album_track(&shell, &play_rows, &track);
                                 }
                             });
                         (cell.clone().upcast(), AlbumTrackField::Index(cell))
@@ -1650,37 +1614,19 @@ fn album_track_column_width(field: LibraryField) -> i32 {
     }
 }
 
-fn play_album_track(shell: &Rc<CatalogUi>, track: &TrackRow, folder: Option<library::FolderKey>) {
-    let (Some(album), Some(uri)) = (track.links.album_key, track.links.album_media_uri.clone())
-    else {
-        return;
-    };
-    let queue = shell.products.playback.clone();
-    let settings = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::AlbumDetailTracks);
-    queue.play_selection(
-        rufin_core::playback::PlayRequest::ordered(
-            library::MemberRead {
-                sort: Some(settings.sort_key),
-                folder,
-                descending: settings.descending,
-                ..library::MemberRead::new(library::Collection::Album(album))
-            }
-            .selection(),
-            0,
+/// Plays `track`'s album from it, as the View plays a track of the Albums list in Detail
+/// layout.
+fn play_album_track(shell: &CatalogUi, rows: &Rows<Row>, track: &TrackRow) {
+    if let Some(position) = rows.ready_position(|row| {
+        matches!(row, Row::AlbumTrack { track: shown, .. } if shown.track_key == track.track_key)
+    }) {
+        rows.play(
+            &shell.products.playback,
+            position as usize,
             QueuePlacement::Now,
             false,
-        )
-        .with_context(
-            rufin_core::collection_context::CollectionTarget::Album(uri)
-                .context_id()
-                .into(),
-        )
-        .with_anchor(track.track_key, None),
-    );
+        );
+    }
 }
 
 pub fn album_detail_track_text(track: &TrackRow, index: usize, field: LibraryField) -> String {

@@ -1,4 +1,3 @@
-use rufin_core::collection_context::CollectionTarget;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -8,12 +7,13 @@ use ::library::{AlbumView, FavoriteTarget};
 use adw::prelude::*;
 
 use crate::favorites::{
-    album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
+    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
-use crate::widgets::mounted_route::{MountedRoute, route_view};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
 use ::library::RadioSeed;
 use localization::{msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
@@ -28,7 +28,6 @@ use super::detail_showcase::{
 use crate::library::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_wrapper, detail_showcase_cover_size,
 };
-use crate::library::track_model::TrackCollectionModel;
 use crate::menus::media_menus::present_album_context_menu;
 use crate::widgets::detail_links::DetailLinkBinding;
 use rufin_core::route::detail_links::album_artist_links;
@@ -45,9 +44,7 @@ impl CatalogUi {
             ));
         };
         let album = *album;
-        let view = route_view(&read);
         let current_album = Rc::new(RefCell::new(album.clone()));
-        let context_id = rufin_core::view::context_base(read.view.route());
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings
                 .current
@@ -65,12 +62,11 @@ impl CatalogUi {
                 self.route_width(),
                 PRIMARY_ROUTE_MARGIN_START,
             );
-        let model = TrackCollectionModel::new(self.products.runtime.clone(), &view, read);
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
-            model,
+            rows.clone(),
             LibraryListKey::AlbumDetailTracks,
             "album-detail",
-            context_id.clone(),
         );
         track_toolbar.set_layout_control_visible(false);
         let cover_size = detail_showcase_cover_size(inner_content_width);
@@ -129,15 +125,9 @@ impl CatalogUi {
         actions.add_css_class("album-detail-actions");
         actions.set_halign(gtk::Align::Start);
         let play_controller = self.products.playback.clone();
-        let play_tracks = track_projection.clone();
-        let play_context_id = context_id.clone();
+        let play_rows = rows.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            play_tracks.play_source(
-                play_controller.clone(),
-                placement,
-                play_context_id.clone(),
-                shuffled,
-            );
+            play_rows.play_all(&play_controller, placement, shuffled);
         });
         let cover_controls = detail_playback_controls(
             &actions,
@@ -156,8 +146,8 @@ impl CatalogUi {
             .expect("album detail has a Favorite cover control")
             .clone();
         let favorite_media_uri = album.row.media_uri.clone();
+        let hearts = [favorite.clone(), hover_favorite.clone()];
         for button in [favorite, hover_favorite] {
-            self.register_favorite_button(album_favorite_key(&favorite_media_uri), &button);
             let shell = Rc::clone(self);
             let favorite_media_uri = favorite_media_uri.clone();
             button.connect_clicked(move |button| {
@@ -171,9 +161,20 @@ impl CatalogUi {
         let menu_shell = Rc::clone(self);
         let menu_album = Rc::clone(&current_album);
         let menu_play = Rc::clone(&play);
+        let menu_rows = rows.clone();
         let context_menu: crate::widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
-                let album = menu_album.borrow().row.clone();
+                let mut album = menu_album.borrow().row.clone();
+                // The tracks shown say whether the album is downloaded now.
+                let summary = &mut album.summary;
+                if menu_rows.len() as i64 == summary.track_count
+                    && let Some(downloaded) = (0..menu_rows.len())
+                        .map(|position| menu_rows.ready(position).map(|row| row.downloaded()))
+                        .collect::<Option<Vec<_>>>()
+                {
+                    summary.downloaded_count =
+                        downloaded.iter().filter(|shown| **shown).count() as i64;
+                }
                 {
                     present_album_context_menu(
                         target,
@@ -208,8 +209,7 @@ impl CatalogUi {
         );
         route_stack.set_visible_child_name("content");
 
-        let reread =
-            track_projection.page_reread(self, "mounted Album route", &view, |_| {}, |_| {});
+        let reads = track_projection.page_reads(|_| {}, |_| {});
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -217,7 +217,7 @@ impl CatalogUi {
             let showcase = showcase_view.clone();
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
@@ -241,37 +241,32 @@ impl CatalogUi {
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let download_target = current_album.borrow().row.media_uri.clone();
-        let download_album = Rc::clone(&current_album);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            if matches!(target, CollectionTarget::Album(uri) if *uri == download_target) {
-                let mut album = download_album.borrow_mut();
-                let row = &mut album.row;
-                row.summary.downloaded_count = if downloaded {
-                    row.summary.track_count
-                } else {
-                    0
-                };
-            }
-        });
-        let refresh_projection = track_projection.clone();
+        let heart_album = Rc::clone(&current_album);
+        let states = Rc::new(
+            move |changes: &[::library::StateChange], _: &[::library::DownloadChange]| {
+                use ::library::ShowsState;
+                let mut album = heart_album.borrow_mut();
+                for change in changes {
+                    if let Some(state) = album.row.state_mut(change) {
+                        change.show_in(state);
+                        for heart in &hearts {
+                            set_favorite_button_active(heart, change.favorite);
+                        }
+                    }
+                }
+            },
+        );
         MountedRoute::new(route_stack.upcast(), resume)
-            .with_states(&view)
-            .with_catalog_refresh(Rc::new(move || {
-                reread.refresh(refresh_projection.live_window())
-            }))
-            .with_download_change(downloads)
-            .with_download_change(track_projection.download_change())
+            .with_rows(&rows)
+            .with_states(states)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(track_projection.search())
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(item_navigation)
-            .with_initial_demand({
-                let track_projection = track_projection.clone();
-                Rc::new(move || track_projection.resume_initial_demand())
-            })
+            .with_initial_demand(Rc::new(move || rows.resume_initial_demand()))
     }
 }
 

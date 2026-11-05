@@ -403,11 +403,17 @@ async fn queue_play(
         };
         match (input.index, anchor) {
             (Some(index), _) => view
-                .play(index, placement, false, &library::ReadCancellation::new())
+                .play(
+                    index,
+                    placement,
+                    false,
+                    None,
+                    &library::ReadCancellation::new(),
+                )
                 .await
                 .map_err(page::read_error)?,
-            (None, Some((key, entry))) => view.play_track(key, entry, 0, placement, false),
-            (None, None) => view.play_all(placement, false),
+            (None, Some((key, entry))) => view.play_track(key, entry, 0, placement, false, None),
+            (None, None) => view.play_all(placement, false, None),
         }
         .ok_or_else(gone)?
     };

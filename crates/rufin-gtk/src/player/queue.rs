@@ -10,7 +10,7 @@ use crate::widgets::{
         RecycledMergedCell, TrackRowPlayingIndicator, set_track_row_index_text,
         track_list_row_index_cell,
     },
-    sparse_model::{SparseObjectItem, connect_sparse_bind},
+    view_model::{RowItem, connect_row_bind},
 };
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -40,7 +40,7 @@ pub struct QueueState {
 
 impl QueueState {
     pub fn new() -> Self {
-        let model = gio::ListStore::new::<SparseObjectItem>();
+        let model = gio::ListStore::new::<RowItem>();
         Self {
             window: RefCell::new(Vec::new()),
             rows: RefCell::new(Vec::new()),
@@ -107,7 +107,7 @@ impl QueueState {
             .map(|position| {
                 self.model
                     .item(position)
-                    .and_downcast::<SparseObjectItem>()
+                    .and_downcast::<RowItem>()
                     .expect("Queue row object")
             })
             .collect::<Vec<_>>();
@@ -132,7 +132,7 @@ impl QueueState {
             .map(|(row, object)| {
                 let object = object
                     .or_else(|| retired.next().cloned())
-                    .unwrap_or_else(|| SparseObjectItem::new(Arc::clone(row), true));
+                    .unwrap_or_else(|| RowItem::new(Arc::clone(row), true));
                 let previous = object.value::<Arc<QueueRow>>().expect("Queue row");
                 if !Arc::ptr_eq(&previous, row) {
                     object.replace(Arc::clone(row), true);
@@ -292,7 +292,7 @@ fn filter_queue_window(rows: &[Arc<QueueRow>], filter: &str) -> Vec<Arc<QueueRow
 fn queue_row_from_item(item: &glib::WeakRef<gtk::ListItem>) -> Option<Arc<QueueRow>> {
     item.upgrade()?
         .item()?
-        .downcast::<SparseObjectItem>()
+        .downcast::<RowItem>()
         .ok()
         .and_then(|object| object.value::<Arc<QueueRow>>())
 }
@@ -452,7 +452,7 @@ fn queue_index_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewCol
     });
     let playing = shell.queue.borrow().playing.clone();
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -515,17 +515,14 @@ fn queue_title_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewCol
     let playing = shell.queue.borrow().playing.clone();
     let bind_playing = playing.clone();
     let bind_shell = Rc::downgrade(shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let Some(cell) = item.child().and_downcast::<RecycledMergedCell>() else {
             return;
         };
-        let Some(object) = item
-            .item()
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
-        else {
+        let Some(object) = item.item().and_then(|item| item.downcast::<RowItem>().ok()) else {
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
@@ -589,7 +586,7 @@ fn queue_duration_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnView
         }
         item.set_child(Some(&cell));
     });
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -599,10 +596,7 @@ fn queue_duration_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnView
         else {
             return;
         };
-        let Some(object) = item
-            .item()
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
-        else {
+        let Some(object) = item.item().and_then(|item| item.downcast::<RowItem>().ok()) else {
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
@@ -659,17 +653,14 @@ fn queue_actions_column(
             click_shell.set_track_favorite(row.track.media_uri.clone(), favorite);
         });
     });
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let Some(button) = crate::widgets::recycled_cells::row_favorite_button(item) else {
             return;
         };
-        let Some(object) = item
-            .item()
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
-        else {
+        let Some(object) = item.item().and_then(|item| item.downcast::<RowItem>().ok()) else {
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
@@ -703,17 +694,14 @@ fn queue_year_column(shell: &Rc<crate::player::PlayerUi>) -> gtk::ColumnViewColu
         }
         item.set_child(Some(&label));
     });
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let Some(label) = item.child().and_downcast::<gtk::Label>() else {
             return;
         };
-        let Some(object) = item
-            .item()
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
-        else {
+        let Some(object) = item.item().and_then(|item| item.downcast::<RowItem>().ok()) else {
             return;
         };
         let row = object.value::<Arc<QueueRow>>().expect("Queue row");
@@ -779,7 +767,7 @@ fn build_queue_table(
     table.connect_activate(move |table, position| {
         let Some(object) = activate_model
             .item(position)
-            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .and_then(|item| item.downcast::<RowItem>().ok())
         else {
             return;
         };
@@ -911,7 +899,7 @@ fn queue_text_column(
         }
         item.set_child(Some(&cell));
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1550,7 +1538,7 @@ mod tests {
             let object = state
                 .model
                 .item(position as u32)
-                .and_downcast::<SparseObjectItem>()
+                .and_downcast::<RowItem>()
                 .unwrap();
             let payload = object.value::<Arc<QueueRow>>().unwrap();
             assert!(Arc::ptr_eq(&window[position], &rows[position]));

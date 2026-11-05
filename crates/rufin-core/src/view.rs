@@ -644,6 +644,33 @@ impl View {
             && previous.settings_reread(&self.settings).is_none()
     }
 
+    /// The context id a play of this page carries, in the order it reads; `result` ties it to
+    /// the order a client shows, as `|result=`.
+    fn play_context(&self, result: Option<&str>) -> Arc<str> {
+        with_result(self.context_id(), result)
+    }
+
+    /// The context id a play of an artist page's favorite tracks carries, in their order.
+    pub fn favorites_context_id(&self) -> Option<String> {
+        let read = self.favorites()?;
+        let album_artist = matches!(self.route, Route::AlbumArtistDetail(_));
+        let uri = match &self.route {
+            Route::ArtistDetail(uri) | Route::AlbumArtistDetail(uri) => uri.clone(),
+            _ => return None,
+        };
+        Some(format!(
+            "{}|favorites|query={}|sort={:?}|descending={}",
+            crate::collection_context::CollectionTarget::Artist {
+                id: uri,
+                album_artist,
+            }
+            .context_id(),
+            read.filter,
+            read.sort,
+            read.descending,
+        ))
+    }
+
     /// The context id a play of this page carries, in the order it reads.
     pub fn context_id(&self) -> String {
         let (sort, descending, _) = read_order(&self.route, &self.options, &self.settings);
@@ -669,20 +696,34 @@ impl View {
 
     /// What a committed change means for this page, which keeps the source and music folder
     /// it opened with, as a web page names them. Favorites and ratings read it again only
-    /// where they order or filter its rows; the rows that show them patch them in.
+    /// where they order or filter its rows, and downloads where collections or a header count
+    /// them; the track rows that show them patch them in.
     pub fn refresh(&self, changed: &Changed) -> Refresh {
+        self.refresh_selected(self.selected.as_ref(), changed)
+    }
+
+    /// [`View::refresh`] for a page that follows the selection: now that `current` is
+    /// selected, a page opened for another source or music folder opens again.
+    pub fn refresh_selected(
+        &self,
+        current: Option<&SelectedLibrary>,
+        changed: &Changed,
+    ) -> Refresh {
         let refresh = changes(
             &self.owner,
             &self.route,
             self.selected.as_ref(),
-            self.selected.as_ref(),
+            current,
             &self.options,
             changed,
         );
         if !changed.items.is_empty() && self.states_reorder() {
             return refresh.max(Refresh::Reread);
         }
-        if !changed.downloads.is_empty() && self.members().is_some_and(|read| read.downloaded_only)
+        // Track rows show their downloads patched in; collection rows and headers count them.
+        if !changed.downloads.is_empty()
+            && (self.members().is_none_or(|read| read.downloaded_only)
+                || crate::collection_context::CollectionTarget::for_route(&self.route).is_some())
         {
             return refresh.max(Refresh::Reread);
         }
@@ -692,10 +733,15 @@ impl View {
     /// What playing the page whole queues, as its header Play does: everything it lists in
     /// its order and filter, from a random track when shuffle is on. None when it lists no
     /// tracks of its own.
-    pub fn play_all(&self, placement: QueuePlacement, shuffled: bool) -> Option<PlayRequest> {
+    pub fn play_all(
+        &self,
+        placement: QueuePlacement,
+        shuffled: bool,
+        result: Option<&str>,
+    ) -> Option<PlayRequest> {
         Some(
             PlayRequest::ordered(self.selection()?, 0, placement, true)
-                .with_context(self.context_id().into())
+                .with_context(self.play_context(result))
                 .shuffled(shuffled),
         )
     }
@@ -710,6 +756,7 @@ impl View {
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
+        result: Option<&str>,
     ) -> Option<PlayRequest> {
         if !matches!(placement, QueuePlacement::Replace { .. }) {
             return Some(PlayRequest::ordered(
@@ -724,10 +771,44 @@ impl View {
         }
         Some(
             PlayRequest::captured(self.members()?.clone().selection(), index, placement, false)
-                .with_context(self.context_id().into())
+                .with_context(self.play_context(result))
                 .with_anchor(key, entry)
                 .shuffled(shuffled),
         )
+    }
+
+    /// What playing an artist page's favorite track `index` queues, as [`View::play_track`]
+    /// does for the page's tracks. None when the page shows no favorite tracks.
+    pub async fn play_favorite(
+        &self,
+        index: usize,
+        placement: QueuePlacement,
+        shuffled: bool,
+        result: Option<&str>,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
+        let Some(read) = self.favorites() else {
+            return Ok(None);
+        };
+        let key = match self
+            .catalog()
+            .order(&Read::Members(read.clone()), cancel)
+            .await?
+            .items(index..index + 1)
+            .pop()
+        {
+            Some(Item::Track { key, .. }) => key,
+            _ => return Ok(None),
+        };
+        if !matches!(placement, QueuePlacement::Replace { .. }) {
+            return Ok(self.play_track(key, None, index, placement, shuffled, result));
+        }
+        Ok(self.favorites_context_id().map(|context| {
+            PlayRequest::captured(read.clone().selection(), index, placement, false)
+                .with_context(with_result(context, result))
+                .with_anchor(key, None)
+                .shuffled(shuffled)
+        }))
     }
 
     /// What playing row `index` queues: a track plays the page from it, and a track of the
@@ -737,12 +818,13 @@ impl View {
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
+        result: Option<&str>,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<PlayRequest>> {
         let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
         Ok(match self.item(index, cancel).await? {
             Some(Item::Track { key, entry }) => {
-                self.play_track(key, entry, tracks, placement, shuffled)
+                self.play_track(key, entry, tracks, placement, shuffled, result)
             }
             // A History row names its listen; its row holds the track.
             Some(Item::Listen(_)) => self
@@ -753,11 +835,11 @@ impl View {
                     Row::Track(track) => Some(track.track_key),
                     _ => None,
                 })
-                .and_then(|key| self.play_track(key, None, tracks, placement, shuffled)),
+                .and_then(|key| self.play_track(key, None, tracks, placement, shuffled, result)),
             Some(Item::AlbumTrack { key, .. })
                 if !matches!(placement, QueuePlacement::Replace { .. }) =>
             {
-                self.play_track(key, None, tracks, placement, shuffled)
+                self.play_track(key, None, tracks, placement, shuffled, result)
             }
             Some(Item::AlbumTrack { key, album, .. }) => {
                 let list = self
@@ -768,16 +850,16 @@ impl View {
                 read.descending = list.descending;
                 self.catalog().uri(Item::Album(album)).map(|uri| {
                     PlayRequest::captured(read.selection(), 0, placement, false)
-                        .with_context(
+                        .with_context(with_result(
                             context_id(
                                 &Route::AlbumDetail(uri),
                                 None,
                                 &OpenOptions::default(),
                                 list.sort_key,
                                 list.descending,
-                            )
-                            .into(),
-                        )
+                            ),
+                            result,
+                        ))
                         .with_anchor(key, None)
                         .shuffled(shuffled)
                 })
@@ -794,6 +876,7 @@ impl View {
         from: usize,
         placement: QueuePlacement,
         shuffled: bool,
+        result: Option<&str>,
     ) -> Option<PlayRequest> {
         let section = self.home_sections()?.into_iter().nth(index)?;
         let (id, selections) = match &section {
@@ -823,7 +906,7 @@ impl View {
         let source = self.selected.as_ref()?.source_id.as_str();
         Some(
             PlayRequest::captured(MemberSelection::Concat(selections), from, placement, false)
-                .with_context(format!("home:{source}:{id}").into())
+                .with_context(with_result(format!("home:{source}:{id}"), result))
                 .shuffled(shuffled),
         )
     }
@@ -1497,6 +1580,14 @@ fn section_selections(section: &HomeSection) -> Vec<MemberSelection> {
             }
         })
         .collect()
+}
+
+/// `context` tied to the order a client shows: `|result=` and its id.
+fn with_result(context: String, result: Option<&str>) -> Arc<str> {
+    match result {
+        Some(result) => format!("{context}|result={result}").into(),
+        None => context.into(),
+    }
 }
 
 /// The collection or route a page's context id starts with; a play of the collection from

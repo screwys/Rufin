@@ -107,7 +107,37 @@ impl crate::PlaylistFolderRow {
     }
 }
 
+impl crate::CollectionSummary {
+    /// Whether every track of the collection is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
+impl crate::PlaylistRow {
+    /// Whether every track of the playlist is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
+impl crate::SmartPlaylistRow {
+    /// Whether every track the smart playlist lists is downloaded; an empty one is not.
+    pub fn downloaded(&self) -> bool {
+        self.track_count > 0 && self.downloaded_count == self.track_count
+    }
+}
+
 impl PlaylistListRow {
+    /// Whether every track of the playlist is downloaded; a folder never is.
+    pub fn downloaded(&self) -> bool {
+        match self {
+            Self::Playlist(playlist) => playlist.downloaded(),
+            Self::SmartPlaylist(smart) => smart.downloaded(),
+            Self::Folder(_) => false,
+        }
+    }
+
     pub fn pin(&self) -> SidebarPin {
         match self {
             Self::Playlist(playlist) => playlist.pin(),
@@ -121,21 +151,14 @@ impl Row {
     /// Whether the row shows as downloaded: a track with its copy, or a collection with
     /// tracks that are all downloaded.
     pub fn downloaded(&self) -> bool {
-        let summary = match self {
-            Self::Track(track) | Self::AlbumTrack { track, .. } => return track.is_downloaded,
-            Self::Album(album) | Self::AlbumHeading(album) => &album.summary,
-            Self::Artist(artist) => &artist.summary,
-            Self::Tag(tag) => &tag.summary,
-            Self::Playlist(PlaylistListRow::Playlist(playlist)) => {
-                return playlist.track_count > 0
-                    && playlist.downloaded_count == playlist.track_count;
-            }
-            Self::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {
-                return smart.track_count > 0 && smart.downloaded_count == smart.track_count;
-            }
-            Self::Playlist(PlaylistListRow::Folder(_)) | Self::Folder(_) => return false,
-        };
-        summary.track_count > 0 && summary.downloaded_count == summary.track_count
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.is_downloaded,
+            Self::Album(album) | Self::AlbumHeading(album) => album.summary.downloaded(),
+            Self::Artist(artist) => artist.summary.downloaded(),
+            Self::Tag(tag) => tag.summary.downloaded(),
+            Self::Playlist(playlist) => playlist.downloaded(),
+            Self::Folder(_) => false,
+        }
     }
 
     /// The sidebar pin of a collection row.

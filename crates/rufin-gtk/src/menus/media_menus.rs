@@ -978,8 +978,7 @@ pub fn present_album_context_menu(
         ),
         Some(&album.media_uri),
         false,
-        album.summary.track_count > 0
-            && album.summary.downloaded_count == album.summary.track_count,
+        album.summary.downloaded(),
     );
     if context_menu_rating_visible(shell) {
         let shell = Rc::clone(shell);
@@ -1089,8 +1088,7 @@ pub fn present_artist_context_menu(
         &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
         Some(&artist.media_uri),
         false,
-        artist.summary.track_count > 0
-            && artist.summary.downloaded_count == artist.summary.track_count,
+        artist.summary.downloaded(),
     );
     if context_menu_rating_visible(shell) {
         let shell = Rc::clone(shell);
@@ -1141,8 +1139,7 @@ pub fn present_genre_context_menu(
         &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
         None,
         false,
-        genre.summary.track_count > 0
-            && genre.summary.downloaded_count == genre.summary.track_count,
+        genre.summary.downloaded(),
     );
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
@@ -1168,7 +1165,7 @@ pub fn present_mood_context_menu(
         &crate::widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
         None,
         false,
-        mood.summary.track_count > 0 && mood.summary.downloaded_count == mood.summary.track_count,
+        mood.summary.downloaded(),
     );
     crate::playlists::picker::append_to_menu(
         &surface,
@@ -1315,7 +1312,7 @@ pub fn present_playlist_context_menu(
         &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
         None,
         false,
-        playlist.track_count > 0 && playlist.downloaded_count == playlist.track_count,
+        playlist.downloaded(),
     );
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
@@ -1395,7 +1392,7 @@ pub fn present_smart_playlist_context_menu(
         &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
         None,
         false,
-        playlist.track_count > 0 && playlist.downloaded_count == playlist.track_count,
+        playlist.downloaded(),
     );
     surface.popup(&shell.settings.current.borrow().application.context_menu);
 }

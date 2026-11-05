@@ -9,8 +9,16 @@ use std::sync::Arc;
 use gtk::prelude::*;
 use library::PlaylistEntryKey;
 
-use super::playlist_entry_model::PlaylistEntryModel;
-use super::track_model::TrackCollectionModel;
+use crate::widgets::view_model::Rows;
+use library::{PlaylistKey, Row};
+
+/// Where the track `media_uri` names is read in `rows`.
+fn track_position(rows: &Rows<Row>, media_uri: &str) -> Option<u32> {
+    rows.ready_position(|row| match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => track.media_uri == media_uri,
+        _ => false,
+    })
+}
 
 #[derive(Clone)]
 pub struct TrackSelection {
@@ -20,12 +28,13 @@ pub struct TrackSelection {
 }
 
 impl TrackSelection {
-    pub fn new(model: TrackCollectionModel) -> Self {
-        let selection = PositionSelectionModel::new(model.list_model());
-        let locate = model.clone();
+    pub fn new(rows: &Rows<Row>) -> Self {
+        let selection = PositionSelectionModel::new(rows.list_model());
+        let input = rows.clone();
+        let locate = rows.clone();
         Self {
-            input: Rc::new(move |positions| model.selection_input(positions)),
-            position: Rc::new(move |uri| locate.ready_position(uri)),
+            input: Rc::new(move |positions| input.selection(positions)),
+            position: Rc::new(move |uri| track_position(&locate, uri)),
             selection,
         }
     }
@@ -80,17 +89,24 @@ impl TrackSelection {
 
 #[derive(Clone)]
 pub struct PlaylistEntrySelection {
-    model: PlaylistEntryModel,
+    rows: Rows<Row>,
+    playlist: PlaylistKey,
     selection: PositionSelectionModel,
     playlist_name: Arc<str>,
     writable: bool,
 }
 
 impl PlaylistEntrySelection {
-    pub fn new(model: PlaylistEntryModel, playlist_name: String, writable: bool) -> Self {
-        let selection = PositionSelectionModel::new(model.list_model());
+    pub fn new(
+        rows: &Rows<Row>,
+        playlist: PlaylistKey,
+        playlist_name: String,
+        writable: bool,
+    ) -> Self {
+        let selection = PositionSelectionModel::new(rows.list_model());
         Self {
-            model,
+            rows: rows.clone(),
+            playlist,
             selection,
             playlist_name: playlist_name.into(),
             writable,
@@ -106,7 +122,9 @@ impl PlaylistEntrySelection {
         clicked: PlaylistEntryKey,
     ) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
-        let position = self.model.ready_position(clicked)?;
+        let position = self.rows.ready_position(|row| {
+            matches!(row, Row::Track(track) if track.entry.as_ref().is_some_and(|entry| entry.key == clicked))
+        })?;
         (positions.size() > 1 && positions.contains(position)).then(|| self.snapshot(&positions))
     }
 
@@ -118,7 +136,7 @@ impl PlaylistEntrySelection {
     pub fn single_entry(&self, entry: library::PlaylistEntry) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             writable: self.writable,
-            playlist: self.model.playlist_key(),
+            playlist: self.playlist,
             playlist_name: Arc::clone(&self.playlist_name),
             count: 1,
             input: library::MemberSelection::Entries(vec![entry.key].into()),
@@ -129,9 +147,9 @@ impl PlaylistEntrySelection {
     fn snapshot(&self, positions: &gtk::Bitset) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             writable: self.writable,
-            playlist: self.model.playlist_key(),
+            playlist: self.playlist,
             playlist_name: Arc::clone(&self.playlist_name),
-            input: self.model.selection_input(positions),
+            input: self.rows.selection(positions),
             count: positions.size() as usize,
             entry: None,
         }

@@ -282,11 +282,9 @@ impl AndroidView {
     }
 
     /// Whether a committed change means the page reads again. Rows show favorites, ratings and
-    /// a track's download through `show_state` and `show_download`; a page of collections
-    /// reads again for their download counts.
+    /// a track's download through `show_state` and `show_download`.
     pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
         self.view.refresh(&changed) != rufin_core::view::Refresh::Nothing
-            || (!changed.downloads.is_empty() && self.view.members().is_none())
     }
 
     /// The context id the page's plays carry.
@@ -307,7 +305,7 @@ impl AndroidView {
             let index = usize::try_from(index).map_err(error)?;
             let request = self
                 .view
-                .play(index, QueuePlacement::Now, shuffled, &cancel)
+                .play(index, QueuePlacement::Now, shuffled, None, &cancel)
                 .await
                 .map_err(error)?;
             // A track of the Albums list in Detail layout plays its album.
@@ -333,7 +331,7 @@ impl AndroidView {
         let target = CollectionTarget::for_route(self.view.route());
         self.playback.play_selection(
             self.view
-                .play_all(placement, shuffled)
+                .play_all(placement, shuffled, None)
                 .ok_or_else(|| error("Choose a collection"))?
                 .with_context_title(caption(target, context_title)),
         );
@@ -353,6 +351,7 @@ impl AndroidView {
             usize::try_from(from).map_err(error)?,
             QueuePlacement::Now,
             shuffled,
+            None,
         );
         self.play_request(
             request.map(|request| request.with_context_title(caption(None, context_title))),

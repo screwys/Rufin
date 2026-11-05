@@ -83,15 +83,6 @@ impl AlbumCover {
                 }
             });
         }
-        let row = Rc::downgrade(&current);
-        shell.register_dynamic_favorite_button(
-            Rc::new(move || {
-                Some(crate::favorites::album_favorite_key(
-                    &row.upgrade()?.borrow().as_ref()?.media_uri,
-                ))
-            }),
-            &favorite,
-        );
         let favorite_shell = Rc::downgrade(shell);
         let row = Rc::clone(&current);
         favorite.connect_clicked(move |button| {

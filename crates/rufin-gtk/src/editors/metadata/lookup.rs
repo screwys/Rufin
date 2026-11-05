@@ -1,4 +1,4 @@
-use crate::widgets::sparse_model::{SparseLoad, SparseRouteModel, SparseSource};
+use crate::widgets::view_model::Rows;
 use adw::prelude::*;
 use rufin_core::metadata::{
     MetadataLookupField, MetadataLookupItem, MetadataLookupReview, MetadataMatchKind,
@@ -15,7 +15,7 @@ struct ReviewView {
     dialog: gtk::glib::WeakRef<adw::Dialog>,
     selection: gtk::SingleSelection,
     current: Cell<u32>,
-    rows: Rc<SparseRouteModel<u64, MetadataTrackSummary>>,
+    rows: Rows<MetadataTrackSummary>,
     title: gtk::Label,
     query: gtk::SearchEntry,
     status: gtk::Label,
@@ -112,22 +112,17 @@ pub(super) fn present(
         }
     });
     let load_review = review.clone();
-    let load: SparseLoad<u64, MetadataTrackSummary> = Rc::new(move |_, range, _| {
-        let review = load_review.clone();
-        Box::pin(async move {
-            review
-                .tracks(range.start as u64, range.len() as u64)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    });
-    let rows = SparseRouteModel::new(
-        SparseSource::Query {
-            count: review.progress().total as usize,
-        },
-        runtime,
-        load,
-    );
+    let load: crate::widgets::view_model::PageReader<MetadataTrackSummary> =
+        Rc::new(move |range, _| {
+            let review = load_review.clone();
+            Box::pin(async move {
+                review
+                    .tracks(range.start as u64, range.len() as u64)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+        });
+    let rows = Rows::paged(runtime, review.progress().total as usize, load);
     let selection = gtk::SingleSelection::new(Some(rows.list_model()));
     tracks.set_model(Some(&selection));
     tracks.set_factory(Some(&super::batch::track_factory()));
@@ -568,13 +563,7 @@ impl ReviewView {
             gtk::glib::spawn_future_local(async move {
                 if let Ok(updated) = review.tracks(first as u64, 192).await {
                     for row in updated {
-                        if rows
-                            .peek_ready(row.index as usize)
-                            .is_some_and(|current| current.as_ref() == &row)
-                        {
-                            continue;
-                        }
-                        rows.update_ready(row.index as usize, |current| *current = row.clone());
+                        rows.set_ready(row.index as usize, row);
                     }
                 }
             });

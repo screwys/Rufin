@@ -6,7 +6,8 @@ use localization::msgid;
 
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
-use crate::library::track_model::TrackCollectionModel;
+use crate::widgets::view_model::Rows;
+use library::Row;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -31,10 +32,8 @@ pub struct GroupedDetailData {
     pub seed: u32,
     pub summary_items: Vec<(&'static str, String)>,
     pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub view: crate::widgets::mounted_route::RouteView,
-    pub tracks: rufin_core::view::Opened,
+    pub rows: Rows<Row>,
     pub table_context: &'static str,
-    pub playback_context: String,
     pub play_label: &'static str,
 }
 
@@ -79,10 +78,8 @@ impl CatalogUi {
             seed,
             summary_items,
             context_menu,
-            view,
-            tracks,
+            rows,
             table_context,
-            playback_context,
             play_label,
         } = data;
         let content_width = crate::library::route_layout::detail_route_inner_width_for_viewport(
@@ -111,25 +108,17 @@ impl CatalogUi {
         }
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.track_projection(
-            TrackCollectionModel::new(self.products.runtime.clone(), &view, tracks),
+            rows.clone(),
             key,
             SearchableTrackOptions {
-                context_id: playback_context.clone(),
                 content_inset: PRIMARY_ROUTE_HORIZONTAL_INSET,
                 fixed_layout: None,
                 search: None,
             },
         );
-        let controller = self.products.playback.clone();
-        let play_context = playback_context;
-        let play_tracks = track_projection.clone();
+        let playback = self.products.playback.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            play_tracks.play_source(
-                controller.clone(),
-                placement,
-                play_context.clone(),
-                shuffled,
-            );
+            rows.play_all(&playback, placement, shuffled);
         });
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);

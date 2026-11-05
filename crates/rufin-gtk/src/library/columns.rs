@@ -1,5 +1,5 @@
 use crate::widgets::media_drag::{MediaDragSource, install_media_drag_source};
-use crate::widgets::sparse_model::{item_at_from_item, object_item};
+use crate::widgets::view_model::{item_at_from_item, object_item};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use ::library::{AlbumRow, ArtistRow};
@@ -28,7 +28,7 @@ use crate::widgets::library_fields::{
 use crate::widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
-use crate::widgets::sparse_model::connect_sparse_bind;
+use crate::widgets::view_model::connect_row_bind;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
@@ -46,7 +46,7 @@ pub fn bind_collection_title<T: Clone + 'static>(
     >::new()));
     let bind_cells = Rc::clone(&bindings);
     let shell = Rc::clone(shell);
-    connect_sparse_bind(factory, move |item| {
+    connect_row_bind(factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -151,10 +151,6 @@ impl CollectionIndexCell {
     }
 }
 
-fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
-    track_count > 0 && downloaded_count == track_count
-}
-
 fn set_cover_placeholder(shell: &Rc<CatalogUi>, cover: &ArtworkTile, placeholder: bool) {
     if placeholder {
         shell.artwork.clear_artwork_tile(cover);
@@ -199,15 +195,15 @@ pub fn album_column(
             )));
         }
     });
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         if let Some(cell) = list_cell::<AlbumTableCell>(item) {
             let row = item
                 .item()
-                .and_downcast::<crate::widgets::sparse_model::SparseObjectItem>()
-                .and_then(|item| item.value::<std::sync::Arc<AlbumRow>>());
+                .and_downcast::<crate::widgets::view_model::RowItem>()
+                .and_then(|item| item.part::<AlbumRow>().map(std::sync::Arc::new));
             cell.bind(item.position(), row);
         }
     });
@@ -429,11 +425,7 @@ impl AlbumTableCell {
                         .set_text(&album_field(&row, imp.field.get().unwrap()));
                     shell.bind_download_badge(
                         &cell.downloaded(),
-                        imp.field.get() == Some(LibraryField::Title)
-                            && collection_is_downloaded(
-                                row.summary.track_count,
-                                row.summary.downloaded_count,
-                            ),
+                        imp.field.get() == Some(LibraryField::Title) && row.summary.downloaded(),
                     );
                 } else {
                     cell.clear();
@@ -451,13 +443,8 @@ impl AlbumTableCell {
                     cell.title().set_text(&row.title);
                     cell.bind_subtitle(album_row_artist_links(&row));
                     cell.subtitle().set_visible(!row.artist.trim().is_empty());
-                    shell.bind_download_badge(
-                        &cell.downloaded().unwrap(),
-                        collection_is_downloaded(
-                            row.summary.track_count,
-                            row.summary.downloaded_count,
-                        ),
-                    );
+                    shell
+                        .bind_download_badge(&cell.downloaded().unwrap(), row.summary.downloaded());
                 } else {
                     cell.title().set_text("");
                     cell.downloaded().unwrap().set_visible(false);
@@ -724,7 +711,7 @@ where
             item.set_child(Some(&label));
         }
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -776,7 +763,7 @@ pub fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
             item.set_child(Some(&label));
         }
     });
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -805,7 +792,7 @@ pub fn mapped_row_index_column<T: Clone + 'static>(
             item.set_child(Some(&CollectionIndexCell::new(&shell)));
         }
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -850,7 +837,7 @@ where
         }
     });
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -978,7 +965,7 @@ where
     });
 
     let bind_shell = Rc::clone(&shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1023,7 +1010,7 @@ pub fn artist_image_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk::Co
     });
 
     let bind_shell = Rc::clone(&shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1089,7 +1076,7 @@ where
     });
 
     let bind_shell = Rc::clone(&shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1097,12 +1084,7 @@ where
             return;
         };
         let Some((text, downloaded)) = item.item().and_then(|object| {
-            object_item::<ArtistRow, _>(object, |row| {
-                (
-                    value(row),
-                    collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
-                )
-            })
+            object_item::<ArtistRow, _>(object, |row| (value(row), row.summary.downloaded()))
         }) else {
             cell.clear();
             return;
@@ -1187,7 +1169,7 @@ where
     });
 
     let bind_shell = Rc::clone(&shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1274,7 +1256,7 @@ where
 
     let bind_shell = Rc::clone(&shell);
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1406,7 +1388,7 @@ where
 
     let bind_shell = Rc::clone(&shell);
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1513,7 +1495,7 @@ pub fn artist_actions_column(
         });
     });
 
-    connect_sparse_bind(&factory, |item| {
+    connect_row_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1588,7 +1570,7 @@ where
     });
 
     let bind_favorite_value = Rc::clone(&favorite_value);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };

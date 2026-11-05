@@ -1,4 +1,3 @@
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::view::OpenOptions;
 use std::{cell::RefCell, rc::Rc};
 
@@ -9,17 +8,18 @@ use localization::{album_count_text, msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
 use crate::favorites::{
-    artist_favorite_key, favorite_button_is_active, favorite_icon_button,
-    set_favorite_button_active,
+    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
+use crate::library::routes::PageReads;
 use crate::widgets::artwork::presentation::stable_seed;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
 use crate::widgets::layout::width_allocation_owner;
 use crate::widgets::localization::localized_label;
-use crate::widgets::mounted_route::{MountedRoute, PageReread, route_view};
-use rufin_core::view::{Opened, View};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
+use rufin_core::view::Opened;
 
 use super::artist_releases::{ArtistReleaseProjections, ArtistReleaseRoutePreamble};
 use super::detail_showcase::{
@@ -72,27 +72,15 @@ impl CatalogUi {
                 msgid("No music from this artist yet"),
             ));
         };
-        let view = route_view(&read);
         let artist = summary.row.artist_key;
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
         let favorite_count = read.view.favorites_len().unwrap_or(0);
-        let favorite_model = crate::library::track_model::TrackCollectionModel::favorites(
-            self.products.runtime.clone(),
-            &view,
-            favorite_rows,
-        );
+        let favorite_model =
+            Rows::favorites(self.products.runtime.clone(), &read.view, favorite_rows);
         let favorite = self.track_projection(
-            favorite_model,
+            favorite_model.clone(),
             LibraryListKey::ArtistTracks,
             SearchableTrackOptions {
-                context_id: format!(
-                    "{}|favorites",
-                    CollectionTarget::Artist {
-                        id: summary.row.media_uri.clone(),
-                        album_artist,
-                    }
-                    .context_id()
-                ),
                 content_inset: 0,
                 fixed_layout: Some(crate::library::LibraryLayout::Row),
                 search: None,
@@ -133,46 +121,33 @@ impl CatalogUi {
                 )),
             },
             ARTIST_RELEASE_TITLES,
-            &view,
-            read,
+            &mut read,
         ));
+        // The releases take each read; a whole-page read also has the header and the favorite
+        // tracks, which a release reread leaves as they are.
         let apply = {
             let shell = Rc::downgrade(self);
-            let favorite = favorite.clone();
+            let favorite_model = favorite_model.clone();
             let favorite_scroller = favorite_scroller.clone();
-            let releases = Rc::clone(&releases);
+            let releases = Rc::downgrade(&releases);
             let header = header.clone();
-            move |mut read: Opened, previous: &View| {
-                let Some(shell) = shell.upgrade() else {
-                    return false;
+            move |mut read: Opened| {
+                let (Some(shell), Some(releases)) = (shell.upgrade(), releases.upgrade()) else {
+                    return;
                 };
-                // A release reread leaves the header and favorite tracks as they are.
-                let Some(favorite_rows) = read.favorites.take() else {
-                    if !releases.replace_page(previous, read) {
-                        return false;
-                    }
-                    shell.reapply_current_track();
-                    return true;
-                };
-                let Some(summary) =
-                    artist_header(&mut read).filter(|_| read.view.favorites().is_some())
-                else {
-                    return false;
-                };
-                favorite.replace_favorites(
-                    read.view.favorites_len().unwrap_or(0),
-                    favorite_rows,
-                    read.view.same_list(previous),
-                );
-                header.replace(&shell, summary);
-                let present = !favorite.source_is_empty();
-                releases.set_favorite_present(present);
-                let height = 30 + favorite.source_count().min(4) as i32 * 64;
-                favorite_scroller.set_max_content_height(-1);
-                favorite_scroller.set_min_content_height(height);
-                favorite_scroller.set_max_content_height(height);
-                if !releases.replace_page(previous, read) {
-                    return false;
+                releases.take(&read);
+                if read.favorites.is_some()
+                    && let Some(summary) =
+                        artist_header(&mut read).filter(|_| read.view.favorites().is_some())
+                {
+                    favorite_model.take(&mut read);
+                    header.replace(&shell, summary);
+                    let present = !favorite_model.is_empty();
+                    releases.set_favorite_present(present);
+                    let height = 30 + favorite_model.len().min(4) as i32 * 64;
+                    favorite_scroller.set_max_content_height(-1);
+                    favorite_scroller.set_min_content_height(height);
+                    favorite_scroller.set_max_content_height(height);
                 }
                 releases.apply_library_list_settings(
                     &shell
@@ -181,15 +156,13 @@ impl CatalogUi {
                         .borrow()
                         .library_list(LibraryListKey::ArtistAlbums),
                 );
-                true
+                shell.reapply_current_track();
             }
         };
         let favorite_search = favorite.search();
         let filters = Rc::downgrade(&releases);
-        let reread = PageReread::new(
-            self.products.runtime.clone(),
-            "mounted Artist route",
-            &view,
+        let reads = PageReads::new(
+            &releases.sparse,
             move |options| OpenOptions {
                 filter: favorite_search.text().trim().to_string(),
                 release_filters: filters.upgrade().map(|releases| releases.filters()),
@@ -197,18 +170,13 @@ impl CatalogUi {
             },
             apply,
         );
-        connect_artist_release_requests(self, &releases, &reread);
-        let refresh = {
-            let reread = Rc::clone(&reread);
-            let releases = Rc::clone(&releases);
-            Rc::new(move || reread.refresh(releases.live_window())) as Rc<dyn Fn()>
-        };
-
+        crate::library::routes::connect_list_search(&favorite.search(), &reads);
+        connect_artist_release_requests(self, &releases, &reads);
         let resume = {
             let shell = Rc::downgrade(self);
             let favorite = favorite.clone();
             let releases = Rc::clone(&releases);
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let track_settings = shell
@@ -224,39 +192,17 @@ impl CatalogUi {
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
                 releases.apply_library_list_settings(&album_settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let download_rows = Rc::clone(&releases.sparse);
-
-        let download_artist = Rc::clone(&header.current);
-        let downloads =
-            crate::library::collection_download_change(move |target, downloaded| match target {
-                CollectionTarget::Artist {
-                    id,
-                    album_artist: role,
-                } if *role == album_artist && *id == download_artist.borrow().row.media_uri => {
-                    let mut artist = download_artist.borrow_mut();
-                    let row = &mut artist.row;
-                    row.summary.downloaded_count = if downloaded {
-                        row.summary.track_count
-                    } else {
-                        0
-                    };
-                }
-                CollectionTarget::Album(uri) => {
-                    update_release_downloads(&download_rows, uri, downloaded)
-                }
-                _ => {}
-            });
         MountedRoute::new(releases.widget(), resume)
-            .with_states(&view)
+            .with_rows(&releases.sparse)
+            .with_rows(&favorite_model)
+            .with_states(header.states())
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || releases.upgrade().map(|releases| releases.item_scroll()))
             })
-            .with_download_change(downloads)
-            .with_download_change(favorite.download_change())
             .with_search_provider({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || {
@@ -268,9 +214,9 @@ impl CatalogUi {
             .with_layout_cycle(releases.layout_cycle())
             .with_initial_demand({
                 let releases = Rc::clone(&releases);
-                Rc::new(move || releases.resume_initial_demand())
+                Rc::new(move || releases.sparse.resume_initial_demand())
             })
-            .with_catalog_refresh(refresh)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
     }
 
     pub fn artist_tracks_view(
@@ -308,7 +254,6 @@ impl CatalogUi {
                 msgid("No albums from this artist yet"),
             ));
         };
-        let view = route_view(&read);
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
             ArtistReleaseRoutePreamble {
@@ -320,39 +265,33 @@ impl CatalogUi {
                 )),
             },
             ARTIST_RELEASE_TITLES,
-            &view,
-            read,
+            &mut read,
         ));
         let apply = {
             let shell = Rc::downgrade(self);
-            let releases = Rc::clone(&releases);
-            move |read: Opened, previous: &View| {
-                let Some(shell) = shell.upgrade() else {
-                    return false;
+            let releases = Rc::downgrade(&releases);
+            move |read: Opened| {
+                let (Some(shell), Some(releases)) = (shell.upgrade(), releases.upgrade()) else {
+                    return;
                 };
-                if !releases.replace_page(previous, read) {
-                    return false;
-                }
+                releases.take(&read);
                 shell.reapply_current_track();
-                true
             }
         };
         let filters = Rc::downgrade(&releases);
-        let reread = PageReread::new(
-            self.products.runtime.clone(),
-            "mounted Discography route",
-            &view,
+        let reads = PageReads::new(
+            &releases.sparse,
             move |options| OpenOptions {
                 release_filters: filters.upgrade().map(|releases| releases.filters()),
                 ..options.clone()
             },
             apply,
         );
-        connect_artist_release_requests(self, &releases, &reread);
+        connect_artist_release_requests(self, &releases, &reads);
         let resume = {
             let releases = Rc::clone(&releases);
             let shell = Rc::downgrade(self);
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
@@ -363,7 +302,7 @@ impl CatalogUi {
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
                 releases.apply_library_list_settings(&settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
         let refresh = {
@@ -378,23 +317,15 @@ impl CatalogUi {
                         .borrow()
                         .library_list(LibraryListKey::ArtistAlbums),
                 );
-                reread.refresh(releases.live_window());
+                reads.refresh();
             }) as Rc<dyn Fn()>
         };
-
-        let download_rows = Rc::clone(&releases.sparse);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            if let CollectionTarget::Album(uri) = target {
-                update_release_downloads(&download_rows, uri, downloaded);
-            }
-        });
         MountedRoute::new(releases.widget(), resume)
-            .with_states(&view)
+            .with_rows(&releases.sparse)
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || releases.upgrade().map(|releases| releases.item_scroll()))
             })
-            .with_download_change(downloads)
             .with_search_provider({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || {
@@ -406,7 +337,7 @@ impl CatalogUi {
             .with_layout_cycle(releases.layout_cycle())
             .with_initial_demand({
                 let releases = Rc::clone(&releases);
-                Rc::new(move || releases.resume_initial_demand())
+                Rc::new(move || releases.sparse.resume_initial_demand())
             })
             .with_catalog_refresh(refresh)
     }
@@ -414,11 +345,10 @@ impl CatalogUi {
     fn artist_track_surface_restored(
         self: &Rc<Self>,
         summary: ArtistView,
-        read: Opened,
+        mut read: Opened,
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
-        let view = route_view(&read);
         let key = LibraryListKey::ArtistTracks;
         let context = if favorites_only && album_artist {
             "album-artist-favorite-tracks"
@@ -429,15 +359,9 @@ impl CatalogUi {
         } else {
             "artist-tracks"
         };
-        let context_id = rufin_core::view::context_base(read.view.route());
-        let model = crate::library::track_model::TrackCollectionModel::new(
-            self.products.runtime.clone(),
-            &view,
-            read,
-        );
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let (tracks_widget, tracks, toolbar) =
-            self.scrolling_track_projection(model, key, context, context_id);
-        let tracks = Rc::new(tracks);
+            self.scrolling_track_projection(rows.clone(), key, context);
         let root = crate::library::route_layout::detail_route_wrapper(18);
         root.append(&artist_subroute_header(
             self,
@@ -450,33 +374,26 @@ impl CatalogUi {
         ));
         root.append(&tracks_widget);
         let layout_cycle = toolbar.layout_cycle();
-        let reread = tracks.page_reread(self, "mounted artist tracks", &view, |_| {}, |_| {});
+        let reads = tracks.page_reads(|_| {}, |_| {});
         let resume = {
             let shell = Rc::downgrade(self);
-            let projection = Rc::clone(&tracks);
-            let reread = Rc::clone(&reread);
+            let projection = tracks.clone();
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
                 projection.apply_library_list_settings(key, &settings);
                 toolbar.apply(key, &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let refresh_tracks = Rc::clone(&tracks);
         MountedRoute::new(root.upcast(), resume)
-            .with_states(&view)
-            .with_catalog_refresh(Rc::new(move || {
-                reread.refresh(refresh_tracks.live_window())
-            }))
-            .with_download_change(tracks.download_change())
+            .with_rows(&rows)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(tracks.search())
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(tracks.item_navigation())
-            .with_initial_demand({
-                let tracks = Rc::clone(&tracks);
-                Rc::new(move || tracks.resume_initial_demand())
-            })
+            .with_initial_demand(Rc::new(move || rows.resume_initial_demand()))
     }
 }
 
@@ -484,7 +401,7 @@ impl CatalogUi {
 fn connect_artist_release_requests(
     shell: &Rc<CatalogUi>,
     releases: &Rc<ArtistReleaseProjections>,
-    reread: &Rc<PageReread>,
+    reads: &PageReads,
 ) {
     for index in 0..ARTIST_RELEASE_TITLES.len() {
         let Some(search) = releases.section_search(index) else {
@@ -492,11 +409,9 @@ fn connect_artist_release_requests(
         };
         let weak_shell = Rc::downgrade(shell);
         let releases = Rc::downgrade(releases);
-        let reread = Rc::downgrade(reread);
+        let reread = reads.weak(PageReads::reread_releases);
         search.connect_search_changed(move |_| {
-            let (Some(shell), Some(releases), Some(reread)) =
-                (weak_shell.upgrade(), releases.upgrade(), reread.upgrade())
-            else {
+            let (Some(shell), Some(releases)) = (weak_shell.upgrade(), releases.upgrade()) else {
                 return;
             };
             releases.apply_library_list_settings(
@@ -506,29 +421,9 @@ fn connect_artist_release_requests(
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums),
             );
-            reread.reread_releases();
+            reread();
         });
     }
-}
-
-fn update_release_downloads(
-    rows: &crate::widgets::sparse_model::SparseRouteModel<library::AlbumKey, library::AlbumRow>,
-    uri: &str,
-    downloaded: bool,
-) {
-    rows.update_matching(
-        |row| {
-            row.media_uri == uri
-                && (row.summary.downloaded_count == row.summary.track_count) != downloaded
-        },
-        |row| {
-            row.summary.downloaded_count = if downloaded {
-                row.summary.track_count
-            } else {
-                0
-            }
-        },
-    );
 }
 
 #[derive(Clone)]
@@ -536,6 +431,7 @@ struct ArtistDetailHeaderProjection {
     album_artist: bool,
     root: gtk::Widget,
     current: Rc<RefCell<ArtistView>>,
+    hearts: Rc<[gtk::Button]>,
     showcase: DetailShowcaseView,
     album_count: gtk::Label,
     track_count: gtk::Label,
@@ -570,11 +466,28 @@ impl ArtistDetailHeaderProjection {
                 &artist,
                 self.album_artist,
             ));
-        shell.update_visible_favorite_buttons(
-            &library::FavoriteTarget::Artist(artist.row.media_uri.clone()),
-            artist.row.state.favorite,
-        );
+        for heart in self.hearts.iter() {
+            set_favorite_button_active(heart, artist.row.state.favorite);
+        }
         self.current.replace(artist);
+    }
+
+    /// Shows a committed favorite of the artist in its hearts.
+    fn states(&self) -> crate::widgets::mounted_route::MountedStates {
+        let current = Rc::clone(&self.current);
+        let hearts = Rc::clone(&self.hearts);
+        Rc::new(move |changes, _| {
+            use library::ShowsState;
+            let mut artist = current.borrow_mut();
+            for change in changes {
+                if let Some(state) = artist.row.state_mut(change) {
+                    change.show_in(state);
+                    for heart in hearts.iter() {
+                        set_favorite_button_active(heart, change.favorite);
+                    }
+                }
+            }
+        })
     }
 }
 
@@ -671,8 +584,8 @@ fn artist_detail_header_restored(
         .expect("artist detail has a Favorite cover control")
         .clone();
     let favorite_media_uri = artist.row.media_uri.clone();
+    let hearts: Rc<[gtk::Button]> = Rc::new([favorite.clone(), hover_favorite.clone()]);
     for button in [favorite, hover_favorite] {
-        shell.register_favorite_button(artist_favorite_key(&favorite_media_uri), &button);
         let favorite_shell = Rc::clone(shell);
         let favorite_media_uri = favorite_media_uri.clone();
         button.connect_clicked(move |button| {
@@ -714,6 +627,7 @@ fn artist_detail_header_restored(
         album_artist,
         root,
         current,
+        hearts,
         showcase,
         album_count,
         track_count,

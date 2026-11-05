@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
-use crate::favorites::FavoriteSessionState;
 use crate::player::lyrics::search::connect_lyrics_search_controls;
 use crate::widgets::popup::present_light_dismiss_dialog;
 use rufin_core::runtime::SelectedLibrary;
@@ -18,7 +17,6 @@ use super::Shell;
 /// own cleanup step.
 pub(crate) struct SelectedUiSession {
     pub(crate) library: SelectedLibrary,
-    pub(crate) favorites: Rc<FavoriteSessionState>,
     pub(crate) dialogs: SelectedDialogState,
 }
 
@@ -26,7 +24,6 @@ impl SelectedUiSession {
     pub(crate) fn new(library: SelectedLibrary) -> Self {
         Self {
             library,
-            favorites: Rc::new(FavoriteSessionState::default()),
             dialogs: SelectedDialogState::default(),
         }
     }

@@ -1,7 +1,4 @@
-use crate::favorites::{
-    FavoriteControlKey, album_favorite_key, artist_favorite_key, favorite_button_is_active,
-    set_favorite_button_active, track_favorite_key,
-};
+use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::LibraryField;
 use crate::menus::media_menus::{present_album_context_menu, present_artist_context_menu};
@@ -9,7 +6,7 @@ use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
 use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
-use crate::widgets::sparse_model::{item_at, item_at_from_item};
+use crate::widgets::view_model::{item_at, item_at_from_item};
 use ::library::{AlbumRow, ArtistRow, FavoriteTarget};
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -30,14 +27,10 @@ use crate::widgets::library_fields::{
     COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MAX_CARD_WIDTH, COLLECTION_GRID_MIN_CARD_WIDTH,
     opaque_artwork,
 };
-use crate::widgets::sparse_model::{bind_sparse_item, unbind_sparse_item};
+use crate::widgets::view_model::{bind_row_item, unbind_row_item};
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
-
-fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
-    track_count > 0 && downloaded_count == track_count
-}
 
 fn set_grid_favorite(button: &gtk::Button, favorite: Option<bool>) {
     set_favorite_button_active(button, favorite.unwrap_or(false));
@@ -65,22 +58,23 @@ fn install_grid_favorite<T: 'static>(
     });
 }
 
-/// Keeps a card's heart showing committed favorites of the row it holds, for cards bound
-/// outside a page model that shows them in its rows.
-fn follow_card_favorite<T: 'static>(
-    shell: &std::rc::Weak<CatalogUi>,
-    current: &Rc<RefCell<Option<T>>>,
-    button: &gtk::Button,
-    key: impl Fn(&T) -> FavoriteControlKey + 'static,
+/// Shows committed favorites and ratings in a card's row and heart, for cards bound outside a
+/// page model that shows them in its rows.
+fn show_card_states<T: library::ShowsState>(
+    current: &RefCell<Option<T>>,
+    favorite: &gtk::Button,
+    changes: &[library::StateChange],
 ) {
-    let Some(shell) = shell.upgrade() else {
+    let mut current = current.borrow_mut();
+    let Some(row) = current.as_mut() else {
         return;
     };
-    let current = Rc::downgrade(current);
-    shell.register_dynamic_favorite_button(
-        Rc::new(move || current.upgrade()?.borrow().as_ref().map(&key)),
-        button,
-    );
+    for change in changes {
+        if let Some(state) = row.state_mut(change) {
+            change.show_in(state);
+            set_favorite_button_active(favorite, change.favorite);
+        }
+    }
 }
 
 pub fn install_grid_context<T: Clone + 'static>(
@@ -455,10 +449,7 @@ where
     M: IsA<gio::ListModel> + Clone + 'static,
 {
     let selection = selection.unwrap_or_else(|| {
-        if model
-            .as_ref()
-            .is::<crate::widgets::sparse_model::SparseObjectModel>()
-        {
+        if model.as_ref().is::<crate::widgets::view_model::RowList>() {
             crate::widgets::selection::PositionSelectionModel::new(model.clone()).upcast()
         } else {
             gtk::MultiSelection::new(Some(model.clone())).upcast()
@@ -499,7 +490,7 @@ where
             return;
         };
         bind_demand(item.position());
-        bind_sparse_item(
+        bind_row_item(
             item,
             Rc::new(move |item| {
                 if let Some(child) = item.child() {
@@ -541,7 +532,7 @@ where
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        unbind_sparse_item(item);
+        unbind_row_item(item);
         item.set_activatable(false);
         item.set_selectable(false);
         if let Some(child) = item.child() {
@@ -556,7 +547,7 @@ where
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        unbind_sparse_item(item);
+        unbind_row_item(item);
         if let Some(cell) = item
             .child()
             .and_then(|child| child.downcast::<cards::CollectionGridCardInset>().ok())
@@ -673,13 +664,6 @@ pub struct TrackGridCell<T: crate::widgets::library_fields::TrackPresentation = 
 }
 
 impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
-    /// Shows committed favorites on a card no page model shows them in.
-    pub(crate) fn follow_favorites(&self) {
-        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
-            track_favorite_key(row.media_uri())
-        });
-    }
-
     pub fn new(
         shell: &Rc<CatalogUi>,
         fields: &[LibraryField],
@@ -831,10 +815,8 @@ impl AlbumGridCell {
     }
 
     /// Shows committed favorites on a card no page model shows them in.
-    pub(crate) fn follow_favorites(&self) {
-        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
-            album_favorite_key(&row.media_uri)
-        });
+    pub(crate) fn show_states(&self, changes: &[library::StateChange]) {
+        show_card_states(&self.current, &self.favorite, changes);
     }
 
     pub fn enable_card_activation(&self) {
@@ -944,10 +926,8 @@ impl ArtistGridCell {
     }
 
     /// Shows committed favorites on a card no page model shows them in.
-    pub(crate) fn follow_favorites(&self) {
-        follow_card_favorite(&self.shell, &self.current, &self.favorite, |row| {
-            artist_favorite_key(&row.media_uri)
-        });
+    pub(crate) fn show_states(&self, changes: &[library::StateChange]) {
+        show_card_states(&self.current, &self.favorite, changes);
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], album_artist: bool) -> Self {
@@ -1044,11 +1024,8 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         self.body.bind(&row.name, |field| {
             DetailLinks::text(&artist_field(&row, field))
         });
-        self.body.set_download_target(
-            &shell,
-            !shell.local_source()
-                && collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
-        );
+        self.body
+            .set_download_target(&shell, !shell.local_source() && row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }
@@ -1101,11 +1078,8 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
                 album_row_artist_links(&row)
             }
         });
-        self.body.set_download_target(
-            &shell,
-            !shell.local_source()
-                && collection_is_downloaded(row.summary.track_count, row.summary.downloaded_count),
-        );
+        self.body
+            .set_download_target(&shell, !shell.local_source() && row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }

@@ -262,12 +262,9 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
         }
         shell.search_session.set_selected(Some(selected));
     }
-    // The player's hearts follow the playback rows.
-    for state in &changed.items {
-        shell.update_visible_favorite_buttons(&state.target, state.favorite);
-    }
     shell.search_session.show_states(&changed.items);
-    shell.show_states_in_mounted_route(&changed.items);
+    shell.show_activity_states(&changed.items);
+    shell.show_changes_in_mounted_route(changed);
     if changed.all
         || !changed.sources.is_empty()
         || changed.scope.is_some()

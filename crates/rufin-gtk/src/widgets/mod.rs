@@ -7,8 +7,8 @@ pub mod localization;
 pub mod lyrics_editor;
 pub mod lyrics_snippet;
 pub mod settings;
-pub mod sparse_model;
 pub mod text_slide;
+pub mod view_model;
 
 pub mod artwork;
 

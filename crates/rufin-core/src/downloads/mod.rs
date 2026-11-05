@@ -766,14 +766,6 @@ pub struct DownloadFeedback {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DownloadEvent {
-    SubjectChanged {
-        subject: DownloadSubject,
-        downloaded: bool,
-    },
-    Changed {
-        media_uri: String,
-        downloaded: bool,
-    },
     Queue {
         summary: DownloadQueueSummary,
         paused: bool,
@@ -1168,8 +1160,6 @@ impl Actor {
                 }
                 if skipped {
                     self.mark_subject_incomplete(&subject).await;
-                } else {
-                    self.publish_subject_complete(&subject);
                 }
             }
             Command::LibraryChanged(changes) => self.library_changed(changes.as_deref()),
@@ -2200,13 +2190,6 @@ impl Actor {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(source_id.clone());
-        let _ = self
-            .events
-            .send(DownloadEvent::Changed {
-                media_uri: media_uri.into(),
-                downloaded: true,
-            })
-            .await;
         if let Err(error) = self.retire_previous_files(&mut file).await {
             let _ = self.events.send(DownloadEvent::Notice(error)).await;
         }
@@ -2437,26 +2420,9 @@ impl Actor {
             job.completed.push(media_uri.to_string());
         }
         if job.remaining.is_empty() {
-            let job = jobs.remove(job_index);
-            if completed && !job.failed {
-                self.publish_subject_complete(&job.subject);
-            }
+            jobs.remove(job_index);
         } else {
             job.state = DownloadQueueState::Downloading;
-        }
-    }
-
-    fn publish_subject_complete(&self, subject: &DownloadSubject) {
-        if !self
-            .jobs
-            .values()
-            .flatten()
-            .any(|job| &job.subject == subject)
-        {
-            let _ = self.events.try_send(DownloadEvent::SubjectChanged {
-                subject: subject.clone(),
-                downloaded: true,
-            });
         }
     }
 
@@ -2474,10 +2440,6 @@ impl Actor {
                 warn!(%error, "could not save download progress");
             }
         }
-        let _ = self.events.try_send(DownloadEvent::SubjectChanged {
-            subject: subject.clone(),
-            downloaded: false,
-        });
     }
 
     /// Lets the first waiting job of each queue try again; starting it asks for the source.
@@ -2600,21 +2562,6 @@ impl Actor {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(file.source_id.clone().map(SourceId::new));
-        let _ = self
-            .events
-            .send(DownloadEvent::Changed {
-                media_uri: file.media_uri.clone(),
-                downloaded: false,
-            })
-            .await;
-        for owner in download_owners(&file)? {
-            if let DownloadOwner::Subject(subject) = owner {
-                let _ = self.events.try_send(DownloadEvent::SubjectChanged {
-                    subject,
-                    downloaded: false,
-                });
-            }
-        }
         Ok(removed)
     }
 
@@ -3299,7 +3246,6 @@ mod tests {
         std::fs::create_dir_all(&paths.directory).expect("create download directory");
         std::fs::write(&paths.audio_part, b"complete bytes").expect("write completed transfer");
         let job = actor.jobs[&None][0].clone();
-        let subject = job.subject.clone();
         let active = ActiveDownload {
             source_id: None,
             job_id: job.id,
@@ -3312,13 +3258,6 @@ mod tests {
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
 
-        assert_eq!(
-            received.recv().await.unwrap(),
-            DownloadEvent::Changed {
-                media_uri: media_uri.clone(),
-                downloaded: true,
-            }
-        );
         let access = actor
             .catalog
             .download_file(&media_uri)
@@ -3331,13 +3270,6 @@ mod tests {
                 .to_file_path()
                 .unwrap(),
             paths.audio.native().unwrap()
-        );
-        assert_eq!(
-            received.recv().await.unwrap(),
-            DownloadEvent::SubjectChanged {
-                subject: subject.clone(),
-                downloaded: true,
-            }
         );
         let DownloadEvent::Queue { summary, .. } = received.recv().await.unwrap() else {
             panic!("completed Queue event")
@@ -3362,13 +3294,6 @@ mod tests {
                 &mut Vec::new(),
             )
             .await;
-        assert_eq!(
-            received.recv().await.unwrap(),
-            DownloadEvent::Changed {
-                media_uri: media_uri.clone(),
-                downloaded: false,
-            }
-        );
         let access = actor
             .catalog
             .download_file(&media_uri)
@@ -3377,13 +3302,6 @@ mod tests {
             .map(|download| download.path);
         assert!(access.is_none());
         assert!(!paths.audio.native().unwrap().exists());
-        assert_eq!(
-            received.recv().await.unwrap(),
-            DownloadEvent::SubjectChanged {
-                subject,
-                downloaded: false,
-            }
-        );
         let DownloadEvent::Queue { summary, .. } = received.recv().await.unwrap() else {
             panic!("removed Queue event")
         };
@@ -3499,18 +3417,6 @@ mod tests {
                     Ok(())
                 };
                 actor.finish(active, Ok(result), &mut Vec::new()).await;
-                let mut completed = 0;
-                while let Ok(event) = received.try_recv() {
-                    if event
-                        == (DownloadEvent::SubjectChanged {
-                            subject: subject.clone(),
-                            downloaded: true,
-                        })
-                    {
-                        completed += 1;
-                    }
-                }
-                assert_eq!(completed, usize::from(index == 1 && !fail_first));
                 if index == 0 && fail_first {
                     let saved: QueueFile = serde_json::from_slice(
                         &std::fs::read(source_directory(root.path(), None).join(QUEUE_FILE))
@@ -3992,9 +3898,7 @@ impl DownloadEvents {
                         state.queues.sort_by(|a, b| a.source_id.cmp(&b.source_id));
                     }
                 }
-                DownloadEvent::Changed { .. }
-                | DownloadEvent::Feedback(_)
-                | DownloadEvent::SubjectChanged { .. } => return false,
+                DownloadEvent::Feedback(_) => return false,
             }
             true
         });
@@ -4005,13 +3909,6 @@ impl DownloadEvents {
     ) -> Result<(), async_channel::SendError<DownloadEvent>> {
         self.update(&event);
         self.sender.send(event).await
-    }
-    fn try_send(
-        &self,
-        event: DownloadEvent,
-    ) -> Result<(), async_channel::TrySendError<DownloadEvent>> {
-        self.update(&event);
-        self.sender.try_send(event)
     }
 }
 

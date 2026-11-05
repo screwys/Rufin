@@ -19,7 +19,6 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn download_badge(&self) -> bool {
         crate::downloads::media_download_badge(self.media_uri(), self.downloaded())
     }
-    fn set_downloaded(&mut self, value: bool);
     fn field(&self, field: LibraryField) -> String;
     fn track_number(&self) -> Option<i64>;
     fn links(&self, field: LibraryField) -> rufin_core::route::detail_links::DetailLinks {
@@ -48,9 +47,6 @@ impl TrackPresentation for TrackRow {
     }
     fn downloaded(&self) -> bool {
         self.is_downloaded
-    }
-    fn set_downloaded(&mut self, value: bool) {
-        self.is_downloaded = value;
     }
     fn track_number(&self) -> Option<i64> {
         Some(self.track_number)
@@ -90,9 +86,6 @@ impl TrackPresentation for std::sync::Arc<QueueRow> {
     }
     fn downloaded(&self) -> bool {
         self.track.access.is_downloaded
-    }
-    fn set_downloaded(&mut self, value: bool) {
-        std::sync::Arc::make_mut(self).track.access.is_downloaded = value;
     }
     fn track_number(&self) -> Option<i64> {
         Some(self.track.metadata.track_number)

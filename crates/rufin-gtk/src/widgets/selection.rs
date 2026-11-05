@@ -73,9 +73,7 @@ mod position_selection_imp {
             self.model
                 .borrow()
                 .as_ref()
-                .and_then(|model| {
-                    model.downcast_ref::<crate::widgets::sparse_model::SparseObjectModel>()
-                })
+                .and_then(|model| model.downcast_ref::<crate::widgets::view_model::RowList>())
                 .map_or_else(
                     || {
                         if position >= self.n_items() {
@@ -213,8 +211,7 @@ impl PositionSelectionModel {
             selection.items_changed(position, removed, added);
         });
         selection.imp().model_handler.replace(Some(handler));
-        if let Some(model) = model.downcast_ref::<crate::widgets::sparse_model::SparseObjectModel>()
-        {
+        if let Some(model) = model.downcast_ref::<crate::widgets::view_model::RowList>() {
             let weak = selection.downgrade();
             let handler = model.connect_sections_changed(move |position, count| {
                 if let Some(selection) = weak.upgrade() {
@@ -247,7 +244,7 @@ impl PositionSelectionModel {
             .model
             .borrow()
             .as_ref()?
-            .downcast_ref::<crate::widgets::sparse_model::SparseObjectModel>()?
+            .downcast_ref::<crate::widgets::view_model::RowList>()?
             .collection_selection(target, positions)
     }
 }

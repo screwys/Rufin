@@ -141,6 +141,18 @@ impl Shell {
         }
     }
 
+    /// Shows committed favorites and ratings on the activity cards.
+    pub(crate) fn show_activity_states(&self, changes: &[library::StateChange]) {
+        if let Some(view) = self.activity.borrow().as_ref() {
+            for cell in view.collections.artist_cells.borrow().iter() {
+                cell.show_states(changes);
+            }
+            for cell in view.collections.album_cells.borrow().iter() {
+                cell.show_states(changes);
+            }
+        }
+    }
+
     pub(crate) fn refresh_activity_playback(&self) {
         if let Some(view) = self.activity.borrow().as_ref() {
             view.refresh_playback();
@@ -1019,7 +1031,6 @@ impl ActivityCollections {
         );
         for (position, row) in data.artists.iter().take(limit).enumerate() {
             let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount], false);
-            cell.follow_favorites();
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);
@@ -1028,7 +1039,6 @@ impl ActivityCollections {
         }
         for (position, row) in data.albums.iter().take(limit).enumerate() {
             let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount], None);
-            cell.follow_favorites();
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);

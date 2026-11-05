@@ -1,38 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use crate::shell::shell::Shell;
 use crate::widgets::localization::bind_widget_tooltip;
 use ::library::FavoriteTarget;
 use adw::prelude::*;
-use gtk::glib;
 
 pub const FAVORITE_ADD_ICON: &str = "rufin-heart-outline-symbolic";
 pub const FAVORITE_REMOVE_ICON: &str = "rufin-heart-filled-symbolic";
 pub const FAVORITE_COLUMN_WIDTH: i32 = 44;
-
-pub type FavoriteControlKey = FavoriteTarget;
-
-struct FavoriteControl {
-    key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
-    button: glib::WeakRef<gtk::Button>,
-}
-
-#[derive(Default)]
-pub struct FavoriteSessionState {
-    controls: RefCell<Vec<FavoriteControl>>,
-}
-
-pub fn album_favorite_key(media_uri: &str) -> FavoriteControlKey {
-    FavoriteTarget::Album(media_uri.to_string())
-}
-
-pub fn track_favorite_key(media_uri: &str) -> FavoriteControlKey {
-    FavoriteTarget::Track(media_uri.to_string())
-}
-
-pub fn artist_favorite_key(media_uri: &str) -> FavoriteControlKey {
-    FavoriteTarget::Artist(media_uri.to_string())
-}
 
 pub fn favorite_icon_button(label: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(FAVORITE_ADD_ICON);
@@ -86,60 +61,6 @@ fn icon_image_from_widget(widget: gtk::Widget) -> Option<gtk::Image> {
         .and_then(icon_image_from_widget)
 }
 
-impl FavoriteSessionState {
-    pub fn register_dynamic_favorite_button(
-        &self,
-        key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
-        button: &gtk::Button,
-    ) {
-        let mut controls = self.controls.borrow_mut();
-        controls.retain(|control| control.button.upgrade().is_some());
-        controls.push(FavoriteControl {
-            key,
-            button: button.downgrade(),
-        });
-    }
-    pub fn clear_favorite_controls(&self) {
-        self.controls.borrow_mut().clear();
-    }
-    pub fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
-        self.controls.borrow_mut().retain(|control| {
-            let Some(button) = control.button.upgrade() else {
-                return false;
-            };
-            if (control.key)().as_ref() == Some(item) {
-                set_favorite_button_active(&button, favorite);
-            }
-            true
-        });
-    }
-}
-
-impl Shell {
-    /// Keeps `button`'s heart showing the favorite of the item `key` names while the button
-    /// lives.
-    pub(crate) fn register_dynamic_favorite_button(
-        &self,
-        key: Rc<dyn Fn() -> Option<FavoriteControlKey>>,
-        button: &gtk::Button,
-    ) {
-        if let Some(session) = self.selected_ui.session() {
-            session
-                .favorites
-                .register_dynamic_favorite_button(key, button);
-        }
-    }
-
-    pub(crate) fn register_favorite_button(&self, key: FavoriteControlKey, button: &gtk::Button) {
-        self.register_dynamic_favorite_button(Rc::new(move || Some(key.clone())), button);
-    }
-
-    pub(crate) fn clear_favorite_controls(&self) {
-        if let Some(session) = self.selected_ui.session() {
-            session.favorites.clear_favorite_controls();
-        }
-    }
-}
 impl Shell {
     pub(crate) fn toggle_current_track_favorite(self: &Rc<Self>) {
         let Some(media_uri) = self
@@ -154,14 +75,6 @@ impl Shell {
         let favorite =
             !favorite_button_is_active(&self.player_ui.views.player_controls.favorite_button);
         self.set_favorite(FavoriteTarget::Track(media_uri), favorite);
-    }
-
-    pub(crate) fn update_visible_favorite_buttons(&self, item: &FavoriteTarget, favorite: bool) {
-        if let Some(session) = self.selected_ui.session() {
-            session
-                .favorites
-                .update_visible_favorite_buttons(item, favorite);
-        }
     }
 
     /// Hearts change when the favorite is committed, from the publication that follows.

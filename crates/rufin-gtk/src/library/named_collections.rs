@@ -1,21 +1,22 @@
 use crate::widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
-use crate::widgets::sparse_model::item_at_from_item;
+use crate::widgets::view_model::item_at_from_item;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use library::{ArtistKey, ArtistRow, Row, TagKind, TagRow};
+use library::{ArtistRow, Row, TagKind, TagRow};
 use localization::msgid;
 use rufin_core::collection_context::CollectionTarget;
 
 use crate::library::CatalogUi;
 use crate::library::{LibraryLayout, LibraryListKey};
 use crate::widgets::artwork::CoverGroupProjection;
-use crate::widgets::mounted_route::{MountedRoute, PageReread, route_view, view_model};
-use rufin_core::view::{Opened, View};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
+use rufin_core::view::Opened;
 
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
@@ -36,7 +37,7 @@ use crate::library::LibraryField;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::library_fields::playlist_artwork;
 use crate::widgets::recycled_cells::{RecycledBadgedTextCell, list_cell};
-use crate::widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
+use crate::widgets::view_model::connect_row_bind;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::settings::presentation::{
@@ -45,7 +46,7 @@ use rufin_core::settings::presentation::{
 
 impl CatalogUi {
     pub fn library_tags_route(self: &Rc<Self>, read: Opened, genres: bool) -> MountedRoute {
-        self.collection_list_route(
+        self.collection_list_route::<TagRow>(
             if genres {
                 LibraryListKey::Genres
             } else {
@@ -54,142 +55,90 @@ impl CatalogUi {
             msgid("Nothing here yet"),
             false,
             read,
-            |row: &TagRow| row.key,
         )
     }
 
-    pub(crate) fn collection_list_route<K, R>(
+    pub(crate) fn collection_list_route<R: CollectionRow>(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
         favorites_only: bool,
         mut read: Opened,
-        row_key: impl Fn(&R) -> K + 'static,
-    ) -> MountedRoute
-    where
-        K: Clone + Eq + Send + Sync + 'static,
-        R: CollectionRow<Key = K>,
-    {
-        let view = route_view(&read);
-        let sparse = view_model(self.products.runtime.clone(), &view, R::row, &mut read);
-        let row_key = Rc::new(row_key);
-        crate::widgets::media_drag::install_parent_selection(&sparse, &view, {
-            move |row| row.playback(key)
-        });
-        let content = R::projection(self, Rc::clone(&sparse), key);
+    ) -> MountedRoute {
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
+        crate::widgets::media_drag::install_parent_selection(&rows);
+        let content = R::projection(self, rows.clone(), key);
         let search = gtk::SearchEntry::new();
         crate::widgets::controls::configure_search_entry(&search);
         crate::widgets::localization::bind_search_placeholder(&search, "Search");
         let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
-            empty: sparse.len() == 0,
+            empty: rows.is_empty(),
             empty_body,
             search: search.clone(),
             has_visible_results: {
-                let sparse = Rc::clone(&sparse);
-                Rc::new(move || sparse.len() != 0)
+                let rows = rows.clone();
+                Rc::new(move || !rows.is_empty())
             },
             content: content.scrolling_widget(),
         });
         let apply = {
             let shell = Rc::downgrade(self);
-            let sparse = Rc::clone(&sparse);
+            let rows = rows.clone();
             let page = page.clone();
             let content = content.clone();
-            let row_key = Rc::clone(&row_key);
-            move |read: Opened, previous: &View| {
+            move |_| {
                 let Some(shell) = shell.upgrade() else {
-                    return false;
+                    return;
                 };
-                if !shell.is_current() {
-                    return false;
-                }
-                let row_key = Rc::clone(&row_key);
-                let refresh = read.view.same_list(previous);
-                if !sparse.replace_prepared_at(
-                    SparseSource::Query {
-                        count: read.view.len(),
-                    },
-                    read.first,
-                    read.rows.into_iter().filter_map(R::row).collect(),
-                    Vec::new(),
-                    refresh,
-                    move |row| row_key(row),
-                ) {
-                    tracing::warn!("rejected a mismatched prepared named page");
-                    return false;
-                }
                 let settings = shell.settings.current.borrow().library_list(key);
                 content.apply_settings(&settings);
                 page.apply_library_list_settings(key, &settings);
-                page.set_empty(sparse.len() == 0);
-                true
+                page.set_empty(rows.is_empty());
             }
         };
-        let reread = PageReread::new(
-            self.products.runtime.clone(),
-            "mounted named collection",
-            &view,
+        let reads = crate::library::routes::PageReads::new(
+            &rows,
             crate::library::routes::list_inputs(&search),
             apply,
         );
-        crate::library::routes::connect_list_search(&search, &reread);
+        crate::library::routes::connect_list_search(&search, &reads);
         let resume = {
             let shell = Rc::downgrade(self);
             let content = content.clone();
             let page = page.clone();
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
                 content.apply_settings(&settings);
                 page.apply_library_list_settings(key, &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-
-        let download_rows = Rc::clone(&sparse);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            let identity = target.context_id();
-            download_rows.update_matching(
-                |row| {
-                    row.playback(key)
-                        .is_some_and(|play| play.context() == Some(identity.as_str()))
-                        && row.downloaded() != downloaded
-                },
-                |row| row.set_downloaded(downloaded),
-            );
-        });
         if favorites_only {
             self.install_favorite_category_tabs(
                 rufin_core::route::CollectionCategory::Artists,
                 &mut page,
             );
         }
-        let live = Rc::clone(&sparse);
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || reread.refresh(live.live_window())))
-            .with_states(&view)
-            .with_download_change(downloads)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
+            .with_rows(&rows)
             .with_item_navigation(content.item_navigation())
             .with_initial_demand({
-                let sparse = Rc::clone(&sparse);
-                Rc::new(move || sparse.resume_initial_demand())
+                let rows = rows.clone();
+                Rc::new(move || rows.resume_initial_demand())
             })
     }
 }
 
 pub trait CollectionRow: library::ShowsState + Clone + PartialEq + Send + Sync + 'static {
-    type Key: Clone + Eq + Send + Sync + 'static;
-    /// The row of a list of these rows.
-    fn row(row: Row) -> Option<Self>;
-
     fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest>;
     fn downloaded(&self) -> bool;
-    fn set_downloaded(&mut self, downloaded: bool);
     fn projection(
         shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
+        rows: Rows<Row>,
         key: LibraryListKey,
     ) -> LibraryCollectionProjection;
 }
@@ -220,30 +169,23 @@ pub trait NamedCollectionRow: CollectionRow {
     }
     fn grid(
         shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: &Rows<Row>,
         fields: &[LibraryField],
         key: LibraryListKey,
     ) -> CollectionGridProjection
     where
         Self: Send + Sync,
     {
-        named_collection_grid_impl(shell, sparse, fields, key)
+        named_collection_grid_impl::<Self>(shell, sparse, fields, key)
     }
     fn table(
         shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: &Rows<Row>,
         key: LibraryListKey,
     ) -> super::collections::CollectionTableProjection;
 }
 
 impl CollectionRow for ArtistRow {
-    type Key = ArtistKey;
-    fn row(row: Row) -> Option<Self> {
-        match row {
-            Row::Artist(row) => Some(row),
-            _ => None,
-        }
-    }
     fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(crate::widgets::selection::artist_play_request(
             self,
@@ -251,18 +193,11 @@ impl CollectionRow for ArtistRow {
         ))
     }
     fn downloaded(&self) -> bool {
-        self.summary.track_count > 0 && self.summary.downloaded_count == self.summary.track_count
-    }
-    fn set_downloaded(&mut self, downloaded: bool) {
-        self.summary.downloaded_count = if downloaded {
-            self.summary.track_count
-        } else {
-            0
-        };
+        self.summary.downloaded()
     }
     fn projection(
         shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: Rows<Row>,
         key: LibraryListKey,
     ) -> LibraryCollectionProjection {
         super::collections::artist_collection_projection(shell, sparse, key)
@@ -270,22 +205,6 @@ impl CollectionRow for ArtistRow {
 }
 
 impl CollectionRow for TagRow {
-    type Key = i64;
-    fn row(row: Row) -> Option<Self> {
-        match row {
-            Row::Tag(row) => Some(row),
-            _ => None,
-        }
-    }
-
-    fn set_downloaded(&mut self, downloaded: bool) {
-        self.summary.downloaded_count = if downloaded {
-            self.summary.track_count
-        } else {
-            0
-        };
-    }
-
     fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         let (scope, target) = match self.kind {
             TagKind::Genre => {
@@ -306,14 +225,14 @@ impl CollectionRow for TagRow {
     }
 
     fn downloaded(&self) -> bool {
-        self.summary.track_count > 0 && self.summary.downloaded_count == self.summary.track_count
+        self.summary.downloaded()
     }
     fn projection(
         shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: Rows<Row>,
         key: LibraryListKey,
     ) -> LibraryCollectionProjection {
-        named_collection_projection(shell, sparse, key)
+        named_collection_projection::<Self>(shell, sparse, key)
     }
 }
 
@@ -358,7 +277,7 @@ impl NamedCollectionRow for TagRow {
     }
     fn table(
         shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: &Rows<Row>,
         key: LibraryListKey,
     ) -> super::collections::CollectionTableProjection {
         named_collection_table::<Self, _>(shell, sparse.list_model(), key)
@@ -366,13 +285,6 @@ impl NamedCollectionRow for TagRow {
 }
 
 impl CollectionRow for library::PlaylistListRow {
-    type Key = (u8, i64);
-    fn row(row: Row) -> Option<Self> {
-        match row {
-            Row::Playlist(row) => Some(row),
-            _ => None,
-        }
-    }
     fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         match self {
             Self::Playlist(row) => Some(crate::widgets::selection::collection_play_request(
@@ -386,31 +298,14 @@ impl CollectionRow for library::PlaylistListRow {
         }
     }
     fn downloaded(&self) -> bool {
-        match self {
-            Self::Playlist(row) => row.track_count > 0 && row.downloaded_count == row.track_count,
-            Self::SmartPlaylist(row) => {
-                row.track_count > 0 && row.downloaded_count == row.track_count
-            }
-            Self::Folder(_) => false,
-        }
-    }
-    fn set_downloaded(&mut self, downloaded: bool) {
-        match self {
-            Self::Playlist(row) => {
-                row.downloaded_count = if downloaded { row.track_count } else { 0 }
-            }
-            Self::SmartPlaylist(row) => {
-                row.downloaded_count = if downloaded { row.track_count } else { 0 }
-            }
-            Self::Folder(_) => {}
-        }
+        library::PlaylistListRow::downloaded(self)
     }
     fn projection(
         shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: Rows<Row>,
         key: LibraryListKey,
     ) -> LibraryCollectionProjection {
-        named_collection_projection(shell, sparse, key)
+        named_collection_projection::<Self>(shell, sparse, key)
     }
 }
 impl NamedCollectionRow for library::PlaylistListRow {
@@ -551,7 +446,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
     }
     fn table(
         shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
+        sparse: &Rows<Row>,
         key: LibraryListKey,
     ) -> super::collections::CollectionTableProjection {
         named_collection_table::<Self, _>(shell, sparse.list_model(), key)
@@ -560,7 +455,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
 
 fn named_collection_projection<T>(
     shell: &Rc<CatalogUi>,
-    sparse: Rc<SparseRouteModel<T::Key, T>>,
+    sparse: Rows<Row>,
     key: LibraryListKey,
 ) -> LibraryCollectionProjection
 where
@@ -583,7 +478,7 @@ where
 
 fn named_collection_grid<T>(
     shell: &Rc<CatalogUi>,
-    sparse: &Rc<SparseRouteModel<T::Key, T>>,
+    sparse: &Rows<Row>,
     key: LibraryListKey,
 ) -> CollectionGridProjection
 where
@@ -600,7 +495,7 @@ where
 
 fn named_collection_grid_impl<T>(
     shell: &Rc<CatalogUi>,
-    sparse: &Rc<SparseRouteModel<T::Key, T>>,
+    sparse: &Rows<Row>,
     fields: &[LibraryField],
     key: LibraryListKey,
 ) -> CollectionGridProjection
@@ -609,7 +504,7 @@ where
 {
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = Rc::clone(sparse);
+    let demand = sparse.clone();
     collection_grid_with_demand(
         sparse.list_model(),
         fields,
@@ -819,7 +714,7 @@ fn named_collection_column<T: NamedCollectionRow>(
                 item.set_child(Some(&cell));
             });
             let bind_shell = Rc::clone(shell);
-            connect_sparse_bind(&factory, move |item| {
+            connect_row_bind(&factory, move |item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                     return;
                 };

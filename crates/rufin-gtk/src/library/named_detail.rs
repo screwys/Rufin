@@ -1,4 +1,3 @@
-use rufin_core::collection_context::CollectionTarget;
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
@@ -10,7 +9,8 @@ use rufin_core::playback::RadioPlayRequest;
 use crate::library::CatalogUi;
 use crate::library::LibraryListKey;
 use crate::widgets::artwork::presentation::stable_seed;
-use crate::widgets::mounted_route::{MountedRoute, route_view};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
 use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
@@ -54,13 +54,6 @@ impl NamedDetailId {
         }
     }
 
-    fn target(self) -> CollectionTarget {
-        match self {
-            Self::Genre(id) => CollectionTarget::Genre(id),
-            Self::Mood(id) => CollectionTarget::Mood(id),
-        }
-    }
-
     fn missing_body(self) -> &'static str {
         match self {
             Self::Genre(_) => msgid("This isn't available"),
@@ -97,7 +90,7 @@ impl CatalogUi {
                 id.missing_body(),
             ));
         };
-        let view = route_view(&read);
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let title = summary.name.clone();
         let artwork = named_artwork(&summary);
         let seed = named_seed(&summary);
@@ -118,52 +111,39 @@ impl CatalogUi {
             seed,
             summary_items,
             context_menu,
-            view: Rc::clone(&view),
-            tracks: read,
+            rows: rows.clone(),
             table_context: id.table_context(),
-            playback_context: id.target().context_id(),
             play_label: id.play_label(),
         });
-        let tracks = Rc::new(grouped.tracks().clone());
-        let reread = tracks.page_reread(self, "mounted named detail", &view, |_| {}, |_| {});
+        let tracks = grouped.tracks().clone();
+        // A reread shows the header's counts, such as how many tracks are downloaded.
+        let header = Rc::clone(&current);
+        let reads = tracks.page_reads(
+            |_| {},
+            move |read| {
+                if let Some(library::Header::Tag(summary)) = read {
+                    header.replace(summary);
+                }
+            },
+        );
         let resume = {
             let shell = Rc::downgrade(self);
-            let projection = Rc::clone(&tracks);
-            let reread = Rc::clone(&reread);
+            let projection = tracks.clone();
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(id.key());
                 projection.apply_library_list_settings(id.key(), &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let download_summary = Rc::clone(&current);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            if *target != id.target() {
-                return;
-            }
-            let row = &mut *download_summary.borrow_mut();
-            row.summary.downloaded_count = if downloaded {
-                row.summary.track_count
-            } else {
-                0
-            };
-        });
-        let refresh_tracks = Rc::clone(&tracks);
         MountedRoute::new(grouped.widget(), resume)
-            .with_states(&view)
-            .with_catalog_refresh(Rc::new(move || {
-                reread.refresh(refresh_tracks.live_window())
-            }))
-            .with_download_change(downloads)
-            .with_download_change(tracks.download_change())
+            .with_rows(&rows)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(grouped.search())
             .with_layout_cycle(grouped.layout_cycle())
             .with_item_navigation(grouped.item_navigation())
-            .with_initial_demand({
-                let tracks = Rc::clone(&tracks);
-                Rc::new(move || tracks.resume_initial_demand())
-            })
+            .with_initial_demand(Rc::new(move || rows.resume_initial_demand()))
     }
 }
 

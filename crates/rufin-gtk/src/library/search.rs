@@ -1,7 +1,7 @@
 use crate::widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
-use crate::widgets::sparse_model::item_at_from_item;
+use crate::widgets::view_model::item_at_from_item;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -21,7 +21,6 @@ use crate::library::{LibraryField, LibraryLayout};
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::mounted_route::{MountedRoute, MountedRouteItemNavigation};
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::runtime::SelectedLibrary;
 
 use super::cards;
@@ -44,7 +43,7 @@ use crate::widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, TrackPresentation, add_field_skeleton_class, column_width,
 };
 use crate::widgets::recycled_cells::{RecycledMergedCell, RecycledTextCell, list_cell};
-use crate::widgets::sparse_model::{SparseObjectItem, connect_sparse_bind};
+use crate::widgets::view_model::{RowItem, connect_row_bind};
 use rufin_core::route::CollectionCategory;
 use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
@@ -510,7 +509,7 @@ impl SearchRouteProjection {
         let wrapper = SearchRouteView::new();
         let search = shell.chrome.topbar.search.clone();
 
-        let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<SparseObjectItem>());
+        let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<RowItem>());
         let category_pages =
             CollectionCategory::ALL.map(|_| gtk::Box::new(gtk::Orientation::Vertical, 0).upcast());
         let (results, switcher) =
@@ -631,7 +630,7 @@ impl SearchRouteProjection {
                         model
                             .item(*position)
                             .and_then(|item| {
-                                crate::widgets::sparse_model::object_item::<SearchItem, _>(
+                                crate::widgets::view_model::object_item::<SearchItem, _>(
                                     item,
                                     |item| item.media_uri() == Some(current.media_uri.as_str()),
                                 )
@@ -676,7 +675,7 @@ impl SearchRouteProjection {
     ) {
         for model in &self.models {
             for position in 0..model.n_items() {
-                let Some(item) = model.item(position).and_downcast::<SparseObjectItem>() else {
+                let Some(item) = model.item(position).and_downcast::<RowItem>() else {
                     continue;
                 };
                 let Some(mut row) = item.value::<Arc<SearchItem>>() else {
@@ -687,6 +686,23 @@ impl SearchRouteProjection {
                     item.replace(row, true);
                 }
             }
+        }
+    }
+
+    /// Shows committed downloads in the shown tracks.
+    fn show_downloads(&self, changes: &[library::DownloadChange]) {
+        for change in changes {
+            self.update_matching(
+                |row| {
+                    matches!(row, SearchItem::Track(row, _)
+                        if row.track_key == change.track && row.is_downloaded != change.downloaded)
+                },
+                |row| {
+                    if let SearchItem::Track(row, _) = row {
+                        change.show_in(row);
+                    }
+                },
+            );
         }
     }
 
@@ -719,7 +735,7 @@ impl SearchRouteProjection {
             let additions = items[index]
                 .iter()
                 .cloned()
-                .map(|row| SparseObjectItem::new(Arc::new(row), true))
+                .map(|row| RowItem::new(Arc::new(row), true))
                 .collect::<Vec<_>>();
             self.models[index].splice(0, self.models[index].n_items(), &additions);
         }
@@ -756,13 +772,13 @@ impl SearchRouteProjection {
         let model = &self.models[category as usize];
         let mut items = (0..model.n_items())
             .filter_map(|position| {
-                crate::widgets::sparse_model::item_at::<SearchItem>(model, position)
+                crate::widgets::view_model::item_at::<SearchItem>(model, position)
             })
             .collect::<Vec<_>>();
         sort_search_items(&mut items, settings.sort_key, settings.descending);
         let additions = items
             .into_iter()
-            .map(|row| SparseObjectItem::new(Arc::new(row), true))
+            .map(|row| RowItem::new(Arc::new(row), true))
             .collect::<Vec<_>>();
         model.splice(0, model.n_items(), &additions);
     }
@@ -897,74 +913,15 @@ impl CatalogUi {
                 .unwrap_or(glib::Propagation::Stop)
         });
 
-        let download_counts = Rc::downgrade(&projection);
-        let download_tracks = Rc::downgrade(&projection);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            if let Some(projection) = download_counts.upgrade() {
-                projection.update_matching(
-                    |row| match (row, target) {
-                        (SearchItem::Album(row), CollectionTarget::Album(uri)) => {
-                            row.media_uri == *uri
-                                && (row.summary.downloaded_count == row.summary.track_count)
-                                    != downloaded
-                        }
-                        (
-                            SearchItem::Artist(row),
-                            CollectionTarget::Artist {
-                                id,
-                                album_artist: false,
-                            },
-                        ) => {
-                            row.media_uri == *id
-                                && (row.summary.downloaded_count == row.summary.track_count)
-                                    != downloaded
-                        }
-                        _ => false,
-                    },
-                    |row| match row {
-                        SearchItem::Album(row) => {
-                            row.summary.downloaded_count = if downloaded {
-                                row.summary.track_count
-                            } else {
-                                0
-                            }
-                        }
-                        SearchItem::Artist(row) => {
-                            row.summary.downloaded_count = if downloaded {
-                                row.summary.track_count
-                            } else {
-                                0
-                            }
-                        }
-                        SearchItem::Track(..) => {}
-                    },
-                );
-            }
-        });
         MountedRoute::new(
             projection.root.clone(),
             Rc::new(move || resume_projection.resume()),
         )
-        .with_download_change(downloads)
-        .with_download_change(Rc::new(move |event| {
-            let rufin_core::downloads::DownloadEvent::Changed { media_uri: uri, downloaded } = event else { return };
-            let (uri, downloaded) = (uri.as_str(), *downloaded);
-            if let Some(projection) = download_tracks.upgrade() {
-                projection.update_matching(
-                    |row| matches!(row, SearchItem::Track(row, _) if row.media_uri == uri && row.is_downloaded != downloaded),
-                    |row| {
-                        if let SearchItem::Track(row, _) = row {
-                            row.is_downloaded = downloaded;
-                        }
-                    },
-                );
-            }
-        }))
-        .with_shown_states(Rc::new(move |items| {
+        .with_states(Rc::new(move |items, downloads| {
             if let Some(projection) = states_projection.upgrade() {
                 projection.show_states(items);
+                projection.show_downloads(downloads);
             }
-            false
         }))
         .with_search(projection.search.clone())
         .with_layout_cycle(layout_cycle)
@@ -988,7 +945,7 @@ fn search_collection(
         let targets = std::iter::once(first)
             .chain(iter)
             .filter_map(|position| {
-                crate::widgets::sparse_model::item_at::<SearchItem>(&model, position)
+                crate::widgets::view_model::item_at::<SearchItem>(&model, position)
             })
             .map(|item| item.play_request())
             .collect::<Vec<_>>();
@@ -1144,7 +1101,7 @@ fn search_column(
         item.set_child(Some(&cell));
     });
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1240,7 +1197,7 @@ fn search_merged_column(
     });
     let bind_shell = Rc::clone(shell);
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1343,7 +1300,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
             click_shell.set_favorite(target, !favorite_button_is_active(button));
         });
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };

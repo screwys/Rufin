@@ -864,15 +864,13 @@ fn add_download_queue(
     let resource = "preferences/download_queue.ui";
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { scroll: gtk::ScrolledWindow, queue: gtk::ListView, empty: adw::ActionRow });
-    use crate::widgets::sparse_model::{
-        SparseRouteModel, SparseSource, bind_sparse_item, item_at_from_item, unbind_sparse_item,
-    };
+    use crate::widgets::view_model::{Rows, bind_row_item, item_at_from_item, unbind_row_item};
     let owner = shell.products.downloads.clone();
     let source = source_id.clone();
-    let jobs = SparseRouteModel::<String, rufin_core::downloads::DownloadQueueItem>::new(
-        SparseSource::Query { count: 0 },
+    let jobs = Rows::<rufin_core::downloads::DownloadQueueItem>::paged(
         shell.products.runtime.clone(),
-        Rc::new(move |_, range, _| {
+        0,
+        Rc::new(move |range, _| {
             let owner = owner.clone();
             let source_id = source.clone();
             Box::pin(async move {
@@ -1052,12 +1050,11 @@ fn add_download_queue(
             *current.borrow_mut() = Some(job.clone());
         });
         let update = refresh.clone();
-        item.connect_item_notify(move |item| bind_sparse_item(item, update.clone()));
+        item.connect_item_notify(move |item| bind_row_item(item, update.clone()));
         item.connect_position_notify(move |item| refresh(item));
     });
-    factory.connect_unbind(|_, item| {
-        unbind_sparse_item(item.downcast_ref::<gtk::ListItem>().unwrap())
-    });
+    factory
+        .connect_unbind(|_, item| unbind_row_item(item.downcast_ref::<gtk::ListItem>().unwrap()));
     queue.set_factory(Some(&factory));
     group.add(&scroll);
     group.add(&empty);
@@ -1119,17 +1116,7 @@ fn add_download_queue(
                 )
                 .await
             {
-                rows.replace_prepared_at(
-                    SparseSource::Query {
-                        count: page.total as usize,
-                    },
-                    offset,
-                    page.jobs,
-                    Vec::new(),
-                    true,
-                    |job| job.id.clone(),
-                );
-                rows.resume_initial_demand();
+                rows.replace(page.total as usize, offset, page.jobs, true);
             }
         }));
     });

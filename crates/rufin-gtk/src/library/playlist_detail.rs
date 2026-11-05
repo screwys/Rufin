@@ -1,4 +1,3 @@
-use rufin_core::collection_context::CollectionTarget;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -9,9 +8,11 @@ use library::{PlaylistKey, PlaylistRow, SmartPlaylistKey, SmartPlaylistRow};
 use localization::{msgid, track_count_text};
 
 use crate::library::CatalogUi;
+use crate::library::routes::PageReads;
 use crate::library::{LibraryListKey, LibraryListSettings};
 use crate::widgets::artwork::presentation::stable_seed;
-use crate::widgets::mounted_route::{MountedRoute, PageReread, route_view};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
 use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::view::Opened;
 
@@ -117,13 +118,6 @@ impl PlaylistDetailOwner {
         }
     }
 
-    fn target(&self) -> CollectionTarget {
-        match self {
-            Self::Saved { key, .. } => CollectionTarget::Playlist(*key),
-            Self::Smart { key, .. } => CollectionTarget::SmartPlaylist(*key),
-        }
-    }
-
     /// The playlist as a page read again shows it; `None` when the read lacks it.
     fn read_from(&self, header: library::Header) -> Option<Self> {
         Some(match (self, header) {
@@ -190,35 +184,20 @@ impl CatalogUi {
         else {
             unreachable!("Smart Playlist pages read their playlist")
         };
-        let view = route_view(&read);
         let owner = PlaylistDetailOwner::Smart {
             key,
             now,
             summary: *summary,
         };
         let list_key = owner.key();
-        let model = crate::library::track_model::TrackCollectionModel::new(
-            self.products.runtime.clone(),
-            &view,
-            read,
-        );
-        let play_model = model.clone();
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
+        let play_rows = rows.clone();
         let play_queue = self.products.playback.clone();
-        let play_context = owner.target().context_id();
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            play_model.play_source(
-                play_queue.clone(),
-                placement,
-                play_context.clone(),
-                shuffled,
-            );
+            play_rows.play_all(&play_queue, placement, shuffled);
         });
-        let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
-            model,
-            list_key,
-            "smart-playlist-detail",
-            owner.target().context_id(),
-        );
+        let (tracks_widget, tracks, toolbar) =
+            self.scrolling_track_projection(rows.clone(), list_key, "smart-playlist-detail");
         let item_navigation = tracks.item_navigation();
         let apply_tracks = tracks.clone();
         let apply_toolbar = toolbar.clone();
@@ -228,37 +207,17 @@ impl CatalogUi {
         }) as Rc<dyn Fn(&LibraryListSettings)>;
         let search = tracks.search();
         let layout_cycle = toolbar.layout_cycle();
-        let initial_demand = {
-            let tracks = tracks.clone();
-            Rc::new(move || tracks.resume_initial_demand()) as Rc<dyn Fn()>
-        };
-        let reread_tracks = tracks.clone();
-        let shell = Rc::clone(self);
         self.shared_playlist_detail_route(
             owner,
+            rows,
             tracks_widget,
             item_navigation,
             apply,
-            move |apply_owner| {
-                let reread = reread_tracks.page_reread(
-                    &shell,
-                    "mounted Smart Playlist route",
-                    &view,
-                    |_| {},
-                    move |header| apply_owner(header),
-                );
-                let refresh = Rc::clone(&reread);
-                (
-                    reread,
-                    Rc::new(move || refresh.refresh(reread_tracks.live_window())),
-                )
-            },
+            move |apply_owner| tracks.page_reads(|_| {}, move |header| apply_owner(header)),
             search,
             layout_cycle,
-            initial_demand,
             play,
         )
-        .with_download_change(tracks.download_change())
     }
 
     pub fn playlist_detail_route(
@@ -274,17 +233,16 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        let view = route_view(&read);
         let owner = PlaylistDetailOwner::Saved {
             key,
             summary: *summary,
         };
+        let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
         let entries = Rc::new(self.playlist_entries_view(
             key,
             owner.name().to_string(),
             matches!(&owner, PlaylistDetailOwner::Saved { summary, .. } if summary.writable),
-            &view,
-            read,
+            rows.clone(),
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
@@ -294,87 +252,61 @@ impl CatalogUi {
         }) as Rc<dyn Fn(&LibraryListSettings)>;
         let search = entries.search();
         let layout_cycle = entries.layout_cycle();
-        let initial_demand = {
-            let entries = Rc::clone(&entries);
-            Rc::new(move || entries.resume_initial_demand()) as Rc<dyn Fn()>
-        };
         let play_queue = self.products.playback.clone();
-        let download_entries = Rc::clone(&entries);
         let reread_entries = Rc::clone(&entries);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            entries.play(play_queue.clone(), placement, shuffled);
+            entries.play(&play_queue, placement, shuffled);
         });
-        let shell = Rc::clone(self);
         let reread_search = search.clone();
+        let reread_rows = rows.clone();
         self.shared_playlist_detail_route(
             owner,
+            rows,
             tracks_widget,
             item_navigation,
             apply,
             move |apply_owner| {
-                let apply_entries = Rc::clone(&reread_entries);
-                let reread = PageReread::new(
-                    shell.products.runtime.clone(),
-                    "mounted Playlist route",
-                    &view,
+                let reads = PageReads::new(
+                    &reread_rows,
                     crate::library::routes::list_inputs(&reread_search),
-                    move |mut read, previous| {
-                        let header = read.header.take();
-                        if !apply_entries.replace_prepared(previous, read) {
-                            return false;
-                        }
-                        apply_owner(header);
-                        true
+                    move |mut read| {
+                        reread_entries.show_empty();
+                        apply_owner(read.header.take());
                     },
                 );
-                let requested = RefCell::new(reread.view().options().filter.clone());
-                let search_reread = Rc::downgrade(&reread);
+                let requested = RefCell::new(
+                    reread_rows
+                        .view()
+                        .map(|view| view.options().filter.clone())
+                        .unwrap_or_default(),
+                );
+                let reread = reads.weak(PageReads::reread);
                 reread_search.connect_search_changed(move |search| {
                     let filter = search.text().trim().to_string();
                     if *requested.borrow() == filter {
                         return;
                     }
                     requested.replace(filter);
-                    if let Some(reread) = search_reread.upgrade() {
-                        reread.reread();
-                    }
+                    reread();
                 });
-                let refresh_reread = Rc::downgrade(&reread);
-                let refresh = Rc::new(move || {
-                    if let Some(reread) = refresh_reread.upgrade() {
-                        reread.refresh(reread_entries.live_window());
-                    }
-                }) as Rc<dyn Fn()>;
-                (reread, refresh)
+                reads
             },
             search,
             layout_cycle,
-            initial_demand,
             play,
         )
-        .with_download_change(Rc::new(move |event| {
-            let rufin_core::downloads::DownloadEvent::Changed {
-                media_uri,
-                downloaded,
-            } = event
-            else {
-                return;
-            };
-            let (media_uri, downloaded) = (media_uri.as_str(), *downloaded);
-            download_entries.update_downloaded(media_uri, downloaded);
-        }))
     }
 
     fn shared_playlist_detail_route(
         self: &Rc<Self>,
         owner: PlaylistDetailOwner,
+        rows: Rows<library::Row>,
         tracks_widget: gtk::Widget,
         item_navigation: crate::widgets::mounted_route::MountedRouteItemNavigation,
         apply_list_settings: Rc<dyn Fn(&LibraryListSettings)>,
-        reread: impl FnOnce(Rc<dyn Fn(Option<library::Header>)>) -> (Rc<PageReread>, Rc<dyn Fn()>),
+        reads: impl FnOnce(Rc<dyn Fn(Option<library::Header>)>) -> PageReads,
         search: gtk::SearchEntry,
         layout_cycle: crate::widgets::mounted_route::MountedRouteCommand,
-        initial_demand: Rc<dyn Fn()>,
         play: CollectionPlay,
     ) -> MountedRoute {
         let key = owner.key();
@@ -533,43 +465,29 @@ impl CatalogUi {
                 owner.replace(next);
             }) as Rc<dyn Fn(Option<library::Header>)>
         };
-        let (reread, refresh) = reread(apply_owner);
-        let states = Rc::clone(reread.route_view());
+        let reads = reads(apply_owner);
         let resume = {
             let shell = Rc::downgrade(self);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
                 };
                 let settings = shell.settings.current.borrow().library_list(key);
                 apply_list_settings(&settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-
-        let download_owner = Rc::clone(&owner_state);
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            let mut owner = download_owner.borrow_mut();
-            if *target != owner.target() {
-                return;
-            }
-            match &mut *owner {
-                PlaylistDetailOwner::Saved { summary, .. } => {
-                    summary.downloaded_count = if downloaded { summary.track_count } else { 0 };
-                }
-                PlaylistDetailOwner::Smart { summary, .. } => {
-                    summary.downloaded_count = if downloaded { summary.track_count } else { 0 };
-                }
-            }
-        });
         MountedRoute::new(wrapper.upcast(), resume)
-            .with_download_change(downloads)
             .with_search(search)
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(item_navigation)
-            .with_initial_demand(initial_demand)
-            .with_catalog_refresh(refresh)
-            .with_states(&states)
+            .with_initial_demand({
+                let rows = rows.clone();
+                Rc::new(move || rows.resume_initial_demand())
+            })
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
+            .with_rows(&rows)
     }
 
     fn append_playlist_detail_kind_controls(

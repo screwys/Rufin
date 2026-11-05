@@ -1,7 +1,7 @@
 use crate::widgets::media_drag::{
     MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider,
 };
-use crate::widgets::sparse_model::item_at_from_item;
+use crate::widgets::view_model::item_at_from_item;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -26,30 +26,57 @@ use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_selection_and_demand,
 };
-use crate::library::playlist_entry_model::PlaylistEntryModel;
 use crate::widgets::recycled_cells::{TrackRowPlayingIndicator, set_track_row_index_text};
 
 use super::route_shell::LibraryToolbarProjection;
-use crate::library::playlist_entry_model::entry_key;
 use crate::library::track_selection::PlaylistEntrySelection;
 use crate::widgets::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, opaque_artwork,
 };
-use crate::widgets::mounted_route::RouteView;
 use crate::widgets::recycled_cells::{
     RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
-use crate::widgets::sparse_model::connect_sparse_bind;
+use crate::widgets::view_model::{Rows, connect_row_bind};
+use library::Row;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::settings::presentation::track_row_field;
-use rufin_core::view::{Opened, View};
+
+fn entry_key(row: &TrackRow) -> Option<library::PlaylistEntryKey> {
+    row.entry.as_ref().map(|entry| entry.key)
+}
+
+/// Where the current entry shows: at its rank of a play from these rows, or by its index in
+/// the playlist for a play of the whole playlist.
+fn entry_position(
+    rows: &Rows<Row>,
+    playlist: PlaylistKey,
+    media_uri: &str,
+    context_id: &str,
+    rank: usize,
+) -> Option<u32> {
+    if context_id == rows.context_ids().1 {
+        return rows
+            .ready(rank)
+            .filter(|row| matches!(row.as_ref(), Row::Track(track) if track.media_uri == media_uri))
+            .map(|_| rank as u32);
+    }
+    if context_id
+        != rufin_core::collection_context::CollectionTarget::Playlist(playlist).context_id()
+    {
+        return None;
+    }
+    rows.ready_position(|row| {
+        matches!(row, Row::Track(track) if track.media_uri == media_uri
+            && track.entry.as_ref().is_some_and(|entry| entry.position as usize == rank))
+    })
+}
 
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
     widget: gtk::Widget,
     collection: LibraryCollectionProjection,
     toolbar: LibraryToolbarProjection,
-    model: PlaylistEntryModel,
+    pub(crate) rows: Rows<Row>,
     search: gtk::SearchEntry,
     stack: gtk::Stack,
     toolbar_widget: gtk::Widget,
@@ -58,11 +85,11 @@ pub struct PlaylistEntriesView {
 impl PlaylistEntriesView {
     pub fn play(
         &self,
-        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
+        queue: &rufin_core::playback::PlaybackOwner,
         placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
     ) {
-        self.model.play(0, queue, placement, true, shuffled);
+        self.rows.play_all(queue, placement, shuffled);
     }
 
     pub fn widget(&self) -> gtk::Widget {
@@ -81,28 +108,12 @@ impl PlaylistEntriesView {
         self.toolbar.layout_cycle()
     }
 
-    pub fn resume_initial_demand(&self) {
-        self.model.resume_initial_demand();
-    }
-
-    pub fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
-        self.model.update_downloaded(media_uri, downloaded);
-    }
-
-    /// Where a reread starts so the rows on screen stay.
-    pub fn live_window(&self) -> library::RouteSeedWindow {
-        self.model.live_window()
-    }
-
-    pub fn replace_prepared(&self, previous: &View, read: Opened) -> bool {
-        let empty = read.view.is_empty();
-        if !self.model.replace_prepared(previous, read) {
-            return false;
-        }
+    /// Shows whether the entries the rows took are empty.
+    pub fn show_empty(&self) {
+        let empty = self.rows.is_empty();
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
-        true
     }
 
     pub fn apply_library_list_settings(&self, key: LibraryListKey, settings: &LibraryListSettings) {
@@ -120,10 +131,9 @@ impl CatalogUi {
         playlist: PlaylistKey,
         playlist_name: String,
         writable: bool,
-        view: &RouteView,
-        read: Opened,
+        rows: Rows<Row>,
     ) -> PlaylistEntriesView {
-        let model = PlaylistEntryModel::new(self.products.runtime.clone(), playlist, view, read);
+        let model = rows;
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 8);
         wrapper.set_hexpand(true);
         wrapper.set_width_request(1);
@@ -136,7 +146,7 @@ impl CatalogUi {
         let toolbar =
             self.library_toolbar_projection(LibraryListKey::PlaylistTracks, search.clone());
         let toolbar_widget = library_route_inset(toolbar.widget());
-        toolbar_widget.set_visible(!model.source_is_empty());
+        toolbar_widget.set_visible(!model.is_empty());
         wrapper.append(&toolbar_widget);
 
         let collection =
@@ -152,18 +162,14 @@ impl CatalogUi {
             Some("empty"),
         );
         stack.add_named(&collection.scrolling_widget(), Some("content"));
-        stack.set_visible_child_name(if model.source_is_empty() {
-            "empty"
-        } else {
-            "content"
-        });
+        stack.set_visible_child_name(if model.is_empty() { "empty" } else { "content" });
         wrapper.append(&stack);
 
         PlaylistEntriesView {
             widget: wrapper.upcast(),
             collection,
             toolbar,
-            model,
+            rows: model,
             search,
             stack,
             toolbar_widget,
@@ -173,7 +179,7 @@ impl CatalogUi {
 
 fn playlist_entry_collection(
     shell: &Rc<CatalogUi>,
-    model: PlaylistEntryModel,
+    model: Rows<Row>,
     playlist: PlaylistKey,
     playlist_name: String,
     writable: bool,
@@ -184,7 +190,7 @@ fn playlist_entry_collection(
         .borrow()
         .library_list(LibraryListKey::PlaylistTracks);
     let playing = TrackRowPlayingIndicator::new();
-    let selection = PlaylistEntrySelection::new(model.clone(), playlist_name, writable);
+    let selection = PlaylistEntrySelection::new(&model, playlist, playlist_name, writable);
     shell.set_current_playlist_entry_selection(selection.clone());
     let current_model = model.clone();
     let current_playing = playing.clone();
@@ -192,7 +198,9 @@ fn playlist_entry_collection(
         let position = current
             .and_then(|current| {
                 let context = current.context.as_ref()?;
-                current_model.position_for_current(
+                entry_position(
+                    &current_model,
+                    playlist,
                     &current.media_uri,
                     &context.context_id,
                     context.source_rank,
@@ -229,7 +237,7 @@ fn playlist_entry_collection(
 
 fn playlist_entry_table(
     shell: &Rc<CatalogUi>,
-    model: PlaylistEntryModel,
+    model: Rows<Row>,
     playlist: PlaylistKey,
     playing: TrackRowPlayingIndicator,
     selection: PlaylistEntrySelection,
@@ -253,7 +261,12 @@ fn playlist_entry_table(
         playlist_entry_column_width,
         false,
         Some(Box::new(move |position, _: TrackRow| {
-            activate_model.activate(position, queue.clone());
+            activate_model.play(
+                &queue,
+                position as usize,
+                rufin_core::playback::QueuePlacement::Now,
+                false,
+            );
         })),
         Some(selection.selection_model()),
         shell.table_initial_width(crate::library::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET),
@@ -300,7 +313,7 @@ fn playlist_entry_number_column(
         item.set_child(Some(&cell));
     });
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -346,7 +359,7 @@ fn playlist_entry_image_column(
         item.set_child(Some(&cell));
     });
     let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -408,7 +421,7 @@ fn playlist_entry_actions_column(
             );
         });
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -470,7 +483,7 @@ fn playlist_entry_title_column(
     });
     let bind_shell = Rc::clone(shell);
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -558,7 +571,7 @@ fn playlist_entry_text_column(
         item.set_child(Some(&cell));
     });
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -840,7 +853,7 @@ impl ReusableCollectionGridCell<TrackRow> for PlaylistEntryGridCell {
 
 fn playlist_entry_grid(
     shell: &Rc<CatalogUi>,
-    model: PlaylistEntryModel,
+    model: Rows<Row>,
     playlist: PlaylistKey,
     selection: PlaylistEntrySelection,
     playing: TrackRowPlayingIndicator,
@@ -861,7 +874,14 @@ fn playlist_entry_grid(
         move |fields| {
             PlaylistEntryGridCell::new(Rc::clone(&cell_shell), fields, playlist, playing.clone())
         },
-        move |position, _: TrackRow| activate_model.activate(position, queue.clone()),
+        move |position, _: TrackRow| {
+            activate_model.play(
+                &queue,
+                position as usize,
+                rufin_core::playback::QueuePlacement::Now,
+                false,
+            )
+        },
         |_| {},
     )
 }

@@ -1,10 +1,10 @@
-use crate::widgets::sparse_model::{item_at, item_at_from_item};
+use crate::widgets::view_model::{Rows, item_at, item_at_from_item};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 
-use ::library::{AlbumRow, ArtistKey, ArtistRow, TrackRow};
+use ::library::{AlbumRow, ArtistRow, Row, TrackRow};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
@@ -20,7 +20,6 @@ use super::grid_cells::{
     collection_grid_with_demand,
 };
 use crate::library::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
-use crate::library::track_model::TrackCollectionModel;
 use crate::library::track_selection::TrackSelection;
 use crate::library::track_selection::install_track_drag_source;
 use crate::widgets::library_fields::TrackPresentation;
@@ -33,8 +32,8 @@ use crate::widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width
 use rufin_core::route::Route;
 
 struct TrackTablePlayingStateInner {
-    model: TrackCollectionModel,
-    handler_model: crate::widgets::sparse_model::SparseObjectModel,
+    model: Rows<Row>,
+    handler_model: crate::widgets::view_model::RowList,
     model_handler: RefCell<Option<glib::SignalHandlerId>>,
     track_id: RefCell<Option<String>>,
     position: Cell<u32>,
@@ -458,7 +457,7 @@ fn matching_context_rank(
 }
 
 impl TrackTablePlayingState {
-    pub fn new(model: &TrackCollectionModel, indicator: TrackRowPlayingIndicator) -> Self {
+    pub fn new(model: &Rows<Row>, indicator: TrackRowPlayingIndicator) -> Self {
         let handler_model = model.list_model();
         let inner = Rc::new(TrackTablePlayingStateInner {
             model: model.clone(),
@@ -479,7 +478,7 @@ impl TrackTablePlayingState {
                 .and_then(|track_id| {
                     inner
                         .model
-                        .selection_position_after_point_change(track_id, inner.position.get())
+                        .position_of(track_id, Some(inner.position.get() as usize))
                 })
                 .unwrap_or(gtk::INVALID_LIST_POSITION);
             inner.position.set(position);
@@ -504,7 +503,7 @@ impl TrackTablePlayingState {
     fn set_track_id(&self, media_uri: &str, position: Option<u32>) {
         *self.inner.track_id.borrow_mut() = Some(media_uri.to_string());
         let position = position
-            .or_else(|| self.inner.model.position_for_current_uri(media_uri, None))
+            .or_else(|| self.inner.model.position_of(media_uri, None))
             .unwrap_or(gtk::INVALID_LIST_POSITION);
         self.set_position(position);
     }
@@ -572,7 +571,7 @@ pub fn album_collection_projection(
 
 pub fn artist_collection_projection(
     shell: &Rc<CatalogUi>,
-    sparse: Rc<crate::widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    sparse: Rows<Row>,
     key: LibraryListKey,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(key);
@@ -591,25 +590,21 @@ pub fn artist_collection_projection(
 }
 pub fn track_collection_projection(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel,
+    model: Rows<Row>,
     key: LibraryListKey,
     settings: crate::library::LibraryListSettings,
-    context_id: String,
     content_inset: i32,
 ) -> LibraryCollectionProjection {
     let shell = Rc::clone(shell);
-    let selection = TrackSelection::new(model.clone());
+    let selection = TrackSelection::new(&model);
     shell.register_current_route_track_selection_owner(selection.clone());
     let play_model = model.clone();
     let play_queue = shell.products.playback.clone();
-    let play_context_id = context_id.clone();
     let play_from_collection = Rc::new(move |position: u32| {
         play_model.play(
-            play_queue.clone(),
+            &play_queue,
             position as usize,
             rufin_core::playback::QueuePlacement::Now,
-            &play_context_id,
-            false,
             false,
         );
     }) as Rc<dyn Fn(u32)>;
@@ -630,7 +625,6 @@ pub fn track_collection_projection(
                     key,
                     TrackTableOptions {
                         detail: false,
-                        context_id: context_id.clone(),
                         content_inset,
                         fields: None,
                     },
@@ -643,7 +637,6 @@ pub fn track_collection_projection(
 
 pub struct TrackTableOptions {
     pub detail: bool,
-    pub context_id: String,
     pub content_inset: i32,
     pub fields: Option<Vec<LibraryField>>,
 }
@@ -657,10 +650,10 @@ pub fn album_grid(
     let fields = settings.grid_fields;
     let sparse = models
         .album_rows()
-        .expect("Album grid has an Album row sparse model");
+        .expect("Album grid has an Album row model");
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = Rc::clone(&sparse);
+    let demand = sparse.clone();
     collection_grid_with_demand(
         sparse.list_model(),
         &fields,
@@ -674,7 +667,7 @@ pub fn album_grid(
 
 pub fn artist_grid(
     shell: &Rc<CatalogUi>,
-    sparse: &Rc<crate::widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    sparse: &Rows<Row>,
     key: LibraryListKey,
 ) -> CollectionGridProjection {
     let fields = shell
@@ -686,7 +679,7 @@ pub fn artist_grid(
     let album_artist = key == LibraryListKey::AlbumArtists;
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = Rc::clone(sparse);
+    let demand = sparse.clone();
     collection_grid_with_demand(
         sparse.list_model(),
         &fields,
@@ -699,14 +692,13 @@ pub fn artist_grid(
 }
 pub fn track_grid(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel,
+    model: Rows<Row>,
     key: LibraryListKey,
     play_from_collection: Rc<dyn Fn(u32)>,
     selection: TrackSelection,
 ) -> CollectionGridProjection {
-    let sparse = model.sparse_model();
-    let demand = Rc::clone(&sparse);
-    let model = sparse.list_model();
+    let demand = model.clone();
+    let model = model.list_model();
     let demand: Rc<dyn Fn(u32)> =
         Rc::new(move |position| demand.demand_positions([position as usize]));
     let fields = shell
@@ -880,10 +872,7 @@ where
     M: IsA<gio::ListModel> + Clone + 'static,
 {
     let selection = selection.unwrap_or_else(|| {
-        if model
-            .as_ref()
-            .is::<crate::widgets::sparse_model::SparseObjectModel>()
-        {
+        if model.as_ref().is::<crate::widgets::view_model::RowList>() {
             crate::widgets::selection::PositionSelectionModel::new(model.clone()).upcast()
         } else {
             gtk::MultiSelection::new(Some(model.clone())).upcast()
@@ -948,12 +937,8 @@ impl CatalogUi {
         rows: Vec<TrackRow>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let model = TrackCollectionModel::related(
-            self.products.library.clone(),
-            self.products.runtime.clone(),
-            rows,
-        );
-        let selection = TrackSelection::new(model.clone());
+        let model = Rows::seeded("related", rows.into_iter().map(Row::Track).collect());
+        let selection = TrackSelection::new(&model);
         self.register_current_route_track_selection_owner(selection.clone());
         let table = track_table(
             self,
@@ -961,7 +946,6 @@ impl CatalogUi {
             key,
             TrackTableOptions {
                 detail: false,
-                context_id: "related".into(),
                 content_inset: 0,
                 fields: None,
             },
@@ -991,21 +975,19 @@ impl CatalogUi {
                     table.fit_scroller_allocation(&scroller, width);
                 }
             });
-        model.resume_initial_demand();
         (root.upcast(), changed)
     }
 }
 
 pub fn track_table(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel,
+    model: Rows<Row>,
     key: LibraryListKey,
     options: TrackTableOptions,
     selection: TrackSelection,
 ) -> CollectionTableProjection {
     let playing_indicator = TrackRowPlayingIndicator::new();
     let playing_state = TrackTablePlayingState::new(&model, playing_indicator.clone());
-    let selection_context_base = options.context_id.clone();
     let current_playing_state = Rc::downgrade(&playing_state.inner);
     shell.register_current_route_track_selection(Rc::new(move |current| {
         let Some(inner) = current_playing_state.upgrade() else {
@@ -1014,13 +996,9 @@ pub fn track_table(
         let current_playing_state = TrackTablePlayingState { inner };
         let selection_model = &current_playing_state.inner.model;
         let position = current.and_then(|current| {
-            let expected_context_id = selection_model.visible_context_id(&selection_context_base);
-            let source_rank = matching_context_rank(
-                current.context.as_ref(),
-                &selection_context_base,
-                &expected_context_id,
-            );
-            selection_model.position_for_current_uri(&current.media_uri, source_rank)
+            let (base, visible) = selection_model.context_ids();
+            let source_rank = matching_context_rank(current.context.as_ref(), &base, &visible);
+            selection_model.position_of(&current.media_uri, source_rank)
         });
         current_playing_state
             .set_now_playing_track(current.map(|current| current.media_uri.as_str()), position);
@@ -1041,14 +1019,11 @@ pub fn track_table(
     };
     let queue = shell.products.playback.clone();
     let play_model = model.clone();
-    let context_id = options.context_id;
     let activate = Box::new(move |position, _: TrackRow| {
         play_model.play(
-            queue.clone(),
+            &queue,
             position as usize,
             rufin_core::playback::QueuePlacement::Now,
-            &context_id,
-            false,
             false,
         );
     });

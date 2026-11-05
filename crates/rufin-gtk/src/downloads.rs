@@ -255,9 +255,6 @@ impl Shell {
             DownloadEvent::Queue { summary, .. } => {
                 self.downloads.refresh_queue(summary.source_id.as_ref())
             }
-            event @ (DownloadEvent::Changed { .. } | DownloadEvent::SubjectChanged { .. }) => {
-                self.apply_download_change_to_mounted_route(&event);
-            }
             DownloadEvent::Feedback(feedback) => {
                 self.show_operation_feedback(&OperationFeedback {
                     title: crate::downloads::download_subject_title(&feedback.subject),

@@ -7,26 +7,108 @@ use gtk::glib;
 use crate::library::CatalogUi;
 use crate::library::{LibraryLayout, LibraryListKey, LibraryListSettings};
 use crate::widgets::localization::bind_search_placeholder;
-use crate::widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
+use crate::widgets::mounted_route::MountedRoute;
+use crate::widgets::view_model::Rows;
+use library::Row;
 use localization::msgid;
-use rufin_core::collection_context::CollectionTarget;
-use rufin_core::view::{Opened, View};
+use rufin_core::view::{Opened, Reread};
 
 use super::album_detail::AlbumCollectionModels;
 use super::collections::{
     album_collection_projection, library_route_inset, track_collection_projection,
 };
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
-use crate::library::track_model::TrackCollectionModel;
 use rufin_core::route::{CollectionCategory, Route};
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub struct SearchableTrackOptions {
-    pub context_id: String,
     pub content_inset: i32,
     pub fixed_layout: Option<LibraryLayout>,
     pub search: Option<gtk::SearchEntry>,
+}
+
+/// What a page reads again, the options it wants read, and what it does with each read.
+/// Widgets hold it weakly; the mounted route holds it.
+#[derive(Clone)]
+pub(crate) struct PageReads(Rc<PageReadsInner>);
+
+pub(crate) struct PageReadsInner {
+    rows: Rows<Row>,
+    wanted: Box<dyn Fn(&OpenOptions) -> OpenOptions>,
+    apply: Rc<dyn Fn(Opened)>,
+}
+
+impl PageReads {
+    pub fn new(
+        rows: &Rows<Row>,
+        wanted: impl Fn(&OpenOptions) -> OpenOptions + 'static,
+        apply: impl Fn(Opened) + 'static,
+    ) -> Self {
+        Self(Rc::new(PageReadsInner {
+            rows: rows.clone(),
+            wanted: Box::new(wanted),
+            apply: Rc::new(apply),
+        }))
+    }
+
+    /// Calls `read` on these reads while the page holds them.
+    pub fn weak(&self, read: impl Fn(&Self) + 'static) -> impl Fn() + 'static {
+        let reads = Rc::downgrade(&self.0);
+        move || {
+            if let Some(reads) = reads.upgrade() {
+                read(&Self(reads));
+            }
+        }
+    }
+
+    fn wanted(&self) -> Option<OpenOptions> {
+        self.0
+            .rows
+            .view()
+            .map(|view| (self.0.wanted)(view.options()))
+    }
+
+    fn applied(&self) -> impl FnOnce(Opened) + 'static {
+        let apply = Rc::clone(&self.0.apply);
+        move |read| apply(read)
+    }
+
+    /// Reads from the top, for a new search or filter.
+    pub fn reread(&self) {
+        if let Some(options) = self.wanted() {
+            self.0.rows.reread(
+                Reread::Page,
+                options,
+                library::RouteSeedWindow::top(),
+                self.applied(),
+            );
+        }
+    }
+
+    /// Reads an artist page's releases again.
+    pub fn reread_releases(&self) {
+        if let Some(options) = self.wanted() {
+            self.0.rows.reread(
+                Reread::Releases,
+                options,
+                library::RouteSeedWindow::top(),
+                self.applied(),
+            );
+        }
+    }
+
+    /// Reads again for a committed change, where the list is.
+    pub fn refresh(&self) {
+        if let Some(options) = self.wanted() {
+            self.0.rows.refresh(options, self.applied());
+        }
+    }
+
+    /// Reads again what `settings` change.
+    pub fn resume(&self, settings: &rufin_core::settings::app::Settings) {
+        self.0.rows.resume(settings, self.applied());
+    }
 }
 
 #[derive(Clone)]
@@ -34,24 +116,11 @@ pub struct TrackListProjection {
     key: LibraryListKey,
     search: gtk::SearchEntry,
     collection: super::collections::LibraryCollectionProjection,
-    model: TrackCollectionModel,
+    pub(crate) rows: Rows<Row>,
     fixed_layout: Option<LibraryLayout>,
 }
 
 impl TrackListProjection {
-    pub fn download_change(&self) -> crate::widgets::mounted_route::MountedDownloadChange {
-        let model = self.model.clone();
-        Rc::new(move |event| {
-            if let rufin_core::downloads::DownloadEvent::Changed {
-                media_uri,
-                downloaded,
-            } = event
-            {
-                model.update_downloaded(media_uri, *downloaded);
-            }
-        })
-    }
-
     pub fn search(&self) -> gtk::SearchEntry {
         self.search.clone()
     }
@@ -69,35 +138,7 @@ impl TrackListProjection {
     }
 
     pub fn source_is_empty(&self) -> bool {
-        self.model.source_is_empty()
-    }
-
-    pub fn source_count(&self) -> usize {
-        self.model.visible_count()
-    }
-
-    pub fn play_source(
-        &self,
-        queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-        placement: rufin_core::playback::QueuePlacement,
-        context_id: String,
-        shuffled: bool,
-    ) {
-        self.model
-            .play_source(queue, placement, context_id, shuffled);
-    }
-
-    /// Where a reread starts so the rows on screen stay.
-    pub fn live_window(&self) -> library::RouteSeedWindow {
-        self.model.live_window()
-    }
-
-    pub fn replace_favorites(&self, count: usize, rows: Vec<library::Row>, refresh: bool) {
-        self.model.replace_favorites(count, rows, refresh);
-    }
-
-    pub fn resume_initial_demand(&self) {
-        self.model.resume_initial_demand();
+        self.rows.is_empty()
     }
 
     pub fn apply_library_list_settings(
@@ -114,67 +155,45 @@ impl TrackListProjection {
         }
         self.collection.apply_settings(&settings);
     }
-}
 
-impl TrackListProjection {
     /// The page's rereads, for this list's search and the inputs `scope` adds. A search reads
-    /// at once when it clears and after a pause while typing. Rows read while the route is not
-    /// current are dropped.
-    pub fn page_reread(
+    /// at once when it clears and after a pause while typing.
+    pub fn page_reads(
         &self,
-        shell: &Rc<CatalogUi>,
-        context: &'static str,
-        view: &RouteView,
         scope: impl Fn(&mut OpenOptions) + 'static,
         changed: impl Fn(Option<library::Header>) + 'static,
-    ) -> Rc<PageReread> {
+    ) -> PageReads {
         let inputs = list_inputs(&self.search);
-        let model = self.model.clone();
-        let current = Rc::downgrade(shell);
-        let reread = PageReread::new(
-            shell.products.runtime.clone(),
-            context,
-            view,
+        let reads = PageReads::new(
+            &self.rows,
             move |options| {
                 let mut options = inputs(options);
                 scope(&mut options);
                 options
             },
-            move |mut read, previous| {
-                let header = read.header.take();
-                let replaced = current.upgrade().is_some_and(|shell| shell.is_current())
-                    && model.replace_page(previous, read);
-                if replaced {
-                    changed(header);
-                }
-                replaced
-            },
+            move |read| changed(read.header),
         );
-        let search_reread = Rc::downgrade(&reread);
+        let reread: Rc<dyn Fn()> = Rc::new(reads.weak(PageReads::reread));
         let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
         self.search.connect_search_changed(move |search| {
             if let Some(source) = pending.borrow_mut().take() {
                 source.remove();
             }
             if search.text().trim().is_empty() {
-                if let Some(reread) = search_reread.upgrade() {
-                    reread.reread();
-                }
+                reread();
                 return;
             }
-            let search_reread = search_reread.clone();
+            let reread = Rc::clone(&reread);
             let pending_timeout = Rc::clone(&pending);
             pending.replace(Some(glib::timeout_add_local_once(
                 TRACK_FILTER_DEBOUNCE,
                 move || {
                     pending_timeout.borrow_mut().take();
-                    if let Some(reread) = search_reread.upgrade() {
-                        reread.reread();
-                    }
+                    reread();
                 },
             )));
         });
-        reread
+        reads
     }
 }
 
@@ -190,13 +209,9 @@ pub(crate) fn list_inputs(
 }
 
 /// Reads a list page again whenever its search changes; lists search as you type.
-pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reread: &Rc<PageReread>) {
-    let reread = Rc::downgrade(reread);
-    search.connect_search_changed(move |_| {
-        if let Some(reread) = reread.upgrade() {
-            reread.reread();
-        }
-    });
+pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reads: &PageReads) {
+    let reread = reads.weak(PageReads::reread);
+    search.connect_search_changed(move |_| reread());
 }
 
 impl CatalogUi {
@@ -255,25 +270,25 @@ impl CatalogUi {
                 self.library_smart_playlists_route(read)
             }
             Route::Folders { path } => self.folders_route(path, read),
-            Route::Home => self.home_route(read.view.home_sections().unwrap_or_default()),
+            Route::Home => self
+                .home_route(read.view.home_sections().unwrap_or_default())
+                .with_view(read.view),
             Route::Search => self.search_route(),
         }
     }
 
     pub fn scrolling_track_projection(
         self: &Rc<Self>,
-        model: TrackCollectionModel,
+        rows: Rows<Row>,
         key: LibraryListKey,
         context: &str,
-        context_id: String,
     ) -> (gtk::Widget, TrackListProjection, LibraryToolbarProjection) {
         let settings = self.settings.current.borrow().library_list(key);
         let projection = self.build_track_collection(
-            model,
+            rows,
             key,
             settings,
             SearchableTrackOptions {
-                context_id,
                 content_inset: 0,
                 fixed_layout: None,
                 search: None,
@@ -291,14 +306,14 @@ impl CatalogUi {
 
     pub fn library_albums_route(
         self: &Rc<Self>,
-        read: Opened,
+        mut read: Opened,
         favorites_only: bool,
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
-        let view = route_view(&read);
-        let models = AlbumCollectionModels::new(&self.products.runtime, &view, read);
-        let models = Rc::new(RefCell::new(models));
-
+        let models = Rc::new(RefCell::new(AlbumCollectionModels::new(
+            &self.products.runtime,
+            &mut read,
+        )));
         let search = gtk::SearchEntry::new();
         crate::widgets::controls::configure_search_entry(&search);
         bind_search_placeholder(&search, "Search");
@@ -318,56 +333,35 @@ impl CatalogUi {
             },
             content: content.scrolling_widget(),
         });
+        // The rows take each read; a read in the other layout shows them in that layout.
         let apply = {
             let shell = Rc::downgrade(self);
-            let models = models.clone();
+            let models = Rc::downgrade(&models);
             let content = content.clone();
             let page = page.clone();
-            let view = Rc::clone(&view);
-            move |read: Opened, previous: &View| {
-                let Some(shell) = shell.upgrade() else {
-                    return false;
+            move |read: Opened| {
+                let (Some(shell), Some(models)) = (shell.upgrade(), models.upgrade()) else {
+                    return;
                 };
-                if !shell.is_current() {
-                    return false;
+                let other = models.borrow().take(&read);
+                if let Some(other) = other {
+                    models.replace(other);
                 }
                 let settings = shell.settings.current.borrow().library_list(key);
-                let current_models = models.borrow().clone();
-                let replace_model = current_models.is_detail() != read.view.album_spans().is_some();
-                if replace_model {
-                    models.replace(AlbumCollectionModels::new(
-                        &shell.products.runtime,
-                        &view,
-                        read,
-                    ));
-                } else if !current_models.replace_prepared(previous, read) {
-                    tracing::warn!("rejected a mismatched prepared Albums page");
-                    return false;
-                }
                 content.apply_settings(&settings);
                 page.apply_library_list_settings(key, &settings);
-                let models = models.borrow().clone();
-                page.set_empty(models.is_empty());
-                if replace_model {
-                    models.resume_initial_demand();
-                }
-                true
+                page.set_empty(models.borrow().is_empty());
             }
         };
-        let reread = PageReread::new(
-            self.products.runtime.clone(),
-            "mounted Albums route",
-            &view,
-            list_inputs(&search),
-            apply,
-        );
-        connect_list_search(&search, &reread);
+        let rows = models.borrow().rows().clone();
+        let reads = PageReads::new(&rows, list_inputs(&search), apply);
+        connect_list_search(&search, &reads);
         let resume = {
             let shell = Rc::downgrade(self);
             let content = content.clone();
             let models = models.clone();
             let page = page.clone();
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
@@ -375,67 +369,34 @@ impl CatalogUi {
                     content.apply_settings(&settings);
                 }
                 page.apply_library_list_settings(key, &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let download_models = models.clone();
-        let downloads = crate::library::collection_download_change(move |target, downloaded| {
-            let CollectionTarget::Album(uri) = target else {
-                return;
-            };
-            let rows = download_models.borrow().album_rows();
-            if let Some(rows) = rows {
-                rows.update_matching(
-                    |row| {
-                        row.media_uri == *uri
-                            && (row.summary.downloaded_count == row.summary.track_count)
-                                != downloaded
-                    },
-                    |row| {
-                        row.summary.downloaded_count = if downloaded {
-                            row.summary.track_count
-                        } else {
-                            0
-                        }
-                    },
-                );
-            }
-        });
         if favorites_only {
             self.install_favorite_category_tabs(CollectionCategory::Albums, &mut page);
         }
-        let refresh_models = models.clone();
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || {
-                reread.refresh(refresh_models.borrow().live_window())
-            }))
-            .with_download_change(downloads)
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_item_navigation(content.item_navigation())
             .with_item_scroll(content.item_scroll())
             .with_initial_demand({
                 let models = models.clone();
-                Rc::new(move || {
-                    let models = models.borrow().clone();
-                    models.resume_initial_demand();
-                })
+                Rc::new(move || models.borrow().rows().resume_initial_demand())
             })
-            .with_states(&view)
+            .with_rows(&rows)
     }
 
     fn root_track_route(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
-        read: Opened,
+        mut read: Opened,
         favorites_only: bool,
     ) -> MountedRoute {
-        let context_id = rufin_core::view::context_base(read.view.route());
-        let view = route_view(&read);
         let projection = self.track_projection(
-            TrackCollectionModel::new(self.products.runtime.clone(), &view, read),
+            Rows::over_view(self.products.runtime.clone(), &mut read),
             key,
             SearchableTrackOptions {
-                context_id,
                 content_inset: 0,
                 fixed_layout: None,
                 search: None,
@@ -444,28 +405,22 @@ impl CatalogUi {
         let mut page = self.track_page_shell(key, empty_body, &projection);
         let apply_page = page.clone();
         let apply_projection = projection.clone();
-        let reread = projection.page_reread(
-            self,
-            "mounted Track route",
-            &view,
+        let reads = projection.page_reads(
             |_| {},
             move |_| apply_page.set_empty(apply_projection.source_is_empty()),
         );
         if favorites_only {
             self.install_favorite_category_tabs(CollectionCategory::Tracks, &mut page);
         }
-        self.mount_track_page(key, projection, page, reread)
+        self.mount_track_page(key, projection, page, reads)
     }
 
-    pub fn history_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
+    pub fn history_route(self: &Rc<Self>, mut read: Opened) -> MountedRoute {
         let key = LibraryListKey::History;
-        let view = route_view(&read);
-        let context_id = rufin_core::view::context_base(read.view.route());
         let projection = self.track_projection(
-            TrackCollectionModel::new(self.products.runtime.clone(), &view, read),
+            Rows::over_view(self.products.runtime.clone(), &mut read),
             key,
             SearchableTrackOptions {
-                context_id,
                 content_inset: 0,
                 fixed_layout: None,
                 search: None,
@@ -477,14 +432,11 @@ impl CatalogUi {
         // The current source as the filter was picked; later source changes leave it.
         let source = Rc::new(RefCell::new(None));
         let scope = Rc::clone(&source);
-        let reread = projection.page_reread(
-            self,
-            "History filter",
-            &view,
+        let reads = projection.page_reads(
             move |options| options.history_source.clone_from(&scope.borrow()),
             move |_| apply_page.set_empty(apply_projection.source_is_empty()),
         );
-        let filter_reread = Rc::downgrade(&reread);
+        let reread = reads.weak(PageReads::reread);
         let filter_shell = Rc::downgrade(self);
         let source_name = {
             let configured = self.source.configured.borrow();
@@ -504,11 +456,9 @@ impl CatalogUi {
                     })
                     .flatten(),
             );
-            if let Some(reread) = filter_reread.upgrade() {
-                reread.reread();
-            }
+            reread();
         });
-        self.mount_track_page(key, projection, page, reread)
+        self.mount_track_page(key, projection, page, reads)
     }
 
     pub fn library_artist_list_route(self: &Rc<Self>, read: Opened, route: Route) -> MountedRoute {
@@ -517,38 +467,35 @@ impl CatalogUi {
             Route::AlbumArtists => (LibraryListKey::AlbumArtists, msgid("Nothing here yet")),
             _ => (LibraryListKey::Artists, msgid("Nothing here yet")),
         };
-        self.collection_list_route(
+        self.collection_list_route::<library::ArtistRow>(
             key,
             empty_body,
             route == Route::Favorites,
             read,
-            |row: &library::ArtistRow| row.artist_key,
         )
     }
 
     pub fn library_playlists_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
-        self.collection_list_route(
+        self.collection_list_route::<library::PlaylistListRow>(
             LibraryListKey::Playlists,
             msgid("No playlists yet"),
             false,
             read,
-            |row: &library::PlaylistListRow| row.key(),
         )
     }
 
     pub fn library_smart_playlists_route(self: &Rc<Self>, read: Opened) -> MountedRoute {
-        self.collection_list_route(
+        self.collection_list_route::<library::PlaylistListRow>(
             LibraryListKey::SmartPlaylists,
             msgid("No smart playlists yet"),
             false,
             read,
-            |row: &library::PlaylistListRow| row.key(),
         )
     }
 
     pub fn track_projection(
         self: &Rc<Self>,
-        model: TrackCollectionModel,
+        rows: Rows<Row>,
         key: LibraryListKey,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {
@@ -556,17 +503,16 @@ impl CatalogUi {
         if let Some(layout) = options.fixed_layout {
             settings.layout = layout;
         }
-        self.build_track_collection(model, key, settings, options)
+        self.build_track_collection(rows, key, settings, options)
     }
 
     fn build_track_collection(
         self: &Rc<Self>,
-        model: TrackCollectionModel,
+        rows: Rows<Row>,
         key: LibraryListKey,
         settings: LibraryListSettings,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {
-        let persistent_search = options.search.is_some();
         let search = options.search.unwrap_or_else(|| {
             let search = gtk::SearchEntry::new();
             crate::widgets::controls::configure_search_entry(&search);
@@ -574,25 +520,13 @@ impl CatalogUi {
         });
         bind_search_placeholder(&search, "Search");
         search.set_hexpand(true);
-        if !persistent_search {
-            let model = model.clone();
-            search.connect_search_changed(move |entry| {
-                model.set_query(entry.text().as_str());
-            });
-        }
-        let collection = track_collection_projection(
-            self,
-            model.clone(),
-            key,
-            settings,
-            options.context_id,
-            options.content_inset,
-        );
+        let collection =
+            track_collection_projection(self, rows.clone(), key, settings, options.content_inset);
         TrackListProjection {
             key,
             search,
             collection,
-            model,
+            rows,
             fixed_layout: options.fixed_layout,
         }
     }
@@ -609,8 +543,8 @@ impl CatalogUi {
             empty_body,
             search: projection.search(),
             has_visible_results: {
-                let model = projection.model.clone();
-                Rc::new(move || model.visible_count() != 0)
+                let rows = projection.rows.clone();
+                Rc::new(move || !rows.is_empty())
             },
             content: projection.scrolling_widget(),
         })
@@ -621,33 +555,28 @@ impl CatalogUi {
         key: LibraryListKey,
         projection: TrackListProjection,
         page: super::route_shell::LibraryPageShell,
-        reread: Rc<PageReread>,
+        reads: PageReads,
     ) -> MountedRoute {
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = projection.clone();
             let page = page.clone();
-            let reread = Rc::clone(&reread);
+            let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
                 projection.apply_library_list_settings(key, &settings);
                 page.apply_library_list_settings(key, &settings);
-                reread.resume(&shell.settings.current.borrow());
+                reads.resume(&shell.settings.current.borrow());
             })
         };
-        let states = Rc::clone(reread.route_view());
-        let refresh_projection = projection.clone();
         page.mounted_route(resume)
-            .with_catalog_refresh(Rc::new(move || {
-                reread.refresh(refresh_projection.live_window())
-            }))
-            .with_download_change(projection.download_change())
+            .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_item_navigation(projection.item_navigation())
             .with_initial_demand({
-                let projection = projection.clone();
-                Rc::new(move || projection.resume_initial_demand())
+                let rows = projection.rows.clone();
+                Rc::new(move || rows.resume_initial_demand())
             })
-            .with_states(&states)
+            .with_rows(&projection.rows)
     }
 }

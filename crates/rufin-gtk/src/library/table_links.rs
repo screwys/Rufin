@@ -8,8 +8,8 @@ use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::localization::localized_column;
 
 use crate::widgets::recycled_cells::{RecycledTextCell, list_cell};
-use crate::widgets::sparse_model::connect_sparse_bind;
-use crate::widgets::sparse_model::object_item;
+use crate::widgets::view_model::connect_row_bind;
+use crate::widgets::view_model::object_item;
 use rufin_core::route::detail_links::DetailLinks;
 
 pub fn mapped_track_link_column<T, TrackValue, Value>(
@@ -61,7 +61,7 @@ where
         list_item.set_child(Some(&cell));
     });
 
-    connect_sparse_bind(&factory, move |list_item| {
+    connect_row_bind(&factory, move |list_item| {
         let Some(list_item) = list_item.downcast_ref::<gtk::ListItem>() else {
             return;
         };

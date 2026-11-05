@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 use library::Row;
 
@@ -9,11 +9,10 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::library::{CatalogUi, LibraryField, LibraryListKey};
 use crate::widgets::interactions::install_context_menu_openers;
-use crate::widgets::mounted_route::{MountedRoute, PageReread, RouteView, route_view};
-use library::ShowsState;
-use rufin_core::view::{Opened, View};
+use crate::widgets::mounted_route::MountedRoute;
+use rufin_core::view::Opened;
 
-use crate::widgets::sparse_model::{SparseSource, connect_sparse_bind};
+use crate::widgets::view_model::{Rows, connect_row_bind};
 use rufin_core::route::{FolderPathItem, Route};
 
 type FolderResume = Rc<dyn Fn()>;
@@ -52,8 +51,7 @@ impl CatalogUi {
             .imp()
             .breadcrumb_host
             .append(&folder_path_switcher(self, &path));
-        let (content, view, resume, refresh, download_change, initial_demand) =
-            folder_page(self, path, search.clone(), read);
+        let (content, rows, resume, refresh) = folder_page(self, path, search.clone(), read);
         wrapper.append(&content);
         let shell = Rc::downgrade(self);
         let resume = Rc::new(move || {
@@ -71,157 +69,35 @@ impl CatalogUi {
         MountedRoute::new(wrapper.upcast(), resume)
             .with_catalog_refresh(refresh)
             .with_search(search)
-            .with_download_change(download_change)
-            .with_initial_demand(initial_demand)
-            .with_states(&view)
+            .with_initial_demand({
+                let rows = rows.clone();
+                Rc::new(move || rows.resume_initial_demand())
+            })
+            .with_rows(&rows)
     }
-}
-
-#[derive(Clone, PartialEq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "folder table rows are supplied through the bounded sparse-model window"
-)]
-enum FolderTableRow {
-    Folder(library::FolderRow),
-    Track(library::TrackRow),
-}
-
-impl ShowsState for FolderTableRow {
-    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
-        match self {
-            Self::Track(track) => track.state(change),
-            Self::Folder(_) => None,
-        }
-    }
-    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
-        match self {
-            Self::Track(track) => track.state_mut(change),
-            Self::Folder(_) => None,
-        }
-    }
-}
-
-impl FolderTableRow {
-    fn folder(row: Row) -> Option<Self> {
-        match row {
-            Row::Folder(folder) => Some(Self::Folder(folder)),
-            _ => None,
-        }
-    }
-
-    fn track(row: Row) -> Option<Self> {
-        match row {
-            Row::Track(track) => Some(Self::Track(track)),
-            _ => None,
-        }
-    }
-}
-
-/// Windows of a folder's child folders, or of its tracks, which follow them in the view.
-fn folder_rows(
-    view: &RouteView,
-    tracks: bool,
-) -> crate::widgets::sparse_model::SparseLoad<(), FolderTableRow> {
-    let view = Rc::clone(view);
-    Rc::new(move |_, range: std::ops::Range<usize>, cancel| {
-        let view = Arc::clone(&view.borrow());
-        Box::pin(async move {
-            let (offset, map): (usize, fn(Row) -> Option<FolderTableRow>) = if tracks {
-                (view.folder_len().unwrap_or(0), FolderTableRow::track)
-            } else {
-                (0, FolderTableRow::folder)
-            };
-            view.rows(range.start + offset..range.end + offset, &cancel)
-                .await
-                .map(|rows| rows.into_iter().filter_map(map).collect())
-                .map_err(|error| error.to_string())
-        })
-    })
 }
 
 fn folder_page(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
-    read: Opened,
-) -> (
-    gtk::Widget,
-    RouteView,
-    FolderResume,
-    FolderResume,
-    crate::widgets::mounted_route::MountedDownloadChange,
-    FolderResume,
-) {
+    mut read: Opened,
+) -> (gtk::Widget, Rows<Row>, FolderResume, FolderResume) {
     search.set_visible(true);
     let route_width = shell.route_width();
-    let view = route_view(&read);
-    let folder_sparse = crate::widgets::sparse_model::SparseRouteModel::new(
-        SparseSource::Query { count: 0 },
-        shell.products.runtime.clone(),
-        folder_rows(&view, false),
-    );
-    let track_sparse = crate::widgets::sparse_model::SparseRouteModel::new(
-        SparseSource::Query { count: 0 },
-        shell.products.runtime.clone(),
-        folder_rows(&view, true),
-    );
-    view.show_states(&track_sparse);
-    let filter = read.view.options().filter.clone();
-    let initial_empty = read.view.is_empty();
-    let seed = {
-        let folder_sparse = Rc::clone(&folder_sparse);
-        let track_sparse = Rc::clone(&track_sparse);
-        move |read: Opened, refresh: bool| {
-            let folder_len = read.view.folder_len().unwrap_or(0);
-            let track_len = read.view.len() - folder_len;
-            let (folders, tracks) = read
-                .rows
-                .into_iter()
-                .partition::<Vec<_>, _>(|row| matches!(row, Row::Folder(_)));
-            folder_sparse.replace_prepared_at(
-                SparseSource::Query { count: folder_len },
-                read.first.min(folder_len),
-                folders
-                    .into_iter()
-                    .filter_map(FolderTableRow::folder)
-                    .collect(),
-                Vec::new(),
-                refresh,
-                |_| (),
-            );
-            track_sparse.replace_prepared_at(
-                SparseSource::Query { count: track_len },
-                read.first.saturating_sub(folder_len),
-                tracks
-                    .into_iter()
-                    .filter_map(FolderTableRow::track)
-                    .collect(),
-                Vec::new(),
-                refresh,
-                |_| (),
-            );
-        }
-    };
-    seed(read, false);
+    // Child folders, then the folder's tracks, as the View lists them.
+    let rows = Rows::over_view(shell.products.runtime.clone(), &mut read);
     let settings = shell
         .settings
         .current
         .borrow()
         .library_list(LibraryListKey::Folders);
-    let sections = gtk::gio::ListStore::new::<crate::widgets::sparse_model::SparseObjectModel>();
-    sections.append(&folder_sparse.list_model());
-    sections.append(&track_sparse.list_model());
-    let rows = gtk::FlattenListModel::new(Some(sections));
     let table_initial_width = folder_table_initial_width(route_width);
     let table = folder_table(
         shell,
-        rows,
-        Rc::clone(&folder_sparse),
-        Rc::clone(&track_sparse),
+        rows.clone(),
         path.clone(),
         table_initial_width,
-        Rc::clone(&view),
         &settings.row_fields,
     );
 
@@ -242,35 +118,27 @@ fn folder_page(
     table_stack.set_vexpand(true);
     table_stack.add_named(&table_view, Some("content"));
     table_stack.add_named(&folder_empty_view(shell), Some("empty"));
-    table_stack.set_visible_child_name(if initial_empty { "empty" } else { "content" });
+    table_stack.set_visible_child_name(if rows.is_empty() { "empty" } else { "content" });
 
     let apply = {
         let stack = table_stack.clone();
-        move |read: Opened, previous: &View| {
-            let refresh = read.view.same_list(previous);
-            stack.set_visible_child_name(if read.view.is_empty() {
-                "empty"
-            } else {
-                "content"
-            });
-            seed(read, refresh);
-            true
+        let rows = rows.clone();
+        move |_| {
+            stack.set_visible_child_name(if rows.is_empty() { "empty" } else { "content" });
         }
     };
-    let reread = PageReread::new(
-        shell.products.runtime.clone(),
-        "mounted Folder route",
-        &view,
+    let reads = crate::library::routes::PageReads::new(
+        &rows,
         crate::library::routes::list_inputs(&search),
         apply,
     );
-    let request = {
+    crate::library::routes::connect_list_search(&search, &reads);
+    let resume = {
         let shell = Rc::downgrade(shell);
-        let folder_sparse = Rc::clone(&folder_sparse);
-        let track_sparse = Rc::clone(&track_sparse);
-        let requested = RefCell::new(filter);
+        let rows = rows.clone();
+        let reads = reads.clone();
         let previous_fields = RefCell::new(settings.row_fields);
-        Rc::new(move |filter: String, refresh: bool| {
+        Rc::new(move || {
             let Some(shell) = shell.upgrade() else { return };
             let settings = shell
                 .settings
@@ -282,94 +150,24 @@ fn folder_page(
             table.apply_fields(&settings.row_fields);
             crate::widgets::display::apply(&table.widget(), &settings.display);
             if name_changed {
-                folder_sparse.update_matching(|_| true, |_| {});
+                rows.update(|row| matches!(row, Row::Folder(_)), |_| {});
             }
             previous_fields.replace(settings.row_fields);
-            let query_changed = *requested.borrow() != filter
-                || reread
-                    .view()
-                    .settings_reread(&shell.settings.current.borrow())
-                    .is_some();
-            requested.replace(filter);
-            if refresh || query_changed {
-                let position = folder_sparse
-                    .first_live_position()
-                    .or_else(|| {
-                        track_sparse
-                            .first_live_position()
-                            .map(|position| folder_sparse.len() + position)
-                    })
-                    .unwrap_or(0);
-                let window = if query_changed {
-                    library::RouteSeedWindow::top()
-                } else {
-                    library::RouteSeedWindow::position(position)
-                };
-                reread.reread_at(window);
-            }
-        })
-    };
-    let search_request = Rc::downgrade(&request);
-    search.connect_search_changed(move |entry| {
-        if let Some(request) = search_request.upgrade() {
-            request(entry.text().trim().to_string(), false);
-        }
-    });
-    let refresh = {
-        let request = Rc::clone(&request);
-        let search = search.clone();
-        Rc::new(move || request(search.text().trim().to_string(), true)) as FolderResume
-    };
-    let resume = Rc::new(move || request(search.text().trim().to_string(), false)) as FolderResume;
-    let initial_demand = {
-        let tracks = Rc::clone(&track_sparse);
-        Rc::new(move || {
-            folder_sparse.resume_initial_demand();
-            tracks.resume_initial_demand();
+            reads.resume(&shell.settings.current.borrow());
         }) as FolderResume
     };
-    let download_change = Rc::new(move |event: &rufin_core::downloads::DownloadEvent| {
-        let rufin_core::downloads::DownloadEvent::Changed {
-            media_uri,
-            downloaded,
-        } = event
-        else {
-            return;
-        };
-        let (media_uri, downloaded) = (media_uri.as_str(), *downloaded);
-        track_sparse.update_matching(
-            |row| {
-                matches!(row, FolderTableRow::Track(track)
-                if track.media_uri == media_uri && track.is_downloaded != downloaded)
-            },
-            |row| {
-                if let FolderTableRow::Track(track) = row {
-                    track.is_downloaded = downloaded;
-                }
-            },
-        );
-    });
-    (
-        table_stack.upcast(),
-        view,
-        resume,
-        refresh,
-        download_change,
-        initial_demand,
-    )
+    let refresh = Rc::new(move || reads.refresh()) as FolderResume;
+    (table_stack.upcast(), rows, resume, refresh)
 }
 
 fn folder_table(
     shell: &Rc<CatalogUi>,
-    rows: gtk::FlattenListModel,
-    folders: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
-    tracks: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
+    rows: Rows<Row>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
-    view: RouteView,
     fields: &[LibraryField],
 ) -> crate::library::collections::CollectionTableProjection {
-    let selection = gtk::SingleSelection::new(Some(rows.clone()));
+    let selection = gtk::SingleSelection::new(Some(rows.list_model()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
     let playing = crate::widgets::recycled_cells::TrackRowPlayingIndicator::new();
@@ -384,59 +182,37 @@ fn folder_table(
     }));
     let column_shell = Rc::clone(shell);
     let column_path = path.clone();
-    let column_folders = Rc::clone(&folders);
+    let column_rows = rows.clone();
     let activate_shell = Rc::clone(shell);
-    let activate_folders = Rc::clone(&folders);
-    let activate_tracks = Rc::clone(&tracks);
-    let activate = move |position: u32, row: FolderTableRow| {
-        let folder_count = activate_folders.len();
-        let position = position as usize;
-        match row {
-            FolderTableRow::Folder(folder) => {
-                let mut next = path.clone();
-                next.push(FolderPathItem {
-                    id: folder.object_id.clone(),
-                    name: folder.name.clone(),
-                });
-                activate_shell.open_route(Route::Folders { path: next });
-            }
-            FolderTableRow::Track(track) => {
-                let anchor = position.saturating_sub(folder_count);
-                let Some(input) = view.borrow().members().map(|read| read.clone().selection())
-                else {
-                    return;
-                };
-                activate_shell.products.playback.play_selection(
-                    rufin_core::playback::PlayRequest::captured(
-                        input,
-                        anchor,
-                        QueuePlacement::Now,
-                        false,
-                    )
-                    .with_context(
-                        format!(
-                            "{}|result={}",
-                            view.borrow().context_id(),
-                            activate_tracks.order_id()
-                        )
-                        .into(),
-                    )
-                    .with_anchor(track.track_key, None),
-                );
-            }
+    let activate_rows = rows.clone();
+    let activate = move |position: u32, row: Row| match row {
+        Row::Folder(folder) => {
+            let mut next = path.clone();
+            next.push(FolderPathItem {
+                id: folder.object_id.clone(),
+                name: folder.name.clone(),
+            });
+            activate_shell.open_route(Route::Folders { path: next });
         }
+        Row::Track(_) => activate_rows.play(
+            &activate_shell.products.playback,
+            position as usize,
+            QueuePlacement::Now,
+            false,
+        ),
+        _ => {}
     };
     let table = crate::library::collections::dynamic_collection_table(
         shell,
         LibraryListKey::Folders,
-        rows,
+        rows.list_model(),
         fields,
         Vec::new(),
         move |field| {
             folder_column(
                 &column_shell,
                 column_path.clone(),
-                Rc::clone(&column_folders),
+                column_rows.clone(),
                 &playing,
                 field,
             )
@@ -455,7 +231,7 @@ fn folder_table(
 }
 
 fn folder_index_column(
-    folders: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
+    rows: Rows<Row>,
     playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
@@ -467,7 +243,7 @@ fn folder_index_column(
         }
     });
     let bind_playing = playing.clone();
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -477,11 +253,13 @@ fn folder_index_column(
         else {
             return;
         };
-        let text = match crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(item) {
-            Some(FolderTableRow::Track(track)) => {
+        let text = match crate::widgets::view_model::item_at_from_item::<Row>(item) {
+            Some(Row::Track(track)) => {
                 bind_playing.bind(cell.upcast_ref(), item.position(), &track.media_uri);
                 item.position()
-                    .saturating_sub(folders.len().min(u32::MAX as usize) as u32)
+                    .saturating_sub(
+                        rows.view().and_then(|view| view.folder_len()).unwrap_or(0) as u32
+                    )
                     .saturating_add(1)
                     .to_string()
             }
@@ -539,8 +317,8 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                 let (Some(item), Some(shell)) = (weak.upgrade(), shell.upgrade()) else {
                     return;
                 };
-                let Some(FolderTableRow::Track(track)) =
-                    crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(&item)
+                let Some(Row::Track(track)) =
+                    crate::widgets::view_model::item_at_from_item::<Row>(&item)
                 else {
                     return;
                 };
@@ -556,12 +334,11 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
         item.set_child(Some(&cell));
     });
     let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(row) = crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(item)
-        else {
+        let Some(row) = crate::widgets::view_model::item_at_from_item::<Row>(item) else {
             return;
         };
         let Some(cell) = crate::widgets::recycled_cells::list_cell::<
@@ -577,7 +354,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
         };
         let cover = cell.cover();
         match row {
-            FolderTableRow::Folder(folder) => {
+            Row::Folder(folder) => {
                 bind_shell.artwork.clear_artwork_tile(&cover);
                 cover.widget().set_visible(false);
                 icon.set_visible(true);
@@ -587,7 +364,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                     downloaded.set_visible(false);
                 }
             }
-            FolderTableRow::Track(track) => {
+            Row::Track(track) => {
                 icon.set_visible(false);
                 cover.widget().set_visible(true);
                 bind_shell.artwork.bind_artwork_tile(
@@ -613,6 +390,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                     );
                 }
             }
+            _ => {}
         }
     });
     let clear_shell = Rc::clone(shell);
@@ -647,45 +425,43 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
 fn folder_column(
     shell: &Rc<CatalogUi>,
     path: Vec<FolderPathItem>,
-    folders: Rc<crate::widgets::sparse_model::SparseRouteModel<(), FolderTableRow>>,
+    rows: Rows<Row>,
     playing: &crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     field: LibraryField,
 ) -> gtk::ColumnViewColumn {
     use crate::widgets::library_fields::TrackPresentation;
     let width = super::columns::track_column_width(LibraryListKey::Folders, field);
     match field {
-        LibraryField::RowIndex => return folder_index_column(folders, playing.clone()),
+        LibraryField::RowIndex => return folder_index_column(rows, playing.clone()),
         LibraryField::TitleMerged => return folder_merged_column(shell, path),
         LibraryField::Image => {
-            return super::columns::mapped_track_image_column::<FolderTableRow, _, _>(
+            return super::columns::mapped_track_image_column::<Row, _, _>(
                 shell,
                 rufin_core::settings::presentation::library_field_title(field),
                 width,
                 |row| match row {
-                    FolderTableRow::Track(track) => Some(track.media_uri.clone()),
-                    FolderTableRow::Folder(_) => None,
+                    Row::Track(track) => Some(track.media_uri.clone()),
+                    _ => None,
                 },
                 |row| match row {
-                    FolderTableRow::Track(track) => crate::widgets::library_fields::opaque_artwork(
+                    Row::Track(track) => crate::widgets::library_fields::opaque_artwork(
                         track.artwork_binding.as_deref(),
                     ),
-                    FolderTableRow::Folder(_) => Default::default(),
+                    _ => Default::default(),
                 },
             );
         }
         LibraryField::Favorite | LibraryField::Tools => {
-            return super::columns::mapped_track_actions_column::<FolderTableRow, _, _>(
+            return super::columns::mapped_track_actions_column::<Row, _, _>(
                 shell,
                 field,
                 |row| match row {
-                    FolderTableRow::Track(track) => Some(track.media_uri.clone()),
-                    FolderTableRow::Folder(_) => None,
+                    Row::Track(track) => Some(track.media_uri.clone()),
+                    _ => None,
                 },
                 |row| match row {
-                    FolderTableRow::Track(track) => {
-                        Some((track.media_uri.clone(), track.state.favorite))
-                    }
-                    FolderTableRow::Folder(_) => None,
+                    Row::Track(track) => Some((track.media_uri.clone(), track.state.favorite)),
+                    _ => None,
                 },
             );
         }
@@ -706,7 +482,7 @@ fn folder_column(
                 | LibraryField::Genre
         ),
         move |row| match row {
-            FolderTableRow::Folder(folder) => {
+            Row::Folder(folder) => {
                 let fields = value_shell
                     .settings
                     .current
@@ -719,11 +495,12 @@ fn folder_column(
                     String::new()
                 }
             }
-            FolderTableRow::Track(track) => track.field(field),
+            Row::Track(track) => track.field(field),
+            _ => String::new(),
         },
         move |row| match row {
-            FolderTableRow::Folder(_) => None,
-            FolderTableRow::Track(track) => Some(track.links(field)),
+            Row::Track(track) => Some(track.links(field)),
+            _ => None,
         },
     );
     configure_folder_column(&column, width);
@@ -753,8 +530,8 @@ fn folder_text_column(
     title: &str,
     max_width_chars: i32,
     tabular_numeric: bool,
-    value: impl Fn(&FolderTableRow) -> String + 'static,
-    links: impl Fn(&FolderTableRow) -> Option<rufin_core::route::detail_links::DetailLinks> + 'static,
+    value: impl Fn(&Row) -> String + 'static,
+    links: impl Fn(&Row) -> Option<rufin_core::route::detail_links::DetailLinks> + 'static,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
@@ -780,8 +557,8 @@ fn folder_text_column(
             &cell,
             Rc::new(move |target, position| {
                 let Some(item) = weak.upgrade() else { return };
-                let Some(FolderTableRow::Track(track)) =
-                    crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(&item)
+                let Some(Row::Track(track)) =
+                    crate::widgets::view_model::item_at_from_item::<Row>(&item)
                 else {
                     return;
                 };
@@ -796,12 +573,11 @@ fn folder_text_column(
         install_folder_cell_activation(&cell, item, &setup_shell, path.clone());
         item.set_child(Some(&cell));
     });
-    connect_sparse_bind(&factory, move |item| {
+    connect_row_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(row) = crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(item)
-        else {
+        let Some(row) = crate::widgets::view_model::item_at_from_item::<Row>(item) else {
             return;
         };
         let Some(cell) = crate::widgets::recycled_cells::list_cell::<
@@ -843,8 +619,7 @@ fn install_folder_cell_activation(
             return;
         }
         let Some(item) = item.upgrade() else { return };
-        let Some(FolderTableRow::Folder(folder)) =
-            crate::widgets::sparse_model::item_at_from_item::<FolderTableRow>(&item)
+        let Some(Row::Folder(folder)) = crate::widgets::view_model::item_at_from_item::<Row>(&item)
         else {
             return;
         };

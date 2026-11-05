@@ -92,43 +92,52 @@ async fn selected_parent_collections(
         .map_err(|error| error.to_string())
 }
 
-pub fn install_parent_selection<K, R>(
-    sparse: &Rc<crate::widgets::sparse_model::SparseRouteModel<K, R>>,
-    view: &crate::widgets::mounted_route::RouteView,
-    target: impl Fn(&R) -> Option<PlayRequest> + Send + Sync + 'static,
-) where
-    K: Clone + Eq + Send + Sync + 'static,
-    R: Clone + PartialEq + Send + Sync + 'static,
-{
-    let weak = Rc::downgrade(sparse);
-    let view = Rc::downgrade(view);
-    sparse
-        .list_model()
+/// The collection a collection row lists, compared by key: a smart playlist at any time.
+fn row_collection(row: &library::Row) -> Option<library::Collection> {
+    use library::{Collection, PlaylistListRow, Row, TagKind};
+    Some(match row {
+        Row::Album(album) => Collection::Album(album.album_key),
+        Row::Artist(artist) => Collection::Artist {
+            key: artist.artist_key,
+            album_artist: artist.album_artist,
+        },
+        Row::Tag(tag) if tag.kind == TagKind::Genre => {
+            Collection::Genre(library::GenreKey::from_raw(tag.key))
+        }
+        Row::Tag(tag) => Collection::Mood(library::MoodKey::from_raw(tag.key)),
+        Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
+            Collection::Playlist(playlist.playlist_key)
+        }
+        Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => Collection::Smart {
+            key: smart.smart_playlist_key,
+            now: 0,
+        },
+        _ => return None,
+    })
+}
+
+/// Lets a drag of a selected collection row carry the selected rows of `rows`' list.
+pub fn install_parent_selection(rows: &crate::widgets::view_model::Rows<library::Row>) {
+    let weak = rows.list_model().downgrade();
+    rows.list_model()
         .set_collection_selection(Box::new(move |dragged, positions| {
-            let sparse = weak.upgrade()?;
-            let Some(library::MemberSelection::Parents { read, .. }) =
-                view.upgrade()?.borrow().selection()
+            let rows = crate::widgets::view_model::Rows::<library::Row>::of(&weak.upgrade()?);
+            let Some(library::MemberSelection::Parents { read, .. }) = rows.view()?.selection()
             else {
                 return None;
             };
-            let position = sparse.ready_position(|row| {
-                match (
-                    target(row).and_then(|target| target.selection()),
-                    dragged.selection(),
-                ) {
-                    (
-                        Some(library::MemberSelection::Members { read: left, .. }),
-                        Some(library::MemberSelection::Members { read: right, .. }),
-                    ) => match (&left.collection, &right.collection) {
-                        (
-                            library::Collection::Smart { key: left, .. },
-                            library::Collection::Smart { key: right, .. },
-                        ) => left == right,
-                        _ => left == right,
-                    },
-                    (left, right) => left == right,
-                }
-            })?;
+            let Some(library::MemberSelection::Members { read: dragged, .. }) = dragged.selection()
+            else {
+                return None;
+            };
+            let same = |row: &library::Row| match (row_collection(row), &dragged.collection) {
+                (
+                    Some(library::Collection::Smart { key: left, .. }),
+                    library::Collection::Smart { key: right, .. },
+                ) => left == *right,
+                (left, right) => left.as_ref() == Some(right),
+            };
+            let position = rows.ready_position(same)?;
             positions.contains(position).then(|| {
                 CollectionTargets::Parents(vec![(
                     read,
