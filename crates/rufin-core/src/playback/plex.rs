@@ -1418,20 +1418,6 @@ impl PlaybackOwner {
             );
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
-            let source = plex.connection().0.clone();
-            let local = self.settings.local_configuration();
-            let playable = self
-                .catalog
-                .playable(row.track.track_key)
-                .await
-                .map_err(string_error)?
-                .ok_or("The current Plex track is not available locally")?;
-            let stream = prepare_stream(&playable, request, local.as_ref(), None, move |_| async {
-                Ok(source)
-            })
-            .await
-            .map_err(string_error)?;
-            let prepared = prepare_media_stream(stream, super::track_loudness(&playable), row);
             check_cancelled(&cancelled)?;
             queue.progress_millis = plex
                 .playback
@@ -1439,19 +1425,19 @@ impl PlaybackOwner {
                 .map_err(string_error)?
                 .0
                 .progress_millis;
-            let playback = plex.playback.clone();
-            tokio::task::spawn_blocking(move || {
-                playback.adopt_local(
+            self.adopt_here(
+                plex.playback.clone(),
+                super::continuation::Adoption {
                     queue,
-                    prepared,
-                    matches!(timeline.state.as_str(), "playing" | "buffering"),
-                    None,
-                    backend,
-                )
-            })
-            .await
-            .map_err(string_error)?
-            .map_err(string_error)?;
+                    row,
+                    request,
+                    client: Some(plex.connection().0.clone()),
+                    playing: matches!(timeline.state.as_str(), "playing" | "buffering"),
+                    listen: None,
+                },
+                backend,
+            )
+            .await?;
             plex.cancel();
             Ok::<_, String>(())
         })?;

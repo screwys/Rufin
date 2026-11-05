@@ -392,15 +392,11 @@ pub(crate) async fn smart_totals(
             .map(|smart| (smart.key, smart.definition.clone()))
             .collect::<Vec<_>>()
     };
-    let mut inputs = crate::catalog::views::Inputs::default();
-    catalog
-        .read_periods(
+    let inputs = catalog
+        .smart_inputs(
             connection,
-            &mut inputs,
-            definitions
-                .iter()
-                .filter_map(|(_, definition)| crate::catalog::views::smart_period(definition))
-                .collect(),
+            keys.iter()
+                .map(|key| crate::Item::Smart(crate::SmartPlaylistKey::from_raw(*key))),
             now,
         )
         .await?;

@@ -1131,6 +1131,13 @@ impl Owned for Tag {
     fn set_header(&mut self, metadata: &TagMetadata, _json: Value) {
         self.metadata = metadata.clone();
     }
+
+    /// Albums show the names of their tracks' genres.
+    fn touch(&self, touched: &mut Touched, header: bool) {
+        if header {
+            touched.tags.insert(self.key);
+        }
+    }
 }
 
 impl Row for Folder {

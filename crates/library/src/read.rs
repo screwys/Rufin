@@ -1250,7 +1250,7 @@ pub(crate) fn show_listen(row: &mut TrackRow, listen: &ListenWrite, listened: Pl
 
 impl Catalog {
     /// Listens in the windows the smart playlists these items total read.
-    async fn smart_inputs(
+    pub(crate) async fn smart_inputs(
         &self,
         connection: &mut sqlx::SqliteConnection,
         items: impl Iterator<Item = Item>,

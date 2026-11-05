@@ -154,6 +154,7 @@ pub(crate) struct Touched {
     pub(crate) tracks: BTreeSet<i64>,
     pub(crate) albums: BTreeSet<i64>,
     pub(crate) artists: BTreeSet<i64>,
+    pub(crate) tags: BTreeSet<i64>,
 }
 
 /// The kinds providers name in completion and removal.
@@ -935,7 +936,11 @@ async fn memberships(
 
 /// Resolves the albums of what a batch staged.
 pub(crate) async fn resolve(write: &mut Write<'_>, touched: &mut Touched) -> LibraryResult<()> {
-    if touched.tracks.is_empty() && touched.albums.is_empty() && touched.artists.is_empty() {
+    if touched.tracks.is_empty()
+        && touched.albums.is_empty()
+        && touched.artists.is_empty()
+        && touched.tags.is_empty()
+    {
         return Ok(());
     }
     let mut albums = touched.albums.clone();
@@ -958,6 +963,16 @@ pub(crate) async fn resolve(write: &mut Write<'_>, touched: &mut Touched) -> Lib
             .fetch_all(write.connection().await?)
             .await?;
         albums.extend(credited);
+    }
+    // A genre's name shows in the albums of the tracks it tags.
+    if !touched.tags.is_empty() {
+        let tagged: Vec<i64> = sqlx::query_scalar("SELECT DISTINCT track.album_key FROM track_links link JOIN tracks track USING(track_key) WHERE link.role IN(?2,?3) AND link.target IN(SELECT value FROM json_each(?1)) AND track.album_key IS NOT NULL")
+            .bind(serde_json::to_string(&touched.tags)?)
+            .bind(crate::schema::LINK_GENRE)
+            .bind(crate::schema::LINK_MOOD)
+            .fetch_all(write.connection().await?)
+            .await?;
+        albums.extend(tagged);
     }
     super::albums::resolve(write, &albums).await?;
     Ok(())
@@ -1149,11 +1164,9 @@ pub(crate) async fn remove_items(
                 .albums
                 .extend(albums.iter().map(|album| album.key.raw()));
         }
+        // Album resolution never reads whether an artist is indexed.
         Kind::Artist => {
-            let artists = withdraw::<Artist>(write, source, None, ids).await?;
-            touched
-                .artists
-                .extend(artists.iter().map(|artist| artist.key.raw()));
+            withdraw::<Artist>(write, source, None, ids).await?;
         }
         Kind::Tag(tag) => {
             withdraw::<Tag>(write, source, Some(tag), ids).await?;

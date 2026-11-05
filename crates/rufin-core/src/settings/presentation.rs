@@ -369,48 +369,12 @@ pub fn format_duration_units(seconds: u32) -> String {
     format!("{seconds}s")
 }
 
+/// A track's text for one field, as its list row shows it.
 pub fn track_field(song: &TrackView, field: LibraryField) -> String {
-    let metadata = &song.metadata;
-    match field {
-        LibraryField::Title | LibraryField::TitleMerged => metadata.title.clone(),
-        LibraryField::Artist => metadata.artist.clone(),
-        LibraryField::Album => metadata.album.clone(),
-        LibraryField::AlbumArtist => joined_credits(&song.links.album_artists),
-        LibraryField::Year => optional_year(metadata.year),
-        LibraryField::ReleaseDate => metadata.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => metadata.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(song.state.last_played),
-        LibraryField::PlayCount => count(song.state.play_count),
-        LibraryField::UserRating => stored_rating(song.state.rating),
-        LibraryField::Bpm => metadata
-            .bpm
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&metadata.audio_properties, field),
-        LibraryField::Format => metadata.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => song.access.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => song.access.source_name.clone(),
-        LibraryField::DiscNumber => metadata.disc_number.to_string(),
-        LibraryField::TrackNumber => {
-            optional_track_number(Some(metadata.disc_number), Some(metadata.track_number))
-        }
-        LibraryField::Genre => song
-            .links
-            .genres
-            .iter()
-            .map(|genre| genre.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        LibraryField::Duration => format_duration((metadata.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(song.state.favorite),
-        _ => String::new(),
-    }
+    track_row_field(&library::TrackRow::from(song.clone()), field)
 }
 
-/// A list row's text for one field, as `track_field` gives it for a full track.
+/// A list row's text for one field.
 pub fn track_row_field(row: &TrackRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => row.title.clone(),

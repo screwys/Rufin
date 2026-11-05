@@ -127,10 +127,30 @@ impl Catalog {
 }
 
 impl super::Observation<'_> {
+    /// Clears the artist pictures media files read without their own picture. A refresh
+    /// where none are left writes nothing.
     pub async fn clear_partial_file_image_observations(&mut self) -> LibraryResult<()> {
+        const PARTIAL: &str = "source_key=?1 AND kind='media' AND picture_index IS NULL AND artist_pictures IS NOT NULL AND path NOT LIKE 'rufin-document://%' AND path NOT LIKE 'content://%'";
+        let partial: bool = {
+            let mut connection = self.catalog.acquire_reader().await?;
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT EXISTS(SELECT 1 FROM files WHERE {PARTIAL})"
+            )))
+            .bind(self.source)
+            .fetch_one(&mut *connection)
+            .await?
+        };
+        if !partial {
+            return Ok(());
+        }
         let mut write = self.write().await?;
-        let cleared = sqlx::query("UPDATE files SET artist_pictures=NULL WHERE source_key=?1 AND kind='media' AND picture_index IS NULL AND artist_pictures IS NOT NULL AND path NOT LIKE 'rufin-document://%' AND path NOT LIKE 'content://%'")
-            .bind(self.source).execute(write.connection().await?).await?.rows_affected();
+        let cleared = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE files SET artist_pictures=NULL WHERE {PARTIAL}"
+        )))
+        .bind(self.source)
+        .execute(write.connection().await?)
+        .await?
+        .rows_affected();
         keep_file_rows(write, cleared).await
     }
 }

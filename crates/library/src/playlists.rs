@@ -92,6 +92,44 @@ impl Catalog {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
+    /// How many listed tracks a genre's or mood's header counts.
+    pub fn tag_track_count(&self, header: &crate::HeaderKey) -> i64 {
+        let key = match header {
+            crate::HeaderKey::Genre(key) => key.raw(),
+            crate::HeaderKey::Mood(key) => key.raw(),
+            _ => return 0,
+        };
+        let snapshot = self.snapshot();
+        let Some(slot) = snapshot.tags.slot(key) else {
+            return 0;
+        };
+        let context = crate::catalog::views::Context::new(&snapshot);
+        self.derived(&context, None).tags[slot as usize]
+            .summary()
+            .track_count
+    }
+
+    /// The object ids of these playlists and smart playlists, from their resident records.
+    pub fn playlist_objects(
+        &self,
+        playlists: &[PlaylistKey],
+        smart: &[crate::SmartPlaylistKey],
+    ) -> (Vec<String>, Vec<String>) {
+        let snapshot = self.snapshot();
+        (
+            playlists
+                .iter()
+                .filter_map(|key| snapshot.playlists.get(key.raw()))
+                .map(|record| snapshot.text(record.object).to_owned())
+                .collect(),
+            smart
+                .iter()
+                .filter_map(|key| snapshot.smart_playlists.get(&key.raw()))
+                .map(|smart| smart.object.clone())
+                .collect(),
+        )
+    }
+
     /// Whether a playlist holds a track its source no longer lists, from its resident entries.
     pub fn playlist_holds_hidden(&self, playlist: PlaylistKey) -> bool {
         let snapshot = self.snapshot();

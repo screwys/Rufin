@@ -543,6 +543,7 @@ impl Records {
             return self.write(written, listened).await;
         };
         let mut kinds = Vec::new();
+        let (mut playlists, mut smart) = (Vec::new(), Vec::new());
         let mut states = Vec::new();
         let mut lyrics = Vec::new();
         let mut entries = Vec::new();
@@ -558,14 +559,14 @@ impl Records {
                     key,
                     entries: changed,
                 } => {
-                    kinds.extend(["playlist", "artwork"]);
+                    playlists.push(*key);
                     if *changed {
                         entries.push(*key);
                     }
                 }
                 // Playlists were added or removed, and their entries with them.
                 Scope::Playlists => kinds.extend(["playlist", "entry", "artwork"]),
-                Scope::Smart { .. } => kinds.extend(["smart", "artwork"]),
+                Scope::Smart { key } => smart.push(*key),
                 Scope::Folders => kinds.extend(["folder", "smart"]),
                 Scope::Analysis { hash } => hashes.push(*hash),
                 Scope::Queue => queue = true,
@@ -575,8 +576,23 @@ impl Records {
         kinds.sort_unstable();
         kinds.dedup();
         let mut written = Vec::new();
-        for kind in kinds {
+        for kind in &kinds {
             written.extend(self.compare(kind, true).await?);
+        }
+        // A changed playlist or smart playlist compares its own record and picture.
+        playlists.sort_unstable();
+        playlists.dedup();
+        smart.sort_unstable();
+        smart.dedup();
+        let (playlists, smart) = self.catalog.playlist_objects(&playlists, &smart);
+        for (kind, objects) in [("playlist", &playlists), ("smart", &smart)] {
+            if !objects.is_empty() && !kinds.contains(&kind) {
+                written.extend(self.compare_ids(kind, objects.clone()).await?);
+            }
+        }
+        let pictured = playlists.into_iter().chain(smart).collect::<Vec<_>>();
+        if !pictured.is_empty() && !kinds.contains(&"artwork") {
+            written.extend(self.compare_ids("artwork", pictured).await?);
         }
         if !states.is_empty() {
             states.sort_unstable();

@@ -2,6 +2,18 @@
 use super::*;
 use state::ContinuedListen;
 
+/// A queue another player played, to go on here.
+pub(super) struct Adoption {
+    pub(super) queue: library::QueueRestore,
+    /// Its current row.
+    pub(super) row: Arc<playback::QueueRow>,
+    pub(super) request: StreamRequest,
+    /// The client that streams it, keeping its session; None reads the source's.
+    pub(super) client: Option<Arc<sources::Source>>,
+    pub(super) playing: bool,
+    pub(super) listen: Option<ContinuedListen>,
+}
+
 impl PlaybackOwner {
     pub(crate) async fn return_empty_local(&self) -> Result<(), String> {
         let active = self.active().ok_or("Playback is unavailable")?;
@@ -51,29 +63,6 @@ impl PlaybackOwner {
             (&occurrence.track).media_uri.clone(),
             self.settings.playback_stream_quality(),
         );
-        let source = Arc::clone(&self.source);
-        let downloads = source.downloads().clone();
-        let local = self.settings.local_configuration();
-        let playable = self
-            .catalog
-            .playable(occurrence.track.track_key)
-            .await
-            .map_err(string_error)?
-            .ok_or("The current track is unavailable")?;
-        let stream = prepare_stream(
-            &playable,
-            request,
-            local.as_ref(),
-            Some(&downloads),
-            move |source_id| async move {
-                tokio::task::spawn_blocking(move || source.client(&source_id))
-                    .await
-                    .map_err(string_error)?
-            },
-        )
-        .await
-        .map_err(string_error)?;
-        let stream = prepare_media_stream(stream, super::track_loudness(&playable), occurrence);
         let backend =
             (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         let active = self.active().ok_or("Playback is unavailable")?;
@@ -85,14 +74,72 @@ impl PlaybackOwner {
             plex.stop_for_continuation().await?;
             self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
         }
+        self.adopt_here(
+            active,
+            Adoption {
+                queue,
+                row: occurrence,
+                request,
+                client: None,
+                playing,
+                listen,
+            },
+            backend,
+        )
+        .await?;
+        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
+        Ok(())
+    }
+
+    /// Plays a queue here from its current row: reads the row's playable, prepares its
+    /// stream and hands both to `playback`, which plays them on `backend`.
+    pub(super) async fn adopt_here(
+        &self,
+        playback: actor::Playback,
+        adoption: Adoption,
+        backend: Box<dyn PlaybackBackend>,
+    ) -> Result<(), String> {
+        let Adoption {
+            queue,
+            row,
+            request,
+            client,
+            playing,
+            listen,
+        } = adoption;
+        let playable = self
+            .catalog
+            .playable(row.track.track_key)
+            .await
+            .map_err(string_error)?
+            .ok_or("The current track is unavailable")?;
+        let local = self.settings.local_configuration();
+        let source = Arc::clone(&self.source);
+        // A fixed client keeps its session; otherwise a download or the source plays.
+        let downloads = client.is_none().then(|| source.downloads().clone());
+        let stream = prepare_stream(
+            &playable,
+            request,
+            local.as_ref(),
+            downloads.as_ref(),
+            move |source_id| async move {
+                match client {
+                    Some(client) => Ok(client),
+                    None => tokio::task::spawn_blocking(move || source.client(&source_id))
+                        .await
+                        .map_err(string_error)?,
+                }
+            },
+        )
+        .await
+        .map_err(string_error)?;
+        let stream = prepare_media_stream(stream, super::track_loudness(&playable), row);
         tokio::task::spawn_blocking(move || {
-            active.adopt_local(queue, stream, playing, listen, backend)
+            playback.adopt_local(queue, stream, playing, listen, backend)
         })
         .await
         .map_err(string_error)?
-        .map_err(string_error)?;
-        *self.output.lock().unwrap_or_else(|p| p.into_inner()) = playback::PlaybackOutput::Local;
-        Ok(())
+        .map_err(string_error)
     }
 
     /// The listen of the track this device plays, for a device that continues it.

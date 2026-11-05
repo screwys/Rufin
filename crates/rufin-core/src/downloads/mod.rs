@@ -1022,49 +1022,13 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
     loop {
-        if receiver.is_closed() {
-            actor.abort_matching(&mut active, true, |_| true).await;
-            break;
-        }
-        if let Ok(command) = receiver.try_recv() {
-            actor.apply(command, &mut active).await;
-            continue;
-        }
-        if let Ok(prepared) = rule_results.try_recv() {
-            actor.apply_prepared_rules(prepared, &mut active).await;
-            continue;
-        }
         actor.fill_slots(&mut active).await;
-        if !active.is_empty() {
-            tokio::select! {
-                command = receiver.recv() => {
-                    let Ok(command) = command else {
-                        actor.abort_matching(&mut active, true, |_| true).await;
-                        break;
-                    };
-                    actor.apply(command, &mut active).await;
-                }
-                Ok(prepared) = rule_results.recv() => {
-                    actor.apply_prepared_rules(prepared, &mut active).await;
-                }
-                (index, result) = wait_for_finished(&mut active) => {
-                    let current = active.swap_remove(index);
-                    actor.finish(current, result, &mut active).await;
-                }
-                Ok(()) = committed.changed() => {
-                    let current = Arc::clone(&committed.borrow_and_update());
-                    if current.ui.downloads != previous.ui.downloads {
-                        actor.settings_changed(&mut active).await;
-                    }
-                    previous = current;
-                }
-                _ = retry.tick() => actor.retry_waiting(),
-            }
-            continue;
-        }
+        // Commands come first, then prepared rules, then transfers and the settings.
         tokio::select! {
+            biased;
             command = receiver.recv() => {
                 let Ok(command) = command else {
+                    actor.abort_matching(&mut active, true, |_| true).await;
                     break;
                 };
                 actor.apply(command, &mut active).await;
@@ -1072,16 +1036,18 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
             Ok(prepared) = rule_results.recv() => {
                 actor.apply_prepared_rules(prepared, &mut active).await;
             }
+            (index, result) = wait_for_finished(&mut active), if !active.is_empty() => {
+                let current = active.swap_remove(index);
+                actor.finish(current, result, &mut active).await;
+            }
             Ok(()) = committed.changed() => {
                 let current = Arc::clone(&committed.borrow_and_update());
                 if current.ui.downloads != previous.ui.downloads {
-                    actor.settings_changed(&mut active).await;
+                    actor.settings_changed(&previous, &mut active).await;
                 }
                 previous = current;
             }
-            _ = retry.tick() => {
-                actor.retry_waiting();
-            }
+            _ = retry.tick() => actor.retry_waiting(),
         }
     }
 }
@@ -1297,11 +1263,22 @@ impl Actor {
     }
 
     /// Follows the committed download settings: a source whose folder moved leaves what it
-    /// downloaded to the old one, queued jobs take their source's quality, and the rules run
-    /// again.
-    async fn settings_changed(&mut self, active: &mut Vec<ActiveDownload>) {
+    /// downloaded to the old one, queued jobs take their source's quality, and the rules of a
+    /// source whose settings changed run again.
+    async fn settings_changed(
+        &mut self,
+        previous: &crate::settings::StoredSettings,
+        active: &mut Vec<ActiveDownload>,
+    ) {
         let stored = self.settings.load();
-        let source_ids = self.attached.keys().cloned().collect::<Vec<_>>();
+        let source_ids = self
+            .attached
+            .keys()
+            .filter(|source_id| {
+                previous.ui.download_settings(source_id) != stored.ui.download_settings(source_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         for source_id in &source_ids {
             let directory = stored.ui.download_settings(source_id).directory;
             if self
@@ -1320,7 +1297,7 @@ impl Actor {
             }
         }
         for (source_id, jobs) in &mut self.jobs {
-            if let Some(source_id) = source_id {
+            if let Some(source_id) = source_id.as_ref().filter(|id| source_ids.contains(id)) {
                 let quality = stored.ui.download_settings(source_id).quality;
                 for job in jobs {
                     job.quality = quality;
@@ -1335,6 +1312,20 @@ impl Actor {
     /// Reconciles the rules of the sources Changes touched: their tracks for every rule,
     /// favorites for the favorites rule and playlists for the playlists rule.
     fn library_changed(&mut self, changes: Option<&[Arc<Change>]>) {
+        // A favorite or rating counts for the source of what it names.
+        let stated = changes.map_or_else(Default::default, |changes| {
+            let items = changes
+                .iter()
+                .flat_map(|change| &change.scopes)
+                .filter_map(|scope| match scope {
+                    Scope::State { items } => Some(items.as_slice()),
+                    _ => None,
+                })
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>();
+            self.catalog.state_sources(&items)
+        });
         let sources =
             self.attached
                 .iter()
@@ -1353,7 +1344,9 @@ impl Actor {
                                     | Scope::Source { key: source, .. } => {
                                         *source == attached.source_key
                                     }
-                                    Scope::State { .. } => rules.favorites,
+                                    Scope::State { .. } => {
+                                        rules.favorites && stated.contains(&attached.source_key)
+                                    }
                                     Scope::Playlist { entries: true, .. } | Scope::Playlists => {
                                         rules.all_playlists
                                     }

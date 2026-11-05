@@ -191,14 +191,9 @@ impl SourceOwner {
             .await?;
         Ok(Some(match plan {
             Plan::Rows(Read::Members(read)) | Plan::Folders { tracks: read, .. } => {
-                // A tag page with no tracks reads as missing.
-                if matches!(header, Some(HeaderKey::Genre(_) | HeaderKey::Mood(_)))
-                    && self
-                        .shared
-                        .catalog
-                        .order(&Read::Members(read.clone()), cancel)
-                        .await?
-                        .is_empty()
+                // A tag page with no tracks reads as missing, as its header counts them.
+                if let Some(header @ (HeaderKey::Genre(_) | HeaderKey::Mood(_))) = &header
+                    && self.shared.catalog.tag_track_count(header) == 0
                 {
                     return Ok(None);
                 }
@@ -1156,6 +1151,46 @@ pub enum HomeSection {
     /// A section the source's server lists.
     Provider(HomeProviderSection),
     Genres(Vec<TagRow>),
+}
+
+/// One row of a Home section.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HomeItem {
+    Track(Box<HomeTrackRow>),
+    Album(Box<HomeAlbumRow>),
+}
+
+impl HomeSection {
+    /// Its title as the page shows it.
+    pub fn title(&self) -> String {
+        use crate::settings::presentation::{home_block_title, home_provider_title};
+        match self {
+            Self::Showcase(_) => localization::tr(home_block_title(HomeBlockKind::Showcase)),
+            Self::Genres(_) => localization::tr(home_block_title(HomeBlockKind::Genres)),
+            Self::Rows { block, .. } => localization::tr(home_block_title(*block)),
+            Self::Provider(provider) => {
+                home_provider_title(&provider.section_id, provider.title.as_deref())
+            }
+        }
+    }
+
+    /// Its rows in the order the page shows them: tracks, then albums.
+    pub fn items(&self) -> Vec<HomeItem> {
+        let rows = match self {
+            Self::Rows { rows, .. } => rows,
+            Self::Provider(provider) => &provider.rows,
+            Self::Showcase(_) | Self::Genres(_) => return Vec::new(),
+        };
+        rows.tracks
+            .iter()
+            .map(|row| HomeItem::Track(Box::new(row.clone())))
+            .chain(
+                rows.albums
+                    .iter()
+                    .map(|row| HomeItem::Album(Box::new(row.clone()))),
+            )
+            .collect()
+    }
 }
 
 /// Home's sections in the order clients show them: the visible `blocks` in their order, except

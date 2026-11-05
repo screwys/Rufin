@@ -1,7 +1,7 @@
 //! Owns the Store (the fixed SQLite writer, bounded read pools and read cancellation) and the
 //! resident Catalog state. It creates no runtime and contains no product query policy.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -219,6 +219,25 @@ impl Catalog {
                 record.source() == slot && record.flags() & crate::catalog::snapshot::INDEXED != 0
             })
             .count()
+    }
+
+    /// The sources of the tracks, albums and artists these state changes name.
+    pub fn state_sources(&self, items: &[crate::StateChange]) -> BTreeSet<SourceKey> {
+        use crate::catalog::snapshot::Packed;
+        let snapshot = self.snapshot();
+        items
+            .iter()
+            .filter_map(|item| {
+                let slot = if let Some(track) = item.track() {
+                    snapshot.tracks.get(track.raw())?.source()
+                } else if let Some(album) = item.album() {
+                    snapshot.albums.get(album.raw())?.source
+                } else {
+                    snapshot.artists.get(item.artist()?.raw())?.source
+                };
+                snapshot.source_key(slot)
+            })
+            .collect()
     }
 
     /// Whether the Catalog holds each of these tracks with a source.

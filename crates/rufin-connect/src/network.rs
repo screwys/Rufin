@@ -755,20 +755,38 @@ impl ConnectNetwork {
     }
 
     pub async fn request(&self, peer: &str, body: Vec<u8>) -> Result<Vec<u8>> {
-        let connection =
-            tokio::time::timeout(Duration::from_secs(30), self.connect(peer, RPC_PROTOCOL))
-                .await
-                .context("Device is unreachable")??;
+        self.exchange(peer, &body, TRUSTED_FRAME, Duration::from_secs(30))
+            .await
+            .map(|(response, _)| response)
+    }
+
+    /// One RPC exchange, connecting within `deadline`, with frames up to `frame` bytes: the
+    /// answer and the path the connection took.
+    async fn exchange(
+        &self,
+        peer: &str,
+        body: &[u8],
+        frame: usize,
+        deadline: Duration,
+    ) -> Result<(Vec<u8>, Option<iroh::TransportAddr>)> {
+        let connection = tokio::time::timeout(deadline, self.connect(peer, RPC_PROTOCOL))
+            .await
+            .context("Device is unreachable")??;
         let answered = async {
             let (mut send, mut recv) = connection.open_bi().await?;
-            write_frame(&mut send, &body, TRUSTED_FRAME).await?;
+            write_frame(&mut send, &body, frame).await?;
             send.finish()?;
-            read_frame::<Result<Vec<u8>, String>>(&mut recv, TRUSTED_FRAME).await
+            read_frame::<Result<Vec<u8>, String>>(&mut recv, frame).await
         }
         .await;
-        let response = self.settle(&connection, answered).await?;
+        let response = self.settle(&connection, answered).await;
+        let path = connection
+            .paths()
+            .iter()
+            .find(|path| path.is_selected())
+            .map(|path| path.remote_addr().clone());
         connection.close(0u32.into(), b"complete");
-        response.map_err(anyhow::Error::msg)
+        Ok((response?.map_err(anyhow::Error::msg)?, path))
     }
 
     pub async fn stream_request(&self, peer: &str, body: Vec<u8>) -> Result<PeerByteResponse> {
@@ -796,47 +814,33 @@ impl ConnectNetwork {
     }
 
     pub async fn test_connection(&self, peer: &str, body: Vec<u8>) -> Result<(String, Vec<u8>)> {
-        tokio::time::timeout(Duration::from_secs(15), async {
-            let connection = self.connect(peer, RPC_PROTOCOL).await?;
-            let answered = async {
-                let (mut send, mut recv) = connection.open_bi().await?;
-                write_frame(&mut send, &body, MAX_FRAME).await?;
-                send.finish()?;
-                read_frame::<Result<Vec<u8>, String>>(&mut recv, MAX_FRAME).await
-            }
-            .await;
-            let response = self
-                .settle(&connection, answered)
-                .await?
-                .map_err(anyhow::Error::msg)?;
-            let route = connection
-                .paths()
-                .iter()
-                .find(|path| path.is_selected())
-                .map(|path| match path.remote_addr() {
-                    iroh::TransportAddr::Relay(_) => localization::msgid("Via relay"),
-                    iroh::TransportAddr::Ip(address) => match address.ip() {
-                        std::net::IpAddr::V4(ip)
-                            if ip.is_private() || ip.is_loopback() || ip.is_link_local() =>
-                        {
-                            localization::msgid("Local network")
-                        }
-                        std::net::IpAddr::V6(ip)
-                            if ip.is_unique_local()
-                                || ip.is_loopback()
-                                || ip.is_unicast_link_local() =>
-                        {
-                            localization::msgid("Local network")
-                        }
-                        _ => localization::msgid("Direct"),
-                    },
+        // A test answers within its deadline, not only connects.
+        let deadline = Duration::from_secs(15);
+        let (response, path) =
+            tokio::time::timeout(deadline, self.exchange(peer, &body, MAX_FRAME, deadline))
+                .await??;
+        let route = path
+            .map(|address| match address {
+                iroh::TransportAddr::Relay(_) => localization::msgid("Via relay"),
+                iroh::TransportAddr::Ip(address) => match address.ip() {
+                    std::net::IpAddr::V4(ip)
+                        if ip.is_private() || ip.is_loopback() || ip.is_link_local() =>
+                    {
+                        localization::msgid("Local network")
+                    }
+                    std::net::IpAddr::V6(ip)
+                        if ip.is_unique_local()
+                            || ip.is_loopback()
+                            || ip.is_unicast_link_local() =>
+                    {
+                        localization::msgid("Local network")
+                    }
                     _ => localization::msgid("Direct"),
-                })
-                .map_or_else(|| localization::tr("Waiting for device"), localization::tr);
-            connection.close(0u32.into(), b"connection test complete");
-            Ok((route, response))
-        })
-        .await?
+                },
+                _ => localization::msgid("Direct"),
+            })
+            .map_or_else(|| localization::tr("Waiting for device"), localization::tr);
+        Ok((route, response))
     }
 
     pub async fn shutdown(&self) -> Result<()> {

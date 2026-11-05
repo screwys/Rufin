@@ -36,7 +36,9 @@ pub use layout::{
     available_grid_fields, available_row_fields, available_sort_fields,
     default_library_list_settings, sanitized_window_size,
 };
-pub use sidebar::{SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings};
+pub use sidebar::{
+    HomeBlockRow, SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings,
+};
 
 use std::fs;
 use std::io::{ErrorKind, Write as _};
@@ -633,6 +635,64 @@ impl SettingsOwner {
         edit: impl FnOnce(&mut UiSettings) -> Result<(), String>,
     ) -> Result<(), String> {
         self.file.edit(move |stored| edit(&mut stored.ui))
+    }
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl SettingsOwner {
+    /// The Home blocks as the block editor lists them.
+    pub fn home_block_rows(&self) -> Vec<sidebar::HomeBlockRow> {
+        sidebar::home_block_rows(&self.file.load().ui.application.home_blocks)
+    }
+
+    pub fn set_home_block_visible(
+        &self,
+        block: library::HomeBlockKind,
+        visible: bool,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::set_home_block_visible(
+                    &mut stored.ui.application.home_blocks,
+                    block,
+                    visible,
+                ))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn move_home_block(
+        &self,
+        block: library::HomeBlockKind,
+        delta: i32,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::move_home_block(
+                    &mut stored.ui.application.home_blocks,
+                    block,
+                    delta as isize,
+                ))
+            })
+            .map_err(Into::into)
+    }
+
+    pub fn reorder_home_block(
+        &self,
+        source: library::HomeBlockKind,
+        target: library::HomeBlockKind,
+        after: bool,
+    ) -> Result<bool, SettingsError> {
+        self.file
+            .update(|stored| {
+                Ok(sidebar::reorder_home_block(
+                    &mut stored.ui.application.home_blocks,
+                    source,
+                    target,
+                    after,
+                ))
+            })
+            .map_err(Into::into)
     }
 }
 

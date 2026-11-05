@@ -96,7 +96,7 @@ pub struct TrackView {
     pub artwork_binding: Option<Vec<u8>>,
 }
 
-/// A track as a list row shows it. A TrackView knows no date added, so the row has none.
+/// A track as a list row shows it. A TrackView knows the day it was added.
 impl From<TrackView> for crate::TrackRow {
     fn from(track: TrackView) -> Self {
         Self {
@@ -115,7 +115,13 @@ impl From<TrackView> for crate::TrackRow {
             track_number: track.metadata.track_number,
             year: track.metadata.year,
             bpm: track.metadata.bpm,
-            date_added: None,
+            date_added: track
+                .metadata
+                .date_added
+                .as_deref()
+                .and_then(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+                .and_then(|day| day.and_hms_opt(0, 0, 0))
+                .map(|time| time.and_utc().timestamp()),
             source_format: track.metadata.source_format,
             state: track.state,
             is_downloaded: track.access.is_downloaded,
