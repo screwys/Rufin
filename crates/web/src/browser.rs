@@ -1,5 +1,7 @@
 use super::*;
 use askama::Template;
+use library::{PlaylistListRow, Row};
+use rufin_core::menu::Menu;
 
 #[path = "../../../web/gettext.rs"]
 mod web_gettext;
@@ -47,188 +49,280 @@ struct Index<'a> {
     pub page: &'a Page,
 }
 
-struct Row<'a> {
-    data: &'a Value,
-    parameters: &'a HashMap<String, String>,
-    csrf: &'a str,
-    menu_id: String,
+/// What a page's forms carry back: the browser session's form token and the page to return to.
+pub(super) struct Form {
+    csrf: String,
+    return_to: String,
 }
 
-/// A field a card shows under its title, with its text.
-struct Label<'a> {
-    field: &'a str,
-    text: &'a str,
-}
-
-/// A column of a track list: its field, and its header's title, class and icon.
-struct Column<'a> {
-    field: &'a str,
+/// A field a list shows: a card's label or a track list's column, with its header's title,
+/// class and icon.
+struct Column {
+    field: LibraryField,
     title: String,
     class: &'static str,
     icon: &'static str,
 }
 
-impl<'a> Column<'a> {
-    fn new(field: &'a str) -> Self {
-        let parsed = serde_json::from_value::<LibraryField>(Value::String(field.into())).ok();
-        let (class, icon) = match parsed {
-            Some(LibraryField::RowIndex) => ("number", ""),
-            Some(LibraryField::Album) => ("album", ""),
-            Some(LibraryField::Duration) => ("duration", "rufin-preferences-system-time-symbolic"),
-            Some(LibraryField::Favorite) => ("favorite", "rufin-heart-outline-symbolic"),
-            Some(LibraryField::Tools) => ("actions", ""),
+impl Column {
+    fn new(field: LibraryField) -> Self {
+        let (class, icon) = match field {
+            LibraryField::RowIndex => ("number", ""),
+            LibraryField::Album => ("album", ""),
+            LibraryField::Duration => ("duration", "rufin-preferences-system-time-symbolic"),
+            LibraryField::Favorite => ("favorite", "rufin-heart-outline-symbolic"),
+            LibraryField::Tools => ("actions", ""),
             _ => ("", ""),
         };
-        let title = parsed
-            .and_then(rufin_core::settings::presentation::library_column_title)
-            .map(localization::tr)
-            .unwrap_or_default();
         Self {
             field,
-            title,
+            title: rufin_core::settings::presentation::library_column_title(field)
+                .map(localization::tr)
+                .unwrap_or_default(),
             class,
             icon,
         }
     }
 }
 
-impl Row<'_> {
-    /// The row's fields with text, in its list's order.
-    fn labels(&self) -> Vec<Label<'_>> {
-        self.data["fields"]
+/// A row as the page shows it.
+struct Shown<'a> {
+    row: Row,
+    /// Its title: Home rows have their own.
+    title: String,
+    /// Its JSON for the script: the row, its menu and the page it opens.
+    data: String,
+    fields: Vec<(LibraryField, String)>,
+    menu: Menu,
+    /// The link it opens; empty for tracks.
+    href: String,
+    /// What its Play buttons post: the list from it, or the page it opens.
+    play: String,
+    previews: Vec<String>,
+    /// Its position in its list.
+    index: usize,
+    menu_id: String,
+    form: &'a Form,
+}
+
+/// A row's JSON for the page's script: what the API lists for it, its menu, its index, and
+/// the page it opens, which keeps the source and music folder of `scope`.
+pub(super) fn row_data(
+    products: &ProductHandles,
+    settings: &rufin_core::settings::app::Settings,
+    row: &Row,
+    scope: &page::PageToken,
+) -> Value {
+    let mut value = page::row_json(products, row, true);
+    value["menu"] = json!(rufin_core::menu::menu(&products.source, settings, row));
+    if let Some(route) = rufin_core::route::Route::of_row(row) {
+        value["page"] = json!(scope.at(route));
+    }
+    value
+}
+
+impl<'a> Shown<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        products: &ProductHandles,
+        settings: &rufin_core::settings::app::Settings,
+        list: &page::PageToken,
+        row: Row,
+        title: Option<String>,
+        fields: &[LibraryField],
+        index: usize,
+        menu_id: String,
+        form: &'a Form,
+    ) -> Self {
+        let mut data = row_data(products, settings, &row, list);
+        if let Some(title) = &title {
+            data[if matches!(row, Row::Tag(_)) {
+                "name"
+            } else {
+                "title"
+            }] = json!(title);
+        }
+        data["index"] = json!(index);
+        let opens = rufin_core::route::Route::of_row(&row).map(|route| list.at(route));
+        let href = opens.as_ref().map_or_else(String::new, |token| {
+            link(&HashMap::from([("page".to_owned(), token.json())]))
+        });
+        let play = match (&row, &opens) {
+            (Row::Track(_) | Row::AlbumTrack { .. }, _) | (_, None) => {
+                json!({"page":list,"index":index})
+            }
+            (_, Some(token)) => json!({ "page": token }),
+        }
+        .to_string();
+        let previews = data["artwork_previews"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|label| {
-                Some(Label {
-                    field: label["field"].as_str()?,
-                    text: label["text"].as_str().filter(|text| !text.is_empty())?,
+            .map(|preview| preview.as_str().unwrap_or_default().to_owned())
+            .collect();
+        Self {
+            title: title.unwrap_or_else(|| {
+                rufin_core::settings::presentation::row_field(&row, LibraryField::Title)
+            }),
+            fields: fields
+                .iter()
+                .map(|field| {
+                    (
+                        *field,
+                        rufin_core::settings::presentation::row_field(&row, *field),
+                    )
                 })
-            })
-            .collect()
-    }
-
-    /// The row's text for `field`.
-    fn field_text(&self, field: &str) -> &str {
-        self.data["fields"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|label| label["field"] == field)
-            .and_then(|label| label["text"].as_str())
-            .unwrap_or_default()
-    }
-
-    fn preview_tiles(&self) -> Vec<&str> {
-        let previews = &self.data["artwork_previews"];
-        let count = self.number("artwork_count").max(1) as usize;
-        (0..if count > 1 { 4 } else { 1 })
-            .map(|part| previews[part % count].as_str().unwrap_or_default())
-            .collect()
-    }
-
-    fn href(&self, kind: &str) -> String {
-        let mut query = self.parameters.clone();
-        query.remove("offset");
-        query.remove("q");
-        query.remove("sort");
-        query.insert("title".into(), self.title().into());
-        query.insert("view".into(), kind.into());
-        query.insert(
-            "id".into(),
-            self.data["id"].to_string().trim_matches('"').into(),
-        );
-        link(&query)
-    }
-    fn artwork(&self, kind: &str) -> String {
-        let mut query = HashMap::new();
-        match kind {
-            "playlist" => {
-                query.insert("playlist".to_owned(), self.data["id"].to_string());
-            }
-            "smart-playlist" => {
-                query = self.parameters.clone();
-                query.insert("smart_playlist".into(), self.data["id"].to_string());
-            }
-            _ => {
-                query.insert("uri".into(), self.text("uri").into());
-            }
+                .collect(),
+            menu: rufin_core::menu::menu(&products.source, settings, &row),
+            data: data.to_string(),
+            href,
+            play,
+            previews,
+            index,
+            menu_id,
+            form,
+            row,
         }
-        format!(
-            "/api/artwork?{}",
-            url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(query)
-                .finish()
-        )
-    }
-    fn return_to(&self) -> String {
-        link(self.parameters)
-    }
-    fn selection(&self, kind: &str) -> String {
-        let mut value = json!({"kind":kind,"id":self.data["id"],"uri":self.data["uri"],"favorite":!self.favorite()});
-        if kind == "track" {
-            value["uris"] = json!([self.data["uri"]]);
-        }
-        if kind == "artist" {
-            value["album_artists"] = self.data["album_artists"].clone();
-        }
-        for field in ["source", "folder"] {
-            if (field != "folder" || matches!(kind, "track" | "smart-playlist"))
-                && let Some(text) = self.parameters.get(field)
-            {
-                value[field] = json!(text);
-            }
-        }
-        value.to_string()
     }
 
-    fn track_count(&self) -> String {
-        localization::track_count_text(self.number("track_count"))
-    }
-    fn text(&self, field: &str) -> &str {
-        self.data[field].as_str().unwrap_or_default()
+    fn kind(&self) -> &'static str {
+        match &self.row {
+            Row::Track(_) | Row::AlbumTrack { .. } => "track",
+            Row::Album(_) | Row::AlbumHeading(_) => "album",
+            Row::Artist(_) => "artist",
+            Row::Tag(tag) if tag.kind == library::TagKind::Genre => "genre",
+            Row::Tag(_) => "mood",
+            Row::Playlist(PlaylistListRow::Playlist(_)) => "playlist",
+            Row::Playlist(PlaylistListRow::SmartPlaylist(_)) => "smart-playlist",
+            Row::Playlist(PlaylistListRow::Folder(_)) => "playlist-folder",
+            Row::Folder(_) => "folder",
+        }
     }
 
-    fn number(&self, field: &str) -> u64 {
-        self.data[field].as_u64().unwrap_or_default()
-    }
-
-    fn title(&self) -> &str {
-        self.data["title"]
-            .as_str()
-            .unwrap_or_else(|| self.text("name"))
+    fn uri(&self) -> &str {
+        match &self.row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => &track.media_uri,
+            Row::Album(album) | Row::AlbumHeading(album) => &album.media_uri,
+            Row::Artist(artist) => &artist.media_uri,
+            Row::Tag(tag) => &tag.media_uri,
+            _ => "",
+        }
     }
 
     fn favorite(&self) -> bool {
-        self.data["favorite"].as_bool().unwrap_or(false)
+        match &self.row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => track.state.favorite,
+            Row::Album(album) | Row::AlbumHeading(album) => album.state.favorite,
+            Row::Artist(artist) => artist.state.favorite,
+            _ => false,
+        }
     }
 
-    fn duration(&self) -> String {
-        let seconds = self.number("duration_ms") / 1000;
-        format!("{}:{:02}", seconds / 60, seconds % 60)
+    /// What its heart posts: the opposite favorite.
+    fn favorite_payload(&self) -> String {
+        json!({"kind":self.kind(),"uri":self.uri(),"favorite":!self.favorite()}).to_string()
+    }
+
+    fn artist(&self) -> &str {
+        match &self.row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => &track.artist,
+            Row::Album(album) | Row::AlbumHeading(album) => &album.artist,
+            _ => "",
+        }
+    }
+
+    fn track_number(&self) -> i64 {
+        match &self.row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => track.track_number,
+            _ => 0,
+        }
+    }
+
+    fn year(&self) -> i64 {
+        match &self.row {
+            Row::Album(album) | Row::AlbumHeading(album) => album.year.unwrap_or_default(),
+            _ => 0,
+        }
+    }
+
+    fn summary(&self) -> Option<library::CollectionShown<'_>> {
+        self.row.collection()
+    }
+
+    fn track_count(&self) -> String {
+        localization::track_count_text(
+            self.summary()
+                .map_or(0, |shown| shown.track_count.max(0) as u64),
+        )
     }
 
     fn long_duration(&self) -> String {
-        let seconds = self.number("duration_ms") / 1000;
-        [
-            (seconds / 3600, "h"),
-            (seconds % 3600 / 60, "m"),
-            (seconds % 60, "s"),
-        ]
-        .into_iter()
-        .filter(|(value, _)| *value != 0)
-        .map(|(value, unit)| format!("{value}{unit}"))
-        .collect::<Vec<_>>()
-        .join(" ")
+        rufin_core::settings::presentation::format_duration_units(
+            self.summary()
+                .map_or(0, |shown| (shown.duration_millis.max(0) / 1000) as u32),
+        )
+    }
+
+    /// The text the row shows for `field`.
+    fn cell(&self, field: &LibraryField) -> &str {
+        self.fields
+            .iter()
+            .find(|(shown, _)| shown == field)
+            .map_or("", |(_, text)| text.as_str())
+    }
+
+    /// The fields with text, in its list's order.
+    fn labels(&self) -> Vec<(LibraryField, &str)> {
+        self.fields
+            .iter()
+            .filter(|(_, text)| !text.is_empty())
+            .map(|(field, text)| (*field, text.as_str()))
+            .collect()
+    }
+
+    /// Whether its picture is a mosaic of its tracks' covers.
+    fn mosaic(&self) -> bool {
+        self.data_count() > 1
+    }
+
+    fn data_count(&self) -> usize {
+        self.summary().map_or(0, |shown| shown.artwork.len())
+    }
+
+    fn preview_tiles(&self) -> Vec<&str> {
+        let count = self.previews.len().max(1);
+        (0..if self.mosaic() { 4 } else { 1 })
+            .map(|part| self.previews.get(part % count).map_or("", String::as_str))
+            .collect()
+    }
+
+    /// Its picture for pages without scripts.
+    fn artwork(&self) -> String {
+        let query = match &self.row {
+            Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
+                ("playlist", playlist.playlist_key.raw().to_string())
+            }
+            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {
+                ("smart_playlist", smart.smart_playlist_key.raw().to_string())
+            }
+            _ => ("uri", self.uri().to_owned()),
+        };
+        format!(
+            "/api/artwork?{}",
+            url::form_urlencoded::Serializer::new(String::new())
+                .append_pair(query.0, &query.1)
+                .finish()
+        )
     }
 
     fn palette(&self) -> u32 {
-        let seed = self
-            .text("object_id")
-            .bytes()
-            .fold(0x811c9dc5u32, |seed, byte| {
-                seed.wrapping_mul(16777619) ^ u32::from(byte)
-            });
+        let id = match &self.row {
+            Row::Album(album) | Row::AlbumHeading(album) => album.object_id.as_str(),
+            _ => "",
+        };
+        let seed = id.bytes().fold(0x811c9dc5u32, |seed, byte| {
+            seed.wrapping_mul(16777619) ^ u32::from(byte)
+        });
         (seed ^ seed.rotate_left(13) ^ seed.rotate_right(9)) % 16
     }
 }
@@ -236,219 +330,198 @@ impl Row<'_> {
 #[derive(Template)]
 #[template(path = "library.html")]
 struct Library<'a> {
-    rows: Vec<Row<'a>>,
+    rows: Vec<Shown<'a>>,
     /// A track list's columns: its list's row fields. Track rows carry no artwork, so an
     /// Image field shows no column.
-    columns: Vec<Column<'a>>,
-    kind: &'a str,
-    offset: usize,
-    total: String,
+    columns: Vec<Column>,
+    cards: bool,
     album_tracks: bool,
-    activity_sensitive: bool,
-    /// The order a track page lists in, for the client to show; empty for other lists.
-    sort: &'a str,
-    descending: bool,
     disc_headers: HashMap<usize, String>,
-    /// The collection's name as this read found it.
-    name: &'a str,
+    /// The page as the script reads it.
+    page: String,
+    title: String,
+    back: String,
+    section: &'static str,
+    sort: &'static str,
+    descending: bool,
+    sorts: String,
+    total: String,
+    name: String,
+    play: bool,
+    writable: bool,
+    playlists: bool,
 }
 
 impl Library<'_> {
     fn disc_heading(&self, index: &usize) -> Option<&str> {
-        self.disc_headers
-            .get(&(self.offset + index))
-            .map(String::as_str)
+        self.disc_headers.get(index).map(String::as_str)
     }
 }
 
-#[cfg(test)]
-mod disc_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn album_disc_headers_keep_page_counts_and_track_numbers() {
-        let mut headers = hyper::HeaderMap::new();
-        headers.insert("HX-Request", "true".parse().unwrap());
-        for (offset, sections, has_header) in [
-            (0, json!([]), false),
-            (0, json!([[0, 1], [2, 2]]), true),
-            (1, json!([[0, 1], [2, 2]]), false),
-            (2, json!([[0, 1], [2, 2]]), true),
-        ] {
-            let parameters = HashMap::from([("offset".into(), offset.to_string())]);
-            let response = page(
-                &headers,
-                &parameters,
-                json!({
-                    "album_tracks": true, "disc_sections": sections,
-                    "columns": ["RowIndex", "Title"],
-                    "tracks": [{"uri":"file:///track", "title":"Track", "track_number":7}]
-                }),
+/// An open list page as HTML.
+pub(super) fn library(
+    products: &ProductHandles,
+    opened: &page::Opened,
+    total: bool,
+    form: &Form,
+) -> Result<String, Error> {
+    let settings = products.settings.load();
+    let token = &opened.token;
+    let fields = page::fields(products, token);
+    let cards = page::cards(&token.route);
+    let rows = opened
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(position, row)| {
+            let index = opened.offset + position;
+            Shown::new(
+                products,
+                &settings,
+                token,
+                row.clone(),
+                None,
+                &fields,
+                index,
+                format!("media-menu-library-{index}"),
+                form,
             )
-            .unwrap();
-            let html = String::from_utf8(
-                axum::body::to_bytes(response.into_body(), usize::MAX)
-                    .await
-                    .unwrap()
-                    .to_vec(),
-            )
-            .unwrap();
-            assert_eq!(html.contains("class=\"disc-header\""), has_header);
-            assert!(html.contains("data-count=\"1\""));
-            assert_eq!(html.matches("data-row=").count(), 1);
-            assert!(html.contains("class=\"number\">7</td>"));
-        }
-        let preview = "data:image/png;base64,iVBORw0KGgo=";
-        let html = render(
-            &HashMap::new(),
-            &json!({"albums":[{"id":1,"title":"Album","artwork_previews":[preview]}]}),
-            "",
-        )
-        .unwrap();
-        assert!(html.contains(&format!("<img src=\"{preview}\" alt=\"\" />")));
-        assert!(!html.contains("preview=true"));
-        let html = render(&HashMap::new(), &json!({"playlists":[{"id":1,"name":"Playlist","artwork_count":2,"artwork_previews":[preview,null]}]}), "").unwrap();
-        assert_eq!(html.matches("class=\"cover-quadrant\"").count(), 4);
-        assert_eq!(
-            html.matches(&format!("<img src=\"{preview}\" alt=\"\" />"))
-                .count(),
-            2
-        );
+        })
+        .collect();
+    let (sort, descending) = opened.view.order();
+    let list = token.list();
+    let header = opened.header.as_ref();
+    Library {
+        rows,
+        columns: fields
+            .iter()
+            .filter(|field| !cards && **field != LibraryField::Image)
+            .map(|field| Column::new(*field))
+            .collect(),
+        cards,
+        album_tracks: matches!(token.route, rufin_core::route::Route::AlbumDetail(_)),
+        disc_headers: opened
+            .view
+            .disc_sections()
+            .iter()
+            .map(|(start, disc)| {
+                let title = if *disc > 0 {
+                    localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+                } else {
+                    localization::tr("Unknown disc")
+                };
+                (*start as usize, title)
+            })
+            .collect(),
+        page: token.json(),
+        title: page::title(products, token, header),
+        back: page::parent(token).map_or_else(String::new, |parent| parent.json()),
+        section: page::section(&token.route),
+        sort: sort_name(list, sort),
+        descending,
+        sorts: json!(translated_sorts(list)).to_string(),
+        total: total
+            .then(|| opened.view.len().to_string())
+            .unwrap_or_default(),
+        name: match header {
+            Some(library::Header::Playlist(playlist)) => playlist.name.clone(),
+            _ => String::new(),
+        },
+        play: opened.view.members().is_some(),
+        writable: matches!(header, Some(library::Header::Playlist(playlist)) if playlist.writable),
+        playlists: token.route == rufin_core::route::Route::Playlists,
     }
+    .render()
+    .map_err(internal)
 }
 
 struct Section<'a> {
-    block: &'a str,
-    title: &'a str,
-    items: Vec<Row<'a>>,
+    block: String,
+    title: String,
+    rows: Vec<Shown<'a>>,
 }
 
 #[derive(Template)]
 #[template(path = "home.html")]
 struct Home<'a> {
     sections: Vec<Section<'a>>,
+    page: String,
+    title: String,
 }
 
-pub(super) fn render(
-    parameters: &HashMap<String, String>,
-    value: &Value,
-    csrf: &str,
+/// Home's sections as HTML.
+pub(super) fn home(
+    products: &ProductHandles,
+    token: &page::PageToken,
+    sections: &[rufin_core::view::HomeSection],
+    form: &Form,
 ) -> Result<String, Error> {
-    let html = if let Some(sections) = value["sections"].as_array() {
-        Home {
-            sections: sections
-                .iter()
-                .enumerate()
-                .map(|(section_index, section)| Section {
-                    block: section["block"].as_str().unwrap_or_default(),
-                    title: section["title"].as_str().unwrap_or_default(),
-                    items: section["items"]
-                        .as_array()
+    let settings = products.settings.load();
+    Home {
+        sections: sections
+            .iter()
+            .enumerate()
+            .map(|(number, section)| {
+                let block = page::home_block(section)
+                    .and_then(|block| serde_json::to_value(block).ok())
+                    .and_then(|block| block.as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                let id = if block.is_empty() {
+                    format!("provider-{number}")
+                } else {
+                    block.clone()
+                };
+                Section {
+                    title: section.title(),
+                    rows: page::home_rows(section)
                         .into_iter()
-                        .flatten()
                         .enumerate()
-                        .map(|(index, data)| Row {
-                            data,
-                            parameters,
-                            csrf,
-                            menu_id: format!(
-                                "media-menu-home-{}-{index}",
-                                section["block"]
-                                    .as_str()
-                                    .filter(|block| !block.is_empty())
-                                    .map(str::to_owned)
-                                    .unwrap_or_else(|| format!("provider-{section_index}"))
-                            ),
+                        .map(|(index, (row, title, fields))| {
+                            Shown::new(
+                                products,
+                                &settings,
+                                token,
+                                row,
+                                Some(title),
+                                fields,
+                                index,
+                                format!("media-menu-home-{id}-{index}"),
+                                form,
+                            )
                         })
                         .collect(),
-                })
-                .collect(),
-        }
-        .render()
-    } else {
-        let offset = number(parameters, "offset", 0)?;
-        let (field, kind) = [
-            ("tracks", "track"),
-            ("entries", "track"),
-            ("albums", "album"),
-            ("artists", "artist"),
-            ("playlists", "playlist"),
-            ("smart_playlists", "smart-playlist"),
-        ]
-        .into_iter()
-        .find(|(field, _)| value[*field].is_array())
-        .ok_or_else(|| internal("Missing library rows"))?;
-        Library {
-            rows: value[field]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .enumerate()
-                .map(|(index, data)| Row {
-                    data,
-                    parameters,
-                    csrf,
-                    menu_id: format!("media-menu-library-{}", offset + index),
-                })
-                .collect(),
-            columns: value["columns"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .filter(|field| *field != "Image")
-                .map(Column::new)
-                .collect(),
-            kind,
-            offset,
-            total: value["total"]
-                .as_i64()
-                .map(|count| count.to_string())
-                .unwrap_or_default(),
-            album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
-            activity_sensitive: value["activity_sensitive"].as_bool().unwrap_or(false),
-            sort: value["sort"].as_str().unwrap_or_default(),
-            descending: value["descending"].as_bool().unwrap_or(false),
-            name: value["name"].as_str().unwrap_or_default(),
-            disc_headers: value["disc_sections"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|section| {
-                    let start = section[0].as_u64()? as usize;
-                    let disc = section[1].as_i64()?;
-                    let title = if disc > 0 {
-                        localization::tr("Disc {number}").replace("{number}", &disc.to_string())
-                    } else {
-                        localization::tr("Unknown disc")
-                    };
-                    Some((start, title))
-                })
-                .collect(),
-        }
-        .render()
+                    block,
+                }
+            })
+            .collect(),
+        page: token.json(),
+        title: page::title(products, token, None),
     }
-    .map_err(internal)?;
-    Ok(html)
+    .render()
+    .map_err(internal)
 }
 
+/// A library response: HTML for the web page, else JSON.
 pub(super) fn page(
     headers: &hyper::HeaderMap,
-    parameters: &HashMap<String, String>,
-    value: Value,
+    json: impl FnOnce() -> Value,
+    html: impl FnOnce(&Form) -> Result<String, Error>,
 ) -> Result<Response<Body>, Error> {
     let mut response = if headers
         .get("HX-Request")
         .is_some_and(|value| value == "true")
     {
-        let csrf = headers
-            .get("x-rufin-csrf")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        let html = render(parameters, &value, csrf)?;
-        axum::response::Html(html).into_response()
+        let form = Form {
+            csrf: headers
+                .get("x-rufin-csrf")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned(),
+            return_to: "/".into(),
+        };
+        axum::response::Html(html(&form)?).into_response()
     } else {
-        json_response(StatusCode::OK, value)
+        json_response(StatusCode::OK, json())
     };
     response
         .headers_mut()
@@ -572,28 +645,6 @@ async fn icon(
     Ok(asset("image/svg+xml", file.data))
 }
 
-/// The list each sortable page view shows, by the key the other clients save it under.
-const VIEW_LISTS: [(&str, LibraryListKey); 11] = [
-    ("tracks", LibraryListKey::Tracks),
-    ("favorites", LibraryListKey::FavoriteTracks),
-    ("album", LibraryListKey::AlbumDetailTracks),
-    ("artist", LibraryListKey::ArtistTracks),
-    ("genre", LibraryListKey::GenreTracks),
-    ("playlist", LibraryListKey::PlaylistTracks),
-    ("smart-playlist", LibraryListKey::SmartPlaylistTracks),
-    ("albums", LibraryListKey::Albums),
-    ("artists", LibraryListKey::Artists),
-    ("playlists", LibraryListKey::Playlists),
-    ("smart-playlists", LibraryListKey::SmartPlaylists),
-];
-
-fn view_list_key(view: &str) -> Option<LibraryListKey> {
-    VIEW_LISTS
-        .iter()
-        .find(|(name, _)| *name == view)
-        .map(|(_, key)| *key)
-}
-
 fn translated_sorts(key: LibraryListKey) -> Vec<(&'static str, String)> {
     sort_options(key)
         .into_iter()
@@ -607,6 +658,7 @@ struct QueueRow {
     pub artist: String,
 }
 
+/// The whole page, for browsers without scripts and the first paint.
 struct Page {
     pub connected: bool,
     pub appearance: Value,
@@ -614,7 +666,17 @@ struct Page {
     pub error: String,
     pub source: String,
     pub sources: Vec<(String, String)>,
-    pub parameters: HashMap<String, String>,
+    /// The page the content shows.
+    pub token: Option<page::PageToken>,
+    pub title: String,
+    pub back: Option<String>,
+    pub section: &'static str,
+    pub sort: &'static str,
+    pub descending: bool,
+    /// The orders the page offers: their names, titles and whether the page reads in it.
+    pub sorts: Vec<(&'static str, String, bool)>,
+    pub play: bool,
+    pub playlists: bool,
     pub content: String,
     pub previous: Option<String>,
     pub next: Option<String>,
@@ -630,7 +692,10 @@ struct Page {
     pub queue_total: usize,
     pub paused: bool,
     pub volume: f64,
+    pub folder: String,
     pub folders: Vec<(String, String)>,
+    /// The address of this page.
+    pub here: String,
 }
 
 fn link(parameters: &HashMap<String, String>) -> String {
@@ -657,28 +722,27 @@ impl Page {
             .filter_map(|(name, value)| value.as_str().map(|value| format!("{name}:{value};")))
             .collect()
     }
-    pub fn parent_view(&self) -> &str {
-        match self.view() {
-            "album" => "albums",
-            "artist" => "artists",
-            "genre" => "home",
-            "playlist" => "playlists",
-            "smart-playlist" => "smart-playlists",
-            _ => "",
-        }
-    }
-    pub fn can_play_collection(&self) -> bool {
-        !self.parent_view().is_empty()
-            || (!self.source.is_empty() && matches!(self.view(), "tracks" | "favorites"))
-    }
     pub fn needs_source(&self) -> bool {
-        self.source.is_empty()
-            && !matches!(
-                self.view(),
-                "playlists" | "playlist" | "smart-playlists" | "smart-playlist"
-            )
+        self.connected && self.token.is_none()
     }
-
+    pub fn home(&self) -> bool {
+        self.section == "Home"
+            && self
+                .token
+                .as_ref()
+                .is_none_or(|token| token.route == rufin_core::route::Route::Home)
+    }
+    pub fn page_json(&self) -> String {
+        self.token
+            .as_ref()
+            .map(page::PageToken::json)
+            .unwrap_or_default()
+    }
+    pub fn query(&self) -> &str {
+        self.token
+            .as_ref()
+            .map_or("", |token| token.options.filter.as_str())
+    }
     pub fn current_position(&self) -> String {
         self.controls["current"]["position"]
             .as_u64()
@@ -692,38 +756,47 @@ impl Page {
         json!({"kind":"track", "uri":self.controls["current"]["track"]["uri"], "favorite":!self.current_favorite}).to_string()
     }
     pub fn position_time(&self) -> String {
-        format!("{}:{:02}", self.position / 60000, self.position / 1000 % 60)
+        rufin_core::settings::presentation::format_duration((self.position / 1000) as u32)
     }
     pub fn duration_time(&self) -> String {
-        format!("{}:{:02}", self.duration / 60000, self.duration / 1000 % 60)
+        rufin_core::settings::presentation::format_duration((self.duration / 1000) as u32)
     }
-    pub fn nav(&self, view: &str) -> String {
-        let mut parameters = HashMap::from([("view".into(), view.into())]);
-        if !self.source.is_empty() {
-            parameters.insert("source".into(), self.source.clone());
-        }
-        if let Some(folder) = self.parameters.get("folder") {
-            parameters.insert("folder".into(), folder.clone());
-        }
-        link(&parameters)
+    /// The navigation entries: their routes, titles, icons, links and whether this page is in
+    /// them.
+    pub fn navigation(&self) -> Vec<(&'static str, String, &'static str, String, bool)> {
+        use rufin_core::settings::SidebarRouteItem;
+        [
+            SidebarRouteItem::Home,
+            SidebarRouteItem::Favorites,
+            SidebarRouteItem::Albums,
+            SidebarRouteItem::Artists,
+            SidebarRouteItem::Tracks,
+            SidebarRouteItem::Playlists,
+            SidebarRouteItem::SmartPlaylists,
+        ]
+        .into_iter()
+        .map(rufin_core::route::sidebar_route_descriptor)
+        .map(|entry| {
+            (
+                entry.stable_id,
+                localization::tr(entry.title),
+                entry.icon_name,
+                self.nav(entry.stable_id),
+                self.section == entry.stable_id,
+            )
+        })
+        .collect()
     }
-    pub fn current(&self) -> String {
-        link(&self.parameters)
-    }
-    pub fn view(&self) -> &str {
-        self.parameters
-            .get("view")
-            .map(String::as_str)
-            .unwrap_or("home")
-    }
-    pub fn query(&self) -> &str {
-        self.parameters.get("q").map(String::as_str).unwrap_or("")
-    }
-    pub fn folder(&self) -> &str {
-        self.parameters
-            .get("folder")
-            .map(String::as_str)
-            .unwrap_or("")
+
+    /// A link to the navigation entry `route`, in this page's source and music folder.
+    fn nav(&self, route: &str) -> String {
+        let token = page::PageToken {
+            route: serde_json::from_value(json!(route)).expect("navigation route"),
+            source: (!self.source.is_empty()).then(|| sources::SourceId::new(&self.source)),
+            folder: Some(self.folder.clone()).filter(|folder| !folder.is_empty()),
+            options: Default::default(),
+        };
+        link(&HashMap::from([("page".to_owned(), token.json())]))
     }
     pub fn source_name(&self) -> &str {
         self.sources
@@ -731,32 +804,6 @@ impl Page {
             .find(|(id, _)| id == &self.source)
             .map(|(_, name)| name.as_str())
             .unwrap_or("")
-    }
-    pub fn sort(&self) -> &str {
-        self.parameters.get("sort").map_or("title", String::as_str)
-    }
-    /// The sorts this page's list offers, as `(name, title, selected)`.
-    pub fn sort_options(&self) -> Vec<(&'static str, String, bool)> {
-        view_list_key(self.view())
-            .map_or_else(
-                || vec![("title", localization::tr("Title"))],
-                translated_sorts,
-            )
-            .into_iter()
-            .map(|(name, title)| (name, title, name == self.sort()))
-            .collect()
-    }
-    /// The sorts of every list the web shows, by page view, for the script to switch between.
-    pub fn sort_lists(&self) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
-        VIEW_LISTS
-            .iter()
-            .map(|(view, key)| (*view, translated_sorts(*key)))
-            .collect()
-    }
-    pub fn descending(&self) -> bool {
-        self.parameters
-            .get("descending")
-            .is_some_and(|v| v == "true")
     }
     pub fn enabled(&self, name: &str) -> bool {
         self.controls[name].as_bool().unwrap_or(false)
@@ -768,20 +815,6 @@ impl Page {
             _ => "Repeat off",
         })
     }
-    pub fn title(&self) -> String {
-        if let Some(title) = self.parameters.get("title") {
-            return title.clone();
-        }
-        localization::tr(match self.view() {
-            "home" => "Home",
-            "favorites" => "Favorites",
-            "albums" => "Albums",
-            "artists" => "Artists",
-            "playlists" => "Playlists",
-            "smart-playlists" => "Smart Playlists",
-            _ => "Tracks",
-        })
-    }
 }
 
 async fn index(
@@ -790,12 +823,6 @@ async fn index(
     headers: hyper::HeaderMap,
     Query(mut parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    if parameters.remove("reverse").is_some() {
-        parameters.insert(
-            "descending".into(),
-            (!boolean(&parameters, "descending")?).to_string(),
-        );
-    }
     let csrf = session(&auth, &headers);
     let mut page = Page {
         connected: csrf.is_some(),
@@ -812,7 +839,15 @@ async fn index(
         },
         source: String::new(),
         sources: vec![],
-        parameters: HashMap::new(),
+        token: None,
+        title: localization::tr("Home"),
+        back: None,
+        section: "Home",
+        sort: "title",
+        descending: false,
+        sorts: Vec::new(),
+        play: false,
+        playlists: false,
         content: String::new(),
         previous: None,
         next: None,
@@ -828,7 +863,9 @@ async fn index(
         queue_total: 0,
         paused: true,
         volume: 1.0,
+        folder: String::new(),
         folders: vec![],
+        here: link(&parameters),
     };
     if page.connected {
         let configured = products.source.list_sources();
@@ -837,38 +874,6 @@ async fn index(
             .iter()
             .map(|s| (s.id.to_string(), s.name.clone()))
             .collect();
-        if parameters.get("source").is_some_and(|s| s.is_empty()) {
-            parameters.remove("source");
-        }
-        if !parameters.contains_key("source") {
-            if let Some(source) = configured
-                .selected_source_id
-                .as_ref()
-                .map(ToString::to_string)
-                .or_else(|| page.sources.first().map(|s| s.0.clone()))
-            {
-                parameters.insert("source".into(), source);
-            }
-        }
-        page.source = parameters.get("source").cloned().unwrap_or_default();
-        if let Some(selected) = products
-            .source
-            .selected_library()
-            .filter(|s| s.source_id.as_str() == page.source)
-        {
-            page.folders = selected
-                .music_folders
-                .iter()
-                .map(|f| (f.object_id.clone(), f.name.clone()))
-                .collect();
-            if !parameters.contains_key("folder") {
-                if let Some(folder) = &selected.music_folder_object_id {
-                    parameters.insert("folder".into(), folder.clone());
-                }
-            }
-        }
-        parameters.insert("limit".into(), "48".into());
-        page.parameters = parameters.clone();
         let current = products.playback.updates.current();
         let playback = playback_json(&products, current.as_deref(), true);
         page.preview = playback["current"]["track"]["artwork_previews"][0]
@@ -910,39 +915,91 @@ async fn index(
             .as_str()
             .unwrap_or_default()
             .into();
-        if !page.needs_source() {
-            match catalog_page(products, parameters.clone()).await {
-                Ok(value) => {
-                    let count = [
-                        "tracks",
-                        "entries",
-                        "albums",
-                        "artists",
-                        "playlists",
-                        "smart_playlists",
-                    ]
-                    .iter()
-                    .find_map(|key| value[*key].as_array().map(Vec::len))
-                    .unwrap_or(0);
-                    let offset = number(&parameters, "offset", 0)?;
-                    let mut target = parameters.clone();
+        // Without a page, Home of the selected source; a reversed order flips the current one.
+        if !parameters.contains_key("page") {
+            parameters.insert(
+                "page".into(),
+                json!({"route":rufin_core::route::Route::Home}).to_string(),
+            );
+        }
+        let reverse = parameters.remove("reverse").is_some();
+        let mut token = page::token(&products, "page", &parameters)?;
+        let selected = products.source.selected_library();
+        if token.source.is_none() {
+            token.source = configured
+                .selected_source_id
+                .clone()
+                .or_else(|| configured.sources.first().map(|source| source.id.clone()));
+            if let Some(selected) = selected
+                .as_ref()
+                .filter(|selected| Some(&selected.source_id) == token.source.as_ref())
+            {
+                token.folder.clone_from(&selected.music_folder_object_id);
+            }
+        }
+        if reverse {
+            let saved = products
+                .settings
+                .load()
+                .library_list(token.list())
+                .descending;
+            token.options.descending = Some(!token.options.descending.unwrap_or(saved));
+        }
+        page.source = token
+            .source
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        page.folder = token.folder.clone().unwrap_or_default();
+        if let Some(selected) = selected.filter(|s| s.source_id.as_str() == page.source) {
+            page.folders = selected
+                .music_folders
+                .iter()
+                .map(|f| (f.object_id.clone(), f.name.clone()))
+                .collect();
+        }
+        page.section = page::section(&token.route);
+        let offset = number(&parameters, "offset", 0)?;
+        let form = Form {
+            csrf: page.csrf.clone(),
+            return_to: page.here.clone(),
+        };
+        if token.source.is_some() || !token.route.requires_selected_source() {
+            match page::open(&products, token, offset, 48).await {
+                Ok(opened) => {
+                    let list = opened.token.list();
+                    let (sort, descending) = opened.view.order();
+                    page.title = page::title(&products, &opened.token, opened.header.as_ref());
+                    page.back = page::parent(&opened.token)
+                        .map(|parent| link(&HashMap::from([("page".to_owned(), parent.json())])));
+                    page.sort = sort_name(list, sort);
+                    page.descending = descending;
+                    page.sorts = translated_sorts(list)
+                        .into_iter()
+                        .map(|(name, title)| (name, title, name == page.sort))
+                        .collect();
+                    page.play = opened.view.members().is_some();
+                    page.playlists = opened.token.route == rufin_core::route::Route::Playlists;
+                    let mut target = HashMap::from([("page".to_owned(), opened.token.json())]);
                     if offset > 0 {
                         target.insert("offset".into(), offset.saturating_sub(48).to_string());
                         page.previous = Some(link(&target));
                     }
-                    if count == 48 {
-                        target.insert("offset".into(), offset.saturating_add(48).to_string());
+                    if opened.offset + opened.rows.len() < opened.view.len() {
+                        target.insert("offset".into(), (offset + 48).to_string());
                         page.next = Some(link(&target));
                     }
-                    // The selector shows the order a track page read in.
-                    if let Some(sort) = value["sort"].as_str() {
-                        page.parameters.insert("sort".into(), sort.into());
-                        page.parameters.insert(
-                            "descending".into(),
-                            value["descending"].as_bool().unwrap_or(false).to_string(),
-                        );
-                    }
-                    page.content = render(&parameters, &value, &page.csrf)?;
+                    page.content = if opened.token.route == rufin_core::route::Route::Home {
+                        home(
+                            &products,
+                            &opened.token,
+                            &page::home_sections(&opened.view, None),
+                            &form,
+                        )?
+                    } else {
+                        library(&products, &opened, true, &form)?
+                    };
+                    page.token = Some(opened.token);
                 }
                 Err((_, message)) => {
                     page.error = message.0["error"].as_str().unwrap_or_default().into()
@@ -962,32 +1019,4 @@ async fn index(
         .header("referrer-policy", "same-origin")
         .body(Body::from(html))
         .expect("page headers"))
-}
-
-async fn catalog_page(
-    products: ProductHandles,
-    mut parameters: HashMap<String, String>,
-) -> Result<Value, Error> {
-    parameters.insert("total".into(), "true".into());
-    let view = parameters
-        .get("view")
-        .cloned()
-        .unwrap_or_else(|| "home".into());
-    if view == "favorites" {
-        parameters.insert("favorites".into(), "true".into());
-    }
-    match view.as_str() {
-        "home" => catalog::home_data(&products, &parameters).await,
-        "tracks" | "favorites" => tracks_data(&products, &parameters).await,
-        "albums" => catalog::albums_data(&products, &parameters).await,
-        "album" => catalog::album_tracks_data(&products, &parameters).await,
-        "artists" => catalog::artists_data(&products, &parameters).await,
-        "artist" => catalog::artist_tracks_data(&products, &parameters).await,
-        "genre" => catalog::genre_tracks_data(&products, &parameters).await,
-        "playlists" => playlists::list_data(&products, &parameters).await,
-        "playlist" => playlists::entries_data(&products, &parameters).await,
-        "smart-playlists" => catalog::smart_playlists_data(&products, &parameters).await,
-        "smart-playlist" => catalog::smart_tracks_data(&products, &parameters).await,
-        _ => Err(bad_request("Unknown library view")),
-    }
 }

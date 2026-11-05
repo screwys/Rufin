@@ -1091,7 +1091,10 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let page = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source)])
+        .query(&[(
+            "page",
+            &json!({"route":"Tracks","source":source}).to_string(),
+        )])
         .send()
         .await
         .unwrap()
@@ -1123,7 +1126,13 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let next = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source), ("offset", "48")])
+        .query(&[
+            (
+                "page",
+                json!({"route":"Tracks","source":source}).to_string(),
+            ),
+            ("offset", "48".into()),
+        ])
         .send()
         .await
         .unwrap()
@@ -1144,7 +1153,13 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let searched = client
         .get(format!("{origin}/"))
         .header("Cookie", cookie)
-        .query(&[("view", "tracks"), ("source", source), ("q", "random-149")])
+        .query(&[
+            (
+                "page",
+                json!({"route":"Tracks","source":source}).to_string(),
+            ),
+            ("q", "random-149".into()),
+        ])
         .send()
         .await
         .unwrap()

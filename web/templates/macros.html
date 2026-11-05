@@ -1,39 +1,39 @@
 {% macro icon(name) %}<span class="icon" data-icon="{{ name }}" style="--icon:url(&quot;/icons/{{ name }}.svg&quot;)" aria-hidden="true"></span>{% endmacro %}
 {% macro action(label, name, action, class) %}<button type="button" class="{{ class }}" data-action="{{ action }}" title="{{ label }}" aria-label="{{ label }}"{% if action == "menu" %} aria-haspopup="menu"{% endif %}>{% call icon(name) %}{% endcall %}</button>{% endmacro %}
-{% macro favorite(row, kind, class, embedded) %}{% if !embedded %}<form method="post" action="/api/queue" data-enhanced-form><input type="hidden" name="csrf" value="{{ row.csrf }}" /><input type="hidden" name="return" value="{{ row.return_to() }}" />{% endif %}<button type="submit" formaction="/api/favorite" name="payload" value="{{ row.selection(kind) }}" class="{{ class }}" data-action="favorite" data-favorite-uri="{{ row.text("uri") }}" title="{{ localization::tr("Favorite") }}" aria-label="{{ localization::tr("Favorite") }}" aria-pressed="{{ row.favorite() }}">{% if row.favorite() %}{% call icon("rufin-heart-filled-symbolic") %}{% endcall %}{% else %}{% call icon("rufin-heart-outline-symbolic") %}{% endcall %}{% endif %}</button>{% if !embedded %}</form>{% endif %}{% endmacro %}
+{% macro favorite(row, class, embedded) %}{% if !embedded %}<form method="post" action="/api/queue" data-enhanced-form><input type="hidden" name="csrf" value="{{ row.form.csrf }}" /><input type="hidden" name="return" value="{{ row.form.return_to }}" />{% endif %}<button type="submit" formaction="/api/favorite" name="payload" value="{{ row.favorite_payload() }}" class="{{ class }}" data-action="favorite" data-favorite-uri="{{ row.uri() }}" title="{{ localization::tr("Favorite") }}" aria-label="{{ localization::tr("Favorite") }}" aria-pressed="{{ row.favorite() }}">{% if row.favorite() %}{% call icon("rufin-heart-filled-symbolic") %}{% endcall %}{% else %}{% call icon("rufin-heart-outline-symbolic") %}{% endcall %}{% endif %}</button>{% if !embedded %}</form>{% endif %}{% endmacro %}
 {% macro menu_button(row, class) %}
 <button type="button" class="{{ class }}" data-action="menu" popovertarget="{{ row.menu_id }}" aria-haspopup="menu" aria-label="{{ localization::tr("More actions") }}" title="{{ localization::tr("More actions") }}">{% call icon("rufin-view-more-symbolic") %}{% endcall %}</button>
 {% endmacro %}
-{% macro media_menu(row, kind) %}
+{% macro media_menu(row) %}
 <div id="{{ row.menu_id }}" class="media-menu" popover="auto" role="menu" aria-label="{{ localization::tr("More actions") }}">
-  <button class="menu-item" role="menuitem" name="mode" value="replace">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
-  <button class="menu-item" role="menuitem" name="mode" value="next">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
-  <button class="menu-item" role="menuitem" name="mode" value="append">{% call icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
-  {% if kind == "track" || kind == "album" || kind == "artist" %}
-  <button class="menu-item" role="menuitem" formaction="/api/favorite" name="payload" value="{{ row.selection(kind) }}">{% if row.favorite() %}{% call icon("rufin-heart-filled-symbolic") %}{% endcall %}{{ localization::tr("Remove from Favorites") }}{% else %}{% call icon("rufin-heart-outline-symbolic") %}{% endcall %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
+  {% if row.menu.play %}<button class="menu-item" role="menuitem" name="mode" value="replace">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>{% endif %}
+  {% if row.menu.play_next %}<button class="menu-item" role="menuitem" name="mode" value="next">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}{{ localization::tr("Play Next") }}</button>{% endif %}
+  {% if row.menu.play_later %}<button class="menu-item" role="menuitem" name="mode" value="append">{% call icon("rufin-go-last-symbolic") %}{% endcall %}{{ localization::tr("Play Later") }}</button>{% endif %}
+  {% if row.menu.favorite %}
+  <button class="menu-item" role="menuitem" formaction="/api/favorite" name="payload" value="{{ row.favorite_payload() }}">{% if row.favorite() %}{% call icon("rufin-heart-filled-symbolic") %}{% endcall %}{{ localization::tr("Remove from Favorites") }}{% else %}{% call icon("rufin-heart-outline-symbolic") %}{% endcall %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
   {% endif %}
 </div>
 {% endmacro %}
-{% macro card(row, kind) %}
-<article class="album-card" data-row="{{ row.data }}" data-kind="{{ kind }}">
+{% macro card(row) %}
+<article class="album-card" data-row="{{ row.data }}" data-kind="{{ row.kind() }}">
   <form method="post" action="/api/queue" data-enhanced-form>
-    <input type="hidden" name="csrf" value="{{ row.csrf }}" />
-    <input type="hidden" name="return" value="{{ row.return_to() }}" />
-    <input type="hidden" name="payload" value="{{ row.selection(kind) }}" />
+    <input type="hidden" name="csrf" value="{{ row.form.csrf }}" />
+    <input type="hidden" name="return" value="{{ row.form.return_to }}" />
+    <input type="hidden" name="payload" value="{{ row.play }}" />
 
   <div class="cover-wrap">
-    {% if kind == "track" %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% else %}<a href="{{ row.href(kind) }}" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% endif %}<div class="cover{% if row.number("artwork_count") > 1 %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.number("artwork_count") > 1 %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.number("artwork_count") > 1 %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork(kind) }}" loading="lazy" alt="" /></noscript></div>{% if kind == "track" %}</button>{% else %}</a>{% endif %}
+    {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% else %}<a href="{{ row.href }}" class="cover-open" data-action="open" aria-label="{{ row.title }}">{% endif %}<div class="cover{% if row.mosaic() %} cover-mosaic{% endif %}">{% for preview in row.preview_tiles() %}{% if row.mosaic() %}<span class="cover-quadrant">{% endif %}{% if preview != "" %}<img src="{{ preview }}" alt="" />{% else %}{% call icon("rufin-symbolic") %}{% endcall %}{% endif %}{% if row.mosaic() %}</span>{% endif %}{% endfor %}<noscript><img src="{{ row.artwork() }}" loading="lazy" alt="" /></noscript></div>{% if row.href.is_empty() %}</button>{% else %}</a>{% endif %}
     <div class="cover-controls">
-      <button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>
-      <button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>
-      {% if kind == "track" || kind == "album" || kind == "artist" %}{% call favorite(row, kind, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
+      {% if row.menu.play_next %}<button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("rufin-mail-forward-symbolic") %}{% endcall %}</button>{% endif %}
+      {% if row.menu.play %}<button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("rufin-media-playback-start-symbolic") %}{% endcall %}</button>{% endif %}
+      {% if row.menu.play_later %}<button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("rufin-go-last-symbolic") %}{% endcall %}</button>{% endif %}
+      {% if row.menu.favorite %}{% call favorite(row, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
       {% call menu_button(row, "cover-menu") %}{% endcall %}
     </div>
   </div>
-  {% if kind == "track" %}<button type="submit" name="mode" value="replace" class="collection-title" data-action="open">{{ row.title() }}</button>{% else %}<a class="collection-title" href="{{ row.href(kind) }}" data-action="open">{{ row.title() }}</a>{% endif %}
-  {% for label in row.labels() %}{% if label.field == "Artist" || label.field == "AlbumArtist" %}<button type="button" class="metadata-link" data-action="artists">{{ label.text }}</button>{% else if label.field == "Album" %}<button type="button" class="metadata-link" data-action="albums">{{ label.text }}</button>{% else %}<p>{{ label.text }}</p>{% endif %}{% endfor %}
-  {% call media_menu(row, kind) %}{% endcall %}
+  {% if row.href.is_empty() %}<button type="submit" name="mode" value="replace" class="collection-title" data-action="open">{{ row.title }}</button>{% else %}<a class="collection-title" href="{{ row.href }}" data-action="open">{{ row.title }}</a>{% endif %}
+  {% for (field, text) in row.labels() %}{% if field == LibraryField::Artist || field == LibraryField::AlbumArtist %}<button type="button" class="metadata-link" data-action="artists">{{ text }}</button>{% else if field == LibraryField::Album %}<button type="button" class="metadata-link" data-action="albums">{{ text }}</button>{% else %}<p>{{ text }}</p>{% endif %}{% endfor %}
+  {% call media_menu(row) %}{% endcall %}
   </form>
 </article>
 {% endmacro %}

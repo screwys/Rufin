@@ -10,10 +10,11 @@
     "POST /api/connect": "Use action create; join {invitation,replace:true} after confirming that joining removes this device's data; invite {peer}; pair {session,approve,replace:false}; cancel_pairing; rename {name}; remove {peer}; leave; refresh; retry; discover; test_connection {peer}; network {nearby,relay,public_relay:false}; folder {folder:null|{path}|{document}|{connection,path}}; continue {peer}; control {peer,command:{command:play|pause|stop|next|previous|seek|volume,millis|value}}. Paired devices share source configs and saved logins, scrobbling accounts, shared preferences, favorites, ratings, listens, playlists, playlist folders, smart playlists, lyrics a person picks or edits, and analysis results. Lyrics fetched automatically that nobody picked are not shared. A change reaches online devices within seconds, and devices pass on what they received from others. Queues, downloads, download and stream quality, outputs and Local File Access mappings stay per device. Joining first clears this device's Rufin data, then receives the profile; original media files are not deleted. Another device's Local library appears as a source of kind peer: it browses offline, and plays and downloads while that device is online. folder sets a sync folder for devices that are never online together: a path on the running Rufin device, an Android document tree, or a path on a saved WebDAV or SMB connection (connection is its source ID). Files in the sync folder are encrypted with the profile key. Continue takes another device's queue and position and pauses that device when it is reachable. relay:null with public_relay:false disables relays; public_relay:true uses public Iroh relays; relay sets a custom relay URL.",
     "GET /api/playback": "Playback status and the current track",
     "GET /api/pins": "Read shared sidebar pins and their resolved items in saved order.",
-    "POST /api/pins": "Set a pin with {pin,pinned}. Pin is Album {source_id,album_id}, Artist {source_id,artist_id,album_artist}, Genre {source_id,genre_id}, Playlist {source_id,playlist_id}, or SmartPlaylist {playlist_id}, wrapped in its type name. IDs are object_id values, not numeric database keys; omit source_id for a local playlist.",
+    "POST /api/pins": "Set a pin with {pin,pinned}. Pin is Album {source_id,album_id}, Artist {source_id,artist_id,album_artist}, Genre {source_id,genre_id}, Playlist {source_id,playlist_id}, SmartPlaylist {playlist_id} or PlaylistFolder {folder_id,smart}, wrapped in its type name. Library rows carry their pin as pin. IDs are object_id values, not numeric database keys; omit source_id for a local playlist.",
     "PATCH /api/pins": "Reorder with {moved,target}, each a pin identity. Uses the desktop drag order: before when moving upward, after when moving downward.",
-    "List order": "Without sort or descending, a list or track page reads in the order saved for that list, the one the app opens it in. Responses name the order they read in as sort and descending.",
-    "Row fields": "Library rows (albums, artists, playlists, smart_playlists, Home items, tracks and entries) carry fields [{field,text}]: what the app shows for the row in its list, the labels under a card's title or a track list's columns, in the list's saved order. Track pages also carry columns, that list's fields. field is a name such as RowIndex, Image, Title, TitleMerged (title with artist), Artist, AlbumArtist, Album, Year, SongCount, Duration, Favorite or Tools (the row's actions).",
+    "List order": "Without sort or descending, a list or track page reads in the order saved for that list, the one the app opens it in. Responses name the order they read in as sort and descending. The sort choices are the orders the app offers for each list; position (a playlist list's order of creation, or a playlist's entry order) and definition (a smart playlist's saved order) are accepted API names the app does not offer.",
+    "Pages": "List responses carry page, the token of the page they read: {route, source, folder, options}. GET /api/page?page=TOKEN reads it again with offset, limit (up to 128), total, q, sort and descending; an opened smart playlist's token keeps the time it opened at. POST /api/queue with {page, mode} plays the page whole in its order and filter; with index it plays the page from that row. Card rows (albums, artists, genres, playlists, smart playlists, playlist folders) carry the token of the page they open as page in HTML responses.",
+    "Row fields": "Library rows (albums, artists, playlists, smart_playlists, Home items, tracks and entries) carry kind (track, album, artist, genre, mood, playlist, smart-playlist or playlist-folder) and fields [{field,text}]: what the app shows for the row in its list, the labels under a card's title or a track list's columns, in the list's saved order. Track pages also carry columns, that list's fields. field is a name such as RowIndex, Image, Title, TitleMerged (title with artist), Artist, AlbumArtist, Album, Year, SongCount, Duration, Favorite or Tools (the row's actions).",
     "Queue drop position": "POST /api/queue and its collection routes accept mode insert with before or after (zero-based queue position). Omit both to insert at the end. Uses the desktop drop operation without starting playback. POST /api/queue/reorder also accepts before or after.",
     "GET /api/playback/events": "Follow playback changes",
     "POST /api/playback/play": {},
@@ -43,7 +44,7 @@
       "source": "source ID",
       "library": "library ID, or null for All Music"
     },
-    "GET /api/home?source=...": "Home entries in the app's configured order. You can set folder or block to read one section.",
+    "GET /api/home?source=...": "Home sections in the app's order with the app's titles: the visible blocks in their configured order, with the server's own sections right after the Showcase. Each section lists its tracks, then its albums. You can set folder, or block to read one block's section.",
     "POST /api/home": {
       "source": "source ID",
       "block": "Explore | MostPlayed | NewlyAdded | RecentlyPlayed | RecentlyReleased"
@@ -91,7 +92,8 @@
     "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too. The response includes album_tracks and disc_sections: pairs of zero-based track position and disc number in the filtered result. Sections are empty for a single known disc or a sort other than track_number; disc number 0 means unknown.",
     "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
     "GET /api/folders/live?source=...": "Browse source folders. File sources use their saved directory inventory; other sources browse the server directly. You can set parent and folder. Returned track_ids match object_id in track results.",
-    "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",
+    "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source, with playlist folders as rows of kind playlist-folder; a folder's playlists list under it with playlist_folder=ID. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",
+    "GET /api/playlists/destinations?source=...": "The playlists tracks can be added to, Rufin's own and the source's, as {playlists:[{id,name}]} in the playlist list's order.",
     "POST /api/playlists": {
       "name": "Evening",
       "source": null,
@@ -163,7 +165,7 @@
     "DELETE /api/queue": "Clear the queue using the app's setting for keeping the current song.",
     "GET /api/media?uri=...": "Get a track's album, artists and favorite state. Album URIs return their artists.",
     "POST /api/favorite": "Set favorite with {kind: track, album or artist, uri, favorite: true or false}. Returns the effective favorite state.",
-    "POST /api/queue/radio": "Play radio with {kind: track, uri} or {kind: album, artist, album_artist or playlist, id}.",
+    "POST /api/queue/radio": "Play radio with {kind: track, uri} or {kind: album, artist, album_artist, genre or playlist, id}. Library rows offer theirs in menu.radio in HTML responses.",
     "POST /api/queue/activate": {
       "position": 0
     },
@@ -182,7 +184,7 @@
     "POST /api/queue/next": {
       "position": 0
     },
-    "GET /api/events": "Follow playback, source progress, catalog changes and lyrics together on one connection.",
+    "GET /api/events": "Follow playback, source progress, catalog changes and lyrics together on one connection. The first update names the stream as stream. Pass page=TOKEN to follow that page; a library read sent with the header X-Rufin-Events: STREAM becomes the page the stream follows. A catalog change then carries page_refresh (reread: read the page again where it is; reopen: open it again) when it changes what the page shows, and states [{uri,favorite,rating}] for tracks, albums and artists whose favorite or rating changed, which rows that show them can patch in.",
     "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",
     "GET /api/artists/tracks?id=...": "Browse an artist’s tracks, up to 256 at a time. Use q, sort, descending and album_artists.",
     "GET /api/genres/tracks?id=...": "Browse tracks in a genre. Use q, sort, descending, offset and limit. To filter by library folder, include source and folder.",
@@ -190,7 +192,7 @@
       "id": 1,
       "mode": "replace | next | append"
     },
-    "GET /api/smart-playlists?source=...": "Browse saved smart playlists, up to 64 at a time. Source is optional; use q, sort and descending.",
+    "GET /api/smart-playlists?source=...": "Browse saved smart playlists and their folders (rows of kind playlist-folder; open one with playlist_folder=ID), up to 64 at a time. Source is optional; use q, sort and descending.",
     "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and limit. Use source, q, offset, limit (up to 256), sort and descending. Sort accepts track_sort choices or definition for the saved playlist order. An opened smart playlist keeps the members it opened with: pass opened (Unix seconds of the first read) on every later read of the page, so plays, ratings and syncs change its members only when it is opened again.",
     "POST /api/queue/artist": {
       "id": 1,
@@ -349,6 +351,6 @@
     "append": "Add to the end of the queue",
     "next": "Play next"
   },
-  "collection_playback": "For queue/source, queue/album, queue/artist and queue/playlist, q, sort and descending choose the tracks and order. Set anchor_uri to start at a particular track. For a playlist with repeated tracks, use anchor_entry to choose the playlist entry. Without an anchor, Play follows your shuffle setting. Smart playlists play in their saved order; q filters the tracks and anchor_uri chooses the starting track.",
+  "collection_playback": "For queue/source, queue/album, queue/artist and queue/playlist, q, sort and descending choose the tracks and order. Set anchor_uri to start at a particular track. For a playlist with repeated tracks, use anchor_entry to choose the playlist entry. Without an anchor, Play follows your shuffle setting. Without sort or descending, a collection plays in the order its page lists in, as the app plays it; sort definition plays a smart playlist in its saved order.",
   "volume": "Volume is a slider position from 0 to 1. Rufin applies the perceptual or linear scale selected in the app. Set persist to false while dragging, then send the final value with persist true to save it."
 }

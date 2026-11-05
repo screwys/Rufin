@@ -194,19 +194,6 @@ impl Catalog {
             .collect())
     }
 
-    pub async fn selected_track_keys(
-        &self,
-        selection: &MemberSelection,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
-        let mut connection = self.acquire_loaded(cancellation).await?;
-        Ok(selected_tracks_on(self, &mut connection, selection)
-            .await?
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect())
-    }
-
     pub async fn selected_track_uris(
         &self,
         selection: &MemberSelection,

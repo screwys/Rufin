@@ -8,9 +8,10 @@ import {
   $,
   notice,
   run,
+  showFavorite,
 } from "./ui.js";
 
-import { detail, disposeHome, loadView, restoreView, route, viewRequest } from "./library.js";
+import { disposeHome, loadView, navigate, opened, refreshPage, showPage, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -41,8 +42,9 @@ async function login() {
   token = "";
 }
 
+// The events stream names itself so the page reads it sends become the page it follows.
 function browserHeaders() {
-  return { "X-Rufin-CSRF": csrf };
+  return { "X-Rufin-CSRF": csrf, ...(state.stream ? { "X-Rufin-Events": String(state.stream) } : {}) };
 }
 
 async function api(path, method = "GET", data, signal = session?.signal) {
@@ -143,35 +145,44 @@ async function connect() {
   $("login-dialog").close();
   $("app").inert = false;
   updateSources(configured);
+  const shown = rendered && $("content").querySelector("[data-page]");
   if (initialPage) {
-    restoreView();
-    if (rendered) {
+    if (shown) {
       state.source = $("content").dataset.source;
       state.selectedLibrary = $("content").dataset.folder || null;
     }
     initialPage = false;
-  }
-  await loadView(rendered);
+    if (shown) {
+      showPage(shown.dataset);
+      await loadView(true);
+    } else navigate("Home");
+  } else await loadView();
   void refreshContinuation();
   stream(
-    "/events",
+    // The stream follows the page shown when it connects, then the pages it reads.
+    () => `/events${opened && opened !== "sources" ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
     (value) => {
+      if (value.stream) state.stream = value.stream;
       if (Object.hasOwn(value, "playback")) showPlayback(value.playback);
       if (value.queue) showQueue(value.queue);
       if (value.source) showSourceProgress(value.source);
       if (value.lyrics) showLyrics(value.lyrics);
       if (value.appearance) applyColors(value.appearance);
       if (value.pins_changed) run(refreshPins);
-      if (value.catalog_acquired) run(async () => {
-        updateSources(await api("/sources"));
-        await loadView();
-      });
-      else if (value.activity_changed && $("content").querySelector('[data-activity-sensitive="true"]')) run(loadView);
-      else if (Object.hasOwn(value, "playlists") && route === "playlists" &&
-        (value.playlists === null || !detail || detail.id === value.playlists)) run(loadView);
+      if (value.catalog_acquired) run(async () => updateSources(await api("/sources")));
+      for (const changed of value.states || []) showState(changed);
+      if (value.page_refresh) run(() => refreshPage(value.page_refresh));
     },
     session.signal,
   );
+}
+
+// Shows a favorite that changed on the rows and hearts showing it.
+function showState(changed) {
+  for (const row of state.visibleItems)
+    if (row.uri === changed.uri) row.favorite = changed.favorite;
+  for (const node of document.querySelectorAll("[data-favorite-uri]"))
+    if (node.dataset.favoriteUri === changed.uri) showFavorite(node, changed.favorite);
 }
 
 async function stream(path, receive, signal) {
@@ -179,7 +190,8 @@ async function stream(path, receive, signal) {
   while (!signal.aborted) {
     let retryAfter = 1500;
     try {
-      const response = await fetch(`/api${path}`, {
+      state.stream = null;
+      const response = await fetch(`/api${path()}`, {
         signal,
         headers: browserHeaders(),
       });
@@ -312,6 +324,7 @@ const state = {
   currentRun: null,
   selectedLibrary: null,
   randomSource: null,
+  stream: null,
 };
 
 export { init, api, fragment, session, state };

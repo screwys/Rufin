@@ -80,25 +80,15 @@
             <input type="hidden" name="source" value="{{ page.source }}" />
             <p class="menu-heading">{{ localization::tr("Server Library") }}</p>
             <button class="menu-item" name="library" value="">{{ localization::tr("All Music") }}</button>
-            {% for (id, name) in page.folders %}<button class="menu-item" name="library" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder() }}">{{ name }}</button>{% endfor %}
+            {% for (id, name) in page.folders %}<button class="menu-item" name="library" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder }}">{{ name }}</button>{% endfor %}
           </form>
           {% endif %}
         </div>
         <nav aria-label="{{ localization::tr("Library") }}">
-          <a data-route="home" href="{{ page.nav("home") }}" {% if page.view() == "home" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-home-symbolic") %}{% endcall %}{{ localization::tr("Home") }}</a>
-          <a data-route="favorites" href="{{ page.nav("favorites") }}" {% if page.view() == "favorites" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-heart-outline-symbolic") %}{% endcall %}{{ localization::tr("Favorites") }}</a>
-          <a data-route="albums" href="{{ page.nav("albums") }}" {% if page.view() == "albums" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-albums-symbolic") %}{% endcall %}{{ localization::tr("Albums") }}</a>
-          <a data-route="artists" href="{{ page.nav("artists") }}" {% if page.view() == "artists" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-artists-symbolic") %}{% endcall %}{{ localization::tr("Artists") }}</a>
-          <a data-route="tracks" href="{{ page.nav("tracks") }}" {% if page.view() == "tracks" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-tracks-symbolic") %}{% endcall %}{{ localization::tr("Tracks") }}</a>
-          <a data-route="playlists" href="{{ page.nav("playlists") }}" {% if page.view() == "playlists" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-playlists-symbolic") %}{% endcall %}{{ localization::tr("Playlists") }}</a>
-          <a data-route="smart-playlists" href="{{ page.nav("smart-playlists") }}" {% if page.view() == "smart-playlists" %}aria-current="page"{% endif %}>
-            {% call m::icon("rufin-smart-playlists-symbolic") %}{% endcall %}{{ localization::tr("Smart Playlists") }}</a>
+          {% for (route, title, icon, href, current) in page.navigation() %}
+          <a data-route="{{ route }}" href="{{ href }}" {% if current %}aria-current="page"{% endif %}>
+            {% call m::icon(icon) %}{% endcall %}{{ title }}</a>
+          {% endfor %}
         </nav>
         <section id="pins" aria-labelledby="pins-title" hidden>
           <h2 id="pins-title">{{ localization::tr("Pins") }}</h2>
@@ -127,12 +117,12 @@
            href="#navigation">
             {% call m::icon("rufin-sidebar-show-symbolic") %}{% endcall %}
           </a>
-          <a class="icon-button" id="back" href="{{ page.nav(page.parent_view()) }}" aria-label="{{ localization::tr("Back") }}" {% if page.parent_view().is_empty() %}hidden{% endif %}>
+          <a class="icon-button" id="back" href="{% if let Some(back) = page.back %}{{ back }}{% endif %}" aria-label="{{ localization::tr("Back") }}" {% if page.back.is_none() %}hidden{% endif %}>
             {% call m::icon("rufin-go-previous-symbolic") %}{% endcall %}
           </a>
           <div class="heading">
             <span id="source-name" class="eyebrow">{{ page.source_name() }}</span>
-            <h1 id="title">{{ page.title() }}</h1>
+            <h1 id="title">{{ page.title }}</h1>
           </div>
           <button
             class="icon-button"
@@ -143,9 +133,8 @@
             {% call m::icon("rufin-view-refresh-symbolic") %}{% endcall %}
           </button>
         </header>
-        <form class="toolbar" id="library-toolbar" data-enhanced-form method="get" action="/" {% if page.view() == "home" %}hidden{% endif %}>
-          {% for (key, value) in page.parameters %}{% if key != "q" && key != "offset" && key != "view" && key != "sort" %}<input type="hidden" name="{{ key }}" value="{{ value }}" />{% endif %}{% endfor %}
-          <input type="hidden" name="view" value="{% if page.view() == "home" %}tracks{% else %}{{ page.view() }}{% endif %}" />
+        <form class="toolbar" id="library-toolbar" data-enhanced-form method="get" action="/" {% if page.home() %}hidden{% endif %}>
+          <input type="hidden" name="page" value="{{ page.page_json() }}" />
           <input
             type="search"
             id="search" name="q" value="{{ page.query() }}"
@@ -153,30 +142,29 @@
             aria-label="{{ localization::tr("Search library") }}"
           />
           <noscript><button class="without-js" type="submit">{{ localization::tr("Search") }}</button></noscript>
-          {% for (view, options) in page.sort_lists() %}<template data-sort="{{ view }}">{% for (name, title) in options %}<option value="{{ name }}">{{ title }}</option>{% endfor %}</template>{% endfor %}
           <select id="sort" name="sort" aria-label="{{ localization::tr("Sort by") }}">
-            {% for (name, title, selected) in page.sort_options() %}<option value="{{ name }}" {% if selected %}selected{% endif %}>{{ title }}</option>{% endfor %}
+            {% for (name, title, selected) in page.sorts %}<option value="{{ name }}" {% if selected %}selected{% endif %}>{{ title }}</option>{% endfor %}
           </select>
           <button
             class="icon-button"
             type="submit" name="reverse" value="true" id="descending"
             title="{{ localization::tr("Change sort order") }}"
             aria-label="{{ localization::tr("Change sort order") }}"
-            aria-pressed="{{ page.descending() }}"
-            {% if page.sort() == "definition" %}hidden{% endif %}
+            aria-pressed="{{ page.descending }}"
+            {% if page.sort == "definition" %}hidden{% endif %}
           >
             {% call m::icon("rufin-sort-name-symbolic") %}{% endcall %}
           </button>
-          <button type="button" class="primary" id="play-collection" {% if !page.can_play_collection() %}hidden{% endif %}>
+          <button type="button" class="primary" id="play-collection" {% if !page.play %}hidden{% endif %}>
             {% call m::icon("rufin-media-playback-start-symbolic") %}{% endcall %}{{ localization::tr("Play") }}</button>
-          <button type="button" id="new-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>
+          <button type="button" id="new-playlist" {% if !page.playlists %}hidden{% endif %}>
             {% call m::icon("rufin-list-add-symbolic") %}{% endcall %}{{ localization::tr("New Playlist") }}</button>
-          <button type="button" id="import-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
+          <button type="button" id="import-playlist" {% if !page.playlists %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
         </form>
         <div id="source-progress" role="status" hidden>
           <span id="source-progress-label"></span>
         </div>
-        <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
+        <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
           {% if !page.error.is_empty() %}<p class="empty-note" role="alert">{{ page.error }}</p>{% endif %}
           {% if page.connected && page.needs_source() %}
           <div class="empty">
@@ -220,7 +208,7 @@
             <span class="number">{{ loop.index }}</span>
             <form class="queue-track" method="post" action="/api/queue/activate">
               <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-              <input type="hidden" name="return" value="{{ page.current() }}" />
+              <input type="hidden" name="return" value="{{ page.here }}" />
               <input type="hidden" name="position" value="{{ row.position }}" />
               <button class="queue-select" formaction="/api/queue/activate"><strong>{{ row.title }}</strong></button>
               <span class="metadata-link queue-artist">{{ row.artist }}</span>
@@ -239,11 +227,11 @@
       <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
         <input type="hidden" name="id" value="{{ page.source }}" />
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-        <input type="hidden" name="return" value="{{ page.current() }}" />
+        <input type="hidden" name="return" value="{{ page.here }}" />
       </form>
       <form id="current-track-form" data-enhanced-form method="post" action="/api/queue/activate" hidden>
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-        <input type="hidden" name="return" value="{{ page.current() }}" />
+        <input type="hidden" name="return" value="{{ page.here }}" />
         <input type="hidden" name="position" value="{{ page.current_position() }}" />
         <input type="hidden" name="payload" value="{{ page.current_selection() }}" />
       </form>

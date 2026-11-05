@@ -1,16 +1,16 @@
 {% import "macros.html" as m %}
-<div data-activity-sensitive="true">
+<div data-page="{{ page }}" data-title="{{ title }}" data-section="Home">
 {% for section in sections %}
 {% if section.block == "Showcase" %}
-  {% for row in section.items %}
+  {% for row in section.rows %}
   <section class="home-section home-showcase seeded-gradient-showcase seeded-gradient-palette-{{ row.palette() }}">
-    <div class="showcase-cover"><div class="album-grid">{% call m::card(row, "album") %}{% endcall %}</div></div>
+    <div class="showcase-cover"><div class="album-grid">{% call m::card(row) %}{% endcall %}</div></div>
     <div class="showcase-content" data-row="{{ row.data }}" data-kind="album">
-      <div class="showcase-heading"><span class="eyebrow">{{ localization::tr("Showcase") }}</span>{% call m::action(localization::tr("Album radio"), "rufin-audio-only-symbolic", "radio", "icon-button") %}{% endcall %}</div>
-      <h2 class="showcase-title">{{ row.title() }}</h2>
-      <button type="button" class="metadata-link" data-action="artists">{{ row.text("artist") }}</button>
+      <div class="showcase-heading"><span class="eyebrow">{{ section.title }}</span>{% if row.menu.radio.is_some() %}{% call m::action(localization::tr("Album radio"), "rufin-audio-only-symbolic", "radio", "icon-button") %}{% endcall %}{% endif %}</div>
+      <h2 class="showcase-title">{{ row.title }}</h2>
+      <button type="button" class="metadata-link" data-action="artists">{{ row.artist() }}</button>
       <div class="showcase-summary">
-        {% if row.number("year") > 0 %}<span>{% call m::icon("rufin-x-office-calendar-symbolic") %}{% endcall %}{{ row.number("year") }}</span>{% endif %}
+        {% if row.year() > 0 %}<span>{% call m::icon("rufin-x-office-calendar-symbolic") %}{% endcall %}{{ row.year() }}</span>{% endif %}
         <span>{% call m::icon("rufin-tracks-symbolic") %}{% endcall %}{{ row.track_count() }}</span>
         <span>{% call m::icon("rufin-preferences-system-time-symbolic") %}{% endcall %}{{ row.long_duration() }}</span>
       </div>
@@ -19,14 +19,14 @@
   {% endfor %}
 {% else %}
   <section class="home-section" data-block="{{ section.block }}">
-    <div class="home-heading"><h2>{{ localization::tr(section.title) }}</h2>
+    <div class="home-heading"><h2>{{ section.title }}</h2>
       {% if section.block != "" && section.block != "Genres" %}{% call m::action(localization::tr("Refresh"), "rufin-view-refresh-symbolic", "refresh-home", "icon-button") %}{% endcall %}{% endif %}
       {% if section.block != "Genres" %}<div class="home-paging">{% call m::action(localization::tr("Previous"), "rufin-go-previous-symbolic", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "rufin-go-next-symbolic", "next-home", "icon-button") %}{% endcall %}</div>{% endif %}
     </div>
     {% if section.block == "Genres" %}
-      <div class="home-genres">{% for row in section.items %}<a href="{{ row.href("genre") }}" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title() }}</a>{% endfor %}</div>
+      <div class="home-genres">{% for row in section.rows %}<a href="{{ row.href }}" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title }}</a>{% endfor %}</div>
     {% else %}
-      <div class="home-row" hx-sync="this:replace"><div class="album-grid">{% for row in section.items %}{% call m::card(row, row.text("kind")) %}{% endcall %}{% endfor %}</div></div>
+      <div class="home-row" hx-sync="this:replace"><div class="album-grid">{% for row in section.rows %}{% call m::card(row) %}{% endcall %}{% endfor %}</div></div>
     {% endif %}
   </section>
 {% endif %}

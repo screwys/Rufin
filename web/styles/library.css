@@ -61,8 +61,12 @@
   color: var(--accent);
 }
 
-.track-list td.actions {
+.track-list td.actions,
+.track-list td.favorite {
   padding-inline: 4px;
+}
+
+.track-list td.actions {
   text-align: right;
 }
 

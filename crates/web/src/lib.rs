@@ -9,6 +9,7 @@ mod connect;
 mod controller;
 mod equalizer;
 mod media;
+mod page;
 mod pins;
 mod playlists;
 mod source;
@@ -91,6 +92,7 @@ pub async fn serve(
         ))
         .merge(browser::routes())
         .layer(Extension(authorization))
+        .layer(Extension(Pages::default()))
         .with_state(products);
     let mut connections = JoinSet::new();
     loop {
@@ -114,7 +116,45 @@ fn routes() -> Router<ProductHandles> {
         .route("/api/playback", get(playback_state))
         .route("/api/playback/events", get(playback_events))
         .route("/api/events", get(events))
-        .route("/api/tracks", get(tracks))
+        .route("/api/page", list_route("page", (48, 128)))
+        .route(
+            "/api/home",
+            list_route("home", (0, 0)).post(catalog::refresh_home),
+        )
+        .route("/api/tracks", list_route("tracks", (100, 256)))
+        .route("/api/albums", list_route("albums", (100, 128)))
+        .route(
+            "/api/albums/tracks",
+            list_route("albums/tracks", (100, 128)),
+        )
+        .route("/api/artists", list_route("artists", (48, 128)))
+        .route(
+            "/api/artists/tracks",
+            list_route("artists/tracks", (48, 256)),
+        )
+        .route("/api/genres/tracks", list_route("genres/tracks", (48, 256)))
+        .route(
+            "/api/playlists",
+            list_route("playlists", (100, 128))
+                .post(playlists::create)
+                .patch(playlists::rename)
+                .delete(playlists::delete),
+        )
+        .route(
+            "/api/playlists/entries",
+            list_route("playlists/entries", (100, 256))
+                .post(playlists::add_entries)
+                .delete(playlists::remove_entries)
+                .patch(playlists::move_entry),
+        )
+        .route(
+            "/api/smart-playlists",
+            list_route("smart-playlists", (48, 64)),
+        )
+        .route(
+            "/api/smart-playlists/tracks",
+            list_route("smart-playlists/tracks", (48, 256)),
+        )
         .route(
             "/api/queue",
             get(queue_state).post(queue_play).delete(queue_clear),
@@ -186,29 +226,6 @@ async fn playback_events(State(products): State<ProductHandles>) -> Result<Respo
     Ok(event_response(Body::new(StreamBody::new(stream))))
 }
 
-async fn tracks(
-    State(products): State<ProductHandles>,
-    headers: hyper::HeaderMap,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    browser::page(
-        &headers,
-        &parameters,
-        tracks_data(&products, &parameters).await?,
-    )
-}
-
-async fn tracks_data(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-) -> Result<Value, Error> {
-    Ok(
-        catalog::tracks_page(products, parameters, "tracks", (100, 256), "tracks")
-            .await?
-            .1,
-    )
-}
-
 async fn queue_state(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
@@ -240,187 +257,167 @@ fn queue_json(
     }).unwrap_or(json!({"total": 0, "current_index": null, "loading": false, "offset": 0, "window": []}))
 }
 
+/// A list endpoint: the page its parameters name, as HTML for the web page or as JSON.
+fn list_route(
+    list: &'static str,
+    limits: (usize, usize),
+) -> axum::routing::MethodRouter<ProductHandles> {
+    get(
+        move |State(products): State<ProductHandles>,
+              Extension(pages): Extension<Pages>,
+              headers: hyper::HeaderMap,
+              Query(parameters): Query<HashMap<String, String>>| async move {
+            list_page(&products, &pages, &headers, list, &parameters, limits).await
+        },
+    )
+}
+
+async fn list_page(
+    products: &ProductHandles,
+    pages: &Pages,
+    headers: &hyper::HeaderMap,
+    list: &str,
+    parameters: &HashMap<String, String>,
+    (default, cap): (usize, usize),
+) -> Result<Response<Body>, Error> {
+    let token = page::token(products, list, parameters)?;
+    let limit = number(parameters, "limit", default)?.min(cap);
+    let opened = page::open(products, token, number(parameters, "offset", 0)?, limit).await?;
+    pages.show(headers, &opened.view);
+    if opened.token.route == rufin_core::route::Route::Home {
+        let block = parameters
+            .get("block")
+            .map(|block| serde_json::from_value(Value::String(block.clone())))
+            .transpose()
+            .map_err(bad_request)?;
+        let sections = page::home_sections(&opened.view, block);
+        return browser::page(
+            headers,
+            || page::home_json(products, &sections),
+            |csrf| browser::home(products, &opened.token, &sections, csrf),
+        );
+    }
+    let total = boolean(parameters, "total")?;
+    browser::page(
+        headers,
+        || page::json(products, &opened, limit, total),
+        |csrf| browser::library(products, &opened, total, csrf),
+    )
+}
+
 async fn queue_play(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
-    let form_return = request
-        .extensions()
-        .get::<SubmittedForm>()
-        .map(|form| form.0.get("return").cloned().unwrap_or_default());
-    let mut kind = request
-        .uri()
-        .path()
-        .strip_prefix("/api/queue/")
-        .unwrap_or("track")
-        .to_owned();
+    // The collection routes name a page by the list parameters of its endpoint.
+    let list = match request.uri().path().strip_prefix("/api/queue/") {
+        Some("album") => Some("albums/tracks"),
+        Some("artist") => Some("artists/tracks"),
+        Some("genre") => Some("genres/tracks"),
+        Some("playlist") => Some("playlists/entries"),
+        Some("smart-playlist") => Some("smart-playlists/tracks"),
+        Some("source") => Some("tracks"),
+        _ => None,
+    };
     #[derive(Deserialize)]
     struct Input {
         mode: String,
         before: Option<usize>,
         after: Option<usize>,
+        uris: Option<Vec<String>>,
+        page: Option<page::PageToken>,
+        index: Option<usize>,
+        anchor_uri: Option<String>,
+        anchor_entry: Option<library::PlaylistEntryKey>,
         #[serde(flatten)]
-        selection: Value,
+        parameters: HashMap<String, Value>,
     }
-    let mut input: Input = body(request).await?;
-    if form_return.is_some() {
-        kind = input.selection["kind"].as_str().unwrap_or(&kind).to_owned();
-    }
-    if let Some(form_return) = form_return.filter(|_| input.mode == "replace") {
-        let parameters: HashMap<String, String> = url::form_urlencoded::parse(
-            form_return
-                .strip_prefix("/?")
-                .unwrap_or_default()
-                .as_bytes(),
-        )
-        .into_owned()
-        .collect();
-        let selection = &mut input.selection;
-        if selection["kind"] == "track" {
-            let view = parameters.get("view").map(String::as_str).unwrap_or("home");
-            if matches!(
-                view,
-                "tracks"
-                    | "favorites"
-                    | "album"
-                    | "artist"
-                    | "genre"
-                    | "playlist"
-                    | "smart-playlist"
-            ) {
-                selection["anchor_uri"] = selection["uris"][0].clone();
-                if view == "playlist" {
-                    selection["anchor_entry"] = selection["id"].clone();
-                }
-                selection["kind"] = json!(if matches!(view, "tracks" | "favorites") {
-                    "source"
-                } else {
-                    view
-                });
-                for key in [
-                    "source",
-                    "folder",
-                    "q",
-                    "sort",
-                    "album_artists",
-                    "favorites",
-                ] {
-                    if let Some(value) = parameters.get(key) {
-                        selection[key] = json!(value);
-                    }
-                }
-                if let Some(id) = parameters.get("id") {
-                    selection["id"] = serde_json::from_str(id).map_err(bad_request)?;
-                }
-                selection["favorites"] =
-                    json!(view == "favorites" || boolean(&parameters, "favorites")?);
-                selection["descending"] =
-                    json!(parameters.get("descending").is_some_and(|v| v == "true"));
-            }
-        }
-        kind = selection["kind"].as_str().unwrap_or(&kind).to_owned();
-    }
-    let shuffled_start = kind != "track"
-        && input.selection.get("anchor_uri").is_none_or(Value::is_null)
-        && input
-            .selection
-            .get("anchor_entry")
-            .is_none_or(Value::is_null);
+    let input: Input = body(request).await?;
+    use rufin_core::playback::QueuePlacement;
     let placement = match input.mode.as_str() {
-        "replace" => rufin_core::playback::QueuePlacement::Replace { anchor_index: 0 },
-        "append" | "insert" => rufin_core::playback::QueuePlacement::End,
-        "next" => rufin_core::playback::QueuePlacement::AfterCurrent,
+        "replace" => QueuePlacement::Replace { anchor_index: 0 },
+        "append" | "insert" => QueuePlacement::End,
+        "next" => QueuePlacement::AfterCurrent,
         _ => {
             return Err(bad_request(
                 "Queue mode must be replace, append, next or insert",
             ));
         }
     };
-    let mut anchor_key =
-        if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
-            products
-                .library
-                .track_keys(&[uri.to_owned()], &library::ReadCancellation::new())
-                .await
-                .map_err(internal)?
-                .first()
-                .copied()
-        } else {
-            None
-        };
-    let anchor_entry = input
-        .selection
-        .get("anchor_entry")
-        .filter(|value| !value.is_null())
-        .map(|value| serde_json::from_value(value.clone()).map_err(bad_request))
-        .transpose()?;
-    if anchor_key.is_none() {
-        if let Some(entry) = anchor_entry {
-            anchor_key = products
-                .library
-                .selected_track_keys(
-                    &library::MemberSelection::Entries((vec![entry]).into()),
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .map_err(internal)?
-                .first()
-                .copied();
-        }
-    }
-    let selection = if kind == "track" {
-        let uris: Vec<String> =
-            serde_json::from_value(input.selection["uris"].clone()).map_err(bad_request)?;
-        library::MemberSelection::Keys {
-            source: None,
-            keys: ((products
-                .library
-                .remember_media_uris(&uris)
-                .await
-                .map_err(internal)?)
-            .iter()
-            .map(|key| key.raw())
-            .collect::<Vec<i64>>())
-            .into_iter()
-            .map(library::TrackKey::from_raw)
-            .collect::<Vec<_>>()
-            .into(),
-        }
+    let request = if let Some(uris) = input
+        .uris
+        .filter(|_| list.is_none() && input.page.is_none())
+    {
+        let keys = products
+            .library
+            .remember_media_uris(&uris)
+            .await
+            .map_err(internal)?;
+        rufin_core::playback::PlayRequest::ordered(
+            library::MemberSelection::Keys {
+                source: None,
+                keys: keys.into(),
+            },
+            0,
+            placement,
+            false,
+        )
     } else {
-        let parameters = input
-            .selection
-            .as_object()
-            .ok_or_else(|| bad_request("Invalid media selection"))?
-            .iter()
-            .filter(|(_, value)| !value.is_null())
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    value
-                        .as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| value.to_string()),
-                )
-            })
-            .collect();
-        catalog::track_query(products, &parameters, &kind)
-            .await?
-            .selection()
+        let token = match (input.page, list) {
+            (Some(token), _) => token,
+            (None, Some(list)) => {
+                let parameters = input
+                    .parameters
+                    .iter()
+                    .filter(|(_, value)| !value.is_null())
+                    .map(|(key, value)| {
+                        let text = value
+                            .as_str()
+                            .map_or_else(|| value.to_string(), str::to_owned);
+                        (key.clone(), text)
+                    })
+                    .collect();
+                page::token(products, list, &parameters)?
+            }
+            (None, None) => return Err(bad_request("uris or page is required")),
+        };
+        let view = page::open(products, token, 0, 0).await?.view;
+        let gone = || bad_request("Nothing to play here");
+        let anchor = match (&input.anchor_uri, input.anchor_entry) {
+            (Some(uri), entry) => products
+                .library
+                .track_keys(std::slice::from_ref(uri), &library::ReadCancellation::new())
+                .await
+                .map_err(internal)?
+                .first()
+                .map(|key| (*key, entry)),
+            (None, Some(entry)) => match view.route() {
+                rufin_core::route::Route::PlaylistDetail(playlist) => products
+                    .library
+                    .playlist_entry_track(*playlist, entry)
+                    .map(|key| (key, Some(entry))),
+                _ => None,
+            },
+            (None, None) => None,
+        };
+        match (input.index, anchor) {
+            (Some(index), _) => view
+                .play(index, placement, false, &library::ReadCancellation::new())
+                .await
+                .map_err(page::read_error)?,
+            (None, Some((key, entry))) => view.play_track(key, entry, 0, placement, false),
+            (None, None) => view.play_all(placement, false),
+        }
+        .ok_or_else(gone)?
     };
     let queue = products.playback.clone();
     tokio::task::spawn_blocking(move || {
         if input.mode == "insert" {
-            queue.insert(selection, queue_drop_target(input.before, input.after));
+            if let Some(selection) = request.selection() {
+                queue.insert(selection, queue_drop_target(input.before, input.after));
+            }
             return;
-        }
-        let mut request =
-            rufin_core::playback::PlayRequest::ordered(selection, 0, placement, shuffled_start);
-        if kind != "track" {
-            request = request.with_context("api".into());
-        }
-        if let Some(key) = anchor_key {
-            request = request.with_anchor(key, anchor_entry);
         }
         queue.play_selection(request)
     })
@@ -654,44 +651,32 @@ const SORTS: [(&str, LibraryField); 18] = [
     ("album_count", LibraryField::AlbumCount),
 ];
 
-/// The `sort` name of a list's own saved order, where the list has one.
-fn own_sort(key: LibraryListKey) -> Option<&'static str> {
-    match key {
-        LibraryListKey::Playlists | LibraryListKey::SmartPlaylists => Some("position"),
-        LibraryListKey::SmartPlaylistTracks => Some("definition"),
-        _ => None,
-    }
-}
-
-/// The `sort` names a list takes and their titles: its own order first, then the fields the
-/// other clients sort it by, titled as GTK titles them.
+/// The `sort` names a list takes and their titles, as GTK titles them.
 fn sort_options(key: LibraryListKey) -> Vec<(&'static str, &'static str)> {
-    own_sort(key)
-        .map(|name| (name, localization::msgid("Playlist order")))
-        .into_iter()
-        .chain(available_sort_fields(key).iter().filter_map(|field| {
+    available_sort_fields(key)
+        .iter()
+        .filter_map(|field| {
             let (name, _) = SORTS.iter().find(|(_, sorted)| sorted == field)?;
             Some((
                 *name,
                 rufin_core::settings::presentation::library_sort_title(key, *field),
             ))
-        }))
+        })
         .collect()
 }
 
-/// Reads `sort` as a documented name for a field `key` sorts by. None is the list's own order:
-/// no `sort`, or the name help.json gives a playlist's saved order.
+/// Reads `sort` as a documented name for a field `key` sorts by. `position` and `definition`
+/// name a list's own order: a playlist's, or a smart playlist's saved one.
 fn sort(
     parameters: &HashMap<String, String>,
     key: LibraryListKey,
 ) -> Result<Option<LibraryField>, Error> {
-    let own = own_sort(key);
-    let Some(name) = parameters
-        .get("sort")
-        .filter(|name| Some(name.as_str()) != own)
-    else {
+    let Some(name) = parameters.get("sort") else {
         return Ok(None);
     };
+    if matches!(name.as_str(), "position" | "definition") {
+        return Ok(Some(LibraryField::RowIndex));
+    }
     SORTS
         .iter()
         .find(|(api, field)| api == name && available_sort_fields(key).contains(field))
@@ -699,46 +684,15 @@ fn sort(
         .ok_or_else(|| bad_request("Unknown sort"))
 }
 
-/// The order a card list opens in: the request's, else the one saved for `key`, as GTK opens
-/// it. Returns the field, the direction and the order's documented name.
-fn list_order(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-    key: LibraryListKey,
-) -> Result<(LibraryField, bool, &'static str), Error> {
-    let saved = products.settings.load().library_list(key);
-    let sort = if parameters.contains_key("sort") {
-        sort(parameters, key)?.unwrap_or(LibraryField::RowIndex)
-    } else {
-        saved.sort_key
-    };
-    let descending = if parameters.contains_key("descending") {
-        boolean(parameters, "descending")?
-    } else {
-        saved.descending
-    };
-    let name = (sort == LibraryField::RowIndex)
-        .then(|| own_sort(key))
-        .flatten()
-        .or_else(|| {
-            SORTS
-                .iter()
-                .find(|(_, field)| *field == sort)
-                .map(|(name, _)| *name)
-        })
-        .unwrap_or("title");
-    Ok((sort, descending, name))
-}
-
-/// The documented name of the order a track read lists in. Only a smart playlist reads in its
-/// own order, `definition`, without a field.
-fn sort_name(read: &library::MemberRead) -> &'static str {
-    read.sort.map_or("definition", |sort| {
-        SORTS
-            .iter()
-            .find(|(_, field)| *field == sort)
-            .map_or("title", |(name, _)| name)
-    })
+/// The documented name of the order a list reads in.
+fn sort_name(key: LibraryListKey, sort: LibraryField) -> &'static str {
+    if key == LibraryListKey::SmartPlaylistTracks && sort == LibraryField::RowIndex {
+        return "definition";
+    }
+    SORTS
+        .iter()
+        .find(|(_, field)| *field == sort)
+        .map_or("title", |(name, _)| name)
 }
 
 fn track_json(
@@ -752,23 +706,6 @@ fn track_json(
     }
     row
 }
-/// What `row` shows for `fields`, the fields its list shows on the other clients, as
-/// `[{field, text}]`.
-fn field_texts(row: &library::Row, fields: &[LibraryField]) -> Value {
-    fields
-        .iter()
-        .map(|field| {
-            json!({"field":field,"text":rufin_core::settings::presentation::row_field(row, *field)})
-        })
-        .collect()
-}
-
-fn track_row_json(row: &library::TrackRow) -> Value {
-    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
-        "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
-        "year":row.year,"favorite":row.state.favorite,"rating":row.state.rating,"source_id":row.source_id,"media":media::media_links(&row.links, &row.album)})
-}
-
 fn playback_json(
     products: &ProductHandles,
     state: Option<&playback::PlaybackView>,
@@ -1053,7 +990,63 @@ fn publication_json(
     value
 }
 
-async fn events(State(products): State<ProductHandles>) -> Response<Body> {
+/// The page each live events stream shows, for the refresh verdicts its frames carry. A page
+/// read sent with `X-Rufin-Events: <stream>` becomes that stream's page.
+#[derive(Clone, Default)]
+struct Pages(Arc<Mutex<HashMap<u64, Option<Arc<rufin_core::view::View>>>>>);
+
+impl Pages {
+    fn show(&self, headers: &hyper::HeaderMap, view: &Arc<rufin_core::view::View>) {
+        let Some(stream) = headers
+            .get("x-rufin-events")
+            .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
+        else {
+            return;
+        };
+        if let Some(shown) = self.0.lock().expect("event pages").get_mut(&stream) {
+            *shown = Some(Arc::clone(view));
+        }
+    }
+
+    fn page(&self, stream: u64) -> Option<Arc<rufin_core::view::View>> {
+        self.0
+            .lock()
+            .expect("event pages")
+            .get(&stream)
+            .cloned()
+            .flatten()
+    }
+}
+
+/// An events stream's place in [`Pages`], which it leaves when the stream closes.
+struct Stream {
+    id: u64,
+    pages: Pages,
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        self.pages.0.lock().expect("event pages").remove(&self.id);
+    }
+}
+
+async fn events(
+    State(products): State<ProductHandles>,
+    Extension(pages): Extension<Pages>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Response<Body> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // The page the client shows when it connects; one that does not open has nothing to follow.
+    let shown = match page::token(&products, "page", &parameters) {
+        Ok(token) => page::open(&products, token, 0, 0)
+            .await
+            .ok()
+            .map(|opened| opened.view),
+        Err(_) => None,
+    };
+    pages.0.lock().expect("event pages").insert(id, shown);
+    let stream = Stream { id, pages };
     let receivers = (
         products.playback.updates.subscribe(),
         products.source.operation(),
@@ -1065,6 +1058,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         true,
         None,
         rufin_core::settings::SidebarSettings::default(),
+        stream,
     );
     let stream = futures_util::stream::unfold(
         receivers,
@@ -1079,10 +1073,12 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
             first,
             mut previous,
             mut pins,
+            stream,
         )| async move {
             let values = if first {
                 let publication = playback.recv().await.ok()?;
                 let mut value = playback_event_json(&products, publication, &mut previous, true);
+                value["stream"] = json!(stream.id);
                 value["source"] = json!(*source.borrow_and_update());
                 value["lyrics"] = media::lyrics_json(
                     &lyrics.borrow_and_update(),
@@ -1103,14 +1099,14 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                         let now = sidebar.borrow_and_update().ui.sidebar.clone();
                         if now == pins { Vec::new() } else { pins = now; vec![json!({"pins_changed":true})] }
                     },
-                    changed = catalog.next() => changed_json(&products, &changed?),
+                    changed = catalog.next() => changed_json(&products, stream.pages.page(stream.id).as_deref(), &changed?),
                 }
             };
             Some((
                 values,
                 (
                     playback, source, lyrics, appearance, sidebar, catalog, products, false,
-                    previous, pins,
+                    previous, pins, stream,
                 ),
             ))
         },
@@ -1125,17 +1121,38 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
     event_response(Body::new(StreamBody::new(stream)))
 }
 
-/// The update frames of one catalog change. The first carries the flags and the first changed
-/// playlist, or null when any may have changed; each further playlist gets a frame of its own.
+/// The update frames of one catalog change. The first carries the flags, what the change means
+/// for the stream's page (`page_refresh`: reread or reopen) and the favorites and ratings that
+/// changed, which the rows that show them patch in; then the first changed playlist, or null
+/// when any may have changed. Each further playlist gets a frame of its own.
 fn changed_json(
     products: &ProductHandles,
+    shown: Option<&rufin_core::view::View>,
     changed: &rufin_core::source::feed::Changed,
 ) -> Vec<Value> {
+    use rufin_core::view::Refresh;
     let mut first = json!({
-        "catalog_acquired": changed.all || !changed.sources.is_empty() || !changed.items.is_empty(),
+        "catalog_acquired": changed.all || !changed.sources.is_empty(),
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
         "activity_changed": changed.listened,
     });
+    match shown.map(|view| view.refresh(changed)) {
+        Some(Refresh::Reread) => first["page_refresh"] = json!("reread"),
+        Some(Refresh::Reopen) => first["page_refresh"] = json!("reopen"),
+        Some(Refresh::Nothing) | None => {}
+    }
+    if !changed.items.is_empty() {
+        first["states"] = changed
+            .items
+            .iter()
+            .map(|state| {
+                let (library::FavoriteTarget::Track(uri)
+                | library::FavoriteTarget::Album(uri)
+                | library::FavoriteTarget::Artist(uri)) = &state.target;
+                json!({"uri":uri,"favorite":state.favorite,"rating":state.rating})
+            })
+            .collect();
+    }
     if changed.playlist_lists {
         first["playlists"] = Value::Null;
         return vec![first];

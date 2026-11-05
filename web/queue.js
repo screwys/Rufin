@@ -193,7 +193,7 @@ async function showQueueMenu(row, anchor, event) {
         () =>
           api("/queue/reorder", "POST", { positions: [row.position], before: null }),
       ],
-      radioMenu(track),
+      radioMenu({ kind: "track", uri: track.uri }),
       null,
       playlistMenu({ uris: [track.uri] }),
       [

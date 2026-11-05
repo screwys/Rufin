@@ -2,7 +2,7 @@ import { qualityControls } from "./download-quality.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
-import { loadView, navigate, route } from "./library.js";
+import { loadView, navigate, reopen } from "./library.js";
 
 import { $, button, el, icon, notice, openPopup, run } from "./ui.js";
 
@@ -78,7 +78,7 @@ function renderSources(configured) {
           await api("/sources/select", "POST", { id: item.id });
           state.source = item.id;
           updateSources(await api("/sources"));
-          navigate("tracks");
+          navigate("Tracks");
         },
         "rufin-object-select-symbolic",
         "",
@@ -211,7 +211,7 @@ function showSourceProgress(value) {
     run(async () => {
       const source = state.source, library = state.selectedLibrary;
       updateSources(await api("/sources"));
-      if (state.source !== source || state.selectedLibrary !== library) await loadView();
+      if (state.source !== source || state.selectedLibrary !== library) reopen();
     });
   previousOperation = value.state;
 }
@@ -343,7 +343,7 @@ function init() {
             await api("/sources/select", "POST", { id: item.id });
             state.source = item.id;
             updateSources(await api("/sources"));
-            navigate(route === "genres" ? "home" : route);
+            reopen();
           },
           null,
           "menu-item",
@@ -393,7 +393,7 @@ function init() {
                 library: library.id,
               });
               updateSources(await api("/sources"));
-              navigate(route === "genres" ? "home" : route);
+              reopen();
             },
             null,
             "menu-item",
@@ -450,7 +450,7 @@ function init() {
       $("source-dialog").close();
       $("password").value = "";
       updateSources(await api("/sources"));
-      navigate(editingSource ? "sources" : "home");
+      navigate(editingSource ? "sources" : "Home");
     }),
   );
 }

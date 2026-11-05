@@ -6,8 +6,9 @@ import { loadView, openMediaLink } from "./library.js";
 import { $, button, el, icon, run, notice } from "./ui.js";
 import { sourceIcon } from "./sources.js";
 
-function playRadio(row, kind = "track", mode = "replace") {
-  return api("/queue/radio", "POST", { kind, id: row.id, uri: row.uri, mode });
+// Plays the radio a row's menu offers.
+function playRadio(seed, mode = "replace") {
+  return api("/queue/radio", "POST", { ...seed, mode });
 }
 
 let menuAnchor = null;
@@ -120,22 +121,23 @@ function positionSubmenu(menu, anchor) {
   menu.style.top = `${Math.max(8, Math.min(rect.top, innerHeight - menu.offsetHeight - 8))}px`;
 }
 
-function radioMenu(row, kind = "track") {
+function radioMenu(seed) {
   const title = {
     track: tr("Track radio"),
     album: tr("Album radio"),
     artist: tr("Artist radio"),
     album_artist: tr("Artist radio"),
+    genre: tr("Genre radio"),
     playlist: tr("Playlist radio"),
-  }[kind];
+  }[seed.kind];
   return [
     title,
     null,
     "rufin-audio-only-symbolic",
     [
-      [tr("Play"), () => playRadio(row, kind, "replace")],
-      [tr("Play Next"), () => playRadio(row, kind, "next")],
-      [tr("Play Later"), () => playRadio(row, kind, "append")],
+      [tr("Play"), () => playRadio(seed, "replace")],
+      [tr("Play Next"), () => playRadio(seed, "next")],
+      [tr("Play Later"), () => playRadio(seed, "append")],
     ],
   ];
 }
@@ -165,7 +167,7 @@ async function goToMenu(row, kind = "track") {
       [
         [
           tr("Go to {artist}", { artist: row.name }),
-          () => openMediaLink("artists", row),
+          () => openMediaLink(row),
           "rufin-artists-symbolic",
         ],
       ],
@@ -173,14 +175,14 @@ async function goToMenu(row, kind = "track") {
   const metadata = await mediaLinks(row, kind);
   const items = metadata.artists.map((artist) => [
     tr("Go to {artist}", { artist: artist.name }),
-    () => openMediaLink("artists", artist),
+    () => openMediaLink(artist),
     "rufin-artists-symbolic",
   ]);
   const album = kind === "album" ? row : metadata.album;
   if (album)
     items.push([
       tr("Go to Album"),
-      () => openMediaLink("albums", album),
+      () => openMediaLink(album),
       "rufin-albums-symbolic",
     ]);
   return items.length ? [tr("Go to"), null, "rufin-external-link-compact-symbolic", items] : null;
@@ -208,29 +210,13 @@ function renderPlaylistSubmenu(menu, target, signal) {
     ),
   );
   menu.lastChild.append(document.createTextNode(tr("New Playlist")));
-  let offset = 0,
-    total = 0,
-    request = 0,
+  let playlists = [],
     timer;
-  const load = async () => {
-    const turn = ++request,
-      start = offset;
-    const params = new URLSearchParams({
-      offset: start,
-      limit: 64,
-      total: start === 0,
-      sort: "title",
-      q: search.value,
-    });
-    if (state.source) params.set("source", state.source);
-    const result = await api(`/playlists?${params}`, "GET", undefined, signal);
-    if (signal.aborted || turn !== request) return;
-    if (result.total !== null) total = result.total;
+  const show = () => {
     const focused = document.activeElement?.dataset.playlistId;
+    const query = search.value.toLocaleLowerCase();
     window.replaceChildren();
-    window.style.paddingTop = `${start * 32}px`;
-    window.style.paddingBottom = `${Math.max(0, total - start - result.playlists.length) * 32}px`;
-    for (const row of result.playlists) {
+    for (const row of playlists.filter((row) => row.name.toLocaleLowerCase().includes(query))) {
       const item = button(
         row.name,
         async () => {
@@ -245,7 +231,6 @@ function renderPlaylistSubmenu(menu, target, signal) {
         null,
         "menu-item",
       );
-      item.disabled = !row.writable;
       item.dataset.playlistId = String(row.id);
       item.setAttribute("role", "menuitem");
       window.append(item);
@@ -255,21 +240,15 @@ function renderPlaylistSubmenu(menu, target, signal) {
   };
   search.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      offset = 0;
-      scroll.scrollTop = 0;
-      run(load);
-    }, 150);
+    timer = setTimeout(show, 150);
   });
-  scroll.addEventListener("scroll", () => {
-    const next = Math.min(Math.max(0, total - 64), Math.max(0, Math.floor(scroll.scrollTop / 32 / 32) * 32));
-    if (next !== offset) {
-      offset = next;
-      clearTimeout(timer);
-      timer = setTimeout(() => run(load), 60);
-    }
+  run(async () => {
+    const params = new URLSearchParams(state.source ? { source: state.source } : {});
+    const result = await api(`/playlists/destinations?${params}`, "GET", undefined, signal);
+    if (signal.aborted) return;
+    playlists = result.playlists;
+    show();
   });
-  run(load);
 }
 
 let editingPlaylist = null;

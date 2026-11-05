@@ -31,28 +31,16 @@ import { renderSources, sources } from "./sources.js";
 import { pinAction, refreshPins, markPins } from "./pins.js";
 import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
-const titles = {
-  home: tr("Home"),
-  favorites: tr("Favorites"),
-  genres: tr("Genres"),
-  tracks: tr("Tracks"),
-  albums: tr("Albums"),
-  playlists: tr("Playlists"),
-  artists: tr("Artists"),
-  "smart-playlists": tr("Smart Playlists"),
-  sources: tr("Sources"),
-};
-
 let viewRequest = null;
 
-let route = "home";
+// The page shown: its token as the server resolved it, or "sources".
+let opened = null;
 
-let detail = null;
+// What the page's fragment says of itself: its title, Back page, navigation entry, order and
+// actions.
+let shown = {};
 
 let offset = 0;
-
-// Whether the reader picked the order; otherwise the server lists in the list's saved order.
-let orderChosen = false;
 
 let searchTimer;
 
@@ -67,10 +55,14 @@ const pageSize = 48;
 let revealEntry = async () => {};
 let libraryTotal = null;
 let readRange = async () => [];
+// Reads the shown windows of a list again in place.
+let rereadPage = async () => {};
 let selectionRequest;
 let selectionPending = Promise.resolve();
 
-async function loadLibrary(path, parameters, signal, initialPage = null, knownTotal = null) {
+// Pages the list of `token` in windows as it scrolls; `extra` parameters, such as a new
+// order, apply to the first window, which names the page as it opened.
+async function loadLibrary(token, extra, signal, initialPage = null, knownTotal = null) {
   signal.throwIfAborted();
   const content = $("content"), scroller = $("main"), pages = new Map();
   const before = el("div"), after = el("div");
@@ -135,18 +127,19 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
       releaseCovers();
     };
     try {
-      const query = new URLSearchParams(parameters);
-      query.set("offset", start);
-      query.set("total", String(total === null));
-      if (!existing) await fragment(`/api${path}?${query}`, node, lifetime.signal);
+      const query = new URLSearchParams({
+        ...extra,
+        page: JSON.stringify(token),
+        offset: start,
+        limit: pageSize,
+        total: String(total === null),
+      });
+      if (!existing) await fragment(`/api/page?${query}`, node, lifetime.signal);
       signal.throwIfAborted();
       const data = node.matches("[data-page]") ? node : node.querySelector("[data-page]");
-      if (data.dataset.name && detail) $("title").textContent = detail.title = data.dataset.name;
-      if (data.dataset.sort) {
-        parameters.set("sort", data.dataset.sort);
-        parameters.set("descending", data.dataset.descending);
-        showOrder(data.dataset.sort, data.dataset.descending === "true");
-      }
+      showPage(data.dataset);
+      token = opened;
+      extra = {};
       if (data.dataset.total !== "") {
         total = Number(data.dataset.total);
         libraryTotal = total;
@@ -166,7 +159,7 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
       node.hidden = false;
       const page = { start, node, remove, count };
       pages.set(start, page);
-      if (table) bindTracks(node, start, lifetime.signal);
+      if (table) bindTracks(node, lifetime.signal);
       else {
         bindCards(node);
         loadCardCovers(node, lifetime.signal);
@@ -220,14 +213,24 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
   readRange = async (start, end, selectionSignal) => {
     const result = [];
     for (let offset = start; offset <= end; offset += pageSize) {
-      const query = new URLSearchParams(parameters);
-      query.set("offset", offset);
-      query.set("limit", Math.min(pageSize, end - offset + 1));
-      query.delete("total");
-      const page = await api(`${path}?${query}`, "GET", undefined, selectionSignal);
-      result.push(...(page.tracks || page.entries));
+      const query = new URLSearchParams({
+        page: JSON.stringify(token),
+        offset,
+        limit: Math.min(pageSize, end - offset + 1),
+      });
+      const window = await api(`/page?${query}`, "GET", undefined, selectionSignal);
+      result.push(...(window.tracks || window.entries));
     }
     return result;
+  };
+  rereadPage = async () => {
+    total = null;
+    for (const page of pages.values()) page.remove();
+    pages.clear();
+    const first = Math.max(0, targetPage()) * pageSize;
+    await loadPage(first);
+    measure();
+    await fill();
   };
   const start = Math.floor(offset / pageSize) * pageSize;
   if (offset !== start) { initialPage?.remove(); initialPage = null; }
@@ -266,61 +269,52 @@ async function loadLibrary(path, parameters, signal, initialPage = null, knownTo
   resize.observe(scroller);
 }
 
-function restoreView() {
-  const parameters = new URLSearchParams(location.search);
-  const view = parameters.get("view") || "home";
-  const collections = {
-    album: "albums",
-    artist: "artists",
-    genre: "genres",
-    playlist: "playlists",
-    "smart-playlist": "smart-playlists",
-  };
-  route = Object.hasOwn(collections, view) ? collections[view] : (Object.hasOwn(titles, view) ? view : "home");
-  if (Object.hasOwn(collections, view) && parameters.has("id")) {
-    const id = parameters.get("id");
-    detail = { id: /^-?\d+$/.test(id) ? Number(id) : id, title: parameters.get("title") };
+// Shows what a page's fragment says of itself.
+function showPage(data) {
+  opened = JSON.parse(data.page);
+  shown = data;
+  if (opened.source) {
+    state.source = opened.source;
+    state.selectedLibrary = opened.folder ?? null;
   }
-  if (parameters.has("source")) state.source = parameters.get("source");
-  if (parameters.has("folder")) state.selectedLibrary = parameters.get("folder");
-  offset = Math.max(0, Number(parameters.get("offset")) || 0);
-  setSort();
-  $("search").value = parameters.get("q") || "";
-  orderChosen = parameters.has("sort") || parameters.has("descending");
-  if (parameters.has("sort")) $("sort").value = parameters.get("sort");
-  $("descending").setAttribute("aria-pressed", String(parameters.get("descending") === "true"));
-  document.querySelectorAll("[data-route]").forEach((node) => {
-    if (node.dataset.route === route) node.setAttribute("aria-current", "page");
-    else node.removeAttribute("aria-current");
-  });
-}
-
-function navigate(next, selected = null) {
-  route = next;
-  detail = selected;
+  $("title").textContent = data.name || data.title;
+  $("back").hidden = !data.back;
+  $("library-toolbar").hidden = data.section === "Home";
+  $("play-collection").hidden = data.play !== "true";
+  $("new-playlist").hidden = $("import-playlist").hidden = data.playlists !== "true";
+  if (data.sorts) {
+    $("sort").replaceChildren(
+      ...JSON.parse(data.sorts).map(([name, title]) => new Option(title, name)),
+    );
+    showOrder(data.sort, data.descending === "true");
+  }
+  markSection(data.section);
   markPins();
-  offset = 0;
-  orderChosen = false;
-  $("search").value = "";
-  $("descending").setAttribute("aria-pressed", "false");
-  setIcon($("descending").firstElementChild, "rufin-sort-name-symbolic");
-  document.querySelectorAll("[data-route]").forEach((node) => {
-    if (node.dataset.route === route) node.setAttribute("aria-current", "page");
-    else node.removeAttribute("aria-current");
-  });
-  $("navigation").classList.remove("open");
-  setSort();
-  run(() => loadView(false, state.selectedLibrary ? null : selected?.track_count ?? null));
 }
 
-// The sorts the page's list offers, as the server lists them for each page view.
-function setSort() {
-  const view = detail
-    ? { albums: "album", artists: "artist", genres: "genre", playlists: "playlist", "smart-playlists": "smart-playlist" }[route]
-    : route;
-  const options = document.querySelector(`template[data-sort="${view}"]`)
-    ?? document.querySelector('template[data-sort="tracks"]');
-  $("sort").replaceChildren(options.content.cloneNode(true));
+function markSection(section) {
+  document.querySelectorAll("[data-route]").forEach((node) => {
+    if (node.dataset.route === section) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
+  });
+}
+
+// Opens `target`: a page token, a navigation entry such as "Albums", or "sources".
+function navigate(target) {
+  opened = typeof target === "string" && target !== "sources"
+    ? { route: target, source: state.source || undefined, folder: state.selectedLibrary || undefined }
+    : target;
+  shown = {};
+  offset = 0;
+  $("search").value = "";
+  showOrder($("sort").value, false);
+  $("navigation").classList.remove("open");
+  run(() => loadView());
+}
+
+// The navigation entry the page belongs to, opened again, as after choosing another source.
+function reopen() {
+  navigate(opened === "sources" ? "sources" : shown.section || "Home");
 }
 
 function showOrder(sort, descending) {
@@ -330,31 +324,10 @@ function showOrder(sort, descending) {
   $("descending").hidden = sort === "definition";
 }
 
-function query() {
-  const params = new URLSearchParams({
-    offset,
-    limit: pageSize,
-    q: $("search").value,
-  });
-  if (orderChosen) {
-    params.set("sort", $("sort").value);
-    params.set("descending", $("descending").getAttribute("aria-pressed"));
-  }
-  if (state.source) params.set("source", state.source);
-  if (state.selectedLibrary) params.set("folder", state.selectedLibrary);
-  if (route === "favorites") params.set("favorites", "true");
-  if (detail) params.set("id", detail.id);
-  if (detail?.album_artists) params.set("album_artists", "true");
-  // An open Smart Playlist keeps the members it opened with until the next visit.
-  if (route === "smart-playlists" && detail)
-    params.set("opened", (detail.opened ??= Math.floor(Date.now() / 1000)));
-  return params;
-}
-
 function empty(title, description, action) {
   const node = el("div", "empty");
   node.append(
-    icon(route === "sources" ? "rufin-network-server-symbolic" : `rufin-${route}-symbolic`),
+    icon(opened === "sources" ? "rufin-network-server-symbolic" : "rufin-home-symbolic"),
     el("h2", "", title),
     el("p", "", description),
   );
@@ -370,7 +343,7 @@ function empty(title, description, action) {
   $("content").replaceChildren(node);
 }
 
-async function loadView(initial = false, knownTotal = null) {
+async function loadView(initial = false, knownTotal = null, extra = {}) {
   run(refreshPins);
   for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
     $("content").removeAttribute(name);
@@ -378,6 +351,7 @@ async function loadView(initial = false, knownTotal = null) {
   selectionPending = Promise.resolve();
   revealEntry = async () => {};
   readRange = async () => [];
+  rereadPage = async () => {};
   libraryTotal = null;
   selectedTracks.clear();
   selectionAnchor = 0;
@@ -393,55 +367,32 @@ async function loadView(initial = false, knownTotal = null) {
     $("content").replaceChildren(el("p", "empty-note", tr("Loading...")));
     releaseCovers();
   }
-  $("title").textContent = detail?.title || detail?.name || titles[route];
   $("source-name").textContent =
     sources.find((item) => item.id === state.source)?.name || tr("Library");
-  $("back").hidden = !detail;
-  $("library-toolbar").hidden = ["sources", "home"].includes(route);
-  $("descending").hidden = $("sort").value === "definition";
-  $("play-collection").hidden =
-    route === "sources" ||
-    (["playlists", "albums", "artists", "smart-playlists"].includes(route)
-      ? !detail
-      : !state.source);
-  $("new-playlist").hidden = route !== "playlists" || !!detail;
-  $("import-playlist").hidden = route !== "playlists" || !!detail;
   $("search").placeholder = tr("Search");
   try {
-    if (route === "sources") {
+    if (opened === "sources") {
+      $("title").textContent = tr("Sources");
+      for (const id of ["back", "library-toolbar"]) $(id).hidden = true;
+      markSection(null);
       renderSources(await api("/sources", "GET", undefined, signal));
       return;
     }
-    if (!state.source && !["playlists", "smart-playlists"].includes(route)) {
-      if (initial) {
-        $("content").querySelector("[data-open-source]")?.addEventListener("click", () => $("source-dialog").showModal());
-        return;
-      }
-      empty(
-        tr("Your music belongs here"),
-        tr("Add a music source to start listening."),
-        true,
-      );
-      return;
-    }
-    const params = query();
-    let path = route === "favorites" ? "/tracks" : `/${route}`;
-    if (
-      ["albums", "artists", "genres", "smart-playlists"].includes(route) &&
-      detail
-    )
-      path += "/tracks";
-    if (route === "playlists" && detail) path += "/entries";
     if (!initial) {
       $("content").replaceChildren();
       $("main").scrollTop = 0;
     }
-    if (route === "home") {
-      if (!initial) await fragment(`/api${path}?${params}`, $("content"), signal);
+    if (opened.route === "Home") {
+      if (!initial)
+        await fragment(`/api/page?${new URLSearchParams({ page: JSON.stringify(opened) })}`, $("content"), signal);
+      showPage($("content").querySelector("[data-page]").dataset);
       bindHome(signal);
-    } else await loadLibrary(path, params, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal);
+    } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal);
   } catch (error) {
-    if (!signal.aborted) empty(tr("Could not load this page"), error.message);
+    if (!signal.aborted) {
+      if (state.source) empty(tr("Could not load this page"), error.message);
+      else empty(tr("Your music belongs here"), tr("Add a music source to start listening."), true);
+    }
     throw error;
   } finally {
     if (!signal.aborted) {
@@ -449,6 +400,13 @@ async function loadView(initial = false, knownTotal = null) {
       $("content").inert = false;
     }
   }
+}
+
+// Reads the page again as a committed change asks: in place, or opened again.
+function refreshPage(verdict) {
+  if (opened === "sources") return;
+  if (verdict === "reread" && opened.route !== "Home") return rereadPage();
+  return loadView(false, libraryTotal);
 }
 
 async function setFavorite(rows, kind = "track") {
@@ -470,14 +428,13 @@ async function setFavorite(rows, kind = "track") {
       }
     }),
   );
-  if (route === "favorites") await loadView();
 }
 
 async function goToMedia(row, kind, anchor, rowKind = "track") {
   const metadata = await mediaLinks(row, rowKind);
   const links =
     kind === "albums" ? [metadata.album].filter(Boolean) : metadata.artists;
-  const open = (link) => openMediaLink(kind, link);
+  const open = (link) => openMediaLink(link);
   if (links.length === 1) open(links[0]);
   else if (links.length)
     showMenu(
@@ -490,12 +447,9 @@ async function goToMedia(row, kind, anchor, rowKind = "track") {
     );
 }
 
-function openMediaLink(kind, link) {
-  if (link.source && link.source !== state.source) {
-    state.source = link.source;
-    state.selectedLibrary = null;
-  }
-  navigate(kind, link);
+// Opens the page of an album or artist link.
+function openMediaLink(link) {
+  navigate(link.page);
 }
 
 let selectedTracks = new Map();
@@ -549,55 +503,53 @@ function selectedRows() {
   return [...selectedTracks].sort(([a], [b]) => a - b).map(([, row]) => row);
 }
 
-async function playSelection(row) {
+// Plays the page from track row `index`, or the tracks selected with it.
+async function playSelection(index) {
   await selectionPending;
   const selected = selectedRows();
   return selected.length > 1
     ? playUris(selected.map((track) => track.uri))
-    : playCollection(row);
+    : api("/queue", "POST", { page: opened, index, mode: "replace" });
 }
 
 async function showTrackMenu(index, row, anchor, event) {
   if (!selectedTracks.has(index)) await selectTrack(index);
   else await selectionPending;
   const rows = selectedRows(),
-    uris = rows.map((row) => row.uri);
-  const actions = [
-    [tr("Play"), () => playSelection(row)],
-    [tr("Play Next"), () => playUris(uris, "next")],
-    [tr("Play Later"), () => playUris(uris, "append")],
-    radioMenu(row),
-    null,
-    playlistMenu({ uris }),
-    [
+    uris = rows.map((row) => row.uri),
+    menu = row.menu;
+  const actions = [];
+  if (menu.play) actions.push([tr("Play"), () => playSelection(index)]);
+  if (menu.play_next) actions.push([tr("Play Next"), () => playUris(uris, "next")]);
+  if (menu.play_later) actions.push([tr("Play Later"), () => playUris(uris, "append")]);
+  if (menu.radio) actions.push(radioMenu(menu.radio));
+  actions.push(null);
+  if (menu.add_to_playlist) actions.push(playlistMenu({ uris }));
+  if (menu.favorite)
+    actions.push([
       rows.every((row) => row.favorite)
         ? tr("Remove from Favorites")
         : tr("Add to Favorites"),
       () => setFavorite(rows),
-    ],
-  ];
-  if (route === "playlists" && detail?.writable)
+    ]);
+  if (shown.writable === "true")
     actions.push([
       tr("Remove from Playlist"),
-      async () => {
-        await api("/playlists/entries", "DELETE", {
-          id: detail.id,
-          entries: rows.map((row) => row.id),
-        });
-        await loadView();
-      },
+      () => api("/playlists/entries", "DELETE", {
+        id: opened.route.PlaylistDetail,
+        entries: rows.map((row) => row.id),
+      }),
     ]);
-  const destination = await goToMenu(row);
+  const destination = menu.go_to && await goToMenu(row);
   if (destination) actions.push(null, destination);
   showMenu(actions, anchor, event);
 }
 
-function bindTracks(host, start, signal) {
+function bindTracks(host, signal) {
   const nodes = [...host.querySelectorAll("tbody tr[data-row]")];
-  for (const [position, tr] of nodes.entries()) {
-    const index = start + position,
+  for (const tr of nodes) {
+    const index = Number(tr.dataset.index),
       row = mediaRow(tr);
-    tr.dataset.index = index;
     tr.setAttribute("aria-rowindex", index + 2);
     bindDrag(
       tr,
@@ -623,7 +575,7 @@ function bindTracks(host, start, signal) {
           event.preventDefault();
           run(() => {
             const action = button.dataset.action;
-            if (action === "replace") return playSelection(row);
+            if (action === "replace") return playSelection(index);
             if (action === "next" || action === "append") return playUris([row.uri], action);
             if (action === "favorite") return setFavorite([row]);
             if (action === "menu") return showTrackMenu(index, row, button);
@@ -636,7 +588,7 @@ function bindTracks(host, start, signal) {
     tr.addEventListener(
       "dblclick",
       (event) => {
-        if (!event.target.closest("button")) run(() => playSelection(row));
+        if (!event.target.closest("button")) run(() => playSelection(index));
       },
       { signal },
     );
@@ -654,7 +606,7 @@ function bindTracks(host, start, signal) {
         if (event.target !== tr) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          if (event.key === "Enter") run(() => playSelection(row));
+          if (event.key === "Enter") run(() => playSelection(index));
           else selectTrack(index, event);
         } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
           event.preventDefault();
@@ -693,29 +645,9 @@ function playUris(uris, mode = "replace") {
   return api("/queue", "POST", { uris, mode });
 }
 
-function playCollection(track = null) {
-  const options = {
-    source: state.source || null,
-    q: $("search").value,
-    sort: $("sort").value,
-    descending: $("descending").getAttribute("aria-pressed") === "true",
-    mode: "replace",
-    anchor_uri: track?.uri || null,
-    favorites: route === "favorites",
-    folder: state.selectedLibrary,
-  };
-  if (detail && ["albums", "artists", "playlists", "smart-playlists", "genres"].includes(route))
-    return api(
-      `/queue/${{ albums: "album", artists: "artist", playlists: "playlist", "smart-playlists": "smart-playlist", genres: "genre" }[route]}`,
-      "POST",
-      {
-        ...options,
-        id: detail.id,
-        anchor_entry: route === "playlists" ? track?.id : null,
-        album_artists: !!detail.album_artists,
-      },
-    );
-  return api("/queue/source", "POST", { ...options, source: state.source });
+// Plays the page whole, as its header Play does.
+function playCollection() {
+  return api("/queue", "POST", { page: opened, mode: "replace" });
 }
 
 function markCurrent() {
@@ -740,25 +672,28 @@ function init() {
     );
   $("back").addEventListener("click", (event) => {
     event.preventDefault();
-    navigate(route === "genres" ? "home" : route);
+    navigate(JSON.parse(shown.back));
   });
   $("search").addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       offset = 0;
+      opened.options = { ...opened.options, filter: $("search").value };
       run(loadView);
     }, 200);
   });
-  $("sort").addEventListener("change", () => {
-    orderChosen = true;
+  // A chosen order goes with the first window; the page names it from then on.
+  const order = () => {
     offset = 0;
-    run(() => loadView(false, libraryTotal));
-  });
+    run(() => loadView(false, libraryTotal, {
+      sort: $("sort").value,
+      descending: $("descending").getAttribute("aria-pressed"),
+    }));
+  };
+  $("sort").addEventListener("change", order);
   $("descending").addEventListener("click", () => {
-    orderChosen = true;
     showOrder($("sort").value, $("descending").getAttribute("aria-pressed") !== "true");
-    offset = 0;
-    run(() => loadView(false, libraryTotal));
+    order();
   });
   $("refresh").addEventListener("click", () =>
     run(async () => {
@@ -769,7 +704,6 @@ function init() {
   );
   $("play-collection").addEventListener("click", () => run(playCollection));
   $("new-playlist").addEventListener("click", () => run(() => openName()));
-  setSort();
 }
 
 function bindCards(host) {
@@ -780,17 +714,7 @@ function bindCards(host) {
     if (!card.classList.contains("pin-row"))
       bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
     const open = () => {
-      if (kind !== "track")
-        return navigate(
-          {
-            album: "albums",
-            artist: "artists",
-            playlist: "playlists",
-            "smart-playlist": "smart-playlists",
-            genre: "genres",
-          }[kind],
-          row,
-        );
+      if (row.page) return navigate(row.page);
       host
         .querySelectorAll(".album-card.selected")
         .forEach((node) => node.classList.remove("selected"));
@@ -798,70 +722,56 @@ function bindCards(host) {
     };
     const play = (mode) => queueMedia(mediaSelection(kind, row), mode);
     const menu = async (anchor, event) => {
-      const actions = [
-        [tr("Play"), () => play("replace")],
-        [tr("Play Next"), () => play("next")],
-        [tr("Play Later"), () => play("append")],
-      ];
-      if (["track", "album", "artist", "playlist"].includes(kind))
+      const actions = [], options = row.menu;
+      if (options.play) actions.push([tr("Play"), () => play("replace")]);
+      if (options.play_next) actions.push([tr("Play Next"), () => play("next")]);
+      if (options.play_later) actions.push([tr("Play Later"), () => play("append")]);
+      if (options.radio) actions.push(radioMenu(options.radio));
+      actions.push(null);
+      if (options.add_to_playlist)
         actions.push(
-          radioMenu(
-            row,
-            kind === "artist" && row.album_artists ? "album_artist" : kind,
+          playlistMenu(
+            kind === "track"
+              ? { uris: [row.uri] }
+              : {
+                  selection: {
+                    kind: kind.replaceAll("-", "_"),
+                    id: row.id,
+                    album_artists: !!row.album_artists,
+                  },
+                  source: row.source ?? state.source,
+                  folder:
+                    row.source && row.source !== state.source
+                      ? null
+                      : state.selectedLibrary,
+                },
           ),
         );
-      actions.push(
-        null,
-        playlistMenu(
-          kind === "track"
-            ? { uris: [row.uri] }
-            : {
-                selection: {
-                  kind: kind.replaceAll("-", "_"),
-                  id: row.id,
-                  album_artists: !!row.album_artists,
-                },
-                source: row.source ?? state.source,
-                folder:
-                  row.source && row.source !== state.source
-                    ? null
-                    : state.selectedLibrary,
-              },
-        ),
-      );
-      if (["track", "album", "artist"].includes(kind))
+      if (options.favorite)
         actions.push([
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite([row], kind),
         ]);
-      const pin = pinAction(kind, row, row.source ?? state.source);
-      if (pin) actions.push(pin);
-      if (kind === "playlist") actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
-      if (kind === "playlist" && row.can_remove_unavailable)
+      if (options.pin) actions.push(pinAction(...options.pin));
+      // The web's playlist dialogs edit, export and delete playlists, not smart ones.
+      if (options.export && kind === "playlist")
+        actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
+      if (options.remove_unavailable)
         actions.push([
           tr("Remove unavailable tracks"),
-          async () => {
-            const result = await api(`/playlists/remove-unavailable?id=${row.id}`, "POST");
-            if (result.removed) await loadView();
-          },
+          () => api(`/playlists/remove-unavailable?id=${row.id}`, "POST"),
           "rufin-user-trash-symbolic",
         ]);
-      if (row.metadata_writable)
-        actions.push(
-          [tr("Edit"), () => openName(row)],
-          [
-            tr("Delete Playlist"),
-            async () => {
-              if (
-                confirm(tr('Delete "{name}"?', { name: row.title || row.name }))
-              ) {
-                await api(`/playlists?id=${row.id}`, "DELETE");
-                await loadView();
-              }
-            },
-          ],
-        );
-      if (["track", "album", "artist"].includes(kind)) {
+      if (options.edit) actions.push([tr("Edit"), () => openName(row)]);
+      if (options.delete)
+        actions.push([
+          tr("Delete Playlist"),
+          async () => {
+            if (confirm(tr('Delete "{name}"?', { name: row.title || row.name })))
+              await api(`/playlists?id=${row.id}`, "DELETE");
+          },
+        ]);
+      if (options.go_to) {
         const destination = await goToMenu(row, kind);
         if (destination) actions.push(null, destination);
       }
@@ -877,7 +787,7 @@ function bindCards(host) {
         if (action === "artists" || action === "albums")
           return goToMedia(row, action, button, kind);
         if (action === "favorite") return setFavorite([row], kind);
-        if (action === "radio") return playRadio(row, kind);
+        if (action === "radio") return playRadio(row.menu.radio);
         if (action === "menu") return menu(button);
         return play(action);
       });
@@ -901,15 +811,27 @@ function bindCards(host) {
         }
       });
     }
-    if (kind !== "genre" || card.classList.contains("pin-row"))
-      card.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        run(() => menu(card, event));
-      });
+    card.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      run(() => menu(card, event));
+    });
   }
 }
 
 const requestedCovers = new WeakSet();
+
+// What a card's picture is read by; None for a playlist folder, whose preview is its picture.
+function cardCover(kind, row) {
+  if (kind === "playlist") return { playlist: row.id };
+  if (kind === "smart-playlist")
+    return {
+      smart_playlist: row.id,
+      ...(state.source ? { source: state.source } : {}),
+      ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}),
+    };
+  if (kind === "genre" || kind === "mood") return { genre: row.id, source: row.source };
+  return row.uri;
+}
 
 function loadCardCovers(host, signal) {
   const cards = [...host.querySelectorAll(".album-card:not([hidden])")].filter(
@@ -923,19 +845,8 @@ function loadCardCovers(host, signal) {
         const card = cards[next++],
           row = JSON.parse(card.dataset.row),
           kind = card.dataset.kind;
-        const query =
-          kind === "playlist"
-            ? { playlist: row.id }
-            : kind === "smart-playlist"
-              ? {
-                  smart_playlist: row.id,
-                  ...(state.source ? { source: state.source } : {}),
-                  ...(state.selectedLibrary
-                    ? { folder: state.selectedLibrary }
-                    : {}),
-                }
-              : row.uri;
-        await coverGroup(
+        const query = cardCover(kind, row);
+        if (query) await coverGroup(
           card.querySelector(".cover"),
           query,
           row.artwork_count || 1,
@@ -1037,17 +948,19 @@ function disposeHome() {
 }
 
 export {
-  restoreView,
+  cardCover,
   openMediaLink,
   init,
   goToMedia,
   loadView,
   markCurrent,
   navigate,
+  opened,
   playUris,
-  route,
-  detail,
+  refreshPage,
+  reopen,
   setFavorite,
+  showPage,
   viewRequest,
   disposeHome,
   bindCards,

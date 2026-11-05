@@ -167,15 +167,6 @@ impl MemberRead {
             })
             .sort()
     }
-    /// Whether plays change the rows an open page shows. An open Smart Playlist keeps the list
-    /// it opened with; plays change its members on the next visit.
-    pub fn activity_sensitive(&self) -> bool {
-        match self.collection {
-            Collection::Smart { .. } => false,
-            Collection::History { .. } => true,
-            _ => self.activity || self.effective_sort().activity_sensitive(),
-        }
-    }
     pub fn selection(self) -> MemberSelection {
         MemberSelection::Members {
             read: self,
@@ -200,11 +191,6 @@ impl ListRead {
         }
     }
 
-    pub fn activity_sensitive(&self) -> bool {
-        self.activity
-            || self.sort.activity_sensitive()
-            || matches!(self.kind, ListKind::SmartPlaylists { .. })
-    }
     pub fn selection(self) -> MemberSelection {
         MemberSelection::Parents {
             read: self,

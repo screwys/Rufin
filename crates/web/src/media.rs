@@ -62,12 +62,20 @@ async fn metadata(
     Ok(json_response(StatusCode::OK, links))
 }
 
-/// The album and artists a track's Go to menu opens, as `{album, artists}`.
+/// The album and artists a track's Go to menu opens, as `{album, artists}`, each with the page
+/// it opens.
 pub(super) fn media_links(links: &library::TrackLinks, album: &str) -> Value {
     let (artists, album_artists) = rufin_core::route::detail_links::go_to_artists(links);
-    let album = links.album_media_uri.as_ref().zip(links.album_key).map(|(uri, id)| {
-        json!({"id":id,"uri":uri,"title":album,"source":library::source_entity_parts(uri).map(|(source,_,_)|source)})
-    });
+    let album = links
+        .album_media_uri
+        .as_ref()
+        .zip(links.album_key)
+        .map(|(uri, id)| {
+            let source = library::source_entity_parts(uri).map(|(source, _, _)| source);
+            let page = page::PageToken::at_source(source.clone())
+                .at(rufin_core::route::Route::AlbumDetail(uri.clone()));
+            json!({"id":id,"uri":uri,"title":album,"source":source,"page":page})
+        });
     let artists = artists
         .iter()
         .map(|link| artist_link(link.artist_key, &link.media_uri, &link.name, album_artists))
@@ -76,7 +84,14 @@ pub(super) fn media_links(links: &library::TrackLinks, album: &str) -> Value {
 }
 
 fn artist_link(id: library::ArtistKey, uri: &str, name: &str, album_artists: bool) -> Value {
-    json!({"id":id,"uri":uri,"name":name,"source":library::source_entity_parts(uri).map(|(source,_,_)|source),"album_artists":album_artists})
+    use rufin_core::route::Route;
+    let source = library::source_entity_parts(uri).map(|(source, _, _)| source);
+    let page = page::PageToken::at_source(source.clone()).at(if album_artists {
+        Route::AlbumArtistTracks(uri.to_owned())
+    } else {
+        Route::ArtistTracks(uri.to_owned())
+    });
+    json!({"id":id,"uri":uri,"name":name,"source":source,"album_artists":album_artists,"page":page})
 }
 
 pub(super) async fn favorite(
@@ -109,28 +124,13 @@ async fn radio(
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     #[derive(Deserialize)]
-    #[serde(tag = "kind", rename_all = "snake_case")]
-    enum Input {
-        Track { uri: String },
-        Album { id: library::AlbumKey },
-        Artist { id: library::ArtistKey },
-        AlbumArtist { id: library::ArtistKey },
-        Playlist { id: library::PlaylistKey },
-    }
-    #[derive(Deserialize)]
     struct RadioInput {
         #[serde(flatten)]
-        seed: Input,
+        seed: library::RadioSeed,
         mode: Option<String>,
     }
     let input: RadioInput = body(request).await?;
-    let seed = match input.seed {
-        Input::Track { uri } => library::RadioSeed::Track(uri),
-        Input::Album { id } => library::RadioSeed::Album(id),
-        Input::Artist { id } => library::RadioSeed::Artist(id),
-        Input::AlbumArtist { id } => library::RadioSeed::AlbumArtist(id),
-        Input::Playlist { id } => library::RadioSeed::Playlist(id),
-    };
+    let seed = input.seed;
     let request = match input.mode.as_deref().unwrap_or("replace") {
         "replace" => rufin_core::playback::RadioPlayRequest::now(seed),
         "next" => rufin_core::playback::RadioPlayRequest::next(seed),

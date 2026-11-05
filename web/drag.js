@@ -6,6 +6,7 @@ const pinType = "application/x-rufin-collection";
 let current = null;
 let preview = null;
 
+// What dragging or playing a row carries: a track's URI, or the page a collection opens.
 function mediaSelection(kind, row) {
   return {
     kind,
@@ -13,7 +14,7 @@ function mediaSelection(kind, row) {
     source: row.source ?? state.source,
     folder:
       row.source && row.source !== state.source ? null : state.selectedLibrary,
-    ...(kind === "track" ? { uris: [row.uri] } : {}),
+    ...(row.page ? { page: row.page } : { uris: [row.uri] }),
   };
 }
 
@@ -63,13 +64,10 @@ function acceptsPin(event) {
   return event.dataTransfer.types.includes(pinType);
 }
 
+// Plays or queues a collection's page whole, or tracks by URI.
 function queueMedia(media, mode = "append", position = {}) {
-  return api(media.uris ? "/queue" : `/queue/${media.kind}`, "POST", {
-    source: media.source || null,
-    folder: media.kind === "smart-playlist" ? media.folder : null,
-    ...(media.uris
-      ? { uris: media.uris }
-      : { id: media.row.id, album_artists: !!media.row.album_artists }),
+  return api("/queue", "POST", {
+    ...(media.uris ? { uris: media.uris } : { page: media.page }),
     mode,
     ...position,
   });

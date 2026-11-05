@@ -59,21 +59,35 @@ pub(super) fn routes() -> Router<ProductHandles> {
             post(remove_unavailable),
         )
         .route("/api/playlists/public", get(public))
-        .route(
-            "/api/playlists",
-            get(list).post(create).patch(rename).delete(delete),
-        )
+        .route("/api/playlists/destinations", get(destinations))
         .route(
             "/api/playlists/file",
             get(file_settings).post(file_action).patch(file_update),
         )
-        .route(
-            "/api/playlists/entries",
-            get(entries)
-                .post(add_entries)
-                .delete(remove_entries)
-                .patch(move_entry),
-        )
+}
+
+/// The playlists tracks can be added to, as the playlist list orders them: `source`'s and
+/// Rufin's own.
+async fn destinations(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let source = match parameters.get("source").filter(|source| !source.is_empty()) {
+        Some(source) => Some(catalog::scope(&products, source, None).await?.0),
+        None => None,
+    };
+    let playlists = products
+        .library
+        .playlist_destinations(source, &library::ReadCancellation::new())
+        .await
+        .map_err(internal)?
+        .iter()
+        .map(|row| json!({"id":row.playlist_key,"name":row.name}))
+        .collect::<Vec<_>>();
+    Ok(json_response(
+        StatusCode::OK,
+        json!({"playlists":playlists}),
+    ))
 }
 
 async fn remove_unavailable(
@@ -296,95 +310,7 @@ async fn export_file(
     Ok(json_response(StatusCode::OK, json!({"saved":true})))
 }
 
-async fn list(
-    State(products): State<ProductHandles>,
-    headers: hyper::HeaderMap,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    browser::page(
-        &headers,
-        &parameters,
-        list_data(&products, &parameters).await?,
-    )
-}
-
-pub(super) async fn list_data(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-) -> Result<Value, Error> {
-    let (source, folder) = if parameters.contains_key("source") {
-        let (source, folder) = catalog::scope(
-            products,
-            required(parameters, "source")?,
-            parameters.get("folder").map(String::as_str),
-        )
-        .await?;
-        (Some(source), folder)
-    } else {
-        (None, None)
-    };
-    let (sort, descending, sort_name) =
-        list_order(products, parameters, LibraryListKey::Playlists)?;
-    let offset = number(parameters, "offset", 0)?;
-    let limit = number(parameters, "limit", 100)?.min(128);
-    let query = library::ListRead {
-        folder,
-        filter: parameters.get("q").cloned().unwrap_or_default(),
-        descending,
-        ..library::ListRead::new(library::ListKind::Playlists, source, sort)
-    };
-    let activity_sensitive = query.activity_sensitive();
-    let fields = catalog::grid_fields(products, LibraryListKey::Playlists);
-    let (order, total) = catalog::order(products, parameters, library::Read::List(query)).await?;
-    let playlists = catalog::rows(products, &order, offset, limit, true)
-        .await?
-        .iter()
-        .filter_map(|shown| match shown {
-            library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => Some(json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice()),"fields":field_texts(shown, &fields)})),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    Ok(
-        json!({"activity_sensitive":activity_sensitive,"sort":sort_name,"descending":descending,"total":total,"offset":offset,"limit":limit,"playlists":playlists}),
-    )
-}
-
-async fn entries(
-    State(products): State<ProductHandles>,
-    headers: hyper::HeaderMap,
-    Query(parameters): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, Error> {
-    browser::page(
-        &headers,
-        &parameters,
-        entries_data(&products, &parameters).await?,
-    )
-}
-
-pub(super) async fn entries_data(
-    products: &ProductHandles,
-    parameters: &HashMap<String, String>,
-) -> Result<Value, Error> {
-    let (query, fields) = catalog::page_query(products, parameters, "entries").await?;
-    let activity_sensitive = query.activity_sensitive();
-    let (sort, descending) = (sort_name(&query), query.descending);
-    let offset = number(parameters, "offset", 0)?;
-    let limit = number(parameters, "limit", 100)?.min(256);
-    let (order, total) =
-        catalog::order(products, parameters, library::Read::Members(query)).await?;
-    // The first page carries the playlist's name, so an open page shows a rename.
-    let name = match offset {
-        0 => products.library.playlist_name(key(parameters, "id")?).await,
-        _ => None,
-    };
-    let rows = catalog::rows(products, &order, offset, limit, false).await?;
-    let entries = catalog::track_rows(&rows, &fields, true);
-    Ok(
-        json!({"activity_sensitive":activity_sensitive,"sort":sort,"descending":descending,"name":name,"total":total,"offset":offset,"limit":limit,"entries":entries,"columns":fields}),
-    )
-}
-
-async fn create(
+pub(super) async fn create(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -444,7 +370,7 @@ async fn create(
     ))
 }
 
-async fn rename(
+pub(super) async fn rename(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -469,7 +395,7 @@ async fn rename(
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
-async fn delete(
+pub(super) async fn delete(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
@@ -482,7 +408,7 @@ async fn delete(
     Ok(json_response(StatusCode::OK, json!({"changed":changed})))
 }
 
-async fn add_entries(
+pub(super) async fn add_entries(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -510,7 +436,7 @@ async fn add_entries(
     Ok(json_response(StatusCode::OK, json!({"added":added})))
 }
 
-async fn remove_entries(
+pub(super) async fn remove_entries(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -534,7 +460,7 @@ async fn remove_entries(
     ))
 }
 
-async fn move_entry(
+pub(super) async fn move_entry(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
