@@ -182,7 +182,7 @@ impl Shared {
         if matches!(
             operation,
             SourceOperation::Idle | SourceOperation::Refreshing { .. }
-        ) && self.settings.cache_downloads() != (false, false)
+        ) && self.settings.load().cache_downloads() != (false, false)
             && matches!(
                 *self.operation.borrow(),
                 SourceOperation::Downloading { .. }

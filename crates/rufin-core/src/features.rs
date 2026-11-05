@@ -51,6 +51,11 @@ pub(crate) trait Feature: Send + Sync + 'static {
     fn period(&self) -> Option<Duration> {
         None
     }
+    /// Whether a settings change that keeps it wanted starts it again, for a pass that
+    /// captured the settings it starts with.
+    fn restarts(&self, _previous: &StoredSettings, _current: &StoredSettings) -> bool {
+        false
+    }
     /// It stopped running.
     fn stopped(&self) {}
 }
@@ -74,22 +79,26 @@ pub(crate) fn run(
                 .collect(),
         ),
     });
-    let heard = Arc::clone(&runner);
+    crate::settings::follow(
+        runtime,
+        settings,
+        Arc::downgrade(&runner),
+        |runner, previous, current| {
+            runner.decide(|_| true, |feature| feature.restarts(previous, current));
+            std::future::ready(())
+        },
+    );
     runtime.spawn(catalog.follow(move |changes| {
-        heard.decide(|feature| {
-            changes
-                .as_deref()
-                .is_none_or(|changes| hears(feature, changes))
-        });
+        runner.decide(
+            |feature| {
+                changes
+                    .as_deref()
+                    .is_none_or(|changes| hears(feature, changes))
+            },
+            |_| false,
+        );
         std::future::ready(true)
     }));
-    let mut committed = settings.changes();
-    runtime.spawn(async move {
-        committed.borrow_and_update();
-        while committed.changed().await.is_ok() {
-            runner.decide(|_| true);
-        }
-    });
 }
 
 fn hears(feature: &dyn Feature, changes: &[Arc<Change>]) -> bool {
@@ -109,21 +118,26 @@ struct Runner {
 }
 
 impl Runner {
-    /// Decides again for the features `concerned` names.
-    fn decide(&self, concerned: impl Fn(&dyn Feature) -> bool) {
+    /// Decides again for the features `concerned` names, and starts those `restart` names
+    /// again.
+    fn decide(
+        &self,
+        concerned: impl Fn(&dyn Feature) -> bool,
+        restart: impl Fn(&dyn Feature) -> bool,
+    ) {
         let settings = self.settings.load();
         let mut running = self.running.lock().unwrap_or_else(|p| p.into_inner());
         for (feature, task) in running.iter_mut() {
             if !concerned(feature.as_ref()) {
                 continue;
             }
-            match (feature.wanted(&settings, &self.catalog), task.is_some()) {
-                (true, false) => *task = Some(self.start(Arc::clone(feature))),
-                (false, true) => {
-                    task.take().into_iter().for_each(|task| task.abort());
-                    feature.stopped();
-                }
-                _ => {}
+            let wanted = feature.wanted(&settings, &self.catalog);
+            if task.is_some() && (!wanted || restart(feature.as_ref())) {
+                task.take().into_iter().for_each(|task| task.abort());
+                feature.stopped();
+            }
+            if wanted && task.is_none() {
+                *task = Some(self.start(Arc::clone(feature)));
             }
         }
     }

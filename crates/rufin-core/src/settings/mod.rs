@@ -183,6 +183,14 @@ impl Default for StoredSettings {
 }
 
 impl StoredSettings {
+    /// Whether artwork and lyrics download automatically.
+    pub(crate) fn cache_downloads(&self) -> (bool, bool) {
+        (
+            self.ui.application.download_artwork_automatically,
+            self.ui.application.download_lyrics_automatically,
+        )
+    }
+
     pub(crate) fn migrate_defaults(&mut self) {
         self.scrobbling.sanitize();
         if !self.visualizer_preset_bar_counts_updated {
@@ -352,14 +360,6 @@ impl SettingsFile {
             .iter()
             .find(|p| p.id == id)
             .cloned()
-    }
-
-    pub(crate) fn cache_downloads(&self) -> (bool, bool) {
-        let stored = self.committed.borrow();
-        (
-            stored.ui.application.download_artwork_automatically,
-            stored.ui.application.download_lyrics_automatically,
-        )
     }
 
     pub(crate) fn playback_stream_quality(&self) -> StreamQuality {

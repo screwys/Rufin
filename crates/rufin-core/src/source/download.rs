@@ -17,8 +17,12 @@ pub(crate) struct Assets(pub(crate) Weak<Shared>);
 
 impl Feature for Assets {
     fn wanted(&self, settings: &StoredSettings, _: &Catalog) -> bool {
-        let application = &settings.ui.application;
-        application.download_artwork_automatically || application.download_lyrics_automatically
+        settings.cache_downloads() != (false, false)
+    }
+
+    /// The pass reads both switches when it starts.
+    fn restarts(&self, previous: &StoredSettings, current: &StoredSettings) -> bool {
+        previous.cache_downloads() != current.cache_downloads()
     }
 
     fn hears(&self, scope: &Scope) -> bool {
@@ -43,7 +47,7 @@ impl Feature for Assets {
 impl SourceOwner {
     /// Fetches artwork and lyrics for every source, or only for these tracks.
     async fn download_assets(&self, only: Option<&BTreeMap<SourceKey, Vec<TrackKey>>>) {
-        let (artwork, lyrics) = self.shared.settings.cache_downloads();
+        let (artwork, lyrics) = self.shared.settings.load().cache_downloads();
         for configured in &self.shared.settings.load().sources.configured {
             let source_id = &configured.configuration.source_id;
             let Some(source_key) = self.shared.catalog.source_key(source_id) else {
