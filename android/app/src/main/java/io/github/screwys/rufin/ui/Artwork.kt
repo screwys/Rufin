@@ -39,10 +39,9 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
     val binding = remember(identityBytes) { identityBytes?.toList() } ?: return null
     val bridge = player.bridge
     val identity = remember(bridge, binding) { bridge?.artworkIdentity(binding.toByteArray()) } ?: return null
-    val revision = player.artworkRevision
     return key(identity) {
-        val cached = remember(bridge, revision, pixels) { player.artworkCache.peek(identity, pixels) }
-        val loaded by produceState(cached, bridge, revision, pixels, binding) {
+        val cached = remember(bridge, pixels) { player.artworkCache.peek(identity, pixels) }
+        val loaded by produceState(cached, bridge, pixels, binding) {
             value = cached ?: value
             if (bridge != null && pixels > 0) {
                 try {
@@ -62,11 +61,10 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
 internal data class PlayerArtwork(val bitmap: Bitmap, val color: Color)
 
 internal class ArtworkCache {
-    private data class Key(val identity: String, val pixels: Int, val revision: ULong)
+    private data class Key(val identity: String, val pixels: Int)
     private class Load(val mutex: Mutex = Mutex(), var readers: Int = 0)
     private val loads = HashMap<Key, Load>()
     private val sizes = HashMap<String, TreeMap<Int, Key>>()
-    private var revision = 0UL
     private val decoded = object : LruCache<Key, PlayerArtwork>(32 * 1024 * 1024) {
         override fun sizeOf(key: Key, value: PlayerArtwork) = value.bitmap.allocationByteCount
         override fun entryRemoved(evicted: Boolean, key: Key, oldValue: PlayerArtwork, newValue: PlayerArtwork?) {
@@ -80,19 +78,12 @@ internal class ArtworkCache {
         }
     }
 
-    fun updateRevision(value: ULong) = synchronized(decoded) {
-        if (revision != value) {
-            revision = value
-            decoded.evictAll()
-        }
-    }
-
     fun peek(identity: String, pixels: Int): PlayerArtwork? = synchronized(decoded) {
-        decoded.get(Key(identity, pixels, revision)) ?: sizes[identity]?.ceilingEntry(pixels)?.value?.let(decoded::get)
+        decoded.get(Key(identity, pixels)) ?: sizes[identity]?.ceilingEntry(pixels)?.value?.let(decoded::get)
     }
 
     suspend fun load(player: AndroidPlayer, identity: String, binding: ByteArray, pixels: Int): PlayerArtwork? {
-        val key = synchronized(decoded) { Key(identity, pixels, revision) }
+        val key = Key(identity, pixels)
         peek(identity, pixels)?.let { return it }
         val load = synchronized(loads) { loads.getOrPut(key) { Load() }.also { it.readers++ } }
         try {
@@ -102,12 +93,9 @@ internal class ArtworkCache {
                     player.artwork(binding, pixels.toUInt())?.let(::playerArtwork)
                 } ?: return@withLock null
                 synchronized(decoded) {
-                    if (key.revision != revision) null
-                    else {
-                        sizes.getOrPut(identity) { TreeMap() }[pixels] = key
-                        decoded.put(key, artwork)
-                        artwork
-                    }
+                    sizes.getOrPut(identity) { TreeMap() }[pixels] = key
+                    decoded.put(key, artwork)
+                    artwork
                 }
             }
         } finally {

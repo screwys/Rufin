@@ -34,7 +34,6 @@ struct Shared {
 #[derive(Default)]
 struct State {
     next_request: u64,
-    cache_epoch: u64,
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
     foreground: VecDeque<ArtworkKey>,
@@ -103,25 +102,6 @@ impl Pipeline {
         &self.shared.cache
     }
 
-    pub(crate) fn invalidate_decoded_cache(&self) {
-        let commit = lock_cache_commit(&self.shared);
-        let mut state = lock_state(&self.shared);
-        state.cache_epoch = state.cache_epoch.wrapping_add(1);
-        state.decoded_index.entries.clear();
-        state.foreground.clear();
-        state.background.clear();
-        let jobs = std::mem::take(&mut state.jobs);
-        drop(state);
-        drop(commit);
-        for completion in jobs
-            .into_values()
-            .flat_map(|job| job.subscribers.into_values())
-        {
-            let _ = completion.completion.send(Resolution::Invalidated);
-        }
-        self.shared.wake.notify_all();
-    }
-
     pub(crate) fn remove_cache_entries(
         &self,
         entries: &[crate::ArtworkCacheEntry],
@@ -136,10 +116,6 @@ impl Pipeline {
         self.shared.cache.clear_missing()?;
         lock_state(&self.shared).decoded_index.entries.clear();
         Ok(())
-    }
-
-    pub(crate) fn cache_revision(&self) -> u64 {
-        lock_state(&self.shared).cache_epoch
     }
 
     pub(crate) fn new(
@@ -504,7 +480,6 @@ fn source_epoch(state: &State, binding: &ArtworkBinding) -> u64 {
         .and_then(|source_id| state.source_epochs.get(source_id))
         .copied()
         .unwrap_or_default()
-        .wrapping_add(state.cache_epoch)
 }
 
 fn run_worker(shared: Arc<Shared>, foreground_reserved: bool) {

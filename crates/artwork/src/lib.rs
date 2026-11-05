@@ -329,15 +329,6 @@ impl Artwork {
             .map_err(|error| std::io::Error::other(error.to_string()))?
     }
 
-    /// Refresh live images and jobs after a changed import batch, preserving files on disk.
-    pub fn invalidate_decoded_cache(&self) {
-        self.pipeline.invalidate_decoded_cache();
-    }
-
-    pub fn cache_revision(&self) -> u64 {
-        self.pipeline.cache_revision()
-    }
-
     /// Creates the cache's directories, so a cache there can open.
     pub fn prepare(cache_root: impl AsRef<Path>) -> Result<(), ArtworkError> {
         cache::current_layout(cache_root.as_ref())?;

@@ -46,7 +46,7 @@ class RufinPlayerTest {
     private val playing = AndroidPlaybackUpdate(
         queueLoading = false,
         queue = QueueSummaryView(1UL, 1UL, 0UL, null, true),
-        notices = emptyList(), favorite = false, artworkRevision = 0UL, sourceLabels = listOf("WAV", "44.1 kHz"),
+        notices = emptyList(), favorite = false, sourceLabels = listOf("WAV", "44.1 kHz"),
         transport = TransportView(
             current = CurrentMedia(null, CurrentMediaId(1UL, "file:///test/track.wav"), row),
             state = TransportStatus.PLAYING, desiredPlaying = true,

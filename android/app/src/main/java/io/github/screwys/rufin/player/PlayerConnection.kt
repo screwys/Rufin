@@ -63,8 +63,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var favorite by mutableStateOf(false)
         private set
-    var artworkRevision by mutableStateOf(0UL)
-        private set
     var sourceLabels by mutableStateOf<List<String>>(emptyList())
         private set
     var currentContextId by mutableStateOf<String?>(null)
@@ -216,8 +214,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                     currentSourceRank = row?.sourceRank()
                                     currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
                                 }
-                                artworkRevision = update?.artworkRevision ?: 0UL
-                                artworkCache.updateRevision(artworkRevision)
                                 favorite = update?.favorite ?: false
                                 sourceLabels = update?.sourceLabels.orEmpty()
                                 playback = update

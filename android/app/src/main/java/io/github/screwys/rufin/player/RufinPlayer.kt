@@ -26,7 +26,6 @@ import io.github.screwys.rufin.shared.library.QueueRepeatMode
 internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var playback: AndroidPlaybackUpdate? = null
     private var item: TrackView? = null
-    private var artworkRevision = 0UL
     var artworkIdentity: List<Byte>? = null
         private set
     private var positionObservedAt = SystemClock.elapsedRealtime()
@@ -62,7 +61,6 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
         }
         item = nextItem
         artworkIdentity = nextIdentity
-        artworkRevision = value?.artworkRevision ?: 0UL
         playback = value
         invalidateState()
     }
@@ -77,8 +75,8 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
         return if (current.transport.durationMillis > 0UL) position.coerceAtMost(current.transport.durationMillis) else position
     }
 
-    fun updateArtwork(identity: List<Byte>, revision: ULong, bytes: ByteArray?) {
-        if (artworkIdentity != identity || artworkRevision != revision) return
+    fun updateArtwork(identity: List<Byte>, bytes: ByteArray?) {
+        if (artworkIdentity != identity) return
         metadata = metadata.buildUpon().setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build()
         invalidateState()
     }

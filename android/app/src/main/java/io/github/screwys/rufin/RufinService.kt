@@ -140,10 +140,9 @@ class RufinService : MediaSessionService() {
             launch {
                 val artworkPlayer = started.player()
                 try {
-                    playback.map { state -> state?.let { current ->
-                        nativePlayer.artworkIdentity?.let { it to current.artworkRevision }
-                    } }.distinctUntilChanged().collectLatest { key ->
-                        val (identity, revision) = key ?: return@collectLatest
+                    playback.map { state -> state?.let { nativePlayer.artworkIdentity } }
+                        .distinctUntilChanged().collectLatest { key ->
+                        val identity = key ?: return@collectLatest
                         try {
                             val artwork = withContext(Dispatchers.Default) {
                                 artworkPlayer.artwork(identity.toByteArray(), 512u)?.let { image ->
@@ -157,7 +156,7 @@ class RufinService : MediaSessionService() {
                                     }
                                 }
                             }
-                            nativePlayer.updateArtwork(identity, revision, artwork)
+                            nativePlayer.updateArtwork(identity, artwork)
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (_: Exception) {

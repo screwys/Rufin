@@ -10,7 +10,6 @@ pub struct AndroidPlaybackUpdate {
     pub queue_loading: bool,
     pub notices: Vec<playback::PlaybackNotice>,
     pub favorite: bool,
-    pub artwork_revision: u64,
     pub source_labels: Vec<String>,
 }
 
@@ -18,7 +17,6 @@ pub struct AndroidPlaybackUpdate {
 pub struct AndroidPlaybackSubscription {
     subscription: tokio::sync::Mutex<playback::PlaybackSubscription>,
     settings: SettingsHandle,
-    artwork: artwork::Artwork,
 }
 
 impl AndroidPlaybackSubscription {
@@ -26,7 +24,6 @@ impl AndroidPlaybackSubscription {
         Self {
             subscription: tokio::sync::Mutex::new(products.playback.updates.subscribe()),
             settings: products.settings.clone(),
-            artwork: products.artwork.clone(),
         }
     }
 }
@@ -85,7 +82,6 @@ impl AndroidPlaybackSubscription {
             queue_loading,
             notices,
             favorite,
-            artwork_revision: self.artwork.cache_revision(),
             source_labels,
         })
     }
