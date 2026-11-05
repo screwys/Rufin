@@ -10,10 +10,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::menus::media_menus::{
-    present_album_context_menu, present_artist_context_menu, present_genre_context_menu,
-    present_playlist_context_menu, present_smart_playlist_context_menu,
-};
 use crate::widgets::cover_controls::cover_play_only_hover_controls;
 use crate::widgets::selection::PlayTarget;
 use rufin_core::collection_context::CollectionTarget;
@@ -564,30 +560,7 @@ impl SidebarPinItem {
             else {
                 return;
             };
-            let menus = &shell;
-            match row {
-                library::Row::Album(row) => {
-                    present_album_context_menu(&target, menus, row, None, position)
-                }
-                library::Row::Artist(row) => {
-                    present_artist_context_menu(&target, menus, row, None, position)
-                }
-                library::Row::Tag(row) => {
-                    present_genre_context_menu(&target, menus, row, None, position)
-                }
-                library::Row::Playlist(library::PlaylistListRow::Playlist(row)) => {
-                    present_playlist_context_menu(&target, menus, row, None, position)
-                }
-                library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(row)) => {
-                    present_smart_playlist_context_menu(&target, menus, row, None, position)
-                }
-                library::Row::Playlist(library::PlaylistListRow::Folder(row)) => {
-                    crate::menus::playlist_folders::present_folder_context_menu(
-                        &target, menus, row, position,
-                    )
-                }
-                _ => unreachable!("pin_rows returns pinned collections only"),
-            }
+            crate::menus::media_menus::present_row_menu(&target, &shell, row, None, position);
         });
     }
 }

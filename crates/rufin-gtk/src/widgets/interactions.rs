@@ -7,8 +7,9 @@ use gtk::{gio, glib};
 use localization::{msgid, tr};
 
 use crate::widgets::controls::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
+use rufin_core::menu::Menu;
 use rufin_core::playback::QueuePlacement;
-use rufin_core::settings::context_menu::{ContextMenuItem, ContextMenuSettings};
+use rufin_core::settings::context_menu::ContextMenuItem;
 
 const NATIVE_MENU_SELECTION_CLASS: &str = "rufin-menu-selection";
 const NATIVE_MENU_SELECTED_CLASS: &str = "rufin-menu-selected";
@@ -101,7 +102,7 @@ pub struct ContextMenuSurface {
     actions: gio::SimpleActionGroup,
     action_activated: Rc<Cell<bool>>,
     position: Option<(f64, f64)>,
-    entries: RefCell<Vec<ContextMenuEntry<gio::MenuItem>>>,
+    entries: RefCell<Vec<(ContextMenuSection, gio::MenuItem)>>,
     custom_children: RefCell<Vec<ContextMenuCustomChild>>,
     /// Submenu rows whose body runs an action, by label: Play and the radio.
     submenu_actions: RefCell<Vec<(String, String)>>,
@@ -109,16 +110,9 @@ pub struct ContextMenuSurface {
 }
 
 struct ContextMenuCustomChild {
-    setting: Option<ContextMenuItem>,
     id: String,
     widget: gtk::Widget,
     primary_click: Option<Rc<dyn Fn()>>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum ContextMenuEntry<T> {
-    Configurable(ContextMenuItem, T),
-    Fixed(T),
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -172,33 +166,17 @@ impl ContextMenuSurface {
         &self.popover
     }
 
-    /// The Play submenu: Play, Play Next and Play Later as settings show them, each also
+    /// The Play submenu: Play, Play Next and Play Later as `menu` offers them, each also
     /// shuffled. Its row body plays.
-    pub fn append_play_actions(
-        &self,
-        settings: &ContextMenuSettings,
-        run: impl Fn(QueuePlacement, bool) + 'static,
-    ) {
+    pub fn append_play_actions(&self, menu: &Menu, run: impl Fn(QueuePlacement, bool) + 'static) {
         let placements = [
-            (ContextMenuItem::Play, QueuePlacement::Now, PLAY_ICON),
-            (
-                ContextMenuItem::PlayNext,
-                QueuePlacement::Next,
-                PLAY_NEXT_ICON,
-            ),
-            (
-                ContextMenuItem::PlayLater,
-                QueuePlacement::Last,
-                PLAY_LATER_ICON,
-            ),
+            (menu.play, QueuePlacement::Now, PLAY_ICON),
+            (menu.play_next, QueuePlacement::Next, PLAY_NEXT_ICON),
+            (menu.play_later, QueuePlacement::Last, PLAY_LATER_ICON),
         ];
-        let Some(first) = placements
-            .iter()
-            .map(|(item, _, _)| *item)
-            .find(|item| settings.is_visible(*item))
-        else {
+        if !placements.iter().any(|(shown, _, _)| *shown) {
             return;
-        };
+        }
         let run = Rc::new(run);
         let submenu = gio::Menu::new();
         for (shuffled, labels) in [
@@ -216,12 +194,12 @@ impl ContextMenuSurface {
             ),
         ] {
             let section = gio::Menu::new();
-            for ((setting, placement, icon), label) in placements.iter().zip(labels) {
-                if settings.is_visible(*setting) {
+            for ((shown, placement, icon), label) in placements.iter().zip(labels) {
+                if *shown {
                     let run = Rc::clone(&run);
-                    let (placement, item) = (*placement, *setting);
+                    let placement = *placement;
                     let action = self.action(true, move || run(placement, shuffled));
-                    if item == ContextMenuItem::Play && !shuffled {
+                    if placement == QueuePlacement::Now && !shuffled {
                         self.submenu_default(&tr(msgid("Play")), &action);
                     }
                     section.append_item(&menu_action_item(&tr(label), &action, icon));
@@ -233,7 +211,7 @@ impl ContextMenuSurface {
         item.set_icon(&gio::ThemedIcon::new(PLAY_ICON));
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Configurable(first, item));
+            .push((ContextMenuSection::Playback, item));
     }
 
     /// The radio submenu: Play, Play Next and Play Later of a radio. Its row body plays it.
@@ -279,7 +257,7 @@ impl ContextMenuSurface {
         let item = menu_action_item(&tr(label), &self.action(enabled, run), icon_name);
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Fixed(item));
+            .push((ContextMenuSection::Fixed, item));
     }
 
     /// An action under a generated name that closes the menu before it runs. Returns its
@@ -314,11 +292,10 @@ impl ContextMenuSurface {
         item.set_attribute_value("custom", Some(&id.to_variant()));
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Fixed(item));
+            .push((ContextMenuSection::Fixed, item));
         self.custom_children
             .borrow_mut()
             .push(ContextMenuCustomChild {
-                setting: None,
                 id: id.to_string(),
                 widget: widget.as_ref().clone(),
                 primary_click: None,
@@ -335,7 +312,7 @@ impl ContextMenuSurface {
         let entry = menu_action_item(&tr(label), &self.action(true, run), icon_name);
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Configurable(item, entry));
+            .push((ContextMenuSection::for_item(item), entry));
     }
 
     pub fn append_configurable_submenu(
@@ -349,7 +326,7 @@ impl ContextMenuSurface {
         item.set_icon(&gio::ThemedIcon::new(icon_name));
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Configurable(setting, item));
+            .push((ContextMenuSection::for_item(setting), item));
     }
 
     pub fn append_fixed_widget_submenu(
@@ -368,11 +345,10 @@ impl ContextMenuSurface {
         item.set_icon(&gio::ThemedIcon::new(icon_name));
         self.entries
             .borrow_mut()
-            .push(ContextMenuEntry::Fixed(item));
+            .push((ContextMenuSection::Fixed, item));
         self.custom_children
             .borrow_mut()
             .push(ContextMenuCustomChild {
-                setting: None,
                 id: id.to_string(),
                 widget: widget.as_ref().clone(),
                 primary_click: Some(Rc::new(primary_click)),
@@ -396,31 +372,16 @@ impl ContextMenuSurface {
         self.custom_children
             .borrow_mut()
             .push(ContextMenuCustomChild {
-                setting: Some(setting),
                 id: id.to_string(),
                 widget: widget.as_ref().clone(),
                 primary_click: Some(Rc::new(primary_click)),
             });
     }
 
-    pub fn popup(self, settings: &ContextMenuSettings) {
-        let entries = self
-            .entries
-            .into_inner()
-            .into_iter()
-            .map(|entry| match entry {
-                ContextMenuEntry::Configurable(setting, item) => ContextMenuEntry::Configurable(
-                    setting,
-                    (ContextMenuSection::for_item(setting), item),
-                ),
-                ContextMenuEntry::Fixed(item) => {
-                    ContextMenuEntry::Fixed((ContextMenuSection::Fixed, item))
-                }
-            })
-            .collect();
+    pub fn popup(self) {
         let mut previous = None;
         let mut section = gio::Menu::new();
-        for (group, item) in resolve_context_menu_entries(entries, settings) {
+        for (group, item) in self.entries.into_inner() {
             if previous.is_some_and(|previous| previous != group) {
                 self.menu.append_section(None, &section);
                 section = gio::Menu::new();
@@ -434,12 +395,7 @@ impl ContextMenuSurface {
         if context_menu_needs_sliding_submenus(&self.popover, &self.target, self.position) {
             self.popover.set_flags(gtk::PopoverMenuFlags::empty());
         }
-        for child in self
-            .custom_children
-            .into_inner()
-            .into_iter()
-            .filter(|child| child.setting.is_none_or(|item| settings.is_visible(item)))
-        {
+        for child in self.custom_children.into_inner() {
             match (
                 add_native_menu_child(&self.popover, &child.widget, &child.id),
                 child.primary_click,
@@ -542,91 +498,9 @@ fn context_menu_hover_owners(target: &gtk::Widget) -> Vec<gtk::Widget> {
     owners
 }
 
-fn resolve_context_menu_entries<T>(
-    entries: Vec<ContextMenuEntry<T>>,
-    settings: &ContextMenuSettings,
-) -> Vec<T> {
-    entries
-        .into_iter()
-        .filter_map(|entry| match entry {
-            ContextMenuEntry::Configurable(item, value) => {
-                settings.is_visible(item).then_some(value)
-            }
-            ContextMenuEntry::Fixed(value) => Some(value),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod context_menu_tests {
-    use super::{ContextMenuEntry, context_menu_has_submenu_side, resolve_context_menu_entries};
-    use rufin_core::settings::context_menu::{
-        ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings,
-    };
-
-    fn settings(order: &[(ContextMenuItem, bool)]) -> ContextMenuSettings {
-        ContextMenuSettings {
-            items: order
-                .iter()
-                .map(|(item, visible)| ContextMenuItemSettings {
-                    item: *item,
-                    visible: *visible,
-                })
-                .collect(),
-            rating_visible: true,
-        }
-    }
-
-    #[test]
-    fn configurable_items_ignore_saved_order_and_preserve_visibility() {
-        let settings = settings(&[
-            (ContextMenuItem::Download, true),
-            (ContextMenuItem::Play, false),
-            (ContextMenuItem::Favorites, true),
-        ]);
-        let entries = vec![
-            ContextMenuEntry::Configurable(ContextMenuItem::Play, "play"),
-            ContextMenuEntry::Configurable(ContextMenuItem::Favorites, "favorite"),
-            ContextMenuEntry::Configurable(ContextMenuItem::Download, "download"),
-            ContextMenuEntry::Configurable(ContextMenuItem::Download, "remove-downloads"),
-        ];
-
-        assert_eq!(
-            resolve_context_menu_entries(entries, &settings),
-            ["favorite", "download", "remove-downloads"]
-        );
-    }
-
-    #[test]
-    fn fixed_items_keep_their_defined_positions() {
-        let settings = settings(&[
-            (ContextMenuItem::Download, true),
-            (ContextMenuItem::Play, true),
-            (ContextMenuItem::Favorites, true),
-        ]);
-        let entries = vec![
-            ContextMenuEntry::Configurable(ContextMenuItem::Play, "play"),
-            ContextMenuEntry::Configurable(ContextMenuItem::Favorites, "favorite"),
-            ContextMenuEntry::Fixed("remove"),
-            ContextMenuEntry::Configurable(ContextMenuItem::Download, "download"),
-        ];
-
-        assert_eq!(
-            resolve_context_menu_entries(entries, &settings),
-            ["play", "favorite", "remove", "download"]
-        );
-    }
-
-    #[test]
-    fn hidden_configurable_items_can_resolve_to_an_empty_menu() {
-        let settings = settings(&[(ContextMenuItem::Play, false)]);
-        let entries = vec![ContextMenuEntry::Configurable(
-            ContextMenuItem::Play,
-            "play",
-        )];
-
-        assert!(resolve_context_menu_entries(entries, &settings).is_empty());
-    }
+    use super::context_menu_has_submenu_side;
 
     #[test]
     fn side_submenus_require_one_complete_contiguous_side() {

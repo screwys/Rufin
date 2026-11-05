@@ -109,12 +109,12 @@ struct Shown<'a> {
 /// the page it opens, which keeps the source and music folder of `scope`.
 pub(super) fn row_data(
     products: &ProductHandles,
-    settings: &rufin_core::settings::app::Settings,
     row: &Row,
+    menu: &Menu,
     scope: &page::PageToken,
 ) -> Value {
     let mut value = page::row_json(products, row, true);
-    value["menu"] = json!(rufin_core::menu::menu(&products.source, settings, row));
+    value["menu"] = json!(menu);
     if let Some(route) = opens(row) {
         value["page"] = json!(scope.at(route));
     }
@@ -145,7 +145,8 @@ impl<'a> Shown<'a> {
         menu_id: String,
         form: &'a Form,
     ) -> Self {
-        let mut data = row_data(products, settings, &row, list);
+        let menu = rufin_core::menu::menu(&products.source, settings, &row);
+        let mut data = row_data(products, &row, &menu, list);
         if let Some(title) = &title {
             data[if matches!(row, Row::Tag(_)) {
                 "name"
@@ -195,7 +196,7 @@ impl<'a> Shown<'a> {
                     )
                 })
                 .collect(),
-            menu: rufin_core::menu::menu(&products.source, settings, &row),
+            menu,
             data: data.to_string(),
             href,
             play,

@@ -19,6 +19,7 @@ const RADIO_EXTRA_EXCLUSION_LIMIT: usize = 500;
 /// What a radio starts from. Its serde form is the HTTP API's: `{kind: track, uri}`, or
 /// `{kind: album, artist, album_artist, genre or playlist, id}`.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 #[serde(from = "SeedForm", into = "SeedForm")]
 pub enum RadioSeed {
     Track(String),

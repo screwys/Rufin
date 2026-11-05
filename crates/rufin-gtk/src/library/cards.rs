@@ -1,6 +1,6 @@
 use crate::favorites::{favorite_button_is_active, favorite_icon_button};
 use crate::library::CatalogUi;
-use crate::menus::media_menus::present_album_context_menu;
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::controls::{ActionButtonVariant, configure_action_button};
 use crate::widgets::cover_controls::{
@@ -51,10 +51,10 @@ impl AlbumCover {
                 && let Some(album) = row.borrow().clone()
             {
                 {
-                    present_album_context_menu(
+                    present_row_menu(
                         target,
                         shell.shell(),
-                        album.clone(),
+                        library::Row::Album(album.clone()),
                         None,
                         position,
                     );

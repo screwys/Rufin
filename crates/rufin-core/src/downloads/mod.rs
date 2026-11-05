@@ -472,26 +472,28 @@ fn rebind_released_subject(
             DownloadSubject::Prepared { context_id, title }
         }
         ReleasedDownloadSubject::Track(_) => {
-            DownloadSubject::for_media_uris("track", Some("Track"), media_uris)
+            DownloadSubject::hashed("track", Some("Track".to_owned()), media_uris)
         }
         ReleasedDownloadSubject::Album(_) => {
-            DownloadSubject::for_media_uris("album", Some("Album"), media_uris)
+            DownloadSubject::hashed("album", Some("Album".to_owned()), media_uris)
         }
         ReleasedDownloadSubject::Artist(_) => {
-            DownloadSubject::for_media_uris("artist", Some("Artist"), media_uris)
+            DownloadSubject::hashed("artist", Some("Artist".to_owned()), media_uris)
         }
         ReleasedDownloadSubject::Genre(_) => {
-            DownloadSubject::for_media_uris("genre", Some("Genre"), media_uris)
+            DownloadSubject::hashed("genre", Some("Genre".to_owned()), media_uris)
         }
         ReleasedDownloadSubject::Mood(_) => {
-            DownloadSubject::for_media_uris("mood", Some("Mood"), media_uris)
+            DownloadSubject::hashed("mood", Some("Mood".to_owned()), media_uris)
         }
         ReleasedDownloadSubject::Playlist(_) => {
-            DownloadSubject::for_media_uris("playlist", Some("Playlist"), media_uris)
+            DownloadSubject::hashed("playlist", Some("Playlist".to_owned()), media_uris)
         }
-        ReleasedDownloadSubject::SmartPlaylist(_) => {
-            DownloadSubject::for_media_uris("smart-playlist", Some("Smart Playlist"), media_uris)
-        }
+        ReleasedDownloadSubject::SmartPlaylist(_) => DownloadSubject::hashed(
+            "smart-playlist",
+            Some("Smart Playlist".to_owned()),
+            media_uris,
+        ),
     }
 }
 
@@ -702,13 +704,94 @@ pub enum DownloadSubject {
 }
 
 impl DownloadSubject {
-    pub fn for_media_uris(context: &str, title: Option<&str>, media_uris: &[String]) -> Self {
-        let encoded = serde_json::to_vec(media_uris).unwrap_or_default();
+    /// The subject of downloading `selection`, whose tracks are `media_uris`: a whole
+    /// collection by its context id, one track by its URI, other selections by their tracks.
+    pub(crate) fn of_selection(
+        catalog: &library::Catalog,
+        selection: &library::MemberSelection,
+        media_uris: &[String],
+    ) -> Self {
+        use library::MemberSelection;
+        let context_id = match (collection(catalog, selection), selection, media_uris) {
+            (Some(target), _, _) => target.context_id(),
+            (None, MemberSelection::Keys { .. } | MemberSelection::Uris(_), [uri]) => {
+                format!("track:{uri}")
+            }
+            (None, MemberSelection::Members { .. }, _) => hashed_id("folder", media_uris),
+            (None, MemberSelection::Entries(_), _) => hashed_id("playlist", media_uris),
+            _ => hashed_id("selection", media_uris),
+        };
         Self::Prepared {
-            context_id: format!("{context}:{}", hash_id_bytes(&encoded)),
-            title: title.map(str::to_string),
+            context_id,
+            title: selection_title(catalog, selection),
         }
     }
+
+    fn hashed(context: &str, title: Option<String>, media_uris: &[String]) -> Self {
+        Self::Prepared {
+            context_id: hashed_id(context, media_uris),
+            title,
+        }
+    }
+}
+
+fn hashed_id(context: &str, media_uris: &[String]) -> String {
+    let encoded = serde_json::to_vec(media_uris).unwrap_or_default();
+    format!("{context}:{}", hash_id_bytes(&encoded))
+}
+
+/// The whole collection `selection` reads.
+fn collection(
+    catalog: &library::Catalog,
+    selection: &library::MemberSelection,
+) -> Option<crate::collection_context::CollectionTarget> {
+    match selection {
+        library::MemberSelection::Members { read, ranges: None } => {
+            crate::collection_context::CollectionTarget::of(catalog, &read.collection)
+        }
+        _ => None,
+    }
+}
+
+/// What `selection` is called where it is downloaded or added to a playlist: a whole
+/// collection by its kind, one track, a folder or a playlist's entries. Other selections
+/// have no name.
+pub fn selection_title(
+    catalog: &library::Catalog,
+    selection: &library::MemberSelection,
+) -> Option<String> {
+    use library::MemberSelection;
+    let title = match selection {
+        MemberSelection::Members { ranges: None, .. } => collection(catalog, selection)
+            .map_or(localization::msgid("Folder"), |target| target.kind()),
+        MemberSelection::Keys { keys, .. } if keys.len() == 1 => localization::msgid("Track"),
+        MemberSelection::Uris(uris) if uris.len() == 1 => localization::msgid("Track"),
+        MemberSelection::Entries(_) => localization::msgid("Playlist"),
+        _ => return None,
+    };
+    Some(localization::tr(title))
+}
+
+/// What a download job is called.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn download_subject_title(subject: &DownloadSubject) -> String {
+    match subject {
+        DownloadSubject::Rule(rule) => download_rule_title(*rule),
+        DownloadSubject::Prepared { title, .. } => title
+            .clone()
+            .unwrap_or_else(|| localization::tr("Selection")),
+    }
+}
+
+/// What a download rule is called.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn download_rule_title(rule: DownloadRule) -> String {
+    localization::tr(match rule {
+        DownloadRule::EntireLibrary => "Entire Library",
+        DownloadRule::Favorites => "Favorites",
+        DownloadRule::AllPlaylists => "All Playlists",
+        DownloadRule::LatestFiveAlbums => "5 Latest Albums",
+    })
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3077,9 +3160,9 @@ mod tests {
             version: QUEUE_VERSION,
             jobs: vec![DownloadJob {
                 id: "job".to_string(),
-                subject: DownloadSubject::for_media_uris(
+                subject: DownloadSubject::hashed(
                     "track",
-                    Some("Track"),
+                    Some("Track".to_owned()),
                     std::slice::from_ref(&media_uri),
                 ),
                 quality: DownloadQuality::Original,
@@ -3316,8 +3399,11 @@ mod tests {
         let source = SourceId::new("connect-copy");
         let uri = test_media(&source, source_key, track);
         let mut actor = actor_for_test(root.path(), catalog.clone(), &source, source_key);
-        let subject =
-            DownloadSubject::for_media_uris("connect", Some("Track"), std::slice::from_ref(&uri));
+        let subject = DownloadSubject::hashed(
+            "connect",
+            Some("Track".to_owned()),
+            std::slice::from_ref(&uri),
+        );
         let _ = actor
             .enqueue(
                 Some(source.clone()),
@@ -3638,9 +3724,9 @@ mod tests {
     fn test_job(media_uri: String) -> DownloadJob {
         DownloadJob {
             id: "job".to_string(),
-            subject: DownloadSubject::for_media_uris(
+            subject: DownloadSubject::hashed(
                 "track",
-                Some("Track"),
+                Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
             quality: DownloadQuality::Original,
@@ -3671,9 +3757,9 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
-            subject: DownloadSubject::for_media_uris(
+            subject: DownloadSubject::hashed(
                 "track",
-                Some("Track"),
+                Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
             paths,
@@ -3712,9 +3798,9 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
-            subject: DownloadSubject::for_media_uris(
+            subject: DownloadSubject::hashed(
                 "track",
-                Some("Track"),
+                Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
             paths,
@@ -3778,9 +3864,9 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
-            subject: DownloadSubject::for_media_uris(
+            subject: DownloadSubject::hashed(
                 "track",
-                Some("Track"),
+                Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),
@@ -3811,9 +3897,9 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "removed".to_string(),
             media_uri: media_uri.clone(),
-            subject: DownloadSubject::for_media_uris(
+            subject: DownloadSubject::hashed(
                 "track",
-                Some("Track"),
+                Some("Track".to_owned()),
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),

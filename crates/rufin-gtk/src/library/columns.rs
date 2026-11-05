@@ -2,7 +2,7 @@ use crate::widgets::media_drag::{MediaDragSource, install_media_drag_source};
 use crate::widgets::view_model::{item_at_from_item, object_item};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use ::library::{AlbumRow, ArtistRow};
+use ::library::{AlbumRow, ArtistRow, Row, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
@@ -14,7 +14,7 @@ use crate::favorites::{
 };
 use crate::library::CatalogUi;
 use crate::library::{LibraryField, LibraryListKey};
-use crate::menus::media_menus::{present_album_context_menu, present_artist_context_menu};
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::localization::localized_column;
@@ -336,10 +336,10 @@ impl AlbumTableCell {
                     let row = cell.imp().row.borrow().clone();
                     if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
                         {
-                            present_album_context_menu(
+                            present_row_menu(
                                 target,
                                 shell.shell(),
-                                (*row).clone(),
+                                Row::Album((*row).clone()),
                                 None,
                                 position,
                             );
@@ -489,7 +489,7 @@ pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation
             shell,
             "Image",
             width,
-            |item| Some(item.media_uri().to_string()),
+            |item| item.track_row(),
             |item| opaque_artwork(item.artwork()),
         ),
         LibraryField::TitleMerged => track_merged_column(
@@ -498,7 +498,7 @@ pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation
             width,
             playing.clone(),
             TrackMergedColumnValues {
-                track: |item: &T| Some(item.media_uri().to_string()),
+                track: T::track_row,
                 downloaded: |item: &T| item.download_badge(),
                 artwork: |item: &T| opaque_artwork(item.artwork()),
                 title: |item: &T| item.title().to_string(),
@@ -515,7 +515,7 @@ pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation
                 width,
                 0.0,
                 Some(playing.clone()),
-                |item: &T| Some(item.media_uri().to_string()),
+                |item: &T| item.track_row(),
                 |item: &T| item.download_badge(),
                 |_, item: &T| item.title().to_string(),
             );
@@ -540,28 +540,28 @@ pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation
         LibraryField::Favorite | LibraryField::Tools => mapped_track_actions_column(
             shell,
             field,
-            |item: &T| Some(item.media_uri().to_string()),
+            |item: &T| item.track_row(),
             |item: &T| Some((item.media_uri().to_string(), item.favorite())),
         ),
         LibraryField::Artist => mapped_track_link_column(
             shell,
             "Artist",
             width,
-            |item: &T| Some(item.media_uri().to_string()),
+            |item: &T| item.track_row(),
             |item: &T| item.links(LibraryField::Artist),
         ),
         LibraryField::AlbumArtist => mapped_track_link_column(
             shell,
             rufin_core::settings::presentation::library_field_title(LibraryField::AlbumArtist),
             width,
-            |item: &T| Some(item.media_uri().to_string()),
+            |item: &T| item.track_row(),
             |item: &T| item.links(LibraryField::AlbumArtist),
         ),
         LibraryField::Album => mapped_track_link_column(
             shell,
             "Album",
             width,
-            |item: &T| Some(item.media_uri().to_string()),
+            |item: &T| item.track_row(),
             |item: &T| item.links(LibraryField::Album),
         ),
         _ => mapped_track_position_text_column(
@@ -571,7 +571,7 @@ pub fn track_column_for_key<T: crate::widgets::library_fields::TrackPresentation
             width,
             0.0,
             None,
-            |item: &T| Some(item.media_uri().to_string()),
+            |item: &T| item.track_row(),
             |item: &T| item.download_badge(),
             move |_, item: &T| {
                 if key == LibraryListKey::AlbumDetailTracks && field == LibraryField::TrackNumber {
@@ -883,7 +883,7 @@ fn install_artist_list_item_context_menu(
                 return;
             };
             {
-                present_artist_context_menu(target, shell.shell(), artist, None, position);
+                present_row_menu(target, shell.shell(), Row::Artist(artist), None, position);
             }
         }),
     );
@@ -1074,7 +1074,7 @@ fn install_track_list_item_context_menu<T: Clone + 'static>(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     item: &gtk::ListItem,
-    track_value: Rc<dyn Fn(&T) -> Option<String>>,
+    track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>>,
 ) {
     let item = item.downgrade();
     let shell = Rc::clone(shell);
@@ -1084,7 +1084,7 @@ fn install_track_list_item_context_menu<T: Clone + 'static>(
             let Some(track) = item
                 .upgrade()
                 .and_then(|item| item.item())
-                .and_then(|object| object_item::<T, _>(object, |row| track_value(row)))
+                .and_then(|object| object_item::<T, _>(object, |row| track_value(row).cloned()))
                 .flatten()
             else {
                 return;
@@ -1110,12 +1110,12 @@ pub fn mapped_track_image_column<T, TrackValue, ArtworkValue>(
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    TrackValue: Fn(&T) -> Option<String> + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
     ArtworkValue: Fn(&T) -> ArtworkBinding + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
-    let track_value: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(track_value);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
     let artwork_value = Rc::new(artwork_value);
 
     let setup_shell = Rc::clone(&shell);
@@ -1180,14 +1180,14 @@ pub fn mapped_track_position_text_column<T, TrackValue, Downloaded, Value>(
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    TrackValue: Fn(&T) -> Option<String> + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
     Downloaded: Fn(&T) -> bool + 'static,
     Value: Fn(u32, &T) -> String + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
     let value = Rc::new(value);
-    let track_value: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(track_value);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
     let downloaded_value = Rc::new(downloaded_value);
 
     let setup_shell = Rc::clone(&shell);
@@ -1234,7 +1234,9 @@ where
                 (
                     value(item.position(), row),
                     downloaded.is_some() && downloaded_value(row),
-                    bind_playing.as_ref().and_then(|_| track_value(row)),
+                    bind_playing
+                        .as_ref()
+                        .and_then(|_| track_value(row).map(|track| track.media_uri.clone())),
                 )
             })
         }) else {
@@ -1298,7 +1300,7 @@ pub fn track_merged_column<T, ItemTrack, Downloaded, Artwork, Title, Subtitle, S
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    ItemTrack: Fn(&T) -> Option<String> + 'static,
+    ItemTrack: Fn(&T) -> Option<&TrackRow> + 'static,
     Downloaded: Fn(&T) -> bool + 'static,
     Artwork: Fn(&T) -> ArtworkBinding + 'static,
     Title: Fn(&T) -> String + 'static,
@@ -1318,11 +1320,11 @@ where
     } = values;
     let title_value = Rc::new(title_value);
     let downloaded_value = Rc::new(downloaded_value);
-    let item_track: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(item_track);
+    let item_track: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(item_track);
     let artwork_value = Rc::new(artwork_value);
     let subtitle_value = Rc::new(subtitle_value);
     let subtitle_links = Rc::new(subtitle_links);
-    let context_track: Rc<dyn Fn(&T) -> Option<String>> = Rc::clone(&item_track);
+    let context_track = Rc::clone(&item_track);
 
     let setup_shell = Rc::clone(&shell);
     factory.connect_setup(move |_, item| {
@@ -1372,7 +1374,7 @@ where
                         subtitle_value(row),
                         subtitle_links(row),
                         downloaded_value(row),
-                        item_track(row),
+                        item_track(row).map(|track| track.media_uri.clone()),
                     )
                 })
             })
@@ -1492,12 +1494,12 @@ pub fn mapped_track_actions_column<T, TrackValue, FavoriteValue>(
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    TrackValue: Fn(&T) -> Option<String> + 'static,
+    TrackValue: Fn(&T) -> Option<&TrackRow> + 'static,
     FavoriteValue: Fn(&T) -> Option<(String, bool)> + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
-    let track_value: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(track_value);
+    let track_value: Rc<dyn Fn(&T) -> Option<&TrackRow>> = Rc::new(track_value);
     let favorite_value = Rc::new(favorite_value);
 
     let setup_shell = Rc::clone(&shell);

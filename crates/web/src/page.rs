@@ -329,7 +329,7 @@ pub(super) fn row_json(products: &ProductHandles, row: &Row, art: bool) -> Value
         }
         Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
             json!({"kind":"playlist","id":playlist.playlist_key,"object_id":playlist.object_id,"source":playlist.source_id,"name":playlist.name,"writable":playlist.writable,
-                "metadata_writable":playlist.metadata_writable,"can_remove_unavailable":rufin_core::playlists::can_remove_unavailable(&products.source, playlist),
+                "metadata_writable":playlist.metadata_writable,
                 "track_count":playlist.track_count,"duration_ms":playlist.duration_millis,"artwork_count":playlist.artwork_binding.as_slice().len(),"artwork_previews":previews(playlist.artwork_binding.as_slice())})
         }
         Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {

@@ -13,8 +13,8 @@ pub(crate) struct MenuHeader<'a> {
     pub title: &'a str,
     pub subtitle: &'a str,
     pub artwork: Option<&'a [u8]>,
-    /// What the favorite button marks, and whether it is a favorite now.
-    pub favorite: (library::FavoriteTarget, bool),
+    /// What the favorite button marks, and whether it is a favorite now; None hides it.
+    pub favorite: Option<(library::FavoriteTarget, bool)>,
 }
 
 pub(crate) fn append_header(
@@ -37,21 +37,14 @@ pub(crate) fn append_header(
     subtitle.set_text(identity.subtitle);
     subtitle_host.set_visible(!identity.subtitle.is_empty());
     bind_cover(&cover, shell, identity.artwork, 48);
-    let (favorite_target, favorited) = identity.favorite;
-    crate::favorites::set_favorite_button_active(&favorite, favorited);
-    favorite.set_visible(
-        shell
-            .settings
-            .current
-            .borrow()
-            .application
-            .context_menu
-            .is_visible(rufin_core::settings::ContextMenuItem::Favorites),
-    );
-    let favorite_shell = Rc::clone(shell);
-    surface.bind_button(&favorite, move || {
-        favorite_shell.set_favorite(favorite_target.clone(), !favorited);
-    });
+    favorite.set_visible(identity.favorite.is_some());
+    if let Some((favorite_target, favorited)) = identity.favorite {
+        crate::favorites::set_favorite_button_active(&favorite, favorited);
+        let favorite_shell = Rc::clone(shell);
+        surface.bind_button(&favorite, move || {
+            favorite_shell.set_favorite(favorite_target.clone(), !favorited);
+        });
+    }
     let parent = target
         .root()
         .and_downcast::<gtk::Window>()

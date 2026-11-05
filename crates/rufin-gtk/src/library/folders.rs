@@ -323,10 +323,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                     return;
                 };
                 super::collection_context::present_track_context_menu(
-                    target,
-                    &shell,
-                    track.media_uri,
-                    position,
+                    target, &shell, track, position,
                 );
             }),
         );
@@ -439,8 +436,8 @@ fn folder_column(
                 shell,
                 rufin_core::settings::presentation::library_field_title(field),
                 width,
-                |row| match row {
-                    Row::Track(track) => Some(track.media_uri.clone()),
+                |row: &Row| match row {
+                    Row::Track(track) => Some(track),
                     _ => None,
                 },
                 |row| match row {
@@ -455,8 +452,8 @@ fn folder_column(
             return super::columns::mapped_track_actions_column::<Row, _, _>(
                 shell,
                 field,
-                |row| match row {
-                    Row::Track(track) => Some(track.media_uri.clone()),
+                |row: &Row| match row {
+                    Row::Track(track) => Some(track),
                     _ => None,
                 },
                 |row| match row {
@@ -563,10 +560,7 @@ fn folder_text_column(
                     return;
                 };
                 super::collection_context::present_track_context_menu(
-                    target,
-                    &shell,
-                    track.media_uri,
-                    position,
+                    target, &shell, track, position,
                 );
             }),
         );

@@ -6,7 +6,6 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
 use rufin_core::collection_context::CollectionTarget;
-use rufin_core::downloads::DownloadSubject;
 use rufin_core::playback::PlayRequest;
 use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};
@@ -564,11 +563,8 @@ impl MediaDragSource {
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
         let selection = self.track_selection(catalog, source).await?;
-        let title = match self {
-            Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
-            Self::PlaylistEntries(_) => localization::tr("Playlist"),
-            _ => localization::tr("Selection"),
-        };
+        let title = rufin_core::downloads::selection_title(catalog, &selection)
+            .unwrap_or_else(|| localization::tr("Selection"));
         let preview = catalog
             .selected_track_uris(&selection, Some(4), &library::ReadCancellation::new())
             .await
@@ -610,74 +606,6 @@ impl MediaDragSource {
                 media_uris: order, ..
             } => PlayRequest::uris(order.to_vec(), placement),
         })
-    }
-
-    pub async fn resolve(
-        &self,
-        catalog: &library::Catalog,
-        source: &rufin_core::runtime::SourceHandle,
-    ) -> Result<(Vec<String>, DownloadSubject), String> {
-        let mut prepared = None;
-        let uris = match self {
-            Self::MediaUris(uris)
-            | Self::Queue {
-                media_uris: uris, ..
-            } => uris.to_vec(),
-            _ => {
-                let request = self.play_request(catalog, source).await?;
-                let selection = request.selection().expect("song-backed collection drag");
-                prepared = Some(request);
-                catalog
-                    .selected_track_uris(&selection, None, &library::ReadCancellation::new())
-                    .await
-                    .map_err(|error| error.to_string())?
-            }
-        };
-        let subject = match self {
-            Self::Target { .. } | Self::LiveCollection { .. } => {
-                let request = prepared.as_ref().expect("prepared collection");
-                let title = selection_title(request.selection().as_ref());
-                let context = match self {
-                    Self::Target { target } => target.context(),
-                    Self::LiveCollection { media_uri, .. } => {
-                        live_collection(catalog, media_uri)?.context()
-                    }
-                    _ => None,
-                };
-                DownloadSubject::Prepared {
-                    context_id: context.unwrap_or_else(|| {
-                        format!("track:{}", uris.first().map_or("", String::as_str))
-                    }),
-                    title: Some(title),
-                }
-            }
-            Self::PlaylistEntries(_) => {
-                DownloadSubject::for_media_uris("playlist", Some("Playlist"), &uris)
-            }
-            Self::Targets { .. } => DownloadSubject::for_media_uris("collections", None, &uris),
-            Self::MediaUris(_) | Self::Queue { .. } => {
-                DownloadSubject::for_media_uris("playlist-media", None, &uris)
-            }
-            Self::Selection(_) => DownloadSubject::for_media_uris("track-selection", None, &uris),
-        };
-        Ok((uris, subject))
-    }
-}
-
-fn selection_title(selection: Option<&library::MemberSelection>) -> String {
-    use library::{Collection, MemberSelection};
-    match selection {
-        Some(MemberSelection::Members { read, .. }) => localization::tr(match read.collection {
-            Collection::Album(_) => "Album",
-            Collection::Artist { .. } => "Artist",
-            Collection::Genre(_) => "Genre",
-            Collection::Mood(_) => "Mood",
-            Collection::Playlist(_) => "Playlist",
-            Collection::Smart { .. } => "Smart Playlist",
-            _ => "Folder",
-        }),
-        Some(MemberSelection::Keys { .. } | MemberSelection::Uris(_)) => localization::tr("Track"),
-        _ => localization::tr("Selection"),
     }
 }
 

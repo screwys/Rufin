@@ -27,9 +27,7 @@ use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_demand, install_grid_context, install_grid_play,
 };
-use crate::menus::media_menus::{
-    present_genre_context_menu, present_mood_context_menu, present_smart_playlist_context_menu,
-};
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::library_fields::column_fit_width;
 
 use super::route_shell::LibraryPageShellOptions;
@@ -251,14 +249,13 @@ impl NamedCollectionRow for TagRow {
         shell: &Rc<CatalogUi>,
         position: Option<(f64, f64)>,
     ) {
-        match self.kind {
-            TagKind::Genre => {
-                present_genre_context_menu(target, shell.shell(), self.clone(), None, position)
-            }
-            TagKind::Mood => {
-                present_mood_context_menu(target, shell.shell(), self.clone(), None, position)
-            }
-        }
+        present_row_menu(
+            target,
+            shell.shell(),
+            Row::Tag(self.clone()),
+            None,
+            position,
+        );
     }
     fn table(
         shell: &Rc<CatalogUi>,
@@ -334,28 +331,13 @@ impl NamedCollectionRow for library::PlaylistListRow {
         shell: &Rc<CatalogUi>,
         position: Option<(f64, f64)>,
     ) {
-        match self {
-            Self::Playlist(row) => crate::menus::media_menus::present_playlist_context_menu(
-                target,
-                shell,
-                row.clone(),
-                None,
-                position,
-            ),
-            Self::SmartPlaylist(row) => present_smart_playlist_context_menu(
-                target,
-                shell.shell(),
-                row.clone(),
-                None,
-                position,
-            ),
-            Self::Folder(row) => crate::menus::playlist_folders::present_folder_context_menu(
-                target,
-                shell.shell(),
-                row.clone(),
-                position,
-            ),
-        }
+        present_row_menu(
+            target,
+            shell.shell(),
+            Row::Playlist(self.clone()),
+            None,
+            position,
+        );
     }
     fn install_extra(
         widget: &gtk::Widget,

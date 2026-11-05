@@ -33,7 +33,7 @@ use super::grid_cells::{
     collection_grid_column_count, fixed_page_collection_row,
 };
 use crate::library::home_layout::home_section_header;
-use crate::menus::media_menus::present_album_context_menu;
+use crate::menus::media_menus::present_row_menu;
 
 use crate::library::route_layout::{ROUTE_TOP_MARGIN, route_scroller_widget};
 use crate::widgets::detail_links::DetailLinkBinding;
@@ -600,7 +600,13 @@ impl CatalogUi {
                 return;
             };
             {
-                present_album_context_menu(target, menu_shell.shell(), album, None, position);
+                present_row_menu(
+                    target,
+                    menu_shell.shell(),
+                    library::Row::Album(album),
+                    None,
+                    position,
+                );
             }
         });
 

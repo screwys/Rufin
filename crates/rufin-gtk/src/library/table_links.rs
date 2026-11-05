@@ -21,13 +21,13 @@ pub fn mapped_track_link_column<T, TrackValue, Value>(
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    TrackValue: Fn(&T) -> Option<String> + 'static,
+    TrackValue: Fn(&T) -> Option<&library::TrackRow> + 'static,
     Value: Fn(&T) -> DetailLinks + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let value = Rc::new(value);
     let shell = Rc::clone(shell);
-    let track_value: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(track_value);
+    let track_value: Rc<dyn Fn(&T) -> Option<&library::TrackRow>> = Rc::new(track_value);
 
     let setup_shell = Rc::clone(&shell);
     let setup_track_value = Rc::clone(&track_value);
@@ -51,7 +51,9 @@ where
                 };
                 if let Some(track) = item
                     .item()
-                    .and_then(|object| object_item::<T, _>(object, |value| item_track_value(value)))
+                    .and_then(|object| {
+                        object_item::<T, _>(object, |value| item_track_value(value).cloned())
+                    })
                     .flatten()
                 {
                     present_track_context_menu(target, &shell, track, position);

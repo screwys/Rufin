@@ -77,7 +77,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             DownloadQualityControls(source.settings.quality) { downloads.quality(source.source.id, it) }
             }
             SettingsGroup {
-            DownloadRule.entries.forEach { rule -> SettingsRow(rule.title(), trailing = {
+            DownloadRule.entries.forEach { rule -> SettingsRow(downloadRuleTitle(rule), trailing = {
                 Switch(downloadRulesContain(source.settings.rules, rule), { enabled -> if (enabled) downloads.rule(source.source.id, rule, true) else removingRule = source.source.id to rule })
             }) }
             }
@@ -88,7 +88,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, preferences: Preferenc
             }
         }
     }
-    removingRule?.let { (sourceId, rule) -> AlertDialog(onDismissRequest = { removingRule = null }, title = { Text(rule.title()) },
+    removingRule?.let { (sourceId, rule) -> AlertDialog(onDismissRequest = { removingRule = null }, title = { Text(downloadRuleTitle(rule)) },
         text = { Text(translate("Choose whether to keep the completed downloads.")) },
         confirmButton = { TextButton({ downloads.rule(sourceId, rule, false, true); removingRule = null }) { Text(translate("Remove Rule and Delete Downloads")) } },
         dismissButton = { TextButton({ downloads.rule(sourceId, rule, false); removingRule = null }) { Text(translate("Remove Rule, Keep Downloads")) } }) }

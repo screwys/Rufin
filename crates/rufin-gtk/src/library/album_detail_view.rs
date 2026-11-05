@@ -28,7 +28,7 @@ use super::detail_showcase::{
 use crate::library::route_layout::{
     PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_wrapper, detail_showcase_cover_size,
 };
-use crate::menus::media_menus::present_album_context_menu;
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::detail_links::DetailLinkBinding;
 use rufin_core::route::detail_links::album_artist_links;
 use rufin_core::settings::presentation::album_release_title;
@@ -163,10 +163,10 @@ impl CatalogUi {
         let menu_play = Rc::clone(&play);
         let context_menu: crate::widgets::interactions::ContextMenuOpen =
             Rc::new(move |target, position| {
-                present_album_context_menu(
+                present_row_menu(
                     target,
                     menu_shell.shell(),
-                    menu_album.borrow().row.clone(),
+                    library::Row::Album(menu_album.borrow().row.clone()),
                     Some(Rc::clone(&menu_play)),
                     position,
                 );

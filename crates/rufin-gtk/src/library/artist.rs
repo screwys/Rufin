@@ -28,7 +28,7 @@ use super::detail_showcase::{
 };
 use super::routes::SearchableTrackOptions;
 use crate::library::route_layout::PRIMARY_ROUTE_MARGIN_START;
-use crate::menus::media_menus::present_artist_context_menu;
+use crate::menus::media_menus::present_row_menu;
 use rufin_core::route::Route;
 use rufin_core::settings::presentation::ARTIST_RELEASE_TITLES;
 
@@ -608,10 +608,10 @@ fn artist_detail_header_restored(
     let context_menu = Rc::new(move |target: &gtk::Widget, position| {
         let artist = menu_artist.borrow().row.clone();
         {
-            present_artist_context_menu(
+            present_row_menu(
                 target,
                 menu_shell.shell(),
-                artist,
+                library::Row::Artist(artist),
                 Some(Rc::clone(&menu_play)),
                 position,
             );

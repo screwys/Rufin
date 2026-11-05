@@ -4,7 +4,6 @@ use artwork::ArtworkBinding;
 use gtk::glib;
 use localization::tr;
 use localization::track_count_text;
-use rufin_core::downloads::DownloadSubject;
 use rufin_core::downloads::{DownloadEvent, DownloadFeedbackKind};
 use sources::SourceId;
 use std::time::Duration;
@@ -147,24 +146,6 @@ impl DownloadsState {
     }
 }
 
-/// What a download rule is called.
-pub fn download_rule_title(rule: rufin_core::downloads::DownloadRule) -> &'static str {
-    use rufin_core::downloads::DownloadRule;
-    match rule {
-        DownloadRule::EntireLibrary => localization::msgid("Entire Library"),
-        DownloadRule::Favorites => localization::msgid("Favorites"),
-        DownloadRule::AllPlaylists => localization::msgid("All Playlists"),
-        DownloadRule::LatestFiveAlbums => localization::msgid("5 Latest Albums"),
-    }
-}
-
-pub fn download_subject_title(subject: &DownloadSubject) -> String {
-    match subject {
-        DownloadSubject::Rule(rule) => tr(download_rule_title(*rule)),
-        DownloadSubject::Prepared { title, .. } => title.clone().unwrap_or_else(|| tr("Selection")),
-    }
-}
-
 pub fn media_artwork(
     artwork: &Rc<crate::widgets::artwork::ArtworkState>,
     catalog: &Arc<library::Catalog>,
@@ -257,7 +238,7 @@ impl Shell {
             }
             DownloadEvent::Feedback(feedback) => {
                 self.show_operation_feedback(&OperationFeedback {
-                    title: crate::downloads::download_subject_title(&feedback.subject),
+                    title: rufin_core::downloads::download_subject_title(&feedback.subject),
                     artwork: OperationArtwork::MediaUris(feedback.preview_uris),
                     item_count: feedback.item_count,
                     kind: match feedback.kind {

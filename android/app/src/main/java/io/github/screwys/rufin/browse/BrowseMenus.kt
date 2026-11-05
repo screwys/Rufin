@@ -13,8 +13,8 @@ import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
 import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
 import io.github.screwys.rufin.core.AndroidBrowseItem
-import io.github.screwys.rufin.shared.library.DownloadItem
-import io.github.screwys.rufin.shared.library.DownloadStatus
+import io.github.screwys.rufin.shared.library.RadioSeed
+import io.github.screwys.rufin.shared.rufin_core.Menu
 import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
@@ -86,18 +86,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
-
-internal val AndroidBrowseRow.downloadItem: DownloadItem?
-    get() = when (val target = route) {
-        is Route.AlbumDetail -> DownloadItem.Album(target.v1)
-        is Route.ArtistDetail -> DownloadItem.Artist(target.v1, false)
-        is Route.AlbumArtistDetail -> DownloadItem.Artist(target.v1, true)
-        is Route.GenreDetail -> DownloadItem.Genre(target.v1)
-        is Route.MoodDetail -> DownloadItem.Mood(target.v1)
-        is Route.PlaylistDetail -> DownloadItem.Playlist(target.v1)
-        is Route.SmartPlaylistDetail -> DownloadItem.SmartPlaylist(target.v1)
-        else -> if (isTrack) DownloadItem.Track(mediaUri) else null
-    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -212,7 +200,6 @@ internal fun BrowseMenuSheet(
     val playbackControls by remember(player) { derivedStateOf {
         Triple(player.playback?.controls?.shuffleEnabled == true, player.playback?.controls?.autoDjEnabled == true, player.playback?.controls?.repeatMode)
     } }
-    var pinned by remember(item.row.pin, browse.library) { mutableStateOf<Boolean?>(null) }
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var random by remember { mutableStateOf(false) }
@@ -220,49 +207,20 @@ internal fun BrowseMenuSheet(
     val playlistFolder = item.row.playlistFolder
     val smartPlaylist = item.row.smartPlaylist
     val folderMember = item.row.playlistFolderMember
-    val removeUnavailable = remember(item.row.item, browse.library) {
-        item.row.playlist?.let { browse.library?.canRemoveUnavailable(it) } == true
-    }
-    var memberFolder by remember(item.row.key) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(folderMember, browse.library) {
-        if (folderMember != null) {
-            try { memberFolder = browse.library?.playlistMemberFolder(folderMember) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { model.runAction { throw failure } }
-        }
+    // What the menu offers, as GTK's menus do, under the saved menu settings.
+    var menu by remember(item.row, browse.library) { mutableStateOf<Menu?>(null) }
+    LaunchedEffect(item.row, browse.library) {
+        try { menu = browse.library?.menu(item.row) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { model.runAction { throw error } }
     }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     var details by remember(item.row.key) { mutableStateOf(false) }
-    val canRate = item.row.target != null
     var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
-    var ratingVisible by remember { mutableStateOf(false) }
     val halfStars = model.sources?.let { sourceHalfStarsEnabled(it, item.row.mediaUri, item.row.sourceId) } == true
     LaunchedEffect(item.row.item, browse.library) {
-        if (canRate) ratingVisible = withContext(Dispatchers.IO) {
-            model.connectedService().runtime.value!!.getOrThrow().settings().use { it.applicationPreferences().contextMenu.ratingVisible }
-        }
         if (item.row.item is AndroidBrowseItem.Recent) {
             try { rating = item.row.target?.let { browse.library?.rating(it) } }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.runAction { throw error } }
-        }
-    }
-    val downloadItem = item.row.downloadItem
-    val downloadFolder = (item.row.route as? Route.Folders)?.takeIf { item.row.item is AndroidBrowseItem.Folder }
-    var downloaded by remember(downloadItem, downloadFolder, browse.library) { mutableStateOf<DownloadStatus?>(null) }
-    LaunchedEffect(downloadItem, downloadFolder, browse.library) {
-        try {
-            downloaded = when {
-                downloadItem != null -> browse.library?.itemDownloadStatus(downloadItem)
-                downloadFolder != null -> browse.library?.folderDownloadStatus(downloadFolder.path)
-                else -> null
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { model.runAction { throw error } }
-    }
-    LaunchedEffect(item.row.pin, browse.library) {
-        item.row.pin?.let { pin ->
-            try { pinned = browse.library?.isPinned(pin) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { model.runAction { throw error } }
         }
@@ -291,31 +249,34 @@ internal fun BrowseMenuSheet(
                 }
                 MediaMenuDivider()
             }
+            val offered = menu
             BrowseMenuHeader(projected, player,
-                onFavorite = if (item.row.target != null) ({ browse.favorite(projected) }) else null,
-                onDetails = if (canRate) ({ details = true }) else null)
-            val playable = item.row.playlistFolder == null
-            if (playable) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                onFavorite = if (offered?.favorite == true) ({ browse.favorite(projected) }) else null,
+                onDetails = if (item.row.target != null) ({ details = true }) else null)
+            if (offered != null) {
+                val plays = listOfNotNull(
+                    Triple("rufin-media-playback-start-symbolic", "Play", null as QueuePlacement?).takeIf { offered.play },
+                    Triple("rufin-mail-forward-symbolic", "Play Next", QueuePlacement.AfterCurrent).takeIf { offered.playNext },
+                    Triple("rufin-go-last-symbolic", "Play Later", QueuePlacement.End).takeIf { offered.playLater })
+                if (plays.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BrowsePrimaryAction("rufin-media-playback-start-symbolic", "Play", Modifier.weight(1f),
-                        shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, QueuePlacement.Replace(0UL), true); onDismiss() }) {
-                            onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
-                        }
-                    BrowsePrimaryAction("rufin-mail-forward-symbolic", "Play Next", Modifier.weight(1f),
-                        shuffle = { browse.play(item, QueuePlacement.AfterCurrent, true); onDismiss() }) { browse.play(item, QueuePlacement.AfterCurrent); onDismiss() }
-                    BrowsePrimaryAction("rufin-go-last-symbolic", "Play Later", Modifier.weight(1f),
-                        shuffle = { browse.play(item, QueuePlacement.End, true); onDismiss() }) { browse.play(item, QueuePlacement.End); onDismiss() }
+                    plays.forEach { (icon, title, placement) ->
+                        if (placement == null) BrowsePrimaryAction(icon, title, Modifier.weight(1f),
+                            shuffle = { onPlayNow?.invoke(true) ?: browse.play(item, QueuePlacement.Replace(0UL), true); onDismiss() }) {
+                                onPlayNow?.invoke(false) ?: browse.play(item); onDismiss()
+                            }
+                        else BrowsePrimaryAction(icon, title, Modifier.weight(1f),
+                            shuffle = { browse.play(item, placement, true); onDismiss() }) { browse.play(item, placement); onDismiss() }
+                    }
                 }
-                val radioLabel = when {
-                    item.row.target is FavoriteTarget.Track -> "Track radio"
-                    item.row.target is FavoriteTarget.Album -> "Album radio"
-                    item.row.target is FavoriteTarget.Artist -> "Artist radio"
-                    item.row.genre != null -> "Genre radio"
-                    item.row.playlist != null -> "Playlist radio"
-                    else -> null
-                }
-                radioLabel?.let { label ->
+                offered.radio?.let { seed ->
+                    val label = when (seed) {
+                        is RadioSeed.Track -> "Track radio"
+                        is RadioSeed.Album -> "Album radio"
+                        is RadioSeed.Artist, is RadioSeed.AlbumArtist -> "Artist radio"
+                        is RadioSeed.Genre -> "Genre radio"
+                        is RadioSeed.Playlist -> "Playlist radio"
+                    }
                     ListItem(headlineContent = { Text(translate(label)) },
                         leadingContent = { RufinIcon("rufin-audio-only-symbolic", null, Modifier.size(24.dp)) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -330,53 +291,47 @@ internal fun BrowseMenuSheet(
                         }
                     })
                 }
-                BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
-                if (folderMember != null) {
+                if (offered.addToPlaylist) BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
+                offered.folder?.let { inFolder ->
                     BrowseMenuAction("rufin-folders-symbolic", "Add to folder") { folderPicker = true }
-                    if (memberFolder != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
+                    if (inFolder && folderMember != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
                         val source = model.sourceOwner ?: return@runAction
                         movePlaylistToFolder(source, folderMember, null)
                         browse.refresh()
                         onDismiss()
                     } }
                 }
-                if (removeUnavailable) BrowseMenuAction("rufin-user-trash-symbolic", "Remove unavailable tracks") { model.runAction {
+                if (offered.removeUnavailable) BrowseMenuAction("rufin-user-trash-symbolic", "Remove unavailable tracks") { model.runAction {
                     browse.library?.removeUnavailableTracks(item.row.playlist!!.playlistKey)
                     onDismiss()
                 } }
-                downloaded?.let { status ->
-                    if (status.downloaded == 0UL || status.downloaded < status.total)
-                        BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
-                    if (status.downloaded > 0UL)
-                        BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
+                if (offered.download) BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
+                if (offered.removeDownload) BrowseMenuAction("rufin-user-trash-symbolic", "Remove Downloads") { browse.download(item, true); onDismiss() }
+                if (offered.goTo) BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
+                if (offered.editMetadata) BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
+                if (offered.pin != null) BrowseMenuAction("rufin-bookmark-symbolic",
+                    if (offered.pinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !offered.pinned); onDismiss() }
+                onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
+                if (playlistFolder != null) {
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
                 }
-            }
-            if (item.row.target != null) {
-                BrowseMenuAction("rufin-external-link-compact-symbolic", "Go to") { navigation = true }
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit metadata", onMetadata)
-            }
-            pinned?.let { isPinned -> BrowseMenuAction("rufin-bookmark-symbolic",
-                if (isPinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !isPinned); onDismiss() } }
-            onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
-            if (playlistFolder != null) {
-                BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
-            }
-            if (smartPlaylist != null) {
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
-            }
-            if (item.row.playlist?.metadataWritable == true && item.row.route is Route.PlaylistDetail) {
-                MediaMenuDivider()
-                BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
-                BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
-            }
-            if (canRate && ratingVisible) {
-                MediaMenuDivider()
-                MenuRating(rating, halfStars) { value -> model.runAction {
-                    withContext(Dispatchers.IO) { item.row.target?.let { model.sourceOwner?.setRating(it, value) } }
-                    onDismiss()
-                } }
+                if (smartPlaylist != null) {
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
+                }
+                if (item.row.playlist != null && (offered.edit || offered.delete)) {
+                    MediaMenuDivider()
+                    if (offered.edit) BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
+                    if (offered.delete) BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
+                }
+                if (offered.rating) {
+                    MediaMenuDivider()
+                    MenuRating(rating, halfStars) { value -> model.runAction {
+                        withContext(Dispatchers.IO) { item.row.target?.let { model.sourceOwner?.setRating(it, value) } }
+                        onDismiss()
+                    } }
+                }
             }
         }
         }

@@ -15,16 +15,6 @@ import kotlinx.coroutines.flow.*
 
 internal data class DownloadRow(val job: DownloadQueueItem, val preview: TrackView?)
 internal data class DownloadSource(val source: SourceSummary, val settings: SourceDownloadSettings)
-internal fun DownloadRule.title() = translate(when (this) {
-    DownloadRule.ENTIRE_LIBRARY -> "Entire Library"
-    DownloadRule.FAVORITES -> "Favorites"
-    DownloadRule.ALL_PLAYLISTS -> "All Playlists"
-    DownloadRule.LATEST_FIVE_ALBUMS -> "5 Latest Albums"
-})
-internal fun DownloadSubject.title() = when (this) {
-    is DownloadSubject.Rule -> v1.title()
-    is DownloadSubject.Prepared -> title ?: translate("Downloads")
-}
 internal fun DownloadQueueState.title() = translate(when (this) {
     DownloadQueueState.QUEUED -> "Queued"
     DownloadQueueState.DOWNLOADING -> "Downloading"

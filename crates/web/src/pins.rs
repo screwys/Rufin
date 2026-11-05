@@ -35,7 +35,12 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             _ => None,
         };
         let scope = page::PageToken::at_source(source.clone());
-        let mut item = browser::row_data(&products, &settings, &row, &scope);
+        let mut item = browser::row_data(
+            &products,
+            &row,
+            &rufin_core::menu::menu(&products.source, &settings, &row),
+            &scope,
+        );
         let collection = row.collection();
         item["artwork_revision"] = json!(artwork_revision(
             collection

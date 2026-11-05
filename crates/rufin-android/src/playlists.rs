@@ -100,11 +100,6 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
-    /// Whether the playlist's menu offers Remove unavailable tracks.
-    pub fn can_remove_unavailable(&self, playlist: library::PlaylistRow) -> bool {
-        playlists::can_remove_unavailable(&self.source, &playlist)
-    }
-
     /// Removes the playlist's tracks that are no longer available; returns how many went.
     pub async fn remove_unavailable_tracks(
         &self,
@@ -238,13 +233,6 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub fn playlist_member_folder(
-        &self,
-        member: library::PlaylistFolderMember,
-    ) -> Option<library::PlaylistFolderKey> {
-        self.catalog.playlist_member_folder(&member)
-    }
-
     pub async fn save_smart_playlist(
         &self,
         key: Option<library::SmartPlaylistKey>,

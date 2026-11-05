@@ -678,7 +678,7 @@ fn add_download_rules(
     let mut rows = Vec::new();
     for rule in DownloadRule::ALL {
         let row = adw::ActionRow::builder()
-            .title(tr(crate::downloads::download_rule_title(rule)))
+            .title(rufin_core::downloads::download_rule_title(rule))
             .subtitle(tr(download_rule_subtitle(rule)))
             .build();
         row.set_visible(rules.contains(rule));
@@ -750,7 +750,7 @@ fn add_download_rules(
     for (rule, row) in rows {
         let action_name = download_rule_action_name(rule);
         menu.append(
-            Some(&tr(crate::downloads::download_rule_title(rule))),
+            Some(&rufin_core::downloads::download_rule_title(rule)),
             Some(&format!("download-rules.{action_name}")),
         );
         let action = gio::SimpleAction::new(action_name, None);
@@ -1033,7 +1033,7 @@ fn add_download_queue(
                     &job.preview_uris,
                     48,
                 ));
-                row.set_title(&crate::downloads::download_subject_title(&job.subject));
+                row.set_title(&rufin_core::downloads::download_subject_title(&job.subject));
             }
             row.set_subtitle(&download_queue_item_subtitle(&job));
             up.set_sensitive(position > 0);

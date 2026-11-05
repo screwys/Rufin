@@ -15,49 +15,42 @@ fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub async fn item_download_status(
+    /// The row's menu, as core's Menu offers it under the saved menu settings. A remembered
+    /// search result has its library row's menu; a child folder offers its plays, playlists
+    /// and downloads.
+    pub async fn menu(
         &self,
-        item: library::DownloadItem,
-    ) -> Result<library::DownloadStatus, AndroidError> {
-        let catalog = self.catalog.clone();
-        run_read(&self.runtime, move |cancel| async move {
-            catalog
-                .item_download_status(&item, &cancel)
-                .await
-                .map_err(error)
-        })
-        .await
-    }
-
-    pub async fn folder_download_status(
-        &self,
-        path: Vec<rufin_core::route::FolderPathItem>,
-    ) -> Result<library::DownloadStatus, AndroidError> {
-        let selection = self.route_selection(Route::Folders { path }).await?;
-        let MemberSelection::Members { mut read, .. } = Arc::unwrap_or_clone(selection) else {
-            unreachable!("A folder lists its tracks")
-        };
-        let catalog = self.catalog.clone();
-        run_read(&self.runtime, move |cancel| async move {
-            let count = |read: library::MemberRead| {
-                let catalog = &catalog;
-                let cancel = &cancel;
-                async move {
-                    Ok::<_, AndroidError>(
-                        catalog
-                            .order(&library::Read::Members(read), cancel)
-                            .await
-                            .map_err(error)?
-                            .len() as u64,
-                    )
+        row: AndroidBrowseRow,
+    ) -> Result<rufin_core::menu::Menu, AndroidError> {
+        let settings = self.settings.load();
+        let row = match row.item {
+            AndroidBrowseItem::Library { row } => row,
+            AndroidBrowseItem::Folder { .. } => {
+                return Ok(rufin_core::menu::Menu {
+                    edit_metadata: false,
+                    ..rufin_core::menu::selection(&settings)
+                });
+            }
+            AndroidBrowseItem::Recent { row } => {
+                let catalog = self.catalog.clone();
+                let read = run_read(&self.runtime, move |cancel| async move {
+                    catalog.loaded().await;
+                    let Some(item) = catalog.item(&row.media_uri) else {
+                        return Ok(None);
+                    };
+                    Ok(catalog
+                        .rows_of(&[item], false, &cancel)
+                        .await
+                        .map_err(error)?
+                        .pop())
+                });
+                match read.await? {
+                    Some(row) => row,
+                    None => return Ok(rufin_core::menu::Menu::default()),
                 }
-            };
-            let total = count(read.clone()).await?;
-            read.downloaded_only = true;
-            let downloaded = count(read).await?;
-            Ok(library::DownloadStatus { total, downloaded })
-        })
-        .await
+            }
+        };
+        Ok(rufin_core::menu::menu(&self.source, &settings, &row))
     }
 
     pub async fn download_target(
@@ -92,15 +85,7 @@ impl AndroidLibrary {
                 let result = if remove {
                     source.remove_download_selection(selection)
                 } else {
-                    source.download_selection(
-                        selection,
-                        route
-                            .map(|route| {
-                                serde_json::to_string(&route).expect("Route serialization")
-                            })
-                            .unwrap_or_else(|| "track".into()),
-                        None,
-                    )
+                    source.download_selection(selection)
                 };
                 result.recv().await.map_err(error)?.map_err(error)
             })
@@ -259,10 +244,6 @@ impl AndroidLibrary {
         self.playback
             .play_radio(rufin_core::playback::RadioPlayRequest { seed, placement });
         Ok(())
-    }
-
-    pub fn is_pinned(&self, pin: SidebarPin) -> Result<bool, AndroidError> {
-        Ok(self.settings.changes().borrow().ui.sidebar.is_pinned(&pin))
     }
 
     pub async fn refresh_home(&self, block: library::HomeBlockKind) -> Result<(), AndroidError> {

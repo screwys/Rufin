@@ -198,22 +198,18 @@ impl SourceOwner {
 }
 
 impl SourceOwner {
+    /// Downloads the tracks of `selection`, as a job named after what it selects.
     pub fn download_selection(
         &self,
         selection: library::MemberSelection,
-        context: String,
-        title: Option<String>,
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, catalog| async move {
             let uris = catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
-            let subject = crate::downloads::DownloadSubject::for_media_uris(
-                &context,
-                title.as_deref(),
-                &uris,
-            );
+            let subject =
+                crate::downloads::DownloadSubject::of_selection(&catalog, &selection, &uris);
             owner.download_media(subject, uris);
             Ok(())
         })

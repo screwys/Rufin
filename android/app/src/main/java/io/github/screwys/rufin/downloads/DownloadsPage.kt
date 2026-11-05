@@ -17,6 +17,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.shared.rufin_core.DownloadQueueItem
+import io.github.screwys.rufin.shared.rufin_core.downloadSubjectTitle
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.player.PlayerConnection
@@ -54,7 +55,7 @@ internal fun DownloadsPage(model: RufinConnection, player: PlayerConnection, onS
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Artwork(art, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(job.subject.title(), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                Text(downloadSubjectTitle(job.subject), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 val subtitle = row.preview?.let { "${it.metadata.album} · ${it.metadata.artist}" }.orEmpty()
                                 if (subtitle.isNotBlank()) Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

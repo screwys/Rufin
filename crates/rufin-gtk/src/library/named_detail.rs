@@ -17,7 +17,7 @@ use rufin_core::view::Opened;
 use super::detail_showcase::detail_radio_button;
 use super::grouped_detail::GroupedDetailData;
 use crate::menus::media_menus::CollectionPlay;
-use crate::menus::media_menus::{present_genre_context_menu, present_mood_context_menu};
+use crate::menus::media_menus::present_row_menu;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NamedDetailId {
@@ -155,15 +155,8 @@ fn named_context_menu(
 ) -> Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>> {
     let shell = Rc::clone(shell);
     Some(Rc::new(move |target: &gtk::Widget, position, play| {
-        let row = current.borrow().clone();
-        match row.kind {
-            library::TagKind::Genre => {
-                present_genre_context_menu(target, shell.shell(), row, Some(play), position)
-            }
-            library::TagKind::Mood => {
-                present_mood_context_menu(target, shell.shell(), row, Some(play), position)
-            }
-        }
+        let row = library::Row::Tag(current.borrow().clone());
+        present_row_menu(target, shell.shell(), row, Some(play), position);
     })
         as Rc<
             dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay),

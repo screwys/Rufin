@@ -33,9 +33,7 @@ use super::grid_cells::{
     CollectionGridCardCell, ReusableCollectionGridCell, collection_grid_with_selection_and_demand,
     install_grid_context, install_grid_play,
 };
-use crate::menus::media_menus::{
-    present_album_context_menu, present_artist_context_menu, present_collection_selection_menu,
-};
+use crate::menus::media_menus::{present_collection_selection_menu, present_row_menu};
 use crate::widgets::library_fields::column_fit_width;
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
@@ -284,7 +282,7 @@ impl SearchItem {
         }
         let media_uri = match self {
             Self::Track(row, _) => {
-                present_track_context_menu(target, shell, row.media_uri.clone(), position);
+                present_track_context_menu(target, shell, row.clone(), position);
                 return;
             }
             Self::Album(row) => row.media_uri.clone(),
@@ -306,10 +304,10 @@ impl SearchItem {
             }
             match item {
                 Self::Album(row) => {
-                    present_album_context_menu(&target, &menus, row, None, position)
+                    present_row_menu(&target, &menus, library::Row::Album(row), None, position)
                 }
                 Self::Artist(row) => {
-                    present_artist_context_menu(&target, &menus, row, None, position)
+                    present_row_menu(&target, &menus, library::Row::Artist(row), None, position)
                 }
                 Self::Track(..) => unreachable!(),
             }

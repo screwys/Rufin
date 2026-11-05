@@ -5,10 +5,8 @@ use crate::widgets::media_drag::MediaDragSource;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::{
-    AlbumRow, ArtistRow, FavoriteTarget, PlaylistRow, RadioSeed, SmartPlaylistRow, TagRow,
-    TrackLinks, TrackRow, TrackView,
-};
+use library::{FavoriteTarget, PlaylistListRow, RadioSeed, Row, TrackRow, TrackView};
+use rufin_core::menu::{GoTo, Menu};
 use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
 use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
@@ -92,26 +90,24 @@ pub(crate) fn play_target(
     });
 }
 
-pub(crate) fn download(shell: &Shell, payload: &crate::widgets::media_drag::MediaDragSource) {
+/// Downloads the tracks of `payload`, or removes their downloads.
+pub(crate) fn download(shell: &Shell, payload: &MediaDragSource, remove: bool) {
     let payload = payload.clone();
     let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match payload.resolve(&catalog, &source).await {
-            Ok((uris, subject)) => source.download_media(subject, uris),
-            Err(error) => tracing::warn!(%error, "failed to identify download tracks"),
+        let result = async {
+            let selection = payload.track_selection(&catalog, &source).await?;
+            let reply = if remove {
+                source.remove_download_selection(selection)
+            } else {
+                source.download_selection(selection)
+            };
+            reply.recv().await.map_err(|error| error.to_string())?
         }
-    });
-}
-
-fn remove_download(shell: &Shell, payload: &crate::widgets::media_drag::MediaDragSource) {
-    let payload = payload.clone();
-    let catalog = shell.products.library.clone();
-    let source = shell.products.source.clone();
-    shell.products.runtime.spawn(async move {
-        match payload.resolve(&catalog, &source).await {
-            Ok((uris, _)) => source.remove_download_media(uris),
-            Err(error) => tracing::warn!(%error, "failed to identify downloaded tracks"),
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not change the downloads");
         }
     });
 }
@@ -124,6 +120,45 @@ fn track_menu_subtitle(artist: &str, album: &str) -> String {
         .join(" · ")
 }
 
+/// What a row menu adds for where the row is shown.
+enum Place {
+    List,
+    /// A queue entry: its position and occurrence.
+    Queue(usize, Option<u64>),
+    /// A playlist entry, with the removal its selection allows.
+    Entry(Option<PlaylistEntrySelectionSnapshot>),
+}
+
+/// The menu of `row`, as core's Menu offers it, or of the selection it belongs to. `play`
+/// plays the row where its page does.
+pub fn present_row_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    row: Row,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+) {
+    let menu = row_menu(shell, &row);
+    if let Some(clicked) = row_target(&row) {
+        let selected = match &row {
+            Row::Playlist(_) => present_playlist_selection_menu(
+                target,
+                shell,
+                clicked,
+                position,
+                menu.folder.unwrap_or(false),
+            ),
+            _ => present_collection_selection_menu(target, shell, clicked, position),
+        };
+        if selected {
+            return;
+        }
+    }
+    present_row_surface(target, shell, &row, &menu, play, position, Place::List);
+}
+
+/// The menu of the player's or the queue's `track`; `queue_entry` is its queue position and
+/// occurrence.
 pub fn present_track_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
@@ -132,118 +167,292 @@ pub fn present_track_menu(
     popover_position: Option<gtk::PositionType>,
     queue_entry: Option<(usize, Option<u64>)>,
 ) {
-    if queue_entry.is_none()
-        && present_collection_selection_menu(
-            target,
-            shell,
-            crate::widgets::selection::PlayTarget::Track(track.track_key),
-            position,
-        )
-    {
-        return;
-    }
-    let action_group = if queue_entry.is_some() {
-        "queue"
-    } else {
-        "track"
+    let row = Row::Track(track.into());
+    let menu = row_menu(shell, &row);
+    let place = match queue_entry {
+        Some((position, occurrence)) => Place::Queue(position, occurrence),
+        None => Place::List,
     };
-    let surface = ContextMenuSurface::new(target, action_group, position);
-    crate::menus::media_details::append_header(
-        &surface,
+    if let Some(surface) = row_surface(target, shell, &row, &menu, None, position, place) {
+        if let Some(position) = popover_position {
+            surface.popover().set_position(position);
+        }
+        surface.popup();
+    }
+}
+
+pub fn present_playlist_entry_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    row: TrackRow,
+    position: Option<(f64, f64)>,
+    removal: Option<PlaylistEntrySelectionSnapshot>,
+) {
+    let row = Row::Track(row);
+    let menu = row_menu(shell, &row);
+    present_row_surface(
         target,
         shell,
-        crate::menus::media_details::MenuHeader {
-            item: MediaDetailsItem::Track(track.media_uri.clone()),
-            title: &track.metadata.title,
-            subtitle: &track_menu_subtitle(&track.metadata.artist, &track.metadata.album),
-            artwork: track.artwork_binding.as_deref(),
-            favorite: (
-                FavoriteTarget::Track(track.media_uri.clone()),
-                track.state.favorite,
-            ),
-        },
+        &row,
+        &menu,
+        None,
+        position,
+        Place::Entry(removal),
     );
-    if let Some((position, occurrence_id)) = queue_entry {
-        append_queue_entry_actions(&surface, shell, track.track_key, position, occurrence_id);
-    } else {
-        append_loaded_play(
+}
+
+fn row_menu(shell: &Shell, row: &Row) -> Menu {
+    rufin_core::menu::menu(
+        &shell.products.source,
+        &shell.settings.current.borrow(),
+        row,
+    )
+}
+
+/// What a play of `row` plays: a track by key, a collection by the page it opens. Playlist
+/// folders play nothing.
+fn row_target(row: &Row) -> Option<PlayTarget> {
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => {
+            Some(PlayTarget::Track(track.track_key))
+        }
+        Row::Playlist(PlaylistListRow::Folder(_)) => None,
+        _ => Route::of_row(row).map(PlayTarget::Route),
+    }
+}
+
+fn present_row_surface(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    row: &Row,
+    menu: &Menu,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+    place: Place,
+) {
+    if let Some(surface) = row_surface(target, shell, row, menu, play, position, place) {
+        surface.popup();
+    }
+}
+
+fn row_surface(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    row: &Row,
+    menu: &Menu,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+    place: Place,
+) -> Option<ContextMenuSurface> {
+    let group = match (&place, row) {
+        (Place::Queue(..), _) => "queue",
+        (Place::Entry(_), _) => "playlist-entry",
+        (_, Row::Track(_) | Row::AlbumTrack { .. }) => "track",
+        (_, Row::Album(_) | Row::AlbumHeading(_)) => "album",
+        (_, Row::Artist(_)) => "artist",
+        (_, Row::Tag(tag)) if tag.kind == library::TagKind::Genre => "genre",
+        (_, Row::Tag(_)) => "mood",
+        (_, Row::Playlist(PlaylistListRow::Playlist(_))) => "playlist",
+        (_, Row::Playlist(PlaylistListRow::SmartPlaylist(_))) => "smart-playlist",
+        (_, Row::Playlist(PlaylistListRow::Folder(_))) => "playlist-folder",
+        (_, Row::Folder(_)) => return None,
+    };
+    let surface = ContextMenuSurface::new(target, group, position);
+    let rated = rated(row);
+    if let Some((item, title, subtitle, artwork)) = header(row) {
+        crate::menus::media_details::append_header(
             &surface,
+            target,
             shell,
-            crate::widgets::selection::PlayTarget::Track(track.track_key),
-            None,
+            crate::menus::media_details::MenuHeader {
+                item,
+                title,
+                subtitle: &subtitle,
+                artwork,
+                favorite: rated
+                    .as_ref()
+                    .filter(|_| menu.favorite)
+                    .map(|rated| (rated.target.clone(), rated.favorite)),
+            },
         );
     }
-    append_radio(
-        &surface,
-        shell,
-        msgid("Track radio"),
-        RadioSeed::Track(track.media_uri.clone()),
-    );
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        MediaDragSource::capture_target(crate::widgets::selection::PlayTarget::Track(
-            track.track_key,
-        )),
-    );
-    if track.access.cue_path.is_none()
-        && (track.source_key.is_some() || track.media_uri.starts_with("file:"))
+    let playback = row_target(row);
+    match (place, &playback) {
+        (Place::Queue(position, occurrence), Some(PlayTarget::Track(track))) => {
+            append_queue_entry_actions(&surface, shell, menu, *track, position, occurrence);
+        }
+        (place, Some(playback)) => {
+            append_loaded_play(&surface, shell, menu, playback.clone(), play);
+            if let Place::Entry(Some(removal)) = place
+                && removal.writable
+            {
+                let remove_shell = Rc::downgrade(shell);
+                surface.append_fixed_action(
+                    msgid("Remove from Playlist"),
+                    REMOVE_ICON,
+                    move || {
+                        if let Some(shell) = remove_shell.upgrade() {
+                            remove_playlist_entry_selection(&shell, removal.clone());
+                        }
+                    },
+                );
+            }
+        }
+        _ => {}
+    }
+    if let Some(seed) = &menu.radio {
+        append_radio(&surface, shell, radio_label(seed), seed.clone());
+    }
+    let payload = playback.map(MediaDragSource::capture_target);
+    if menu.add_to_playlist
+        && let Some(payload) = &payload
     {
-        let metadata_shell = Rc::clone(shell);
-        let media_uri = track.media_uri.clone();
+        crate::playlists::picker::append_to_menu(&surface, shell, payload.clone());
+    }
+    if menu.edit_metadata
+        && let Some(item) = metadata_item(row)
+    {
+        let shell = Rc::clone(shell);
         surface.append_configurable_action(
             ContextMenuItem::EditMetadata,
             msgid("Edit metadata"),
             EDIT_ICON,
-            move || {
-                crate::editors::metadata::present_metadata_dialog(
-                    &metadata_shell,
-                    MetadataItemId::Track(media_uri.clone()),
-                )
-            },
+            move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone()),
         );
     }
-    install_track_navigation(
-        &surface,
-        shell,
-        &track.links,
-        &track.media_uri,
-        track.source_id.as_deref(),
-    );
-    let playback = crate::widgets::selection::PlayTarget::Track(track.track_key);
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
-        Some(&track.media_uri),
-        true,
-        track.access.is_downloaded,
-    );
-    if context_menu_rating_visible(shell) {
+    if let Some(pin) = &menu.pin {
+        append_pin_action(&surface, shell, pin.clone(), menu.pinned);
+    }
+    if menu.go_to {
+        append_go_to(&surface, shell, row);
+    }
+    match row {
+        Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
+            append_playlist_actions(&surface, shell, target, menu, playlist);
+        }
+        Row::Playlist(PlaylistListRow::SmartPlaylist(playlist)) => {
+            append_smart_playlist_actions(&surface, shell, target, menu, playlist);
+        }
+        Row::Playlist(PlaylistListRow::Folder(folder)) => {
+            crate::menus::playlist_folders::append_folder_row_actions(
+                &surface, shell, menu, folder,
+            );
+        }
+        _ => {}
+    }
+    if let Some(payload) = payload {
+        let single = matches!(row, Row::Track(_) | Row::AlbumTrack { .. });
+        append_download_actions(&surface, shell, menu, &payload, single);
+    }
+    if menu.rating
+        && let Some(rated) = rated
+    {
         let shell = Rc::clone(shell);
-        let media_uri = track.media_uri.clone();
+        let half_stars = shell.half_stars_enabled(rated.media_uri, rated.source_id);
+        let target = rated.target;
         surface.append_fixed_widget(
             "rating",
             &context_rating_row(
-                track
-                    .state
-                    .rating
-                    .and_then(|value| u8::try_from(value).ok()),
-                shell.half_stars_enabled(&track.media_uri, track.source_id.as_deref()),
+                rated.rating.and_then(|value| u8::try_from(value).ok()),
+                half_stars,
                 surface.popover(),
-                move |rating| {
-                    shell
-                        .products
-                        .source
-                        .set_rating(FavoriteTarget::Track(media_uri.clone()), rating)
-                },
+                move |rating| shell.products.source.set_rating(target.clone(), rating),
             ),
         );
     }
-    if let Some(position) = popover_position {
-        surface.popover().set_position(position);
+    Some(surface)
+}
+
+/// The header a track, album or artist menu starts with: what Details opens, its title,
+/// subtitle and artwork.
+fn header(row: &Row) -> Option<(MediaDetailsItem, &str, String, Option<&[u8]>)> {
+    Some(match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => (
+            MediaDetailsItem::Track(track.media_uri.clone()),
+            &track.title,
+            track_menu_subtitle(&track.artist, &track.album),
+            track.artwork_binding.as_deref(),
+        ),
+        Row::Album(album) | Row::AlbumHeading(album) => (
+            MediaDetailsItem::Album(album.media_uri.clone()),
+            &album.title,
+            album.artist.clone(),
+            album.artwork_binding.as_deref(),
+        ),
+        Row::Artist(artist) => (
+            MediaDetailsItem::Artist {
+                media_uri: artist.media_uri.clone(),
+                album_artist: artist.album_artist,
+            },
+            &artist.name,
+            String::new(),
+            artist.artwork_binding.as_deref(),
+        ),
+        _ => return None,
+    })
+}
+
+/// What a track, album or artist row's favorite and rating mark.
+struct Rated<'a> {
+    target: FavoriteTarget,
+    favorite: bool,
+    rating: Option<i64>,
+    media_uri: &'a str,
+    source_id: Option<&'a str>,
+}
+
+fn rated(row: &Row) -> Option<Rated<'_>> {
+    let (target, state, media_uri, source_id) = match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => (
+            FavoriteTarget::Track(track.media_uri.clone()),
+            &track.state,
+            &track.media_uri,
+            track.source_id.as_deref(),
+        ),
+        Row::Album(album) | Row::AlbumHeading(album) => (
+            FavoriteTarget::Album(album.media_uri.clone()),
+            &album.state,
+            &album.media_uri,
+            None,
+        ),
+        Row::Artist(artist) => (
+            FavoriteTarget::Artist(artist.media_uri.clone()),
+            &artist.state,
+            &artist.media_uri,
+            None,
+        ),
+        _ => return None,
+    };
+    Some(Rated {
+        target,
+        favorite: state.favorite,
+        rating: state.rating,
+        media_uri,
+        source_id,
+    })
+}
+
+fn metadata_item(row: &Row) -> Option<MetadataItemId> {
+    Some(match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => {
+            MetadataItemId::Track(track.media_uri.clone())
+        }
+        Row::Album(album) | Row::AlbumHeading(album) => {
+            MetadataItemId::Album(album.media_uri.clone())
+        }
+        Row::Artist(artist) => MetadataItemId::Artist(artist.media_uri.clone()),
+        _ => return None,
+    })
+}
+
+fn radio_label(seed: &RadioSeed) -> &'static str {
+    match seed {
+        RadioSeed::Track(_) => msgid("Track radio"),
+        RadioSeed::Album(_) => msgid("Album radio"),
+        RadioSeed::Artist(_) | RadioSeed::AlbumArtist(_) => msgid("Artist radio"),
+        RadioSeed::Genre(_) => msgid("Genre radio"),
+        RadioSeed::Playlist(_) => msgid("Playlist radio"),
     }
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
 
 /// A queue entry's Remove from Queue and Play actions: unshuffled plays move the entry; shuffled
@@ -251,6 +460,7 @@ pub fn present_track_menu(
 fn append_queue_entry_actions(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
+    menu: &Menu,
     track: library::TrackKey,
     position: usize,
     occurrence_id: Option<u64>,
@@ -266,12 +476,11 @@ fn append_queue_entry_actions(
     });
     let queue = shell.products.playback.clone();
     let play_shell = Rc::clone(shell);
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| match (placement, occurrence_id) {
+    surface.append_play_actions(menu, move |placement, shuffled| {
+        match (placement, occurrence_id) {
             _ if shuffled => play_target(
                 &play_shell.products,
-                &crate::widgets::selection::PlayTarget::Track(track),
+                &PlayTarget::Track(track),
                 placement,
                 true,
             ),
@@ -283,107 +492,67 @@ fn append_queue_entry_actions(
             ),
             (_, Some(id)) => queue.activate_occurrence(id),
             (_, None) => queue.activate(position),
-        },
-    );
-}
-
-fn install_track_navigation(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    links: &TrackLinks,
-    media_uri: &str,
-    source_id: Option<&str>,
-) {
-    let album_media_uri = links.album_media_uri.as_deref();
-    let (artists, album_artist) = rufin_core::route::detail_links::go_to_artists(links);
-    let submenu = go_to_submenu(
-        surface,
-        shell,
-        artists.iter().map(|artist| {
-            let key = artist.media_uri.clone();
-            let route = if album_artist {
-                Route::AlbumArtistDetail(key)
-            } else {
-                Route::ArtistDetail(key)
-            };
-            (artist.name.as_str(), route)
-        }),
-        album_media_uri.map(|album| Route::AlbumDetail(album.to_owned())),
-    );
-    install_source_navigation(
-        surface,
-        shell,
-        &submenu,
-        media_uri,
-        source_id,
-        album_media_uri,
-        false,
-    );
-    if submenu.n_items() > 0 {
-        surface.append_configurable_submenu(
-            ContextMenuItem::GoTo,
-            msgid("Go to"),
-            &submenu,
-            GO_TO_ICON,
-        );
-    }
-}
-
-/// The Go to submenu of artists and an album, with the actions that open them.
-fn go_to_submenu<'a>(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    artists: impl IntoIterator<Item = (&'a str, Route)>,
-    album: Option<Route>,
-) -> gtk::gio::Menu {
-    let submenu = gtk::gio::Menu::new();
-    let artists = artists.into_iter().map(|(name, route)| {
-        (
-            localization::tr_with("Go to {artist}", &[("artist", name)]),
-            ARTIST_ICON,
-            route,
-        )
+        }
     });
-    let album = album.map(|route| (localization::tr(msgid("Go to Album")), ALBUM_ICON, route));
-    for (label, icon, route) in artists.chain(album) {
-        let shell = Rc::clone(shell);
-        submenu.append_item(&surface.item(&label, icon, move || shell.open_route(route.clone())));
-    }
-    submenu
 }
 
-#[allow(clippy::too_many_arguments)]
-fn install_source_navigation(
+/// The Go to submenu of what `row` links to, with the actions that open them.
+fn append_go_to(surface: &ContextMenuSurface, shell: &Rc<Shell>, row: &Row) {
+    let submenu = gtk::gio::Menu::new();
+    for target in rufin_core::menu::go_to(&shell.products.source, row) {
+        let item = match target {
+            GoTo::Artist(name, route) => {
+                let label = localization::tr_with("Go to {artist}", &[("artist", &name)]);
+                let shell = Rc::clone(shell);
+                surface.item(&label, ARTIST_ICON, move || shell.open_route(route.clone()))
+            }
+            GoTo::Album(route) => {
+                let shell = Rc::clone(shell);
+                surface.item(
+                    &localization::tr(msgid("Go to Album")),
+                    ALBUM_ICON,
+                    move || shell.open_route(route.clone()),
+                )
+            }
+            GoTo::Source(link) => source_item(surface, shell, row, link),
+        };
+        submenu.append_item(&item);
+    }
+    surface.append_configurable_submenu(
+        ContextMenuItem::GoTo,
+        msgid("Go to"),
+        &submenu,
+        GO_TO_ICON,
+    );
+}
+
+/// The item that opens `row`'s page on its server, or its folder.
+fn source_item(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    submenu: &gtk::gio::Menu,
-    media_uri: &str,
-    source_id: Option<&str>,
-    album_uri: Option<&str>,
-    album_artist: bool,
-) {
+    row: &Row,
+    link: rufin_core::detail_links::DetailLink,
+) -> gtk::gio::MenuItem {
+    let (media_uri, source_id, album_artist) = match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => {
+            (&track.media_uri, track.source_id.as_deref(), false)
+        }
+        Row::Album(album) | Row::AlbumHeading(album) => (&album.media_uri, None, false),
+        Row::Artist(artist) => (&artist.media_uri, None, artist.album_artist),
+        _ => unreachable!("Go to leads to a source only from tracks, albums and artists"),
+    };
     let source_id = source_id
         .map(sources::SourceId::new)
         .or_else(|| library::source_entity_parts(media_uri).map(|(id, _, _)| id));
-    let configuration = source_id
-        .as_ref()
-        .and_then(|id| shell.products.source.configuration(id));
-    let Some(link) = rufin_core::detail_links::navigation_source_link(
-        configuration.as_ref(),
-        media_uri,
-        album_uri,
-    ) else {
-        return;
-    };
     let window = surface
         .popover()
         .root()
         .and_downcast::<gtk::ApplicationWindow>()
         .map(|window| window.downgrade());
     let shell = Rc::clone(shell);
-    let media_uri = media_uri.to_owned();
+    let media_uri = media_uri.clone();
     let (title, icon_name) = (localization::tr(link.title), link.icon_name);
-    submenu.append_item(&surface.item(&title, icon_name, move || {
+    surface.item(&title, icon_name, move || {
         let Some(window) = window.as_ref().and_then(glib::WeakRef::upgrade) else {
             return;
         };
@@ -416,108 +585,278 @@ fn install_source_navigation(
                 feedback.show_feedback_toast(error);
             }
         });
-    }));
+    })
 }
 
-pub fn present_playlist_entry_menu(
-    target: &gtk::Widget,
+/// A playlist's Export, Edit, Add current, folder, Remove unavailable tracks and Delete
+/// actions, as `menu` offers them.
+fn append_playlist_actions(
+    surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    row: TrackRow,
-    position: Option<(f64, f64)>,
-    _playlist: library::PlaylistKey,
-    removal: Option<PlaylistEntrySelectionSnapshot>,
+    target: &gtk::Widget,
+    menu: &Menu,
+    playlist: &library::PlaylistRow,
 ) {
-    let surface = ContextMenuSurface::new(target, "playlist-entry", position);
-    crate::menus::media_details::append_header(
-        &surface,
-        target,
-        shell,
-        crate::menus::media_details::MenuHeader {
-            item: MediaDetailsItem::Track(row.media_uri.clone()),
-            title: &row.title,
-            subtitle: &track_menu_subtitle(&row.artist, &row.album),
-            artwork: row.artwork_binding.as_deref(),
-            favorite: (
-                FavoriteTarget::Track(row.media_uri.clone()),
-                row.state.favorite,
-            ),
-        },
-    );
-    let queue = shell.products.playback.clone();
-    let media_uri = row.media_uri.clone();
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| {
-            queue.play_selection(
-                PlayRequest::uris(vec![media_uri.clone()], placement).shuffled(shuffled),
-            )
-        },
-    );
-    if let Some(removal) = removal.filter(|selection| selection.writable) {
-        let remove_shell = Rc::downgrade(shell);
-        surface.append_fixed_action(msgid("Remove from Playlist"), REMOVE_ICON, move || {
-            if let Some(shell) = remove_shell.upgrade() {
-                remove_playlist_entry_selection(&shell, removal.clone());
-            }
+    let playlist_key = playlist.playlist_key;
+    if menu.export {
+        append_export_action(
+            surface,
+            shell,
+            rufin_core::runtime::source::PlaylistExport::Playlist(playlist_key),
+            &playlist.name,
+        );
+    }
+    if menu.edit {
+        let edit_shell = Rc::clone(shell);
+        let playlist_name = playlist.name.clone();
+        surface.append_fixed_action(msgid("Edit"), EDIT_ICON, move || {
+            edit_shell.edit_playlist_dialog(playlist_key, playlist_name.clone());
         });
     }
-    install_track_navigation(
-        &surface,
-        shell,
-        &row.links,
-        &row.media_uri,
-        row.source_id.as_deref(),
-    );
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(
-            crate::widgets::selection::PlayTarget::Track(row.track_key),
-        ),
-        Some(&row.media_uri),
-        true,
-        row.is_downloaded,
-    );
-    if row.media_uri.starts_with("file:") || library::source_entity_parts(&row.media_uri).is_some()
-    {
-        let metadata_shell = Rc::clone(shell);
-        let media_uri = row.media_uri.clone();
-        surface.append_configurable_action(
-            ContextMenuItem::EditMetadata,
-            msgid("Edit metadata"),
-            EDIT_ICON,
+    if menu.add_current {
+        let current = crate::player::state::current_playback_track(
+            shell.player_ui.selected_playback().as_deref(),
+        )
+        .map(|track| track.media_uri);
+        let add_shell = Rc::clone(shell);
+        surface.append_fixed_action_enabled(
+            msgid("Add current"),
+            ADD_ICON,
+            current.is_some(),
             move || {
-                crate::editors::metadata::present_metadata_dialog(
-                    &metadata_shell,
-                    MetadataItemId::Track(media_uri.clone()),
-                )
+                if let Some(media_uri) = current.as_ref() {
+                    crate::playlists::picker::add_media_to_playlist(
+                        &add_shell.products.source,
+                        playlist_key,
+                        library::MemberSelection::Uris((vec![media_uri.clone()]).into()),
+                        false,
+                        Rc::new(|_| {}),
+                    );
+                }
             },
         );
     }
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        MediaDragSource::media_uris([row.media_uri.clone()]),
-    );
-    if context_menu_rating_visible(shell) {
-        let rating_shell = Rc::clone(shell);
-        let media_uri = row.media_uri.clone();
-        surface.append_fixed_widget(
-            "rating",
-            &context_rating_row(
-                row.state.rating.and_then(|value| u8::try_from(value).ok()),
-                rating_shell.half_stars_enabled(&row.media_uri, row.source_id.as_deref()),
-                surface.popover(),
-                move |rating| {
-                    rating_shell
-                        .products
-                        .source
-                        .set_rating(FavoriteTarget::Track(media_uri.clone()), rating)
-                },
-            ),
+    if let Some(in_folder) = menu.folder {
+        crate::menus::playlist_folders::append_folder_actions(
+            surface,
+            shell,
+            vec![library::PlaylistFolderMember::Playlist { key: playlist_key }],
+            in_folder,
         );
     }
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
+    if menu.remove_unavailable {
+        let cleanup_shell = Rc::downgrade(shell);
+        let name = playlist.name.clone();
+        let artwork = crate::widgets::library_fields::playlist_artwork(playlist);
+        surface.append_fixed_action(msgid("Remove unavailable tracks"), TRASH_ICON, move || {
+            let Some(shell) = cleanup_shell.upgrade() else {
+                return;
+            };
+            let result = rufin_core::playlists::remove_unavailable_tracks(
+                &shell.products.source,
+                playlist_key,
+            );
+            let shell = Rc::downgrade(&shell);
+            let name = name.clone();
+            let artwork = artwork.clone();
+            gtk::glib::spawn_future_local(async move {
+                let Ok(result) = result.recv().await else {
+                    return;
+                };
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
+                let removed = match result {
+                    Ok(removed) => removed,
+                    Err(error) => {
+                        shell.control_feedback.show_feedback_toast(error);
+                        return;
+                    }
+                };
+                shell.show_operation_feedback(&OperationFeedback {
+                    title: name.clone(),
+                    artwork: OperationArtwork::Bindings(artwork),
+                    item_count: removed,
+                    kind: OperationFeedbackKind::PlaylistRemoved { destination: name },
+                });
+            });
+        });
+    }
+    if menu.delete {
+        let delete_shell = Rc::clone(shell);
+        let delete_target = target.downgrade();
+        let name = playlist.name.clone();
+        surface.append_fixed_action(msgid("Delete"), DELETE_ICON, move || {
+            let Some(target) = delete_target.upgrade() else {
+                return;
+            };
+            let shell = Rc::clone(&delete_shell);
+            let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
+                let source = shell.products.source.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let _ = rufin_core::playlists::delete_playlist(&source, playlist_key).await;
+                });
+                shell.open_route(Route::Playlists);
+            });
+            dialog.present(Some(&target));
+        });
+    }
+}
+
+/// A smart playlist's Export, Edit, folder and Delete actions, as `menu` offers them.
+fn append_smart_playlist_actions(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    target: &gtk::Widget,
+    menu: &Menu,
+    playlist: &library::SmartPlaylistRow,
+) {
+    let key = playlist.smart_playlist_key;
+    if menu.export {
+        append_export_action(
+            surface,
+            shell,
+            rufin_core::runtime::source::PlaylistExport::Smart(key),
+            &playlist.name,
+        );
+    }
+    if menu.edit {
+        let edit_shell = Rc::clone(shell);
+        let edit_row = playlist.clone();
+        surface.append_fixed_action(msgid("Edit"), EDIT_ICON, move || {
+            edit_shell.edit_smart_playlist_dialog(edit_row.clone());
+        });
+    }
+    if let Some(in_folder) = menu.folder {
+        crate::menus::playlist_folders::append_folder_actions(
+            surface,
+            shell,
+            vec![library::PlaylistFolderMember::SmartPlaylist { key }],
+            in_folder,
+        );
+    }
+    if menu.delete {
+        let delete_shell = Rc::clone(shell);
+        let delete_target = target.downgrade();
+        let name = playlist.name.clone();
+        surface.append_fixed_action(msgid("Delete"), DELETE_ICON, move || {
+            let Some(target) = delete_target.upgrade() else {
+                return;
+            };
+            let shell = Rc::clone(&delete_shell);
+            let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
+                let navigate = Rc::clone(&shell);
+                shell.publish_smart_playlist_change(
+                    SmartPlaylistChange::Delete(key),
+                    None,
+                    Some(Rc::new(move |result| {
+                        if result.is_ok() {
+                            navigate.open_route(Route::SmartPlaylists);
+                        }
+                    })),
+                );
+            });
+            dialog.present(Some(&target));
+        });
+    }
+}
+
+fn append_export_action(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    export: rufin_core::runtime::source::PlaylistExport,
+    name: &str,
+) {
+    let shell = Rc::clone(shell);
+    let name = name.to_owned();
+    surface.append_fixed_action(
+        msgid("Export playlist"),
+        "rufin-document-send-symbolic",
+        move || shell.export_playlist_dialog(export, &name),
+    );
+}
+
+fn append_pin_action(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    pin: SidebarPin,
+    pinned: bool,
+) {
+    let shell = Rc::clone(shell);
+    surface.append_configurable_action(
+        ContextMenuItem::Pins,
+        if pinned {
+            msgid("Remove from Pins")
+        } else {
+            msgid("Add to Pins")
+        },
+        if pinned { REMOVE_ICON } else { ADD_ICON },
+        move || shell.set_sidebar_pin(pin.clone(), !pinned),
+    );
+}
+
+/// The Play submenu of a row: `play` where the page plays it, else its play request.
+fn append_loaded_play(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    menu: &Menu,
+    target: PlayTarget,
+    play: Option<CollectionPlay>,
+) {
+    let play_shell = Rc::clone(shell);
+    surface.append_play_actions(menu, move |placement, shuffled| match &play {
+        Some(play) => play(placement, shuffled),
+        None => play_target(&play_shell.products, &target, placement, shuffled),
+    });
+}
+
+/// Download or Remove Download(s) of `payload`, as `menu` offers them; `single` names one
+/// track.
+fn append_download_actions(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    menu: &Menu,
+    payload: &MediaDragSource,
+    single: bool,
+) {
+    if menu.download {
+        let shell = Rc::clone(shell);
+        let payload = payload.clone();
+        surface.append_configurable_action(
+            ContextMenuItem::Download,
+            msgid("Download"),
+            DOWNLOAD_ICON,
+            move || download(&shell, &payload, false),
+        );
+    }
+    if menu.remove_download {
+        let shell = Rc::clone(shell);
+        let payload = payload.clone();
+        surface.append_configurable_action(
+            ContextMenuItem::Download,
+            if single {
+                msgid("Remove Download")
+            } else {
+                msgid("Remove Downloads")
+            },
+            TRASH_ICON,
+            move || download(&shell, &payload, true),
+        );
+    }
+}
+
+fn append_radio(surface: &ContextMenuSurface, shell: &Shell, label: &str, seed: RadioSeed) {
+    let radio = shell.products.playback.clone();
+    surface.append_radio(label, move |placement| {
+        radio.play_radio(RadioPlayRequest {
+            placement,
+            seed: seed.clone(),
+        })
+    });
+}
+
+fn selection_menu(shell: &Shell) -> Menu {
+    rufin_core::menu::selection(&shell.settings.current.borrow())
 }
 
 pub fn present_track_selection_menu(
@@ -528,7 +867,7 @@ pub fn present_track_selection_menu(
 ) {
     let surface = ContextMenuSurface::new(target, "track-selection", position);
     append_track_selection_actions(&surface, shell, selection);
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
+    surface.popup();
 }
 
 pub fn present_collection_selection_menu(
@@ -540,7 +879,7 @@ pub fn present_collection_selection_menu(
     let Some((surface, _)) = collection_selection_surface(target, shell, clicked, position) else {
         return false;
     };
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
+    surface.popup();
     true
 }
 
@@ -554,74 +893,76 @@ fn collection_selection_surface(
     crate::widgets::media_drag::CollectionTargets,
 )> {
     let targets = crate::widgets::media_drag::selected_collection_targets(target, &clicked)?;
-    let payload = crate::widgets::media_drag::MediaDragSource::Targets {
+    let payload = MediaDragSource::Targets {
         targets: targets.clone(),
     };
+    let menu = selection_menu(shell);
     let surface = ContextMenuSurface::new(target, "collection-selection", position);
-    let metadata_targets = targets.clone();
-    let metadata_shell = Rc::clone(shell);
-    let edit_metadata = move || {
-        let targets = metadata_targets.clone();
-        let shell = Rc::clone(&metadata_shell);
-        let catalog = shell.products.library.clone();
-        let source = shell.products.source.clone();
-        let task = shell.products.runtime.spawn(async move {
-            targets.requests(&catalog, &source).await.map(|requests| {
-                library::MemberSelection::Concat(
-                    requests.iter().filter_map(PlayRequest::selection).collect(),
-                )
-            })
-        });
-        glib::spawn_future_local(async move {
-            match task.await {
-                Ok(Ok(selection)) => {
-                    crate::editors::metadata::present_track_metadata_dialog(&shell, selection)
-                }
-                Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
-                Err(error) => shell
-                    .control_feedback
-                    .show_feedback_toast(error.to_string()),
-            }
-        });
-    };
-    surface.append_configurable_action(
-        ContextMenuItem::EditMetadata,
-        msgid("Edit metadata"),
-        EDIT_ICON,
-        edit_metadata,
-    );
-    let play_shell = Rc::clone(shell);
-    let play_payload = payload.clone();
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| {
-            let payload = play_payload.clone();
-            let catalog = play_shell.products.library.clone();
-            let source = play_shell.products.source.clone();
-            let playback = play_shell.products.playback.clone();
-            let task = play_shell.products.runtime.spawn(async move {
-                let mut request = payload
-                    .play_request(&catalog, &source)
-                    .await?
-                    .shuffled(shuffled);
-                request.placement = placement;
-                playback.play_selection(request);
-                Ok::<_, String>(())
+    if menu.edit_metadata {
+        let metadata_targets = targets.clone();
+        let metadata_shell = Rc::clone(shell);
+        let edit_metadata = move || {
+            let targets = metadata_targets.clone();
+            let shell = Rc::clone(&metadata_shell);
+            let catalog = shell.products.library.clone();
+            let source = shell.products.source.clone();
+            let task = shell.products.runtime.spawn(async move {
+                targets.requests(&catalog, &source).await.map(|requests| {
+                    library::MemberSelection::Concat(
+                        requests.iter().filter_map(PlayRequest::selection).collect(),
+                    )
+                })
             });
-            let shell = Rc::clone(&play_shell);
             glib::spawn_future_local(async move {
                 match task.await {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(selection)) => {
+                        crate::editors::metadata::present_track_metadata_dialog(&shell, selection)
+                    }
                     Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
                     Err(error) => shell
                         .control_feedback
                         .show_feedback_toast(error.to_string()),
                 }
             });
-        },
-    );
-    crate::playlists::picker::append_to_menu(&surface, shell, payload.clone());
-    install_selection_download_actions(&surface, shell, payload);
+        };
+        surface.append_configurable_action(
+            ContextMenuItem::EditMetadata,
+            msgid("Edit metadata"),
+            EDIT_ICON,
+            edit_metadata,
+        );
+    }
+    let play_shell = Rc::clone(shell);
+    let play_payload = payload.clone();
+    surface.append_play_actions(&menu, move |placement, shuffled| {
+        let payload = play_payload.clone();
+        let catalog = play_shell.products.library.clone();
+        let source = play_shell.products.source.clone();
+        let playback = play_shell.products.playback.clone();
+        let task = play_shell.products.runtime.spawn(async move {
+            let mut request = payload
+                .play_request(&catalog, &source)
+                .await?
+                .shuffled(shuffled);
+            request.placement = placement;
+            playback.play_selection(request);
+            Ok::<_, String>(())
+        });
+        let shell = Rc::clone(&play_shell);
+        glib::spawn_future_local(async move {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
+                Err(error) => shell
+                    .control_feedback
+                    .show_feedback_toast(error.to_string()),
+            }
+        });
+    });
+    if menu.add_to_playlist {
+        crate::playlists::picker::append_to_menu(&surface, shell, payload.clone());
+    }
+    append_download_actions(&surface, shell, &menu, &payload, false);
     Some((surface, targets))
 }
 
@@ -719,7 +1060,7 @@ fn present_playlist_selection_menu(
                     );
                 }
                 surface.append_fixed_action(msgid("Delete"), DELETE_ICON, delete);
-                surface.popup(&shell.settings.current.borrow().application.context_menu);
+                surface.popup();
             }
             Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
             Err(error) => shell
@@ -745,7 +1086,7 @@ pub fn present_playlist_entry_selection_menu(
         });
     }
     append_playlist_entry_selection_actions(&surface, shell, selection);
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
+    surface.popup();
 }
 
 pub fn remove_playlist_entry_selection(
@@ -824,28 +1165,22 @@ fn append_playlist_entry_selection_actions(
     if selection.count == 0 {
         return;
     }
+    let menu = selection_menu(shell);
     let play_shell = Rc::clone(shell);
     let play_selection = selection.clone();
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| {
-            play_selection.play(&play_shell.products.playback, placement, shuffled)
-        },
-    );
-    crate::playlists::picker::append_to_menu(
-        surface,
-        shell,
-        MediaDragSource::playlist_entries(selection.clone()),
-    );
-    append_metadata_selection_action(surface, shell, selection.input.clone());
-    let download_shell = Rc::clone(shell);
-    let download_payload = crate::widgets::media_drag::MediaDragSource::playlist_entries(selection);
-    surface.append_configurable_action(
-        ContextMenuItem::Download,
-        msgid("Download"),
-        DOWNLOAD_ICON,
-        move || download(&download_shell, &download_payload),
-    );
+    surface.append_play_actions(&menu, move |placement, shuffled| {
+        play_selection.play(&play_shell.products.playback, placement, shuffled)
+    });
+    if menu.add_to_playlist {
+        crate::playlists::picker::append_to_menu(
+            surface,
+            shell,
+            MediaDragSource::playlist_entries(selection.clone()),
+        );
+    }
+    append_metadata_selection_action(surface, shell, &menu, selection.input.clone());
+    let payload = MediaDragSource::playlist_entries(selection);
+    append_download_actions(surface, shell, &menu, &payload, false);
 }
 
 fn append_track_selection_actions(
@@ -856,32 +1191,38 @@ fn append_track_selection_actions(
     if selection.count == 0 {
         return;
     }
+    let menu = selection_menu(shell);
     let play_shell = Rc::clone(shell);
     let play_selection = selection.clone();
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| {
-            play_selection.play(&play_shell.products.playback, placement, shuffled)
-        },
-    );
-    crate::playlists::picker::append_to_menu(
+    surface.append_play_actions(&menu, move |placement, shuffled| {
+        play_selection.play(&play_shell.products.playback, placement, shuffled)
+    });
+    if menu.add_to_playlist {
+        crate::playlists::picker::append_to_menu(
+            surface,
+            shell,
+            MediaDragSource::selection(selection.clone()),
+        );
+    }
+    append_metadata_selection_action(surface, shell, &menu, selection.input.clone());
+    append_download_actions(
         surface,
         shell,
-        MediaDragSource::selection(selection.clone()),
-    );
-    append_metadata_selection_action(surface, shell, selection.input.clone());
-    install_selection_download_actions(
-        surface,
-        shell,
-        crate::widgets::media_drag::MediaDragSource::selection(selection),
+        &menu,
+        &MediaDragSource::selection(selection),
+        false,
     );
 }
 
 fn append_metadata_selection_action(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
+    menu: &Menu,
     selection: library::MemberSelection,
 ) {
+    if !menu.edit_metadata {
+        return;
+    }
     let shell = Rc::clone(shell);
     surface.append_configurable_action(
         ContextMenuItem::EditMetadata,
@@ -889,644 +1230,4 @@ fn append_metadata_selection_action(
         EDIT_ICON,
         move || crate::editors::metadata::present_track_metadata_dialog(&shell, selection.clone()),
     );
-}
-
-fn install_selection_download_actions(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    payload: crate::widgets::media_drag::MediaDragSource,
-) {
-    let download_shell = Rc::clone(shell);
-    let download_payload = payload.clone();
-    surface.append_configurable_action(
-        ContextMenuItem::Download,
-        msgid("Download"),
-        DOWNLOAD_ICON,
-        move || download(&download_shell, &download_payload),
-    );
-    let remove_shell = Rc::clone(shell);
-    surface.append_configurable_action(
-        ContextMenuItem::Download,
-        msgid("Remove Downloads"),
-        TRASH_ICON,
-        move || remove_download(&remove_shell, &payload),
-    );
-}
-
-pub fn present_album_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    album: AlbumRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    let playback = PlayTarget::album(&album);
-    if present_collection_selection_menu(target, shell, playback.clone(), position) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "album", position);
-    crate::menus::media_details::append_header(
-        &surface,
-        target,
-        shell,
-        crate::menus::media_details::MenuHeader {
-            item: MediaDetailsItem::Album(album.media_uri.clone()),
-            title: &album.title,
-            subtitle: &album.artist,
-            artwork: album.artwork_binding.as_deref(),
-            favorite: (
-                FavoriteTarget::Album(album.media_uri.clone()),
-                album.state.favorite,
-            ),
-        },
-    );
-    append_loaded_play(&surface, shell, playback, play);
-    append_radio(
-        &surface,
-        shell,
-        msgid("Album radio"),
-        RadioSeed::Album(album.album_key),
-    );
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        MediaDragSource::capture_target(PlayTarget::album(&album)),
-    );
-    append_metadata_action(
-        &surface,
-        shell,
-        MetadataItemId::Album(album.media_uri.clone()),
-    );
-    install_sidebar_pin_action(&surface, shell, album.pin());
-    let submenu = go_to_submenu(
-        &surface,
-        shell,
-        album.links.album_artists.iter().map(|artist| {
-            let route = Route::AlbumArtistDetail(artist.media_uri.clone());
-            (artist.name.as_str(), route)
-        }),
-        Some(Route::AlbumDetail(album.media_uri.clone())),
-    );
-    install_source_navigation(
-        &surface,
-        shell,
-        &submenu,
-        &album.media_uri,
-        None,
-        None,
-        false,
-    );
-    if submenu.n_items() > 0 {
-        surface.append_configurable_submenu(
-            ContextMenuItem::GoTo,
-            msgid("Go to"),
-            &submenu,
-            GO_TO_ICON,
-        );
-    }
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(PlayTarget::album(&album)),
-        Some(&album.media_uri),
-        false,
-        album.summary.downloaded(),
-    );
-    if context_menu_rating_visible(shell) {
-        let shell = Rc::clone(shell);
-        let media_uri = album.media_uri.clone();
-        surface.append_fixed_widget(
-            "rating",
-            &context_rating_row(
-                album
-                    .state
-                    .rating
-                    .and_then(|value| u8::try_from(value).ok()),
-                shell.half_stars_enabled(&album.media_uri, None),
-                surface.popover(),
-                move |rating| {
-                    shell
-                        .products
-                        .source
-                        .set_rating(FavoriteTarget::Album(media_uri.clone()), rating)
-                },
-            ),
-        );
-    }
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-pub fn present_artist_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    artist: ArtistRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    if present_collection_selection_menu(
-        target,
-        shell,
-        PlayTarget::artist(&artist, artist.album_artist),
-        position,
-    ) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "artist", position);
-    crate::menus::media_details::append_header(
-        &surface,
-        target,
-        shell,
-        crate::menus::media_details::MenuHeader {
-            item: MediaDetailsItem::Artist {
-                media_uri: artist.media_uri.clone(),
-                album_artist: artist.album_artist,
-            },
-            title: &artist.name,
-            subtitle: "",
-            artwork: artist.artwork_binding.as_deref(),
-            favorite: (
-                FavoriteTarget::Artist(artist.media_uri.clone()),
-                artist.state.favorite,
-            ),
-        },
-    );
-    let playback = PlayTarget::artist(&artist, artist.album_artist);
-    append_loaded_play(&surface, shell, playback.clone(), play);
-    append_radio(
-        &surface,
-        shell,
-        msgid("Artist radio"),
-        if artist.album_artist {
-            RadioSeed::AlbumArtist(artist.artist_key)
-        } else {
-            RadioSeed::Artist(artist.artist_key)
-        },
-    );
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        MediaDragSource::capture_target(playback.clone()),
-    );
-    append_metadata_action(
-        &surface,
-        shell,
-        MetadataItemId::Artist(artist.media_uri.clone()),
-    );
-    install_sidebar_pin_action(&surface, shell, artist.pin());
-    let submenu = go_to_submenu(
-        &surface,
-        shell,
-        [(artist.name.as_str(), Route::of_artist(&artist))],
-        None,
-    );
-    install_source_navigation(
-        &surface,
-        shell,
-        &submenu,
-        &artist.media_uri,
-        None,
-        None,
-        artist.album_artist,
-    );
-    surface.append_configurable_submenu(
-        ContextMenuItem::GoTo,
-        msgid("Go to"),
-        &submenu,
-        GO_TO_ICON,
-    );
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
-        Some(&artist.media_uri),
-        false,
-        artist.summary.downloaded(),
-    );
-    if context_menu_rating_visible(shell) {
-        let shell = Rc::clone(shell);
-        let media_uri = artist.media_uri.clone();
-        surface.append_fixed_widget(
-            "rating",
-            &context_rating_row(
-                artist
-                    .state
-                    .rating
-                    .and_then(|value| u8::try_from(value).ok()),
-                shell.half_stars_enabled(&artist.media_uri, None),
-                surface.popover(),
-                move |rating| {
-                    shell
-                        .products
-                        .source
-                        .set_rating(FavoriteTarget::Artist(media_uri.clone()), rating)
-                },
-            ),
-        );
-    }
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-pub fn present_genre_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    genre: TagRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    let key = library::GenreKey::from_raw(genre.key);
-    let playback = PlayTarget::Route(Route::GenreDetail(key));
-    if present_collection_selection_menu(target, shell, playback.clone(), position) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "genre", position);
-    append_loaded_play(&surface, shell, playback.clone(), play);
-    append_radio(&surface, shell, msgid("Genre radio"), RadioSeed::Genre(key));
-    install_sidebar_pin_action(&surface, shell, genre.pin());
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
-        None,
-        false,
-        genre.summary.downloaded(),
-    );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-pub fn present_mood_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    mood: TagRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    let key = library::MoodKey::from_raw(mood.key);
-    let playback = PlayTarget::Route(Route::MoodDetail(key));
-    if present_collection_selection_menu(target, shell, playback.clone(), position) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "mood", position);
-    append_loaded_play(&surface, shell, playback.clone(), play);
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback.clone()),
-        None,
-        false,
-        mood.summary.downloaded(),
-    );
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        MediaDragSource::capture_target(playback),
-    );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-pub fn present_playlist_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    playlist: PlaylistRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    let current = crate::player::state::current_playback_track(
-        shell.player_ui.selected_playback().as_deref(),
-    )
-    .map(|track| track.media_uri);
-    let in_folder = shell
-        .products
-        .library
-        .playlist_member_folder(&library::PlaylistFolderMember::Playlist {
-            key: playlist.playlist_key,
-        })
-        .is_some();
-    let playback = PlayTarget::Route(Route::PlaylistDetail(playlist.playlist_key));
-    if present_playlist_selection_menu(target, shell, playback.clone(), position, in_folder) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "playlist", position);
-    append_loaded_play(&surface, shell, playback.clone(), play);
-    append_radio(
-        &surface,
-        shell,
-        msgid("Playlist radio"),
-        RadioSeed::Playlist(playlist.playlist_key),
-    );
-    install_sidebar_pin_action(&surface, shell, Some(playlist.pin()));
-    append_export_action(
-        &surface,
-        shell,
-        rufin_core::runtime::source::PlaylistExport::Playlist(playlist.playlist_key),
-        &playlist.name,
-    );
-    let playlist_key = playlist.playlist_key;
-    if playlist.metadata_writable {
-        let edit_shell = Rc::clone(shell);
-        let playlist_name = playlist.name.clone();
-        surface.append_fixed_action(msgid("Edit"), EDIT_ICON, move || {
-            edit_shell.edit_playlist_dialog(playlist_key, playlist_name.clone());
-        });
-    }
-    if playlist.writable {
-        let add_shell = Rc::clone(shell);
-        surface.append_fixed_action_enabled(
-            msgid("Add current"),
-            ADD_ICON,
-            current.is_some(),
-            move || {
-                if let Some(media_uri) = current.as_ref() {
-                    crate::playlists::picker::add_media_to_playlist(
-                        &add_shell.products.source,
-                        playlist_key,
-                        library::MemberSelection::Uris((vec![media_uri.clone()]).into()),
-                        false,
-                        Rc::new(|_| {}),
-                    );
-                }
-            },
-        );
-    }
-    crate::menus::playlist_folders::append_folder_actions(
-        &surface,
-        shell,
-        vec![library::PlaylistFolderMember::Playlist {
-            key: playlist.playlist_key,
-        }],
-        in_folder,
-    );
-    if rufin_core::playlists::can_remove_unavailable(&shell.products.source, &playlist) {
-        let cleanup_shell = Rc::downgrade(shell);
-        let key = playlist.playlist_key;
-        let name = playlist.name.clone();
-        let artwork = crate::widgets::library_fields::playlist_artwork(&playlist);
-        surface.append_fixed_action(msgid("Remove unavailable tracks"), TRASH_ICON, move || {
-            let Some(shell) = cleanup_shell.upgrade() else {
-                return;
-            };
-            let result =
-                rufin_core::playlists::remove_unavailable_tracks(&shell.products.source, key);
-            let shell = Rc::downgrade(&shell);
-            let name = name.clone();
-            let artwork = artwork.clone();
-            gtk::glib::spawn_future_local(async move {
-                let Ok(result) = result.recv().await else {
-                    return;
-                };
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                let removed = match result {
-                    Ok(removed) => removed,
-                    Err(error) => {
-                        shell.control_feedback.show_feedback_toast(error);
-                        return;
-                    }
-                };
-                shell.show_operation_feedback(&OperationFeedback {
-                    title: name.clone(),
-                    artwork: OperationArtwork::Bindings(artwork),
-                    item_count: removed,
-                    kind: OperationFeedbackKind::PlaylistRemoved { destination: name },
-                });
-            });
-        });
-    }
-    if playlist.metadata_writable {
-        let delete_shell = Rc::clone(shell);
-        let delete_target = target.downgrade();
-        let name = playlist.name.clone();
-        surface.append_fixed_action(msgid("Delete"), DELETE_ICON, move || {
-            let Some(target) = delete_target.upgrade() else {
-                return;
-            };
-            let shell = Rc::clone(&delete_shell);
-            let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
-                let source = shell.products.source.clone();
-                gtk::glib::spawn_future_local(async move {
-                    let _ = rufin_core::playlists::delete_playlist(&source, playlist_key).await;
-                });
-                shell.open_route(Route::Playlists);
-            });
-            dialog.present(Some(&target));
-        });
-    }
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
-        None,
-        false,
-        playlist.downloaded(),
-    );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-pub fn present_smart_playlist_context_menu(
-    target: &gtk::Widget,
-    shell: &Rc<Shell>,
-    playlist: SmartPlaylistRow,
-    play: Option<CollectionPlay>,
-    position: Option<(f64, f64)>,
-) {
-    let in_folder = shell
-        .products
-        .library
-        .playlist_member_folder(&library::PlaylistFolderMember::SmartPlaylist {
-            key: playlist.smart_playlist_key,
-        })
-        .is_some();
-    if present_playlist_selection_menu(
-        target,
-        shell,
-        PlayTarget::smart(playlist.smart_playlist_key),
-        position,
-        in_folder,
-    ) {
-        return;
-    }
-    let surface = ContextMenuSurface::new(target, "smart-playlist", position);
-    let playback = PlayTarget::smart(playlist.smart_playlist_key);
-    append_loaded_play(&surface, shell, playback.clone(), play);
-    install_sidebar_pin_action(&surface, shell, Some(playlist.pin()));
-    append_export_action(
-        &surface,
-        shell,
-        rufin_core::runtime::source::PlaylistExport::Smart(playlist.smart_playlist_key),
-        &playlist.name,
-    );
-    let edit_shell = Rc::clone(shell);
-    let edit_row = playlist.clone();
-    surface.append_fixed_action(msgid("Edit"), EDIT_ICON, move || {
-        edit_shell.edit_smart_playlist_dialog(edit_row.clone());
-    });
-    crate::menus::playlist_folders::append_folder_actions(
-        &surface,
-        shell,
-        vec![library::PlaylistFolderMember::SmartPlaylist {
-            key: playlist.smart_playlist_key,
-        }],
-        in_folder,
-    );
-    let delete_shell = Rc::clone(shell);
-    let key = playlist.smart_playlist_key;
-    let delete_target = target.downgrade();
-    let name = playlist.name.clone();
-    surface.append_fixed_action(msgid("Delete"), DELETE_ICON, move || {
-        let Some(target) = delete_target.upgrade() else {
-            return;
-        };
-        let shell = Rc::clone(&delete_shell);
-        let dialog = crate::playlists::delete_playlist_dialog(&name, move || {
-            let navigate = Rc::clone(&shell);
-            shell.publish_smart_playlist_change(
-                SmartPlaylistChange::Delete(key),
-                None,
-                Some(Rc::new(move |result| {
-                    if result.is_ok() {
-                        navigate.open_route(Route::SmartPlaylists);
-                    }
-                })),
-            );
-        });
-        dialog.present(Some(&target));
-    });
-    install_download_actions(
-        &surface,
-        shell,
-        &crate::widgets::media_drag::MediaDragSource::capture_target(playback),
-        None,
-        false,
-        playlist.downloaded(),
-    );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
-}
-
-fn append_export_action(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    export: rufin_core::runtime::source::PlaylistExport,
-    name: &str,
-) {
-    let shell = Rc::clone(shell);
-    let name = name.to_owned();
-    surface.append_fixed_action(
-        msgid("Export playlist"),
-        "rufin-document-send-symbolic",
-        move || shell.export_playlist_dialog(export, &name),
-    );
-}
-
-fn append_metadata_action(surface: &ContextMenuSurface, shell: &Rc<Shell>, item: MetadataItemId) {
-    let shell = Rc::clone(shell);
-    surface.append_configurable_action(
-        ContextMenuItem::EditMetadata,
-        msgid("Edit metadata"),
-        EDIT_ICON,
-        move || crate::editors::metadata::present_metadata_dialog(&shell, item.clone()),
-    );
-}
-
-pub(crate) fn install_sidebar_pin_action(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    pin: Option<SidebarPin>,
-) {
-    let Some(pin) = pin else { return };
-    let settings = shell.settings.current.borrow();
-    if !settings.sidebar.pins_visible {
-        return;
-    }
-    let pinned = settings.sidebar.is_pinned(&pin);
-    drop(settings);
-    let shell = Rc::clone(shell);
-    surface.append_configurable_action(
-        ContextMenuItem::Pins,
-        if pinned {
-            msgid("Remove from Pins")
-        } else {
-            msgid("Add to Pins")
-        },
-        if pinned { REMOVE_ICON } else { ADD_ICON },
-        move || shell.set_sidebar_pin(pin.clone(), !pinned),
-    );
-}
-
-/// The Play submenu of a collection: `play` where the page plays it, else its play request.
-fn append_loaded_play(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    target: PlayTarget,
-    play: Option<CollectionPlay>,
-) {
-    let play_shell = Rc::clone(shell);
-    surface.append_play_actions(
-        &shell.settings.current.borrow().application.context_menu,
-        move |placement, shuffled| match &play {
-            Some(play) => play(placement, shuffled),
-            None => play_target(&play_shell.products, &target, placement, shuffled),
-        },
-    );
-}
-
-pub fn install_download_actions(
-    surface: &ContextMenuSurface,
-    shell: &Rc<Shell>,
-    payload: &crate::widgets::media_drag::MediaDragSource,
-    media_uri: Option<&str>,
-    single: bool,
-    downloaded: bool,
-) {
-    let available = media_uri.is_none_or(|uri| {
-        if let Some((source_id, _, _)) = library::source_entity_parts(uri) {
-            shell.source_download_available(&source_id)
-        } else {
-            library::normalize_direct_media_uri(uri)
-                .is_some_and(|uri| uri.starts_with("https:") || uri.starts_with("http:"))
-        }
-    });
-    if !downloaded && !available {
-        return;
-    }
-    let shell = Rc::clone(shell);
-    let payload = payload.clone();
-    if downloaded {
-        surface.append_configurable_action(
-            ContextMenuItem::Download,
-            if single {
-                msgid("Remove Download")
-            } else {
-                msgid("Remove Downloads")
-            },
-            TRASH_ICON,
-            move || remove_download(&shell, &payload),
-        );
-    } else {
-        surface.append_configurable_action(
-            ContextMenuItem::Download,
-            msgid("Download"),
-            DOWNLOAD_ICON,
-            move || download(&shell, &payload),
-        );
-    }
-}
-
-fn append_radio(surface: &ContextMenuSurface, shell: &Shell, label: &str, seed: RadioSeed) {
-    let radio = shell.products.playback.clone();
-    surface.append_radio(label, move |placement| {
-        radio.play_radio(RadioPlayRequest {
-            placement,
-            seed: seed.clone(),
-        })
-    });
-}
-
-fn context_menu_rating_visible(shell: &Shell) -> bool {
-    shell
-        .settings
-        .current
-        .borrow()
-        .application
-        .context_menu
-        .rating_visible
 }

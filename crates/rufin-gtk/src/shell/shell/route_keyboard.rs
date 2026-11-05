@@ -193,6 +193,7 @@ impl Shell {
                 SelectionShortcut::Download => crate::menus::media_menus::download(
                     self,
                     &MediaDragSource::playlist_entries(selection),
+                    false,
                 ),
                 SelectionShortcut::Delete => unreachable!(),
             }
@@ -208,9 +209,11 @@ impl Shell {
             SelectionShortcut::AddToPlaylist => {
                 picker::present(self, MediaDragSource::selection(selection))
             }
-            SelectionShortcut::Download => {
-                crate::menus::media_menus::download(self, &MediaDragSource::selection(selection))
-            }
+            SelectionShortcut::Download => crate::menus::media_menus::download(
+                self,
+                &MediaDragSource::selection(selection),
+                false,
+            ),
             SelectionShortcut::Delete => unreachable!(),
         }
         true

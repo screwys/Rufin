@@ -24,8 +24,9 @@ use super::detail_showcase::{
 use crate::library::route_layout::{
     DETAIL_SHOWCASE_METADATA_MIN_WIDTH, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
 };
-use crate::menus::media_menus::present_smart_playlist_context_menu;
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::library_fields::playlist_artwork;
+use library::PlaylistListRow;
 
 const PLAYLIST_DETAIL_COMPACT_WIDTH: i32 = 760;
 const PLAYLIST_DETAIL_TINY_COVER_SIZE: i32 = 150;
@@ -141,24 +142,17 @@ impl PlaylistDetailOwner {
         play: CollectionPlay,
         position: Option<(f64, f64)>,
     ) {
-        match self {
-            Self::Saved { summary, .. } => {
-                crate::menus::media_menus::present_playlist_context_menu(
-                    target,
-                    shell,
-                    summary.clone(),
-                    Some(play),
-                    position,
-                )
-            }
-            Self::Smart { summary, .. } => present_smart_playlist_context_menu(
-                target,
-                shell.shell(),
-                summary.clone(),
-                Some(play),
-                position,
-            ),
-        }
+        let row = match self {
+            Self::Saved { summary, .. } => PlaylistListRow::Playlist(summary.clone()),
+            Self::Smart { summary, .. } => PlaylistListRow::SmartPlaylist(summary.clone()),
+        };
+        present_row_menu(
+            target,
+            shell.shell(),
+            library::Row::Playlist(row),
+            Some(play),
+            position,
+        );
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::favorites::{favorite_button_is_active, set_favorite_button_active};
 use crate::library::CatalogUi;
 use crate::library::LibraryField;
-use crate::menus::media_menus::{present_album_context_menu, present_artist_context_menu};
+use crate::menus::media_menus::present_row_menu;
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::media_drag::{MediaDragSource, install_compact_media_drag_source};
@@ -682,12 +682,14 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
             &controls.imp().overlay,
             &body.card,
             |target, shell, row, point| {
-                super::collection_context::present_track_context_menu(
-                    target,
-                    shell,
-                    row.media_uri().to_string(),
-                    point,
-                );
+                if let Some(track) = row.track_row() {
+                    super::collection_context::present_track_context_menu(
+                        target,
+                        shell,
+                        track.clone(),
+                        point,
+                    );
+                }
             },
         );
         let play_now = Rc::clone(&play);
@@ -862,7 +864,7 @@ impl AlbumGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_album_context_menu(target, shell.shell(), row, None, point)
+                present_row_menu(target, shell.shell(), library::Row::Album(row), None, point)
             },
         );
         install_grid_play(
@@ -945,7 +947,13 @@ impl ArtistGridCell {
             &controls.imp().overlay,
             &body.card,
             move |target, shell, row, point| {
-                present_artist_context_menu(target, shell.shell(), row, None, point)
+                present_row_menu(
+                    target,
+                    shell.shell(),
+                    library::Row::Artist(row),
+                    None,
+                    point,
+                )
             },
         );
         install_grid_play(

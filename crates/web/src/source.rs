@@ -55,14 +55,13 @@ async fn download(
         uris: Vec<String>,
     }
     let input: Input = body(request).await?;
-    products.source.download_media(
-        rufin_core::downloads::DownloadSubject::for_media_uris(
-            "track-selection",
-            None,
-            &input.uris,
-        ),
-        input.uris,
-    );
+    products
+        .source
+        .download_selection(library::MemberSelection::Uris(input.uris.into()))
+        .recv()
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
     Ok(accepted())
 }
 

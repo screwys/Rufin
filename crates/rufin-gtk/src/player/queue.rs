@@ -1616,6 +1616,7 @@ pub(crate) fn present_queue_selection_context_menu(
 ) {
     let surface =
         crate::widgets::interactions::ContextMenuSurface::new(target, "queue-selection", position);
+    let menu = rufin_core::menu::selection(&shell.settings.current.borrow());
     let queue = shell.products.playback.clone();
     let remove = selection.selection.clone();
     surface.append_fixed_action(
@@ -1625,29 +1626,33 @@ pub(crate) fn present_queue_selection_context_menu(
     );
     let queue = shell.products.playback.clone();
     let play = selection.selection.clone();
-    surface.append_configurable_action(
-        rufin_core::settings::ContextMenuItem::Play,
-        localization::msgid("Play"),
-        crate::widgets::controls::PLAY_ICON,
-        move || match &play {
-            QueueSelection::Occurrences(ids) => {
-                if let Some(id) = ids.first() {
-                    queue.activate_occurrence(*id);
+    if menu.play {
+        surface.append_configurable_action(
+            rufin_core::settings::ContextMenuItem::Play,
+            localization::msgid("Play"),
+            crate::widgets::controls::PLAY_ICON,
+            move || match &play {
+                QueueSelection::Occurrences(ids) => {
+                    if let Some(id) = ids.first() {
+                        queue.activate_occurrence(*id);
+                    }
                 }
-            }
-            QueueSelection::Positions(positions) => {
-                if let Some(position) = positions.first() {
-                    queue.activate(*position);
+                QueueSelection::Positions(positions) => {
+                    if let Some(position) = positions.first() {
+                        queue.activate(*position);
+                    }
                 }
-            }
-        },
-    );
-    crate::playlists::picker::append_to_menu(
-        &surface,
-        shell,
-        crate::widgets::media_drag::MediaDragSource::media_uris(
-            selection.media_uris.iter().cloned(),
-        ),
-    );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
+            },
+        );
+    }
+    if menu.add_to_playlist {
+        crate::playlists::picker::append_to_menu(
+            &surface,
+            shell,
+            crate::widgets::media_drag::MediaDragSource::media_uris(
+                selection.media_uris.iter().cloned(),
+            ),
+        );
+    }
+    surface.popup();
 }

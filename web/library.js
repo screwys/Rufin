@@ -757,8 +757,8 @@ function bindCards(host) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite([row], kind),
         ]);
-      if (options.pin) actions.push(pinAction(...options.pin));
-      // The web's playlist dialogs edit, export and delete playlists, not smart ones.
+      if (options.pin) actions.push(pinAction(options.pin, options.pinned));
+      // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
       if (options.export && kind === "playlist")
         actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);
       if (options.remove_unavailable)
@@ -767,8 +767,8 @@ function bindCards(host) {
           () => api(`/playlists/remove-unavailable?id=${row.id}`, "POST"),
           "rufin-user-trash-symbolic",
         ]);
-      if (options.edit) actions.push([tr("Edit"), () => openName(row)]);
-      if (options.delete)
+      if (options.edit && kind === "playlist") actions.push([tr("Edit"), () => openName(row)]);
+      if (options.delete && kind === "playlist")
         actions.push([
           tr("Delete Playlist"),
           async () => {

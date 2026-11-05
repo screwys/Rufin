@@ -10,6 +10,8 @@ use rufin_core::settings::presentation::{track_field, track_row_field};
 
 pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn track_key(&self) -> Option<library::TrackKey>;
+    /// The library row it shows, which its menu is made from.
+    fn track_row(&self) -> Option<&TrackRow>;
     fn media_uri(&self) -> &str;
     fn title(&self) -> &str;
     fn artist(&self) -> &str;
@@ -29,6 +31,9 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
 impl TrackPresentation for TrackRow {
     fn track_key(&self) -> Option<library::TrackKey> {
         Some(self.track_key)
+    }
+    fn track_row(&self) -> Option<&TrackRow> {
+        Some(self)
     }
     fn media_uri(&self) -> &str {
         &self.media_uri
@@ -68,6 +73,9 @@ impl TrackPresentation for TrackRow {
 impl TrackPresentation for std::sync::Arc<QueueRow> {
     fn track_key(&self) -> Option<library::TrackKey> {
         Some(self.track.track_key)
+    }
+    fn track_row(&self) -> Option<&TrackRow> {
+        None
     }
     fn media_uri(&self) -> &str {
         &self.track.media_uri

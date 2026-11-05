@@ -195,41 +195,46 @@ fn populate_folder_picker(
     update(shell.products.library.playlist_folder_choices(smart));
 }
 
-pub fn present_folder_context_menu(
-    target: &gtk::Widget,
+/// A playlist folder's Rename folder and Delete folder, as `menu` offers them.
+pub fn append_folder_row_actions(
+    surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    folder: library::PlaylistFolderRow,
-    position: Option<(f64, f64)>,
+    menu: &rufin_core::menu::Menu,
+    folder: &library::PlaylistFolderRow,
 ) {
-    let surface = ContextMenuSurface::new(target, "playlist-folder", position);
-    crate::menus::media_menus::install_sidebar_pin_action(&surface, shell, Some(folder.pin()));
-    let rename_shell = Rc::clone(shell);
-    let rename_folder = folder.clone();
-    surface.append_fixed_action(
-        msgid("Rename folder"),
-        crate::widgets::controls::EDIT_ICON,
-        move || {
-            let source = rename_shell.products.source.clone();
-            let shell = Rc::downgrade(&rename_shell);
-            let key = rename_folder.folder_key;
-            let dialog = folder_name_dialog(Some(&rename_folder.name), move |name| {
-                let source = source.clone();
-                let shell = shell.clone();
-                gtk::glib::spawn_future_local(async move {
-                    if let Err(error) =
-                        rufin_core::playlists::rename_playlist_folder(&source, key, name).await
-                        && let Some(shell) = shell.upgrade()
-                    {
-                        shell
-                            .control_feedback
-                            .show_feedback_toast(error.to_string());
-                    }
+    if menu.edit {
+        let rename_shell = Rc::clone(shell);
+        let rename_folder = folder.clone();
+        surface.append_fixed_action(
+            msgid("Rename folder"),
+            crate::widgets::controls::EDIT_ICON,
+            move || {
+                let source = rename_shell.products.source.clone();
+                let shell = Rc::downgrade(&rename_shell);
+                let key = rename_folder.folder_key;
+                let dialog = folder_name_dialog(Some(&rename_folder.name), move |name| {
+                    let source = source.clone();
+                    let shell = shell.clone();
+                    gtk::glib::spawn_future_local(async move {
+                        if let Err(error) =
+                            rufin_core::playlists::rename_playlist_folder(&source, key, name).await
+                            && let Some(shell) = shell.upgrade()
+                        {
+                            shell
+                                .control_feedback
+                                .show_feedback_toast(error.to_string());
+                        }
+                    });
                 });
-            });
-            rename_shell.present_selected_dialog(&dialog);
-        },
-    );
+                rename_shell.present_selected_dialog(&dialog);
+            },
+        );
+    }
+    if !menu.delete {
+        return;
+    }
     let delete_shell = Rc::clone(shell);
+    let folder = folder.clone();
     surface.append_fixed_action(
         msgid("Delete folder"),
         crate::widgets::controls::DELETE_ICON,
@@ -260,7 +265,6 @@ pub fn present_folder_context_menu(
             });
         },
     );
-    surface.popup(&shell.settings.current.borrow().application.context_menu);
 }
 
 pub fn single_regular_playlist_drag(source: &crate::widgets::media_drag::MediaDragSource) -> bool {
