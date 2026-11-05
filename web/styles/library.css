@@ -62,6 +62,7 @@
 }
 
 .track-list td.actions {
+  padding-inline: 4px;
   text-align: right;
 }
 
@@ -315,8 +316,9 @@
   width: 42px;
 }
 
+/* Play and More side by side. */
 .track-list th.actions {
-  width: 38px;
+  width: 66px;
 }
 
 .track-list th.duration,
