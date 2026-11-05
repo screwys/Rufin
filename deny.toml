@@ -3,16 +3,13 @@ all-features = true
 
 [advisories]
 ignore = [
-    { id = "RUSTSEC-2023-0089", reason = "Iroh and Loro pull postcard -> heapless 0.7 -> atomic-polyfill. Maintenance advisory; remove when upstream dependencies drop heapless 0.7." },
-    { id = "RUSTSEC-2026-0247", reason = "Loro 1.16 uses im -> bitmaps. Maintenance advisory; remove when Loro replaces im." },
-    { id = "RUSTSEC-2026-0248", reason = "Loro 1.16 uses im. Maintenance advisory; remove when Loro replaces im." },
-    { id = "RUSTSEC-2026-0251", reason = "Loro 1.16 uses im -> sized-chunks. Maintenance advisory; remove when Loro replaces im." },
     { id = "RUSTSEC-2026-0370", reason = "ashpd, oo7, mpris-server and ksni still require zbus 5 / zvariant 5. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies drop standalone zvariant." },
     { id = "RUSTSEC-2026-0371", reason = "zbus 5 and its macros require zbus_names 4. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies migrate to zbus 6 and drop zbus_names." },
     { id = "RUSTSEC-2026-0372", reason = "zvariant 5 requires zvariant_derive 5. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies drop standalone zvariant." },
     { id = "RUSTSEC-2026-0374", reason = "Askama 0.16 and i18n-config 0.4 still use basic-toml for build-time configuration. Maintenance advisory with no patched release; remove when these dependencies migrate to toml." },
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2026-0387", reason = "age 0.12 pulls p256 0.13 -> elliptic-curve 0.13 -> crypto-bigint 0.5, which has no patched release. Rufin uses only age X25519 identities, so the affected P-256 arithmetic (p256tag recipients) is unused. crypto-bigint 0.7 is patched; remove when age moves to p256 0.14." },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils is pulled by smb -> sspi -> async-dnssd on macOS and iOS only. Maintenance advisory with no patched release; remove when sspi or async-dnssd drop pin-utils." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
 ]
 
@@ -54,7 +51,7 @@ deny = [
 skip = [
     { crate = "core-foundation@0.9.4", reason = "pulled by system-configuration via hyper-util while rustls-platform-verifier uses core-foundation 0.10" },
     { crate = "getrandom@0.2.17", reason = "pulled by redox_users through directories; direct randomness uses getrandom 0.4" },
-    { crate = "getrandom@0.3.4", reason = "pulled by jobserver through cc while workspace code and tempfile use getrandom 0.4" },
+    { crate = "getrandom@0.3.4", reason = "pulled by tempfile, rand 0.9 and smb -> sspi while workspace code uses getrandom 0.4" },
     { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3 while getrandom 0.4 uses r-efi 6" },
 ]
 skip-tree = []
@@ -63,7 +60,7 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/attilagyorffy/chromaprint-next"]
+allow-git = []
 
 [sources.allow-org]
 github = []
