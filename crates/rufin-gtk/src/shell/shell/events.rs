@@ -53,7 +53,9 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     // The configured sources and the selection, the operation and server discovery each
     // come from their own state in the source owner, read again on every change.
     let event_shell = Rc::clone(shell);
+    // Each starts from the state at hand, which may have changed before it was installed.
     let mut configured = shell.products.source.configuration_changes();
+    configured.mark_changed();
     glib::spawn_future_local(async move {
         while configured.changed().await.is_ok() {
             apply_source_configuration(&event_shell);
@@ -62,6 +64,7 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
 
     let event_shell = Rc::clone(shell);
     let mut operation = shell.products.source.operation();
+    operation.mark_changed();
     glib::spawn_future_local(async move {
         while operation.changed().await.is_ok() {
             let current = operation.borrow_and_update().clone();
@@ -139,6 +142,7 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
 
     let event_shell = Rc::clone(shell);
     let mut current_lyrics = shell.products.lyrics.current();
+    current_lyrics.mark_changed();
     glib::spawn_future_local(async move {
         while current_lyrics.changed().await.is_ok() {
             let current = current_lyrics.borrow_and_update().clone();
