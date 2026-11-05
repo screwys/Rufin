@@ -78,6 +78,7 @@ impl Settings {
 }
 
 /// Shows playback through the platform's presence sink: Discord IPC on desktop, none elsewhere.
+/// The sink, its cover lookups and its playback observer run only while presence is on.
 pub(crate) fn follow(
     runtime: &tokio::runtime::Handle,
     settings: &crate::settings::SettingsFile,
@@ -86,34 +87,74 @@ pub(crate) fn follow(
     if !discord::SUPPORTED {
         return;
     }
-    let sink = Arc::new(discord::Discord::new(settings.clone()));
-    sink.settings_changed(None);
-    let mut updates = playback.updates.subscribe();
-    let observer = Arc::clone(&sink);
-    runtime.spawn(async move {
-        while let Ok(projection) = updates.recv().await {
-            observer.observe(projection.as_ref());
-        }
-    });
-    let playback = Arc::downgrade(playback);
+    let shown = |stored: &crate::settings::StoredSettings| {
+        stored.ui.rich_presence.enabled && !stored.ui.application.private_mode
+    };
+    let mut running = shown(&settings.load()).then(|| Running::start(runtime, settings, playback));
+    let (handle, file) = (runtime.clone(), settings.clone());
     crate::settings::follow(
         runtime,
         settings,
-        Arc::downgrade(&sink),
-        move |sink, previous, current| {
-            let (previous, current) = (&previous.ui, &current.ui);
-            if previous.rich_presence != current.rich_presence
-                || previous.application.private_mode != current.application.private_mode
-                || previous.lastfm_api_key != current.lastfm_api_key
+        Arc::downgrade(playback),
+        move |playback, previous, current| {
+            let (before, after) = (&previous.ui, &current.ui);
+            if before.rich_presence != after.rich_presence
+                || before.application.private_mode != after.application.private_mode
+                || before.lastfm_api_key != after.lastfm_api_key
             {
-                let projection = playback
-                    .upgrade()
-                    .and_then(|playback| playback.current_projection());
-                sink.settings_changed(projection.as_ref());
+                match (shown(current), &running) {
+                    (true, Some(running)) => running
+                        .sink
+                        .settings_changed(playback.current_projection().as_ref()),
+                    (true, None) => running = Some(Running::start(&handle, &file, &playback)),
+                    (false, _) => running.take().into_iter().for_each(Running::stop),
+                }
             }
             std::future::ready(())
         },
     );
+}
+
+/// The presence sink while presence is on, and the task that shows playback through it.
+struct Running {
+    sink: Arc<discord::Discord>,
+    observer: tokio::task::AbortHandle,
+    runtime: tokio::runtime::Handle,
+}
+
+impl Running {
+    fn start(
+        runtime: &tokio::runtime::Handle,
+        settings: &crate::settings::SettingsFile,
+        playback: &Arc<crate::playback::PlaybackOwner>,
+    ) -> Self {
+        let sink = Arc::new(discord::Discord::new(settings.clone()));
+        let mut updates = playback.updates.subscribe();
+        sink.settings_changed(playback.current_projection().as_ref());
+        let observer = Arc::downgrade(&sink);
+        let observer = runtime
+            .spawn(async move {
+                while let Ok(projection) = updates.recv().await {
+                    let Some(sink) = observer.upgrade() else {
+                        return;
+                    };
+                    sink.observe(projection.as_ref());
+                }
+            })
+            .abort_handle();
+        Self {
+            sink,
+            observer,
+            runtime: runtime.clone(),
+        }
+    }
+
+    /// Clears the activity and ends the sink's threads, which waits for them.
+    fn stop(self) {
+        self.observer.abort();
+        let sink = self.sink;
+        self.runtime.spawn_blocking(move || drop(sink));
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
