@@ -254,6 +254,20 @@ impl AndroidRuntime {
             .map_err(error)
     }
 
+    /// Whether a setting still uses the document tree `uri`: a document root, a download
+    /// directory or the backup destination. Its grant goes only when none does.
+    pub fn uses_document(&self, uri: String) -> Result<bool, AndroidError> {
+        let settings = self.products.settings.load();
+        Ok(self.has_document_root(uri.clone())?
+            || settings.downloads.iter().any(|downloads| {
+                matches!(
+                    &downloads.directory,
+                    Some(rufin_core::downloads::DownloadDirectory::Document { uri: used }) if *used == uri
+                )
+            })
+            || settings.application.backup.destination_uri.as_deref() == Some(uri.as_str()))
+    }
+
     pub fn backups(&self) -> std::sync::Arc<rufin_core::backup::BackupOwner> {
         self.products.backup.clone()
     }
