@@ -197,8 +197,7 @@ fn read_cue_tracks(
     sheet: CueSheet,
 ) -> Option<Vec<ScannedTrack>> {
     let mut tracks = Vec::new();
-    let album_title = sheet.album_title;
-    let album_performer = sheet.album_performer;
+    let album = sheet.album;
     for file in sheet.files {
         let MediaRead::Accepted(mut backing) =
             read_media(worker, resolve_cue_file_path(cue_path, &file.path), None)
@@ -218,14 +217,7 @@ fn read_cue_tracks(
         });
         let segments = cue_segments(&file, backing.track.metadata.duration_millis as u64)?;
         for (cue, end) in segments {
-            let mut track = cue_track(
-                cue_path,
-                album_title.as_deref(),
-                album_performer.as_deref(),
-                cue,
-                end,
-                &backing,
-            );
+            let mut track = cue_track(cue_path, &album, cue, end, &backing);
             crate::file::lyrics::read_local(&mut track);
             tracks.push(track);
         }

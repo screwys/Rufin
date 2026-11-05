@@ -1480,7 +1480,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             "2004-05-06",
             "1995-07-08",
             Some("2004-05-06"),
-            Some(2001),
+            Some(2004),
         ),
         ("", "2004-05-06", "", Some("2004-05-06"), Some(2004)),
         ("", "", "1995-07-08", Some("1995-07-08"), Some(1995)),

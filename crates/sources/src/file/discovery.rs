@@ -336,9 +336,7 @@ impl ScopedTags {
 
 fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) -> Metadata {
     let release_date = tag_date(tags);
-    let year = release_date
-        .as_deref()
-        .and_then(|date| date.get(..4)?.parse().ok());
+    let year = release_date.as_deref().and_then(crate::policy::date_year);
     let artists = tags.strings::<gst::tags::Artist>();
     let artist = if is_asf {
         artists.first().cloned()

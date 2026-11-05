@@ -10,7 +10,7 @@ use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
 
-use crate::policy::{normalized_date, stable_hash};
+use crate::policy::{date_year, normalized_date, stable_hash};
 
 use super::discovery;
 use super::lofty::{read_lofty_file, source_format};
@@ -295,22 +295,16 @@ fn lofty_track(
         &artists,
     );
     let release_types = album_release_types(tag);
-    let date = tag.and_then(|tag| tag.date());
-    let release_date = tag
-        .and_then(|tag| {
-            [
-                ItemKey::ReleaseDate,
-                ItemKey::RecordingDate,
-                ItemKey::OriginalReleaseDate,
-            ]
-            .into_iter()
-            .find_map(|key| normalized_date(tag.get_string(key).map(str::to_owned)))
-        })
-        .or_else(|| normalized_date(date.map(|date| date.to_string())));
-    let year: u16 = date
-        .map(|date| date.year)
-        .or_else(|| release_date.as_deref()?.get(..4)?.parse().ok())
-        .unwrap_or_default();
+    let release_date = tag.and_then(|tag| {
+        [
+            ItemKey::ReleaseDate,
+            ItemKey::RecordingDate,
+            ItemKey::OriginalReleaseDate,
+            ItemKey::Year,
+        ]
+        .into_iter()
+        .find_map(|key| normalized_date(tag.get_string(key).map(str::to_owned)))
+    });
     let sort_title = tag_string(tag, |tag| {
         tag.get_string(ItemKey::TrackTitleSortOrder)
             .map(str::to_owned)
@@ -331,7 +325,7 @@ fn lofty_track(
         artist,
         album,
         album_display_artist: Some(album_artist),
-        year: Some(i64::from(year)).filter(|year| *year > 0),
+        year: release_date.as_deref().and_then(date_year).map(i64::from),
         release_date,
         duration_millis: i64::from(lofty_duration_seconds(tagged_file)) * 1_000,
         disc_number: i64::from(
@@ -953,7 +947,7 @@ mod tests {
                 Some("Retained comment"),
                 "{name}"
             );
-            assert_eq!(track.track.metadata.year, Some(2001), "{name}");
+            assert_eq!(track.track.metadata.year, Some(2004), "{name}");
             assert_eq!(
                 track.track.metadata.release_date.as_deref(),
                 Some("2004-05"),

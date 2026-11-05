@@ -565,8 +565,7 @@ impl walk::FileSource for FileSource {
                 // The relative CUE name supplies Local's album/tag fallbacks; URLs never become native paths.
                 let mut track = crate::file::cue::cue_track(
                     std::path::Path::new(&relative),
-                    sheet.album_title.as_deref(),
-                    sheet.album_performer.as_deref(),
+                    &sheet.album,
                     cue,
                     end,
                     &backing,
