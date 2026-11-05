@@ -22,7 +22,7 @@ pub(crate) mod views;
 pub(crate) mod write;
 pub use files::{FileBatch, StoredFile, walk_key};
 pub use observations::*;
-pub use write::{Change, Scope, ShowsState, SourcePhase, StateChange};
+pub use write::{Change, DownloadChange, Scope, ShowsState, SourcePhase, StateChange};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Freshness(Vec<u8>);

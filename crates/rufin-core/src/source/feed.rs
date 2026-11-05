@@ -33,6 +33,8 @@ pub struct Changed {
     pub playlists: Vec<PlaylistKey>,
     /// The playlist, smart playlist or playlist folder lists changed.
     pub playlist_lists: bool,
+    /// Tracks whose downloaded copy was added or removed.
+    pub downloads: Vec<library::DownloadChange>,
     /// Sources whose stored Home rows or Explore shuffle changed.
     pub home: Vec<SourceKey>,
     /// The source whose music-folder selection changed.
@@ -150,6 +152,9 @@ impl Pending {
                     self.changed.playlist_lists = true
                 }
                 Scope::Home { source } => self.changed.home.push(*source),
+                Scope::Downloads { tracks } => {
+                    self.changed.downloads.extend(tracks.iter().cloned())
+                }
                 // The source's held rows, from this Write or an earlier one, are gone with it.
                 Scope::Source {
                     key,
@@ -162,7 +167,6 @@ impl Pending {
                 | Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Held { .. }
-                | Scope::Downloads { .. }
                 | Scope::Lyrics { .. }
                 | Scope::Analysis { .. } => {}
             }

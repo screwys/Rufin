@@ -308,6 +308,9 @@ mod tests {
             half_stars_enabled: false,
             owns_playlists: false,
             supports_playlist_public: false,
+            file_library: false,
+            offers_half_star_setting: false,
+            stores_lyrics_locally: false,
         }
     }
 
@@ -383,6 +386,9 @@ mod tests {
             half_stars_enabled: false,
             owns_playlists: false,
             supports_playlist_public: false,
+            file_library: true,
+            offers_half_star_setting: true,
+            stores_lyrics_locally: true,
         };
 
         assert_eq!(source_menu_label(&local), "Local");

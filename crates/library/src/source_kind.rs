@@ -82,6 +82,11 @@ impl SourceKind {
         self == Self::Plex || (self.subsonic() && value % 20 != 0)
     }
 
+    /// The server stores whole stars, so half stars are a setting of the source.
+    pub fn offers_half_star_setting(self) -> bool {
+        matches!(self, Self::Local) || self.subsonic()
+    }
+
     /// Half stars are on without the per-source setting.
     pub fn half_stars(self) -> bool {
         matches!(self, Self::Jellyfin | Self::Emby | Self::Plex)

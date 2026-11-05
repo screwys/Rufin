@@ -93,10 +93,10 @@ pub use artwork::{
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
-    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, FileBatch,
-    FolderObservation, Freshness, LocalArtworkCandidate, Observation, PlaylistEntryObservation,
-    PlaylistObservation, Scope, ShowsState, SourcePhase, StateChange, StoredFile, TagObservation,
-    TrackObservation, walk_key,
+    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, Change, DownloadChange,
+    FileBatch, FolderObservation, Freshness, LocalArtworkCandidate, Observation,
+    PlaylistEntryObservation, PlaylistObservation, Scope, ShowsState, SourcePhase, StateChange,
+    StoredFile, TagObservation, TrackObservation, walk_key,
 };
 pub use collections::{
     AlbumArtistLink, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate, AlbumReleaseClass,

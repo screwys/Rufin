@@ -1499,7 +1499,10 @@ impl SourceOwner {
             let mut seen = std::collections::HashSet::new();
             let mut logins = Vec::new();
             for configured in &owner.shared.settings.load().sources.configured {
-                if configured.configuration.kind != "plex" {
+                if !configured
+                    .configuration
+                    .is(|kind| kind == library::SourceKind::Plex)
+                {
                     continue;
                 }
                 let Some(reference) = configured.credential.as_ref() else {
@@ -1528,7 +1531,10 @@ impl SourceOwner {
             return Ok(None);
         };
         for configured in &self.shared.settings.load().sources.configured {
-            if configured.configuration.kind != "plex" {
+            if !configured
+                .configuration
+                .is(|kind| kind == library::SourceKind::Plex)
+            {
                 continue;
             }
             let source = self.client(&configured.configuration.source_id)?;
@@ -3021,6 +3027,16 @@ fn configured_sources(
             supports_playlist_public: configured
                 .configuration
                 .is(library::SourceKind::playlist_public),
+            file_library: configured
+                .configuration
+                .is(library::SourceKind::file_library),
+            offers_half_star_setting: configured
+                .configuration
+                .is(library::SourceKind::offers_half_star_setting),
+            stores_lyrics_locally: configured.configuration.is(|kind| {
+                kind == library::SourceKind::Local
+                    || kind.subsonic() && configured.local_access.is_some()
+            }),
         })
         .collect::<Vec<_>>();
     let local_folders = stored
@@ -3129,6 +3145,10 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             half_stars_enabled: configuration.is(library::SourceKind::half_stars),
             owns_playlists: configuration.is(library::SourceKind::owns_playlists),
             supports_playlist_public: configuration.is(library::SourceKind::playlist_public),
+            file_library: configuration.is(library::SourceKind::file_library),
+            offers_half_star_setting: configuration
+                .is(library::SourceKind::offers_half_star_setting),
+            stores_lyrics_locally: configuration.is(|kind| kind == library::SourceKind::Local),
         },
         credentials: CredentialPreset {
             source_name: configuration.name.clone(),

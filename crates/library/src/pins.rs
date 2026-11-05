@@ -118,6 +118,19 @@ impl PlaylistListRow {
 }
 
 impl Row {
+    /// Whether the row shows as downloaded: a track with its copy, or a collection with
+    /// tracks that are all downloaded.
+    pub fn downloaded(&self) -> bool {
+        let summary = match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => return track.is_downloaded,
+            Self::Album(album) | Self::AlbumHeading(album) => &album.summary,
+            Self::Artist(artist) => &artist.summary,
+            Self::Tag(tag) => &tag.summary,
+            Self::Playlist(_) | Self::Folder(_) => return false,
+        };
+        summary.track_count > 0 && summary.downloaded_count == summary.track_count
+    }
+
     /// The sidebar pin of a collection row.
     pub fn pin(&self) -> Option<SidebarPin> {
         match self {

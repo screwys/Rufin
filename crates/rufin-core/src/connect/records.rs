@@ -1985,7 +1985,11 @@ impl Records {
                                     .sources
                                     .connections()
                                     .any(|item| &item.configuration.source_id == id);
-                                if !known && source.configuration.kind == "peer" {
+                                if !known
+                                    && source
+                                        .configuration
+                                        .is(|kind| kind == library::SourceKind::Peer)
+                                {
                                     stored.ui.set_download_quality(
                                         id.clone(),
                                         sources::DownloadQuality::Transcoded(
@@ -2036,10 +2040,11 @@ impl Records {
         owner.runtime.spawn(async move {
             let mut selecting = source.selected_library().is_none();
             for configuration in added {
+                let peer = configuration.is(|kind| kind == library::SourceKind::Peer);
                 let id = configuration.source_id;
                 let result = if std::mem::take(&mut selecting) {
                     source.select_source(id).await.map(drop)
-                } else if configuration.kind == "peer" {
+                } else if peer {
                     source.refresh_source(id, true).await
                 } else {
                     continue;

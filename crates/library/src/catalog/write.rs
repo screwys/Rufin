@@ -94,8 +94,9 @@ pub enum Scope {
     Folders,
     /// The saved queue or its playback state.
     Queue,
+    /// Tracks whose downloaded copy was added or removed.
     Downloads {
-        uris: Vec<String>,
+        tracks: Vec<DownloadChange>,
     },
     /// The lyrics a person picked for this track changed.
     Lyrics {
@@ -112,6 +113,24 @@ pub enum Scope {
     Analysis {
         hash: [u8; 32],
     },
+}
+
+/// A track whose downloaded copy was added or removed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DownloadChange {
+    pub track: crate::TrackKey,
+    pub uri: String,
+    pub downloaded: bool,
+}
+
+impl DownloadChange {
+    /// Shows the download in a track row of the same track.
+    pub fn show_in(&self, row: &mut crate::TrackRow) {
+        if row.track_key == self.track {
+            row.is_downloaded = self.downloaded;
+        }
+    }
 }
 
 /// A track, album or artist whose shown favorite or rating changed.
@@ -1499,10 +1518,14 @@ impl<'a> Write<'a> {
         );
         if !user.downloads.is_empty() {
             scopes.push(Scope::Downloads {
-                uris: user
+                tracks: user
                     .downloads
                     .iter()
-                    .map(|(_, _, uri)| uri.clone())
+                    .map(|(track, downloaded, uri)| DownloadChange {
+                        track: *track,
+                        uri: uri.clone(),
+                        downloaded: *downloaded,
+                    })
                     .collect(),
             });
         }

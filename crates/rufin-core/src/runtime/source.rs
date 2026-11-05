@@ -34,6 +34,13 @@ pub struct SourceSummary {
     /// sources make Rufin playlists.
     pub owns_playlists: bool,
     pub supports_playlist_public: bool,
+    /// Rufin reads the files itself: albums come from tags and plays from Rufin's listens.
+    pub file_library: bool,
+    /// Whether half stars are a setting of this source.
+    pub offers_half_star_setting: bool,
+    /// Whether lyrics can be kept beside the music files: a Local source, or a Navidrome or
+    /// Subsonic server with a folder mapping.
+    pub stores_lyrics_locally: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -68,7 +68,11 @@ impl PlexPlayback {
             .sources
             .configured
             .iter()
-            .filter(|source| source.configuration.kind == "plex")
+            .filter(|source| {
+                source
+                    .configuration
+                    .is(|kind| kind == library::SourceKind::Plex)
+            })
             .cloned()
             .collect::<Vec<_>>();
         configured
@@ -1457,7 +1461,11 @@ impl PlaybackOwner {
             .sources
             .configured
             .iter()
-            .filter(|source| source.configuration.kind == "plex")
+            .filter(|source| {
+                source
+                    .configuration
+                    .is(|kind| kind == library::SourceKind::Plex)
+            })
             .map(|configured| {
                 let source = owner.client(&configured.configuration.source_id)?;
                 let context = self
