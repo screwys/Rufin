@@ -345,7 +345,7 @@ impl AndroidPlayer {
             .current()
             .and_then(|view| view.transport.current.clone());
         let stored = self.products.settings.load();
-        let settings = stored.lyrics;
+        let settings = &stored.lyrics;
         let mut state = AndroidLyricsState {
             snapshot: None,
             current_media_id: media.as_ref().map(|media| media.id.clone()),
