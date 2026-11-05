@@ -201,7 +201,7 @@ pub(crate) fn update_sidebar_pin_playback(shell: &Shell) {
         pin_rows
             .iter()
             .filter(|(_, pin_context_id)| {
-                sidebar_pin_context_matches(pin_context_id, playback_context_id)
+                rufin_core::collection_context::plays_context(pin_context_id, playback_context_id)
             })
             .max_by_key(|(_, pin_context_id)| {
                 (
@@ -234,19 +234,6 @@ fn sidebar_pin_widgets(container: &gtk::Box) -> Vec<(gtk::Widget, String)> {
         }
     }
     pin_rows
-}
-
-fn sidebar_pin_context_matches(pin_context_id: &str, playback_context_id: &str) -> bool {
-    playback_context_id == pin_context_id
-        || if pin_context_id.starts_with("playlist:") {
-            playback_context_id
-                .strip_prefix(pin_context_id)
-                .is_some_and(|suffix| suffix.starts_with(':'))
-        } else {
-            playback_context_id
-                .strip_prefix(pin_context_id)
-                .is_some_and(|suffix| suffix.starts_with('|'))
-        }
 }
 
 fn clear_box(container: &gtk::Box) {
@@ -1731,16 +1718,6 @@ mod tests {
                 rufin_core::route::sidebar_route_descriptor(item).root_route != route
             }));
         }
-    }
-
-    #[test]
-    fn sidebar_pin_playback_only_matches_its_page_context() {
-        assert!(sidebar_pin_context_matches("album:1", "album:1|query=rock"));
-        assert!(sidebar_pin_context_matches(
-            "playlist:1",
-            "playlist:1:Title:false:"
-        ));
-        assert!(!sidebar_pin_context_matches("album:1", "album:10"));
     }
 
     #[test]

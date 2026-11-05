@@ -1152,11 +1152,7 @@ impl MediaPlayingBinding {
             Some(MediaPlayingTarget::Track(key)) => Some(*key) == current.track_key,
             Some(MediaPlayingTarget::Collection(expected)) => {
                 current.context.as_ref().is_some_and(|context| {
-                    context.context_id == *expected
-                        || context
-                            .context_id
-                            .strip_prefix(expected)
-                            .is_some_and(|suffix| suffix.starts_with("|query="))
+                    rufin_core::collection_context::plays_context(expected, &context.context_id)
                 })
             }
             None => false,

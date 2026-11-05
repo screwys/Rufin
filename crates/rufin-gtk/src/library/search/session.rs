@@ -5,17 +5,17 @@ fn search_result_matches(
     media_uri: &str,
     current: &crate::widgets::mounted_route::RouteCurrentTrack,
 ) -> bool {
-    let prefix = match kind {
+    use rufin_core::collection_context::CollectionTarget;
+    let target = match kind {
         RecentSearchKind::Track => return media_uri == current.media_uri,
-        RecentSearchKind::Album => "album:",
-        RecentSearchKind::Artist => "artist:",
+        RecentSearchKind::Album => CollectionTarget::Album(media_uri.to_owned()),
+        RecentSearchKind::Artist => CollectionTarget::Artist {
+            id: media_uri.to_owned(),
+            album_artist: false,
+        },
     };
     current.context.as_ref().is_some_and(|context| {
-        context
-            .context_id
-            .strip_prefix(prefix)
-            .and_then(|uri| uri.strip_prefix(media_uri))
-            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with("|query="))
+        rufin_core::collection_context::plays_context(&target.context_id(), &context.context_id)
     })
 }
 
