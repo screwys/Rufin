@@ -2,7 +2,6 @@ package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
-import io.github.screwys.rufin.shared.library.DownloadChange
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.library.StateChange
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
@@ -69,10 +68,12 @@ internal class BrowsePage(
     private var openedPage by mutableStateOf<AndroidOpened?>(null)
     private var preparedContext by mutableStateOf<PageContext?>(null)
     private var capturedLabelsVersion = browse.labelsVersion
-    /** The favorites, ratings and track downloads committed while the page is open; rows it
-     * read before show them through [shown]. */
+    /** The favorites and ratings committed while the page is open; rows it read before show
+     * them through [shown]. */
     private val states = mutableStateMapOf<FavoriteTarget, StateChange>()
-    private val downloads = mutableStateMapOf<Long, DownloadChange>()
+    /** How many download changes were committed while the page is open; rows read before the
+     * latest show the current downloads through [shown]. */
+    private var downloads by mutableIntStateOf(0)
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
 
@@ -108,16 +109,20 @@ internal class BrowsePage(
         val parentPage: AndroidOpened?,
     )
 
-    /** `item` showing the favorite, rating and download committed for it since the page read it. */
+    /** `item` showing the favorite and rating committed for it since the page read it, and the
+     * downloads as they are now. */
     @Composable
     fun shown(item: BrowseItem): BrowseItem {
         val change = item.row.target?.let { states[it] }
-        val download = item.row.track?.trackKey?.let { downloads[it] }
-        if (change == null && download == null) return item
-        return remember(item.row, change, download) {
-            var row = item.row
+        val revision = downloads
+        var current by remember(item.row) { mutableStateOf(item.row) }
+        LaunchedEffect(item.row, revision) {
+            if (item.downloads != revision) browse.library?.showDownloads(item.row, item.view)?.let { current = it }
+        }
+        if (change == null && current === item.row) return item
+        return remember(current, change) {
+            var row = current
             change?.let { showState(row, it) }?.let { row = it }
-            download?.let { showDownload(row, it) }?.let { row = it }
             if (row === item.row) item else item.copy(row = row)
         }
     }
@@ -175,7 +180,8 @@ internal class BrowsePage(
     private fun homeSections(view: AndroidView, sections: List<AndroidHomeSection>, display: AndroidBrowseDisplay?) =
         sections.mapIndexed { section, home ->
             HomeSectionItems(section.toULong(), home.title, home.kind, home.refresh, home.rows.mapIndexed { index, row ->
-                BrowseItem(row, index.toULong(), view, display, section = section.toULong(), contextTitle = home.title)
+                BrowseItem(row, index.toULong(), view, display, section = section.toULong(), contextTitle = home.title,
+                    downloads = downloads)
             })
         }
 
@@ -187,7 +193,12 @@ internal class BrowsePage(
         launch {
             connection.changes.collect { changed ->
                 changed.items.forEach { states[it.target] = it }
-                changed.downloads.forEach { downloads[it.track] = it }
+                if (changed.downloads.isNotEmpty()) {
+                    downloads++
+                    val read = summary
+                    val row = read?.let { browse.library?.showDownloads(it.row, currentView) }
+                    if (row != null && summary === read) summary = read.copy(row = row)
+                }
                 if (if (pins) browse.library?.pinsRefresh(changed) == true else currentView?.refresh(changed) == true) changes++
             }
         }
@@ -299,7 +310,7 @@ internal class BrowsePage(
                 context to Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
                     maxSize = 192, enablePlaceholders = !pins,
                     jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
-                    BrowsePagingSource(library, view, count, pins, display, location.playbackTitle, seedRows)
+                    BrowsePagingSource(library, view, count, pins, display, location.playbackTitle, seedRows) { downloads }
                 }.flow
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { connection.runAction { throw error }; null }
@@ -319,11 +330,14 @@ private class BrowsePagingSource(
     private val display: AndroidBrowseDisplay?,
     private val contextTitle: String,
     private val firstRows: List<AndroidBrowseRow>?,
+    /** The page's download changes so far, which the rows it reads show. */
+    private val downloads: () -> Int,
 ) : PagingSource<Int, BrowseItem>() {
     override val jumpingSupported = true
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
+            val revision = downloads()
             val pinPage = if (pins) library.pins(offset.toULong(), params.loadSize.toUInt()) else null
             val total = pinPage?.total?.toInt() ?: count ?: 0
             val rows = pinPage?.rows ?: if (offset == 0 && firstRows != null) {
@@ -331,7 +345,9 @@ private class BrowsePagingSource(
                 if (ready.size >= params.loadSize || ready.size >= total) ready
                 else ready + view!!.rows(ready.size.toULong(), (params.loadSize - ready.size).toUInt())
             } else view!!.rows(offset.toULong(), params.loadSize.toUInt())
-            LoadResult.Page(rows.mapIndexed { index, row -> BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle) },
+            LoadResult.Page(rows.mapIndexed { index, row ->
+                BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision)
+            },
                 if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                 if (pins) pinPage?.nextOffset?.toInt() else if (offset + rows.size >= total) null else offset + rows.size,
                 itemsBefore = if (pins) LoadResult.Page.COUNT_UNDEFINED else offset,

@@ -281,8 +281,8 @@ impl AndroidView {
         .await
     }
 
-    /// Whether a committed change means the page reads again. Rows show favorites, ratings and
-    /// a track's download through `show_state` and `show_download`.
+    /// Whether a committed change means the page reads again. Rows show favorites and ratings
+    /// through `show_state`, and downloads through `AndroidLibrary::show_downloads`.
     pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
         self.view.refresh(&changed) != rufin_core::view::Refresh::Nothing
     }

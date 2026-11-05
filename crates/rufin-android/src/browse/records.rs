@@ -316,23 +316,36 @@ pub fn show_state(
     Some(row)
 }
 
-/// `row` showing a committed download of its track; None when it shows another track, or this
-/// one as it is.
 #[uniffi::export]
-pub fn show_download(
-    mut row: AndroidBrowseRow,
-    change: library::DownloadChange,
-) -> Option<AndroidBrowseRow> {
-    let AndroidBrowseItem::Library {
-        row: Row::Track(track) | Row::AlbumTrack { track, .. },
-    } = &mut row.item
-    else {
-        return None;
-    };
-    if track.track_key != change.track || track.is_downloaded == change.downloaded {
-        return None;
+impl AndroidLibrary {
+    /// `row` showing the current downloads: a track's copy, or whether a collection's tracks
+    /// are all downloaded. `view` is the page that read it.
+    pub async fn show_downloads(
+        &self,
+        mut row: AndroidBrowseRow,
+        view: Option<Arc<super::AndroidView>>,
+    ) -> AndroidBrowseRow {
+        let AndroidBrowseItem::Library { row: library } = &row.item else {
+            return row;
+        };
+        let mut library = library.clone();
+        let catalog = self.catalog.clone();
+        let now = view.and_then(|view| view.view.smart_now());
+        let shown = run_read(&self.runtime, move |cancel| async move {
+            catalog
+                .show_downloads(library.shown().into_iter().collect(), now, &cancel)
+                .await
+                .map_err(error)?;
+            Ok(library)
+        })
+        .await;
+        match shown {
+            Ok(library) => {
+                row.downloaded = library.downloaded();
+                row.item = AndroidBrowseItem::Library { row: library };
+            }
+            Err(error) => tracing::warn!(%error, "failed to show downloads"),
+        }
+        row
     }
-    change.show_in(track);
-    row.downloaded = change.downloaded;
-    Some(row)
 }

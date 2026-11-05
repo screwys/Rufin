@@ -40,9 +40,11 @@ internal data class BrowseLocation(
     val playbackTitle: String = title,
 )
 /** A row and where it shows: its place in `view`, or in Home's `section`, or among search results. */
+/** A row a page shows; `downloads` is how many download changes the page had when it read it. */
 internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val view: AndroidView?,
     val displaySettings: AndroidBrowseDisplay? = null, val section: ULong? = null,
-    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null)
+    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null,
+    val downloads: Int = 0)
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
