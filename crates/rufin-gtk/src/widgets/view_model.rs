@@ -908,20 +908,22 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                 state.active = Some(first);
                 let cancel = ReadCancellation::new();
                 state.running = Some(cancel.clone());
-                return Some((first..end, state.order, cancel, read_window(&state.source)));
+                return Some((first..end, cancel, read_window(&state.source)));
             }
         });
-        let Some((range, order, cancel, reader)) = read else {
+        let Some((range, cancel, reader)) = read else {
             return;
         };
-        let task = runtime.spawn(reader(range.clone(), cancel));
+        let task = runtime.spawn(reader(range.clone(), cancel.clone()));
         let list = self.list.downgrade();
         glib::spawn_future_local(async move {
             let rows = task.await.ok().and_then(Result::ok);
             let Some(list) = list.upgrade() else { return };
             let this = Self::from_list(&list);
             let accepted = this.with(|state| {
-                if state.order != order || state.active != Some(range.start) {
+                // Every read that stopped being the active one was cancelled, so a read of the
+                // same window started after it cannot be taken for it.
+                if cancel.is_cancelled() {
                     return None;
                 }
                 state.active = None;

@@ -57,7 +57,7 @@ impl ReadCancellation {
         self.0.notify.notify_waiters();
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
     }
 
