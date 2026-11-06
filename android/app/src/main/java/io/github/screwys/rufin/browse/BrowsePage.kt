@@ -8,6 +8,8 @@ import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.routeRequiresSelectedSource
+import io.github.screwys.rufin.shared.library.SearchMode
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -102,7 +104,7 @@ internal class BrowsePage(
 
     private data class PageContext(
         val library: AndroidLibrary?, val opens: Boolean, val changes: Int,
-        val route: Route, val category: CollectionCategory, val historyCurrent: Boolean, val filter: String,
+        val route: Route, val category: CollectionCategory, val historySource: String?, val filter: String,
         val sort: LibraryField?, val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
         val homeBlocks: String?,
@@ -233,14 +235,11 @@ internal class BrowsePage(
         snapshotFlow {
             // A page that lists a source opens once one is selected; selecting another source or
             // music folder reaches it through `changes`.
-            val route = location.route
-            val needsSource = !pins && !(route is Route.Playlists || route is Route.PlaylistDetail ||
-                route is Route.SmartPlaylists || route is Route.SmartPlaylistDetail || route is Route.PlaylistFolder) &&
-                !(route is Route.History && !options.historyCurrent)
+            val needsSource = !pins && routeRequiresSelectedSource(location.route, SearchMode.TITLE)
             if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library,
                 !needsSource || connection.sources?.selectedSourceId != null,
                 if (parent != null) parent.preparedContext?.changes ?: 0 else changes,
-                location.route, options.category, options.historyCurrent, options.filter, options.sort, options.descending,
+                location.route, options.category, options.historySource, options.filter, options.sort, options.descending,
                 options.favoritesOnly, options.downloadedOnly,
                 revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,
                 if (location.route is Route.Home && !pins) browse.homeBlocksFingerprint else null, parent?.openedPage)
@@ -257,7 +256,7 @@ internal class BrowsePage(
                     context.filter == parent?.preparedContext?.filter && !context.favoritesOnly && !context.downloadedOnly
                 }
                 val opened = if (pins) null else library.open(route, context.category, context.filter, context.sort,
-                    context.descending, context.favoritesOnly, context.downloadedOnly, context.historyCurrent,
+                    context.descending, context.favoritesOnly, context.downloadedOnly, context.historySource,
                     currentView, embedded)
                 val view = opened?.view
                 val count = favoriteSeed?.summary?.favoriteTotal?.toInt() ?: opened?.count?.toInt()

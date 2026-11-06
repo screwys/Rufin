@@ -114,7 +114,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         is SourceOperation.Downloading -> operation.progress
         else -> null
     }
-    val selectedSourceName get() = sources?.sources?.firstOrNull { it.id == sources?.selectedSourceId }?.name.orEmpty()
+    fun sourceName(id: String) = sources?.sources?.firstOrNull { it.id == id }?.name.orEmpty()
     var sources by mutableStateOf<ConfiguredSources?>(null)
         private set
     var debugLogging by mutableStateOf(false)

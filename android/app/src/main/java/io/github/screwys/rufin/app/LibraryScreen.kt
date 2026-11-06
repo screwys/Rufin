@@ -592,9 +592,6 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     owner: BrowsePage? = null,
 ) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(location.route, model.sources?.selectedSourceId) {
-        if (location.route is Route.History && model.sources?.selectedSourceId == null) options.historyCurrent = false
-    }
     val page = owner ?: remember(location.route, options, pins) { BrowsePage(model, browse, location, options, scope, pins) }
     if (owner == null) LaunchedEffect(page) { page.observe() }
     DisposableEffect(page) { onDispose { page.active = false } }
@@ -616,9 +613,11 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
     Column(Modifier.fillMaxSize()) {
         if (location.route is Route.History) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(!options.historyCurrent, { options.historyCurrent = false }, label = { Text(translate("All")) })
-                if (model.sources?.selectedSourceId != null) FilterChip(options.historyCurrent, { options.historyCurrent = true },
-                    label = { Text(model.selectedSourceName) })
+                FilterChip(options.historySource == null, { options.historySource = null }, label = { Text(translate("All")) })
+                // The source chip keeps the source it was picked with, as on the desktop.
+                val source = options.historySource ?: model.sources?.selectedSourceId
+                if (source != null) FilterChip(options.historySource != null, { options.historySource = source },
+                    label = { Text(model.sourceName(source)) })
             }
             // History shows cards in Grid layout, as on the desktop.
             if (covers) Box(Modifier.weight(1f)) {

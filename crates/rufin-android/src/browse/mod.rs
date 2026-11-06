@@ -489,7 +489,9 @@ impl AndroidLibrary {
     /// Opens `route` with these options and reads its first rows, its header unless it is
     /// `embedded`, an artist's release groups and favorite tracks, and Home's sections.
     /// `previous`, the view this one replaces, reads again in place when it lists the same
-    /// route in the same library, so an open Smart Playlist keeps its members.
+    /// route in the same library, so an open Smart Playlist keeps its members. History lists
+    /// `history_source`'s plays, or every source's. A page whose selection changed while it
+    /// read opens again in the one selected now.
     #[allow(clippy::too_many_arguments)]
     pub async fn open(
         self: Arc<Self>,
@@ -500,11 +502,10 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
-        history_current: bool,
+        history_source: Option<library::SourceId>,
         previous: Option<Arc<AndroidView>>,
         embedded: bool,
     ) -> Result<AndroidOpened, AndroidError> {
-        let selected = self.source.selected_library();
         let options = OpenOptions {
             category,
             filter,
@@ -512,26 +513,40 @@ impl AndroidLibrary {
             descending: sort.map(|_| descending),
             favorites_only,
             downloaded_only,
-            history_source: selected
-                .as_ref()
-                .filter(|_| history_current)
-                .map(|selected| selected.source_id.clone()),
+            history_source,
             ..Default::default()
         };
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
             let seed = library::RouteSeedWindow::top();
-            let opened = match previous.filter(|previous| {
-                *previous.view.route() == route && previous.view.reads_same_in(selected.as_ref())
-            }) {
-                Some(previous) => previous.view.reread(options, seed, &cancel).await,
-                None => {
-                    self.source
-                        .open(route.clone(), selected, options, seed, true, &cancel)
-                        .await
+            let mut previous = previous.map(|previous| Arc::clone(&previous.view));
+            let opened = loop {
+                let selected = self.source.selected_library();
+                let opened = match previous.take().filter(|previous| {
+                    *previous.route() == route && previous.reads_same_in(selected.as_ref())
+                }) {
+                    Some(previous) => previous.reread(options.clone(), seed, &cancel).await,
+                    None => {
+                        self.source
+                            .open(
+                                route.clone(),
+                                selected,
+                                options.clone(),
+                                seed,
+                                true,
+                                &cancel,
+                            )
+                            .await
+                    }
                 }
-            }
-            .map_err(error)?;
+                .map_err(error)?;
+                if opened
+                    .view
+                    .reads_same_in(self.source.selected_library().as_ref())
+                {
+                    break opened;
+                }
+            };
             let key = library_list_key(&route, category);
             let view = Arc::new(AndroidView {
                 fields: self.shown_fields(&route, key),

@@ -23,8 +23,9 @@ internal class BrowseOptions {
     var preparing by mutableStateOf(false)
     var preparationError by mutableStateOf<String?>(null)
     var category by mutableStateOf(CollectionCategory.TRACKS)
-    /** History lists the selected source's plays rather than every source's. */
-    var historyCurrent by mutableStateOf(false)
+    /** The source whose plays History lists, the one selected when it was picked; every
+     * source's when null. */
+    var historySource by mutableStateOf<String?>(null)
     var filter by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
     var downloadedOnly by mutableStateOf(false)
