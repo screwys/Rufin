@@ -251,9 +251,10 @@ impl Catalog {
     ) -> LibraryResult<Vec<PlaylistEditEntry>> {
         let mut connection = self.acquire_loaded(cancellation).await?;
         let selected =
-            crate::selection::selected_tracks_on(self, &mut connection, selection).await?;
+            crate::selection::selected_tracks_on(self, &mut connection, &[selection]).await?;
         let keys = selected
             .into_iter()
+            .flatten()
             .map(|(_, entry)| {
                 entry.ok_or_else(|| {
                     LibraryError::InvalidRequest(
@@ -741,31 +742,26 @@ async fn playlist_tracks_on(
     source: Option<SourceKey>,
     selection: &MemberSelection,
 ) -> LibraryResult<Option<Vec<TrackKey>>> {
+    // A source's playlist takes only tracks the Store has.
     let mut pending = vec![selection];
-    let mut tracks = Vec::new();
     while let Some(selection) = pending.pop() {
         match selection {
-            MemberSelection::Concat(parts) => pending.extend(parts.iter().rev()),
-            MemberSelection::Uris(uris) => {
-                let missing:Vec<String>=sqlx::query_scalar("SELECT DISTINCT requested.value FROM json_each(?1) requested WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=requested.value)").bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?;
-                if source.is_some() && !missing.is_empty() {
+            MemberSelection::Concat(parts) => pending.extend(parts),
+            MemberSelection::Uris(uris) if source.is_some() => {
+                let missing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM json_each(?1) requested WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE media_uri=requested.value))").bind(serde_json::to_string(uris)?).fetch_one(&mut *connection).await?;
+                if missing {
                     return Ok(None);
                 }
-                tracks.extend(
-                    crate::selection::selected_tracks_on(catalog, connection, selection)
-                        .await?
-                        .into_iter()
-                        .map(|(key, _)| key),
-                );
             }
-            _ => tracks.extend(
-                crate::selection::selected_tracks_on(catalog, connection, selection)
-                    .await?
-                    .into_iter()
-                    .map(|(track, _)| track),
-            ),
+            _ => {}
         }
     }
+    let tracks = crate::selection::selected_tracks_on(catalog, connection, &[selection])
+        .await?
+        .into_iter()
+        .flatten()
+        .map(|(track, _)| track)
+        .collect::<Vec<_>>();
     if let Some(source) = source
         && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM json_each(?1) requested JOIN tracks ON tracks.track_key=requested.value WHERE tracks.source_key IS NOT ?2)")
             .bind(serde_json::to_string(&tracks)?).bind(source).fetch_one(&mut *connection).await?

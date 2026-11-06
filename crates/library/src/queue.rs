@@ -311,11 +311,15 @@ impl Catalog {
             QueueLoad::Tracks(groups) => {
                 let mut reader = self.acquire_reader().await?;
                 let mut transaction = reader.begin().await?;
-                for (selection, provenance) in groups {
+                let selections = groups
+                    .iter()
+                    .map(|(selection, _)| selection)
+                    .collect::<Vec<_>>();
+                let tracks =
+                    crate::selection::selected_tracks_on(self, &mut transaction, &selections)
+                        .await?;
+                for ((selection, provenance), songs) in groups.iter().zip(tracks) {
                     let resolve_anchor = !matches!(selection, crate::MemberSelection::Concat(_));
-                    let songs =
-                        crate::selection::selected_tracks_on(self, &mut transaction, &selection)
-                            .await?;
                     for (rank, (track_key, entry_key)) in songs.into_iter().enumerate() {
                         if resolve_anchor
                             && selected.is_some_and(|(key, entry)| {

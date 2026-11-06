@@ -144,16 +144,6 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Whether a track belongs to a genre directly or through its album.
-    fn in_genre(&self, record: &TrackRec, tag: u32) -> bool {
-        self.snapshot.track_runs(record)[2].contains(&tag)
-            || self
-                .snapshot
-                .albums
-                .live(record.album)
-                .is_some_and(|album| self.snapshot.album_runs(album)[1].contains(&tag))
-    }
-
     /// The tags a track counts toward: its own, and its album's genres.
     pub(crate) fn tags_of(&self, record: &TrackRec, into: &mut Vec<u32>) {
         into.clear();
@@ -845,7 +835,8 @@ impl Context<'_> {
             .collect()
     }
 
-    /// The members a collection holds before filters and sorting.
+    /// The members a collection holds before filters and sorting. Albums, artists, genres and
+    /// moods are read by [`Context::scanned_members`].
     fn collection_members(
         &self,
         collection: &Collection,
@@ -854,16 +845,6 @@ impl Context<'_> {
     ) -> Vec<Member> {
         let snapshot = self.snapshot;
         let member = |track| (track, 0, 0);
-        let tracks = |keep: &dyn Fn(&TrackRec) -> bool| {
-            snapshot
-                .tracks
-                .iter()
-                .filter(|(_, record)| {
-                    record.indexed() && self.in_folder(record, folder) && keep(record)
-                })
-                .map(|(slot, _)| member(slot))
-                .collect::<Vec<_>>()
-        };
         match collection {
             Collection::Source(source) => self
                 .source_tracks(*source, folder)
@@ -884,25 +865,6 @@ impl Context<'_> {
                     .map(member)
                     .collect()
             }
-            Collection::Album(key) => match snapshot.albums.slot(key.raw()) {
-                Some(album) => tracks(&|record| record.album == album),
-                None => Vec::new(),
-            },
-            Collection::Artist { key, album_artist } => match snapshot.artists.slot(key.raw()) {
-                Some(artist) if *album_artist => {
-                    tracks(&|record| self.album_artists(record).contains(&artist))
-                }
-                Some(artist) => tracks(&|record| snapshot.track_runs(record)[0].contains(&artist)),
-                None => Vec::new(),
-            },
-            Collection::Genre(key) => match snapshot.tags.slot(key.raw()) {
-                Some(tag) => tracks(&|record| self.in_genre(record, tag)),
-                None => Vec::new(),
-            },
-            Collection::Mood(key) => match snapshot.tags.slot(key.raw()) {
-                Some(tag) => tracks(&|record| snapshot.track_runs(record)[2].contains(&tag)),
-                None => Vec::new(),
-            },
             Collection::Playlist(key) => {
                 let Some(playlist) = snapshot.playlists.get(key.raw()) else {
                     return Vec::new();
@@ -927,18 +889,120 @@ impl Context<'_> {
                 .into_iter()
                 .map(member)
                 .collect(),
-            Collection::History { .. } => Vec::new(),
+            Collection::Album(_)
+            | Collection::Artist { .. }
+            | Collection::Genre(_)
+            | Collection::Mood(_)
+            | Collection::History { .. } => Vec::new(),
         }
     }
 
-    /// A member read's rows in order, before its filters.
-    fn member_base(&self, read: &MemberRead, inputs: &Inputs) -> Vec<Member> {
-        let owner = self.collection_source(&read.collection);
-        let Some(folder) = self.folder_slot(read.folder, owner) else {
-            return Vec::new();
-        };
-        let members = self.collection_members(&read.collection, folder, inputs);
-        self.sort_members(read, members)
+    /// The tracks of each album, artist, genre and mood among `wanted`, each in its music
+    /// folder, from one pass over the catalog; None for other collections.
+    fn scanned_members(
+        &self,
+        wanted: &[Option<(&Collection, Option<u32>)>],
+    ) -> Vec<Option<Vec<Member>>> {
+        let snapshot = self.snapshot;
+        // Positions in `wanted` by the slot that owns them: albums, artists, album artists,
+        // genres and moods.
+        let mut owners: [HashMap<u32, Vec<usize>>; 5] = Default::default();
+        let mut found = vec![None; wanted.len()];
+        for (position, (collection, _)) in wanted
+            .iter()
+            .enumerate()
+            .filter_map(|(position, wanted)| Some((position, (*wanted)?)))
+        {
+            let (kind, slot) = match collection {
+                Collection::Album(key) => (0, snapshot.albums.slot(key.raw())),
+                Collection::Artist { key, album_artist } => (
+                    1 + usize::from(*album_artist),
+                    snapshot.artists.slot(key.raw()),
+                ),
+                Collection::Genre(key) => (3, snapshot.tags.slot(key.raw())),
+                Collection::Mood(key) => (4, snapshot.tags.slot(key.raw())),
+                _ => continue,
+            };
+            found[position] = Some(Vec::new());
+            if let Some(slot) = slot {
+                owners[kind].entry(slot).or_default().push(position);
+            }
+        }
+        if owners.iter().all(HashMap::is_empty) {
+            return found;
+        }
+        let [albums, artists, album_artists, genres, moods] = &owners;
+        let mut tags = Vec::new();
+        for (slot, record) in snapshot.tracks.iter() {
+            if !record.indexed() {
+                continue;
+            }
+            let mut add = |positions: Option<&Vec<usize>>| {
+                for position in positions.into_iter().flatten() {
+                    let folder = wanted[*position].and_then(|(_, folder)| folder);
+                    if let Some(members) = &mut found[*position]
+                        && self.in_folder(record, folder)
+                    {
+                        members.push((slot, 0, 0));
+                    }
+                }
+            };
+            if !albums.is_empty() {
+                add(albums.get(&record.album));
+            }
+            if !artists.is_empty() {
+                for artist in dedup(snapshot.track_runs(record)[0]) {
+                    add(artists.get(&artist));
+                }
+            }
+            if !album_artists.is_empty() {
+                for artist in dedup(self.album_artists(record)) {
+                    add(album_artists.get(&artist));
+                }
+            }
+            if !genres.is_empty() {
+                self.tags_of(record, &mut tags);
+                for tag in &tags {
+                    add(genres.get(tag));
+                }
+            }
+            if !moods.is_empty() {
+                for tag in dedup(snapshot.track_runs(record)[2]) {
+                    add(moods.get(&tag));
+                }
+            }
+        }
+        found
+    }
+
+    /// Member reads' rows in order, before their filters. Albums, artists, genres and moods
+    /// among them take their tracks from one pass over the catalog.
+    fn member_bases(&self, reads: &[(&MemberRead, &Inputs)]) -> Vec<Vec<Member>> {
+        // Each read's collection in the music folder it keeps; None when that folder is gone.
+        let wanted = reads
+            .iter()
+            .map(|(read, _)| {
+                let owner = self.collection_source(&read.collection);
+                let folder = self.folder_slot(read.folder, owner)?;
+                Some((&read.collection, folder))
+            })
+            .collect::<Vec<_>>();
+        let scanned = self.scanned_members(&wanted);
+        reads
+            .iter()
+            .zip(wanted)
+            .zip(scanned)
+            .map(|(((read, inputs), wanted), scanned)| {
+                let members = match (scanned, wanted) {
+                    (Some(members), _) => members,
+                    (None, Some((collection, folder))) => {
+                        self.collection_members(collection, folder, inputs)
+                    }
+                    (None, None) => Vec::new(),
+                };
+                self.sort_members(read, members)
+            })
+            .collect()
     }
 
     /// Members in a member read's order.
@@ -2316,7 +2380,10 @@ impl Catalog {
                         _ => unreachable!("member orders hold tracks"),
                     }
                 } else {
-                    let rows = context.member_base(member, inputs);
+                    let rows = context
+                        .member_bases(&[(member, inputs)])
+                        .pop()
+                        .unwrap_or_default();
                     let records = &snapshot.tracks.records;
                     if matches!(member.collection, Collection::Playlist(_)) {
                         Members::Entries(
@@ -2922,136 +2989,63 @@ impl Context<'_> {
     }
 }
 
-impl Context<'_> {
-    /// The members of each parent of a list, parent by parent: an album's, artist's, genre's or
-    /// mood's tracks in album order, a playlist's entries in place.
-    pub(crate) fn parent_members(
-        &self,
-        kind: &ListKind,
-        parents: &[i64],
-        inputs: &Inputs,
-    ) -> Vec<Member> {
-        let snapshot = self.snapshot;
-        let member = |track| (track, 0, 0);
-        match kind {
-            ListKind::Playlists => {
-                return parents
-                    .iter()
-                    .filter_map(|key| snapshot.playlists.get(*key))
-                    .flat_map(|playlist| {
-                        playlist
-                            .entries
-                            .iter()
-                            .zip(0..)
-                            .filter(|(entry, _)| snapshot.tracks.live(entry.track).is_some())
-                            .map(|(entry, position)| (entry.track, entry.key as u32, position))
-                    })
-                    .collect();
-            }
-            ListKind::SmartPlaylists { .. } => {
-                return parents
-                    .iter()
-                    .filter_map(|key| snapshot.smart_playlists.get(key))
-                    .flat_map(|smart| self.evaluate(&smart.definition, inputs))
-                    .map(member)
-                    .collect();
-            }
-            _ => {}
-        }
-        let slots = match kind {
-            ListKind::Albums | ListKind::ArtistAlbums { .. } => parents
-                .iter()
-                .map(|key| snapshot.albums.slot(*key))
-                .collect::<Vec<_>>(),
-            ListKind::Artists { .. } => parents
-                .iter()
-                .map(|key| snapshot.artists.slot(*key))
-                .collect(),
-            _ => parents.iter().map(|key| snapshot.tags.slot(*key)).collect(),
-        };
-        let sort = crate::query::ALBUM_ORDER;
-        let mut index = HashMap::<u32, Vec<usize>>::new();
-        for (position, slot) in slots.iter().enumerate() {
-            if let Some(slot) = slot {
-                index.entry(*slot).or_default().push(position);
-            }
-        }
-        let mut buckets = vec![Vec::new(); parents.len()];
-        let mut owners = Vec::new();
-        for (slot, record) in snapshot.tracks.iter() {
-            if !record.indexed() {
-                continue;
-            }
-            owners.clear();
-            match kind {
-                ListKind::Albums | ListKind::ArtistAlbums { .. } => {
-                    owners.extend(self.album_of(record));
-                }
-                ListKind::Artists {
-                    album_artist: false,
-                } => owners.extend(dedup(snapshot.track_runs(record)[0])),
-                ListKind::Artists { album_artist: true } => {
-                    owners.extend(dedup(self.album_artists(record)));
-                }
-                ListKind::Genres => self.tags_of(record, &mut owners),
-                _ => owners.extend(dedup(snapshot.track_runs(record)[2])),
-            }
-            for owner in &owners {
-                for position in index.get(owner).into_iter().flatten() {
-                    buckets[*position].push(member(slot));
-                }
-            }
-        }
-        buckets
-            .into_iter()
-            .flat_map(|bucket| {
-                let mut rows = bucket
-                    .into_iter()
-                    .enumerate()
-                    .map(|(position, member)| self.sorted(sort, position, member))
-                    .collect::<Vec<_>>();
-                rows.sort_by(|a, b| compare_tracks(sort, false, a, b));
-                rows.into_iter().map(|row| row.member).collect::<Vec<_>>()
-            })
-            .collect()
-    }
-}
-
 impl Catalog {
-    /// Members of a list's parents, in list order.
-    pub(crate) async fn parent_order(
+    /// The tracks of whole member reads, read by read: a cached order as it is; whole albums,
+    /// artists, genres, moods, playlists and smart playlists together, their tracks from one
+    /// pass over the catalog and their orders not kept; any other read as its order.
+    pub(crate) async fn member_tracks_on(
         &self,
         connection: &mut SqliteConnection,
-        read: &ListRead,
-        parents: &[i64],
-    ) -> LibraryResult<Vec<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>> {
-        let mut inputs = Inputs::default();
-        if let ListKind::SmartPlaylists { now } = read.kind {
-            let definitions = {
-                let snapshot = self.snapshot();
-                parents
-                    .iter()
-                    .filter_map(|key| snapshot.smart_playlists.get(key))
-                    .map(|smart| smart.definition.clone())
-                    .collect::<Vec<_>>()
+        reads: &[MemberRead],
+    ) -> LibraryResult<Vec<Vec<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>>> {
+        self.loaded().await;
+        let stamps = self.snapshot().stamps();
+        let mut tracks = Vec::with_capacity(reads.len());
+        let mut whole = Vec::new();
+        for (index, member) in reads.iter().enumerate() {
+            let read = Read::Members(member.clone());
+            let order = match self.cached(&read, stamps) {
+                Some(order) => order,
+                None if member.unfiltered().is_none()
+                    && matches!(
+                        member.collection,
+                        Collection::Album(_)
+                            | Collection::Artist { .. }
+                            | Collection::Genre(_)
+                            | Collection::Mood(_)
+                            | Collection::Playlist(_)
+                            | Collection::Smart { .. }
+                    ) =>
+                {
+                    whole.push((index, self.inputs(connection, &read).await?));
+                    tracks.push(Vec::new());
+                    continue;
+                }
+                None => self.order_on(connection, &read).await?,
             };
-            let periods = definitions.iter().filter_map(smart_period).collect();
-            self.read_periods(connection, &mut inputs, periods, now)
-                .await?;
+            tracks.push(crate::selection::order_tracks(&order, None));
         }
         let snapshot = self.snapshot();
-        Ok(Context::new(&snapshot)
-            .parent_members(&read.kind, parents, &inputs)
-            .into_iter()
-            .map(|(slot, entry, _)| {
-                (
-                    crate::TrackKey::from_raw(i64::from(
-                        snapshot.tracks.records[slot as usize].key,
-                    )),
-                    (entry != 0).then(|| crate::PlaylistEntryKey::from_raw(i64::from(entry))),
-                )
-            })
-            .collect())
+        let bases = Context::new(&snapshot).member_bases(
+            &whole
+                .iter()
+                .map(|(index, inputs)| (&reads[*index], inputs))
+                .collect::<Vec<_>>(),
+        );
+        for ((index, _), base) in whole.iter().zip(bases) {
+            tracks[*index] = base
+                .into_iter()
+                .map(|(slot, entry, _)| {
+                    (
+                        crate::TrackKey::from_raw(i64::from(
+                            snapshot.tracks.records[slot as usize].key,
+                        )),
+                        (entry != 0).then(|| crate::PlaylistEntryKey::from_raw(i64::from(entry))),
+                    )
+                })
+                .collect();
+        }
+        Ok(tracks)
     }
 }
 

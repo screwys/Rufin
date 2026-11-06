@@ -12,9 +12,12 @@ pub enum MemberSelection {
         read: MemberRead,
         ranges: Option<Vec<Range<usize>>>,
     },
+    /// Selected rows of a list, each row's collection read as `members` reads, its collection
+    /// replaced.
     Parents {
         read: ListRead,
         ranges: Option<Vec<Range<usize>>>,
+        members: Box<MemberRead>,
     },
     Collections(Vec<Collection>),
     Keys {
@@ -64,100 +67,126 @@ fn parents(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<i64> {
         .collect()
 }
 
-/// The tracks a selection names, in order, with the playlist entry each comes from.
+/// The tracks of an order's selected ranges, with the playlist entry each comes from.
+pub(crate) fn order_tracks(
+    order: &Order,
+    ranges: Option<&[Range<usize>]>,
+) -> Vec<(TrackKey, Option<PlaylistEntryKey>)> {
+    in_ranges(order, ranges)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Track { key, entry } => Some((key, entry)),
+            Item::Listen(index) => Some((order.listen_track(index)?, None)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The tracks each selection names, in order, with the playlist entry each comes from. The
+/// whole collections they name are read together, from one pass over the catalog.
 pub(crate) async fn selected_tracks_on(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
-    selection: &MemberSelection,
-) -> LibraryResult<Vec<(TrackKey, Option<PlaylistEntryKey>)>> {
-    let mut pending = vec![selection];
-    let mut rows = Vec::new();
-    while let Some(next) = pending.pop() {
-        match next {
-            MemberSelection::Concat(selections) => pending.extend(selections.iter().rev()),
-            MemberSelection::Members { read, ranges } => {
-                let order = catalog
-                    .order_on(connection, &Read::Members(read.clone()))
-                    .await?;
-                rows.extend(
-                    in_ranges(&order, ranges.as_deref()).into_iter().filter_map(
-                        |item| match item {
-                            Item::Track { key, entry } => Some((key, entry)),
-                            Item::Listen(index) => Some((order.listen_track(index)?, None)),
-                            _ => None,
-                        },
-                    ),
-                );
-            }
-            MemberSelection::Parents { read, ranges } => {
-                let order = catalog
-                    .order_on(connection, &Read::List(read.clone()))
-                    .await?;
-                let parents = parents(&order, ranges.as_deref());
-                rows.extend(catalog.parent_order(connection, read, &parents).await?);
-            }
-            MemberSelection::Collections(collections) => {
-                if collections
-                    .iter()
-                    .all(|collection| matches!(collection, Collection::Album(_)))
-                {
-                    let albums = collections
-                        .iter()
-                        .map(|collection| match collection {
-                            Collection::Album(key) => key.raw(),
-                            _ => unreachable!(),
-                        })
-                        .collect::<Vec<_>>();
-                    let read = ListRead::new(ListKind::Albums, None, LibraryField::TrackNumber);
-                    rows.extend(catalog.parent_order(connection, &read, &albums).await?);
+    selections: &[&MemberSelection],
+) -> LibraryResult<Vec<Vec<(TrackKey, Option<PlaylistEntryKey>)>>> {
+    enum Part {
+        Rows(Vec<(TrackKey, Option<PlaylistEntryKey>)>),
+        Read(usize),
+    }
+    let mut reads = Vec::new();
+    let mut parts = Vec::new();
+    for (group, selection) in selections.iter().enumerate() {
+        let mut pending = vec![*selection];
+        while let Some(next) = pending.pop() {
+            let rows = match next {
+                MemberSelection::Concat(selections) => {
+                    pending.extend(selections.iter().rev());
                     continue;
                 }
-                for collection in collections {
-                    rows.extend(
-                        catalog
-                            .members(connection, MemberRead::new(collection.clone()))
-                            .await?
-                            .into_iter()
-                            .map(|key| (key, None)),
-                    );
+                MemberSelection::Members { read, ranges: None } => {
+                    parts.push((group, Part::Read(reads.len())));
+                    reads.push(read.clone());
+                    continue;
                 }
-            }
-            MemberSelection::Keys { source, keys } => {
-                let snapshot = catalog.snapshot();
-                let slot = source.map(|source| snapshot.source_slot(source));
-                rows.extend(
+                MemberSelection::Members { read, ranges } => {
+                    let order = catalog
+                        .order_on(connection, &Read::Members(read.clone()))
+                        .await?;
+                    order_tracks(&order, ranges.as_deref())
+                }
+                MemberSelection::Parents {
+                    read,
+                    ranges,
+                    members,
+                } => {
+                    let order = catalog
+                        .order_on(connection, &Read::List(read.clone()))
+                        .await?;
+                    for key in parents(&order, ranges.as_deref()) {
+                        // Playlist folders hold no tracks of their own.
+                        if key >= 0 {
+                            parts.push((group, Part::Read(reads.len())));
+                            reads.push(MemberRead {
+                                collection: parent_collection(read, key),
+                                ..(**members).clone()
+                            });
+                        }
+                    }
+                    continue;
+                }
+                MemberSelection::Collections(collections) => {
+                    for collection in collections {
+                        parts.push((group, Part::Read(reads.len())));
+                        reads.push(MemberRead::new(collection.clone()));
+                    }
+                    continue;
+                }
+                MemberSelection::Keys { source, keys } => {
+                    let snapshot = catalog.snapshot();
+                    let slot = source.map(|source| snapshot.source_slot(source));
                     keys.iter()
                         .filter(|key| {
                             snapshot.tracks.get(key.raw()).is_some_and(|record| {
                                 slot.is_none_or(|slot| slot == Some(record.source))
                             })
                         })
-                        .map(|key| (*key, None)),
-                );
-            }
-            MemberSelection::Uris(uris) => rows.extend(
-                crate::read::track_keys_on(connection, uris)
+                        .map(|key| (*key, None))
+                        .collect()
+                }
+                MemberSelection::Uris(uris) => crate::read::track_keys_on(connection, uris)
                     .await?
                     .into_iter()
-                    .map(|key| (key, None)),
-            ),
-            MemberSelection::Objects { source, ids } => rows.extend(
-                catalog
+                    .map(|key| (key, None))
+                    .collect(),
+                MemberSelection::Objects { source, ids } => catalog
                     .track_keys_by_objects(connection, Some(*source), ids)
                     .await?
                     .into_iter()
-                    .map(|key| (TrackKey::from_raw(key), None)),
-            ),
-            MemberSelection::Entries(entries) => {
-                let found: Vec<(TrackKey, PlaylistEntryKey)> = sqlx::query_as("SELECT entry.track_key,entry.playlist_entry_key FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
-                    .bind(serde_json::to_string(entries.as_ref())?)
-                    .fetch_all(&mut *connection)
-                    .await?;
-                rows.extend(found.into_iter().map(|(key, entry)| (key, Some(entry))));
-            }
+                    .map(|key| (TrackKey::from_raw(key), None))
+                    .collect(),
+                MemberSelection::Entries(entries) => {
+                    let found: Vec<(TrackKey, PlaylistEntryKey)> = sqlx::query_as("SELECT entry.track_key,entry.playlist_entry_key FROM json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+                        .bind(serde_json::to_string(entries.as_ref())?)
+                        .fetch_all(&mut *connection)
+                        .await?;
+                    found
+                        .into_iter()
+                        .map(|(key, entry)| (key, Some(entry)))
+                        .collect()
+                }
+            };
+            parts.push((group, Part::Rows(rows)));
         }
     }
-    Ok(rows)
+    let mut read = catalog.member_tracks_on(connection, &reads).await?;
+    let mut groups = vec![Vec::new(); selections.len()];
+    for (group, part) in parts {
+        groups[group].extend(match part {
+            Part::Rows(rows) => rows,
+            Part::Read(index) => std::mem::take(&mut read[index]),
+        });
+    }
+    Ok(groups)
 }
 
 fn parent_collection(read: &ListRead, key: i64) -> Collection {
@@ -204,9 +233,10 @@ impl Catalog {
             return Ok(Vec::new());
         }
         let mut connection = self.acquire_loaded(cancellation).await?;
-        let mut keys = selected_tracks_on(self, &mut connection, selection)
+        let mut keys = selected_tracks_on(self, &mut connection, &[selection])
             .await?
             .into_iter()
+            .flatten()
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
         keys.truncate(limit.unwrap_or(usize::MAX));

@@ -192,13 +192,6 @@ impl ListRead {
             activity: false,
         }
     }
-
-    pub fn selection(self) -> MemberSelection {
-        MemberSelection::Parents {
-            read: self,
-            ranges: None,
-        }
-    }
 }
 
 pub(crate) fn selection_ranges(

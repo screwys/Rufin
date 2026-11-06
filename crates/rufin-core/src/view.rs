@@ -216,6 +216,16 @@ impl SourceOwner {
             .await
     }
 
+    /// The `ranges` of a list's rows for `scope`, each row as route_selection reads its page.
+    pub fn list_selection(
+        &self,
+        read: ListRead,
+        ranges: Vec<Range<usize>>,
+        scope: SelectionScope,
+    ) -> MemberSelection {
+        rows_selection(read, Some(ranges), &self.shared.settings.committed(), scope)
+    }
+
     /// Everything `route` lists, in the order and filter `options` ask, without reading its rows
     /// or header. None when the route lists nothing or its collection is gone or empty.
     async fn selection(
@@ -239,7 +249,9 @@ impl SourceOwner {
                 }
                 read.selection()
             }
-            Plan::Rows(Read::List(read) | Read::AlbumTracks(read)) => read.selection(),
+            Plan::Rows(Read::List(read) | Read::AlbumTracks(read)) => {
+                rows_selection(read, None, &settings, SelectionScope::Page)
+            }
             Plan::Releases { read, .. } => match artist_tracks(&read, &settings) {
                 Some(tracks) => tracks.selection(),
                 None => return Ok(None),
@@ -1282,7 +1294,12 @@ impl View {
                 read: Read::List(read) | Read::AlbumTracks(read),
                 ..
             }
-            | Body::Releases { read, .. } => Some(read.clone().selection()),
+            | Body::Releases { read, .. } => Some(rows_selection(
+                read.clone(),
+                None,
+                &self.settings,
+                SelectionScope::Page,
+            )),
             _ => None,
         }
     }
@@ -1689,15 +1706,14 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
     else {
         return None;
     };
-    let list = settings.library_list(LibraryListKey::ArtistTracks);
-    let mut read = MemberRead::new(Collection::Artist {
-        key: *artist,
-        album_artist: *album_artist,
-    });
-    read.sort = Some(list.sort_key);
-    read.descending = list.descending;
+    let mut read = artist_members(
+        Collection::Artist {
+            key: *artist,
+            album_artist: *album_artist,
+        },
+        settings,
+    );
     read.folder = releases.folder;
-    read.activity = list.sort_key.activity_sensitive();
     let filtered = !releases.filter.trim().is_empty()
         || releases.favorites_only
         || release_class.is_some()
@@ -1706,6 +1722,52 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
             .is_some_and(|filters| filters.iter().any(|filter| !filter.trim().is_empty()));
     read.within = filtered.then(|| Box::new(releases.clone()));
     Some(read)
+}
+
+/// An artist's tracks in the Artist tracks list's saved order.
+fn artist_members(artist: Collection, settings: &Settings) -> MemberRead {
+    let list = settings.library_list(LibraryListKey::ArtistTracks);
+    let mut read = MemberRead::new(artist);
+    read.sort = Some(list.sort_key);
+    read.descending = list.descending;
+    read.activity = list.sort_key.activity_sensitive();
+    read
+}
+
+/// The `ranges` of a list's rows for `scope`, all of them when None, in the list's order:
+/// each row's collection as route_selection reads its page, in that page's saved order. A
+/// page reads them in the list's music folder; downloads in every music folder, except a
+/// smart playlist's.
+fn rows_selection(
+    read: ListRead,
+    ranges: Option<Vec<Range<usize>>>,
+    settings: &Settings,
+    scope: SelectionScope,
+) -> MemberSelection {
+    // Each row's collection takes the place of this one.
+    let row = Collection::Album(library::AlbumKey::from_raw(0));
+    let page = match read.kind {
+        ListKind::Albums | ListKind::ArtistAlbums { .. } => Route::AlbumDetail(String::new()),
+        ListKind::Artists { .. } => Route::ArtistDetail(String::new()),
+        ListKind::Genres => Route::GenreDetail(library::GenreKey::from_raw(0)),
+        ListKind::Moods => Route::MoodDetail(library::MoodKey::from_raw(0)),
+        ListKind::Playlists => Route::PlaylistDetail(library::PlaylistKey::from_raw(0)),
+        ListKind::SmartPlaylists { .. } => {
+            Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(0))
+        }
+    };
+    let mut members = match page {
+        Route::ArtistDetail(_) => artist_members(row, settings),
+        page => member_read(&page, None, &OpenOptions::default(), settings, row),
+    };
+    members.folder = read.folder.filter(|_| {
+        scope == SelectionScope::Page || matches!(read.kind, ListKind::SmartPlaylists { .. })
+    });
+    MemberSelection::Parents {
+        read,
+        ranges,
+        members: Box::new(members),
+    }
 }
 
 /// `context` tied to the order a client shows: `|result=` and its id.

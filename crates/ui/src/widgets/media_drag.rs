@@ -554,13 +554,25 @@ impl MediaDragSource {
                 .await?
                 .ok_or_else(gone),
             Self::Target { target } => target.selection(source, scope).await?.ok_or_else(gone),
-            Self::Targets { targets } => {
+            Self::Targets {
+                targets: CollectionTargets::Ready(targets),
+            } => {
                 let mut selections = Vec::new();
-                for target in targets.resolve(catalog).await? {
+                for target in targets {
                     selections.extend(target.selection(source, scope).await?);
                 }
                 Ok(library::MemberSelection::Concat(selections))
             }
+            Self::Targets {
+                targets: CollectionTargets::Parents(reads),
+            } => Ok(library::MemberSelection::Concat(
+                reads
+                    .iter()
+                    .map(|(read, ranges)| {
+                        source.list_selection(read.clone(), ranges.clone(), scope)
+                    })
+                    .collect(),
+            )),
         }
     }
 
