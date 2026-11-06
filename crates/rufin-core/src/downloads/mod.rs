@@ -787,10 +787,10 @@ pub fn download_subject_title(subject: &DownloadSubject) -> String {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn download_rule_title(rule: DownloadRule) -> String {
     localization::tr(match rule {
-        DownloadRule::EntireLibrary => "Entire Library",
-        DownloadRule::Favorites => "Favorites",
-        DownloadRule::AllPlaylists => "All Playlists",
-        DownloadRule::LatestFiveAlbums => "5 Latest Albums",
+        DownloadRule::EntireLibrary => localization::msgid("Entire Library"),
+        DownloadRule::Favorites => localization::msgid("Favorites"),
+        DownloadRule::AllPlaylists => localization::msgid("All Playlists"),
+        DownloadRule::LatestFiveAlbums => localization::msgid("5 Latest Albums"),
     })
 }
 
