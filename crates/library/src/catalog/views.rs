@@ -2199,7 +2199,7 @@ pub(crate) struct Views {
     downloaded: Vec<(([u64; 2], Option<u32>), Arc<Downloaded>)>,
     /// Most recently used last.
     orders: Vec<Order>,
-    /// Members of the smart playlists pages opened most recently, oldest first.
+    /// Members of the smart playlists open pages hold.
     opened: Vec<OpenedSmart>,
 }
 
@@ -2216,17 +2216,16 @@ impl Views {
     }
 }
 
-/// A smart playlist's members as of the time a page opened it. The page keeps that time, so
-/// plays and syncs while it stays open don't move its rows; the next visit evaluates again.
+/// A smart playlist's members as of the time a page opened it. The page keeps that time and
+/// its order holds them, so plays and syncs while it stays open don't move its rows; they last
+/// while an order holds them, and the next visit evaluates again.
 struct OpenedSmart {
     key: i64,
     now: i64,
     folder: Option<crate::FolderKey>,
     definition: SmartPlaylistDefinition,
-    tracks: Arc<Vec<i64>>,
+    tracks: std::sync::Weak<Vec<i64>>,
 }
-
-const OPENED_SMART: usize = 8;
 
 /// What an order depends on besides catalog records: favorites and ratings, plays, downloads,
 /// and playlists.
@@ -2663,6 +2662,7 @@ impl Catalog {
             stamp,
             members,
             counts,
+            opened: inputs.smart.clone(),
         }));
         if masked(read_at, read.depends()) == stamp {
             self.cache(&order, stamps);
@@ -2757,19 +2757,17 @@ impl Catalog {
                                     evaluated(&self.snapshot(), &definition, &inputs, folder);
                                 let mut views = self.views();
                                 views.opened.retain(|opened| {
-                                    (opened.key, opened.now, opened.folder)
-                                        != (key.raw(), *now, folder)
+                                    opened.tracks.strong_count() > 0
+                                        && (opened.key, opened.now, opened.folder)
+                                            != (key.raw(), *now, folder)
                                 });
                                 views.opened.push(OpenedSmart {
                                     key: key.raw(),
                                     now: *now,
                                     folder,
                                     definition,
-                                    tracks: tracks.clone(),
+                                    tracks: Arc::downgrade(&tracks),
                                 });
-                                if views.opened.len() > OPENED_SMART {
-                                    views.opened.remove(0);
-                                }
                                 tracks
                             }
                         };
@@ -2812,7 +2810,7 @@ impl Catalog {
                 (opened.key, opened.now, opened.folder) == (key, now, folder)
                     && opened.definition == *definition
             })
-            .map(|opened| opened.tracks.clone())
+            .and_then(|opened| opened.tracks.upgrade())
     }
 
     /// Listens in the windows these smart playlists read, by track.

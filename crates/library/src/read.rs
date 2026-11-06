@@ -48,6 +48,8 @@ pub(crate) struct OrderInner {
     pub(crate) members: Members,
     /// Albums of an artist by release class, counted at build.
     pub(crate) counts: Option<[usize; 6]>,
+    /// The members of a smart playlist as its page opened it, which last while it holds them.
+    pub(crate) opened: Option<Arc<Vec<i64>>>,
 }
 
 /// An order's rows. Keys are SQLite rowids, which fit in 32 bits like the records' own.
@@ -112,7 +114,8 @@ impl OrderInner {
             }
             Read::Folders(read) => read.filter.len(),
         };
-        size_of::<Self>() + read + self.members.bytes()
+        let opened = self.opened.as_ref().map_or(0, |tracks| tracks.len() * 8);
+        size_of::<Self>() + read + self.members.bytes() + opened
     }
 }
 

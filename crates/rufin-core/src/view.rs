@@ -94,13 +94,13 @@ pub struct View {
 }
 
 enum Body {
-    /// Lists, detail tracks, History, playlist entries and albums with their tracks. An album
-    /// page holds where each disc starts, the Albums list in Detail layout where each album does.
+    /// Lists, detail tracks, History, playlist entries and albums with their tracks, in the
+    /// order they opened with: it keeps a Smart Playlist page's members. An album page holds
+    /// where each disc starts.
     Rows {
         read: Read,
-        len: usize,
+        order: library::Order,
         discs: Vec<(u32, i64)>,
-        spans: Option<Arc<[AlbumSpan]>>,
     },
     /// An artist's releases, counted per release group as filtered and unfiltered, and the
     /// artist's favorite tracks when the page shows them.
@@ -823,12 +823,7 @@ async fn read(
                 }) => catalog.disc_sections(&order),
                 _ => Vec::new(),
             };
-            view.body = Body::Rows {
-                len: order.len(),
-                discs,
-                spans: order.album_spans().cloned(),
-                read,
-            };
+            view.body = Body::Rows { order, discs, read };
             (fetched.header, range.start, fetched.rows, None)
         }
         Plan::Releases {
@@ -1382,7 +1377,7 @@ impl View {
     /// How many rows it lists; folders count their child folders and then their tracks.
     pub fn len(&self) -> usize {
         match &self.body {
-            Body::Rows { len, .. } => *len,
+            Body::Rows { order, .. } => order.len(),
             Body::Releases { counts, .. } => counts.iter().sum(),
             Body::Folders {
                 folder_len,
@@ -1618,7 +1613,7 @@ impl View {
     /// Where each album of the Albums list in Detail layout starts.
     pub fn album_spans(&self) -> Option<&Arc<[AlbumSpan]>> {
         match &self.body {
-            Body::Rows { spans, .. } => spans.as_ref(),
+            Body::Rows { order, .. } => order.album_spans(),
             _ => None,
         }
     }
