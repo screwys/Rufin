@@ -120,7 +120,7 @@ internal class BrowsePage(
     /** `item` showing the favorites, ratings and downloads committed since the page read it. */
     @Composable
     fun shown(item: BrowseItem): BrowseItem {
-        val key = shownKey(item.row)
+        val key = shownKey(item)
         DisposableEffect(key, item) {
             hold(listOf(item))
             onDispose {}
@@ -129,20 +129,23 @@ internal class BrowsePage(
         return if (revision > item.downloads) remember(item, row) { item.copy(row = row) } else item
     }
 
-    private fun shownKey(row: AndroidBrowseRow) = "${row.sourceId.orEmpty()}:${row.key}"
+    /** A row's identity among those the page holds; a search result shows its own fields, so it
+     * is held apart from the page's row of the same item. */
+    private fun shownKey(item: BrowseItem) =
+        "${if (item.searchResult) "search:" else ""}${item.row.sourceId.orEmpty()}:${item.row.key}"
 
     /** Holds `items`, rows the page read or shows, so committed changes patch them. A row read
      * later replaces one read earlier. */
     fun hold(items: List<BrowseItem>) = synchronized(held) {
         for (item in items) {
-            val key = shownKey(item.row)
+            val key = shownKey(item)
             if ((held[key]?.downloads ?: -1) <= item.downloads) held[key] = item
         }
     }
 
     /** The row `item` shows now: its patch when one came since it was read. */
     private fun current(item: BrowseItem): AndroidBrowseRow =
-        patched[shownKey(item.row)]?.takeIf { it.first > item.downloads }?.second ?: item.row
+        patched[shownKey(item)]?.takeIf { it.first > item.downloads }?.second ?: item.row
 
     /** Shows a committed change in the header and the rows the page holds, through core:
      * favorites and ratings at once, and downloads once read, into each row as it shows then, so
@@ -158,7 +161,7 @@ internal class BrowsePage(
             for (shown in showing.states) {
                 val index = shown.index.toInt() - offset
                 if (index < 0) { if (summary === header) summary = header!!.copy(row = shown.row) }
-                else patched[shownKey(items[index].row)] = revision to shown.row
+                else patched[shownKey(items[index])] = revision to shown.row
             }
         }
         val downloads = showing.downloads ?: return
@@ -172,7 +175,7 @@ internal class BrowsePage(
                         library.takeDownloads(current.row, shown.row)?.let { summary = current.copy(row = it) }
                         continue
                     }
-                    val key = shownKey(items[index].row)
+                    val key = shownKey(items[index])
                     val item = synchronized(held) { held[key] } ?: continue
                     val patch = patched[key]?.takeIf { it.first > item.downloads }
                     val merged = library.takeDownloads(patch?.second ?: item.row, shown.row) ?: continue
