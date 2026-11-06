@@ -505,7 +505,8 @@ pub(crate) async fn restore_record_on(
             object_id,
             mut link,
         } => {
-            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists playlist LEFT JOIN sources source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2")
+            // A Rufin playlist a release kept under a source is restored without one.
+            link.playlist = sqlx::query_scalar("SELECT playlist_key FROM main.playlists WHERE object_id=?2 AND (owner='rufin' OR source_key IS (SELECT source_key FROM sources WHERE object_id=?1))")
                 .bind(source_id).bind(object_id).fetch_one(&mut *connection).await?;
             save_link_on(connection, &link).await?;
         }

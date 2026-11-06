@@ -1481,12 +1481,15 @@ pub(crate) async fn write_playlist_artwork(
         .as_deref()
         .map(crate::normalize_artwork_binding)
         .transpose()?;
+    // The binding names the matched playlist's own source: a restored Rufin playlist has none.
+    let source: Option<Option<String>> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT (SELECT object_id FROM sources WHERE source_key=playlists.source_key) FROM main.playlists WHERE {matched}")))
+        .bind(&image.object_id).bind(&image.source_id).fetch_optional(write.connection().await?).await?;
     let binding = |smart| {
         stored.clone().or_else(|| {
             revision.as_ref().map(|revision| {
                 crate::artwork::playlist_binding(
                     smart,
-                    image.source_id.clone(),
+                    source.clone().flatten(),
                     image.object_id.clone(),
                     revision.clone(),
                 )
