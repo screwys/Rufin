@@ -157,18 +157,17 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 }
 
-/// The configured sources or the selection changed. Pages and pins read a new source or music
-/// folder from the change that follows it (`Changed::scope`), which a selection made before
-/// this client subscribed never sends; the search reads once, from whichever installs it.
+/// The configured sources or the selection changed. Pages, pins and the playlist picker read a
+/// new source or music folder from the change that follows it (`Changed::scope`), which a
+/// selection made before this client subscribed never sends; the search reads once, from
+/// whichever installs it. Releasing the selection is followed by no change.
 fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
     match shell.products.source.selected_library() {
         Some(selected) => {
-            if !install_selected(shell, selected) {
-                shell.refresh_playlist_picker();
-            }
+            install_selected(shell, selected);
             if !shell.startup.route_revealed.get()
                 && !shell.source.operation.borrow().blocks_library()
             {
@@ -215,22 +214,20 @@ fn release_selected_source(shell: &Rc<Shell>) {
 }
 
 /// Makes `selected` the selection here: a new session for another source or music folder,
-/// whose dialogs close with the old one, and the search's. Whether it was another.
-fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) -> bool {
+/// whose dialogs close with the old one, and the search's.
+fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) {
     shell.search_session.set_selected(Some(selected.clone()));
-    let changed = !rufin_core::runtime::SelectedLibrary::same(
+    if !rufin_core::runtime::SelectedLibrary::same(
         shell.selected_library().as_deref(),
         Some(&selected),
         true,
-    );
-    if changed {
+    ) {
         shell
             .selected_ui
             .install(super::selected_ui::SelectedUiSession::new(selected));
     } else if let Some(mut session) = shell.selected_ui.session_mut() {
         session.library = selected;
     }
-    changed
 }
 
 fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
