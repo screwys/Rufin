@@ -15,6 +15,8 @@ pub struct AndroidPlaylistChoices {
 
 #[uniffi::export]
 impl AndroidLibrary {
+    /// The playlists Add to Playlist offers, or with `folder_kind` the playlist folders of that
+    /// kind Add to folder offers, as GTK lists them, whose names hold `filter`.
     pub async fn playlist_choices(
         &self,
         filter: String,
@@ -22,53 +24,55 @@ impl AndroidLibrary {
         offset: u64,
         limit: u32,
     ) -> Result<AndroidPlaylistChoices, AndroidError> {
-        let selected = self.source.selected_library();
-        let mut read = library::ListRead::new(
-            if folder_kind == Some(true) {
-                library::ListKind::SmartPlaylists {
-                    now: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(error)?
-                        .as_secs() as i64,
-                }
-            } else {
-                library::ListKind::Playlists
-            },
-            selected.as_ref().map(|selected| selected.source_key),
-            library::LibraryField::Title,
-        );
-        // Smart playlists count in the music folder; the folder does not filter playlists.
-        let list = if folder_kind == Some(true) {
-            rufin_core::route::Route::SmartPlaylists
-        } else {
-            rufin_core::route::Route::Playlists
-        };
-        read.folder = rufin_core::view::Scope::of(&list, library::SearchMode::Title)
-            .folder(selected.as_ref());
-        read.filter = filter;
-        read.playlist_scope = if folder_kind.is_some() {
-            library::PlaylistScope::Folders
-        } else {
-            library::PlaylistScope::All
-        };
+        let source = self
+            .source
+            .selected_library()
+            .map(|selected| selected.source_key);
         let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
-                let order = catalog
-                    .order(&library::Read::List(read), &cancel)
-                    .await
-                    .map_err(error)?;
+                let filter = filter.trim().to_lowercase();
+                let kept = |name: &str| name.to_lowercase().contains(&filter);
                 let offset = usize::try_from(offset).map_err(error)?;
-                let rows = catalog
-                    .rows(&order, offset..offset + limit as usize, true, &cancel)
-                    .await
-                    .map_err(error)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
-                let count = order.len() as u64;
-                Ok(AndroidPlaylistChoices { count, rows })
+                let window = offset..offset.saturating_add(limit as usize);
+                let (count, rows) = match folder_kind {
+                    Some(smart) => {
+                        let folders = catalog
+                            .playlist_folder_choices(smart)
+                            .into_iter()
+                            .filter(|(_, name)| kept(name))
+                            .map(|(key, _)| library::Item::PlaylistFolder(key))
+                            .collect::<Vec<_>>();
+                        let shown = &folders
+                            [window.start.min(folders.len())..window.end.min(folders.len())];
+                        let rows = catalog.rows_of(shown, true, &cancel).await.map_err(error)?;
+                        (folders.len(), rows)
+                    }
+                    None => {
+                        let playlists = catalog
+                            .playlist_destinations(source, &cancel)
+                            .await
+                            .map_err(error)?
+                            .into_iter()
+                            .filter(|playlist| kept(&playlist.name))
+                            .collect::<Vec<_>>();
+                        let count = playlists.len();
+                        let rows = playlists
+                            .into_iter()
+                            .skip(window.start)
+                            .take(window.len())
+                            .map(|row| {
+                                library::Row::Playlist(library::PlaylistListRow::Playlist(row))
+                            })
+                            .collect();
+                        (count, rows)
+                    }
+                };
+                Ok(AndroidPlaylistChoices {
+                    count: count as u64,
+                    rows: rows.into_iter().map(Into::into).collect(),
+                })
             })
             .await
             .map_err(error)?
