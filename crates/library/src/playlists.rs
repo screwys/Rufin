@@ -187,7 +187,7 @@ impl Catalog {
                 cancellation,
             )
             .await?;
-        let filter = filter.trim().to_lowercase();
+        let holds = name_holds(filter);
         let writable = {
             let snapshot = self.snapshot();
             order
@@ -196,12 +196,7 @@ impl Catalog {
                 .filter(|item| match item {
                     crate::Item::Playlist(key) => {
                         snapshot.playlists.get(key.raw()).is_some_and(|playlist| {
-                            playlist.flags & WRITABLE != 0
-                                && (filter.is_empty()
-                                    || snapshot
-                                        .text(playlist.name)
-                                        .to_lowercase()
-                                        .contains(&filter))
+                            playlist.flags & WRITABLE != 0 && holds(snapshot.text(playlist.name))
                         })
                     }
                     _ => false,
@@ -1524,4 +1519,11 @@ pub(crate) async fn write_playlist_artwork(
         });
     }
     Ok(())
+}
+
+/// Whether a playlist or playlist folder name holds `filter`, ignoring case: the one filter of
+/// Add to Playlist and Add to folder choices.
+pub(crate) fn name_holds(filter: &str) -> impl Fn(&str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    move |name| filter.is_empty() || name.to_lowercase().contains(&filter)
 }

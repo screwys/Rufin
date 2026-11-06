@@ -192,7 +192,7 @@ fn populate_folder_picker(
             );
         }),
     );
-    update(shell.products.library.playlist_folder_choices(smart));
+    update(shell.products.library.playlist_folder_choices(smart, ""));
 }
 
 /// A playlist folder's Rename folder and Delete folder, as `menu` offers them.

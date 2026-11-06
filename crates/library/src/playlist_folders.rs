@@ -207,13 +207,18 @@ impl Catalog {
         write.commit().await?;
         Ok(())
     }
-    /// Playlist folders of one kind by name.
-    pub fn playlist_folder_choices(&self, smart: bool) -> Vec<(PlaylistFolderKey, String)> {
+    /// Playlist folders of one kind whose names hold `filter`, by name.
+    pub fn playlist_folder_choices(
+        &self,
+        smart: bool,
+        filter: &str,
+    ) -> Vec<(PlaylistFolderKey, String)> {
+        let holds = crate::playlists::name_holds(filter);
         let snapshot = self.snapshot();
         let mut folders = snapshot
             .playlist_folders
             .values()
-            .filter(|folder| folder.smart == smart)
+            .filter(|folder| folder.smart == smart && holds(&folder.name))
             .map(|folder| (folder.name.to_lowercase(), folder.key, folder.name.clone()))
             .collect::<Vec<_>>();
         folders.sort();

@@ -211,13 +211,34 @@ function renderPlaylistSubmenu(menu, target, signal) {
     ),
   );
   menu.lastChild.append(document.createTextNode(tr("New Playlist")));
-  let playlists = [],
+  // The playlists whose names hold the search, read from the library a window at a time as
+  // the list scrolls.
+  let shown = 0,
+    count = 0,
+    reading = null,
+    generation = 0,
     timer;
-  const show = () => {
+  const read = async (reset) => {
+    if (reset) generation += 1;
+    else if (reading || shown >= count) return;
+    const current = generation;
+    const offset = reset ? 0 : shown;
+    const params = new URLSearchParams({
+      ...(state.source ? { source: state.source } : {}),
+      q: search.value,
+      offset,
+      limit: 100,
+    });
+    reading = api(`/playlists/destinations?${params}`, "GET", undefined, signal);
+    const result = await reading.finally(() => {
+      if (current === generation) reading = null;
+    });
+    if (signal.aborted || current !== generation) return;
     const focused = document.activeElement?.dataset.playlistId;
-    const query = search.value.toLocaleLowerCase();
-    window.replaceChildren();
-    for (const row of playlists.filter((row) => row.name.toLocaleLowerCase().includes(query))) {
+    if (reset) window.replaceChildren();
+    count = result.count;
+    shown = offset + result.playlists.length;
+    for (const row of result.playlists) {
       const item = button(
         row.name,
         async () => {
@@ -239,15 +260,12 @@ function renderPlaylistSubmenu(menu, target, signal) {
   };
   search.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(show, 150);
+    timer = setTimeout(() => run(() => read(true)), 150);
   });
-  run(async () => {
-    const params = new URLSearchParams(state.source ? { source: state.source } : {});
-    const result = await api(`/playlists/destinations?${params}`, "GET", undefined, signal);
-    if (signal.aborted) return;
-    playlists = result.playlists;
-    show();
+  scroll.addEventListener("scroll", () => {
+    if (scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 48) run(() => read(false));
   });
+  run(() => read(true));
 }
 
 let editingPlaylist = null;

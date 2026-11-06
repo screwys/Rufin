@@ -32,16 +32,13 @@ impl AndroidLibrary {
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
-                let filter = filter.trim().to_lowercase();
-                let kept = |name: &str| name.to_lowercase().contains(&filter);
                 let offset = usize::try_from(offset).map_err(error)?;
                 let window = offset..offset.saturating_add(limit as usize);
                 let (count, rows) = match folder_kind {
                     Some(smart) => {
                         let folders = catalog
-                            .playlist_folder_choices(smart)
+                            .playlist_folder_choices(smart, &filter)
                             .into_iter()
-                            .filter(|(_, name)| kept(name))
                             .map(|(key, _)| library::Item::PlaylistFolder(key))
                             .collect::<Vec<_>>();
                         let shown = &folders

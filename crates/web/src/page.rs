@@ -396,7 +396,7 @@ pub(super) fn title(
         }
         (Route::PlaylistFolder { key, smart }, None) => products
             .library
-            .playlist_folder_choices(*smart)
+            .playlist_folder_choices(*smart, "")
             .into_iter()
             .find_map(|(folder, name)| (folder == *key).then_some(name))
             .unwrap_or_default(),

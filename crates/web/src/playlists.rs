@@ -45,8 +45,8 @@ pub(super) fn routes() -> Router<ProductHandles> {
         )
 }
 
-/// The playlists tracks can be added to, as the playlist list orders them: `source`'s and
-/// Rufin's own.
+/// The playlists tracks can be added to whose names hold `q`, as the playlist list orders
+/// them: `source`'s and Rufin's own. `limit` of them from `offset`, and how many there are.
 async fn destinations(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
@@ -55,18 +55,26 @@ async fn destinations(
         Some(source) => Some(catalog::scope(&products, source, None).await?.0),
         None => None,
     };
-    let playlists = products
+    let offset = number(&parameters, "offset", 0)?;
+    let limit = number(&parameters, "limit", 100)?;
+    let filter = parameters.get("q").map_or("", String::as_str);
+    let (count, rows) = products
         .library
-        .playlist_destinations(source, "", 0..usize::MAX, &library::ReadCancellation::new())
+        .playlist_destinations(
+            source,
+            filter,
+            offset..offset.saturating_add(limit),
+            &library::ReadCancellation::new(),
+        )
         .await
-        .map_err(internal)?
-        .1
+        .map_err(internal)?;
+    let playlists = rows
         .iter()
         .map(|row| json!({"id":row.playlist_key,"name":row.name}))
         .collect::<Vec<_>>();
     Ok(json_response(
         StatusCode::OK,
-        json!({"playlists":playlists}),
+        json!({"count":count,"playlists":playlists}),
     ))
 }
 

@@ -93,7 +93,7 @@
     "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
     "GET /api/folders/live?source=...": "Browse source folders. File sources use their saved directory inventory; other sources browse the server directly. You can set parent and folder. Returned track_ids match object_id in track results.",
     "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source, with playlist folders as rows of kind playlist-folder; a folder's playlists list under it with playlist_folder=ID. Set source to include its playlists too. Up to 128 at a time; you can also set q, sort and descending.",
-    "GET /api/playlists/destinations?source=...": "The playlists tracks can be added to, Rufin's own and the source's, as {playlists:[{id,name}]} in the playlist list's order.",
+    "GET /api/playlists/destinations?source=...&q=...&offset=0&limit=100": "The playlists tracks can be added to, Rufin's own and the source's, whose names hold q (any case), in the playlist list's order: limit of them from offset (default 100 from 0) and how many there are, as {count,playlists:[{id,name}]}.",
     "POST /api/playlists": {
       "name": "Evening",
       "source": null,
