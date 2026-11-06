@@ -72,9 +72,13 @@ pub(crate) fn table(kind: &str) -> (&'static str, &'static str) {
 }
 
 impl<'a> Observation<'a> {
-    /// A Write of this observation; inside a walk it carries the walk's seen set.
+    /// A Write of this observation; inside a walk it carries the walk's seen set. A walk that
+    /// a configuration change stopped writes nothing more, as if cancelled.
     pub(crate) async fn write(&self) -> LibraryResult<write::Write<'a>> {
         let mut write = self.catalog.write().await?;
+        if self.walk.is_some_and(|walk| !self.catalog.walk_open(walk)) {
+            return Err(LibraryError::ReadCancelled);
+        }
         write.walk = self.walk;
         Ok(write)
     }

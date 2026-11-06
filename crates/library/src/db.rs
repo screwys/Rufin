@@ -310,6 +310,10 @@ impl Catalog {
         walk
     }
 
+    pub(crate) fn walk_open(&self, walk: u64) -> bool {
+        self.walks().open.contains_key(&walk)
+    }
+
     pub(crate) fn close_walk(&self, walk: u64) {
         self.walks().open.remove(&walk);
     }
