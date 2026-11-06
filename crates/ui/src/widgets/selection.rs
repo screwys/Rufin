@@ -257,7 +257,7 @@ impl TrackSelectionSnapshot {
         shuffled: bool,
     ) {
         queue.play_selection(
-            rufin_core::playback::PlayRequest::ordered(self.input.clone(), 0, placement, false)
+            rufin_core::playback::PlayRequest::tracks(self.input.clone(), placement)
                 .shuffled(shuffled),
         );
     }
@@ -281,7 +281,7 @@ impl PlaylistEntrySelectionSnapshot {
         shuffled: bool,
     ) {
         queue.play_selection(
-            rufin_core::playback::PlayRequest::ordered(self.input.clone(), 0, placement, false)
+            rufin_core::playback::PlayRequest::tracks(self.input.clone(), placement)
                 .shuffled(shuffled),
         );
     }

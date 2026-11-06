@@ -113,13 +113,7 @@ impl AndroidLibrary {
             Ok(recent
                 .into_iter()
                 .map(|row| {
-                    let route = match row.kind {
-                        RecentSearchKind::Album => Some(Route::AlbumDetail(row.media_uri.clone())),
-                        RecentSearchKind::Artist => {
-                            Some(Route::ArtistDetail(row.media_uri.clone()))
-                        }
-                        RecentSearchKind::Track => None,
-                    };
+                    let route = Route::of_uri(&row.media_uri);
                     let shown = downloaded.contains(&row.media_uri);
                     let item = AndroidBrowseItem::Recent { row };
                     AndroidBrowseRow {

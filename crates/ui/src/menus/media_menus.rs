@@ -98,16 +98,11 @@ pub(crate) fn play_target(
 /// Downloads the tracks of `payload`, or removes their downloads.
 pub(crate) fn download(shell: &Shell, payload: &MediaDragSource, remove: bool) {
     let payload = payload.clone();
-    let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
         let result = async {
             let selection = payload
-                .track_selection(
-                    &catalog,
-                    &source,
-                    rufin_core::view::SelectionScope::Downloads,
-                )
+                .track_selection(&source, rufin_core::view::SelectionScope::Downloads)
                 .await?;
             let reply = if remove {
                 source.remove_download_selection(selection)
@@ -150,7 +145,7 @@ pub fn present_row_menu(
     position: Option<(f64, f64)>,
 ) {
     let menu = row_menu(shell, &row);
-    if let Some(clicked) = row_target(&row) {
+    if let Some(clicked) = PlayTarget::of_row(&row) {
         let selected = match &row {
             Row::Playlist(_) => present_playlist_selection_menu(
                 target,
@@ -220,18 +215,6 @@ fn row_menu(shell: &Shell, row: &Row) -> Menu {
     )
 }
 
-/// What a play of `row` plays: a track by key, a collection by the page it opens. Playlist
-/// folders play nothing.
-fn row_target(row: &Row) -> Option<PlayTarget> {
-    match row {
-        Row::Track(track) | Row::AlbumTrack { track, .. } => {
-            Some(PlayTarget::Track(track.track_key))
-        }
-        Row::Playlist(PlaylistListRow::Folder(_)) => None,
-        _ => Route::of_row(row).map(PlayTarget::Route),
-    }
-}
-
 fn present_row_surface(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
@@ -287,7 +270,7 @@ fn row_surface(
             },
         );
     }
-    let playback = row_target(row);
+    let playback = PlayTarget::of_row(row);
     match (place, &playback) {
         (Place::Queue(position, occurrence), Some(PlayTarget::Track(track))) => {
             append_queue_entry_actions(&surface, shell, menu, *track, position, occurrence);

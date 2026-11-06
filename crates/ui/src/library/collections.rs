@@ -596,15 +596,12 @@ pub fn track_collection_projection(
     let selection = TrackSelection::new(&model);
     shell.register_current_route_track_selection_owner(selection.clone());
     let play_model = model.clone();
-    let play_queue = shell.products.playback.clone();
-    let play_from_collection = Rc::new(move |position: u32| {
-        play_model.play(
-            &play_queue,
-            position as usize,
-            rufin_core::playback::QueuePlacement::Now,
-            false,
-        );
-    }) as Rc<dyn Fn(u32)>;
+    let play_products = shell.products.clone();
+    let play_from_collection = Rc::new(
+        move |position: u32, placement: rufin_core::playback::QueuePlacement| {
+            play_model.play(&play_products, position as usize, placement, false);
+        },
+    ) as Rc<dyn Fn(u32, rufin_core::playback::QueuePlacement)>;
     LibraryCollectionProjection::new(
         settings,
         Rc::new(move |layout| match layout {
@@ -690,7 +687,7 @@ pub fn track_grid(
     shell: &Rc<CatalogUi>,
     model: Rows<Row>,
     key: LibraryListKey,
-    play_from_collection: Rc<dyn Fn(u32)>,
+    play_from_collection: Rc<dyn Fn(u32, rufin_core::playback::QueuePlacement)>,
     selection: TrackSelection,
 ) -> CollectionGridProjection {
     let demand = model.clone();
@@ -721,7 +718,7 @@ pub fn track_grid(
                 Some(selection.clone()),
             )
         },
-        move |position, _: TrackRow| activate(position),
+        move |position, _: TrackRow| activate(position, rufin_core::playback::QueuePlacement::Now),
         move |position| bind_demand(position),
     )
 }
@@ -930,7 +927,7 @@ impl CatalogUi {
         rows: Vec<TrackRow>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let model = Rows::seeded("related", rows.into_iter().map(Row::Track).collect());
+        let model = Rows::seeded(rows.into_iter().map(Row::Track).collect());
         let selection = TrackSelection::new(&model);
         self.register_current_route_track_selection_owner(selection.clone());
         let table = track_table(
@@ -1010,11 +1007,11 @@ pub fn track_table(
     } else {
         shell.settings.current.borrow().library_list(key).row_fields
     };
-    let queue = shell.products.playback.clone();
+    let products = shell.products.clone();
     let play_model = model.clone();
     let activate = Box::new(move |position, _: TrackRow| {
         play_model.play(
-            &queue,
+            &products,
             position as usize,
             rufin_core::playback::QueuePlacement::Now,
             false,

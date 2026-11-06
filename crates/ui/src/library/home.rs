@@ -721,11 +721,11 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             track.title = item.title;
             let play_shell = Rc::clone(shell);
             let play_key = track.track_key;
-            let play = Rc::new(move |_| {
+            let play = Rc::new(move |_, placement| {
                 crate::menus::media_menus::play_target(
                     &play_shell.products,
                     &crate::widgets::selection::PlayTarget::Track(play_key),
-                    rufin_core::playback::QueuePlacement::Now,
+                    placement,
                     false,
                 );
             });

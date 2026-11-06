@@ -132,6 +132,7 @@ impl SearchSession {
 }
 
 impl SearchSession {
+    /// Plays a recent search result at `placement` as core plays it outside a page.
     pub fn play_recent(
         result: &RecentSearchResult,
         catalog: &Rc<CatalogUi>,
@@ -142,42 +143,28 @@ impl SearchSession {
             .update_app_settings("recent search", |settings| {
                 settings.remember_search_result(result.clone())
             });
-        if result.kind == RecentSearchKind::Track {
-            catalog
-                .products
-                .playback
-                .play_selection(rufin_core::playback::PlayRequest::uris(
-                    vec![result.media_uri.clone()],
-                    placement,
-                ));
-            return;
-        }
-        let source = MediaDragSource::LiveCollection {
-            media_uri: result.media_uri.clone(),
-            operations: catalog.products.source.clone(),
-        };
-        let queue = catalog.products.playback.clone();
-        let library = catalog.products.library.clone();
-        let owner = catalog.products.source.clone();
+        let media_uri = result.media_uri.clone();
+        let source = catalog.products.source.clone();
+        let playback = catalog.products.playback.clone();
         catalog.products.runtime.spawn(async move {
-            match source.play_request(&library, &owner).await {
-                Ok(mut request) => {
-                    request.placement = placement;
-                    queue.play_selection(request);
-                }
-                Err(error) => tracing::warn!(%error, "could not prepare recent search playback"),
+            let selected = source.selected_library();
+            let cancel = ReadCancellation::new();
+            match source
+                .play_uri(&media_uri, selected.as_ref(), placement, false, &cancel)
+                .await
+            {
+                Ok(Some(request)) => playback.play_selection(request),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%error, "could not play the recent search"),
             }
         });
     }
 
+    /// Opens a recent album or artist result once its source has it; a track plays.
     pub fn activate_recent(result: &RecentSearchResult, catalog: &Rc<CatalogUi>) {
-        let route = match result.kind {
-            RecentSearchKind::Track => {
-                Self::play_recent(result, catalog, QueuePlacement::Now);
-                return;
-            }
-            RecentSearchKind::Album => Route::AlbumDetail(result.media_uri.clone()),
-            RecentSearchKind::Artist => Route::ArtistDetail(result.media_uri.clone()),
+        let Some(route) = Route::of_uri(&result.media_uri) else {
+            Self::play_recent(result, catalog, QueuePlacement::Now);
+            return;
         };
         catalog
             .settings

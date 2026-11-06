@@ -1621,7 +1621,7 @@ fn play_album_track(shell: &CatalogUi, rows: &Rows<Row>, track: &TrackRow) {
         matches!(row, Row::AlbumTrack { track: shown, .. } if shown.track_key == track.track_key)
     }) {
         rows.play(
-            &shell.products.playback,
+            &shell.products,
             position as usize,
             QueuePlacement::Now,
             false,

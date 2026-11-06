@@ -96,6 +96,17 @@ impl Route {
         })
     }
 
+    /// The page the album or artist `uri` opens, by the kind it names; None for a track and
+    /// anything else. An artist opens in the track artist role, the role Search lists it in.
+    pub fn of_uri(uri: &str) -> Option<Self> {
+        let (_, kind, _) = library::source_entity_parts(uri)?;
+        Some(match kind.as_str() {
+            "album" => Self::AlbumDetail(uri.to_owned()),
+            "artist" => Self::ArtistDetail(uri.to_owned()),
+            _ => return None,
+        })
+    }
+
     /// The page an album row opens.
     pub fn of_album(album: &library::AlbumRow) -> Self {
         Self::AlbumDetail(album.media_uri.clone())

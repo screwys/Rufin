@@ -259,28 +259,14 @@ pub enum PlayTarget {
 }
 
 impl PlayTarget {
-    /// What `row` plays outside a page; None for a child folder.
+    /// What `row` plays outside a page; None for a child folder and a playlist folder, which
+    /// its menu offers no Play for.
     pub fn of_row(row: &Row) -> Option<Self> {
         match row {
             Row::Track(track) | Row::AlbumTrack { track, .. } => Some(Self::Track(track.track_key)),
+            Row::Playlist(library::PlaylistListRow::Folder(_)) => None,
             row => Route::of_row(row).map(Self::Route),
         }
-    }
-
-    /// What the track, album or artist `uri` plays outside a page, as the Catalog holds it.
-    pub fn of_uri(catalog: &Catalog, uri: &str) -> Option<Self> {
-        let route = match catalog.item(uri)? {
-            Item::Track { key, .. } | Item::AlbumTrack { key, .. } => {
-                return Some(Self::Track(key));
-            }
-            Item::Album(_) => Route::AlbumDetail(uri.to_owned()),
-            Item::Artist {
-                album_artist: true, ..
-            } => Route::AlbumArtistDetail(uri.to_owned()),
-            Item::Artist { .. } => Route::ArtistDetail(uri.to_owned()),
-            _ => return None,
-        };
-        Some(Self::Route(route))
     }
 
     /// The context id its plays carry before a page's filter and order; None for a track.
@@ -323,7 +309,8 @@ impl SourceOwner {
 
     /// What playing the track, album or artist `uri` outside a page queues, read in `selected`:
     /// a remembered search result or a listening overview row. An album or artist plays its
-    /// page whole; a track, also one the Catalog no longer holds, plays alone.
+    /// page whole, once its source has fetched it, since a live search result may not be held
+    /// whole yet; a track plays alone.
     pub async fn play_uri(
         &self,
         uri: &str,
@@ -332,19 +319,27 @@ impl SourceOwner {
         shuffled: bool,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<PlayRequest>> {
+        let Some(route) = Route::of_uri(uri) else {
+            return Ok(Some(
+                PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
+            ));
+        };
         tokio::select! {
             () = self.shared.catalog.loaded() => {}
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
-        match PlayTarget::of_uri(&self.shared.catalog, uri) {
-            Some(target @ PlayTarget::Route(_)) => {
-                self.play_target(&target, selected, placement, shuffled, cancel)
-                    .await
-            }
-            _ => Ok(Some(
-                PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
-            )),
+        // Offline, the page plays what the Catalog holds of it.
+        if let Err(error) = self.fetch_collection(uri).await {
+            tracing::warn!(%error, "could not fetch the collection to play");
         }
+        self.play_target(
+            &PlayTarget::Route(route),
+            selected,
+            placement,
+            shuffled,
+            cancel,
+        )
+        .await
     }
 
     /// The tracks `target` holds for `scope`, read in `selected`. None when it holds nothing.

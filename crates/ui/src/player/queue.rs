@@ -418,11 +418,10 @@ fn enqueue_media_drop(
         queue.reorder(selection, target);
         return true;
     }
-    let catalog = window.products.library.clone();
     let owner = window.products.source.clone();
     window.products.runtime.spawn(async move {
         let Ok(input) = source
-            .track_selection(&catalog, &owner, rufin_core::view::SelectionScope::Page)
+            .track_selection(&owner, rufin_core::view::SelectionScope::Page)
             .await
         else {
             return;

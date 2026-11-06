@@ -250,7 +250,7 @@ fn playlist_entry_table(
         .row_fields;
     let column_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.products.playback.clone();
+    let products = shell.products.clone();
     let table = dynamic_collection_table(
         shell,
         LibraryListKey::PlaylistTracks,
@@ -262,7 +262,7 @@ fn playlist_entry_table(
         false,
         Some(Box::new(move |position, _: TrackRow| {
             activate_model.play(
-                &queue,
+                &products,
                 position as usize,
                 rufin_core::playback::QueuePlacement::Now,
                 false,
@@ -861,7 +861,7 @@ fn playlist_entry_grid(
         .grid_fields;
     let cell_shell = Rc::clone(shell);
     let activate_model = model.clone();
-    let queue = shell.products.playback.clone();
+    let products = shell.products.clone();
     collection_grid_with_selection_and_demand(
         model.list_model(),
         Some(selection.selection_model()),
@@ -871,7 +871,7 @@ fn playlist_entry_grid(
         },
         move |position, _: TrackRow| {
             activate_model.play(
-                &queue,
+                &products,
                 position as usize,
                 rufin_core::playback::QueuePlacement::Now,
                 false,

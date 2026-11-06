@@ -1563,11 +1563,17 @@ impl SourceOwner {
     }
 
     pub fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, catalog| async move {
-            let source = owner.media_client(&media_uri).await?;
-            let result = source.prepare_collection(&catalog, &media_uri).await;
-            result.map_err(string_error)
-        })
+        self.reply(move |owner, _| async move { owner.fetch_collection(&media_uri).await })
+    }
+
+    /// Fetches the album or artist `media_uri` whole from its source, which a live search
+    /// result may not be held as yet.
+    pub(crate) async fn fetch_collection(&self, media_uri: &str) -> Result<(), String> {
+        self.media_client(media_uri)
+            .await?
+            .prepare_collection(&self.shared.catalog, media_uri)
+            .await
+            .map_err(string_error)
     }
 }
 
@@ -1647,15 +1653,9 @@ impl SourceOwner {
             let configuration = owner
                 .configuration(&source_id)
                 .ok_or_else(source_access_unavailable)?;
-            let page = match catalog.item(&media_uri) {
-                Some(library::Item::Artist { .. }) if album_artist => {
-                    crate::route::Route::AlbumArtistDetail(media_uri.clone())
-                }
-                Some(library::Item::Artist { .. }) => {
-                    crate::route::Route::ArtistDetail(media_uri.clone())
-                }
-                _ => crate::route::Route::AlbumDetail(media_uri.clone()),
-            };
+            // Both artist roles read in one scope.
+            let page =
+                crate::route::Route::of_uri(&media_uri).ok_or_else(source_access_unavailable)?;
             let folder = crate::view::Scope::of(&page).folder(owner.selected_library().as_ref());
             let (first, last) = catalog
                 .collection_source_path_bounds(&media_uri, album_artist, folder)

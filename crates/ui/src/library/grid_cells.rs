@@ -641,7 +641,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
     pub fn new(
         shell: &Rc<CatalogUi>,
         fields: &[LibraryField],
-        play: Rc<dyn Fn(u32)>,
+        play: Rc<dyn Fn(u32, QueuePlacement)>,
         field: Rc<dyn Fn(u32, &T, LibraryField) -> DetailLinks>,
         selection: Option<TrackSelection>,
     ) -> Self {
@@ -674,28 +674,14 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                 }
             },
         );
-        let play_now = Rc::clone(&play);
-        let play_position = Rc::clone(&position);
-        play_now_button.connect_clicked(move |_| play_now(play_position.get()));
         for (button, placement) in [
+            (&play_now_button, QueuePlacement::Now),
             (&play_next, QueuePlacement::Next),
             (&play_last, QueuePlacement::Last),
         ] {
-            let action_shell = Rc::downgrade(shell);
-            let action_current = Rc::clone(&current);
-            button.connect_clicked(move |_| {
-                if let (Some(shell), Some(row)) = (
-                    action_shell.upgrade(),
-                    action_current.borrow().as_ref().cloned(),
-                ) {
-                    shell.products.playback.play_selection(
-                        rufin_core::playback::PlayRequest::track(
-                            row.track_key().expect("catalog song key"),
-                            placement,
-                        ),
-                    );
-                }
-            });
+            let play = Rc::clone(&play);
+            let position = Rc::clone(&position);
+            button.connect_clicked(move |_| play(position.get(), placement));
         }
         install_grid_favorite(shell, &current, &favorite, |row| {
             FavoriteTarget::Track(row.media_uri().to_string())

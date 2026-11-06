@@ -321,10 +321,6 @@ impl MediaDragPreviewBinding {
 
 #[derive(Clone)]
 pub enum MediaDragSource {
-    LiveCollection {
-        media_uri: String,
-        operations: rufin_core::runtime::source::SourceHandle,
-    },
     Target {
         target: PlayTarget,
     },
@@ -526,7 +522,6 @@ impl MediaDragSource {
     /// The tracks it holds for `scope`; a collection that holds nothing adds none.
     pub async fn track_selection(
         &self,
-        catalog: &library::Catalog,
         source: &rufin_core::runtime::SourceHandle,
         scope: rufin_core::view::SelectionScope,
     ) -> Result<library::MemberSelection, String> {
@@ -539,15 +534,6 @@ impl MediaDragSource {
             Self::Selection(TrackSelectionSnapshot { input, .. })
             | Self::PlaylistEntries(PlaylistEntrySelectionSnapshot { input, .. }) => {
                 Ok(input.clone())
-            }
-            Self::LiveCollection {
-                media_uri,
-                operations,
-            } => {
-                let target = prepare_live_collection(catalog, operations, media_uri).await?;
-                target_selection(source, &target, scope)
-                    .await?
-                    .ok_or_else(gone)
             }
             Self::Target { target } => target_selection(source, target, scope)
                 .await?
@@ -580,7 +566,7 @@ impl MediaDragSource {
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
         let selection = self
-            .track_selection(catalog, source, rufin_core::view::SelectionScope::Page)
+            .track_selection(source, rufin_core::view::SelectionScope::Page)
             .await?;
         let title = rufin_core::downloads::selection_title(catalog, &selection)
             .unwrap_or_else(|| localization::tr("Selection"));
@@ -599,26 +585,15 @@ impl MediaDragSource {
         let placement = rufin_core::playback::QueuePlacement::Now;
         let gone = || "Nothing to play here".to_string();
         Ok(match self {
-            Self::LiveCollection {
-                media_uri,
-                operations,
-            } => {
-                let target = prepare_live_collection(catalog, operations, media_uri).await?;
-                target_request(source, &target, placement)
-                    .await?
-                    .ok_or_else(gone)?
-            }
             Self::Target { target } => target_request(source, target, placement)
                 .await?
                 .ok_or_else(gone)?,
             Self::Targets { targets } => {
                 PlayRequest::group(targets.requests(catalog, source).await?, placement)
             }
-            Self::Selection(selection) => {
-                PlayRequest::ordered(selection.input.clone(), 0, placement, false)
-            }
+            Self::Selection(selection) => PlayRequest::tracks(selection.input.clone(), placement),
             Self::PlaylistEntries(selection) => {
-                PlayRequest::ordered(selection.input.clone(), 0, placement, false)
+                PlayRequest::tracks(selection.input.clone(), placement)
             }
             Self::MediaUris(order)
             | Self::Queue {
@@ -626,21 +601,6 @@ impl MediaDragSource {
             } => PlayRequest::uris(order.to_vec(), placement),
         })
     }
-}
-
-/// The page a live search result opens, once its source has its collection.
-async fn prepare_live_collection(
-    catalog: &library::Catalog,
-    operations: &rufin_core::runtime::source::SourceHandle,
-    media_uri: &str,
-) -> Result<PlayTarget, String> {
-    operations
-        .prepare_collection(media_uri.to_string())
-        .recv()
-        .await
-        .map_err(|error| error.to_string())??;
-    PlayTarget::of_uri(catalog, media_uri)
-        .ok_or_else(|| "Collection is no longer available".to_string())
 }
 
 /// What playing `target` queues in the selected library, as core reads it.

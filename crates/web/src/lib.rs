@@ -355,14 +355,12 @@ async fn queue_play(
             .remember_media_uris(&uris)
             .await
             .map_err(internal)?;
-        rufin_core::playback::PlayRequest::ordered(
+        rufin_core::playback::PlayRequest::tracks(
             library::MemberSelection::Keys {
                 source: None,
                 keys: keys.into(),
             },
-            0,
             placement,
-            false,
         )
     } else {
         let token = match (input.page, list) {

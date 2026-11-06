@@ -61,15 +61,18 @@ impl PlayRequest {
     }
     /// One track, queued by `placement` with no context.
     pub fn track(key: library::TrackKey, placement: QueuePlacement) -> Self {
-        Self::ordered(
+        Self::tracks(
             library::MemberSelection::Keys {
                 source: None,
                 keys: vec![key].into(),
             },
-            0,
             placement,
-            false,
         )
+    }
+    /// What playing a selection of tracks queues: them in their order, from the first, with no
+    /// context.
+    pub fn tracks(selection: library::MemberSelection, placement: QueuePlacement) -> Self {
+        Self::ordered(selection, 0, placement, false)
     }
     pub fn captured(
         selection: library::MemberSelection,

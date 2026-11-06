@@ -195,7 +195,7 @@ fn folder_table(
             activate_shell.open_route(Route::Folders { path: next });
         }
         Row::Track(_) => activate_rows.play(
-            &activate_shell.products.playback,
+            &activate_shell.products,
             position as usize,
             QueuePlacement::Now,
             false,

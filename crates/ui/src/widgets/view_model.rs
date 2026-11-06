@@ -51,10 +51,8 @@ enum Source<T> {
         read: ViewReader<T>,
     },
     Pages(PageReader<T>),
-    /// Every row was given; nothing is read or dropped. Plays carry `context`.
-    Seeded {
-        context: &'static str,
-    },
+    /// Every row was given; nothing is read or dropped. Its rows play outside a page.
+    Seeded,
 }
 
 mod item_imp {
@@ -343,7 +341,7 @@ impl<T> State<T> {
     /// Drops the least recently used windows over the cap; windows on screen stay, so patches
     /// reach every row shown, and so does the one touched last.
     fn evict(&mut self) {
-        if matches!(self.source, Source::Seeded { .. }) {
+        if matches!(self.source, Source::Seeded) {
             return;
         }
         let mut index = 0;
@@ -361,7 +359,7 @@ impl<T> State<T> {
 
     /// Seeds rows from `first` and returns the positions filled.
     fn seed(&mut self, first: usize, rows: Vec<T>) -> Range<usize> {
-        let capacity = if matches!(self.source, Source::Seeded { .. }) {
+        let capacity = if matches!(self.source, Source::Seeded) {
             usize::MAX
         } else {
             WINDOW * READY_CAP - first % WINDOW
@@ -681,9 +679,9 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
         Self::with_source(Source::Pages(reader), len, Some(runtime))
     }
 
-    /// A list of every row it shows, whose plays carry `context`.
-    pub fn seeded(context: &'static str, rows: Vec<T>) -> Self {
-        let list = Self::with_source(Source::Seeded { context }, rows.len(), None);
+    /// A list of every row it shows, outside a page.
+    pub fn seeded(rows: Vec<T>) -> Self {
+        let list = Self::with_source(Source::Seeded, rows.len(), None);
         list.with(|state| state.seed(0, rows));
         list
     }
@@ -1025,7 +1023,7 @@ fn read_window<T: Send + 'static>(
             let reader = Rc::clone(reader);
             Box::new(move |range, cancel| reader(range, cancel))
         }
-        Source::Seeded { .. } => Box::new(|_, _| Box::pin(async { Ok(Vec::new()) })),
+        Source::Seeded => Box::new(|_, _| Box::pin(async { Ok(Vec::new()) })),
     }
 }
 
@@ -1109,79 +1107,48 @@ impl Rows<Row> {
                 rufin_core::view::context_base(view.route()),
                 format!("{}|result={order}", view.context_id()),
             ),
-            Source::Seeded { context } => {
-                ((*context).to_owned(), format!("{context}|result={order}"))
-            }
-            Source::Pages(_) => (String::new(), String::new()),
+            Source::Seeded | Source::Pages(_) => (String::new(), String::new()),
         })
     }
 
-    /// Plays row `index`: a track plays the list from it, a track of the Albums list in Detail
-    /// layout its album. Play Next and Play Later queue only the row.
+    /// Plays row `index` as core's row rule decides: on a page through [`View::play`], else
+    /// what [`PlayTarget::of_row`] plays outside a page.
+    ///
+    /// [`PlayTarget::of_row`]: rufin_core::view::PlayTarget::of_row
     pub fn play(
         &self,
-        playback: &Arc<rufin_core::playback::PlaybackOwner>,
+        products: &rufin_core::runtime::ProductHandles,
         index: usize,
         placement: rufin_core::playback::QueuePlacement,
         shuffled: bool,
     ) {
-        let order = self.order_id();
-        let source = self.with(|state| match &state.source {
-            Source::View {
-                view, favorites, ..
-            } => Some((Arc::clone(view), *favorites)),
-            _ => None,
-        });
-        let Some((view, favorites)) = source else {
-            let (_, context) = self.context_ids();
-            let keys = self.with(|state| {
-                state
-                    .ready
-                    .values()
-                    .filter_map(|row| match row.as_ref() {
-                        Row::Track(track) | Row::AlbumTrack { track, .. } => Some(track.track_key),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-            });
-            let Some(key) = keys.get(index).copied() else {
-                return;
-            };
-            playback.play_selection(
-                rufin_core::playback::PlayRequest::captured(
-                    library::MemberSelection::Keys {
-                        source: None,
-                        keys: keys.into(),
-                    },
-                    index,
-                    placement,
-                    false,
-                )
-                .with_context(context.into())
-                .with_anchor(key, None)
-                .shuffled(shuffled),
-            );
-            return;
-        };
         // The row as it shows anchors the play, wherever the current order has it.
         let Some(row) = self.ready(index) else {
             return;
         };
+        let Some((view, favorites)) = self.with(|state| match &state.source {
+            Source::View {
+                view, favorites, ..
+            } => Some((Arc::clone(view), *favorites)),
+            _ => None,
+        }) else {
+            if let Some(target) = rufin_core::view::PlayTarget::of_row(&row) {
+                crate::menus::media_menus::play_target(products, &target, placement, shuffled);
+            }
+            return;
+        };
+        let order = self.order_id();
         if favorites {
             if let Row::Track(track) = row.as_ref()
                 && let Some(request) =
                     view.play_favorite(track.track_key, index, placement, shuffled, Some(&order))
             {
-                playback.play_selection(request);
+                products.playback.play_selection(request);
             }
             return;
         }
-        use glib::subclass::prelude::ObjectSubclassIsExt;
-        let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
-            return;
-        };
-        let playback = Arc::clone(playback);
-        runtime.spawn(async move {
+        let playback = Arc::clone(&products.playback);
+        products.runtime.spawn(async move {
             let cancel = library::ReadCancellation::new();
             match view
                 .play(&row, index, placement, shuffled, Some(&order), &cancel)
