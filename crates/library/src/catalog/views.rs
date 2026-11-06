@@ -1443,15 +1443,14 @@ impl Context<'_> {
         totals
     }
 
-    /// Slots of the tracks still listed in `folder`, in the given order.
+    /// Slots of the tracks still held in `folder`, in the given order: a sync that hides one
+    /// changes an open page's members on its next visit.
     fn listed_tracks(&self, keys: &[i64], folder: Option<u32>) -> Vec<u32> {
         let tracks = &self.snapshot.tracks;
         keys.iter()
             .filter_map(|key| tracks.slot(*key))
             .filter(|slot| {
-                tracks
-                    .live(*slot)
-                    .is_some_and(|record| record.indexed() && self.in_source_folder(record, folder))
+                (tracks.live(*slot)).is_some_and(|record| self.in_source_folder(record, folder))
             })
             .collect()
     }
