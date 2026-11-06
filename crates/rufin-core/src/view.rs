@@ -316,7 +316,7 @@ impl SourceOwner {
             Plan::Rows(Read::List(read) | Read::AlbumTracks(read)) => {
                 rows_selection(read, None, &settings, SelectionScope::Page)
             }
-            Plan::Releases { read, .. } => match artist_tracks(&read, &settings) {
+            Plan::Releases { read, .. } => match artist_tracks(route, &read, &settings) {
                 Some(tracks) => tracks.selection(),
                 None => return Ok(None),
             },
@@ -374,10 +374,11 @@ impl SourceOwner {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64)
         });
-        let member = |collection| member_read(route, selected, options, settings, collection);
+        let folder = selected.and_then(|selected| selected.music_folder_key);
+        let member = |collection| member_read(route, folder, options, settings, collection);
         let list = |kind| {
             let mut read = ListRead::new(kind, source, sort);
-            read.folder = selected.and_then(|selected| selected.music_folder_key);
+            read.folder = folder;
             read.filter.clone_from(&options.filter);
             read.descending = descending;
             read.favorites_only = favorites_only(route, options);
@@ -446,17 +447,23 @@ impl SourceOwner {
                                 filters: None,
                             });
                             read.source = Some(artist_source);
+                            // The favorite tracks keep the page's search; its order is the
+                            // releases'.
                             let favorites = matches!(
                                 route,
                                 Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
                             )
                             .then(|| {
-                                let list = settings.library_list(LibraryListKey::ArtistTracks);
-                                let mut read = tracks;
-                                read.sort = Some(list.sort_key);
-                                read.descending = list.descending;
-                                read.favorites_only = true;
-                                read
+                                let page = if album_artist {
+                                    Route::AlbumArtistFavoriteTracks(uri.clone())
+                                } else {
+                                    Route::ArtistFavoriteTracks(uri.clone())
+                                };
+                                let options = OpenOptions {
+                                    filter: options.filter.clone(),
+                                    ..OpenOptions::default()
+                                };
+                                member_read(&page, folder, &options, settings, tracks.collection)
                             });
                             Plan::Releases {
                                 read: release_query(read, &options, &settings),
@@ -902,11 +909,7 @@ impl View {
             } => Some(*now),
             _ => self.options.smart_opened,
         };
-        let folder = self
-            .selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key);
-        (now, folder)
+        (now, self.music_folder())
     }
 
     /// What playing the page whole queues, as its header Play does: everything it lists in
@@ -919,7 +922,9 @@ impl View {
         result: Option<&str>,
     ) -> Option<PlayRequest> {
         let selection = match &self.body {
-            Body::Releases { read, .. } => artist_tracks(read, &self.settings)?.selection(),
+            Body::Releases { read, .. } => {
+                artist_tracks(&self.route, read, &self.settings)?.selection()
+            }
             _ => self.selection()?,
         };
         Some(play_whole(
@@ -1029,11 +1034,18 @@ impl View {
     fn page_members(&self, route: &Route, collection: Collection) -> MemberRead {
         member_read(
             route,
-            self.selected.as_ref(),
+            self.music_folder(),
             &OpenOptions::default(),
             &self.settings,
             collection,
         )
+    }
+
+    /// The music folder selected when it opened.
+    fn music_folder(&self) -> Option<library::FolderKey> {
+        self.selected
+            .as_ref()
+            .and_then(|selected| selected.music_folder_key)
     }
 
     /// What playing Home's section `index` queues: its rows in the order it shows them, from
@@ -1498,7 +1510,7 @@ impl View {
             {
                 let members = member_read(
                     &self.route,
-                    self.selected.as_ref(),
+                    self.music_folder(),
                     &options,
                     &settings,
                     members.collection.clone(),
@@ -1763,7 +1775,7 @@ fn play_whole(
 /// An artist page's own tracks on the releases it shows, in the Artist tracks list's saved
 /// order: what the page plays and downloads whole, rather than whole albums of its releases,
 /// which queue other artists of a compilation.
-fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead> {
+fn artist_tracks(route: &Route, releases: &ListRead, settings: &Settings) -> Option<MemberRead> {
     let ListKind::ArtistAlbums {
         artist,
         album_artist,
@@ -1773,9 +1785,24 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
     else {
         return None;
     };
+    let page = match route {
+        Route::ArtistDetail(uri)
+        | Route::AlbumArtistDetail(uri)
+        | Route::ArtistDiscography(uri)
+        | Route::AlbumArtistDiscography(uri)
+            if *album_artist =>
+        {
+            Route::AlbumArtistTracks(uri.clone())
+        }
+        Route::ArtistDetail(uri)
+        | Route::AlbumArtistDetail(uri)
+        | Route::ArtistDiscography(uri)
+        | Route::AlbumArtistDiscography(uri) => Route::ArtistTracks(uri.clone()),
+        _ => return None,
+    };
     let mut read = member_read(
-        &Route::ArtistTracks(String::new()),
-        None,
+        &page,
+        releases.folder,
         &OpenOptions::default(),
         settings,
         Collection::Artist {
@@ -1783,7 +1810,6 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
             album_artist: *album_artist,
         },
     );
-    read.folder = releases.folder;
     let filtered = !releases.filter.trim().is_empty()
         || releases.favorites_only
         || release_class.is_some()
@@ -1814,16 +1840,13 @@ fn rows_selection(
         }
     };
     // Each row's page reads its collection, which takes the place of this one.
-    let mut members = member_read(
+    let members = member_read(
         &page,
-        None,
+        read.folder.filter(|_| scope.keeps_folder(&page)),
         &OpenOptions::default(),
         settings,
         Collection::Album(library::AlbumKey::from_raw(0)),
     );
-    members.folder = read.folder.filter(|_| {
-        Scope::of(&page, library::SearchMode::Title) == Scope::Folder && scope.keeps_folder(&page)
-    });
     MemberSelection::Parents {
         read,
         ranges,
@@ -2114,10 +2137,11 @@ fn favorites_only(route: &Route, options: &OpenOptions) -> bool {
         )
 }
 
-/// How `route` reads the members of `collection`.
+/// How a page on `route` reads the members of `collection` with `options`, with `folder`
+/// selected: the one track read of every page, play and selection.
 fn member_read(
     route: &Route,
-    selected: Option<&SelectedLibrary>,
+    folder: Option<library::FolderKey>,
     options: &OpenOptions,
     settings: &Settings,
     collection: Collection,
@@ -2126,7 +2150,7 @@ fn member_read(
     let mut read = MemberRead::new(collection);
     read.sort = Some(sort);
     read.descending = descending;
-    read.folder = Scope::of(route, options.search_mode).folder(selected);
+    read.folder = folder.filter(|_| Scope::of(route, options.search_mode) == Scope::Folder);
     read.filter.clone_from(&options.filter);
     read.favorites_only = favorites_only(route, options);
     read.downloaded_only =
@@ -2135,7 +2159,7 @@ fn member_read(
     read
 }
 
-/// The tracks of a resolved folder.
+/// The tracks of a resolved folder: those the projection names, in the folder it names.
 fn folder_tracks(
     route: &Route,
     selected: &SelectedLibrary,
@@ -2143,13 +2167,13 @@ fn folder_tracks(
     options: &OpenOptions,
     settings: &Settings,
 ) -> MemberRead {
-    let (sort, descending, activity) = read_order(route, options, settings);
-    let mut read = projection.members(selected.source_key);
-    read.sort = Some(sort);
-    read.descending = descending;
-    read.filter.clone_from(&options.filter);
-    read.activity = activity;
-    read
+    member_read(
+        route,
+        projection.folder(),
+        options,
+        settings,
+        projection.collection(selected.source_key),
+    )
 }
 
 /// The sorts of the Tracks, Albums and Artists lists, which order search results.

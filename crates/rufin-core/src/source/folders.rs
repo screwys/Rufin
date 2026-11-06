@@ -13,18 +13,23 @@ pub enum FolderProjection {
 }
 
 impl FolderProjection {
-    pub fn members(&self, source: library::SourceKey) -> library::MemberRead {
-        let mut query = library::MemberRead::new(match self {
+    /// The tracks it lists: the live folder's own, or the source's in [`Self::folder`].
+    pub fn collection(&self, source: library::SourceKey) -> library::Collection {
+        match self {
             Self::Live { objects, .. } => library::Collection::Objects {
                 source,
                 ids: Arc::clone(objects),
             },
             Self::Cached(_) => library::Collection::Source(source),
-        });
-        if let Self::Cached(folder) = self {
-            query.folder = *folder;
         }
-        query
+    }
+
+    /// The cached folder whose tracks it lists.
+    pub fn folder(&self) -> Option<FolderKey> {
+        match self {
+            Self::Live { .. } => None,
+            Self::Cached(folder) => *folder,
+        }
     }
 
     pub fn live_folders<'a>(
