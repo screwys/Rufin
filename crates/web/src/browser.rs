@@ -159,14 +159,9 @@ impl<'a> Shown<'a> {
         let href = opens.as_ref().map_or_else(String::new, |token| {
             link(&HashMap::from([("page".to_owned(), token.json())]))
         });
-        // A track plays its list from it, anchored on the track and entry it shows; a Home
-        // track plays alone. A collection plays the page it opens.
+        // A track names its place on its list, anchored on the track and entry it shows, and
+        // core's row rule decides what that plays; a collection plays the page it opens.
         let play = match (&row, &opens) {
-            (Row::Track(track) | Row::AlbumTrack { track, .. }, _)
-                if list.route == rufin_core::route::Route::Home =>
-            {
-                json!({ "uris": [track.media_uri] })
-            }
             (Row::Track(track) | Row::AlbumTrack { track, .. }, _) => json!({
                 "page": list,
                 "index": index,

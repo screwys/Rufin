@@ -15,7 +15,7 @@ pub use records::{
 use library::{MemberSelection, ReadCancellation, Row};
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{PlayRequest, QueuePlacement};
-use rufin_core::view::{OpenOptions, SelectionScope, View, library_list_key};
+use rufin_core::view::{OpenOptions, PlayTarget, SelectionScope, View, library_list_key};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
     settings::{
@@ -100,6 +100,36 @@ fn caption(
             title: title.into(),
         })
     })
+}
+
+/// The caption of a play of `row`: a collection by its name, a track of the Albums list in
+/// Detail layout by its album, another track by the page `view` shows, titled `page_title`.
+fn row_caption(
+    row: &AndroidBrowseRow,
+    view: Option<&AndroidView>,
+    page_title: Option<String>,
+) -> Option<Arc<library::QueueContextTitle>> {
+    use rufin_core::settings::presentation::row_field;
+    match &row.item {
+        AndroidBrowseItem::Library {
+            row: Row::AlbumTrack { track, .. },
+        } => caption(
+            Some(CollectionTarget::Album(String::new())),
+            Some(track.album.clone()),
+        ),
+        AndroidBrowseItem::Library { row: Row::Track(_) } => caption(
+            view.and_then(|view| CollectionTarget::for_route(view.view.route())),
+            page_title,
+        ),
+        item => caption(
+            row.route.as_ref().and_then(CollectionTarget::for_route),
+            row.display_title.clone().or_else(|| match item {
+                AndroidBrowseItem::Library { row } => Some(row_field(row, LibraryField::Title)),
+                AndroidBrowseItem::Recent { row } => Some(row.title.clone()),
+                AndroidBrowseItem::Folder { .. } => None,
+            }),
+        ),
+    }
 }
 
 /// The album or artist a detail route shows, and whether it is read as an album artist.
@@ -297,34 +327,6 @@ impl AndroidView {
 
     /// Plays the page from its shown track `row` at `index`. A track of the Albums list in
     /// Detail layout plays its album, which `context_title` names.
-    pub fn play(
-        &self,
-        row: AndroidBrowseRow,
-        index: u64,
-        shuffled: bool,
-        context_title: Option<String>,
-    ) -> Result<(), AndroidError> {
-        let AndroidBrowseItem::Library { row } = row.item else {
-            return self.play_request(None);
-        };
-        let request = self.view.play(
-            &row,
-            usize::try_from(index).map_err(error)?,
-            QueuePlacement::Now,
-            shuffled,
-            None,
-        );
-        // A track of the Albums list in Detail layout plays its album.
-        let target = if self.view.album_spans().is_some() {
-            Some(CollectionTarget::Album(String::new()))
-        } else {
-            CollectionTarget::for_route(self.view.route())
-        };
-        self.play_request(
-            request.map(|request| request.with_context_title(caption(target, context_title))),
-        )
-    }
-
     /// Plays or queues the page whole, as its header does.
     pub fn play_all(
         &self,
@@ -607,41 +609,94 @@ impl AndroidLibrary {
         .await
     }
 
-    /// Plays or queues what `route` lists, as its page's header does: a collection row's card
-    /// and menu Play.
-    pub async fn play_route(
-        self: Arc<Self>,
-        route: Route,
+    /// Plays `row` at `placement` as core's row rule decides (decisions.md, "What a row plays
+    /// is one rule"): shown at `index` on `view`'s page, or outside a page when `view` is None.
+    /// A play of the page is captioned `page_title`.
+    pub async fn play(
+        &self,
+        row: AndroidBrowseRow,
+        view: Option<Arc<AndroidView>>,
+        index: u64,
         placement: QueuePlacement,
         shuffled: bool,
-        context_title: Option<String>,
+        page_title: Option<String>,
+    ) -> Result<(), AndroidError> {
+        let index = usize::try_from(index).map_err(error)?;
+        let caption = row_caption(&row, view.as_deref(), page_title);
+        let source = self.source.clone();
+        let selected = source.selected_library();
+        let request = run_read(&self.runtime, move |cancel| async move {
+            let selected = selected.as_ref();
+            match (&row.item, &view) {
+                (AndroidBrowseItem::Library { row }, Some(view)) => {
+                    view.view
+                        .play(row, index, placement, shuffled, None, &cancel)
+                        .await
+                }
+                (AndroidBrowseItem::Recent { row }, _) => {
+                    source
+                        .play_uri(&row.media_uri, selected, placement, shuffled, &cancel)
+                        .await
+                }
+                (AndroidBrowseItem::Library { row: library }, None) => {
+                    match PlayTarget::of_row(library) {
+                        Some(target) => {
+                            source
+                                .play_target(&target, selected, placement, shuffled, &cancel)
+                                .await
+                        }
+                        None => Ok(None),
+                    }
+                }
+                // A child folder plays the folder it opens.
+                (AndroidBrowseItem::Folder { .. }, _) => match row.route.clone() {
+                    Some(route) => {
+                        source
+                            .play_target(
+                                &PlayTarget::Route(route),
+                                selected,
+                                placement,
+                                shuffled,
+                                &cancel,
+                            )
+                            .await
+                    }
+                    None => Ok(None),
+                },
+            }
+            .map_err(error)
+        })
+        .await?
+        .ok_or_else(|| error("Nothing to play here"))?;
+        self.playback
+            .play_selection(request.with_context_title(caption));
+        Ok(())
+    }
+
+    /// Plays the track, album or artist `media_uri` of a listening overview, captioned `title`.
+    pub async fn play_uri(
+        &self,
+        media_uri: String,
+        title: Option<String>,
     ) -> Result<(), AndroidError> {
         let source = self.source.clone();
         let selected = source.selected_library();
-        let target = CollectionTarget::for_route(&route);
         let request = run_read(&self.runtime, move |cancel| async move {
             source
-                .play_route(
-                    &route,
+                .play_uri(
+                    &media_uri,
                     selected.as_ref(),
-                    &OpenOptions::default(),
-                    placement,
-                    shuffled,
+                    QueuePlacement::Now,
+                    false,
                     &cancel,
                 )
                 .await
                 .map_err(error)
         })
         .await?
-        .ok_or_else(|| error("Choose a collection"))?;
+        .ok_or_else(|| error("Nothing to play here"))?;
         self.playback
-            .play_selection(request.with_context_title(caption(target, context_title)));
+            .play_selection(request.with_context_title(caption(None, title)));
         Ok(())
-    }
-
-    /// Plays or queues one track.
-    pub fn play_track(&self, media_uri: String, placement: QueuePlacement, shuffled: bool) {
-        self.playback
-            .play_selection(PlayRequest::uris(vec![media_uri], placement).shuffled(shuffled));
     }
 }

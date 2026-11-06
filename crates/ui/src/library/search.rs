@@ -129,7 +129,7 @@ impl SearchItem {
         match self {
             Self::Track(row, _) => PlayTarget::Track(row.track_key),
             Self::Album(row) => PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
-            Self::Artist(row) => PlayTarget::Route(Route::ArtistDetail(row.media_uri.clone())),
+            Self::Artist(row) => PlayTarget::Route(Route::of_artist(row)),
         }
     }
 

@@ -33,25 +33,14 @@ fn search_rows(
         .collect()
 }
 
-/// Search results and the source a title search read them in.
-#[derive(uniffi::Record)]
-pub struct AndroidSearch {
-    pub rows: Vec<AndroidBrowseRow>,
-    pub source_id: Option<String>,
-}
-
 #[uniffi::export]
 impl AndroidLibrary {
     pub async fn search(
         &self,
         text: String,
         mode: library::SearchMode,
-    ) -> Result<AndroidSearch, AndroidError> {
+    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let selected = self.source.selected_library();
-        let source_id = selected
-            .as_ref()
-            .filter(|_| mode == library::SearchMode::Title)
-            .map(|selected| selected.source_id.to_string());
         let source = self.source.clone();
         let fields = {
             let settings = self.settings.load();
@@ -75,10 +64,7 @@ impl AndroidLibrary {
                 .await
                 .map_err(error)?;
             let results = opened.view.search_results().cloned().unwrap_or_default();
-            Ok(AndroidSearch {
-                rows: search_rows(results, fields),
-                source_id,
-            })
+            Ok(search_rows(results, fields))
         })
         .await
     }

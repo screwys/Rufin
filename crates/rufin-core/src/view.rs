@@ -228,7 +228,121 @@ impl SelectionScope {
     }
 }
 
+/// What activating a row outside a page plays, by the one rule (decisions.md, "What a row
+/// plays is one rule", 2026-11-06): a collection row plays its page whole, as that page's header
+/// Play does; a track plays only itself. A track row on a page plays through [`View::play`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlayTarget {
+    Route(Route),
+    Track(library::TrackKey),
+}
+
+impl PlayTarget {
+    /// What `row` plays outside a page; None for a child folder.
+    pub fn of_row(row: &Row) -> Option<Self> {
+        match row {
+            Row::Track(track) | Row::AlbumTrack { track, .. } => Some(Self::Track(track.track_key)),
+            row => Route::of_row(row).map(Self::Route),
+        }
+    }
+
+    /// What the track, album or artist `uri` plays outside a page, as the Catalog holds it.
+    pub fn of_uri(catalog: &Catalog, uri: &str) -> Option<Self> {
+        let route = match catalog.item(uri)? {
+            Item::Track { key, .. } | Item::AlbumTrack { key, .. } => {
+                return Some(Self::Track(key));
+            }
+            Item::Album(_) => Route::AlbumDetail(uri.to_owned()),
+            Item::Artist {
+                album_artist: true, ..
+            } => Route::AlbumArtistDetail(uri.to_owned()),
+            Item::Artist { .. } => Route::ArtistDetail(uri.to_owned()),
+            _ => return None,
+        };
+        Some(Self::Route(route))
+    }
+
+    /// The context id its plays carry before a page's filter and order; None for a track.
+    pub fn context(&self) -> Option<String> {
+        match self {
+            Self::Route(route) => Some(context_base(route)),
+            Self::Track(_) => None,
+        }
+    }
+}
+
 impl SourceOwner {
+    /// What playing `target` at `placement` queues, read in `selected`. None when its page
+    /// lists nothing.
+    pub async fn play_target(
+        &self,
+        target: &PlayTarget,
+        selected: Option<&SelectedLibrary>,
+        placement: QueuePlacement,
+        shuffled: bool,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
+        match target {
+            PlayTarget::Track(key) => {
+                Ok(Some(PlayRequest::track(*key, placement).shuffled(shuffled)))
+            }
+            PlayTarget::Route(route) => {
+                self.play_route(
+                    route,
+                    selected,
+                    &OpenOptions::default(),
+                    placement,
+                    shuffled,
+                    cancel,
+                )
+                .await
+            }
+        }
+    }
+
+    /// What playing the track, album or artist `uri` outside a page queues, read in `selected`:
+    /// a remembered search result or a listening overview row. An album or artist plays its
+    /// page whole; a track, also one the Catalog no longer holds, plays alone.
+    pub async fn play_uri(
+        &self,
+        uri: &str,
+        selected: Option<&SelectedLibrary>,
+        placement: QueuePlacement,
+        shuffled: bool,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
+        tokio::select! {
+            () = self.shared.catalog.loaded() => {}
+            () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
+        }
+        match PlayTarget::of_uri(&self.shared.catalog, uri) {
+            Some(target @ PlayTarget::Route(_)) => {
+                self.play_target(&target, selected, placement, shuffled, cancel)
+                    .await
+            }
+            _ => Ok(Some(
+                PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
+            )),
+        }
+    }
+
+    /// The tracks `target` holds for `scope`, read in `selected`. None when it holds nothing.
+    pub async fn target_selection(
+        &self,
+        target: &PlayTarget,
+        selected: Option<&SelectedLibrary>,
+        scope: SelectionScope,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<MemberSelection>> {
+        match target {
+            PlayTarget::Track(key) => Ok(Some(MemberSelection::Keys {
+                source: None,
+                keys: vec![*key].into(),
+            })),
+            PlayTarget::Route(route) => self.route_selection(route, selected, scope, cancel).await,
+        }
+    }
+
     pub async fn open(
         &self,
         route: Route,
@@ -936,8 +1050,8 @@ impl View {
     }
 
     /// What playing the page from its track `key` at `index` among its tracks queues; `entry`
-    /// names a playlist entry. Play Next and Play Later queue only that track. None when the
-    /// page lists no tracks.
+    /// names a playlist entry. Play Next and Play Later queue only that track, and so does a
+    /// track on Home or Search, which list rows outside a page.
     pub fn play_track(
         &self,
         key: library::TrackKey,
@@ -947,11 +1061,14 @@ impl View {
         shuffled: bool,
         result: Option<&str>,
     ) -> Option<PlayRequest> {
-        if !matches!(placement, QueuePlacement::Replace { .. }) {
-            return Some(PlayRequest::track(key, placement));
-        }
+        let page = self
+            .members()
+            .filter(|_| matches!(placement, QueuePlacement::Replace { .. }));
+        let Some(page) = page else {
+            return Some(PlayRequest::track(key, placement).shuffled(shuffled));
+        };
         Some(
-            PlayRequest::captured(self.members()?.clone().selection(), index, placement, false)
+            PlayRequest::captured(page.clone().selection(), index, placement, false)
                 .with_context(self.play_context(result))
                 .with_anchor(key, entry)
                 .shuffled(shuffled),
@@ -981,20 +1098,23 @@ impl View {
         })
     }
 
-    /// What playing the shown `row` at `index` queues: a track plays the page from it, and a
-    /// track of the Albums list in Detail layout plays its album from it. The row's track and
-    /// playlist entry anchor the play, so a row that moved since it showed still plays. None
-    /// for other rows.
-    pub fn play(
+    /// What activating `row`, shown at `index` on this page, queues, by the one rule
+    /// (decisions.md, "What a row plays is one rule", 2026-11-06): a track plays the page from
+    /// it ([`View::play_track`]), a track of the Albums list in Detail layout its album from it,
+    /// and any other row what its [`PlayTarget`] plays. The row's track and playlist entry
+    /// anchor the play, so a row that moved since it showed still plays. None when it plays
+    /// nothing.
+    pub async fn play(
         &self,
         row: &Row,
         index: usize,
         placement: QueuePlacement,
         shuffled: bool,
         result: Option<&str>,
-    ) -> Option<PlayRequest> {
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
         let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
-        match row {
+        Ok(match row {
             Row::Track(track) => self.play_track(
                 track.track_key,
                 track.entry.as_ref().map(|entry| entry.key),
@@ -1003,30 +1123,47 @@ impl View {
                 shuffled,
                 result,
             ),
-            Row::AlbumTrack { track, .. }
-                if !matches!(placement, QueuePlacement::Replace { .. }) =>
-            {
-                Some(PlayRequest::track(track.track_key, placement))
-            }
             Row::AlbumTrack { track, .. } => {
-                let route = Route::AlbumDetail(track.links.album_media_uri.clone()?);
-                let read = self.page_members(&route, Collection::Album(track.links.album_key?));
-                let context = context_id(
-                    &route,
-                    self.selected.as_ref(),
-                    &OpenOptions::default(),
-                    read.sort?,
-                    read.descending,
-                );
-                Some(
-                    PlayRequest::captured(read.selection(), 0, placement, false)
-                        .with_context(with_result(context, result))
-                        .with_anchor(track.track_key, None)
-                        .shuffled(shuffled),
-                )
+                self.play_album_track(track, placement, shuffled, result)
             }
-            _ => None,
+            row => match PlayTarget::of_row(row) {
+                Some(target) => {
+                    return self
+                        .owner
+                        .play_target(&target, self.selected.as_ref(), placement, shuffled, cancel)
+                        .await;
+                }
+                None => None,
+            },
+        })
+    }
+
+    /// What playing a track of the Albums list in Detail layout queues: its album from it.
+    fn play_album_track(
+        &self,
+        track: &library::TrackRow,
+        placement: QueuePlacement,
+        shuffled: bool,
+        result: Option<&str>,
+    ) -> Option<PlayRequest> {
+        if !matches!(placement, QueuePlacement::Replace { .. }) {
+            return Some(PlayRequest::track(track.track_key, placement));
         }
+        let route = Route::AlbumDetail(track.links.album_media_uri.clone()?);
+        let read = self.page_members(&route, Collection::Album(track.links.album_key?));
+        let context = context_id(
+            &route,
+            self.selected.as_ref(),
+            &OpenOptions::default(),
+            read.sort?,
+            read.descending,
+        );
+        Some(
+            PlayRequest::captured(read.selection(), 0, placement, false)
+                .with_context(with_result(context, result))
+                .with_anchor(track.track_key, None)
+                .shuffled(shuffled),
+        )
     }
 
     /// What the page of `collection` on `route` lists unfiltered, in its saved order and this

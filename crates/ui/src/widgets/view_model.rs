@@ -1140,16 +1140,31 @@ impl Rows<Row> {
         let Some(row) = self.ready(index) else {
             return;
         };
-        let request = match (favorites, row.as_ref()) {
-            (true, Row::Track(track)) => {
-                view.play_favorite(track.track_key, index, placement, shuffled, Some(&order))
+        if favorites {
+            if let Row::Track(track) = row.as_ref()
+                && let Some(request) =
+                    view.play_favorite(track.track_key, index, placement, shuffled, Some(&order))
+            {
+                playback.play_selection(request);
             }
-            (true, _) => None,
-            (false, row) => view.play(row, index, placement, shuffled, Some(&order)),
-        };
-        if let Some(request) = request {
-            playback.play_selection(request);
+            return;
         }
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
+            return;
+        };
+        let playback = Arc::clone(playback);
+        runtime.spawn(async move {
+            let cancel = library::ReadCancellation::new();
+            match view
+                .play(&row, index, placement, shuffled, Some(&order), &cancel)
+                .await
+            {
+                Ok(Some(request)) => playback.play_selection(request),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%error, "could not play the row"),
+            }
+        });
     }
 
     /// Plays or queues everything the list shows, as a page header does.

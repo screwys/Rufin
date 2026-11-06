@@ -82,7 +82,12 @@ pub(crate) fn play_target(
     let source = products.source.clone();
     let playback = products.playback.clone();
     products.runtime.spawn(async move {
-        match target.request(&source, placement, shuffled).await {
+        let selected = source.selected_library();
+        let cancel = library::ReadCancellation::new();
+        match source
+            .play_target(&target, selected.as_ref(), placement, shuffled, &cancel)
+            .await
+        {
             Ok(Some(request)) => playback.play_selection(request),
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "could not play the collection"),

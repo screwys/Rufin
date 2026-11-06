@@ -82,9 +82,7 @@ impl CollectionTargets {
         let mut requests = Vec::new();
         for target in self.resolve(catalog).await? {
             requests.extend(
-                target
-                    .request(source, rufin_core::playback::QueuePlacement::Now, false)
-                    .await?,
+                target_request(source, &target, rufin_core::playback::QueuePlacement::Now).await?,
             );
         }
         Ok(requests)
@@ -545,18 +543,21 @@ impl MediaDragSource {
             Self::LiveCollection {
                 media_uri,
                 operations,
-            } => prepare_live_collection(catalog, operations, media_uri)
-                .await?
-                .selection(source, scope)
+            } => {
+                let target = prepare_live_collection(catalog, operations, media_uri).await?;
+                target_selection(source, &target, scope)
+                    .await?
+                    .ok_or_else(gone)
+            }
+            Self::Target { target } => target_selection(source, target, scope)
                 .await?
                 .ok_or_else(gone),
-            Self::Target { target } => target.selection(source, scope).await?.ok_or_else(gone),
             Self::Targets {
                 targets: CollectionTargets::Ready(targets),
             } => {
                 let mut selections = Vec::new();
                 for target in targets {
-                    selections.extend(target.selection(source, scope).await?);
+                    selections.extend(target_selection(source, target, scope).await?);
                 }
                 Ok(library::MemberSelection::Concat(selections))
             }
@@ -601,13 +602,13 @@ impl MediaDragSource {
             Self::LiveCollection {
                 media_uri,
                 operations,
-            } => prepare_live_collection(catalog, operations, media_uri)
-                .await?
-                .request(source, placement, false)
-                .await?
-                .ok_or_else(gone)?,
-            Self::Target { target } => target
-                .request(source, placement, false)
+            } => {
+                let target = prepare_live_collection(catalog, operations, media_uri).await?;
+                target_request(source, &target, placement)
+                    .await?
+                    .ok_or_else(gone)?
+            }
+            Self::Target { target } => target_request(source, target, placement)
                 .await?
                 .ok_or_else(gone)?,
             Self::Targets { targets } => {
@@ -638,17 +639,45 @@ async fn prepare_live_collection(
         .recv()
         .await
         .map_err(|error| error.to_string())??;
-    live_collection(catalog, media_uri)
+    PlayTarget::of_uri(catalog, media_uri)
+        .ok_or_else(|| "Collection is no longer available".to_string())
 }
 
-/// The page a live search result opens.
-fn live_collection(catalog: &library::Catalog, media_uri: &str) -> Result<PlayTarget, String> {
-    let uri = media_uri.to_owned();
-    Ok(PlayTarget::Route(match catalog.item(media_uri) {
-        Some(library::Item::Album(_)) => rufin_core::route::Route::AlbumDetail(uri),
-        Some(library::Item::Artist { .. }) => rufin_core::route::Route::ArtistDetail(uri),
-        _ => return Err("Collection is no longer available".to_string()),
-    }))
+/// What playing `target` queues in the selected library, as core reads it.
+async fn target_request(
+    source: &rufin_core::runtime::SourceHandle,
+    target: &PlayTarget,
+    placement: rufin_core::playback::QueuePlacement,
+) -> Result<Option<PlayRequest>, String> {
+    let selected = source.selected_library();
+    source
+        .play_target(
+            target,
+            selected.as_ref(),
+            placement,
+            false,
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// The tracks `target` holds for `scope` in the selected library, as core reads it.
+async fn target_selection(
+    source: &rufin_core::runtime::SourceHandle,
+    target: &PlayTarget,
+    scope: rufin_core::view::SelectionScope,
+) -> Result<Option<library::MemberSelection>, String> {
+    let selected = source.selected_library();
+    source
+        .target_selection(
+            target,
+            selected.as_ref(),
+            scope,
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

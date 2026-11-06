@@ -316,30 +316,6 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
-    pub fn play_rows(
-        &self,
-        context: String,
-        media_uris: Vec<String>,
-        index: u64,
-        placement: rufin_core::playback::QueuePlacement,
-        shuffled: bool,
-        context_title: Option<String>,
-    ) -> Result<(), AndroidError> {
-        self.playback.play_selection(
-            rufin_core::playback::PlayRequest::uris(media_uris, placement)
-                .with_context(context.into())
-                .with_anchor_index(usize::try_from(index).map_err(error)?)
-                .with_context_title(context_title.map(|title| {
-                    Arc::new(library::QueueContextTitle {
-                        kind: None,
-                        title: title.into(),
-                    })
-                }))
-                .shuffled(shuffled),
-        );
-        Ok(())
-    }
-
     pub fn collection_categories(&self) -> Vec<AndroidCollectionCategory> {
         CollectionCategory::ALL
             .into_iter()
