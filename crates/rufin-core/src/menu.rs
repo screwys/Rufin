@@ -55,7 +55,8 @@ pub enum GoTo {
 /// The menu of `row` under `settings`.
 pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     let shown = |item| settings.application.context_menu.is_visible(item);
-    let source = row_source(owner, row);
+    let stored = owner.shared.settings.load();
+    let source = row_source(&stored.sources, row);
     let mut menu = Menu {
         play: shown(ContextMenuItem::Play),
         play_next: shown(ContextMenuItem::PlayNext),
@@ -132,10 +133,9 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     menu.favorite = rated && shown(ContextMenuItem::Favorites);
     menu.rating = rated && settings.application.context_menu.rating_visible;
     menu.edit_metadata &= shown(ContextMenuItem::EditMetadata);
-    menu.go_to = shown(ContextMenuItem::GoTo) && !targets(source.as_ref(), row).is_empty();
+    menu.go_to = shown(ContextMenuItem::GoTo) && has_go_to(source, row);
     let downloaded = row.downloaded();
-    menu.download =
-        !downloaded && downloadable(source.as_ref(), row) && shown(ContextMenuItem::Download);
+    menu.download = !downloaded && downloadable(source, row) && shown(ContextMenuItem::Download);
     menu.remove_download = downloaded && shown(ContextMenuItem::Download);
     menu.pin = row
         .pin()
@@ -164,7 +164,24 @@ pub fn selection(settings: &Settings) -> Menu {
 
 /// Where Go to on `row` leads: its artists, its album and its folder or server page.
 pub fn go_to(owner: &SourceOwner, row: &Row) -> Vec<GoTo> {
-    targets(row_source(owner, row).as_ref(), row)
+    let stored = owner.shared.settings.load();
+    targets(row_source(&stored.sources, row), row)
+}
+
+/// Whether Go to on `row` leads anywhere, as [`go_to`] finds without building its targets.
+fn has_go_to(source: Option<&SourceConfiguration>, row: &Row) -> bool {
+    match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => {
+            !crate::route::detail_links::go_to_artists(&track.links)
+                .0
+                .is_empty()
+                || track.links.album_media_uri.is_some()
+                || crate::detail_links::navigation_source_link(source, &track.media_uri, None)
+                    .is_some()
+        }
+        Row::Album(_) | Row::AlbumHeading(_) | Row::Artist(_) => true,
+        _ => false,
+    }
 }
 
 fn targets(source: Option<&SourceConfiguration>, row: &Row) -> Vec<GoTo> {
@@ -216,7 +233,10 @@ fn targets(source: Option<&SourceConfiguration>, row: &Row) -> Vec<GoTo> {
 }
 
 /// The configured source of the track, album or artist `row` shows.
-fn row_source(owner: &SourceOwner, row: &Row) -> Option<SourceConfiguration> {
+fn row_source<'a>(
+    sources: &'a crate::settings::SourceSettings,
+    row: &Row,
+) -> Option<&'a SourceConfiguration> {
     let id = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => match &track.source_id {
             Some(id) => SourceId::new(id),
@@ -228,7 +248,11 @@ fn row_source(owner: &SourceOwner, row: &Row) -> Option<SourceConfiguration> {
         Row::Artist(artist) => library::source_entity_parts(&artist.media_uri)?.0,
         _ => return None,
     };
-    owner.configuration(&id)
+    sources
+        .configured
+        .iter()
+        .map(|item| &item.configuration)
+        .find(|configuration| configuration.source_id == id)
 }
 
 /// Whether Download applies: tracks of a remote source or a web address, and every genre,
