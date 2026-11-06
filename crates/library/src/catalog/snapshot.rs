@@ -575,6 +575,25 @@ impl Snapshot {
         ]
     }
 
+    /// Raises the revision and the stamps `changed` marks, in the order of `stamps()`.
+    pub(crate) fn raise(&mut self, changed: [bool; 5]) -> u64 {
+        self.revision += 1;
+        let revision = self.revision;
+        let stamps = [
+            &mut self.facts,
+            &mut self.states,
+            &mut self.plays,
+            &mut self.downloads,
+            &mut self.playlist_stamp,
+        ];
+        for (stamp, changed) in stamps.into_iter().zip(changed) {
+            if changed {
+                *stamp = revision;
+            }
+        }
+        revision
+    }
+
     /// Marks everything changed at the current revision, as a load or a display flag does.
     pub(crate) fn stamp_all(&mut self) {
         let revision = self.revision;
