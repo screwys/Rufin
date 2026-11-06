@@ -223,7 +223,13 @@ impl SourceOwner {
         ranges: Vec<Range<usize>>,
         scope: SelectionScope,
     ) -> MemberSelection {
-        rows_selection(read, Some(ranges), &self.shared.settings.committed(), scope)
+        rows_selection(
+            read,
+            Some(ranges),
+            self.selected_library().as_ref(),
+            &self.shared.settings.committed(),
+            scope,
+        )
     }
 
     /// Everything `route` lists, in the order and filter `options` ask, without reading its rows
@@ -250,7 +256,7 @@ impl SourceOwner {
                 read.selection()
             }
             Plan::Rows(Read::List(read) | Read::AlbumTracks(read)) => {
-                rows_selection(read, None, &settings, SelectionScope::Page)
+                rows_selection(read, None, selected, &settings, SelectionScope::Page)
             }
             Plan::Releases { read, .. } => match artist_tracks(&read, &settings) {
                 Some(tracks) => tracks.selection(),
@@ -1297,6 +1303,7 @@ impl View {
             | Body::Releases { read, .. } => Some(rows_selection(
                 read.clone(),
                 None,
+                self.owner.selected_library().as_ref(),
                 &self.settings,
                 SelectionScope::Page,
             )),
@@ -1735,12 +1742,13 @@ fn artist_members(artist: Collection, settings: &Settings) -> MemberRead {
 }
 
 /// The `ranges` of a list's rows for `scope`, all of them when None, in the list's order:
-/// each row's collection as route_selection reads its page, in that page's saved order. A
-/// page reads them in the list's music folder; downloads in every music folder, except a
-/// smart playlist's.
+/// each row's collection as route_selection reads its page in `selected`, in that page's
+/// saved order. A page reads them in the selected music folder; downloads in every music
+/// folder, except a smart playlist's.
 fn rows_selection(
     read: ListRead,
     ranges: Option<Vec<Range<usize>>>,
+    selected: Option<&SelectedLibrary>,
     settings: &Settings,
     scope: SelectionScope,
 ) -> MemberSelection {
@@ -1760,9 +1768,11 @@ fn rows_selection(
         Route::ArtistDetail(_) => artist_members(row, settings),
         page => member_read(&page, None, &OpenOptions::default(), settings, row),
     };
-    members.folder = read.folder.filter(|_| {
-        scope == SelectionScope::Page || matches!(read.kind, ListKind::SmartPlaylists { .. })
-    });
+    members.folder = selected
+        .and_then(|selected| selected.music_folder_key)
+        .filter(|_| {
+            scope == SelectionScope::Page || matches!(read.kind, ListKind::SmartPlaylists { .. })
+        });
     MemberSelection::Parents {
         read,
         ranges,
