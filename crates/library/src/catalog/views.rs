@@ -1984,7 +1984,7 @@ pub(crate) type Depends = [bool; 4];
 impl MemberRead {
     pub(crate) fn depends(&self) -> Depends {
         let sort = self.effective_sort();
-        match self.collection {
+        let own = match self.collection {
             Collection::Smart { .. } => [true; 4],
             _ => [
                 self.favorites_only
@@ -1995,17 +1995,22 @@ impl MemberRead {
                 self.downloaded_only,
                 matches!(self.collection, Collection::Playlist(_)),
             ],
-        }
+        };
+        let within = self.within.as_deref().map_or([false; 4], ListRead::depends);
+        std::array::from_fn(|index| own[index] || within[index])
     }
 
     /// The read without its filters, whose order a filtered one is taken from.
     fn unfiltered(&self) -> Option<Self> {
-        let filtered =
-            !filter_text(&self.filter).is_empty() || self.favorites_only || self.downloaded_only;
+        let filtered = !filter_text(&self.filter).is_empty()
+            || self.favorites_only
+            || self.downloaded_only
+            || self.within.is_some();
         (filtered && !matches!(self.collection, Collection::History { .. })).then(|| Self {
             filter: String::new(),
             favorites_only: false,
             downloaded_only: false,
+            within: None,
             ..self.clone()
         })
     }
@@ -2265,11 +2270,22 @@ impl Catalog {
                 } else if let Some(base) = member.unfiltered() {
                     let base = self.build_in(context, &Read::Members(base), inputs, read_at);
                     let filter = filter_text(&member.filter);
+                    let albums = member.within.as_deref().map(|releases| {
+                        self.list_keys(context, releases, inputs, read_at)
+                            .into_iter()
+                            .filter_map(|key| snapshot.albums.slot(key))
+                            .collect::<HashSet<_>>()
+                    });
                     let keep = |track: &u32| {
                         snapshot
                             .tracks
                             .get(i64::from(*track))
-                            .is_some_and(|record| context.member_keep(member, &filter, record))
+                            .is_some_and(|record| {
+                                context.member_keep(member, &filter, record)
+                                    && albums
+                                        .as_ref()
+                                        .is_none_or(|albums| albums.contains(&record.album))
+                            })
                     };
                     match &base.0.members {
                         Members::Entries(entries) => Members::Entries(

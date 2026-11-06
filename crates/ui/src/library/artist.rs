@@ -73,7 +73,9 @@ impl CatalogUi {
             ));
         };
         let artist = summary.row.artist_key;
-        let header = artist_detail_header_restored(self, &summary, artist, album_artist);
+        let page = Rc::new(std::cell::OnceCell::new());
+        let header =
+            artist_detail_header_restored(self, &summary, artist, album_artist, Rc::clone(&page));
         let favorite_count = read.view.favorites_len().unwrap_or(0);
         let favorite_model =
             Rows::favorites(self.products.runtime.clone(), &read.view, favorite_rows);
@@ -123,6 +125,7 @@ impl CatalogUi {
             ARTIST_RELEASE_TITLES,
             &mut read,
         ));
+        let _ = page.set(releases.sparse.clone());
         // The releases take each read; a whole-page read also has the header and the favorite
         // tracks, which a release reread leaves as they are.
         let apply = {
@@ -508,6 +511,7 @@ fn artist_detail_header_restored(
     artist: &ArtistView,
     artist_key: ArtistKey,
     album_artist: bool,
+    page: Rc<std::cell::OnceCell<Rows<library::Row>>>,
 ) -> ArtistDetailHeaderProjection {
     let current = Rc::new(RefCell::new(artist.clone()));
     let width = crate::library::route_layout::detail_route_inner_width_for_viewport(
@@ -570,10 +574,12 @@ fn artist_detail_header_restored(
     let actions = showcase.actions();
     actions.add_css_class("artist-detail-actions");
     actions.set_halign(gtk::Align::Start);
-    let target = crate::widgets::selection::PlayTarget::Route(Route::of_artist(&artist.row));
-    let play_shell = Rc::clone(shell);
+    // Header Play plays the artist's tracks on the releases the page shows.
+    let playback = shell.products.playback.clone();
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-        crate::menus::media_menus::play_target(&play_shell.products, &target, placement, shuffled);
+        if let Some(rows) = page.get() {
+            rows.play_all(&playback, placement, shuffled);
+        }
     });
     let controls = detail_playback_controls(
         &actions,

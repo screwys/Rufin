@@ -1674,27 +1674,35 @@ fn play_whole(
         .shuffled(shuffled)
 }
 
-/// An artist page's own tracks, in the Artist tracks list's saved order: what the page plays
-/// and downloads whole, rather than whole albums of its releases, which queue other artists
-/// of a compilation.
+/// An artist page's own tracks on the releases it shows, in the Artist tracks list's saved
+/// order: what the page plays and downloads whole, rather than whole albums of its releases,
+/// which queue other artists of a compilation.
 fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead> {
     let ListKind::ArtistAlbums {
         artist,
         album_artist,
-        ..
-    } = releases.kind
+        release_class,
+        filters,
+    } = &releases.kind
     else {
         return None;
     };
     let list = settings.library_list(LibraryListKey::ArtistTracks);
     let mut read = MemberRead::new(Collection::Artist {
-        key: artist,
-        album_artist,
+        key: *artist,
+        album_artist: *album_artist,
     });
     read.sort = Some(list.sort_key);
     read.descending = list.descending;
     read.folder = releases.folder;
     read.activity = list.sort_key.activity_sensitive();
+    let filtered = !releases.filter.trim().is_empty()
+        || releases.favorites_only
+        || release_class.is_some()
+        || filters
+            .as_deref()
+            .is_some_and(|filters| filters.iter().any(|filter| !filter.trim().is_empty()));
+    read.within = filtered.then(|| Box::new(releases.clone()));
     Some(read)
 }
 

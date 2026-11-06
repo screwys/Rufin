@@ -36,6 +36,9 @@ pub struct MemberRead {
     pub favorites_only: bool,
     pub downloaded_only: bool,
     pub activity: bool,
+    /// Keeps only the tracks on the albums this list read shows, as an artist page's header
+    /// plays the releases it shows.
+    pub within: Option<Box<ListRead>>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -149,6 +152,7 @@ impl MemberRead {
             favorites_only: false,
             downloaded_only: false,
             activity: false,
+            within: None,
         }
     }
     /// The sort it orders by: its own, else its collection's. Albums, artists, genres and
