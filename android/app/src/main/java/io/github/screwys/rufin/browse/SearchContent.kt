@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.paging.LoadState
+import androidx.paging.LoadStates
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.screwys.rufin.core.translate
@@ -130,7 +132,8 @@ private fun SearchResults(
     onScrolled: (Boolean) -> Unit,
 ) {
     if (browse.searchText.isNotBlank()) {
-        val searchFlow = remember(browse) { snapshotFlow { browse.searchRows }.map { PagingData.from(it) } }
+        // Search reads its rows whole: a result list is loaded, and an empty one shows as empty.
+        val searchFlow = remember(browse) { snapshotFlow { browse.searchRows }.map { PagingData.from(it, LOADED) } }
         val rows = searchFlow.collectAsLazyPagingItems()
         BrowseContent(rows, emptyList(), player, false, false, false, browse::open, onMenu,
             { _, _ -> }, browse::refreshSection, browse::favorite, onPlaylist, onScrolled,
@@ -187,3 +190,5 @@ private fun SearchResults(
     }
     metadata?.row?.metadataItem?.let { item -> io.github.screwys.rufin.metadata.MetadataEditorScreen(player.model, item) { metadata = null } }
 }
+
+private val LOADED = LoadStates(LoadState.NotLoading(false), LoadState.NotLoading(true), LoadState.NotLoading(true))
