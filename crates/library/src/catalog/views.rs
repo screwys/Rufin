@@ -1471,10 +1471,7 @@ impl Context<'_> {
         every_source: bool,
     ) -> Vec<PlaylistItem<'_>> {
         let snapshot = self.snapshot;
-        let smart = matches!(read.kind, ListKind::SmartPlaylists { .. });
-        let totals = matches!(read.sort, LibraryField::SongCount | LibraryField::Duration)
-            || !matches!(read.playlist_scope, PlaylistScope::All);
-        if smart {
+        if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
             return snapshot
                 .smart_playlists
                 .values()
@@ -1483,11 +1480,7 @@ impl Context<'_> {
                     name: &playlist.name,
                     sort: playlist.name.to_lowercase(),
                     position: playlist.position,
-                    totals: if totals {
-                        self.smart_totals(&playlist.definition, inputs, None, folder)
-                    } else {
-                        Totals::default()
-                    },
+                    totals: self.smart_totals(&playlist.definition, inputs, None, folder),
                     folder: playlist.folder,
                 })
                 .collect();
@@ -1533,8 +1526,12 @@ impl Context<'_> {
         totals
     }
 
-    /// Playlists, smart playlists and their folders in one key space: folders are negative.
-    fn playlist_order(&self, read: &ListRead, folder: Option<u32>, inputs: &Inputs) -> Vec<i64> {
+    /// Playlists, smart playlists and their folders in one key space, folders negative, with
+    /// the totals their rows show.
+    fn playlist_order(&self, read: &ListRead, inputs: &Inputs) -> Vec<(i64, Totals)> {
+        let Some(folder) = self.list_folder(read) else {
+            return Vec::new();
+        };
         let smart = matches!(read.kind, ListKind::SmartPlaylists { .. });
         let filter = filter_text(&read.filter);
         let has_folders = self
@@ -1609,7 +1606,10 @@ impl Context<'_> {
         } else {
             items.sort_by(|a, b| compare_items(read.sort, read.descending, a, b));
         }
-        items.into_iter().map(|item| item.key).collect()
+        items
+            .into_iter()
+            .map(|item| (item.key, item.totals))
+            .collect()
     }
 
     /// The albums an artist has visible tracks on, in a role.
@@ -1690,26 +1690,18 @@ impl Context<'_> {
     }
 
     /// The keys an unfiltered list read shows, in order; a filtered one keeps rows of this
-    /// order. Playlist lists filter here. Playlist folders have negative keys. The list keeps
-    /// rows by `listed`, totals in its music folder, and orders them by `shown`, the totals its
-    /// rows show.
+    /// order. The list keeps rows by `listed`, totals in its music folder, and orders them by
+    /// `shown`, the totals its rows show. Playlist lists are ordered by `playlist_order`.
     pub(crate) fn list_order(
         &self,
         read: &ListRead,
         listed: Totaled<'_>,
         shown: Totaled<'_>,
-        inputs: &Inputs,
     ) -> Vec<i64> {
         let snapshot = self.snapshot;
         let Some(folder) = self.list_folder(read) else {
             return Vec::new();
         };
-        if matches!(
-            read.kind,
-            ListKind::Playlists | ListKind::SmartPlaylists { .. }
-        ) {
-            return self.playlist_order(read, folder, inputs);
-        }
         let Some(source) = read.source.and_then(|source| self.source_slot(source)) else {
             return Vec::new();
         };
@@ -2565,6 +2557,14 @@ impl Catalog {
                     }
                 }
             }
+            Read::List(list)
+                if matches!(
+                    list.kind,
+                    ListKind::Playlists | ListKind::SmartPlaylists { .. }
+                ) =>
+            {
+                Members::Playlists(context.playlist_order(list, inputs).into())
+            }
             Read::List(list) => {
                 let keys = self.list_keys(context, list, inputs, read_at);
                 if let ListKind::ArtistAlbums { .. } = list.kind {
@@ -2576,14 +2576,7 @@ impl Catalog {
                     }
                     counts = Some(classes);
                 }
-                if matches!(
-                    list.kind,
-                    ListKind::Playlists | ListKind::SmartPlaylists { .. }
-                ) {
-                    Members::Playlists(keys.into())
-                } else {
-                    Members::Keys(keys.into_iter().map(|key| key as u32).collect())
-                }
+                Members::Keys(keys.into_iter().map(|key| key as u32).collect())
             }
             Read::AlbumTracks(list) => {
                 let albums = self.build_in(context, &Read::List(list.clone()), inputs, read_at);
@@ -2701,7 +2694,6 @@ impl Catalog {
                 list,
                 totals(&listed),
                 totals(shown.as_ref().unwrap_or(&listed)),
-                inputs,
             );
         };
         let base = self.build_in(context, &Read::List(base), inputs, read_at);
@@ -2992,7 +2984,7 @@ impl Catalog {
                 context.list_sections(read, keys.iter().map(|key| i64::from(*key)))
             }
             (Read::List(read), Members::Playlists(keys)) => {
-                context.list_sections(read, keys.iter().copied())
+                context.list_sections(read, keys.iter().map(|(key, _)| *key))
             }
             (Read::Folders(_), Members::Keys(keys)) => sections(keys.iter().map(|key| {
                 Some(

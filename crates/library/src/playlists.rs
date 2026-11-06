@@ -206,8 +206,12 @@ impl Catalog {
         // Only the rows shown are built.
         let shown = &writable[window.start.min(writable.len())..window.end.min(writable.len())];
         let mut connection = self.acquire_loaded(cancellation).await?;
+        let shape = crate::read::Shape {
+            totals: order.totals(),
+            ..crate::read::Shape::of(None)
+        };
         let rows = self
-            .rows_of_on(&mut connection, shown, &crate::read::Shape::of(None), true)
+            .rows_of_on(&mut connection, shown, &shape, true)
             .await?
             .into_iter()
             .filter_map(|row| match row {

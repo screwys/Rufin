@@ -60,8 +60,9 @@ pub(crate) enum Members {
     History(Box<[Listen]>),
     /// Albums, artists, genres, moods or folders.
     Keys(Box<[u32]>),
-    /// Playlists or smart playlists, with their folders as negative keys.
-    Playlists(Box<[i64]>),
+    /// Playlists or smart playlists, with their folders as negative keys, and the totals
+    /// their rows show.
+    Playlists(Box<[(i64, Totals)]>),
     AlbumTracks {
         spans: Arc<[AlbumSpan]>,
         tracks: Box<[u32]>,
@@ -136,7 +137,7 @@ impl Members {
             Self::Tracks(keys) | Self::Keys(keys) => keys.len() * 4,
             Self::Entries(entries) => entries.len() * 12,
             Self::History(listens) => listens.len() * 512,
-            Self::Playlists(keys) => keys.len() * 8,
+            Self::Playlists(keys) => keys.len() * size_of::<(i64, Totals)>(),
             Self::AlbumTracks { spans, tracks } => {
                 spans.len() * std::mem::size_of::<AlbumSpan>() + tracks.len() * 4
             }
@@ -206,7 +207,7 @@ impl Order {
                 );
                 keys[range]
                     .iter()
-                    .map(|key| match (*key < 0, smart) {
+                    .map(|(key, _)| match (*key < 0, smart) {
                         (true, _) => Item::PlaylistFolder(PlaylistFolderKey::from_raw(-key)),
                         (false, true) => Item::Smart(SmartPlaylistKey::from_raw(*key)),
                         (false, false) => Item::Playlist(PlaylistKey::from_raw(*key)),
@@ -239,6 +240,14 @@ impl Order {
                 .iter()
                 .map(|(_, entry, position)| (i64::from(*entry), *position))
                 .collect(),
+            _ => HashMap::new(),
+        }
+    }
+
+    /// The playlist and folder totals the order counted, folders by negative key.
+    pub(crate) fn totals(&self) -> HashMap<i64, Totals> {
+        match &self.0.members {
+            Members::Playlists(keys) => keys.iter().copied().collect(),
             _ => HashMap::new(),
         }
     }
@@ -462,6 +471,8 @@ pub(crate) struct Shape {
     pub(crate) folder: Option<FolderKey>,
     pub(crate) list: Option<ListRead>,
     pub(crate) positions: HashMap<i64, u32>,
+    /// Playlist, smart playlist and folder totals the order counted; folders by negative key.
+    pub(crate) totals: HashMap<i64, Totals>,
 }
 
 impl Shape {
@@ -472,6 +483,7 @@ impl Shape {
             folder: None,
             list: None,
             positions: HashMap::new(),
+            totals: HashMap::new(),
         };
         match read {
             Some(Read::List(read) | Read::AlbumTracks(read)) => {
@@ -1041,7 +1053,9 @@ impl<'a> Builder<'a> {
             })
             .collect::<Vec<_>>();
         genres.sort_by(|a, b| (&a.0, &a.1, a.2.key).cmp(&(&b.0, &b.1, b.2.key)));
-        let summary = self.context.playlist_totals(record).summary();
+        let summary = (self.shape.totals.get(&key.raw()).copied())
+            .unwrap_or_else(|| self.context.playlist_totals(record))
+            .summary();
         let object_id = text(snapshot, record.object);
         let source = self.source(record.source);
         let source_id = source.map(|source| source.object.clone());
@@ -1096,7 +1110,9 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         let definition = smart.definition.clone();
-        let summary = self.smart_totals(smart).summary();
+        let summary = (self.shape.totals.get(&key.raw()).copied())
+            .unwrap_or_else(|| self.smart_totals(smart))
+            .summary();
         Ok(Some(SmartPlaylistRow {
             smart_playlist_key: key,
             object_id: smart.object.clone(),
@@ -1119,7 +1135,9 @@ impl<'a> Builder<'a> {
         let Some(folder) = snapshot.playlist_folders.get(&key.raw()) else {
             return Ok(None);
         };
-        let totals = if folder.smart {
+        let totals = if let Some(totals) = self.shape.totals.get(&-key.raw()) {
+            *totals
+        } else if folder.smart {
             snapshot
                 .smart_playlists
                 .values()
@@ -1460,6 +1478,10 @@ impl Catalog {
         let (favorites, favorite_listens, _) = window(fetch.favorites.as_ref());
         let shape = Shape {
             positions,
+            totals: fetch
+                .rows
+                .as_ref()
+                .map_or_else(HashMap::new, |(order, _)| order.totals()),
             ..Shape::of(fetch.rows.as_ref().map(|(order, _)| order.read()))
         };
         let mut connection = self.acquire_loaded(cancellation).await?;
