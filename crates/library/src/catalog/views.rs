@@ -1997,6 +1997,21 @@ enum SortValue {
     Text(String),
 }
 
+/// A smart playlist's members by track key, evaluated now.
+fn evaluated(
+    snapshot: &Snapshot,
+    definition: &SmartPlaylistDefinition,
+    inputs: &Inputs,
+) -> Arc<Vec<i64>> {
+    Arc::new(
+        Context::new(snapshot)
+            .evaluate(definition, inputs)
+            .into_iter()
+            .filter_map(|slot| snapshot.tracks.key_of(slot))
+            .collect(),
+    )
+}
+
 /// The listen windows a smart playlist reads: None when its rules need none.
 pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> {
     use crate::SmartPlaylistRuleField as F;
@@ -2030,6 +2045,19 @@ pub(crate) struct Views {
     orders: Vec<Order>,
     /// Members of the smart playlists pages opened most recently, oldest first.
     opened: Vec<OpenedSmart>,
+}
+
+impl Views {
+    /// The kept order of the read `is` names at `stamp`, now the most recently used.
+    fn kept(&mut self, stamp: [u64; 5], is: impl Fn(&Read) -> bool) -> Option<Order> {
+        let index = self
+            .orders
+            .iter()
+            .position(|order| order.0.stamp == stamp && is(&order.0.read))?;
+        let order = self.orders.remove(index);
+        self.orders.push(order.clone());
+        Some(order)
+    }
 }
 
 /// A smart playlist's members as of the time a page opened it. The page keeps that time, so
@@ -2252,15 +2280,8 @@ impl Catalog {
 
     /// The cached order of a read while what it depends on is unchanged.
     fn cached(&self, read: &Read, stamps: [u64; 5]) -> Option<Order> {
-        let stamp = masked(stamps, read.depends());
-        let mut views = self.views();
-        let index = views
-            .orders
-            .iter()
-            .position(|order| order.0.stamp == stamp && order.0.read == *read)?;
-        let order = views.orders.remove(index);
-        views.orders.push(order.clone());
-        Some(order)
+        self.views()
+            .kept(masked(stamps, read.depends()), |kept| kept == read)
     }
 
     /// Keeps an order; drops those whose stamps moved on, then the oldest past the budget.
@@ -2549,24 +2570,17 @@ impl Catalog {
                         .get(&key.raw())
                         .map(|smart| smart.definition.clone());
                     if let Some(definition) = definition {
-                        self.read_periods(
-                            connection,
-                            &mut inputs,
-                            smart_period(&definition).into_iter().collect(),
-                            *now,
-                        )
-                        .await?;
                         let tracks = match self.opened_smart(key.raw(), *now, &definition) {
                             Some(tracks) => tracks,
                             None => {
-                                let snapshot = self.snapshot();
-                                let tracks = Arc::new(
-                                    Context::new(&snapshot)
-                                        .evaluate(&definition, &inputs)
-                                        .into_iter()
-                                        .filter_map(|slot| snapshot.tracks.key_of(slot))
-                                        .collect::<Vec<_>>(),
-                                );
+                                self.read_periods(
+                                    connection,
+                                    &mut inputs,
+                                    smart_period(&definition).into_iter().collect(),
+                                    *now,
+                                )
+                                .await?;
+                                let tracks = evaluated(&self.snapshot(), &definition, &inputs);
                                 let mut views = self.views();
                                 views
                                     .opened
@@ -3000,7 +3014,9 @@ impl Context<'_> {
 impl Catalog {
     /// The tracks of whole member reads, read by read: a cached order as it is; whole albums,
     /// artists, genres, moods, playlists and smart playlists together, their tracks from one
-    /// pass over the catalog and their orders not kept; any other read as its order.
+    /// pass over the catalog and their orders not kept; any other read as its order. A whole
+    /// smart playlist takes the members an open page froze, else is evaluated with the listen
+    /// windows of all of them read together, and is not kept as an opened page.
     pub(crate) async fn member_tracks_on(
         &self,
         connection: &mut SqliteConnection,
@@ -3008,11 +3024,24 @@ impl Catalog {
     ) -> LibraryResult<Vec<Vec<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>>> {
         self.loaded().await;
         let stamps = self.snapshot().stamps();
-        let mut tracks = Vec::with_capacity(reads.len());
+        let cached = {
+            let mut views = self.views();
+            reads
+                .iter()
+                .map(|member| {
+                    views.kept(
+                        masked(stamps, member.depends()),
+                        |kept| matches!(kept, Read::Members(kept) if kept == member),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut tracks = vec![Vec::new(); reads.len()];
         let mut whole = Vec::new();
-        for (index, member) in reads.iter().enumerate() {
-            let read = Read::Members(member.clone());
-            let order = match self.cached(&read, stamps) {
+        // Whole smart playlists no open page holds: their place in `whole`, key and time.
+        let mut unfrozen = Vec::new();
+        for ((index, member), cached) in reads.iter().enumerate().zip(cached) {
+            let order = match cached {
                 Some(order) => order,
                 None if member.unfiltered().is_none()
                     && matches!(
@@ -3025,13 +3054,46 @@ impl Catalog {
                             | Collection::Smart { .. }
                     ) =>
                 {
-                    whole.push((index, self.inputs(connection, &read).await?));
-                    tracks.push(Vec::new());
+                    let mut inputs = Inputs::default();
+                    if let Collection::Smart { key, now } = member.collection {
+                        let snapshot = self.snapshot();
+                        inputs.smart = snapshot
+                            .smart_playlists
+                            .get(&key.raw())
+                            .and_then(|smart| self.opened_smart(key.raw(), now, &smart.definition));
+                        if inputs.smart.is_none() {
+                            unfrozen.push((whole.len(), key, now));
+                        }
+                    }
+                    whole.push((index, inputs));
                     continue;
                 }
-                None => self.order_on(connection, &read).await?,
+                None => {
+                    self.order_on(connection, &Read::Members(member.clone()))
+                        .await?
+                }
             };
-            tracks.push(crate::selection::order_tracks(&order, None));
+            tracks[index] = crate::selection::order_tracks(&order, None);
+        }
+        let mut times = unfrozen.iter().map(|(.., now)| *now).collect::<Vec<_>>();
+        times.sort_unstable();
+        times.dedup();
+        for time in times {
+            let at = || unfrozen.iter().filter(|(.., now)| *now == time);
+            let periods = self
+                .smart_inputs(
+                    connection,
+                    at().map(|(_, key, _)| crate::Item::Smart(*key)),
+                    time,
+                )
+                .await?;
+            let snapshot = self.snapshot();
+            for (position, key, _) in at() {
+                if let Some(smart) = snapshot.smart_playlists.get(&key.raw()) {
+                    whole[*position].1.smart =
+                        Some(evaluated(&snapshot, &smart.definition, &periods));
+                }
+            }
         }
         let snapshot = self.snapshot();
         let bases = Context::new(&snapshot).member_bases(
