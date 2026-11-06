@@ -198,6 +198,17 @@ impl SidebarSettings {
             home.visible = true;
         }
         self.route_items = sanitized;
+        // A Rufin playlist belongs to no source, whatever source a release saved its pin with.
+        for pin in &mut self.pins {
+            if let SidebarPin::Playlist {
+                source_id,
+                playlist_id,
+            } = pin
+                && playlist_id.starts_with("rufin:playlist:")
+            {
+                *source_id = None;
+            }
+        }
         let mut seen = HashSet::new();
         self.pins.retain(|pin| seen.insert(pin.clone()));
         let mut seen = HashSet::new();
