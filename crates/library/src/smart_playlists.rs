@@ -404,7 +404,7 @@ pub(crate) async fn smart_totals(
         .await?;
     let snapshot = catalog.snapshot();
     let context = crate::catalog::views::Context::new(&snapshot);
-    let Some(folder) = context.folder_slot(folder, None) else {
+    let Some(folder) = context.row_folder(folder, crate::CatalogKind::SmartPlaylist, None) else {
         return Ok(std::collections::HashMap::new());
     };
     Ok(definitions

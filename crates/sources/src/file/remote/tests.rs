@@ -137,6 +137,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let lyrics = catalog
             .search_tracks_by_lyrics(
                 &library::SearchRequest::new("lyric line"),
+                None,
                 &ReadCancellation::new(),
             )
             .await

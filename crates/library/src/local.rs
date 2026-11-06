@@ -4,9 +4,11 @@
 use sqlx::{Connection, FromRow};
 
 use crate::catalog::snapshot::Packed;
+use crate::catalog::views::Downloaded;
 use crate::catalog::write::Write;
 use crate::{
-    Catalog, LibraryError, LibraryResult, LocalAccessFileKey, ReadCancellation, SourceKey, TrackKey,
+    Catalog, CatalogKind, LibraryError, LibraryResult, LocalAccessFileKey, ReadCancellation,
+    SourceKey, TrackKey,
 };
 
 pub(crate) fn whole_file_cue_sql(track: &str, details: &str) -> String {
@@ -270,7 +272,8 @@ impl Catalog {
     }
 
     /// Tracks of an album, an artist or a single track URI, hidden ones included, by key, in
-    /// music folder `folder`. An artist counts in one role, or in both when no role is given.
+    /// music folder `folder` as core's page scope gives it. An artist counts in one role, or in
+    /// both when no role is given.
     async fn collection_members(
         &self,
         connection: &mut sqlx::SqliteConnection,
@@ -297,13 +300,13 @@ impl Catalog {
         let context = crate::catalog::views::Context::new(&snapshot);
         let album = snapshot.albums.slot(owner);
         let artist = snapshot.artists.slot(owner);
-        // A music folder narrows only its own source's artist.
-        let folder = context
-            .folder_slot(
-                folder,
-                artist.map(|slot| snapshot.artists.records[slot as usize].source),
-            )
-            .flatten();
+        // The folder core read the collection in narrows only its own source's tracks.
+        let source = match kind.as_deref() {
+            Some("album") => snapshot.albums.get(owner).map(Packed::source),
+            Some("artist") => snapshot.artists.get(owner).map(Packed::source),
+            _ => snapshot.tracks.get(owner).map(Packed::source),
+        };
+        let folder = context.folder_slot(folder, source).flatten();
         let mut members = snapshot
             .tracks
             .iter()
@@ -413,10 +416,20 @@ impl Catalog {
         };
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);
-        let downloaded = std::cell::OnceCell::new();
-        let downloaded = || downloaded.get_or_init(|| self.downloaded(&context));
+        // Each collection counts its downloads in the music folder its totals count in.
+        let counts: [std::cell::OnceCell<_>; 2] = Default::default();
+        let downloaded = |kind, source: Option<u16>| {
+            let folder = context.row_folder(folder, kind, source).flatten();
+            counts[usize::from(folder.is_some())]
+                .get_or_init(|| self.downloaded(&context, folder))
+                .clone()
+        };
         let count =
-            |counts: &[u32], slot: Option<u32>| slot.map(|slot| i64::from(counts[slot as usize]));
+            |kind, slot: Option<u32>, source: Option<u16>, of: &dyn Fn(&Downloaded) -> &[u32]| {
+                Some(i64::from(
+                    of(&downloaded(kind, Some(source?)))[slot? as usize],
+                ))
+            };
         for row in rows {
             let (shown, current) = match row {
                 Shown::Track(row) => {
@@ -425,32 +438,46 @@ impl Catalog {
                     }
                     continue;
                 }
-                Shown::Album(row) => (
-                    &mut row.summary.downloaded_count,
-                    count(
-                        &downloaded().albums,
-                        snapshot.albums.slot(row.album_key.raw()),
-                    ),
-                ),
-                Shown::Artist(row) => (
-                    &mut row.summary.downloaded_count,
-                    count(
-                        &downloaded().artists[usize::from(row.album_artist)],
-                        snapshot.artists.slot(row.artist_key.raw()),
-                    ),
-                ),
-                Shown::Tag(row) => (
-                    &mut row.summary.downloaded_count,
-                    count(&downloaded().tags, snapshot.tags.slot(row.key)),
-                ),
-                Shown::Folder(row) => (
-                    &mut row.summary.downloaded_count,
-                    count(
-                        &downloaded().folders,
-                        row.folder_key
-                            .and_then(|key| snapshot.folders.slot(key.raw())),
-                    ),
-                ),
+                Shown::Album(row) => {
+                    let key = row.album_key.raw();
+                    let source = snapshot.albums.get(key).map(|record| record.source);
+                    let slot = snapshot.albums.slot(key);
+                    (
+                        &mut row.summary.downloaded_count,
+                        count(CatalogKind::Album, slot, source, &|counts| &counts.albums),
+                    )
+                }
+                Shown::Artist(row) => {
+                    let key = row.artist_key.raw();
+                    let role = usize::from(row.album_artist);
+                    let source = snapshot.artists.get(key).map(|record| record.source);
+                    let slot = snapshot.artists.slot(key);
+                    (
+                        &mut row.summary.downloaded_count,
+                        count(CatalogKind::Artist, slot, source, &|counts| {
+                            &counts.artists[role]
+                        }),
+                    )
+                }
+                Shown::Tag(row) => {
+                    let source = snapshot.tags.get(row.key).map(|record| record.source);
+                    let slot = snapshot.tags.slot(row.key);
+                    (
+                        &mut row.summary.downloaded_count,
+                        count(row.kind.catalog(), slot, source, &|counts| &counts.tags),
+                    )
+                }
+                Shown::Folder(row) => {
+                    let key = row.folder_key.map(|key| key.raw());
+                    let source = key
+                        .and_then(|key| snapshot.folders.get(key))
+                        .map(|record| record.source);
+                    let slot = key.and_then(|key| snapshot.folders.slot(key));
+                    (
+                        &mut row.summary.downloaded_count,
+                        count(CatalogKind::Folder, slot, source, &|counts| &counts.folders),
+                    )
+                }
                 Shown::Playlist(row) => (
                     &mut row.downloaded_count,
                     snapshot

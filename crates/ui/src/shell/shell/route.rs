@@ -732,7 +732,7 @@ impl Shell {
                 .borrow()
                 .as_ref()
                 .is_some_and(|entry| {
-                    rufin_core::view::Scope::of(&entry.route, self.search_session.mode())
+                    rufin_core::view::Scope::of(&entry.route)
                         .same(entry.selected.as_ref(), selected.as_deref())
                 })
     }

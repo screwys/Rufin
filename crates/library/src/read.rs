@@ -546,13 +546,13 @@ struct Builder<'a> {
     catalog: &'a Catalog,
     context: Context<'a>,
     snapshot: &'a Snapshot,
-    /// Totals and pictures of the whole library, and of the music folder the rows read in.
+    /// Totals and pictures of the whole library, and totals of the music folder the rows read
+    /// in.
     covers: Arc<Derived>,
     in_folder: std::cell::OnceCell<Arc<Derived>>,
-    /// Plays of the whole library, and of the music folder, for rows that show them.
-    activity: std::cell::OnceCell<Arc<Activity>>,
-    activity_in_folder: std::cell::OnceCell<Arc<Activity>>,
-    downloaded: std::cell::OnceCell<Arc<Downloaded>>,
+    /// Plays, for rows that show them, and downloads: of the whole library, then of the folder.
+    activity: [std::cell::OnceCell<Arc<Activity>>; 2],
+    downloaded: [std::cell::OnceCell<Arc<Downloaded>>; 2],
     shape: &'a Shape,
     art: bool,
     /// Listens by smart playlist window.
@@ -574,48 +574,43 @@ impl<'a> Builder<'a> {
             context,
             snapshot,
             in_folder: std::cell::OnceCell::new(),
-            activity: std::cell::OnceCell::new(),
-            activity_in_folder: std::cell::OnceCell::new(),
-            downloaded: std::cell::OnceCell::new(),
+            activity: Default::default(),
+            downloaded: Default::default(),
             shape,
             art,
             inputs,
         }
     }
 
-    /// Collection totals of the whole library, with plays when the rows show activity.
-    fn totals(&self, activity: bool) -> Totaled<'_> {
-        Totaled {
-            derived: &self.covers,
-            activity: activity.then(|| {
-                &**self
-                    .activity
-                    .get_or_init(|| self.catalog.activity(&self.context, None))
-            }),
-        }
+    /// The music folder a row of `kind`, of source `owner`, counts in: the one the rows read in
+    /// when the one rule narrows that kind ([`Context::row_folder`]), else none.
+    fn counted_in(&self, kind: CatalogKind, owner: u16) -> Option<u32> {
+        self.context
+            .row_folder(self.shape.folder, kind, Some(owner))
+            .flatten()
     }
 
-    /// An artist's or tag's totals, of source `source`: in the music folder the rows read when
-    /// it is that source's, as the artist's or tag's page lists it (decisions.md, 2026-11-06).
-    fn scoped_totals(&self, activity: bool, source: u16) -> Totaled<'_> {
-        let Some(Some(folder)) = self.context.folder_slot(self.shape.folder, Some(source)) else {
-            return self.totals(activity);
-        };
-        Totaled {
-            derived: self
+    /// Collection totals in `folder`, with plays when the rows show activity.
+    fn totals(&self, folder: Option<u32>, activity: bool) -> Totaled<'_> {
+        let derived = match folder {
+            None => &self.covers,
+            Some(folder) => self
                 .in_folder
                 .get_or_init(|| self.catalog.derived(&self.context, Some(folder))),
+        };
+        Totaled {
+            derived,
             activity: activity.then(|| {
-                &**self
-                    .activity_in_folder
-                    .get_or_init(|| self.catalog.activity(&self.context, Some(folder)))
+                &**self.activity[usize::from(folder.is_some())]
+                    .get_or_init(|| self.catalog.activity(&self.context, folder))
             }),
         }
     }
 
-    fn downloaded(&self) -> &Downloaded {
-        self.downloaded
-            .get_or_init(|| self.catalog.downloaded(&self.context))
+    /// Downloads of each collection in `folder`, counted as [`Builder::totals`] counts tracks.
+    fn downloaded(&self, folder: Option<u32>) -> &Downloaded {
+        self.downloaded[usize::from(folder.is_some())]
+            .get_or_init(|| self.catalog.downloaded(&self.context, folder))
     }
 
     fn track_art(&self, key: TrackKey) -> Option<Art> {
@@ -876,9 +871,10 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.totals(activity).album(slot);
+        let folder = self.counted_in(CatalogKind::Album, record.source);
+        let mut totals = self.totals(folder, activity).album(slot);
         totals.albums = u32::from(totals.tracks > 0);
-        totals.downloaded = self.downloaded().albums[slot as usize];
+        totals.downloaded = self.downloaded(folder).albums[slot as usize];
         let runs = snapshot.album_runs(record);
         let (release_date, date_added) =
             got.album_texts.get(&key.raw()).cloned().unwrap_or_default();
@@ -940,10 +936,12 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
+        let folder = self.counted_in(CatalogKind::Artist, record.source);
         let mut totals = self
-            .scoped_totals(activity, record.source)
+            .totals(folder, activity)
             .artist(usize::from(album_artist), slot);
-        totals.downloaded = self.downloaded().artists[usize::from(album_artist)][slot as usize];
+        totals.downloaded =
+            self.downloaded(folder).artists[usize::from(album_artist)][slot as usize];
         Ok(Some(ArtistRow {
             artist_key: key,
             album_artist,
@@ -987,11 +985,14 @@ impl<'a> Builder<'a> {
             object_id: text(snapshot, record.object),
             media_uri: entity_uri(snapshot, record.source, kind.table().name, record.object),
             name: text(snapshot, record.name),
-            summary: Totals {
-                downloaded: self.downloaded().tags[slot as usize],
-                ..self.scoped_totals(false, record.source).tag(slot)
-            }
-            .summary(),
+            summary: {
+                let folder = self.counted_in(kind.catalog(), record.source);
+                Totals {
+                    downloaded: self.downloaded(folder).tags[slot as usize],
+                    ..self.totals(folder, false).tag(slot)
+                }
+                .summary()
+            },
             representative_artwork: artwork_binding
                 .is_none()
                 .then(|| galleries.get(&key).cloned())
@@ -1067,7 +1068,10 @@ impl<'a> Builder<'a> {
 
     /// A smart playlist's totals in the shape's music folder, as its page lists its members.
     fn smart_totals(&self, smart: &crate::catalog::snapshot::SmartPlaylist) -> Totals {
-        let Some(folder) = self.context.folder_slot(self.shape.folder, None) else {
+        let Some(folder) =
+            self.context
+                .row_folder(self.shape.folder, CatalogKind::SmartPlaylist, None)
+        else {
             return Totals::default();
         };
         let opened = self
@@ -1231,13 +1235,14 @@ impl<'a> Builder<'a> {
             Item::Folder(key) => match self.snapshot.folders.slot(key.raw()) {
                 Some(slot) => {
                     let record = &self.snapshot.folders.records[slot as usize];
+                    let folder = self.counted_in(CatalogKind::Folder, record.source);
                     Some(Row::Folder(FolderRow {
                         folder_key: Some(key),
                         object_id: text(self.snapshot, record.object),
                         name: text(self.snapshot, record.name),
                         summary: Totals {
-                            downloaded: self.downloaded().folders[slot as usize],
-                            ..self.covers.folders[slot as usize]
+                            downloaded: self.downloaded(folder).folders[slot as usize],
+                            ..self.totals(folder, false).derived.folders[slot as usize]
                         }
                         .summary(),
                         artwork_binding: got.own(Part::FolderArt, key.raw())?,
@@ -1645,9 +1650,9 @@ impl Catalog {
 
     /// How many listed tracks a genre's or mood's header counts in music folder `folder`.
     pub fn tag_track_count(&self, header: &HeaderKey, folder: Option<FolderKey>) -> i64 {
-        let key = match header {
-            HeaderKey::Genre(key) => key.raw(),
-            HeaderKey::Mood(key) => key.raw(),
+        let (key, kind) = match header {
+            HeaderKey::Genre(key) => (key.raw(), TagKind::Genre),
+            HeaderKey::Mood(key) => (key.raw(), TagKind::Mood),
             _ => return 0,
         };
         let snapshot = self.snapshot();
@@ -1659,8 +1664,11 @@ impl Catalog {
             ..Shape::of(None)
         };
         let inputs = Inputs::default();
-        Builder::new(self, &snapshot, &shape, &inputs, false)
-            .scoped_totals(false, snapshot.tags.records[slot as usize].source)
+        let builder = Builder::new(self, &snapshot, &shape, &inputs, false);
+        let folder =
+            builder.counted_in(kind.catalog(), snapshot.tags.records[slot as usize].source);
+        builder
+            .totals(folder, false)
             .tag(slot)
             .summary()
             .track_count

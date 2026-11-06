@@ -39,4 +39,11 @@ impl TagKind {
     pub(crate) fn table(self) -> &'static TagTable {
         &TAG_TABLES[self as usize]
     }
+
+    pub(crate) fn catalog(self) -> crate::CatalogKind {
+        match self {
+            Self::Genre => crate::CatalogKind::Genre,
+            Self::Mood => crate::CatalogKind::Mood,
+        }
+    }
 }

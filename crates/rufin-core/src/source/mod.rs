@@ -1656,8 +1656,7 @@ impl SourceOwner {
                 }
                 _ => crate::route::Route::AlbumDetail(media_uri.clone()),
             };
-            let folder = crate::view::Scope::of(&page, library::SearchMode::Title)
-                .folder(owner.selected_library().as_ref());
+            let folder = crate::view::Scope::of(&page).folder(owner.selected_library().as_ref());
             let (first, last) = catalog
                 .collection_source_path_bounds(&media_uri, album_artist, folder)
                 .await

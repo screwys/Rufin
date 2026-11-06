@@ -111,13 +111,13 @@ impl Route {
     }
 
     /// Whether a page lists the selected source and shows nothing without one; a lyrics search
-    /// reads every source.
+    /// reads every source, and in a selected source its music folder.
     pub fn requires_selected_source(&self, search_mode: library::SearchMode) -> bool {
-        crate::view::Scope::of(self, search_mode) != crate::view::Scope::Whole
-            && matches!(
+        match self {
+            Self::Search => search_mode == library::SearchMode::Title,
+            _ => matches!(
                 self,
                 Self::Home
-                    | Self::Search
                     | Self::Favorites
                     | Self::Albums
                     | Self::Tracks
@@ -126,7 +126,8 @@ impl Route {
                     | Self::Genres
                     | Self::Moods
                     | Self::Folders { .. }
-            )
+            ),
+        }
     }
 }
 

@@ -1192,7 +1192,7 @@ mod tests {
             .unwrap();
         let cancellation = library::ReadCancellation::new();
         let result = catalog
-            .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+            .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), None, &cancellation)
             .await
             .unwrap();
         assert_eq!(
@@ -1206,7 +1206,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             catalog
-                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("replacement"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1215,7 +1219,11 @@ mod tests {
         );
         assert!(
             catalog
-                .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("updated"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1233,7 +1241,11 @@ mod tests {
             .unwrap();
         assert!(
             catalog
-                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("replacement"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks
@@ -1251,7 +1263,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             catalog
-                .search_tracks_by_lyrics(&library::SearchRequest::new("returned"), &cancellation)
+                .search_tracks_by_lyrics(
+                    &library::SearchRequest::new("returned"),
+                    None,
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .tracks

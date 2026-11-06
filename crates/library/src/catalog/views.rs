@@ -462,8 +462,9 @@ impl Totaled<'_> {
     }
 }
 
-/// How many visible tracks of each collection are downloaded, from one pass over the
-/// downloaded tracks. A download rebuilds only this, not [`Derived`].
+/// How many visible tracks of each collection are downloaded, in a music folder, from one pass
+/// over the downloaded tracks: what [`Derived`] counts, in the same folder. A download rebuilds
+/// only this.
 pub(crate) struct Downloaded {
     pub(crate) albums: Vec<u32>,
     /// Track artists and album artists.
@@ -473,7 +474,7 @@ pub(crate) struct Downloaded {
 }
 
 impl Downloaded {
-    fn build(context: &Context<'_>) -> Self {
+    fn build(context: &Context<'_>, folder: Option<u32>) -> Self {
         let snapshot = context.snapshot;
         let artists = snapshot.artists.records.len();
         let mut downloaded = Self {
@@ -484,7 +485,10 @@ impl Downloaded {
         };
         let mut tags = Vec::new();
         for (_, record) in snapshot.tracks.iter() {
-            if record.flags & DOWNLOADED == 0 || !record.indexed() {
+            if record.flags & DOWNLOADED == 0
+                || !record.indexed()
+                || !context.in_folder(record, folder)
+            {
                 continue;
             }
             if let Some(album) = context.album_of(record) {
@@ -864,7 +868,7 @@ impl Context<'_> {
 
     /// Whether a track of a collection of every source is in `folder`: a folder narrows only
     /// its own source's tracks.
-    fn in_source_folder(&self, record: &TrackRec, folder: Option<u32>) -> bool {
+    pub(crate) fn in_source_folder(&self, record: &TrackRec, folder: Option<u32>) -> bool {
         folder.is_none_or(|folder| {
             record.source != self.snapshot.folders.records[folder as usize].source
                 || self.snapshot.track_runs(record)[3].contains(&folder)
@@ -885,6 +889,19 @@ impl Context<'_> {
         let folder = self.snapshot.folders.slot(key.raw())?;
         let source = self.snapshot.folders.records[folder as usize].source;
         Some(owner.is_none_or(|owner| owner == source).then_some(folder))
+    }
+
+    /// The music folder a row of `kind`, of source `owner` (None for every source), counts its
+    /// totals and downloads in when the rows read in `folder`: the rows' own when the one rule
+    /// ([`crate::CatalogKind::follows_folder`]) narrows that kind, else none. None when the
+    /// folder is gone.
+    pub(crate) fn row_folder(
+        &self,
+        folder: Option<crate::FolderKey>,
+        kind: crate::CatalogKind,
+        owner: Option<u16>,
+    ) -> Option<Option<u32>> {
+        self.folder_slot(folder.filter(|_| kind.follows_folder()), owner)
     }
 
     /// The music folder a list read keeps, or None when the folder is gone.
@@ -2120,8 +2137,8 @@ pub(crate) struct Views {
     derived: Vec<((u64, Option<u32>), Arc<Derived>)>,
     /// By the facts, plays and music folder each counts.
     activity: Vec<(([u64; 2], Option<u32>), Arc<Activity>)>,
-    /// The facts and downloads it counts, and what it counts.
-    downloaded: Option<([u64; 2], Arc<Downloaded>)>,
+    /// By the facts, downloads and music folder each counts.
+    downloaded: Vec<(([u64; 2], Option<u32>), Arc<Downloaded>)>,
     /// Most recently used last.
     orders: Vec<Order>,
     /// Members of the smart playlists pages opened most recently, oldest first.
@@ -2333,24 +2350,16 @@ impl Catalog {
         value
     }
 
-    /// How many tracks of each collection are downloaded, kept while the facts and downloads
-    /// hold.
-    pub(crate) fn downloaded(&self, context: &Context<'_>) -> Arc<Downloaded> {
-        let stamp = [context.snapshot.facts, context.snapshot.downloads];
-        let find = || match &self.views().downloaded {
-            Some((built, downloaded)) if *built == stamp => Some(downloaded.clone()),
-            _ => None,
-        };
-        if let Some(downloaded) = find() {
-            return downloaded;
-        }
-        let _building = self.deriving();
-        if let Some(downloaded) = find() {
-            return downloaded;
-        }
-        let downloaded = Arc::new(Downloaded::build(context));
-        self.views().downloaded = Some((stamp, downloaded.clone()));
-        downloaded
+    /// How many tracks of each collection are downloaded in music folder `folder`, kept while
+    /// the facts and downloads hold.
+    pub(crate) fn downloaded(&self, context: &Context<'_>, folder: Option<u32>) -> Arc<Downloaded> {
+        let key = ([context.snapshot.facts, context.snapshot.downloads], folder);
+        self.built(
+            |views| &mut views.downloaded,
+            key,
+            |kept| kept.0 == key.0,
+            || Downloaded::build(context, folder),
+        )
     }
 
     /// The cached order of a read while what it depends on is unchanged.

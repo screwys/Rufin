@@ -260,7 +260,7 @@ impl SearchSession {
         let changed =
             !SelectedLibrary::same(self.selected.borrow().as_ref(), selected.as_ref(), true);
         self.selected.replace(selected);
-        if changed && self.mode() == library::SearchMode::Title {
+        if changed {
             self.schedule();
         }
     }
@@ -295,7 +295,8 @@ impl SearchSession {
         self.show_items(Default::default());
         self.revision.set(self.revision.get().wrapping_add(1));
         if self.query.borrow().is_empty()
-            || (self.mode() == library::SearchMode::Title && self.selected.borrow().is_none())
+            || (rufin_core::route::Route::Search.requires_selected_source(self.mode())
+                && self.selected.borrow().is_none())
             || (self.mode() == library::SearchMode::Lyrics
                 && self.query.borrow().chars().nth(1).is_none())
         {

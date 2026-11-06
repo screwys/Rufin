@@ -151,7 +151,7 @@ impl Catalog {
             }
             keys
         };
-        self.search_rows(&mut connection, &keys, album_artists)
+        self.search_rows(&mut connection, &keys, album_artists, folder)
             .await
     }
 
@@ -161,6 +161,7 @@ impl Catalog {
         connection: &mut sqlx::SqliteConnection,
         keys: &[Vec<i64>; 3],
         album_artists: bool,
+        folder: Option<FolderKey>,
     ) -> LibraryResult<SearchResults> {
         let items = keys[0]
             .iter()
@@ -178,9 +179,12 @@ impl Catalog {
                 album_artist: album_artists,
             }))
             .collect::<Vec<_>>();
-        let rows = self
-            .rows_of_on(connection, &items, &crate::read::Shape::of(None), true)
-            .await?;
+        // Each row counts in music folder `folder` as the one rule narrows its kind.
+        let shape = crate::read::Shape {
+            folder,
+            ..crate::read::Shape::of(None)
+        };
+        let rows = self.rows_of_on(connection, &items, &shape, true).await?;
         let mut results = SearchResults::default();
         for row in rows {
             match row {
@@ -198,6 +202,7 @@ impl Catalog {
     pub async fn reread_search(
         &self,
         results: &SearchResults,
+        folder: Option<FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<SearchResults> {
         let mut connection = self.acquire_loaded(cancellation).await?;
@@ -220,7 +225,7 @@ impl Catalog {
         ];
         let album_artists = results.artists.iter().any(|row| row.album_artist);
         let mut reread = self
-            .search_rows(&mut connection, &keys, album_artists)
+            .search_rows(&mut connection, &keys, album_artists, folder)
             .await?;
         reread.lyrics.clone_from(&results.lyrics);
         Ok(reread)
@@ -328,7 +333,7 @@ impl Catalog {
             ]
         };
         let mut connection = self.acquire_loaded(cancellation).await?;
-        self.search_rows(&mut connection, &keys, album_artists)
+        self.search_rows(&mut connection, &keys, album_artists, folder)
             .await
     }
 }

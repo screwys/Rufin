@@ -103,6 +103,17 @@ pub enum CatalogKind {
     PlaylistFolder,
 }
 
+impl CatalogKind {
+    /// Whether the selected music folder narrows a collection of this kind: the one music
+    /// folder rule by kind (decisions.md, 2026-11-06), as Feishin. Albums and playlists name
+    /// their members and stay whole, their pages and their rows' counts and badges alike; the
+    /// other kinds are queried and narrow. A folder narrows only its own source's tracks. Core's
+    /// page scope and every collection row's totals take it.
+    pub fn follows_folder(self) -> bool {
+        !matches!(self, Self::Album | Self::Playlist)
+    }
+}
+
 impl Catalog {
     /// Keys of a source's rows of one kind by object id, in the order asked; ids it does not
     /// hold are skipped. Collection object ids are resident; track ones are read.

@@ -6,8 +6,9 @@ use library::{
 /// How many results of each kind a search shows.
 const SEARCH_LIMIT: usize = 60;
 
-/// What `query` finds: lyrics in every source, or titles in the selected source and music
-/// folder, from its server when it searches live, else from the Catalog.
+/// What `query` finds in the selected source and music folder: titles, from its server when it
+/// searches live, else from the Catalog; or lyrics, in every source, the selected one in its
+/// music folder.
 pub(crate) async fn search(
     owner: &super::SourceOwner,
     selected: Option<&SelectedLibrary>,
@@ -18,7 +19,10 @@ pub(crate) async fn search(
     let catalog = &owner.shared.catalog;
     let request = SearchRequest::with_limit(query.as_str(), SEARCH_LIMIT);
     if mode == SearchMode::Lyrics {
-        return catalog.search_tracks_by_lyrics(&request, cancel).await;
+        let folder = selected.and_then(|selected| selected.music_folder_key);
+        return catalog
+            .search_tracks_by_lyrics(&request, folder, cancel)
+            .await;
     }
     let selected =
         selected.ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()))?;

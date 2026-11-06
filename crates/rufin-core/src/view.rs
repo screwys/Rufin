@@ -159,7 +159,7 @@ enum Plan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     /// Neither the source nor its music folder: album and playlist pages, which name their
-    /// members, the play history, and a lyrics search, which reads every source.
+    /// members, and the play history.
     Whole,
     /// The source: the playlist lists, which a music folder does not filter.
     Source,
@@ -168,12 +168,32 @@ pub enum Scope {
 }
 
 impl Scope {
-    pub fn of(route: &Route, search_mode: library::SearchMode) -> Self {
-        match route {
-            Route::AlbumDetail(_) | Route::PlaylistDetail(_) | Route::History => Self::Whole,
-            Route::Search if search_mode == library::SearchMode::Lyrics => Self::Whole,
-            Route::Playlists | Route::PlaylistFolder { smart: false, .. } => Self::Source,
-            _ => Self::Folder,
+    /// A collection page reads in the scope [`library::CatalogKind::follows_folder`] gives its
+    /// kind; every list, Home and Search read in the music folder.
+    pub fn of(route: &Route) -> Self {
+        use library::CatalogKind as Kind;
+        let kind = match route {
+            Route::History => return Self::Whole,
+            Route::Playlists | Route::PlaylistFolder { smart: false, .. } => return Self::Source,
+            Route::AlbumDetail(_) => Kind::Album,
+            Route::PlaylistDetail(_) => Kind::Playlist,
+            Route::SmartPlaylistDetail(_) => Kind::SmartPlaylist,
+            Route::GenreDetail(_) => Kind::Genre,
+            Route::MoodDetail(_) => Kind::Mood,
+            Route::ArtistDetail(_)
+            | Route::AlbumArtistDetail(_)
+            | Route::ArtistDiscography(_)
+            | Route::AlbumArtistDiscography(_)
+            | Route::ArtistTracks(_)
+            | Route::AlbumArtistTracks(_)
+            | Route::ArtistFavoriteTracks(_)
+            | Route::AlbumArtistFavoriteTracks(_) => Kind::Artist,
+            _ => return Self::Folder,
+        };
+        if kind.follows_folder() {
+            Self::Folder
+        } else {
+            Self::Whole
         }
     }
 
@@ -478,7 +498,7 @@ impl SourceOwner {
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
         let (sort, descending, activity) = read_order(route, options, settings);
-        let selected = Scope::of(route, options.search_mode).apply(selected);
+        let selected = Scope::of(route).apply(selected);
         let selected = selected.as_ref();
         let source = selected.map(|selected| selected.source_key);
         let require_source =
@@ -977,7 +997,7 @@ impl View {
 
     /// Whether it reads the same in `selected` as in the library it opened in.
     pub fn reads_same_in(&self, selected: Option<&SelectedLibrary>) -> bool {
-        Scope::of(&self.route, self.options.search_mode).same(self.selected.as_ref(), selected)
+        Scope::of(&self.route).same(self.selected.as_ref(), selected)
     }
 
     /// What a committed change means for this page now that the client shows `current`, the
@@ -1652,7 +1672,10 @@ impl View {
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Search(results), _) if options == self.options => {
-                let mut results = self.catalog().reread_search(results, cancel).await?;
+                let mut results = self
+                    .catalog()
+                    .reread_search(results, self.music_folder(), cancel)
+                    .await?;
                 self.catalog()
                     .sort_search(&mut results, search_sorts(&settings));
                 let plan = Plan::Search(Box::new(results));
@@ -2045,7 +2068,7 @@ pub fn context_id(
         (Route::History, Some(source)) => format!("|history={}", source.as_str()),
         _ => String::new(),
     };
-    let selected = Scope::of(route, options.search_mode).apply(selected);
+    let selected = Scope::of(route).apply(selected);
     format!(
         "{}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}{history}",
         context_base(route),
@@ -2075,7 +2098,7 @@ fn changes(
     let affects = |source: Option<SourceKey>| source.is_none() || source == selected;
     let unaffected =
         |source| !affects(source) && route.requires_selected_source(options.search_mode);
-    let same = Scope::of(route, options.search_mode).same(opened_with, current);
+    let same = Scope::of(route).same(opened_with, current);
     let mut refresh = Refresh::Nothing;
     // Favorites and ratings are patched into the rows that show them; a page whose rows they
     // order or filter reads again through `View::states_reorder`.
@@ -2285,7 +2308,7 @@ fn member_read(
     let mut read = MemberRead::new(collection);
     read.sort = Some(sort);
     read.descending = descending;
-    read.folder = folder.filter(|_| Scope::of(route, options.search_mode) == Scope::Folder);
+    read.folder = folder.filter(|_| Scope::of(route) == Scope::Folder);
     read.filter.clone_from(&options.filter);
     read.favorites_only = favorites_only(route, options);
     read.downloaded_only =

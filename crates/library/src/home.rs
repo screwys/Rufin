@@ -449,13 +449,13 @@ impl Catalog {
         items.extend(genres.iter().copied());
         let mut seen = std::collections::HashSet::new();
         items.retain(|item| seen.insert(*item));
+        // Each row counts in the music folder as the one rule narrows its kind.
+        let shape = crate::read::Shape {
+            folder,
+            ..crate::read::Shape::of(None)
+        };
         let rows = self
-            .rows_of_on(
-                &mut transaction,
-                &items,
-                &crate::read::Shape::of(None),
-                true,
-            )
+            .rows_of_on(&mut transaction, &items, &shape, true)
             .await?;
         let mut track_rows = std::collections::HashMap::new();
         let mut album_rows = std::collections::HashMap::new();

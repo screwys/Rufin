@@ -24,15 +24,31 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
 }
 
 impl Catalog {
+    /// Tracks whose lyrics match `request`, in every source; music folder `folder` narrows its
+    /// own source's.
     pub async fn search_tracks_by_lyrics(
         &self,
         request: &SearchRequest,
+        folder: Option<crate::FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<SearchResults> {
         let expressions = expressions(request.query());
         if expressions.is_empty() {
             return Ok(SearchResults::default());
         }
+        self.loaded().await;
+        let Some(folder) =
+            crate::catalog::views::Context::new(&self.snapshot()).folder_slot(folder, None)
+        else {
+            return Ok(SearchResults::default());
+        };
+        // A music folder narrows only its own source's tracks.
+        let kept = |key: i64| {
+            let snapshot = self.snapshot();
+            snapshot.tracks.get(key).is_none_or(|track| {
+                crate::catalog::views::Context::new(&snapshot).in_source_folder(track, folder)
+            })
+        };
         let mut connection = self.acquire_cancellable(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let mut keys = Vec::new();
@@ -52,7 +68,7 @@ impl Catalog {
             .bind(serde_json::to_string(&keys)?)
             .fetch(&mut *transaction);
             while let Some((key, payload, ordinal)) = rows.try_next().await? {
-                if keys.contains(&key) {
+                if keys.contains(&key) || !kept(key) {
                     continue;
                 }
                 keys.push(key);
@@ -71,7 +87,12 @@ impl Catalog {
             }
         }
         let tracks = self
-            .search_rows(&mut transaction, &[keys, Vec::new(), Vec::new()], false)
+            .search_rows(
+                &mut transaction,
+                &[keys, Vec::new(), Vec::new()],
+                false,
+                None,
+            )
             .await?
             .tracks;
         transaction.commit().await?;
