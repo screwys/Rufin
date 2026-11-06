@@ -925,7 +925,8 @@ async fn memberships(
                 continue;
             };
             listed.push((record.key.raw(), track.key.raw()));
-            if !track.folders.contains(&record.key) {
+            if !track.folders.contains(&record.key) && !write.newer(Family::Track, track.key.raw())
+            {
                 track.folders.push(record.key);
                 write.put(track);
             }

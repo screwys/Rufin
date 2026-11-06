@@ -946,8 +946,12 @@ impl<'a> Write<'a> {
         Ok(records)
     }
 
-    /// Stages a changed row. A row equal to the known one stages nothing.
+    /// Stages a changed row. A row equal to the known one stages nothing. A write outside a
+    /// walk is newer than every open walk, changed or not.
     pub(crate) fn put<R: Row>(&mut self, mut record: R) {
+        if self.walk.is_none() {
+            self.see(&record);
+        }
         let key = record.key();
         let overlay = R::overlay(self);
         let previous = match overlay.rows.get(&key) {
@@ -1537,6 +1541,15 @@ impl<'a> Write<'a> {
                 edit_entries(&mut playlist.entries, &edit.removed, edit.put);
             }
             if playlist != resident {
+                // An edit outside a walk is newer than every open walk of the playlist's source.
+                if let Some(source) = playlist
+                    .as_ref()
+                    .or(resident.as_ref())
+                    .and_then(|p| p.source)
+                    && self.walk.is_none()
+                {
+                    self.seen.push((Family::Playlist, key, source));
+                }
                 let entries = playlist.as_ref().map(|playlist| &playlist.entries)
                     != resident.as_ref().map(|playlist| &playlist.entries);
                 // Linking alone shows nothing; compared in place, without another copy.

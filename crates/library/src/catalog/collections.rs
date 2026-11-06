@@ -184,7 +184,9 @@ impl super::Observation<'_> {
             entries.retain(|(object, _)| object.is_empty() || seen.insert(object.clone()));
             // A source that names no entries (Subsonic) sends empty ids: entries keep theirs.
             let keep_ids = entries.iter().any(|(object, _)| object.is_empty());
-            crate::playlists::write_entries(&mut write, playlist, &entries, keep_ids).await?;
+            if !write.newer(Family::Playlist, playlist) {
+                crate::playlists::write_entries(&mut write, playlist, &entries, keep_ids).await?;
+            }
         }
         self.commit(write).await?;
         Ok(())
@@ -205,7 +207,10 @@ impl super::Observation<'_> {
                 .bind(source).bind(serde_json::to_string(ids)?).fetch_all(write.connection().await?).await?;
             write.read_keys::<R>(&keys).await?;
             for key in keys {
-                if let Some(mut record) = write.get::<R>(key).await? {
+                // A favorite accepted since the walk began is newer than its listing.
+                if let Some(mut record) =
+                    (write.get::<R>(key).await?).filter(|_| !write.newer(R::FAMILY, key))
+                {
                     let favorite = record
                         .object()
                         .is_some_and(|(_, _, object)| ids.iter().any(|id| id == object));
