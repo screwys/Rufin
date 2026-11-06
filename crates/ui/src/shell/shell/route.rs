@@ -246,7 +246,7 @@ impl Shell {
                     return;
                 }
             };
-            let apply_home = if refresh_home && shell.mounted_catalog_is_current() {
+            let apply_home = if refresh_home {
                 shell
                     .route_viewport
                     .mounted_route
@@ -433,8 +433,7 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| entry.route == route && !entry.load_failed)
-            && self.mounted_catalog_is_current();
+            .is_some_and(|entry| entry.route == route && !entry.load_failed);
         if !force && mounted_current {
             self.cancel_root_order_read();
             self.cancel_route_loading();
@@ -497,31 +496,14 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .map(|entry| {
-                (
-                    entry.view.clone(),
-                    entry.route == route,
-                    entry.selected.clone(),
-                )
-            });
-        let Some((mounted, current, opened_with)) = mounted else {
+            .map(|entry| entry.view.clone());
+        let Some(mounted) = mounted else {
             return;
         };
         mounted.show_changes(&self.products.source, changed);
-        if !current {
-            return;
-        }
         let current = self.products.source.selected_library();
-        // A page without a read of its own, Search or a page waiting for a source, asks core
-        // what the change means for its route.
-        let refresh = match mounted.view() {
-            Some(view) => view.refresh(current.as_ref(), changed),
-            None => rufin_core::view::refresh_unread(
-                &route,
-                opened_with.as_ref(),
-                current.as_ref(),
-                changed,
-            ),
+        let Some(refresh) = self.mounted_refresh(&route, current.as_ref(), changed) else {
+            return;
         };
         match refresh {
             Refresh::Nothing => {}
@@ -529,6 +511,25 @@ impl Shell {
             Refresh::Reread => self.refresh_mounted_catalog(),
             Refresh::Reopen => self.replace_current_route_when_ready(),
         }
+    }
+
+    /// What `changed` means for the page mounted for `route` now that `current` is selected, as
+    /// core decides it: its view's verdict, or for a page without a read of its own (Search or
+    /// a page waiting for a source) its route's. None when another route or none is mounted.
+    fn mounted_refresh(
+        &self,
+        route: &Route,
+        current: Option<&rufin_core::runtime::SelectedLibrary>,
+        changed: &Changed,
+    ) -> Option<Refresh> {
+        let mounted = self.route_viewport.mounted_route.borrow();
+        let entry = mounted.as_ref().filter(|entry| &entry.route == route)?;
+        Some(match entry.view.view() {
+            Some(view) => view.refresh(current, changed),
+            None => {
+                rufin_core::view::refresh_unread(route, entry.selected.as_ref(), current, changed)
+            }
+        })
     }
 
     fn begin_root_order_read(&self) -> (u64, library::ReadCancellation) {
@@ -586,7 +587,7 @@ impl Shell {
         let previous = self.begin_mounted_route_replacement();
         let release_ms = teardown_started.map(elapsed_ms);
         let model_started = render_started.as_ref().map(|_| Instant::now());
-        let catalog = crate::library::CatalogUi::new(self, &route, selected.as_ref());
+        let catalog = crate::library::CatalogUi::new(self);
         catalog.refresh_current_route_now_playing_selections(route_current_track(
             self.player_ui.selected_playback().as_deref(),
         ));
@@ -688,13 +689,19 @@ impl Shell {
         if matches!(route, Route::Folders { .. }) {
             message.set_text(&tr(msgid("Couldn't load this folder")));
         }
+        // A failed read again keeps what the page shows; one in another library does not.
+        let reselected = Changed {
+            scope: true,
+            ..Changed::default()
+        };
         let keep_content = self
             .route_viewport
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| entry.route == route && !entry.load_failed)
-            && self.mounted_catalog_is_current();
+            .is_some_and(|entry| !entry.load_failed)
+            && self.mounted_refresh(&route, selected.as_ref(), &reselected)
+                == Some(Refresh::Nothing);
         if keep_content {
             self.cancel_route_loading();
             self.control_feedback
@@ -739,24 +746,6 @@ impl Shell {
 
     pub(crate) fn has_active_mounted_route(&self) -> bool {
         self.route_viewport.mounted_route.borrow().is_some()
-    }
-
-    fn mounted_catalog_is_current(&self) -> bool {
-        let selected = self.selected_library();
-        self.route_viewport
-            .catalog
-            .borrow()
-            .as_ref()
-            .is_some_and(|catalog| catalog.is_current())
-            && self
-                .route_viewport
-                .mounted_route
-                .borrow()
-                .as_ref()
-                .is_some_and(|entry| {
-                    rufin_core::view::Scope::of(&entry.route)
-                        .same(entry.selected.as_ref(), selected.as_deref())
-                })
     }
 
     fn begin_mounted_route_replacement(&self) -> Option<MountedRouteEntry> {

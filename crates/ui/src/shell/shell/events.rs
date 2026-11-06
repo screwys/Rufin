@@ -27,6 +27,7 @@ use crate::widgets::mounted_route::route_current_track;
 pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: ProductReceivers) {
     let ProductReceivers {
         source,
+        changes,
         downloads,
         visualizer,
         waveform,
@@ -42,7 +43,6 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 
     let event_shell = Rc::clone(shell);
-    let changes = shell.products.source.changes();
     glib::spawn_future_local(async move {
         while let Some(changed) = changes.next().await {
             apply_changed(&event_shell, &changed);
@@ -159,23 +159,13 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
 
 /// The configured sources or the selection changed. Pages, pins, the search and the playlist
 /// picker read a new source or music folder, or none, from the change that follows it
-/// (`Changed::scope`), which a selection made before this client subscribed never sends.
+/// (`Changed::scope`), the startup selection's included.
 fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
     shell.products.lyrics.refresh_write_access();
     shell.chrome.topbar.refresh_lyrics_cache_prompt();
     match shell.products.source.selected_library() {
-        Some(selected) => {
-            install_selected(shell, selected);
-            // The startup selection's change went out before the change feed was followed:
-            // the pins read before it count again in it, as the startup route reads in it.
-            if !shell.startup.route_revealed.get() {
-                super::navigation::refresh_sidebar_pins(shell);
-                if !shell.source.operation.borrow().blocks_library() {
-                    shell.prepare_startup_route_content();
-                }
-            }
-        }
+        Some(selected) => install_selected(shell, selected),
         None => shell.refresh_playlist_picker(),
     }
     shell.player_ui.update_bottom_player();

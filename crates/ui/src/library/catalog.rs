@@ -6,12 +6,10 @@ use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// A page of the window: the route and library it was opened for, and what it shows of the
-/// current track and its selections. Everything else is the window's, through `Deref`.
+/// A page of the window: what it shows of the current track and its selections. Everything
+/// else is the window's, through `Deref`.
 pub(crate) struct CatalogUi {
     shell: Rc<Shell>,
-    route: rufin_core::route::Route,
-    selected: Option<rufin_core::runtime::SelectedLibrary>,
     pub current: RefCell<Option<RouteCurrentTrack>>,
     pub current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
     pub media_playing_cells:
@@ -29,15 +27,9 @@ impl std::ops::Deref for CatalogUi {
 }
 
 impl CatalogUi {
-    pub(crate) fn new(
-        shell: &Rc<Shell>,
-        route: &rufin_core::route::Route,
-        selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Rc<Self> {
+    pub(crate) fn new(shell: &Rc<Shell>) -> Rc<Self> {
         Rc::new(Self {
             shell: Rc::clone(shell),
-            route: route.clone(),
-            selected: selected.cloned(),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             media_playing_cells: RefCell::new(Vec::new()),
@@ -49,16 +41,6 @@ impl CatalogUi {
     /// The window the page is shown in.
     pub(crate) fn shell(&self) -> &Rc<Shell> {
         &self.shell
-    }
-
-    /// Whether the window still shows the route this page was opened for, reading what it read
-    /// in the library it was opened for.
-    pub fn is_current(&self) -> bool {
-        self.navigation.routes.borrow().current() == &self.route
-            && self.selected.as_ref().is_none_or(|opened| {
-                rufin_core::view::Scope::of(&self.route)
-                    .same(Some(opened), self.selected_library().as_deref())
-            })
     }
 
     /// Whether the selected source is a Local one, whose tracks are on this device already.

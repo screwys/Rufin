@@ -147,8 +147,7 @@ impl PlayerUi {
         let Some(shell) = self.shell() else {
             return (gtk::Box::default().upcast(), Rc::new(|| {}));
         };
-        let route = shell.navigation.routes.borrow().current().clone();
-        crate::library::CatalogUi::new(&shell, &route, None).related_tracks_view(rows)
+        crate::library::CatalogUi::new(&shell).related_tracks_view(rows)
     }
 
     fn present_full_artwork(&self, artwork: artwork::ArtworkBinding) {

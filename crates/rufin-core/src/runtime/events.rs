@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use async_channel::Receiver;
 
 use super::{ReleaseUpdate, SourceEvent, VisualizerPublication, WaveformProjection};
 
 pub struct ProductReceivers {
     pub source: Receiver<SourceEvent>,
+    /// The change feed, followed from before the startup selection goes out.
+    pub changes: Arc<crate::source::feed::Changes>,
     pub downloads: Receiver<crate::downloads::DownloadEvent>,
     pub visualizer: Receiver<VisualizerPublication>,
     pub waveform: Receiver<WaveformProjection>,

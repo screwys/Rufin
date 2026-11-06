@@ -274,11 +274,7 @@ impl ActivityView {
             }
         });
         report_host.set_child(Some(&owner));
-        let collections = ActivityCollections::new(crate::library::CatalogUi::new(
-            &shell,
-            &Route::History,
-            None,
-        ));
+        let collections = ActivityCollections::new(crate::library::CatalogUi::new(&shell));
         tracks_host.append(&collections.tracks);
         artists_host.append(&collections.artists);
         albums_host.append(&collections.albums);

@@ -265,6 +265,7 @@ where
     source.install_connect(&connect);
     connect.start();
 
+    let changes = source.changes();
     source.start()?;
     let source_handle: crate::runtime::SourceHandle = source.clone();
 
@@ -293,6 +294,7 @@ where
         },
         receivers: ProductReceivers {
             source: source_receiver,
+            changes,
             downloads: download_receiver,
             visualizer: visualizer_receiver,
             waveform: waveform_receiver,

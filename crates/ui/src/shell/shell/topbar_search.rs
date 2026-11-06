@@ -792,13 +792,7 @@ impl SearchPopup {
 
     fn catalog(&self) -> Option<Rc<crate::library::CatalogUi>> {
         let shell = self.shell.upgrade()?;
-        let route = shell.navigation.routes.borrow().current().clone();
-        let selected = shell.selected_library().as_deref().cloned();
-        Some(crate::library::CatalogUi::new(
-            &shell,
-            &route,
-            selected.as_ref(),
-        ))
+        Some(crate::library::CatalogUi::new(&shell))
     }
 
     fn activate(&self, action: Option<SearchAction>) {
