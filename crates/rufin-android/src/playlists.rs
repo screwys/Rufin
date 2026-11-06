@@ -37,7 +37,14 @@ impl AndroidLibrary {
             selected.as_ref().map(|selected| selected.source_key),
             library::LibraryField::Title,
         );
-        read.folder = selected.and_then(|selected| selected.music_folder_key);
+        // Smart playlists count in the music folder; the folder does not filter playlists.
+        let list = if folder_kind == Some(true) {
+            rufin_core::route::Route::SmartPlaylists
+        } else {
+            rufin_core::route::Route::Playlists
+        };
+        read.folder = rufin_core::view::Scope::of(&list, library::SearchMode::Title)
+            .folder(selected.as_ref());
         read.filter = filter;
         read.playlist_scope = if folder_kind.is_some() {
             library::PlaylistScope::Folders
