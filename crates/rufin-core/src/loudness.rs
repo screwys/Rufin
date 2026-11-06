@@ -300,7 +300,7 @@ impl Analysis<'_> {
                 return Ok(());
             };
             after = Some(last.0);
-            for (album, tracks) in page {
+            for (_, tracks) in page {
                 if self.cancelled.load(Ordering::Acquire) {
                     return Ok(());
                 }
@@ -330,12 +330,12 @@ impl Analysis<'_> {
                 };
                 let mut analyses = Vec::with_capacity(playables.len());
                 let mut track_tags = Vec::with_capacity(playables.len());
-                for (playable, hash) in playables.iter().zip(hashes) {
+                for (playable, hash) in playables.iter().zip(&hashes) {
                     let Some(analysis) = self.analyze(playable).await else {
                         break;
                     };
                     let value = analysis.measurement();
-                    self.store_track(hash, value).await?;
+                    self.store_track(*hash, value).await?;
                     track_tags.push((playable.track, value.integrated_lufs));
                     analyses.push(analysis);
                 }
@@ -351,7 +351,7 @@ impl Analysis<'_> {
                     }
                 };
                 self.catalog
-                    .put_album_loudness(album, &measurement(value))
+                    .put_album_loudness(&hashes, &measurement(value))
                     .await
                     .map_err(|error| format!("could not store Album loudness: {error}"))?;
                 let tags = track_tags

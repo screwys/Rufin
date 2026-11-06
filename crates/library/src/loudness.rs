@@ -159,31 +159,22 @@ impl Catalog {
         .await
     }
 
-    /// Stores an album's loudness under its current members; nothing while a member's hash is
-    /// unknown.
+    /// Stores an album's loudness under the audio hashes of the members it measured, keyed as
+    /// `album_members_sql` keys them.
     pub async fn put_album_loudness(
         &self,
-        album: AlbumKey,
+        members: &[[u8; 32]],
         value: &LoudnessMeasurement,
     ) -> LibraryResult<bool> {
+        let mut members = members.to_vec();
+        members.sort_unstable();
+        let key = members
+            .iter()
+            .flat_map(|hash| &hash[..8])
+            .map(|byte| format!("{byte:02X}"));
         let mut write = self.write().await?;
-        let members: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT {}",
-            album_members_sql("?1")
-        )))
-        .bind(album)
-        .fetch_one(write.connection().await?)
-        .await?;
-        let changed = match members {
-            Some(members) => {
-                write_album_loudness(
-                    &mut write,
-                    &[(members, value.integrated_lufs, value.true_peak)],
-                )
-                .await?
-            }
-            None => false,
-        };
+        let row = (key.collect(), value.integrated_lufs, value.true_peak);
+        let changed = write_album_loudness(&mut write, &[row]).await?;
         write.commit().await?;
         Ok(changed)
     }

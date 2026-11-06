@@ -156,12 +156,6 @@ async fn loudness_is_keyed_by_audio_hash_and_source_facts_win() {
     let (album, members) = work[0].clone();
     assert_eq!(members, tracks[..2]);
     assert!(
-        !catalog
-            .put_album_loudness(album, &measured(Some(-13.0), 0.85))
-            .await
-            .unwrap()
-    );
-    assert!(
         catalog
             .put_audio_hash(tracks[0], [99; 32], [60; 32])
             .await
@@ -175,7 +169,7 @@ async fn loudness_is_keyed_by_audio_hash_and_source_facts_win() {
     );
     assert!(
         catalog
-            .put_album_loudness(album, &measured(Some(-13.0), 0.85))
+            .put_album_loudness(&[[60; 32], [61; 32]], &measured(Some(-13.0), 0.85))
             .await
             .unwrap()
     );
