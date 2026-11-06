@@ -984,21 +984,38 @@ impl View {
         result: Option<&str>,
     ) -> Option<PlayRequest> {
         let section = self.home_sections()?.into_iter().nth(index)?;
+        // Each album and genre as its page lists it whole.
+        let page = |collection, list| {
+            let mut read = saved_members(collection, list, &self.settings);
+            read.folder = self
+                .selected
+                .as_ref()
+                .and_then(|selected| selected.music_folder_key);
+            read.selection()
+        };
+        let album = |key| page(Collection::Album(key), LibraryListKey::AlbumDetailTracks);
         let selections = match &section {
-            HomeSection::Showcase(album) => {
-                vec![MemberSelection::Collections(vec![Collection::Album(
-                    album.album.album_key,
-                )])]
-            }
+            HomeSection::Showcase(row) => vec![album(row.album.album_key)],
             HomeSection::Genres(genres) => genres
                 .iter()
                 .map(|genre| {
-                    MemberSelection::Collections(vec![Collection::Genre(
-                        library::GenreKey::from_raw(genre.key),
-                    )])
+                    page(
+                        Collection::Genre(library::GenreKey::from_raw(genre.key)),
+                        LibraryListKey::GenreTracks,
+                    )
                 })
                 .collect(),
-            HomeSection::Rows { .. } | HomeSection::Provider(_) => section_selections(&section),
+            HomeSection::Rows { .. } | HomeSection::Provider(_) => section
+                .items()
+                .into_iter()
+                .map(|item| match item {
+                    HomeItem::Track(row) => MemberSelection::Keys {
+                        source: None,
+                        keys: vec![row.track.track_key].into(),
+                    },
+                    HomeItem::Album(row) => album(row.album.album_key),
+                })
+                .collect(),
         };
         let id = match &section {
             HomeSection::Provider(provider) => format!("provider:{}", provider.section_id),
@@ -1672,23 +1689,6 @@ fn block_id(block: HomeBlockKind) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default()
-}
-
-/// What a section of tracks and albums plays: each track, then each album.
-fn section_selections(section: &HomeSection) -> Vec<MemberSelection> {
-    section
-        .items()
-        .into_iter()
-        .map(|item| match item {
-            HomeItem::Track(row) => MemberSelection::Keys {
-                source: None,
-                keys: vec![row.track.track_key].into(),
-            },
-            HomeItem::Album(row) => {
-                MemberSelection::Collections(vec![Collection::Album(row.album.album_key)])
-            }
-        })
-        .collect()
 }
 
 /// What playing `selection` whole queues, with `context`, from a random track when shuffled.

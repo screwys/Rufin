@@ -19,7 +19,6 @@ pub enum MemberSelection {
         ranges: Option<Vec<Range<usize>>>,
         members: Box<MemberRead>,
     },
-    Collections(Vec<Collection>),
     Keys {
         source: Option<SourceKey>,
         keys: Arc<[TrackKey]>,
@@ -131,13 +130,6 @@ pub(crate) async fn selected_tracks_on(
                                 ..(**members).clone()
                             });
                         }
-                    }
-                    continue;
-                }
-                MemberSelection::Collections(collections) => {
-                    for collection in collections {
-                        parts.push((group, Part::Read(reads.len())));
-                        reads.push(MemberRead::new(collection.clone()));
                     }
                     continue;
                 }
