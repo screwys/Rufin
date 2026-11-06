@@ -120,8 +120,9 @@ enum Body {
         track_len: usize,
     },
     Home(Box<HomePage>),
-    /// What a search found, each kind in its list's sort.
-    Search(Box<SearchResults>),
+    /// What a search found, each kind in its list's sort, and whether a change to what it
+    /// matches committed since: a reread matches the query in the Catalog again only then.
+    Search(Box<SearchResults>, std::sync::atomic::AtomicBool),
     /// The collection the route names is gone or empty, or the route lists nothing itself.
     Missing,
 }
@@ -799,6 +800,7 @@ impl SourceOwner {
                     selected,
                     options.search_mode,
                     options.filter.clone(),
+                    true,
                     cancel,
                 )
                 .await?;
@@ -961,7 +963,7 @@ async fn read(
             (None, 0, Vec::new(), None)
         }
         Plan::Search(results) => {
-            view.body = Body::Search(results);
+            view.body = Body::Search(results, Default::default());
             (None, 0, Vec::new(), None)
         }
         Plan::Missing => (None, 0, Vec::new(), None),
@@ -1090,6 +1092,22 @@ impl View {
     /// downloads read it again only where they order or filter its rows; the rows and header
     /// that show them show them through [`crate::shown::ShownChanges`].
     pub fn refresh(&self, current: Option<&SelectedLibrary>, changed: &Changed) -> Refresh {
+        if let Body::Search(_, rematch) = &self.body {
+            let mode = self.options.search_mode;
+            let matched = |source: &SourceKey| {
+                !self.route.requires_selected_source(mode)
+                    || self
+                        .selected
+                        .as_ref()
+                        .is_some_and(|selected| selected.source_key == *source)
+            };
+            if changed.all
+                || changed.sources.iter().any(matched)
+                || changed.lyrics && mode == library::SearchMode::Lyrics
+            {
+                rematch.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         let refresh = changes(
             &self.owner,
             &self.route,
@@ -1379,7 +1397,7 @@ impl View {
                     ..
                 }
                 | Body::Home(_)
-                | Body::Search(_)
+                | Body::Search(..)
                 | Body::Missing => false,
                 Body::Rows { .. } | Body::Releases { .. } | Body::Folders { .. } => true,
             }
@@ -1395,7 +1413,7 @@ impl View {
                 track_len,
                 ..
             } => folder_len + track_len,
-            Body::Home(_) | Body::Search(_) | Body::Missing => 0,
+            Body::Home(_) | Body::Search(..) | Body::Missing => 0,
         }
     }
 
@@ -1423,7 +1441,7 @@ impl View {
     /// What a search found, each kind in its list's sort.
     pub fn search_results(&self) -> Option<&SearchResults> {
         match &self.body {
-            Body::Search(results) => Some(results),
+            Body::Search(results, _) => Some(results),
             _ => None,
         }
     }
@@ -1502,7 +1520,7 @@ impl View {
                 }
                 Ok(rows)
             }
-            Body::Home(_) | Body::Search(_) | Body::Missing => Ok(Vec::new()),
+            Body::Home(_) | Body::Search(..) | Body::Missing => Ok(Vec::new()),
         }
     }
 
@@ -1687,7 +1705,7 @@ impl View {
             Body::Home(_) => {
                 self.settings.application.home_blocks != current.application.home_blocks
             }
-            Body::Search(_) => CollectionCategory::ALL
+            Body::Search(..) => CollectionCategory::ALL
                 .into_iter()
                 .any(|category| order(category.key())),
             _ if matches!(
@@ -1725,7 +1743,7 @@ impl View {
                 ..
             }
             | Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
-            Body::Search(_) => search_sorts(&self.settings)
+            Body::Search(..) => search_sorts(&self.settings)
                 .into_iter()
                 .any(|(field, _)| orders(field)),
             _ => false,
@@ -1735,7 +1753,7 @@ impl View {
     /// Reads the page again with `options` and current settings. A folder keeps the folder it
     /// opened, so new child folders show when the route opens again. Album, artist track, genre
     /// and mood pages and Discography read their rows again and keep their header, so a
-    /// collection that is gone reads as empty. A search runs its query again.
+    /// collection that is gone reads as empty.
     pub async fn reread(
         &self,
         options: OpenOptions,
@@ -1782,6 +1800,33 @@ impl View {
                     members.collection.clone(),
                 );
                 let plan = Plan::Rows(Read::Members(members));
+                read(self.again(options, settings), plan, None, seed, cancel).await
+            }
+            // A favorite, rating, play or sort change orders the results it found again; a
+            // change to what they match matches the query in the Catalog again. Only a new
+            // query searches the server.
+            (Body::Search(results, rematch), _) if options == self.options => {
+                let folder = self.music_folder();
+                let mut results = if rematch.load(std::sync::atomic::Ordering::Relaxed) {
+                    crate::source::search::search(
+                        &self.owner,
+                        Scope::of(&self.route)
+                            .apply(self.selected.as_ref())
+                            .as_ref(),
+                        options.search_mode,
+                        options.filter.clone(),
+                        false,
+                        cancel,
+                    )
+                    .await?
+                } else {
+                    self.catalog()
+                        .reread_search(results, folder, cancel)
+                        .await?
+                };
+                self.catalog()
+                    .sort_search(&mut results, folder, search_sorts(&settings));
+                let plan = Plan::Search(Box::new(results));
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Releases { .. }, _)

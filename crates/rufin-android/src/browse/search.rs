@@ -33,6 +33,36 @@ fn search_rows(
         .collect()
 }
 
+impl AndroidLibrary {
+    /// The results the Search page `read` reads, with what commits while it reads.
+    async fn found<F>(
+        self: Arc<Self>,
+        read: impl FnOnce(library::ReadCancellation) -> F + Send + 'static,
+    ) -> Result<AndroidSearch, AndroidError>
+    where
+        F: std::future::Future<Output = library::LibraryResult<rufin_core::view::Opened>>
+            + Send
+            + 'static,
+    {
+        let reading = AndroidReading::new(self.source.reading());
+        let fields = {
+            let settings = self.settings.load();
+            CollectionCategory::ALL.map(|category| settings.library_list(category.key()).row_fields)
+        };
+        let library = Arc::clone(&self);
+        run_read(&self.runtime, move |cancel| async move {
+            let opened = read(cancel).await.map_err(error)?;
+            let results = opened.view.search_results().cloned().unwrap_or_default();
+            Ok(AndroidSearch {
+                rows: search_rows(results, fields),
+                view: library.view_of(opened.view),
+                reading,
+            })
+        })
+        .await
+    }
+}
+
 /// A search's results, the Search page that found them and what committed while it searched.
 #[derive(uniffi::Record)]
 pub struct AndroidSearch {
@@ -50,21 +80,15 @@ impl AndroidLibrary {
         text: String,
         mode: library::SearchMode,
     ) -> Result<AndroidSearch, AndroidError> {
-        let reading = AndroidReading::new(self.source.reading());
-        let selected = self.source.selected_library();
-        let source = self.source.clone();
-        let library = Arc::clone(&self);
-        let fields = {
-            let settings = self.settings.load();
-            CollectionCategory::ALL.map(|category| settings.library_list(category.key()).row_fields)
-        };
         let options = OpenOptions {
             filter: text,
             search_mode: mode,
             ..Default::default()
         };
-        run_read(&self.runtime, move |cancel| async move {
-            let opened = source
+        let selected = self.source.selected_library();
+        let source = self.source.clone();
+        self.found(move |cancel| async move {
+            source
                 .open(
                     Route::Search,
                     selected,
@@ -74,13 +98,23 @@ impl AndroidLibrary {
                     &cancel,
                 )
                 .await
-                .map_err(error)?;
-            let results = opened.view.search_results().cloned().unwrap_or_default();
-            Ok(AndroidSearch {
-                rows: search_rows(results, fields),
-                view: library.view_of(opened.view),
-                reading,
-            })
+        })
+        .await
+    }
+
+    /// Reads the Search page `view` again, as its refresh asked.
+    pub async fn search_again(
+        self: Arc<Self>,
+        view: Arc<AndroidView>,
+    ) -> Result<AndroidSearch, AndroidError> {
+        let view = Arc::clone(&view.view);
+        self.found(move |cancel| async move {
+            view.reread(
+                view.options().clone(),
+                library::RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
         })
         .await
     }

@@ -7,13 +7,14 @@ use library::{
 const SEARCH_LIMIT: usize = 60;
 
 /// What `query` finds in the selected source and music folder: titles, from its server when it
-/// searches live, else from the Catalog; or lyrics, in every source, the selected one in its
-/// music folder.
+/// searches live and `live` asks, else from the Catalog; or lyrics, in every source, the
+/// selected one in its music folder.
 pub(crate) async fn search(
     owner: &super::SourceOwner,
     selected: Option<&SelectedLibrary>,
     mode: SearchMode,
     query: String,
+    live: bool,
     cancel: &ReadCancellation,
 ) -> LibraryResult<SearchResults> {
     let catalog = &owner.shared.catalog;
@@ -26,7 +27,8 @@ pub(crate) async fn search(
     }
     let selected =
         selected.ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()))?;
-    if selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
+    if live
+        && selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
         && let Some(source) = owner.cached_client(&selected.source_id)
     {
         let folder = selected

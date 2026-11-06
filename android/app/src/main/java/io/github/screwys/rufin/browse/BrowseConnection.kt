@@ -63,6 +63,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var searchMode by mutableStateOf(SearchMode.TITLE)
     private var searchSubmission by mutableIntStateOf(0)
     private var searchChanges by mutableIntStateOf(0)
+    private var searchRereads by mutableIntStateOf(0)
     /** The Search page that found `searchRows`; it says when a change means searching again. */
     @Volatile private var searchView: AndroidView? = null
     var searchRows by mutableStateOf<List<BrowseItem>>(emptyList())
@@ -108,7 +109,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         ?.let { BrowseLocation(it.route, it.title, optionsFor(it.id)) }
 
     private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
-        val library: AndroidLibrary?, val changes: Int, val submission: Int)
+        val library: AndroidLibrary?, val changes: Int, val submission: Int, val rereads: Int)
 
     fun submitSearch() {
         if (searchMode == SearchMode.LYRICS) searchSubmission++
@@ -140,15 +141,23 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
         scope.launch(Dispatchers.Main) {
             connection.changes.collect { changed ->
-                if ((searchView?.refresh(changed) ?: Refresh.NOTHING) != Refresh.NOTHING) searchChanges++
+                when (searchView?.refresh(changed)) {
+                    Refresh.REOPEN -> searchChanges++
+                    Refresh.REREAD -> searchRereads++
+                    else -> {}
+                }
             }
         }
         scope.launch {
             var submitted = 0
-            snapshotFlow { SearchContext(section, searchText, searchMode, library, searchChanges, searchSubmission) }
+            var searched: SearchContext? = null
+            snapshotFlow { SearchContext(section, searchText, searchMode, library, searchChanges, searchSubmission, searchRereads) }
                 .debounce { if (it.submission != submitted) 0L else 250L }.collectLatest { context ->
                     val explicit = context.submission != submitted
                     submitted = context.submission
+                    // Only a reread asked: the Search page reads its results again.
+                    val again = searchView.takeIf { searched?.copy(rereads = context.rereads) == context }
+                    searched = context
                     val query = context.text.trim()
                     if (context.section != AppSection.Search || query.isEmpty() || context.library == null ||
                         context.mode == SearchMode.LYRICS && !explicit && query.codePointCount(0, query.length) < 2) {
@@ -159,7 +168,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     }
                     searchLoading = true
                     try {
-                        val found = withContext(Dispatchers.Default) { context.library.search(context.text, context.mode) }
+                        val found = withContext(Dispatchers.Default) {
+                            if (again != null) context.library.searchAgain(again) else context.library.search(context.text, context.mode)
+                        }
                         // What committed while it searched reaches the results as any other change;
                         // results of a library no longer selected are never shown.
                         val missed = found.reading.missed()
@@ -178,7 +189,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                             page.hold(rows)
                             missed?.let(page::showChanges)
                         }
-                        if (refresh == Refresh.REREAD) searchChanges++
+                        if (refresh == Refresh.REREAD) searchRereads++
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { connection.runAction { throw error } }
                     finally { searchLoading = false }
