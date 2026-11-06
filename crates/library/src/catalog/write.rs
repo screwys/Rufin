@@ -182,10 +182,14 @@ pub trait ShowsState {
     fn state_mut(&mut self, _change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         None
     }
-    /// The row as [`crate::Catalog::show_downloads`] shows its downloads; None when it shows
-    /// none.
-    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+    /// What it shows of its downloads; None when it shows none.
+    fn downloads(&self) -> Option<crate::Downloads> {
         None
+    }
+    /// Shows `read`, downloads [`crate::Catalog::show_downloads`] read; false when they are
+    /// another row's or it shows them already.
+    fn show_downloads(&mut self, _read: crate::Downloads) -> bool {
+        false
     }
 
     /// Shows the favorites and ratings of `changes`; true when it showed something new.
@@ -201,17 +205,11 @@ pub trait ShowsState {
         }
         shown
     }
+}
 
-    /// Takes the downloads `read` shows when it is this row read again.
-    fn take_downloads(&mut self, read: &mut Self) -> bool
-    where
-        Self: Sized,
-    {
-        match (self.downloads(), read.downloads()) {
-            (Some(mut into), Some(from)) => into.take_downloads(from),
-            _ => false,
-        }
-    }
+/// Sets `shown` to `read` when they differ.
+fn show<T: PartialEq>(shown: &mut T, read: T) -> bool {
+    (*shown != read).then(|| *shown = read).is_some()
 }
 
 impl ShowsState for crate::TrackRow {
@@ -220,6 +218,13 @@ impl ShowsState for crate::TrackRow {
     }
     fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         (change.track() == Some(self.track_key)).then_some(&mut self.state)
+    }
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Track(self.track_key, self.is_downloaded))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Track(key, downloaded) if key == self.track_key
+            && show(&mut self.is_downloaded, downloaded))
     }
 }
 
@@ -230,6 +235,16 @@ impl ShowsState for crate::AlbumRow {
     fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         (change.album() == Some(self.album_key)).then_some(&mut self.state)
     }
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Album(
+            self.album_key,
+            self.summary.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Album(key, count) if key == self.album_key
+            && show(&mut self.summary.downloaded_count, count))
+    }
 }
 
 impl ShowsState for crate::ArtistRow {
@@ -238,6 +253,18 @@ impl ShowsState for crate::ArtistRow {
     }
     fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         (change.artist() == Some(self.artist_key)).then_some(&mut self.state)
+    }
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Artist(
+            self.artist_key,
+            self.album_artist,
+            self.summary.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Artist(key, album_artist, count)
+            if (key, album_artist) == (self.artist_key, self.album_artist)
+                && show(&mut self.summary.downloaded_count, count))
     }
 }
 
@@ -258,23 +285,94 @@ impl ShowsState for crate::Row {
             Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
         }
     }
-    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
-        self.shown()
+    fn downloads(&self) -> Option<crate::Downloads> {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.downloads(),
+            Self::Album(album) | Self::AlbumHeading(album) => album.downloads(),
+            Self::Artist(artist) => artist.downloads(),
+            Self::Tag(tag) => tag.downloads(),
+            Self::Folder(folder) => folder.downloads(),
+            Self::Playlist(playlist) => playlist.downloads(),
+        }
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        match self {
+            Self::Track(track) | Self::AlbumTrack { track, .. } => track.show_downloads(read),
+            Self::Album(album) | Self::AlbumHeading(album) => album.show_downloads(read),
+            Self::Artist(artist) => artist.show_downloads(read),
+            Self::Tag(tag) => tag.show_downloads(read),
+            Self::Folder(folder) => folder.show_downloads(read),
+            Self::Playlist(playlist) => playlist.show_downloads(read),
+        }
     }
 }
 
 impl ShowsState for crate::TagRow {
-    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
-        Some(crate::Shown::Tag(self))
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Tag(
+            self.key,
+            self.kind,
+            self.summary.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Tag(key, _, count) if key == self.key
+            && show(&mut self.summary.downloaded_count, count))
+    }
+}
+
+impl ShowsState for crate::FolderRow {
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Folder(
+            self.folder_key?,
+            self.summary.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Folder(key, count) if Some(key) == self.folder_key
+            && show(&mut self.summary.downloaded_count, count))
+    }
+}
+
+impl ShowsState for crate::PlaylistRow {
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Playlist(
+            self.playlist_key,
+            self.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Playlist(key, count) if key == self.playlist_key
+            && show(&mut self.downloaded_count, count))
+    }
+}
+
+impl ShowsState for crate::SmartPlaylistRow {
+    fn downloads(&self) -> Option<crate::Downloads> {
+        Some(crate::Downloads::Smart(
+            self.smart_playlist_key,
+            self.downloaded_count,
+        ))
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        matches!(read, crate::Downloads::Smart(key, count) if key == self.smart_playlist_key
+            && show(&mut self.downloaded_count, count))
     }
 }
 
 impl ShowsState for crate::PlaylistListRow {
-    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+    fn downloads(&self) -> Option<crate::Downloads> {
         match self {
-            Self::Playlist(playlist) => Some(crate::Shown::Playlist(playlist)),
-            Self::SmartPlaylist(smart) => Some(crate::Shown::Smart(smart)),
+            Self::Playlist(playlist) => playlist.downloads(),
+            Self::SmartPlaylist(smart) => smart.downloads(),
             Self::Folder(_) => None,
+        }
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        match self {
+            Self::Playlist(playlist) => playlist.show_downloads(read),
+            Self::SmartPlaylist(smart) => smart.show_downloads(read),
+            Self::Folder(_) => false,
         }
     }
 }
@@ -294,8 +392,23 @@ impl ShowsState for crate::Header {
             Self::Playlist(_) | Self::Smart(_) | Self::Tag(_) => None,
         }
     }
-    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
-        Some(self.shown())
+    fn downloads(&self) -> Option<crate::Downloads> {
+        match self {
+            Self::Album(album) => album.row.downloads(),
+            Self::Artist(artist) => artist.row.downloads(),
+            Self::Playlist(playlist) => playlist.downloads(),
+            Self::Smart(smart) => smart.downloads(),
+            Self::Tag(tag) => tag.downloads(),
+        }
+    }
+    fn show_downloads(&mut self, read: crate::Downloads) -> bool {
+        match self {
+            Self::Album(album) => album.row.show_downloads(read),
+            Self::Artist(artist) => artist.row.show_downloads(read),
+            Self::Playlist(playlist) => playlist.show_downloads(read),
+            Self::Smart(smart) => smart.show_downloads(read),
+            Self::Tag(tag) => tag.show_downloads(read),
+        }
     }
 }
 

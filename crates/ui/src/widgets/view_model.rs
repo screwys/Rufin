@@ -1329,13 +1329,13 @@ impl Rows<Row> {
             let Some(list) = list.upgrade() else { return };
             let shown = Self::from_list(&list);
             // The downloads go into the row now at each position when it is the same row.
-            for (index, mut row) in rows {
+            for (index, downloads) in rows {
                 let position = read[index];
                 let Some(current) = shown.ready(position) else {
                     continue;
                 };
                 let mut merged = Row::clone(&current);
-                if merged.take_downloads(&mut row) {
+                if merged.show_downloads(downloads) {
                     shown.set_ready(position, merged);
                 }
             }

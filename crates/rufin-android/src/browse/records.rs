@@ -376,8 +376,9 @@ pub struct AndroidShowing {
     pub downloads: Option<Arc<AndroidDownloads>>,
 }
 
-type DownloadRead =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<(usize, library::Row)>>> + Send>>;
+type DownloadRead = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Option<Vec<(usize, library::Downloads)>>> + Send>,
+>;
 
 /// The downloads a committed change shows in a page's rows, read in the background.
 #[derive(uniffi::Object)]
@@ -404,12 +405,18 @@ impl AndroidDownloads {
         read.await
             .unwrap_or_default()
             .into_iter()
-            .map(|(at, library)| {
+            .filter_map(|(at, read)| {
+                use library::ShowsState;
                 let (index, row) = &self.rows[at];
-                AndroidShownRow {
+                let AndroidBrowseItem::Library { row: library } = &row.item else {
+                    return None;
+                };
+                let mut library = library.clone();
+                library.show_downloads(read);
+                Some(AndroidShownRow {
                     index: *index as u64,
                     row: row.showing(library),
-                }
+                })
             })
             .collect()
     }
@@ -492,14 +499,14 @@ impl AndroidLibrary {
         read: AndroidBrowseRow,
     ) -> Option<AndroidBrowseRow> {
         use library::ShowsState;
-        let (
-            AndroidBrowseItem::Library { row: shown },
-            AndroidBrowseItem::Library { row: mut read },
-        ) = (&row.item, read.item)
+        let (AndroidBrowseItem::Library { row: shown }, AndroidBrowseItem::Library { row: read }) =
+            (&row.item, read.item)
         else {
             return None;
         };
         let mut shown = shown.clone();
-        shown.take_downloads(&mut read).then(|| row.showing(shown))
+        shown
+            .show_downloads(read.downloads()?)
+            .then(|| row.showing(shown))
     }
 }

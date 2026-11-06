@@ -270,7 +270,7 @@ impl HomeRouteProjection {
                 return;
             };
             // The downloads go into the row Home shows there now when it is the same row.
-            for (index, mut row) in read {
+            for (index, read) in read {
                 let current = match at[index] {
                     None => home
                         .showcase
@@ -285,7 +285,7 @@ impl HomeRouteProjection {
                         .cloned(),
                 };
                 if let Some(mut current) = current
-                    && current.take_downloads(&mut row)
+                    && current.show_downloads(read)
                 {
                     home.show_row(&sections, at[index], current);
                 }

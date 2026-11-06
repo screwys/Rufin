@@ -76,12 +76,19 @@ impl library::ShowsState for SearchItem {
             Self::Artist(row) => row.state_mut(change),
         }
     }
-    fn downloads(&mut self) -> Option<library::Shown<'_>> {
-        Some(match self {
-            Self::Track(row, _) => library::Shown::Track(row),
-            Self::Album(row) => library::Shown::Album(row),
-            Self::Artist(row) => library::Shown::Artist(row),
-        })
+    fn downloads(&self) -> Option<library::Downloads> {
+        match self {
+            Self::Track(row, _) => row.downloads(),
+            Self::Album(row) => row.downloads(),
+            Self::Artist(row) => row.downloads(),
+        }
+    }
+    fn show_downloads(&mut self, read: library::Downloads) -> bool {
+        match self {
+            Self::Track(row, _) => row.show_downloads(read),
+            Self::Album(row) => row.show_downloads(read),
+            Self::Artist(row) => row.show_downloads(read),
+        }
     }
 }
 

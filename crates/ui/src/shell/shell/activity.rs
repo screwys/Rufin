@@ -173,9 +173,9 @@ impl Shell {
             };
             // The downloads go into the card there now when it shows the same row.
             let rows = view.collections.rows();
-            for (index, mut row) in read {
+            for (index, read) in read {
                 if let Some(mut current) = rows.get(index).cloned()
-                    && current.take_downloads(&mut row)
+                    && current.show_downloads(read)
                 {
                     view.collections.show_row(index, current);
                 }

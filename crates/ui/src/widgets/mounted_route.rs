@@ -349,11 +349,11 @@ impl MountedRoute {
         // The downloads go into the header shown now, which keeps what changed meanwhile.
         glib::spawn_future_local(async move {
             use library::ShowsState;
-            let Some(mut read) = downloads.await else {
+            let Some(read) = downloads.await else {
                 return;
             };
-            if let (Some((_, read)), Some(mut shown)) = (read.first_mut(), current())
-                && shown.take_downloads(read)
+            if let (Some((_, read)), Some(mut shown)) = (read.first(), current())
+                && shown.show_downloads(*read)
             {
                 show(Some(shown));
             }

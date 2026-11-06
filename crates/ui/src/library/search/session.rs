@@ -82,13 +82,13 @@ impl SearchSession {
         glib::spawn_future_local(async move {
             let Some(read) = downloads.await else { return };
             // The downloads go into the result each item shows now when it is the same row.
-            for (index, mut row) in read {
+            for (index, read) in read {
                 let item = &shown[index].0;
                 let Some(current) = item.value::<Arc<SearchItem>>() else {
                     continue;
                 };
                 let mut merged = SearchItem::clone(&current);
-                if merged.take_downloads(&mut row) {
+                if merged.show_downloads(read) {
                     item.replace(Arc::new(merged), true);
                 }
             }

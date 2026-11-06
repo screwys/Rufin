@@ -49,9 +49,9 @@ pub struct Showing<T, F> {
     /// The rows whose favorites or ratings changed, by their index among the rows passed,
     /// showing them.
     pub states: Vec<(usize, T)>,
-    /// The rows whose downloads changed, by their index among the rows passed, once the Catalog
-    /// counted them; None when the change named no downloads. It resolves to None when a newer
-    /// change superseded it.
+    /// The downloads of the rows whose downloads changed, by their index among the rows passed,
+    /// once the Catalog counted them; None when the change named no downloads. It resolves to
+    /// None when a newer change superseded it.
     pub downloads: Option<F>,
 }
 
@@ -59,18 +59,21 @@ impl ShownChanges {
     /// Shows `changed` in `rows`, the rows the surface shows now, read by `view` (None for rows
     /// read with no page, in no music folder): favorites and ratings at once, and, when it names
     /// downloads, the downloads as the Catalog counts them in the music folder `view` reads,
-    /// read in the background. Only the rows that change come back. A client puts each in place of the row it shows at that
-    /// index, a downloads row with [`ShowsState::take_downloads`], which keeps what changed
-    /// since.
+    /// read in the background. Only the rows that change come back. A client puts each in place
+    /// of the row it shows at that index, the downloads with [`ShowsState::show_downloads`]
+    /// into the row it shows then.
     pub fn show<T>(
         &self,
         owner: &SourceOwner,
         rows: &[&T],
         changed: &Changed,
         view: Option<&crate::view::View>,
-    ) -> Showing<T, impl Future<Output = Option<Vec<(usize, T)>>> + Send + 'static + use<T>>
+    ) -> Showing<
+        T,
+        impl Future<Output = Option<Vec<(usize, library::Downloads)>>> + Send + 'static + use<T>,
+    >
     where
-        T: ShowsState + Clone + Send + 'static,
+        T: ShowsState + Clone,
     {
         let states = rows
             .iter()
@@ -87,37 +90,30 @@ impl ShownChanges {
                 (index, row)
             })
             .collect();
-        if changed.downloads.is_empty() || rows.is_empty() {
+        let shown = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| Some((index, row.downloads()?)))
+            .collect::<Vec<_>>();
+        if changed.downloads.is_empty() || shown.is_empty() {
             return Showing {
                 states,
                 downloads: None,
             };
         }
         let counted = view.map(crate::view::View::counted).unwrap_or_default();
-        let mut read = rows.iter().map(|row| T::clone(row)).collect::<Vec<_>>();
         let catalog = Arc::clone(&owner.shared.catalog);
         let cancel = ReadCancellation::new();
         let reading = cancel.clone();
         let task = owner.shared.runtime.spawn(async move {
-            let shown = read
-                .iter_mut()
-                .map(|row| row.downloads().map(|row| row.downloaded()))
-                .collect::<Vec<_>>();
-            catalog
-                .show_downloads(
-                    read.iter_mut().filter_map(ShowsState::downloads).collect(),
-                    counted,
-                    &reading,
-                )
-                .await?;
+            let mut read = shown.iter().map(|(_, shown)| *shown).collect::<Vec<_>>();
+            catalog.show_downloads(&mut read, counted, &reading).await?;
             Ok::<_, library::LibraryError>(
-                read.into_iter()
-                    .zip(shown)
-                    .enumerate()
-                    .filter_map(|(index, (mut row, shown))| {
-                        (row.downloads().map(|row| row.downloaded()) != shown)
-                            .then_some((index, row))
-                    })
+                shown
+                    .into_iter()
+                    .zip(read)
+                    .filter(|((_, shown), read)| shown != read)
+                    .map(|((index, _), read)| (index, read))
                     .collect::<Vec<_>>(),
             )
         });

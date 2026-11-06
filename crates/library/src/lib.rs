@@ -119,8 +119,8 @@ pub use keys::{
     source_entity_uri, source_id_for_uri,
 };
 pub use local::{
-    FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite, LocalLocatorWrite,
-    LocalMediaLocation, MappingTrackRow, Shown,
+    Downloads, FileEditRow, LocalFileKind, LocalFileState, LocalFileWrite, LocalLocatorWrite,
+    LocalMediaLocation, MappingTrackRow,
 };
 pub use loudness::{AnalysisCopy, LoudnessMeasurement, R128TagWrite};
 pub use lyrics::LyricsCacheRow;

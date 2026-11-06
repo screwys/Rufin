@@ -18,95 +18,19 @@ pub(crate) fn whole_file_cue_sql(track: &str, details: &str) -> String {
               AND sibling.source_key={track}.source_key AND sibling.indexed=1 AND sibling.track_key<>{track}.track_key)")
 }
 
-/// A row read earlier, whose downloads [`Catalog::show_downloads`] shows as they are now.
-pub enum Shown<'a> {
-    Track(&'a mut crate::TrackRow),
-    Album(&'a mut crate::AlbumRow),
-    Artist(&'a mut crate::ArtistRow),
-    Tag(&'a mut crate::TagRow),
-    Folder(&'a mut crate::FolderRow),
-    Playlist(&'a mut crate::PlaylistRow),
-    Smart(&'a mut crate::SmartPlaylistRow),
-}
-
-impl crate::Row {
-    /// The row as [`Catalog::show_downloads`] shows its downloads; None for a playlist folder.
-    pub fn shown(&mut self) -> Option<Shown<'_>> {
-        Some(match self {
-            Self::Track(track) | Self::AlbumTrack { track, .. } => Shown::Track(track),
-            Self::Album(album) | Self::AlbumHeading(album) => Shown::Album(album),
-            Self::Artist(artist) => Shown::Artist(artist),
-            Self::Tag(tag) => Shown::Tag(tag),
-            Self::Folder(folder) => Shown::Folder(folder),
-            Self::Playlist(crate::PlaylistListRow::Playlist(playlist)) => Shown::Playlist(playlist),
-            Self::Playlist(crate::PlaylistListRow::SmartPlaylist(smart)) => Shown::Smart(smart),
-            Self::Playlist(crate::PlaylistListRow::Folder(_)) => return None,
-        })
-    }
-}
-
-impl crate::Header {
-    /// The header as [`Catalog::show_downloads`] shows its downloads.
-    pub fn shown(&mut self) -> Shown<'_> {
-        match self {
-            Self::Album(album) => Shown::Album(&mut album.row),
-            Self::Artist(artist) => Shown::Artist(&mut artist.row),
-            Self::Playlist(playlist) => Shown::Playlist(playlist),
-            Self::Smart(smart) => Shown::Smart(smart),
-            Self::Tag(tag) => Shown::Tag(tag),
-        }
-    }
-}
-
-impl Shown<'_> {
-    /// How many of its tracks it shows downloaded.
-    pub fn downloaded(&self) -> i64 {
-        match self {
-            Self::Track(row) => i64::from(row.is_downloaded),
-            Self::Album(row) => row.summary.downloaded_count,
-            Self::Artist(row) => row.summary.downloaded_count,
-            Self::Tag(row) => row.summary.downloaded_count,
-            Self::Folder(row) => row.summary.downloaded_count,
-            Self::Playlist(row) => row.downloaded_count,
-            Self::Smart(row) => row.downloaded_count,
-        }
-    }
-
-    /// Takes the downloads `from` shows when it is the same row read again; false when it is
-    /// another row.
-    pub fn take_downloads(&mut self, from: Shown<'_>) -> bool {
-        match (self, from) {
-            (Self::Track(row), Shown::Track(from)) if row.track_key == from.track_key => {
-                row.is_downloaded = from.is_downloaded;
-            }
-            (Self::Album(row), Shown::Album(from)) if row.album_key == from.album_key => {
-                row.summary.downloaded_count = from.summary.downloaded_count;
-            }
-            (Self::Artist(row), Shown::Artist(from))
-                if (row.artist_key, row.album_artist) == (from.artist_key, from.album_artist) =>
-            {
-                row.summary.downloaded_count = from.summary.downloaded_count;
-            }
-            (Self::Tag(row), Shown::Tag(from)) if row.key == from.key => {
-                row.summary.downloaded_count = from.summary.downloaded_count;
-            }
-            (Self::Folder(row), Shown::Folder(from)) if row.object_id == from.object_id => {
-                row.summary.downloaded_count = from.summary.downloaded_count;
-            }
-            (Self::Playlist(row), Shown::Playlist(from))
-                if row.playlist_key == from.playlist_key =>
-            {
-                row.downloaded_count = from.downloaded_count;
-            }
-            (Self::Smart(row), Shown::Smart(from))
-                if row.smart_playlist_key == from.smart_playlist_key =>
-            {
-                row.downloaded_count = from.downloaded_count;
-            }
-            _ => return false,
-        }
-        true
-    }
+/// What a row shows of its downloads, by the row it is: whether a track's copy is downloaded,
+/// or how many tracks of a collection are. [`Catalog::show_downloads`] reads them as they are
+/// now, and [`crate::ShowsState::show_downloads`] puts them into a row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Downloads {
+    Track(TrackKey, bool),
+    Album(crate::AlbumKey, i64),
+    /// An artist, as an album artist when true.
+    Artist(crate::ArtistKey, bool, i64),
+    Tag(i64, crate::TagKind, i64),
+    Folder(crate::FolderKey, i64),
+    Playlist(crate::PlaylistKey, i64),
+    Smart(crate::SmartPlaylistKey, i64),
 }
 
 #[derive(Clone, Debug)]
@@ -403,19 +327,20 @@ impl Catalog {
         .transpose()
     }
 
-    /// Shows the current downloads in rows read earlier: a track's copy and how many tracks of
-    /// a collection are downloaded. Smart playlists count their members as of `now`, the time
-    /// the page read them at, in the music folder it read; None reads them as of now.
+    /// The current downloads of what rows read earlier show, in place: a track's copy and how
+    /// many tracks of a collection are downloaded. Smart playlists count their members as of
+    /// `now`, the time the page read them at, in the music folder it read; None reads them as of
+    /// now.
     pub async fn show_downloads(
         &self,
-        rows: Vec<Shown<'_>>,
+        rows: &mut [Downloads],
         (now, folder): (Option<i64>, Option<crate::FolderKey>),
         cancellation: &ReadCancellation,
     ) -> LibraryResult<()> {
         let smart = rows
             .iter()
             .filter_map(|row| match row {
-                Shown::Smart(row) => Some(row.smart_playlist_key.raw()),
+                Downloads::Smart(key, _) => Some(key.raw()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -445,63 +370,61 @@ impl Catalog {
             };
         for row in rows {
             let (shown, current) = match row {
-                Shown::Track(row) => {
-                    if let Some(downloaded) = snapshot.downloaded(row.track_key) {
-                        row.is_downloaded = downloaded;
+                Downloads::Track(key, shown) => {
+                    if let Some(downloaded) = snapshot.downloaded(*key) {
+                        *shown = downloaded;
                     }
                     continue;
                 }
-                Shown::Album(row) => {
-                    let key = row.album_key.raw();
+                Downloads::Album(key, shown) => {
+                    let key = key.raw();
                     let source = snapshot.albums.get(key).map(|record| record.source);
                     let slot = snapshot.albums.slot(key);
                     (
-                        &mut row.summary.downloaded_count,
+                        shown,
                         count(CatalogKind::Album, slot, source, &|counts| &counts.albums),
                     )
                 }
-                Shown::Artist(row) => {
-                    let key = row.artist_key.raw();
-                    let role = usize::from(row.album_artist);
+                Downloads::Artist(key, album_artist, shown) => {
+                    let key = key.raw();
+                    let role = usize::from(*album_artist);
                     let source = snapshot.artists.get(key).map(|record| record.source);
                     let slot = snapshot.artists.slot(key);
                     (
-                        &mut row.summary.downloaded_count,
+                        shown,
                         count(CatalogKind::Artist, slot, source, &|counts| {
                             &counts.artists[role]
                         }),
                     )
                 }
-                Shown::Tag(row) => {
-                    let source = snapshot.tags.get(row.key).map(|record| record.source);
-                    let slot = snapshot.tags.slot(row.key);
+                Downloads::Tag(key, kind, shown) => {
+                    let source = snapshot.tags.get(*key).map(|record| record.source);
+                    let slot = snapshot.tags.slot(*key);
                     (
-                        &mut row.summary.downloaded_count,
-                        count(row.kind.catalog(), slot, source, &|counts| &counts.tags),
+                        shown,
+                        count(kind.catalog(), slot, source, &|counts| &counts.tags),
                     )
                 }
-                Shown::Folder(row) => {
-                    let key = row.folder_key.map(|key| key.raw());
-                    let source = key
-                        .and_then(|key| snapshot.folders.get(key))
-                        .map(|record| record.source);
-                    let slot = key.and_then(|key| snapshot.folders.slot(key));
+                Downloads::Folder(key, shown) => {
+                    let key = key.raw();
+                    let source = snapshot.folders.get(key).map(|record| record.source);
+                    let slot = snapshot.folders.slot(key);
                     (
-                        &mut row.summary.downloaded_count,
+                        shown,
                         count(CatalogKind::Folder, slot, source, &|counts| &counts.folders),
                     )
                 }
-                Shown::Playlist(row) => (
-                    &mut row.downloaded_count,
+                Downloads::Playlist(key, shown) => (
+                    shown,
                     snapshot
                         .playlists
-                        .get(row.playlist_key.raw())
+                        .get(key.raw())
                         .map(|playlist| i64::from(context.playlist_totals(playlist).downloaded)),
                 ),
-                Shown::Smart(row) => (
-                    &mut row.downloaded_count,
+                Downloads::Smart(key, shown) => (
+                    shown,
                     smart
-                        .get(&row.smart_playlist_key.raw())
+                        .get(&key.raw())
                         .map(|totals| i64::from(totals.downloaded)),
                 ),
             };

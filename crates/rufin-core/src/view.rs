@@ -1838,11 +1838,17 @@ impl library::ShowsState for HomeItem {
             Self::Album(row) => row.album.state_mut(change),
         }
     }
-    fn downloads(&mut self) -> Option<library::Shown<'_>> {
-        Some(match self {
-            Self::Track(row) => library::Shown::Track(&mut row.track),
-            Self::Album(row) => library::Shown::Album(&mut row.album),
-        })
+    fn downloads(&self) -> Option<library::Downloads> {
+        match self {
+            Self::Track(row) => row.track.downloads(),
+            Self::Album(row) => row.album.downloads(),
+        }
+    }
+    fn show_downloads(&mut self, read: library::Downloads) -> bool {
+        match self {
+            Self::Track(row) => row.track.show_downloads(read),
+            Self::Album(row) => row.album.show_downloads(read),
+        }
     }
 }
 
