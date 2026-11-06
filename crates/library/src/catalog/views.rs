@@ -1465,11 +1465,14 @@ impl Context<'_> {
             && (record.flags & SOURCE_OWNED == 0 || record.indexed())
     }
 
+    /// Smart playlists, or the playlists of the read's source and Rufin's; of every source for
+    /// `every_source`.
     fn playlist_items(
         &self,
         read: &ListRead,
         folder: Option<u32>,
         inputs: &Inputs,
+        every_source: bool,
     ) -> Vec<PlaylistItem<'_>> {
         let snapshot = self.snapshot;
         let smart = matches!(read.kind, ListKind::SmartPlaylists { .. });
@@ -1499,7 +1502,8 @@ impl Context<'_> {
             .iter()
             .filter(|(_, record)| {
                 self.listed_playlist(record)
-                    && (record.source == NO_SOURCE
+                    && (every_source
+                        || record.source == NO_SOURCE
                         || source.is_some_and(|source| record.source == source))
             })
             .map(|(_, record)| {
@@ -1516,11 +1520,13 @@ impl Context<'_> {
             .collect()
     }
 
-    /// Totals of the playlists each playlist folder holds, as the list read shows them.
+    /// Totals of the playlists each playlist folder holds, as the list read shows them; of
+    /// every source for a read without one, as a pinned folder counts.
     pub(crate) fn playlist_folder_totals(&self, read: &ListRead) -> HashMap<i64, Totals> {
         let folder = self.list_folder(read).flatten();
         let mut totals = HashMap::<i64, Totals>::new();
-        for item in self.playlist_items(read, folder, &Inputs::default()) {
+        let every_source = read.source.is_none();
+        for item in self.playlist_items(read, folder, &Inputs::default(), every_source) {
             if let Some(owner) = item.folder {
                 let total = totals.entry(owner).or_default();
                 total.tracks += item.totals.tracks;
@@ -1540,7 +1546,7 @@ impl Context<'_> {
             .playlist_folders
             .values()
             .any(|folder| folder.smart == smart);
-        let children = self.playlist_items(read, folder, inputs);
+        let children = self.playlist_items(read, folder, inputs, false);
         let mut items =
             if read.playlist_scope == PlaylistScope::All
                 || read.playlist_scope == PlaylistScope::Root && !has_folders
