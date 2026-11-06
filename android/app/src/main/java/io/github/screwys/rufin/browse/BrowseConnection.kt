@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
+import io.github.screwys.rufin.shared.rufin_core.Refresh
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.shared.library.SearchMode
@@ -140,9 +141,9 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                 finally { library = null; bridge?.destroy() }
             }
         }
-        scope.launch(Dispatchers.Default) {
+        scope.launch(Dispatchers.Main) {
             connection.changes.collect { changed ->
-                if (searchView?.refresh(changed) == true) searchChanges++
+                if ((searchView?.refresh(changed) ?: Refresh.NOTHING) != Refresh.NOTHING) searchChanges++
             }
         }
         scope.launch {
@@ -162,10 +163,25 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     searchLoading = true
                     try {
                         val found = withContext(Dispatchers.Default) { context.library.search(context.text, context.mode) }
-                        searchView = found.view
-                        searchRows = found.rows.mapIndexed { index, row ->
+                        // What committed while it searched reaches the results as any other change;
+                        // results of a library no longer selected are never shown.
+                        val missed = found.reading.missed()
+                        val refresh = missed?.let { found.view.refresh(it) } ?: Refresh.NOTHING
+                        if (refresh == Refresh.REOPEN) {
+                            searchChanges++
+                            return@collectLatest
+                        }
+                        val rows = found.rows.mapIndexed { index, row ->
                             BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = context.text)
                         }
+                        searchView = found.view
+                        searchRows = rows
+                        // Results show changes through the visible page, as its rows do.
+                        visiblePage?.let { page ->
+                            page.hold(rows)
+                            missed?.let(page::showChanges)
+                        }
+                        if (refresh == Refresh.REREAD) searchChanges++
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { connection.runAction { throw error } }
                     finally { searchLoading = false }

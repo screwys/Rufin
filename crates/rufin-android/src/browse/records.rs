@@ -120,6 +120,32 @@ pub struct AndroidOpened {
     pub groups: Vec<AndroidArtistReleaseGroup>,
     pub favorite_rows: Vec<AndroidBrowseRow>,
     pub home: Vec<AndroidHomeSection>,
+    /// What committed while the page read.
+    pub reading: Arc<AndroidReading>,
+}
+
+/// What committed while a page read, which the page handles as any other change once it shows
+/// what it read.
+#[derive(uniffi::Object)]
+pub struct AndroidReading(std::sync::Mutex<Option<rufin_core::shown::Reading>>);
+
+impl AndroidReading {
+    pub(super) fn new(reading: rufin_core::shown::Reading) -> Arc<Self> {
+        Arc::new(Self(std::sync::Mutex::new(Some(reading))))
+    }
+}
+
+#[uniffi::export]
+impl AndroidReading {
+    /// Everything committed since the page started reading, everything when it fell behind;
+    /// None when nothing was, or when it was taken already.
+    pub fn missed(&self) -> Option<rufin_core::source::feed::Changed> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()?
+            .missed()
+    }
 }
 
 #[derive(uniffi::Enum)]
@@ -334,73 +360,134 @@ pub struct AndroidShownRow {
     pub row: AndroidBrowseRow,
 }
 
+/// What a committed change shows in a page's rows: their favorites and ratings now, their
+/// downloads once read.
+#[derive(uniffi::Record)]
+pub struct AndroidShowing {
+    pub states: Vec<AndroidShownRow>,
+    pub downloads: Option<Arc<AndroidDownloads>>,
+}
+
+type DownloadRead =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<(usize, library::Row)>>> + Send>>;
+
+/// The downloads a committed change shows in a page's rows, read in the background.
+#[derive(uniffi::Object)]
+pub struct AndroidDownloads {
+    read: std::sync::Mutex<Option<DownloadRead>>,
+    /// The rows passed, by the index core reads them at.
+    rows: Vec<(usize, AndroidBrowseRow)>,
+}
+
+#[uniffi::export]
+impl AndroidDownloads {
+    /// The rows whose downloads changed, showing them as the Catalog counts them; nothing when
+    /// a newer change of the same page superseded it. A page takes each into the row it shows
+    /// now with [`AndroidLibrary::take_downloads`].
+    pub async fn read(&self) -> Vec<AndroidShownRow> {
+        let read = self
+            .read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(read) = read else {
+            return Vec::new();
+        };
+        read.await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(at, library)| {
+                let (index, row) = &self.rows[at];
+                AndroidShownRow {
+                    index: *index as u64,
+                    row: row.showing(library),
+                }
+            })
+            .collect()
+    }
+}
+
+impl AndroidBrowseRow {
+    /// The row showing `library`, the same row with other favorites, ratings or downloads.
+    fn showing(&self, library: library::Row) -> Self {
+        let mut row = self.clone();
+        for field in &mut row.fields {
+            if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
+                field.text = rufin_core::settings::presentation::row_field(&library, field.id);
+            }
+        }
+        row.downloaded = library.downloaded();
+        row.item = AndroidBrowseItem::Library { row: library };
+        row
+    }
+}
+
 #[uniffi::export]
 impl AndroidLibrary {
-    /// The rows of `rows`, those a page shows now, that `changed` shows differently: their
-    /// favorites and ratings, and their downloads as the Catalog counts them, through core's
-    /// [`rufin_core::shown::ShownChanges`]. `view` is the page that read them; a newer change of
+    /// Shows `changed` in `rows`, the rows a page holds now, through core's
+    /// [`rufin_core::shown::ShownChanges`]: the rows whose favorites and ratings it changes at
+    /// once, and the downloads to read. `view` is the page that read them; a newer change of
     /// the same page supersedes the download read of an older one.
-    pub async fn show_changes(
+    pub fn show_changes(
         &self,
         rows: Vec<AndroidBrowseRow>,
         changed: rufin_core::source::feed::Changed,
         view: Option<Arc<super::AndroidView>>,
-    ) -> Vec<AndroidShownRow> {
-        use library::ShowsState;
+    ) -> AndroidShowing {
         let library = rows
-            .iter()
+            .into_iter()
             .enumerate()
-            .filter_map(|(index, row)| match &row.item {
-                AndroidBrowseItem::Library { row } => Some((index, row.clone())),
+            .filter(|(_, row)| matches!(row.item, AndroidBrowseItem::Library { .. }))
+            .collect::<Vec<_>>();
+        let shown = library
+            .iter()
+            .filter_map(|(_, row)| match &row.item {
+                AndroidBrowseItem::Library { row } => Some(row),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        let mut shown = library
-            .iter()
-            .map(|(_, row)| row.clone())
             .collect::<Vec<_>>();
         let changes = view
             .as_ref()
             .map_or_else(|| self.changes.clone(), |view| view.changes.clone());
         let smart = view.map(|view| view.view.smart_count()).unwrap_or_default();
-        let showing = changes.show(&self.source, &mut shown, &changed, smart);
-        let mut patched = std::collections::BTreeMap::new();
-        for ((index, before), after) in library.iter().zip(&shown) {
-            if before != after {
-                patched.insert(*index, after.clone());
-            }
-        }
-        if let Some(downloads) = showing.downloads
-            && let Some(read) = downloads.await
-        {
-            for (at, mut read) in read {
-                let index = library[at].0;
-                let mut merged = patched
-                    .get(&index)
-                    .cloned()
-                    .unwrap_or_else(|| shown[at].clone());
-                if merged.take_downloads(&mut read) {
-                    patched.insert(index, merged);
-                }
-            }
-        }
-        patched
-            .into_iter()
-            .map(|(index, library)| {
-                let mut row = rows[index].clone();
-                for field in &mut row.fields {
-                    if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
-                        field.text =
-                            rufin_core::settings::presentation::row_field(&library, field.id);
+        let showing = changes.show(&self.source, &shown, &changed, smart);
+        AndroidShowing {
+            states: showing
+                .states
+                .into_iter()
+                .map(|(at, row)| {
+                    let (index, shown) = &library[at];
+                    AndroidShownRow {
+                        index: *index as u64,
+                        row: shown.showing(row),
                     }
-                }
-                row.downloaded = library.downloaded();
-                row.item = AndroidBrowseItem::Library { row: library };
-                AndroidShownRow {
-                    index: index as u64,
-                    row,
-                }
-            })
-            .collect()
+                })
+                .collect(),
+            downloads: showing.downloads.map(|read| {
+                Arc::new(AndroidDownloads {
+                    read: std::sync::Mutex::new(Some(Box::pin(read))),
+                    rows: library,
+                })
+            }),
+        }
+    }
+
+    /// `row`, the row a page shows now, with the downloads `read` shows when it is the same row
+    /// read again; None when it is another row.
+    pub fn take_downloads(
+        &self,
+        row: AndroidBrowseRow,
+        read: AndroidBrowseRow,
+    ) -> Option<AndroidBrowseRow> {
+        use library::ShowsState;
+        let (
+            AndroidBrowseItem::Library { row: shown },
+            AndroidBrowseItem::Library { row: mut read },
+        ) = (&row.item, read.item)
+        else {
+            return None;
+        };
+        let mut shown = shown.clone();
+        shown.take_downloads(&mut read).then(|| row.showing(shown))
     }
 }

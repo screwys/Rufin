@@ -8,8 +8,8 @@ pub use records::{
     AndroidBrowseItem, AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailLink,
     AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
     AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
-    AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting,
-    AndroidScrollSection, AndroidSortField,
+    AndroidPinPage, AndroidPlaylistImport, AndroidReading, AndroidRouteDescriptor,
+    AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
@@ -313,12 +313,11 @@ impl AndroidView {
         .await
     }
 
-    /// Whether a committed change means the page reads again, in the library selected now.
-    /// Rows show favorites, ratings and downloads through `AndroidLibrary::show_changes`.
-    pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
+    /// What a committed change means for the page, in the library selected now. Rows show
+    /// favorites, ratings and downloads through `AndroidLibrary::show_changes`.
+    pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> rufin_core::view::Refresh {
         self.view
             .refresh(self.source.selected_library().as_ref(), &changed)
-            != rufin_core::view::Refresh::Nothing
     }
 
     /// The context id the page's plays carry.
@@ -506,8 +505,8 @@ impl AndroidLibrary {
     /// `embedded`, an artist's release groups and favorite tracks, and Home's sections.
     /// `previous`, the view this one replaces, reads again in place when it lists the same
     /// route in the same library, so an open Smart Playlist keeps its members. History lists
-    /// `history_source`'s plays, or every source's. A page whose selection changed while it
-    /// read opens again in the one selected now.
+    /// `history_source`'s plays, or every source's. What committed while it read comes with it,
+    /// for the page to handle once it shows the rows.
     #[allow(clippy::too_many_arguments)]
     pub async fn open(
         self: Arc<Self>,
@@ -533,56 +532,22 @@ impl AndroidLibrary {
             ..Default::default()
         };
         let runtime = self.runtime.clone();
-        let reading = self.source.reading();
+        let reading = AndroidReading::new(self.source.reading());
         run_read(&runtime, move |cancel| async move {
             let seed = library::RouteSeedWindow::top();
-            let mut previous = previous.map(|previous| Arc::clone(&previous.view));
-            let mut opened = loop {
-                let selected = self.source.selected_library();
-                let opened = match previous.take().filter(|previous| {
-                    *previous.route() == route && previous.reads_same_in(selected.as_ref())
-                }) {
-                    Some(previous) => previous.reread(options.clone(), seed, &cancel).await,
-                    None => {
-                        self.source
-                            .open(
-                                route.clone(),
-                                selected,
-                                options.clone(),
-                                seed,
-                                true,
-                                &cancel,
-                            )
-                            .await
-                    }
-                }
-                .map_err(error)?;
-                if opened
-                    .view
-                    .reads_same_in(self.source.selected_library().as_ref())
-                {
-                    break opened;
-                }
-            };
-            let view = self.view_of(opened.view);
-            // A change committed while it read shows in the rows it read too.
-            if let Some(missed) = reading.missed() {
-                let shown = view.changes.show(
-                    &self.source,
-                    &mut opened.rows,
-                    &missed,
-                    view.view.smart_count(),
-                );
-                if let Some(read) = match shown.downloads {
-                    Some(downloads) => downloads.await,
-                    None => None,
-                } {
-                    use library::ShowsState;
-                    for (index, mut row) in read {
-                        opened.rows[index].take_downloads(&mut row);
-                    }
+            let selected = self.source.selected_library();
+            let opened = match previous.filter(|previous| {
+                *previous.view.route() == route && previous.view.reads_same_in(selected.as_ref())
+            }) {
+                Some(previous) => previous.view.reread(options, seed, &cancel).await,
+                None => {
+                    self.source
+                        .open(route, selected, options, seed, true, &cancel)
+                        .await
                 }
             }
+            .map_err(error)?;
+            let view = self.view_of(opened.view);
             let rows = view.rows_from(opened.rows, opened.first);
             let groups = view
                 .view
@@ -628,6 +593,7 @@ impl AndroidLibrary {
                 favorite_rows,
                 home: view.home_sections(),
                 view,
+                reading,
             })
         })
         .await
