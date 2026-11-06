@@ -3175,12 +3175,10 @@ impl Catalog {
                     ) =>
                 {
                     let mut inputs = Inputs::default();
-                    if let Collection::Smart { key, now } = member.collection {
-                        let snapshot = self.snapshot();
-                        inputs.smart = snapshot
-                            .smart_playlists
-                            .get(&key.raw())
-                            .and_then(|smart| self.opened_smart(key.raw(), now, &smart.definition));
+                    if let Collection::Smart { key, now } = member.collection
+                        && let Some(smart) = self.snapshot().smart_playlists.get(&key.raw())
+                    {
+                        inputs.smart = self.opened_smart(key.raw(), now, &smart.definition);
                         if inputs.smart.is_none() {
                             unfrozen.push((whole.len(), key, now));
                         }

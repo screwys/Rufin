@@ -121,15 +121,13 @@ pub(crate) async fn selected_tracks_on(
                     let order = catalog
                         .order_on(connection, &Read::List(read.clone()))
                         .await?;
+                    // A playlist folder's negative key names no playlist, so it reads nothing.
                     for key in parents(&order, ranges.as_deref()) {
-                        // Playlist folders hold no tracks of their own.
-                        if key >= 0 {
-                            parts.push((group, Part::Read(reads.len())));
-                            reads.push(MemberRead {
-                                collection: parent_collection(read, key),
-                                ..(**members).clone()
-                            });
-                        }
+                        parts.push((group, Part::Read(reads.len())));
+                        reads.push(MemberRead {
+                            collection: parent_collection(read, key),
+                            ..(**members).clone()
+                        });
                     }
                     continue;
                 }
