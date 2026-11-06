@@ -141,7 +141,8 @@
             placeholder="{{ localization::tr("Search tracks") }}"
             aria-label="{{ localization::tr("Search library") }}"
           />
-          <noscript><button class="without-js" type="submit">{{ localization::tr("Search") }}</button></noscript>
+          <!-- The form's first submit button, so Enter searches rather than reversing the order. -->
+          <button class="without-js" type="submit">{{ localization::tr("Search") }}</button>
           <select id="sort" name="sort" aria-label="{{ localization::tr("Sort by") }}">
             {% for (name, title, selected) in page.sorts %}<option value="{{ name }}" {% if selected %}selected{% endif %}>{{ title }}</option>{% endfor %}
           </select>
