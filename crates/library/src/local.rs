@@ -43,6 +43,44 @@ impl crate::Row {
     }
 }
 
+impl Shown<'_> {
+    /// Takes the downloads `from` shows when it is the same row read again; false when it is
+    /// another row.
+    pub fn take_downloads(&mut self, from: Shown<'_>) -> bool {
+        match (self, from) {
+            (Self::Track(row), Shown::Track(from)) if row.track_key == from.track_key => {
+                row.is_downloaded = from.is_downloaded;
+            }
+            (Self::Album(row), Shown::Album(from)) if row.album_key == from.album_key => {
+                row.summary.downloaded_count = from.summary.downloaded_count;
+            }
+            (Self::Artist(row), Shown::Artist(from))
+                if (row.artist_key, row.album_artist) == (from.artist_key, from.album_artist) =>
+            {
+                row.summary.downloaded_count = from.summary.downloaded_count;
+            }
+            (Self::Tag(row), Shown::Tag(from)) if row.key == from.key => {
+                row.summary.downloaded_count = from.summary.downloaded_count;
+            }
+            (Self::Folder(row), Shown::Folder(from)) if row.object_id == from.object_id => {
+                row.summary.downloaded_count = from.summary.downloaded_count;
+            }
+            (Self::Playlist(row), Shown::Playlist(from))
+                if row.playlist_key == from.playlist_key =>
+            {
+                row.downloaded_count = from.downloaded_count;
+            }
+            (Self::Smart(row), Shown::Smart(from))
+                if row.smart_playlist_key == from.smart_playlist_key =>
+            {
+                row.downloaded_count = from.downloaded_count;
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DownloadItem {

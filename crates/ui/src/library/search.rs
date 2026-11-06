@@ -80,6 +80,15 @@ impl library::ShowsState for SearchItem {
 }
 
 impl SearchItem {
+    /// The result as the Catalog shows its downloads.
+    fn shown(&mut self) -> library::Shown<'_> {
+        match self {
+            Self::Track(row, _) => library::Shown::Track(row),
+            Self::Album(row) => library::Shown::Album(row),
+            Self::Artist(row) => library::Shown::Artist(row),
+        }
+    }
+
     fn lyrics(&self) -> Option<&library::LyricsSnippet> {
         match self {
             Self::Track(_, snippet) => snippet.as_ref(),
@@ -430,6 +439,8 @@ struct SearchRouteProjection {
     models: [gio::ListStore; 3],
     playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     active: RefCell<Option<SearchPresentation>>,
+    /// The download update being applied; a newer one replaces it.
+    downloads: RefCell<Option<glib::JoinHandle<()>>>,
 }
 
 struct SearchPresentation {
@@ -490,6 +501,7 @@ impl SearchRouteProjection {
             models,
             playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator::new(),
             active: RefCell::new(None),
+            downloads: RefCell::new(None),
         });
         projection.connect();
         projection.mount_category(projection.session.category.get());
@@ -662,32 +674,28 @@ impl SearchRouteProjection {
             .collect::<Vec<_>>();
         let catalog = Arc::clone(&shell.products.library);
         let task = shell.products.runtime.spawn(async move {
-            let shown = rows
-                .iter_mut()
-                .map(|row| match row {
-                    SearchItem::Track(row, _) => library::Shown::Track(row),
-                    SearchItem::Album(row) => library::Shown::Album(row),
-                    SearchItem::Artist(row) => library::Shown::Artist(row),
-                })
-                .collect();
+            let shown = rows.iter_mut().map(SearchItem::shown).collect();
             catalog
                 .show_downloads(shown, None, &ReadCancellation::new())
                 .await
                 .map(|()| rows)
         });
-        glib::spawn_future_local(async move {
+        let apply = glib::spawn_future_local(async move {
             let Ok(Ok(rows)) = task.await else { return };
-            // A result shown again since keeps what it read.
-            for ((item, read), row) in read.into_iter().zip(rows) {
-                if row != *read
-                    && item
-                        .value::<Arc<SearchItem>>()
-                        .is_some_and(|current| Arc::ptr_eq(&current, &read))
-                {
-                    item.replace(Arc::new(row), true);
+            // The downloads go into the result each item shows now when it is the same row.
+            for ((item, _), mut row) in read.into_iter().zip(rows) {
+                let Some(current) = item.value::<Arc<SearchItem>>() else {
+                    continue;
+                };
+                let mut merged = SearchItem::clone(&current);
+                if merged.shown().take_downloads(row.shown()) && merged != *current {
+                    item.replace(Arc::new(merged), true);
                 }
             }
         });
+        if let Some(previous) = self.downloads.replace(Some(apply)) {
+            previous.abort();
+        }
     }
 
     /// Shows committed favorites and ratings in the shown results; the session's own copy

@@ -206,6 +206,14 @@ impl ShownHomeSection {
     }
 }
 
+/// A Home row as the Catalog shows its downloads.
+fn home_item_shown(item: &mut HomeItem) -> library::Shown<'_> {
+    match item {
+        HomeItem::Track(item) => library::Shown::Track(&mut item.track),
+        HomeItem::Album(item) => library::Shown::Album(&mut item.album),
+    }
+}
+
 #[derive(Clone)]
 struct HomeRouteProjection {
     shell: std::rc::Weak<CatalogUi>,
@@ -215,6 +223,8 @@ struct HomeRouteProjection {
     shown: Rc<RefCell<Vec<(HomeSectionId, ShownHomeSection)>>>,
     content: gtk::Box,
     empty: gtk::Widget,
+    /// The download update being applied; a newer one replaces it.
+    downloads: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
 }
 
 impl HomeRouteProjection {
@@ -257,21 +267,17 @@ impl HomeRouteProjection {
             return;
         };
         let sections = self.sections();
-        let read = sections
+        let mut items = sections
             .iter()
             .map(|view| view.mounted.data.borrow().clone())
             .collect::<Vec<_>>();
         let mut showcase = self.showcase.borrow().clone();
-        let mut items = read.clone();
         let catalog = std::sync::Arc::clone(&shell.products.library);
         let task = shell.products.runtime.spawn(async move {
             let shown = showcase
                 .iter_mut()
                 .map(|row| library::Shown::Album(&mut row.album))
-                .chain(items.iter_mut().flatten().map(|item| match item {
-                    HomeItem::Track(item) => library::Shown::Track(&mut item.track),
-                    HomeItem::Album(item) => library::Shown::Album(&mut item.album),
-                }))
+                .chain(items.iter_mut().flatten().map(home_item_shown))
                 .collect();
             catalog
                 .show_downloads(shown, None, &library::ReadCancellation::new())
@@ -279,7 +285,7 @@ impl HomeRouteProjection {
                 .map(|()| (showcase, items))
         });
         let home = self.clone();
-        glib::spawn_future_local(async move {
+        let apply = glib::spawn_future_local(async move {
             let Ok(Ok((showcase, items))) = task.await else {
                 return;
             };
@@ -288,13 +294,21 @@ impl HomeRouteProjection {
             {
                 shown.album.summary = showcase.album.summary;
             }
-            // A section Home showed again since keeps what it read.
-            for ((view, read), items) in sections.iter().zip(read).zip(items) {
-                if *view.mounted.data.borrow() == read {
-                    view.mounted.replace(items);
+            // The downloads go into the rows each section shows now when they are the same rows.
+            for (view, mut items) in sections.iter().zip(items) {
+                let current = view.mounted.data.borrow().clone();
+                let mut merged = current.clone();
+                for (into, from) in merged.iter_mut().zip(&mut items) {
+                    home_item_shown(into).take_downloads(home_item_shown(from));
+                }
+                if merged != current {
+                    view.mounted.replace(merged);
                 }
             }
         });
+        if let Some(previous) = self.downloads.replace(Some(apply)) {
+            previous.abort();
+        }
     }
 
     /// Shows Home's sections in the order core composed them.
@@ -433,6 +447,7 @@ impl CatalogUi {
             shown: Rc::new(RefCell::new(Vec::new())),
             content,
             empty,
+            downloads: Rc::new(RefCell::new(None)),
         };
         projection.apply(sections);
         let widget = route_scroller_widget(scroller);

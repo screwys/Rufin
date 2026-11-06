@@ -454,6 +454,8 @@ mod imp {
             RefCell<Option<crate::widgets::selection::CollectionSelection>>,
         pub(super) reread: RefCell<Option<(ReadCancellation, tokio::task::AbortHandle)>>,
         pub(super) reread_generation: Cell<u64>,
+        /// The download update being applied; a newer one replaces it.
+        pub(super) downloads: RefCell<Option<glib::JoinHandle<()>>>,
     }
 
     #[glib::object_subclass]
@@ -1338,7 +1340,7 @@ impl Rows<Row> {
                 .map(|()| rows)
         });
         let list = self.list.downgrade();
-        glib::spawn_future_local(async move {
+        let apply = glib::spawn_future_local(async move {
             let rows = match task.await {
                 Ok(Ok(rows)) => rows,
                 Ok(Err(error)) => {
@@ -1349,16 +1351,22 @@ impl Rows<Row> {
             };
             let Some(list) = list.upgrade() else { return };
             let shown = Self::from_list(&list);
-            // A row read again since keeps what it read.
-            for ((position, read), row) in read.into_iter().zip(rows) {
-                if shown
-                    .ready(position)
-                    .is_some_and(|current| Arc::ptr_eq(&current, &read))
+            // The downloads go into the row now at each position when it is the same row.
+            for ((position, _), mut row) in read.into_iter().zip(rows) {
+                let Some(current) = shown.ready(position) else {
+                    continue;
+                };
+                let mut merged = Row::clone(&current);
+                if let (Some(mut into), Some(from)) = (merged.shown(), row.shown())
+                    && into.take_downloads(from)
                 {
-                    shown.set_ready(position, row);
+                    shown.set_ready(position, merged);
                 }
             }
         });
+        if let Some(previous) = self.list.imp().downloads.replace(Some(apply)) {
+            previous.abort();
+        }
     }
 
     /// The tracks at `positions`, for selections; a folder's child folders come first.
