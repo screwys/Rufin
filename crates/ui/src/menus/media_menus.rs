@@ -22,7 +22,6 @@ use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
 
 use crate::widgets::selection::PlayTarget;
-use rufin_core::playback::PlayRequest;
 pub type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
 
 use crate::widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
@@ -926,18 +925,16 @@ fn collection_selection_surface(
     let menu = selection_menu(shell);
     let surface = ContextMenuSurface::new(target, "collection-selection", position);
     if menu.edit_metadata {
-        let metadata_targets = targets.clone();
+        let metadata_payload = payload.clone();
         let metadata_shell = Rc::clone(shell);
         let edit_metadata = move || {
-            let targets = metadata_targets.clone();
+            let payload = metadata_payload.clone();
             let shell = Rc::clone(&metadata_shell);
             let source = shell.products.source.clone();
             let task = shell.products.runtime.spawn(async move {
-                targets.requests(&source).await.map(|requests| {
-                    library::MemberSelection::Concat(
-                        requests.iter().filter_map(PlayRequest::selection).collect(),
-                    )
-                })
+                payload
+                    .track_selection(&source, rufin_core::view::SelectionScope::Page)
+                    .await
             });
             glib::spawn_future_local(async move {
                 match task.await {

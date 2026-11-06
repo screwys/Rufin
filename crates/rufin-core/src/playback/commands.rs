@@ -84,15 +84,6 @@ impl PlayRequest {
         request.reactivate = true;
         request
     }
-    pub fn group(requests: Vec<Self>, placement: QueuePlacement) -> Self {
-        let mut groups = Vec::new();
-        for request in requests {
-            if let library::QueueLoad::Tracks(selections) = request.input {
-                groups.extend(selections);
-            }
-        }
-        Self::from_input(library::QueueLoad::Tracks(groups), placement)
-    }
     pub fn selection(&self) -> Option<library::MemberSelection> {
         let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;

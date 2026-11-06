@@ -47,19 +47,21 @@ fn in_ranges(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<Item> {
         .collect()
 }
 
-/// The keys of a list order's selected rows; playlist folders are negative.
-fn parents(order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<i64> {
+/// The collections a list's selected rows name, in order. A playlist folder names none, as
+/// it plays nothing (`PlayTarget::of_playlist`).
+fn parents(read: &ListRead, order: &Order, ranges: Option<&[Range<usize>]>) -> Vec<Collection> {
     in_ranges(order, ranges)
         .into_iter()
         .filter_map(|item| {
-            Some(match item {
-                Item::Album(key) | Item::AlbumHeading(key) => key.raw(),
-                Item::Artist { key, .. } => key.raw(),
-                Item::Genre(key) => key.raw(),
-                Item::Mood(key) => key.raw(),
-                Item::Playlist(key) => key.raw(),
-                Item::Smart(key) => key.raw(),
-                Item::PlaylistFolder(key) => -key.raw(),
+            Some(match (item, &read.kind) {
+                (Item::Album(key) | Item::AlbumHeading(key), _) => Collection::Album(key),
+                (Item::Artist { key, album_artist }, _) => Collection::Artist { key, album_artist },
+                (Item::Genre(key), _) => Collection::Genre(key),
+                (Item::Mood(key), _) => Collection::Mood(key),
+                (Item::Playlist(key), _) => Collection::Playlist(key),
+                (Item::Smart(key), ListKind::SmartPlaylists { now }) => {
+                    Collection::Smart { key, now: *now }
+                }
                 _ => return None,
             })
         })
@@ -121,11 +123,10 @@ pub(crate) async fn selected_tracks_on(
                     let order = catalog
                         .order_on(connection, &Read::List(read.clone()))
                         .await?;
-                    // A playlist folder's negative key names no playlist, so it reads nothing.
-                    for key in parents(&order, ranges.as_deref()) {
+                    for collection in parents(read, &order, ranges.as_deref()) {
                         parts.push((group, Part::Read(reads.len())));
                         reads.push(MemberRead {
-                            collection: parent_collection(read, key),
+                            collection,
                             ..(**members).clone()
                         });
                     }
@@ -179,25 +180,6 @@ pub(crate) async fn selected_tracks_on(
     Ok(groups)
 }
 
-fn parent_collection(read: &ListRead, key: i64) -> Collection {
-    match read.kind {
-        ListKind::Albums | ListKind::ArtistAlbums { .. } => {
-            Collection::Album(AlbumKey::from_raw(key))
-        }
-        ListKind::Artists { album_artist } => Collection::Artist {
-            key: ArtistKey::from_raw(key),
-            album_artist,
-        },
-        ListKind::Genres => Collection::Genre(GenreKey::from_raw(key)),
-        ListKind::Moods => Collection::Mood(MoodKey::from_raw(key)),
-        ListKind::Playlists => Collection::Playlist(PlaylistKey::from_raw(key)),
-        ListKind::SmartPlaylists { now } => Collection::Smart {
-            key: SmartPlaylistKey::from_raw(key),
-            now,
-        },
-    }
-}
-
 impl Catalog {
     pub async fn selected_collections(
         &self,
@@ -206,11 +188,7 @@ impl Catalog {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<Collection>> {
         let order = self.order(&Read::List(read.clone()), cancellation).await?;
-        Ok(parents(&order, Some(ranges))
-            .into_iter()
-            .filter(|key| read.playlist_scope == PlaylistScope::All || *key >= 0)
-            .map(|key| parent_collection(read, key))
-            .collect())
+        Ok(parents(read, &order, Some(ranges)))
     }
 
     pub async fn selected_track_uris(

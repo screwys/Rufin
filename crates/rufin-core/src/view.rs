@@ -156,9 +156,6 @@ enum Plan {
     Missing,
 }
 
-/// The most rows one Catalog read returns.
-const ROWS_WINDOW: usize = 256;
-
 /// What of the selected library a page reads, by the one music folder rule (decisions.md,
 /// 2026-11-06), as Feishin: clients pass the selection and core applies it by route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,27 +450,6 @@ impl SourceOwner {
         scope: SelectionScope,
     ) -> MemberSelection {
         rows_selection(read, Some(ranges), &self.shared.settings.committed(), scope)
-    }
-
-    /// What each of the `ranges` of a list's rows plays, by [`PlayTarget::of_row`]: a playlist
-    /// folder plays nothing.
-    pub async fn list_targets(
-        &self,
-        read: ListRead,
-        ranges: &[Range<usize>],
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlayTarget>> {
-        let catalog = &self.shared.catalog;
-        let order = catalog.order(&Read::List(read), cancel).await?;
-        let mut targets = Vec::new();
-        for range in ranges {
-            for start in range.clone().step_by(ROWS_WINDOW) {
-                let end = (start + ROWS_WINDOW).min(range.end);
-                let rows = catalog.rows(&order, start..end, false, cancel).await?;
-                targets.extend(rows.iter().filter_map(PlayTarget::of_row));
-            }
-        }
-        Ok(targets)
     }
 
     /// Everything `route` lists, in the order and filter `options` ask, without reading its rows

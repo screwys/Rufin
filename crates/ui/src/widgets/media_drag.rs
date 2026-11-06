@@ -54,41 +54,6 @@ impl CollectionTargets {
             }
         }
     }
-    /// What each selected row plays, as core decides it.
-    pub async fn resolve(
-        &self,
-        source: &rufin_core::runtime::SourceHandle,
-    ) -> Result<Vec<PlayTarget>, String> {
-        match self {
-            Self::Ready(targets) => Ok(targets.clone()),
-            Self::Parents(reads) => {
-                let cancel = library::ReadCancellation::new();
-                let mut targets = Vec::new();
-                for (read, ranges) in reads {
-                    targets.extend(
-                        source
-                            .list_targets(read.clone(), ranges, &cancel)
-                            .await
-                            .map_err(|error| error.to_string())?,
-                    );
-                }
-                Ok(targets)
-            }
-        }
-    }
-    /// What playing every selected row queues, each as its page plays.
-    pub async fn requests(
-        &self,
-        source: &rufin_core::runtime::SourceHandle,
-    ) -> Result<Vec<PlayRequest>, String> {
-        let mut requests = Vec::new();
-        for target in self.resolve(source).await? {
-            requests.extend(
-                target_request(source, &target, rufin_core::playback::QueuePlacement::Now).await?,
-            );
-        }
-        Ok(requests)
-    }
 }
 
 async fn selected_parent_collections(
@@ -584,9 +549,11 @@ impl MediaDragSource {
             Self::Target { target } => target_request(source, target, placement)
                 .await?
                 .ok_or_else(gone)?,
-            Self::Targets { targets } => {
-                PlayRequest::group(targets.requests(source).await?, placement)
-            }
+            Self::Targets { .. } => PlayRequest::tracks(
+                self.track_selection(source, rufin_core::view::SelectionScope::Page)
+                    .await?,
+                placement,
+            ),
             Self::Selection(selection) => PlayRequest::tracks(selection.input.clone(), placement),
             Self::PlaylistEntries(selection) => {
                 PlayRequest::tracks(selection.input.clone(), placement)
