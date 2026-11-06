@@ -489,20 +489,6 @@ impl AndroidLibrary {
         rufin_core::view::pins_refresh(&self.source, &changed)
     }
 
-    /// Whether a committed change means a search reads again.
-    pub fn search_refresh(&self, mode: library::SearchMode, changed: Changed) -> bool {
-        rufin_core::view::refresh(
-            &self.source,
-            &Route::Search,
-            None,
-            &OpenOptions {
-                search_mode: mode,
-                ..Default::default()
-            },
-            &changed,
-        ) != rufin_core::view::Refresh::Nothing
-    }
-
     pub async fn pins(&self, offset: u64, limit: u32) -> Result<AndroidPinPage, AndroidError> {
         let skip = usize::try_from(offset).map_err(error)?;
         let (total, pins) = {

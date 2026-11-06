@@ -65,6 +65,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var searchMode by mutableStateOf(SearchMode.TITLE)
     private var searchSubmission by mutableIntStateOf(0)
     private var searchChanges by mutableIntStateOf(0)
+    /** The Search page that found `searchRows`; it says when a change means searching again. */
+    @Volatile private var searchView: AndroidView? = null
     var searchRows by mutableStateOf<List<BrowseItem>>(emptyList())
         private set
     var recentSearchRows by mutableStateOf<List<BrowseItem>>(emptyList())
@@ -140,7 +142,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
         scope.launch(Dispatchers.Default) {
             connection.changes.collect { changed ->
-                if (library?.searchRefresh(searchMode, changed) == true) searchChanges++
+                if (searchView?.refresh(changed) == true) searchChanges++
             }
         }
         scope.launch {
@@ -153,15 +155,16 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     if (context.section != AppSection.Search || query.isEmpty() || context.library == null ||
                         context.mode == SearchMode.LYRICS && !explicit && query.codePointCount(0, query.length) < 2) {
                         searchRows = emptyList()
+                        searchView = null
                         searchLoading = false
                         return@collectLatest
                     }
                     searchLoading = true
                     try {
-                        searchRows = withContext(Dispatchers.Default) {
-                            context.library.search(context.text, context.mode).mapIndexed { index, row ->
-                                BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = context.text)
-                            }
+                        val found = withContext(Dispatchers.Default) { context.library.search(context.text, context.mode) }
+                        searchView = found.view
+                        searchRows = found.rows.mapIndexed { index, row ->
+                            BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = context.text)
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { connection.runAction { throw error } }

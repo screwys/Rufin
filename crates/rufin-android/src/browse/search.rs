@@ -33,15 +33,25 @@ fn search_rows(
         .collect()
 }
 
+/// A search's results and the Search page that found them.
+#[derive(uniffi::Record)]
+pub struct AndroidSearch {
+    pub rows: Vec<AndroidBrowseRow>,
+    pub view: Arc<AndroidView>,
+}
+
 #[uniffi::export]
 impl AndroidLibrary {
+    /// Searches `text` in the library selected now; the page it opens says when a committed
+    /// change means it searches again.
     pub async fn search(
-        &self,
+        self: Arc<Self>,
         text: String,
         mode: library::SearchMode,
-    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
+    ) -> Result<AndroidSearch, AndroidError> {
         let selected = self.source.selected_library();
         let source = self.source.clone();
+        let library = Arc::clone(&self);
         let fields = {
             let settings = self.settings.load();
             CollectionCategory::ALL.map(|category| settings.library_list(category.key()).row_fields)
@@ -64,7 +74,10 @@ impl AndroidLibrary {
                 .await
                 .map_err(error)?;
             let results = opened.view.search_results().cloned().unwrap_or_default();
-            Ok(search_rows(results, fields))
+            Ok(AndroidSearch {
+                rows: search_rows(results, fields),
+                view: library.view_of(opened.view),
+            })
         })
         .await
     }

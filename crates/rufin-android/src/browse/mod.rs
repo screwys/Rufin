@@ -477,6 +477,21 @@ impl AndroidLibrary {
         display.fields(display.layout).to_vec()
     }
 
+    /// `view` as the page Kotlin shows.
+    fn view_of(&self, view: Arc<View>) -> Arc<AndroidView> {
+        let key = library_list_key(view.route(), view.options().category);
+        Arc::new(AndroidView {
+            fields: self.shown_fields(view.route(), key),
+            favorite_fields: self.favorite_fields(),
+            view,
+            runtime: self.runtime.clone(),
+            playback: self.playback.clone(),
+            settings: self.settings.clone(),
+            source: self.source.clone(),
+            changes: Default::default(),
+        })
+    }
+
     fn favorite_fields(&self) -> Vec<LibraryField> {
         self.settings
             .load()
@@ -548,17 +563,7 @@ impl AndroidLibrary {
                     break opened;
                 }
             };
-            let key = library_list_key(&route, category);
-            let view = Arc::new(AndroidView {
-                fields: self.shown_fields(&route, key),
-                favorite_fields: self.favorite_fields(),
-                view: opened.view,
-                runtime: self.runtime.clone(),
-                playback: self.playback.clone(),
-                settings: self.settings.clone(),
-                source: self.source.clone(),
-                changes: Default::default(),
-            });
+            let view = self.view_of(opened.view);
             let rows = view.rows_from(opened.rows, opened.first);
             let groups = view
                 .view

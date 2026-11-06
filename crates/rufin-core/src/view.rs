@@ -2056,26 +2056,6 @@ pub fn context_id(
     )
 }
 
-/// What a committed change means for a page open on `route` with `options`, opened while
-/// `opened_with` was selected.
-pub fn refresh(
-    owner: &SourceOwner,
-    route: &Route,
-    opened_with: Option<&SelectedLibrary>,
-    options: &OpenOptions,
-    changed: &Changed,
-) -> Refresh {
-    let current = owner.shared.selected();
-    changes(
-        owner,
-        route,
-        opened_with,
-        current.as_ref(),
-        options,
-        changed,
-    )
-}
-
 /// What a committed change means for a page on `route`, opened while `opened_with` was
 /// selected, now that `current` is.
 fn changes(
