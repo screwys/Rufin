@@ -419,24 +419,6 @@ pub struct Change {
     pub scopes: Vec<Scope>,
 }
 
-impl Change {
-    /// The sources whose catalog rows changed.
-    pub fn sources(&self) -> BTreeSet<SourceKey> {
-        self.scopes
-            .iter()
-            .filter_map(|scope| match scope {
-                Scope::Tracks {
-                    source: Some(source),
-                    ..
-                }
-                | Scope::Collections { source }
-                | Scope::Source { key: source, .. } => Some(*source),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
 /// The record families and their ids in the observation seen map.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum Family {
