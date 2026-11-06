@@ -398,7 +398,12 @@ impl Activity {
             tags: vec![Totals::default(); snapshot.tags.records.len()],
         };
         let mut tags = Vec::new();
-        for (slot, record) in snapshot.tracks.iter() {
+        // Only tracks with stats carry plays, from Rufin's listens or their source.
+        for (&slot, record) in snapshot
+            .stats
+            .keys()
+            .filter_map(|slot| Some((slot, snapshot.tracks.live(*slot)?)))
+        {
             let runs = snapshot.track_runs(record);
             if !record.indexed() || folder.is_some_and(|folder| !runs[3].contains(&folder)) {
                 continue;
