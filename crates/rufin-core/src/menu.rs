@@ -56,7 +56,7 @@ pub enum GoTo {
 pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     let shown = |item| settings.application.context_menu.is_visible(item);
     let stored = owner.shared.settings.load();
-    let source = row_source(&stored.sources, row);
+    let source = row_source(owner, &stored.sources, row);
     let plays = crate::view::PlayTarget::plays(row);
     let mut menu = Menu {
         play: plays && shown(ContextMenuItem::Play),
@@ -125,14 +125,7 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
             (None, false, false)
         }
         // A child folder plays the folder it opens, as a collection row plays its page.
-        Row::Folder(_) => {
-            return Menu {
-                add_to_playlist: shown(ContextMenuItem::AddToPlaylist),
-                download: shown(ContextMenuItem::Download),
-                remove_download: shown(ContextMenuItem::Download),
-                ..menu
-            };
-        }
+        Row::Folder(_) => (None, true, false),
     };
     menu.radio = radio.filter(|_| shown(ContextMenuItem::PlayRadio));
     menu.add_to_playlist = add_to_playlist && shown(ContextMenuItem::AddToPlaylist);
@@ -140,7 +133,10 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     menu.rating = rated && settings.application.context_menu.rating_visible;
     menu.edit_metadata &= shown(ContextMenuItem::EditMetadata);
     menu.go_to = shown(ContextMenuItem::GoTo) && targets(source, row).next().is_some();
-    let downloaded = row.downloaded();
+    let downloaded = match row {
+        Row::Folder(folder) => folder.summary.downloaded(),
+        row => row.downloaded(),
+    };
     menu.download = !downloaded && downloadable(source, row) && shown(ContextMenuItem::Download);
     menu.remove_download = downloaded && shown(ContextMenuItem::Download);
     menu.pin = row
@@ -171,7 +167,7 @@ pub fn selection(settings: &Settings) -> Menu {
 /// Where Go to on `row` leads: its artists, its album and its folder or server page.
 pub fn go_to(owner: &SourceOwner, row: &Row) -> Vec<GoTo> {
     let stored = owner.shared.settings.load();
-    targets(row_source(&stored.sources, row), row).collect()
+    targets(row_source(owner, &stored.sources, row), row).collect()
 }
 
 /// Go to's destinations, each built when it is asked for.
@@ -233,8 +229,10 @@ fn targets<'a>(
     }))
 }
 
-/// The configured source of the track, album or artist `row` shows.
+/// The configured source of the track, album or artist `row` shows, or of the child folder,
+/// which the selected source's Folders lists.
 fn row_source<'a>(
+    owner: &SourceOwner,
     sources: &'a crate::settings::SourceSettings,
     row: &Row,
 ) -> Option<&'a SourceConfiguration> {
@@ -247,6 +245,7 @@ fn row_source<'a>(
             library::source_entity_parts(&album.media_uri)?.0
         }
         Row::Artist(artist) => library::source_entity_parts(&artist.media_uri)?.0,
+        Row::Folder(_) => owner.shared.selected()?.source_id,
         _ => return None,
     };
     sources
@@ -256,9 +255,11 @@ fn row_source<'a>(
         .find(|configuration| configuration.source_id == id)
 }
 
-/// Whether Download applies: tracks of a remote source or a web address, and every genre,
-/// mood and playlist. Local files are already here.
+/// Whether Download applies: tracks of a remote source or a web address, child folders of a
+/// remote source, and every genre, mood and playlist. Local files are already here.
 fn downloadable(source: Option<&SourceConfiguration>, row: &Row) -> bool {
+    let remote =
+        || source.is_some_and(|source| source.source_kind() != Some(library::SourceKind::Local));
     let uri = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => &track.media_uri,
         Row::Album(album) | Row::AlbumHeading(album) => &album.media_uri,
@@ -267,10 +268,11 @@ fn downloadable(source: Option<&SourceConfiguration>, row: &Row) -> bool {
         | Row::Playlist(PlaylistListRow::Playlist(_) | PlaylistListRow::SmartPlaylist(_)) => {
             return true;
         }
-        Row::Playlist(PlaylistListRow::Folder(_)) | Row::Folder(_) => return false,
+        Row::Folder(_) => return remote(),
+        Row::Playlist(PlaylistListRow::Folder(_)) => return false,
     };
     if library::source_entity_parts(uri).is_some() {
-        source.is_some_and(|source| source.source_kind() != Some(library::SourceKind::Local))
+        remote()
     } else {
         library::normalize_direct_media_uri(uri)
             .is_some_and(|uri| uri.starts_with("https:") || uri.starts_with("http:"))
