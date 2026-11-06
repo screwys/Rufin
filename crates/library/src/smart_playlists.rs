@@ -731,7 +731,7 @@ fn encode_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<Stri
     Ok(json)
 }
 
-pub(crate) fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResult<()> {
+fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResult<()> {
     validate_definition(definition)?;
     for rule in definition
         .match_all
@@ -856,7 +856,8 @@ pub(crate) async fn write_smart_playlist(
             "invalid Smart playlist identity or order".into(),
         ));
     }
-    let _: SmartPlaylistDefinition = serde_json::from_str(&record.definition_json)?;
+    // Backups and Connect write here, so a definition is checked as an edit's is.
+    let definition = encode_definition(&serde_json::from_str(&record.definition_json)?)?;
     let row: Option<crate::catalog::write::SmartRow> = sqlx::query_as(AssertSqlSafe(format!(
         "INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,playlist_folder_key,mosaic)
          VALUES(?1,?2,lower(?2),?3,CASE WHEN ?4 IS NULL OR EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
@@ -872,7 +873,7 @@ pub(crate) async fn write_smart_playlist(
     )))
     .bind(&record.object_id)
     .bind(&record.name)
-    .bind(&record.definition_json)
+    .bind(&definition)
     .bind(record.position)
     .bind(&record.folder)
     .bind(&record.mosaic)

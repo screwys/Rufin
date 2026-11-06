@@ -1089,8 +1089,7 @@ impl<'a> Builder<'a> {
         let Some(smart) = self.snapshot.smart_playlists.get(&key.raw()) else {
             return Ok(None);
         };
-        let mut definition = smart.definition.clone();
-        crate::smart_playlists::normalize_definition(&mut definition)?;
+        let definition = smart.definition.clone();
         let summary = self.smart_totals(smart).summary();
         Ok(Some(SmartPlaylistRow {
             smart_playlist_key: key,
