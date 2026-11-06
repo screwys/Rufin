@@ -133,7 +133,7 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     menu.favorite = rated && shown(ContextMenuItem::Favorites);
     menu.rating = rated && settings.application.context_menu.rating_visible;
     menu.edit_metadata &= shown(ContextMenuItem::EditMetadata);
-    menu.go_to = shown(ContextMenuItem::GoTo) && has_go_to(source, row);
+    menu.go_to = shown(ContextMenuItem::GoTo) && targets(source, row).next().is_some();
     let downloaded = row.downloaded();
     menu.download = !downloaded && downloadable(source, row) && shown(ContextMenuItem::Download);
     menu.remove_download = downloaded && shown(ContextMenuItem::Download);
@@ -165,71 +165,66 @@ pub fn selection(settings: &Settings) -> Menu {
 /// Where Go to on `row` leads: its artists, its album and its folder or server page.
 pub fn go_to(owner: &SourceOwner, row: &Row) -> Vec<GoTo> {
     let stored = owner.shared.settings.load();
-    targets(row_source(&stored.sources, row), row)
+    targets(row_source(&stored.sources, row), row).collect()
 }
 
-/// Whether Go to on `row` leads anywhere, as [`go_to`] finds without building its targets.
-fn has_go_to(source: Option<&SourceConfiguration>, row: &Row) -> bool {
-    match row {
-        Row::Track(track) | Row::AlbumTrack { track, .. } => {
-            !crate::route::detail_links::go_to_artists(&track.links)
-                .0
-                .is_empty()
-                || track.links.album_media_uri.is_some()
-                || crate::detail_links::navigation_source_link(source, &track.media_uri, None)
-                    .is_some()
-        }
-        Row::Album(_) | Row::AlbumHeading(_) | Row::Artist(_) => true,
-        _ => false,
-    }
-}
-
-fn targets(source: Option<&SourceConfiguration>, row: &Row) -> Vec<GoTo> {
-    let (mut targets, media_uri, album_uri) = match row {
+/// Go to's destinations, each built when it is asked for.
+fn targets<'a>(
+    source: Option<&'a SourceConfiguration>,
+    row: &'a Row,
+) -> impl Iterator<Item = GoTo> + 'a {
+    type Targets<'a> = Box<dyn Iterator<Item = GoTo> + 'a>;
+    let (targets, media_uri, album_uri): (Targets<'a>, _, _) = match row {
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             let (artists, album_artist) = crate::route::detail_links::go_to_artists(&track.links);
             let album = track.links.album_media_uri.as_deref();
-            let mut targets = artists
-                .iter()
-                .map(|artist| {
-                    let uri = artist.media_uri.clone();
-                    let route = if album_artist {
-                        Route::AlbumArtistDetail(uri)
-                    } else {
-                        Route::ArtistDetail(uri)
-                    };
-                    GoTo::Artist(artist.name.clone(), route)
-                })
-                .collect::<Vec<_>>();
-            targets.extend(album.map(|uri| GoTo::Album(Route::AlbumDetail(uri.to_owned()))));
-            (targets, &track.media_uri, album)
+            let artists = artists.iter().map(move |artist| {
+                let uri = artist.media_uri.clone();
+                let route = if album_artist {
+                    Route::AlbumArtistDetail(uri)
+                } else {
+                    Route::ArtistDetail(uri)
+                };
+                GoTo::Artist(artist.name.clone(), route)
+            });
+            let album_target = album.map(|uri| GoTo::Album(Route::AlbumDetail(uri.to_owned())));
+            (
+                Box::new(artists.chain(album_target)),
+                Some(track.media_uri.as_str()),
+                album,
+            )
         }
-        Row::Album(album) | Row::AlbumHeading(album) => {
-            let mut targets = album
-                .links
-                .album_artists
-                .iter()
-                .map(|artist| {
-                    GoTo::Artist(
-                        artist.name.clone(),
-                        Route::AlbumArtistDetail(artist.media_uri.clone()),
-                    )
-                })
-                .collect::<Vec<_>>();
-            targets.push(GoTo::Album(Route::AlbumDetail(album.media_uri.clone())));
-            (targets, &album.media_uri, None)
-        }
-        Row::Artist(artist) => (
-            vec![GoTo::Artist(artist.name.clone(), Route::of_artist(artist))],
-            &artist.media_uri,
+        Row::Album(album) | Row::AlbumHeading(album) => (
+            Box::new(
+                album
+                    .links
+                    .album_artists
+                    .iter()
+                    .map(|artist| {
+                        GoTo::Artist(
+                            artist.name.clone(),
+                            Route::AlbumArtistDetail(artist.media_uri.clone()),
+                        )
+                    })
+                    .chain(std::iter::once_with(|| {
+                        GoTo::Album(Route::AlbumDetail(album.media_uri.clone()))
+                    })),
+            ),
+            Some(album.media_uri.as_str()),
             None,
         ),
-        _ => return Vec::new(),
+        Row::Artist(artist) => (
+            Box::new(std::iter::once_with(|| {
+                GoTo::Artist(artist.name.clone(), Route::of_artist(artist))
+            })),
+            Some(artist.media_uri.as_str()),
+            None,
+        ),
+        _ => (Box::new(std::iter::empty()), None, None),
     };
-    targets.extend(
-        crate::detail_links::navigation_source_link(source, media_uri, album_uri).map(GoTo::Source),
-    );
-    targets
+    targets.chain(media_uri.into_iter().flat_map(move |media_uri| {
+        crate::detail_links::navigation_source_link(source, media_uri, album_uri).map(GoTo::Source)
+    }))
 }
 
 /// The configured source of the track, album or artist `row` shows.
