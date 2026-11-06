@@ -197,7 +197,7 @@ pub struct MountedRoute {
     /// The header the route shows now, and showing it with other downloads.
     pub header: Option<(MountedCurrentHeader, MountedHeader)>,
     /// The header download update being applied; a newer one replaces it.
-    header_downloads: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
+    header_downloads: Rc<RefCell<Option<(glib::JoinHandle<()>, tokio::task::AbortHandle)>>>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
 
@@ -349,6 +349,7 @@ impl MountedRoute {
                     .await
                     .map(|()| read)
             });
+            let reading = task.abort_handle();
             // The downloads go into the header shown now, which keeps what changed meanwhile.
             let apply = glib::spawn_future_local(async move {
                 match task.await {
@@ -364,8 +365,9 @@ impl MountedRoute {
                     Err(_) => {}
                 }
             });
-            if let Some(previous) = self.header_downloads.replace(Some(apply)) {
-                previous.abort();
+            if let Some((apply, reading)) = self.header_downloads.replace(Some((apply, reading))) {
+                apply.abort();
+                reading.abort();
             }
         }
     }
