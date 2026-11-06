@@ -26,20 +26,10 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         .pin_rows(&sidebar.pins, &ReadCancellation::new())
         .await
         .map_err(internal)?;
+    // A pin opens its page in the selection, as on GTK: a pin of another source reads whole.
+    let scope = page::PageToken::selected(&products);
     let mut items = Vec::new();
     for (pin, row) in rows {
-        let source = match &pin {
-            SidebarPin::Album { source_id, .. }
-            | SidebarPin::Artist { source_id, .. }
-            | SidebarPin::Genre { source_id, .. } => Some(source_id.clone()),
-            SidebarPin::Playlist { source_id, .. } => source_id.clone(),
-            _ => None,
-        };
-        // A pin opens in what selecting its source selects, as pins.js selects it.
-        let scope = source.clone().map_or_else(
-            || page::PageToken::selected(&products),
-            |source| page::PageToken::of_source(&products, source),
-        );
         let mut item = browser::row_data(
             &products,
             &row,
@@ -67,8 +57,6 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 None => json!({"kind":null,"name":"Rufin"}),
             };
         }
-        item["source"] =
-            json!(source.or_else(|| item["source"].as_str().map(sources::SourceId::new)));
         item["pin"] = json!(pin);
         items.push(item);
     }

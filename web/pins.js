@@ -1,6 +1,6 @@
-import { api, session, state } from "./connection.js";
+import { api, session } from "./connection.js";
 import { navigate, opened, bindCards, cardCover } from "./library.js";
-import { updateSources, sourceIcon } from "./sources.js";
+import { sourceIcon } from "./sources.js";
 import {
   $,
   button,
@@ -44,12 +44,7 @@ async function move(moved, target) {
   await refreshPins();
 }
 
-async function open(item) {
-  if (item.source && item.source !== state.source) {
-    await api("/sources/select", "POST", { id: item.source });
-    state.source = item.source;
-    updateSources(await api("/sources"));
-  }
+function open(item) {
   navigate(item.page);
 }
 

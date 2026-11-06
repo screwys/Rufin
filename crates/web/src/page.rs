@@ -32,16 +32,6 @@ impl PageToken {
         }
     }
 
-    /// Home of what selecting `source` selects, in the music folder it was last left in, which
-    /// a pin of that source opens its page in.
-    pub fn of_source(products: &ProductHandles, source: sources::SourceId) -> Self {
-        Self {
-            folder: products.source.music_folder(&source),
-            source: Some(source),
-            ..Self::new(Route::Home)
-        }
-    }
-
     /// The page `route` shows of no source, opened plainly.
     pub fn new(route: Route) -> Self {
         Self {

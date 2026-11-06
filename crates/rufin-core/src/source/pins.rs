@@ -5,8 +5,9 @@ use super::SourceOwner;
 use super::feed::Notice;
 
 impl SourceOwner {
-    /// Rows of the pins the Catalog still holds, in pin order: smart playlists and their
-    /// folders evaluated now, in the selected music folder.
+    /// Rows of the pins the Catalog still holds, in pin order, counted as their pages read them
+    /// in the selection: smart playlists and their folders evaluated now, and the selected music
+    /// folder narrowing only its own source's pins.
     pub async fn pin_rows(
         &self,
         pins: &[SidebarPin],
