@@ -132,7 +132,7 @@ impl CatalogUi {
 }
 
 pub trait CollectionRow: library::ShowsState + Clone + PartialEq + Send + Sync + 'static {
-    fn playback(&self, key: LibraryListKey) -> Option<PlayTarget>;
+    fn playback(&self) -> Option<PlayTarget>;
     fn downloaded(&self) -> bool;
     fn projection(
         shell: &Rc<CatalogUi>,
@@ -169,12 +169,11 @@ pub trait NamedCollectionRow: CollectionRow {
         shell: &Rc<CatalogUi>,
         sparse: &Rows<Row>,
         fields: &[LibraryField],
-        key: LibraryListKey,
     ) -> CollectionGridProjection
     where
         Self: Send + Sync,
     {
-        named_collection_grid_impl::<Self>(shell, sparse, fields, key)
+        named_collection_grid_impl::<Self>(shell, sparse, fields)
     }
     fn table(
         shell: &Rc<CatalogUi>,
@@ -184,11 +183,8 @@ pub trait NamedCollectionRow: CollectionRow {
 }
 
 impl CollectionRow for ArtistRow {
-    fn playback(&self, key: LibraryListKey) -> Option<PlayTarget> {
-        Some(PlayTarget::artist(
-            self,
-            key == LibraryListKey::AlbumArtists,
-        ))
+    fn playback(&self) -> Option<PlayTarget> {
+        Some(PlayTarget::Route(Route::of_artist(self)))
     }
     fn downloaded(&self) -> bool {
         self.summary.downloaded()
@@ -203,7 +199,7 @@ impl CollectionRow for ArtistRow {
 }
 
 impl CollectionRow for TagRow {
-    fn playback(&self, _key: LibraryListKey) -> Option<PlayTarget> {
+    fn playback(&self) -> Option<PlayTarget> {
         Some(PlayTarget::Route(NamedCollectionRow::route(self)))
     }
 
@@ -267,10 +263,12 @@ impl NamedCollectionRow for TagRow {
 }
 
 impl CollectionRow for library::PlaylistListRow {
-    fn playback(&self, _key: LibraryListKey) -> Option<PlayTarget> {
+    fn playback(&self) -> Option<PlayTarget> {
         match self {
             Self::Playlist(row) => Some(PlayTarget::Route(Route::PlaylistDetail(row.playlist_key))),
-            Self::SmartPlaylist(row) => Some(PlayTarget::smart(row.smart_playlist_key)),
+            Self::SmartPlaylist(row) => Some(PlayTarget::Route(
+                rufin_core::route::Route::SmartPlaylistDetail(row.smart_playlist_key),
+            )),
             Self::Folder(_) => None,
         }
     }
@@ -452,14 +450,13 @@ where
         .borrow()
         .library_list(key)
         .grid_fields;
-    T::grid(shell, sparse, &fields, key)
+    T::grid(shell, sparse, &fields)
 }
 
 fn named_collection_grid_impl<T>(
     shell: &Rc<CatalogUi>,
     sparse: &Rows<Row>,
     fields: &[LibraryField],
-    key: LibraryListKey,
 ) -> CollectionGridProjection
 where
     T: NamedCollectionRow + Send + Sync,
@@ -470,7 +467,7 @@ where
     collection_grid_with_demand(
         sparse.list_model(),
         fields,
-        move |fields| NamedCollectionGridCell::<T>::new(Rc::clone(&cell_shell), fields, key),
+        move |fields| NamedCollectionGridCell::<T>::new(Rc::clone(&cell_shell), fields),
         move |_, row: T| activate_shell.open_route(row.route()),
         move |position| demand.demand_positions([position as usize]),
     )
@@ -478,7 +475,6 @@ where
 
 struct NamedCollectionGridCell<T: NamedCollectionRow> {
     body: CollectionGridCardCell,
-    key: LibraryListKey,
     shell: Rc<CatalogUi>,
     cover: CoverGroupProjection,
     current: Rc<std::cell::RefCell<Option<T>>>,
@@ -486,7 +482,7 @@ struct NamedCollectionGridCell<T: NamedCollectionRow> {
 }
 
 impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
-    fn new(shell: Rc<CatalogUi>, fields: &[LibraryField], key: LibraryListKey) -> Self {
+    fn new(shell: Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(std::cell::RefCell::new(None::<T>));
         let controls = super::cards::CollectionGridCoverView::without_favorite(msgid("Play"));
         let cover_host = controls.imp().cover_host.get();
@@ -508,7 +504,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             &current,
             play_buttons.clone(),
             move |shell, item, placement| {
-                if let Some(target) = item.playback(key) {
+                if let Some(target) = item.playback() {
                     crate::menus::media_menus::play_target(
                         &shell.products,
                         &target,
@@ -524,7 +520,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         install_compact_media_drag_source(&body.card, &cover.widget(), move || {
             let item = drag_current.borrow();
             let item = item.as_ref()?;
-            let source = MediaDragSource::capture_target(item.playback(key)?);
+            let source = MediaDragSource::capture_target(item.playback()?);
             Some((source, item.field(LibraryField::Title)))
         });
         install_grid_context(
@@ -541,7 +537,6 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         });
         Self {
             body,
-            key,
             shell,
             cover,
             current,
@@ -556,7 +551,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn bind(&self, _: u32, item: T) {
-        if let Some(target) = item.playback(self.key) {
+        if let Some(target) = item.playback() {
             self.body.bind_playing_target(&self.shell, target);
         }
         for button in &self.play_buttons {
@@ -643,7 +638,7 @@ fn named_collection_column<T: NamedCollectionRow>(
         LibraryField::Tools => named_actions_column::<T>(shell),
         LibraryField::RowIndex => {
             mapped_row_index_column::<T>(shell, named_column_width(key, field), move |row| {
-                row.playback(key)
+                row.playback()
             })
         }
         LibraryField::Image => artwork_column::<T, _>(
@@ -652,14 +647,12 @@ fn named_collection_column<T: NamedCollectionRow>(
             named_column_width(key, field),
             move |item| item.artwork().into_iter().next().unwrap_or_default(),
             Some(Rc::new(move |item| {
-                Some((item.playback(key)?, item.field(LibraryField::Title)))
+                Some((item.playback()?, item.field(LibraryField::Title)))
             })),
         ),
         LibraryField::Title | LibraryField::TitleMerged => {
             let factory = gtk::SignalListItemFactory::new();
-            super::columns::bind_collection_title::<T>(&factory, shell, move |row| {
-                row.playback(key)
-            });
+            super::columns::bind_collection_title::<T>(&factory, shell, move |row| row.playback());
             let setup_shell = Rc::clone(shell);
             factory.connect_setup(move |_, item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -670,7 +663,7 @@ fn named_collection_column<T: NamedCollectionRow>(
                 install_media_drag_source(&cell, move || {
                     let item = drag_item.upgrade()?;
                     let row = item_at_from_item::<T>(&item)?;
-                    let source = MediaDragSource::capture_target(row.playback(key)?);
+                    let source = MediaDragSource::capture_target(row.playback()?);
                     Some((source, row.field(LibraryField::Title)))
                 });
                 item.set_child(Some(&cell));

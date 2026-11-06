@@ -548,16 +548,19 @@ impl CatalogUi {
         let drag_shell = Rc::downgrade(self);
         install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
             let _shell = drag_shell.upgrade()?;
-            let source = MediaDragSource::capture_target(
-                crate::widgets::selection::PlayTarget::album(&drag_album),
-            );
+            let source =
+                MediaDragSource::capture_target(crate::widgets::selection::PlayTarget::Route(
+                    rufin_core::route::Route::of_album(&drag_album),
+                ));
             Some((source, drag_title.clone()))
         });
 
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
-        let play_target = crate::widgets::selection::PlayTarget::album(&album);
+        let play_target = crate::widgets::selection::PlayTarget::Route(
+            rufin_core::route::Route::of_album(&album),
+        );
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             crate::menus::media_menus::play_target(
                 &play_shell.products,

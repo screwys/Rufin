@@ -75,7 +75,9 @@ impl AlbumCover {
                 {
                     crate::menus::media_menus::play_target(
                         &shell.products,
-                        &crate::widgets::selection::PlayTarget::album(&album),
+                        &crate::widgets::selection::PlayTarget::Route(
+                            rufin_core::route::Route::of_album(&album),
+                        ),
                         placement,
                         false,
                     );

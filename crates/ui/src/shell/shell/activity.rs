@@ -1029,7 +1029,7 @@ impl ActivityCollections {
                 .collect(),
         );
         for (position, row) in data.artists.iter().take(limit).enumerate() {
-            let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount], false);
+            let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount]);
             cell.bind(position as u32, row.clone());
             cell.set_play_count_caption(row.state.play_count);
             let widget = crate::library::cards::collection_grid_card_inset(&cell.widget(), 120);

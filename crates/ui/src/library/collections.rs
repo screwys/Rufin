@@ -673,14 +673,13 @@ pub fn artist_grid(
         .borrow()
         .library_list(key)
         .grid_fields;
-    let album_artist = key == LibraryListKey::AlbumArtists;
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
     let demand = sparse.clone();
     collection_grid_with_demand(
         sparse.list_model(),
         &fields,
-        move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
+        move |fields| ArtistGridCell::new(&cell_shell, fields),
         move |_, artist: ArtistRow| {
             activate_shell.open_route(Route::of_artist(&artist));
         },
@@ -765,14 +764,13 @@ where
     let fields = shell.settings.current.borrow().library_list(key).row_fields;
     let activate_shell = Rc::clone(shell);
     let column_shell = Rc::clone(shell);
-    let album_artist = key == LibraryListKey::AlbumArtists;
     dynamic_collection_table(
         shell,
         key,
         model,
         &fields,
         Vec::new(),
-        move |field| artist_column(&column_shell, field, album_artist),
+        move |field| artist_column(&column_shell, field),
         |field| column_fit_width(field, column_width(field)),
         true,
         Some(Box::new(move |_, artist: ArtistRow| {

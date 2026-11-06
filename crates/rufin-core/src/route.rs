@@ -76,9 +76,7 @@ impl Route {
     pub fn of_row(row: &library::Row) -> Option<Self> {
         use library::{PlaylistListRow, Row, TagKind};
         Some(match row {
-            Row::Album(album) | Row::AlbumHeading(album) => {
-                Self::AlbumDetail(album.media_uri.clone())
-            }
+            Row::Album(album) | Row::AlbumHeading(album) => Self::of_album(album),
             Row::Artist(artist) => Self::of_artist(artist),
             Row::Tag(tag) if tag.kind == TagKind::Genre => {
                 Self::GenreDetail(GenreKey::from_raw(tag.key))
@@ -96,6 +94,11 @@ impl Route {
             },
             Row::Track(_) | Row::AlbumTrack { .. } | Row::Folder(_) => return None,
         })
+    }
+
+    /// The page an album row opens.
+    pub fn of_album(album: &library::AlbumRow) -> Self {
+        Self::AlbumDetail(album.media_uri.clone())
     }
 
     /// The page an artist row opens, in the role it was read with.

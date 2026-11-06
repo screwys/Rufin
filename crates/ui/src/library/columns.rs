@@ -29,6 +29,7 @@ use crate::widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use crate::widgets::view_model::connect_row_bind;
+use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
@@ -322,7 +323,9 @@ impl AlbumTableCell {
                 let cell = weak.upgrade()?;
                 let row = cell.imp().row.borrow().clone()?;
                 Some((
-                    MediaDragSource::capture_target(PlayTarget::album(&row)),
+                    MediaDragSource::capture_target(PlayTarget::Route(
+                        rufin_core::route::Route::of_album(&row),
+                    )),
                     row.title.clone(),
                 ))
             });
@@ -374,7 +377,9 @@ impl AlbumTableCell {
             return;
         };
         let view = imp.view.borrow();
-        let target = row.as_deref().map(PlayTarget::album);
+        let target = row
+            .as_deref()
+            .map(|row| PlayTarget::Route(rufin_core::route::Route::of_album(row)));
         if let Some(playing) = imp.title_playing.borrow().as_ref() {
             playing.bind(&shell, target.clone());
         }
@@ -432,32 +437,23 @@ impl AlbumTableCell {
     }
 }
 
-pub fn artist_column(
-    shell: &Rc<CatalogUi>,
-    field: LibraryField,
-    album_artist: bool,
-) -> gtk::ColumnViewColumn {
+pub fn artist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     match field {
         LibraryField::RowIndex => {
             mapped_row_index_column::<ArtistRow>(shell, column_width(field), move |row| {
-                Some(PlayTarget::artist(row, album_artist))
+                Some(PlayTarget::Route(Route::of_artist(row)))
             })
         }
-        LibraryField::Image => artist_image_column(shell, album_artist),
+        LibraryField::Image => artist_image_column(shell),
         LibraryField::TitleMerged | LibraryField::Title => {
-            artist_text_column(shell, field, "Title", 220, album_artist, |artist| {
-                artist.name.clone()
-            })
+            artist_text_column(shell, field, "Title", 220, |artist| artist.name.clone())
         }
-        LibraryField::Favorite | LibraryField::Tools => {
-            artist_actions_column(shell, album_artist, field)
-        }
+        LibraryField::Favorite | LibraryField::Tools => artist_actions_column(shell, field),
         _ => artist_text_column(
             shell,
             field,
             rufin_core::settings::presentation::library_field_title(field),
             column_width(field),
-            album_artist,
             move |artist| artist_field(artist, field),
         ),
     }
@@ -859,18 +855,13 @@ fn install_artist_list_item_context_menu(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     item: &gtk::ListItem,
-    album_artist: bool,
 ) {
     install_collection_cell_drag(
         target,
         shell,
         item,
         Rc::new(move |artist: ArtistRow| {
-            let target = if album_artist {
-                PlayTarget::artist(&artist, true)
-            } else {
-                PlayTarget::artist(&artist, false)
-            };
+            let target = PlayTarget::Route(Route::of_artist(&artist));
             Some((target, artist.name))
         }),
     );
@@ -964,7 +955,7 @@ where
     column.set_fixed_width(width);
     column
 }
-pub fn artist_image_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk::ColumnViewColumn {
+pub fn artist_image_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
 
@@ -974,7 +965,7 @@ pub fn artist_image_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk::Co
             return;
         };
         let cell = RecycledArtworkCell::new(48);
-        install_artist_list_item_context_menu(&cell, &setup_shell, item, album_artist);
+        install_artist_list_item_context_menu(&cell, &setup_shell, item);
         item.set_child(Some(&cell));
     });
 
@@ -1015,7 +1006,6 @@ pub fn artist_text_column<F>(
     field: LibraryField,
     title: &str,
     width: i32,
-    album_artist: bool,
     value: F,
 ) -> gtk::ColumnViewColumn
 where
@@ -1024,7 +1014,7 @@ where
     let factory = gtk::SignalListItemFactory::new();
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
         bind_collection_title::<ArtistRow>(&factory, shell, move |row| {
-            Some(PlayTarget::artist(row, album_artist))
+            Some(PlayTarget::Route(Route::of_artist(row)))
         });
     }
     let shell = Rc::clone(shell);
@@ -1037,7 +1027,7 @@ where
         };
         let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
         add_field_skeleton_class(&cell, field);
-        install_artist_list_item_context_menu(&cell, &setup_shell, item, album_artist);
+        install_artist_list_item_context_menu(&cell, &setup_shell, item);
         item.set_child(Some(&cell));
     });
 
@@ -1429,11 +1419,7 @@ fn favorite_cell_button(item: &gtk::ListItem) -> Option<gtk::Button> {
     crate::widgets::recycled_cells::row_favorite_button(item)
 }
 
-pub fn artist_actions_column(
-    shell: &Rc<CatalogUi>,
-    album_artist: bool,
-    field: LibraryField,
-) -> gtk::ColumnViewColumn {
+pub fn artist_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
 
@@ -1442,7 +1428,7 @@ pub fn artist_actions_column(
             return;
         };
         let actions = crate::widgets::recycled_cells::row_action_cell(field, "Favorite artist");
-        install_artist_list_item_context_menu(&actions, &shell, item, album_artist);
+        install_artist_list_item_context_menu(&actions, &shell, item);
         item.set_child(Some(&actions));
         let Some(button) = favorite_cell_button(item) else {
             return;

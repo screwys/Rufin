@@ -27,6 +27,7 @@ use crate::widgets::library_fields::{
     opaque_artwork,
 };
 use crate::widgets::view_model::{bind_row_item, unbind_row_item};
+use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
@@ -854,7 +855,9 @@ impl AlbumGridCell {
             let _shell = drag_shell.upgrade()?;
             let row = drag_current.borrow();
             let row = row.as_ref()?;
-            let source = MediaDragSource::capture_target(PlayTarget::album(row));
+            let source = MediaDragSource::capture_target(PlayTarget::Route(
+                rufin_core::route::Route::of_album(row),
+            ));
             Some((source, row.title.clone()))
         });
         install_grid_context(
@@ -874,7 +877,7 @@ impl AlbumGridCell {
             move |shell, row, placement| {
                 crate::menus::media_menus::play_target(
                     &shell.products,
-                    &PlayTarget::album(&row),
+                    &PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
                     placement,
                     false,
                 );
@@ -900,7 +903,6 @@ pub struct ArtistGridCell {
     cover: ArtworkTile,
     favorite: gtk::Button,
     current: Rc<RefCell<Option<ArtistRow>>>,
-    album_artist: bool,
 }
 
 impl ArtistGridCell {
@@ -913,7 +915,7 @@ impl ArtistGridCell {
         show_card_states(&self.current, &self.favorite, changes);
     }
 
-    pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField], album_artist: bool) -> Self {
+    pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(RefCell::new(None::<ArtistRow>));
         let controls = cards::CollectionGridCoverView::new(msgid("Play artist"));
         let cover_host = controls.imp().cover_host.get();
@@ -932,11 +934,7 @@ impl ArtistGridCell {
             let _shell = drag_shell.upgrade()?;
             let row = drag_current.borrow();
             let row = row.as_ref()?;
-            let target = if album_artist {
-                PlayTarget::artist(&row, true)
-            } else {
-                PlayTarget::artist(&row, false)
-            };
+            let target = PlayTarget::Route(Route::of_artist(row));
             let source = MediaDragSource::capture_target(target);
             Some((source, row.name.clone()))
         });
@@ -961,11 +959,7 @@ impl ArtistGridCell {
             &current,
             [play, play_next, play_last],
             move |shell, row, placement| {
-                let target = if album_artist {
-                    PlayTarget::artist(&row, true)
-                } else {
-                    PlayTarget::artist(&row, false)
-                };
+                let target = PlayTarget::Route(Route::of_artist(&row));
                 crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
             },
         );
@@ -979,7 +973,6 @@ impl ArtistGridCell {
             cover,
             favorite,
             current,
-            album_artist,
         }
     }
 }
@@ -992,14 +985,8 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        self.body.bind_playing_target(
-            &shell,
-            if self.album_artist {
-                PlayTarget::artist(&row, true)
-            } else {
-                PlayTarget::artist(&row, false)
-            },
-        );
+        self.body
+            .bind_playing_target(&shell, PlayTarget::Route(Route::of_artist(&row)));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -1045,8 +1032,10 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        self.body
-            .bind_playing_target(&shell, PlayTarget::album(&row));
+        self.body.bind_playing_target(
+            &shell,
+            PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
+        );
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),

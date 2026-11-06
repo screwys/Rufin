@@ -324,26 +324,6 @@ pub enum PlayTarget {
 }
 
 impl PlayTarget {
-    /// The page an album row opens.
-    pub fn album(row: &library::AlbumRow) -> Self {
-        Self::Route(rufin_core::route::Route::AlbumDetail(row.media_uri.clone()))
-    }
-
-    /// The page an artist row opens, read as an album artist or as an artist.
-    pub fn artist(row: &library::ArtistRow, album_artist: bool) -> Self {
-        let uri = row.media_uri.clone();
-        Self::Route(if album_artist {
-            rufin_core::route::Route::AlbumArtistDetail(uri)
-        } else {
-            rufin_core::route::Route::ArtistDetail(uri)
-        })
-    }
-
-    /// A smart playlist's page.
-    pub fn smart(key: library::SmartPlaylistKey) -> Self {
-        Self::Route(rufin_core::route::Route::SmartPlaylistDetail(key))
-    }
-
     /// The context id its plays carry before a page's filter and order; None for a track.
     pub fn context(&self) -> Option<String> {
         match self {

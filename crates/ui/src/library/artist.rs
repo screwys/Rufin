@@ -570,7 +570,7 @@ fn artist_detail_header_restored(
     let actions = showcase.actions();
     actions.add_css_class("artist-detail-actions");
     actions.set_halign(gtk::Align::Start);
-    let target = crate::widgets::selection::PlayTarget::artist(&artist.row, album_artist);
+    let target = crate::widgets::selection::PlayTarget::Route(Route::of_artist(&artist.row));
     let play_shell = Rc::clone(shell);
     let play: CollectionPlay = Rc::new(move |placement, shuffled| {
         crate::menus::media_menus::play_target(&play_shell.products, &target, placement, shuffled);
