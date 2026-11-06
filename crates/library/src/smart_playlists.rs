@@ -408,7 +408,12 @@ pub(crate) async fn smart_totals(
             let opened = catalog.opened_smart(*key, now, definition);
             (
                 *key,
-                context.smart_totals(definition, &inputs, opened.as_deref().map(Vec::as_slice)),
+                context.smart_totals(
+                    definition,
+                    &inputs,
+                    opened.as_deref().map(Vec::as_slice),
+                    None,
+                ),
             )
         })
         .collect())

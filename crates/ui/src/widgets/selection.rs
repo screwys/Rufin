@@ -352,6 +352,24 @@ impl PlayTarget {
         }
     }
 
+    /// The tracks it holds for a download or a playlist, as core reads a collection whole.
+    pub async fn selection(
+        &self,
+        source: &rufin_core::runtime::SourceHandle,
+    ) -> Result<library::MemberSelection, String> {
+        match self {
+            Self::Track(key) => Ok(library::MemberSelection::Keys {
+                source: None,
+                keys: vec![*key].into(),
+            }),
+            Self::Route(route) => source
+                .collection_selection(route, &library::ReadCancellation::new())
+                .await
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "Nothing here".to_string()),
+        }
+    }
+
     /// What playing it at `placement` queues, in the selected library. None when its page lists
     /// nothing.
     pub async fn request(

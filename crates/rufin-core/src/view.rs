@@ -187,10 +187,27 @@ impl SourceOwner {
         .await
     }
 
-    /// Everything `route` lists, in the order and filter `options` ask, for playing, queueing or
-    /// downloading it whole, without reading its rows or header. None when the route lists nothing
-    /// or its collection is gone or empty.
-    pub async fn selection(
+    /// Everything `route` holds, for downloading it, removing its downloads or adding it to a
+    /// playlist: a collection in every music folder, a smart playlist's members and a folder's
+    /// tracks in the music folder they are read in. None when the route lists nothing.
+    pub async fn collection_selection(
+        &self,
+        route: &Route,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<MemberSelection>> {
+        let mut selected = self.selected_library();
+        if !matches!(route, Route::Folders { .. } | Route::SmartPlaylistDetail(_))
+            && let Some(selected) = &mut selected
+        {
+            selected.music_folder_key = None;
+        }
+        self.selection(route, selected.as_ref(), &OpenOptions::default(), cancel)
+            .await
+    }
+
+    /// Everything `route` lists, in the order and filter `options` ask, without reading its rows
+    /// or header. None when the route lists nothing or its collection is gone or empty.
+    async fn selection(
         &self,
         route: &Route,
         selected: Option<&SelectedLibrary>,

@@ -783,10 +783,41 @@ impl Context<'_> {
         folder.is_none_or(|folder| self.snapshot.track_runs(record)[3].contains(&folder))
     }
 
-    fn folder_slot(&self, folder: Option<crate::FolderKey>) -> Option<Option<u32>> {
-        match folder {
-            None => Some(None),
-            Some(key) => self.snapshot.folders.slot(key.raw()).map(Some),
+    /// The music folder a read of `owner`'s tracks keeps, or None when the folder is gone. A
+    /// folder narrows only a read of its own source; one of no source in particular, as a smart
+    /// playlist's, reads only the folder too.
+    fn folder_slot(
+        &self,
+        folder: Option<crate::FolderKey>,
+        owner: Option<u16>,
+    ) -> Option<Option<u32>> {
+        let Some(key) = folder else {
+            return Some(None);
+        };
+        let folder = self.snapshot.folders.slot(key.raw())?;
+        let source = self.snapshot.folders.records[folder as usize].source;
+        Some(owner.is_none_or(|owner| owner == source).then_some(folder))
+    }
+
+    /// The music folder a list read keeps, or None when the folder is gone.
+    pub(crate) fn list_folder(&self, read: &ListRead) -> Option<Option<u32>> {
+        let owner = read.source.and_then(|source| self.source_slot(source));
+        self.folder_slot(read.folder, owner)
+    }
+
+    /// The source a collection's tracks belong to; None for one of every source.
+    fn collection_source(&self, collection: &Collection) -> Option<u16> {
+        let snapshot = self.snapshot;
+        match collection {
+            Collection::Source(source) | Collection::Objects { source, .. } => {
+                self.source_slot(*source)
+            }
+            Collection::Album(key) => snapshot.albums.get(key.raw()).map(Packed::source),
+            Collection::Artist { key, .. } => snapshot.artists.get(key.raw()).map(Packed::source),
+            Collection::Genre(key) => snapshot.tags.get(key.raw()).map(Packed::source),
+            Collection::Mood(key) => snapshot.tags.get(key.raw()).map(Packed::source),
+            Collection::Playlist(key) => snapshot.playlists.get(key.raw()).map(Packed::source),
+            Collection::Smart { .. } | Collection::History { .. } => None,
         }
     }
 
@@ -867,7 +898,6 @@ impl Context<'_> {
                 let Some(playlist) = snapshot.playlists.get(key.raw()) else {
                     return Vec::new();
                 };
-                let scoped = playlist.source != NO_SOURCE;
                 playlist
                     .entries
                     .iter()
@@ -876,7 +906,7 @@ impl Context<'_> {
                         snapshot
                             .tracks
                             .live(entry.track)
-                            .is_some_and(|record| !scoped || self.in_folder(record, folder))
+                            .is_some_and(|record| self.in_folder(record, folder))
                     })
                     .map(|(entry, position)| (entry.track, entry.key as u32, position))
                     .collect()
@@ -884,7 +914,7 @@ impl Context<'_> {
             Collection::Smart { .. } => inputs
                 .smart
                 .as_deref()
-                .map_or_else(Vec::new, |tracks| self.listed_tracks(tracks))
+                .map_or_else(Vec::new, |tracks| self.listed_tracks(tracks, folder))
                 .into_iter()
                 .map(member)
                 .collect(),
@@ -894,7 +924,8 @@ impl Context<'_> {
 
     /// A member read's rows in order, before its filters.
     fn member_base(&self, read: &MemberRead, inputs: &Inputs) -> Vec<Member> {
-        let Some(folder) = self.folder_slot(read.folder) else {
+        let owner = self.collection_source(&read.collection);
+        let Some(folder) = self.folder_slot(read.folder, owner) else {
             return Vec::new();
         };
         let members = self.collection_members(&read.collection, folder, inputs);
@@ -1167,36 +1198,45 @@ impl Context<'_> {
 
     /// A smart playlist's totals: of the members its open page holds, or evaluated now.
     /// Without a limit the members' order does not change them, so they are not sorted.
+    /// In a music folder it counts only the members in it.
     pub(crate) fn smart_totals(
         &self,
         definition: &SmartPlaylistDefinition,
         inputs: &Inputs,
         opened: Option<&[i64]>,
+        folder: Option<u32>,
     ) -> Totals {
         let mut totals = Totals::default();
         let records = &self.snapshot.tracks.records;
         match opened {
             Some(tracks) => self
-                .listed_tracks(tracks)
+                .listed_tracks(tracks, folder)
                 .into_iter()
                 .for_each(|slot| totals.add_member(&records[slot as usize])),
             None if definition.limit.is_some() => self
                 .evaluate(definition, inputs)
                 .into_iter()
-                .for_each(|slot| totals.add_member(&records[slot as usize])),
+                .map(|slot| &records[slot as usize])
+                .filter(|record| self.in_folder(record, folder))
+                .for_each(|record| totals.add_member(record)),
             None => self
                 .matching(definition, inputs)
+                .filter(|(_, record)| self.in_folder(record, folder))
                 .for_each(|(_, record)| totals.add_member(record)),
         }
         totals
     }
 
-    /// Slots of the tracks still listed, in the given order.
-    fn listed_tracks(&self, keys: &[i64]) -> Vec<u32> {
+    /// Slots of the tracks still listed in `folder`, in the given order.
+    fn listed_tracks(&self, keys: &[i64], folder: Option<u32>) -> Vec<u32> {
         let tracks = &self.snapshot.tracks;
         keys.iter()
             .filter_map(|key| tracks.slot(*key))
-            .filter(|slot| tracks.live(*slot).is_some_and(|record| record.indexed()))
+            .filter(|slot| {
+                tracks
+                    .live(*slot)
+                    .is_some_and(|record| record.indexed() && self.in_folder(record, folder))
+            })
             .collect()
     }
 
@@ -1226,7 +1266,7 @@ impl Context<'_> {
                     sort: playlist.name.to_lowercase(),
                     position: playlist.position,
                     totals: if totals {
-                        self.smart_totals(&playlist.definition, inputs, None)
+                        self.smart_totals(&playlist.definition, inputs, None, folder)
                     } else {
                         Totals::default()
                     },
@@ -1262,7 +1302,7 @@ impl Context<'_> {
 
     /// Totals of the playlists each playlist folder holds, as the list read shows them.
     pub(crate) fn playlist_folder_totals(&self, read: &ListRead) -> HashMap<i64, Totals> {
-        let folder = self.folder_slot(read.folder).flatten();
+        let folder = self.list_folder(read).flatten();
         let mut totals = HashMap::<i64, Totals>::new();
         for item in self.playlist_items(read, folder, &Inputs::default()) {
             if let Some(owner) = item.folder {
@@ -1444,7 +1484,7 @@ impl Context<'_> {
         inputs: &Inputs,
     ) -> Vec<i64> {
         let snapshot = self.snapshot;
-        let Some(folder) = self.folder_slot(read.folder) else {
+        let Some(folder) = self.list_folder(read) else {
             return Vec::new();
         };
         if matches!(
@@ -2290,7 +2330,7 @@ impl Catalog {
                     Members::Keys(keys) => keys.clone(),
                     _ => Box::default(),
                 };
-                let folder = context.folder_slot(list.folder).flatten();
+                let folder = context.list_folder(list).flatten();
                 let slots = keys
                     .iter()
                     .filter_map(|key| Some((*key, snapshot.albums.slot(i64::from(*key))?)))
@@ -2370,7 +2410,7 @@ impl Catalog {
         read_at: [u64; 5],
     ) -> Vec<i64> {
         let Some(base) = list.unfiltered() else {
-            let folder = context.folder_slot(list.folder).flatten();
+            let folder = context.list_folder(list).flatten();
             return context.list_order(list, &self.derived(context, folder), inputs);
         };
         let base = self.build_in(context, &Read::List(base), inputs, read_at);

@@ -59,29 +59,13 @@ impl AndroidLibrary {
         media_uri: String,
         remove: bool,
     ) -> Result<(), AndroidError> {
-        let selection = match &route {
-            Some(route) => Some(self.route_selection(route.clone()).await?),
-            None => None,
+        let selection = match route {
+            Some(route) => Arc::unwrap_or_clone(self.route_selection(route).await?),
+            None => MemberSelection::Uris(vec![media_uri].into()),
         };
-        // A download takes a collection in every music folder; a folder's tracks and a smart
-        // playlist's members are the ones of the folder they are read in.
-        let every_music_folder = !matches!(route, Some(Route::Folders { .. }));
         let source = self.source.clone();
         self.runtime
             .spawn(async move {
-                let selection = match selection {
-                    Some(selection) => {
-                        let mut selection = Arc::unwrap_or_clone(selection);
-                        if let MemberSelection::Members { read, .. } = &mut selection
-                            && every_music_folder
-                            && !matches!(read.collection, Collection::Smart { .. })
-                        {
-                            read.folder = None;
-                        }
-                        selection
-                    }
-                    None => MemberSelection::Uris(vec![media_uri].into()),
-                };
                 let result = if remove {
                     source.remove_download_selection(selection)
                 } else {
@@ -598,17 +582,16 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    /// The tracks `route` lists, for a download or a playlist: an artist page lists the
+    /// The tracks `route` holds, for a download or a playlist: an artist page holds the
     /// artist's tracks.
     pub async fn route_selection(
         &self,
         route: Route,
     ) -> Result<Arc<MemberSelection>, AndroidError> {
         let source = self.source.clone();
-        let selected = source.selected_library();
         run_read(&self.runtime, move |cancel| async move {
             source
-                .selection(&route, selected.as_ref(), &OpenOptions::default(), &cancel)
+                .collection_selection(&route, &cancel)
                 .await
                 .map_err(error)?
                 .map(Arc::new)

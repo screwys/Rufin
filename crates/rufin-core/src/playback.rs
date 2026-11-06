@@ -196,39 +196,8 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
-    pub(crate) fn insert_load(&self, mut input: library::QueueLoad, target: QueueReorderTarget) {
-        self.in_selected_folder(&mut input);
+    pub(crate) fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
         self.send(Command::Insert { input, target });
-    }
-
-    /// A smart playlist plays the tracks of the selected music folder, as its page lists them.
-    fn in_selected_folder(&self, input: &mut library::QueueLoad) {
-        fn smart(selection: &mut library::MemberSelection, folder: library::FolderKey) {
-            match selection {
-                library::MemberSelection::Members { read, .. }
-                    if matches!(read.collection, library::Collection::Smart { .. }) =>
-                {
-                    read.folder.get_or_insert(folder);
-                }
-                library::MemberSelection::Concat(selections) => {
-                    selections.iter_mut().for_each(|next| smart(next, folder));
-                }
-                _ => {}
-            }
-        }
-        let library::QueueLoad::Tracks(groups) = input else {
-            return;
-        };
-        let Some(folder) = self
-            .source
-            .selected_library()
-            .and_then(|selected| selected.music_folder_key)
-        else {
-            return;
-        };
-        for (selection, _) in groups {
-            smart(selection, folder);
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -869,8 +838,7 @@ impl PlaybackOwner {
 }
 
 impl PlaybackOwner {
-    pub fn play_selection(&self, mut request: PlayRequest) {
-        self.in_selected_folder(&mut request.input);
+    pub fn play_selection(&self, request: PlayRequest) {
         if self.play_rufin(&request) {
             return;
         }

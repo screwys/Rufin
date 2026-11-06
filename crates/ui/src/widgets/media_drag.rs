@@ -549,11 +549,27 @@ impl MediaDragSource {
             | Self::Queue {
                 media_uris: uris, ..
             } => Ok(library::MemberSelection::Uris((uris.to_vec()).into())),
-            _ => Ok(self
-                .play_request(catalog, source)
-                .await?
-                .selection()
-                .expect("song-backed collection drag")),
+            Self::Selection(TrackSelectionSnapshot { input, .. })
+            | Self::PlaylistEntries(PlaylistEntrySelectionSnapshot { input, .. }) => {
+                Ok(input.clone())
+            }
+            Self::LiveCollection {
+                media_uri,
+                operations,
+            } => {
+                prepare_live_collection(catalog, operations, media_uri)
+                    .await?
+                    .selection(source)
+                    .await
+            }
+            Self::Target { target } => target.selection(source).await,
+            Self::Targets { targets } => {
+                let mut selections = Vec::new();
+                for target in targets.resolve(catalog).await? {
+                    selections.push(target.selection(source).await?);
+                }
+                Ok(library::MemberSelection::Concat(selections.into()))
+            }
         }
     }
 

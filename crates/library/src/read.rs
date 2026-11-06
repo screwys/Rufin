@@ -1032,6 +1032,7 @@ impl<'a> Builder<'a> {
             &smart.definition,
             self.inputs,
             opened.as_deref().map(Vec::as_slice),
+            None,
         )
     }
 
