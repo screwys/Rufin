@@ -159,6 +159,11 @@ async function loadLibrary(token, extra, signal, initialPage = null, knownTotal 
       node.hidden = false;
       const page = { start, node, remove, count };
       pages.set(start, page);
+      // Changes committed while it read show once its rows do.
+      if (data.dataset.missed) {
+        syncRows();
+        showChanged(JSON.parse(data.dataset.missed));
+      }
       if (table) bindTracks(node, lifetime.signal);
       else {
         bindCards(node);
@@ -394,8 +399,10 @@ async function loadView(initial = false, knownTotal = null, extra = {}) {
     if (opened.route === "Home") {
       if (!initial)
         await fragment(`/api/page?${new URLSearchParams({ page: JSON.stringify(opened) })}`, $("content"), signal);
-      showPage($("content").querySelector("[data-page]").dataset);
+      const home = $("content").querySelector("[data-page]").dataset;
+      showPage(home);
       bindHome(signal);
+      if (home.missed) showChanged(JSON.parse(home.missed));
     } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal);
   } catch (error) {
     if (!signal.aborted) {
@@ -409,6 +416,18 @@ async function loadView(initial = false, knownTotal = null, extra = {}) {
       $("content").inert = false;
     }
   }
+}
+
+// Shows what a committed change means for the page: the favorites that changed on the rows
+// and hearts showing them, then the page read again when the change asks.
+function showChanged(value) {
+  for (const changed of value.states || []) {
+    for (const row of state.visibleItems)
+      if (row.uri === changed.uri) row.favorite = changed.favorite;
+    for (const node of document.querySelectorAll("[data-favorite-uri]"))
+      if (node.dataset.favoriteUri === changed.uri) showFavorite(node, changed.favorite);
+  }
+  if (value.page_refresh) run(() => refreshPage(value.page_refresh));
 }
 
 // Reads the page again as a committed change asks: in place, or opened again.
@@ -962,7 +981,7 @@ export {
   opened,
   playUris,
   reopen,
-  refreshPage,
+  showChanged,
   setFavorite,
   showPage,
   viewRequest,

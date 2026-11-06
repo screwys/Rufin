@@ -295,7 +295,7 @@ async fn list_page(
         return browser::page(
             headers,
             || page::home_json(products, &opened.token, &sections),
-            |csrf| browser::home(products, &opened.token, &sections, csrf),
+            |csrf| browser::home(products, &opened, &sections, csrf),
         );
     }
     let total = boolean(parameters, "total")?;
@@ -1130,38 +1130,20 @@ async fn events(
     event_response(Body::new(StreamBody::new(stream)))
 }
 
-/// The update frames of one catalog change. The first carries the flags, what the change means
-/// for the stream's page (`page_refresh`: reread or reopen) and the favorites and ratings that
-/// changed, which the rows that show them patch in; then the first changed playlist, or null
-/// when any may have changed. Each further playlist gets a frame of its own.
+/// The update frames of one catalog change. The first carries the flags and what the change
+/// shows on the stream's page ([`show_changed`]); then the first changed playlist, or null when
+/// any may have changed. Each further playlist gets a frame of its own.
 fn changed_json(
     products: &ProductHandles,
     shown: Option<&rufin_core::view::View>,
     changed: &rufin_core::source::feed::Changed,
 ) -> Vec<Value> {
-    use rufin_core::view::Refresh;
     let mut first = json!({
         "catalog_acquired": changed.all || !changed.sources.is_empty(),
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
         "activity_changed": changed.listened,
     });
-    match shown.map(|view| view.refresh(view.selected(), changed)) {
-        Some(Refresh::Reread) => first["page_refresh"] = json!("reread"),
-        Some(Refresh::Reopen) => first["page_refresh"] = json!("reopen"),
-        Some(Refresh::Nothing) | None => {}
-    }
-    if !changed.items.is_empty() {
-        first["states"] = changed
-            .items
-            .iter()
-            .map(|state| {
-                let (library::FavoriteTarget::Track(uri)
-                | library::FavoriteTarget::Album(uri)
-                | library::FavoriteTarget::Artist(uri)) = &state.target;
-                json!({"uri":uri,"favorite":state.favorite,"rating":state.rating})
-            })
-            .collect();
-    }
+    show_changed(&mut first, shown, changed);
     if changed.playlist_lists {
         first["playlists"] = Value::Null;
         return vec![first];
@@ -1175,6 +1157,34 @@ fn changed_json(
             json!({"catalog_acquired":false,"pins_changed":false,"activity_changed":false,"playlists":playlist})
         }))
         .collect()
+}
+
+/// What `changed` shows on `shown`, the page a client shows: whether it reads the page again
+/// (`page_refresh`: reread or reopen) and the favorites and ratings that changed, which the rows
+/// that show them patch in.
+fn show_changed(
+    value: &mut Value,
+    shown: Option<&rufin_core::view::View>,
+    changed: &rufin_core::source::feed::Changed,
+) {
+    use rufin_core::view::Refresh;
+    match shown.map(|view| view.refresh(view.selected(), changed)) {
+        Some(Refresh::Reread) => value["page_refresh"] = json!("reread"),
+        Some(Refresh::Reopen) => value["page_refresh"] = json!("reopen"),
+        Some(Refresh::Nothing) | None => {}
+    }
+    if !changed.items.is_empty() {
+        value["states"] = changed
+            .items
+            .iter()
+            .map(|state| {
+                let (library::FavoriteTarget::Track(uri)
+                | library::FavoriteTarget::Album(uri)
+                | library::FavoriteTarget::Artist(uri)) = &state.target;
+                json!({"uri":uri,"favorite":state.favorite,"rating":state.rating})
+            })
+            .collect();
+    }
 }
 
 fn playback_event_json(

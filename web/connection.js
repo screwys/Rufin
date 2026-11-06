@@ -8,10 +8,9 @@ import {
   $,
   notice,
   run,
-  showFavorite,
 } from "./ui.js";
 
-import { disposeHome, loadView, navigate, opened, refreshPage, showPage, viewRequest } from "./library.js";
+import { disposeHome, loadView, navigate, opened, showChanged, showPage, viewRequest } from "./library.js";
 
 import { closeMenus } from "./menus.js";
 
@@ -170,19 +169,10 @@ async function connect() {
       if (value.appearance) applyColors(value.appearance);
       if (value.pins_changed) run(refreshPins);
       if (value.catalog_acquired) run(async () => updateSources(await api("/sources")));
-      for (const changed of value.states || []) showState(changed);
-      if (value.page_refresh) run(() => refreshPage(value.page_refresh));
+      showChanged(value);
     },
     session.signal,
   );
-}
-
-// Shows a favorite that changed on the rows and hearts showing it.
-function showState(changed) {
-  for (const row of state.visibleItems)
-    if (row.uri === changed.uri) row.favorite = changed.favorite;
-  for (const node of document.querySelectorAll("[data-favorite-uri]"))
-    if (node.dataset.favoriteUri === changed.uri) showFavorite(node, changed.favorite);
 }
 
 async function stream(path, receive, signal) {

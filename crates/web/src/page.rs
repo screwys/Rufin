@@ -205,6 +205,9 @@ pub(super) struct Opened {
     pub header: Option<Header>,
     pub offset: usize,
     pub rows: Vec<Row>,
+    /// What committed while it read, as an update frame shows it on this page; the client
+    /// shows it once it shows the rows.
+    pub missed: Option<Value>,
 }
 
 /// Opens `token` and reads `limit` rows from `offset`.
@@ -215,6 +218,7 @@ pub(super) async fn open(
     limit: usize,
 ) -> Result<Opened, Error> {
     let selected = scope(products, token.source.as_ref(), token.folder.as_deref()).await?;
+    let reading = products.source.reading();
     let cancel = ReadCancellation::new();
     let opened = products
         .source
@@ -245,12 +249,18 @@ pub(super) async fn open(
         options: opened.view.options().clone(),
         ..token
     };
+    let missed = reading.missed().map(|missed| {
+        let mut value = json!({});
+        show_changed(&mut value, Some(&opened.view), &missed);
+        value
+    });
     Ok(Opened {
         token,
         view: opened.view,
         header: opened.header,
         offset: start,
         rows,
+        missed: missed.filter(|value| value.as_object().is_some_and(|value| !value.is_empty())),
     })
 }
 
@@ -464,6 +474,9 @@ pub(super) fn json(products: &ProductHandles, opened: &Opened, limit: usize, tot
         "total":total.then_some(opened.view.len()),"offset":opened.offset,"limit":limit,"page":opened.token,
     });
     value[rows_name(&opened.token.route)] = rows.into();
+    if let Some(missed) = &opened.missed {
+        value["missed"] = missed.clone();
+    }
     if !cards(&opened.token.route) {
         value["columns"] = json!(fields);
     }

@@ -368,6 +368,8 @@ struct Library<'a> {
     play: bool,
     writable: bool,
     playlists: bool,
+    /// What committed while the page read, as JSON; empty when nothing did.
+    missed: String,
 }
 
 impl Library<'_> {
@@ -448,6 +450,7 @@ pub(super) fn library(
         play: opened.view.members().is_some(),
         writable: matches!(header, Some(library::Header::Playlist(playlist)) if playlist.writable),
         playlists: token.route == rufin_core::route::Route::Playlists,
+        missed: missed_text(opened),
     }
     .render()
     .map_err(internal)
@@ -465,15 +468,27 @@ struct Home<'a> {
     sections: Vec<Section<'a>>,
     page: String,
     title: String,
+    /// What committed while Home read, as JSON; empty when nothing did.
+    missed: String,
 }
 
-/// Home's sections as HTML.
+/// What committed while `opened` read, as its page's `data-missed` carries it.
+fn missed_text(opened: &page::Opened) -> String {
+    opened
+        .missed
+        .as_ref()
+        .map(Value::to_string)
+        .unwrap_or_default()
+}
+
+/// Home's `sections` of `opened` as HTML.
 pub(super) fn home(
     products: &ProductHandles,
-    token: &page::PageToken,
+    opened: &page::Opened,
     sections: &[rufin_core::view::HomeSection],
     form: &Form,
 ) -> Result<String, Error> {
+    let token = &opened.token;
     let settings = products.settings.load();
     Home {
         sections: sections
@@ -515,6 +530,7 @@ pub(super) fn home(
             .collect(),
         page: token.json(),
         title: page::title(products, token, None),
+        missed: missed_text(opened),
     }
     .render()
     .map_err(internal)
@@ -1016,7 +1032,7 @@ async fn index(
                     page.content = if opened.token.route == rufin_core::route::Route::Home {
                         home(
                             &products,
-                            &opened.token,
+                            &opened,
                             &page::home_sections(&opened.view, None),
                             &form,
                         )?

@@ -1,5 +1,5 @@
 {% import "macros.html" as m %}
-<div data-page="{{ page }}" data-title="{{ title }}" data-section="Home">
+<div data-page="{{ page }}" data-title="{{ title }}" data-section="Home" data-missed="{{ missed }}">
 {% for section in sections %}
 {% if section.block == "Showcase" %}
   {% for row in section.rows %}
