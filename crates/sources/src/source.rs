@@ -1465,7 +1465,8 @@ impl Source {
     }
 
     /// What the server finds for `query`, in music folder `music_folder` (its key and object
-    /// id): the server narrows to it where its search takes a folder, else the Catalog does.
+    /// id): the server narrows to it where its search takes a folder, else the Catalog does; the
+    /// rows count their totals in it either way.
     pub async fn live_search(
         &self,
         catalog: &Catalog,
@@ -1483,21 +1484,21 @@ impl Source {
             let source_id = self.source_id.as_str();
             let folder_id = music_folder.map(|(_, id)| id);
             // Plex searches every section; its rows name theirs, which the Catalog narrows by.
-            let (batch, narrow) = match &self.implementation {
+            let (batch, kept) = match &self.implementation {
                 Implementation::Plex(source) => {
-                    (source.live_search(source_id, query, limit).await?, true)
+                    (source.live_search(source_id, query, limit).await?, false)
                 }
                 Implementation::JellyfinEmby(source) => (
                     source
                         .live_search(source_id, query, limit, folder_id)
                         .await?,
-                    false,
+                    true,
                 ),
                 Implementation::OpenSubsonic(source) => (
                     source
                         .live_search(source_id, query, limit, folder_id)
                         .await?,
-                    false,
+                    true,
                 ),
                 _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
             };
@@ -1524,7 +1525,8 @@ impl Source {
             Ok(catalog
                 .search_rows_by_objects(
                     source,
-                    music_folder.filter(|_| narrow).map(|(key, _)| key),
+                    music_folder.map(|(key, _)| key),
+                    kept,
                     false,
                     &tracks,
                     &albums,

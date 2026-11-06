@@ -3322,7 +3322,16 @@ async fn home_search_and_radio_results_stay_bounded() {
         .collect::<Vec<_>>();
     let resolved = fixture
         .catalog
-        .search_rows_by_objects(fixture.source, None, false, &object_ids, &[], &[], &cancel)
+        .search_rows_by_objects(
+            fixture.source,
+            None,
+            false,
+            false,
+            &object_ids,
+            &[],
+            &[],
+            &cancel,
+        )
         .await
         .expect("live Search identity rows");
     assert_eq!(

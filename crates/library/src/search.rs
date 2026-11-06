@@ -78,12 +78,14 @@ pub struct SearchResults {
 }
 
 impl Catalog {
-    /// The rows of a server's search results by object id, kept to music folder `folder` as
-    /// the lists of that folder hold them.
+    /// The rows of a server's search results by object id in music folder `folder`, kept to it
+    /// as the lists of that folder hold them unless the server `kept` its results to it already
+    /// (its Catalog may not hold every result's folder yet).
     pub async fn search_rows_by_objects(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
+        kept: bool,
         album_artists: bool,
         track_objects: &[String],
         album_objects: &[String],
@@ -128,6 +130,7 @@ impl Catalog {
             match context.folder_slot(folder, Some(owner)) {
                 None => keys = Default::default(),
                 Some(None) => {}
+                Some(Some(_)) if kept => {}
                 Some(Some(folder)) => {
                     let derived = self.derived(&context, Some(folder));
                     keys[0].retain(|key| {
