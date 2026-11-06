@@ -668,26 +668,27 @@ pub(crate) struct Inputs {
     pub(crate) history: Vec<Listen>,
 }
 
-/// Whether `text` holds the lowercase `term`, ignoring case, without copying either. A `word`
-/// term matches a whole word only.
-pub(crate) fn holds(text: &str, term: &str, word: bool) -> bool {
-    fn lower(text: &str) -> impl Iterator<Item = char> + '_ {
-        text.chars().flat_map(char::to_lowercase)
-    }
-    if word {
-        text.split_whitespace()
-            .any(|word| lower(word).eq(term.chars()))
-    } else if text.is_ascii() && term.is_ascii() {
-        let term = term.as_bytes();
-        term.is_empty()
-            || (text.as_bytes())
-                .windows(term.len())
-                .any(|window| window.eq_ignore_ascii_case(term))
-    } else {
-        let len = term.chars().count();
-        let mut starts = text.char_indices().map(|(start, _)| start);
-        len == 0 || starts.any(|start| lower(&text[start..]).take(len).eq(term.chars()))
-    }
+/// Whether `parts` and `year`, joined by spaces and lowercased, hold the lowercase `text`; a
+/// `word` text matches a whole word only. The joined text reuses one buffer per thread.
+pub(crate) fn holds(parts: &[&str], year: Option<i16>, text: &str, word: bool) -> bool {
+    use std::fmt::Write as _;
+    thread_local!(static JOINED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
+    text.is_empty()
+        || JOINED.with_borrow_mut(|joined| {
+            joined.clear();
+            for part in parts {
+                joined.extend(part.chars().flat_map(char::to_lowercase));
+                joined.push(' ');
+            }
+            if let Some(year) = year {
+                let _ = write!(joined, "{year}");
+            }
+            if word {
+                joined.split_whitespace().any(|word| word == text)
+            } else {
+                joined.contains(text)
+            }
+        })
 }
 
 /// A filter as clients type it: trimmed, lowercase and bounded.
@@ -695,35 +696,31 @@ pub(crate) fn filter_text(filter: &str) -> String {
     filter.trim().to_lowercase().chars().take(256).collect()
 }
 
-/// Whether a year shows a term.
-fn year_holds(year: i16, term: &str) -> bool {
-    year_of(year).is_some_and(|year| {
-        term.bytes().all(|byte| byte.is_ascii_digit()) && year.to_string().contains(term)
-    })
-}
-
 impl Context<'_> {
-    /// Whether a track's title, artist, album, comment or year holds a term.
-    pub(crate) fn track_holds(&self, record: &TrackRec, term: &str, word: bool) -> bool {
-        [
+    /// Whether a track's title, artist, album, comment and year hold a filter or Search term.
+    pub(crate) fn track_holds(&self, record: &TrackRec, text: &str, word: bool) -> bool {
+        let parts = [
             record.title,
             record.artist,
             record.album_title,
             record.comment,
-        ]
-        .into_iter()
-        .any(|text| holds(self.snapshot.text(text), term, word))
-            || year_holds(record.year, term)
+        ];
+        let parts = parts.map(|part| self.snapshot.text(part));
+        holds(&parts, year_of(record.year), text, word)
     }
 
-    /// Whether an album's title, artist, year, credited artists or tags hold a term.
-    pub(crate) fn album_holds(&self, record: &AlbumRec, term: &str, word: bool) -> bool {
+    /// Whether an album's title and artist, its year, or a credited artist or tag holds a
+    /// filter or Search term.
+    pub(crate) fn album_holds(&self, record: &AlbumRec, text: &str, word: bool) -> bool {
         let snapshot = self.snapshot;
-        let named = |name| holds(snapshot.text(name), term, word);
+        let named = |name| holds(&[snapshot.text(name)], None, text, word);
         let runs = snapshot.album_runs(record);
-        named(record.title)
-            || named(record.artist)
-            || year_holds(record.year, term)
+        holds(
+            &[snapshot.text(record.title), snapshot.text(record.artist)],
+            None,
+            text,
+            word,
+        ) || year_of(record.year).is_some_and(|year| year.to_string() == text)
             || runs[0].iter().any(|slot| {
                 snapshot
                     .artists
@@ -1177,9 +1174,7 @@ impl Context<'_> {
 
     /// Whether a track passes a member read's filters.
     fn member_keep(&self, read: &MemberRead, filter: &str, record: &TrackRec) -> bool {
-        filter
-            .split_whitespace()
-            .all(|term| self.track_holds(record, term, false))
+        self.track_holds(record, filter, false)
             && (!read.favorites_only || favorite(record.flags))
             && (!read.downloaded_only || record.flags & DOWNLOADED != 0)
     }
@@ -1655,9 +1650,7 @@ impl Context<'_> {
         match &read.kind {
             ListKind::Albums => snapshot.albums.slot(key).is_some_and(|slot| {
                 let record = &snapshot.albums.records[slot as usize];
-                filter
-                    .split_whitespace()
-                    .all(|term| self.album_holds(record, term, false))
+                self.album_holds(record, filter, false)
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::ArtistAlbums {
@@ -1670,24 +1663,22 @@ impl Context<'_> {
                 let text = filters.as_ref().map_or(filter.to_owned(), |filters| {
                     filter_text(&filters[usize::from(class.code())])
                 });
-                let matched = text.split_whitespace().all(|term| {
-                    [record.title, record.artist]
-                        .into_iter()
-                        .any(|text| holds(snapshot.text(text), term, false))
-                        || year_holds(record.year, term)
-                });
+                let named = [snapshot.text(record.title), snapshot.text(record.artist)];
+                let matched = holds(&named, None, &text, false)
+                    || year_of(record.year).is_some_and(|year| year.to_string() == text);
                 matched
                     && release_class.is_none_or(|wanted| wanted == class)
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Artists { .. } => snapshot.artists.slot(key).is_some_and(|slot| {
                 let record = &snapshot.artists.records[slot as usize];
-                holds(snapshot.text(record.name), filter, false)
+                holds(&[snapshot.text(record.name)], None, filter, false)
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Genres | ListKind::Moods => snapshot.tags.slot(key).is_some_and(|slot| {
                 holds(
-                    snapshot.text(snapshot.tags.records[slot as usize].name),
+                    &[snapshot.text(snapshot.tags.records[slot as usize].name)],
+                    None,
                     filter,
                     false,
                 )
@@ -2636,8 +2627,9 @@ impl Catalog {
                     unreachable!("folder orders hold folder keys")
                 };
                 let named = |key: &&u32| {
-                    (snapshot.folders.get(i64::from(**key)))
-                        .is_some_and(|folder| holds(snapshot.text(folder.name), &filter, false))
+                    (snapshot.folders.get(i64::from(**key))).is_some_and(|folder| {
+                        holds(&[snapshot.text(folder.name)], None, &filter, false)
+                    })
                 };
                 Members::Keys(keys.iter().filter(named).copied().collect())
             }

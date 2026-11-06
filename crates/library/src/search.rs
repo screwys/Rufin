@@ -302,7 +302,7 @@ impl Catalog {
                 }),
                 found(&artists, &|key| {
                     snapshot.artists.get(key.into()).is_some_and(|record| {
-                        all(&|term, word| holds(snapshot.text(record.name), term, word))
+                        all(&|term, word| holds(&[snapshot.text(record.name)], None, term, word))
                     })
                 }),
             ]
