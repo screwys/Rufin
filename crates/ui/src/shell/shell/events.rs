@@ -157,8 +157,9 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 }
 
-/// The configured sources or the selection changed. A new source or music folder is read
-/// from the change that follows it (`Changed::scope`), once the selection here is current.
+/// The configured sources or the selection changed. Pages and pins read a new source or music
+/// folder from the change that follows it (`Changed::scope`), which a selection made before
+/// this client subscribed never sends; the search reads once, from whichever installs it.
 fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
     shell.products.lyrics.refresh_write_access();
@@ -214,8 +215,9 @@ fn release_selected_source(shell: &Rc<Shell>) {
 }
 
 /// Makes `selected` the selection here: a new session for another source or music folder,
-/// whose dialogs close with the old one. Whether it was another.
+/// whose dialogs close with the old one, and the search's. Whether it was another.
 fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) -> bool {
+    shell.search_session.set_selected(Some(selected.clone()));
     let changed = shell.selected_library().as_deref().is_none_or(|previous| {
         previous.source_key != selected.source_key
             || previous.music_folder_key != selected.music_folder_key
@@ -237,8 +239,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     if (changed.all || changed.scope.is_some() || !changed.sources.is_empty())
         && let Some(selected) = shell.products.source.selected_library()
     {
-        install_selected(shell, selected.clone());
-        shell.search_session.set_selected(Some(selected));
+        install_selected(shell, selected);
     }
     shell.search_session.show_states(&changed.items);
     shell.show_activity_states(&changed.items);
