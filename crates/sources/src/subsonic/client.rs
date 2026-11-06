@@ -270,31 +270,31 @@ impl SubsonicSource {
         Ok(page)
     }
 
+    /// What the server finds for `query`, in music folder `music_folder` when one is given.
     pub(crate) async fn live_search(
         &self,
         source_id: &str,
         query: &str,
         limit: usize,
+        music_folder: Option<&str>,
     ) -> SourceResult<library::CatalogBatch> {
         if query.trim().is_empty() {
             return Ok(library::CatalogBatch::default());
         }
         let limit = limit.clamp(1, 100);
         let count = limit.to_string();
-        let body: Value = self
-            .get_json(
-                "search3",
-                &[
-                    ("query", query.to_string()),
-                    ("artistCount", count.clone()),
-                    ("artistOffset", "0".to_string()),
-                    ("albumCount", count.clone()),
-                    ("albumOffset", "0".to_string()),
-                    ("songCount", count),
-                    ("songOffset", "0".to_string()),
-                ],
-            )
-            .await?;
+        let mut parameters = vec![
+            ("query", query.to_string()),
+            ("artistCount", count.clone()),
+            ("artistOffset", "0".to_string()),
+            ("albumCount", count.clone()),
+            ("albumOffset", "0".to_string()),
+            ("songCount", count),
+            ("songOffset", "0".to_string()),
+        ];
+        parameters
+            .extend(music_folder.map(|folder| ("musicFolderId", raw_item_id(folder).to_string())));
+        let body: Value = self.get_json("search3", &parameters).await?;
         let results = &body["searchResult3"];
         let (mut artists, mut albums, mut songs) = tokio::try_join!(
             self.read_artists(source_id, json::items(&results["artist"])),
@@ -1846,7 +1846,7 @@ mod tests {
             .unwrap();
         let mut updates = catalog.changes();
         let results = source_owner
-            .live_search(&catalog, "Track", 60)
+            .live_search(&catalog, "Track", 60, None)
             .await
             .unwrap();
         assert!(
@@ -1979,7 +1979,7 @@ mod tests {
             let mut updates = catalog.changes();
             crate::published(&mut updates);
             let results = source_owner
-                .live_search(&catalog, "Match", 10)
+                .live_search(&catalog, "Match", 10, None)
                 .await
                 .unwrap();
             assert!(

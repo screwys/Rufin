@@ -1280,7 +1280,7 @@ mod tests {
         for clear in [false, true] {
             cleared.store(clear, Ordering::Relaxed);
             source_owner
-                .live_search(&catalog, "Track", 10)
+                .live_search(&catalog, "Track", 10, None)
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();

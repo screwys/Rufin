@@ -1464,11 +1464,14 @@ impl Source {
         }
     }
 
+    /// What the server finds for `query`, in music folder `music_folder` (its key and object
+    /// id): the server narrows to it where its search takes a folder, else the Catalog does.
     pub async fn live_search(
         &self,
         catalog: &Catalog,
         query: &str,
         limit: usize,
+        music_folder: Option<(library::FolderKey, &str)>,
     ) -> SourceResult<library::SearchResults> {
         if matches!(
             self.implementation,
@@ -1478,14 +1481,24 @@ impl Source {
         }
         self.catalog_operation(catalog, async |changes| {
             let source_id = self.source_id.as_str();
-            let batch = match &self.implementation {
-                Implementation::Plex(source) => source.live_search(source_id, query, limit).await?,
-                Implementation::JellyfinEmby(source) => {
-                    source.live_search(source_id, query, limit).await?
+            let folder_id = music_folder.map(|(_, id)| id);
+            // Plex searches every section; its rows name theirs, which the Catalog narrows by.
+            let (batch, narrow) = match &self.implementation {
+                Implementation::Plex(source) => {
+                    (source.live_search(source_id, query, limit).await?, true)
                 }
-                Implementation::OpenSubsonic(source) => {
-                    source.live_search(source_id, query, limit).await?
-                }
+                Implementation::JellyfinEmby(source) => (
+                    source
+                        .live_search(source_id, query, limit, folder_id)
+                        .await?,
+                    false,
+                ),
+                Implementation::OpenSubsonic(source) => (
+                    source
+                        .live_search(source_id, query, limit, folder_id)
+                        .await?,
+                    false,
+                ),
                 _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
             };
             let tracks = batch
@@ -1511,7 +1524,7 @@ impl Source {
             Ok(catalog
                 .search_rows_by_objects(
                     source,
-                    None,
+                    music_folder.filter(|_| narrow).map(|(key, _)| key),
                     false,
                     &tracks,
                     &albums,
@@ -2555,7 +2568,8 @@ mod live_acquisition_tests {
                         .await
                         .unwrap(),
                     "track",
-                    20
+                    20,
+                    None
                 )
                 .await,
             Err(SourceError::InvalidRequest(_))

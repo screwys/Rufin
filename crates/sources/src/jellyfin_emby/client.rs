@@ -324,20 +324,23 @@ impl JellyfinEmbySource {
         Ok(page)
     }
 
+    /// What the server finds for `query`, under music folder `music_folder` when one is given.
     pub(crate) async fn live_search(
         &self,
         source_id: &str,
         query: &str,
         limit: usize,
+        music_folder: Option<&str>,
     ) -> SourceResult<library::CatalogBatch> {
         if query.trim().is_empty() {
             return Ok(library::CatalogBatch::default());
         }
         let limit = limit.clamp(1, 100);
+        let parent = music_folder.map(raw_item_id);
         let (artists, albums, songs) = tokio::join!(
-            self.search_people(query, limit),
-            self.search_items("MusicAlbum", ALBUM_FIELDS, query, limit),
-            self.search_items("Audio", TRACK_FIELDS, query, limit)
+            self.search_people(query, limit, parent),
+            self.search_items("MusicAlbum", ALBUM_FIELDS, query, limit, parent),
+            self.search_items("Audio", TRACK_FIELDS, query, limit, parent)
         );
         if artists.is_err() && albums.is_err() && songs.is_err() {
             return Err(songs.err().unwrap());
@@ -368,6 +371,7 @@ impl JellyfinEmbySource {
         fields: &str,
         query: &str,
         limit: usize,
+        parent: Option<&str>,
     ) -> SourceResult<Vec<Value>> {
         let mut url = endpoint(&self.base_url, "Items")?;
         url.query_pairs_mut()
@@ -378,6 +382,9 @@ impl JellyfinEmbySource {
             .append_pair("StartIndex", "0")
             .append_pair("Limit", &limit.to_string())
             .append_pair("Fields", fields);
+        if let Some(parent) = parent {
+            url.query_pairs_mut().append_pair("ParentId", parent);
+        }
         let body: serde_json::Value = self.get_json(url).await?;
         Ok(body["Items"]
             .as_array()
@@ -387,9 +394,17 @@ impl JellyfinEmbySource {
             .cloned()
             .collect())
     }
-    async fn search_people(&self, query: &str, limit: usize) -> SourceResult<Vec<Value>> {
+    async fn search_people(
+        &self,
+        query: &str,
+        limit: usize,
+        parent: Option<&str>,
+    ) -> SourceResult<Vec<Value>> {
         let mut url = endpoint(&self.base_url, "Artists")?;
         url.query_pairs_mut().append_pair("UserId",&self.user_id).append_pair("SearchTerm",query).append_pair("StartIndex","0").append_pair("Limit",&limit.to_string()).append_pair("Fields","ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ImageBlurHashes,ProviderIds,SortName");
+        if let Some(parent) = parent {
+            url.query_pairs_mut().append_pair("ParentId", parent);
+        }
         let body: serde_json::Value = self.get_json(url).await?;
         Ok(body["Items"]
             .as_array()
@@ -1444,7 +1459,10 @@ mod tests {
             }
             let mut updates = catalog.changes();
             crate::published(&mut updates);
-            let results = owner.live_search(&catalog, "Match", 10).await.unwrap();
+            let results = owner
+                .live_search(&catalog, "Match", 10, None)
+                .await
+                .unwrap();
             assert!(
                 crate::published(&mut updates)
                     .expect("catalog update")

@@ -78,10 +78,12 @@ pub struct SearchResults {
 }
 
 impl Catalog {
+    /// The rows of a server's search results by object id, kept to music folder `folder` as
+    /// the lists of that folder hold them.
     pub async fn search_rows_by_objects(
         &self,
         source: SourceKey,
-        _folder: Option<FolderKey>,
+        folder: Option<FolderKey>,
         album_artists: bool,
         track_objects: &[String],
         album_objects: &[String],
@@ -117,11 +119,37 @@ impl Catalog {
                     .flatten()
                     .collect()
             };
-            [
+            let mut keys: [Vec<i64>; 3] = [
                 tracks,
                 keys(crate::CatalogKind::Album, album_objects),
                 keys(crate::CatalogKind::Artist, artist_objects),
-            ]
+            ];
+            let context = Context::new(&snapshot);
+            match context.folder_slot(folder, Some(owner)) {
+                None => keys = Default::default(),
+                Some(None) => {}
+                Some(Some(folder)) => {
+                    let derived = self.derived(&context, Some(folder));
+                    keys[0].retain(|key| {
+                        snapshot
+                            .tracks
+                            .get(*key)
+                            .is_some_and(|record| context.in_folder(record, Some(folder)))
+                    });
+                    keys[1].retain(|key| {
+                        snapshot
+                            .albums
+                            .slot(*key)
+                            .is_some_and(|slot| derived.albums[slot as usize].tracks > 0)
+                    });
+                    keys[2].retain(|key| {
+                        snapshot.artists.slot(*key).is_some_and(|slot| {
+                            derived.artists[usize::from(album_artists)][slot as usize].tracks > 0
+                        })
+                    });
+                }
+            }
+            keys
         };
         self.search_rows(&mut connection, &keys, album_artists)
             .await
