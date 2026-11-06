@@ -131,8 +131,13 @@ fn read_destinations(
     let owner = shell.products.source.clone();
     let task = shell.products.runtime.spawn(async move {
         let (selection, title, preview_uris) = source.playlist_input(&catalog, &owner).await?;
-        let playlists = catalog
-            .playlist_destinations(source_key, &library::ReadCancellation::new())
+        let (_, playlists) = catalog
+            .playlist_destinations(
+                source_key,
+                "",
+                0..usize::MAX,
+                &library::ReadCancellation::new(),
+            )
             .await
             .map_err(|error| error.to_string())?;
         Ok((playlists, selection, title, preview_uris))
@@ -536,8 +541,14 @@ fn present_dialog(
         let catalog = shell.products.library.clone();
         let task = shell.products.runtime.spawn(async move {
             catalog
-                .playlist_destinations(source_key, &library::ReadCancellation::new())
+                .playlist_destinations(
+                    source_key,
+                    "",
+                    0..usize::MAX,
+                    &library::ReadCancellation::new(),
+                )
                 .await
+                .map(|(_, playlists)| playlists)
         });
         let artwork = Rc::clone(&artwork);
         let (list, create, rows, add) =

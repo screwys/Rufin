@@ -533,9 +533,10 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     );
     let destinations = fixture
         .catalog
-        .playlist_destinations(Some(fixture.source), &cancellation)
+        .playlist_destinations(Some(fixture.source), "", 0..usize::MAX, &cancellation)
         .await
-        .unwrap();
+        .unwrap()
+        .1;
     assert_eq!(
         destinations
             .iter()

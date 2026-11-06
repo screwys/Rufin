@@ -168,12 +168,15 @@ impl Catalog {
             .await?)
     }
 
-    /// Playlists the user can add tracks to, as the playlist list orders them.
+    /// Playlists the user can add tracks to whose names hold `filter`, as the playlist list
+    /// orders them: how many there are, and the rows of those in `window`.
     pub async fn playlist_destinations(
         &self,
         source: Option<SourceKey>,
+        filter: &str,
+        window: std::ops::Range<usize>,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistRow>> {
+    ) -> LibraryResult<(usize, Vec<PlaylistRow>)> {
         let order = self
             .order(
                 &crate::Read::List(crate::ListRead::new(
@@ -184,35 +187,40 @@ impl Catalog {
                 cancellation,
             )
             .await?;
+        let filter = filter.trim().to_lowercase();
         let writable = {
             let snapshot = self.snapshot();
             order
                 .items(0..order.len())
                 .into_iter()
                 .filter(|item| match item {
-                    crate::Item::Playlist(key) => snapshot
-                        .playlists
-                        .get(key.raw())
-                        .is_some_and(|playlist| playlist.flags & WRITABLE != 0),
+                    crate::Item::Playlist(key) => {
+                        snapshot.playlists.get(key.raw()).is_some_and(|playlist| {
+                            playlist.flags & WRITABLE != 0
+                                && (filter.is_empty()
+                                    || snapshot
+                                        .text(playlist.name)
+                                        .to_lowercase()
+                                        .contains(&filter))
+                        })
+                    }
                     _ => false,
                 })
                 .collect::<Vec<_>>()
         };
+        // Only the rows shown are built.
+        let shown = &writable[window.start.min(writable.len())..window.end.min(writable.len())];
         let mut connection = self.acquire_loaded(cancellation).await?;
-        Ok(self
-            .rows_of_on(
-                &mut connection,
-                &writable,
-                &crate::read::Shape::of(None),
-                true,
-            )
+        let rows = self
+            .rows_of_on(&mut connection, shown, &crate::read::Shape::of(None), true)
             .await?
             .into_iter()
             .filter_map(|row| match row {
                 crate::Row::Playlist(crate::PlaylistListRow::Playlist(row)) => Some(row),
                 _ => None,
             })
-            .collect())
+            .collect();
+        Ok((writable.len(), rows))
     }
 
     pub async fn playlist_edit_entries(

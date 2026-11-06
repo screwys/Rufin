@@ -50,18 +50,12 @@ impl AndroidLibrary {
                         (folders.len(), rows)
                     }
                     None => {
-                        let playlists = catalog
-                            .playlist_destinations(source, &cancel)
+                        let (count, playlists) = catalog
+                            .playlist_destinations(source, &filter, window, &cancel)
                             .await
-                            .map_err(error)?
-                            .into_iter()
-                            .filter(|playlist| kept(&playlist.name))
-                            .collect::<Vec<_>>();
-                        let count = playlists.len();
+                            .map_err(error)?;
                         let rows = playlists
                             .into_iter()
-                            .skip(window.start)
-                            .take(window.len())
                             .map(|row| {
                                 library::Row::Playlist(library::PlaylistListRow::Playlist(row))
                             })

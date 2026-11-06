@@ -98,9 +98,10 @@ async fn destinations(
     };
     let playlists = products
         .library
-        .playlist_destinations(source, &library::ReadCancellation::new())
+        .playlist_destinations(source, "", 0..usize::MAX, &library::ReadCancellation::new())
         .await
         .map_err(internal)?
+        .1
         .iter()
         .map(|row| json!({"id":row.playlist_key,"name":row.name}))
         .collect::<Vec<_>>();
