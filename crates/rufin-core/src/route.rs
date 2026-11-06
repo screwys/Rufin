@@ -125,11 +125,13 @@ impl Route {
                 | Self::Folders { .. }
         )
     }
+    /// Whether a page reads in the selected library: the playlist lists of its source, the
+    /// smart playlist lists counting in its music folder.
     pub fn uses_selected_source(&self) -> bool {
         self.requires_selected_source()
             || matches!(
                 self,
-                Self::Playlists | Self::PlaylistFolder { smart: false, .. }
+                Self::Playlists | Self::SmartPlaylists | Self::PlaylistFolder { .. }
             )
     }
 }

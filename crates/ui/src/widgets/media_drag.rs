@@ -109,10 +109,7 @@ pub fn install_parent_selection(rows: &crate::widgets::view_model::Rows<library:
     rows.list_model()
         .set_collection_selection(Box::new(move |dragged, positions| {
             let rows = crate::widgets::view_model::Rows::<library::Row>::of(&weak.upgrade()?);
-            let Some(library::MemberSelection::Parents { read, .. }) = rows.view()?.selection()
-            else {
-                return None;
-            };
+            let read = rows.view()?.list()?.clone();
             let PlayTarget::Route(dragged) = dragged else {
                 return None;
             };

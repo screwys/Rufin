@@ -26,14 +26,6 @@ use rufin_core::view::Opened;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 
-/// The read of an artist page's releases, for its selections. A page whose artist is gone
-/// has none.
-fn release_read(view: &rufin_core::view::View) -> Option<library::ListRead> {
-    match view.selection() {
-        Some(library::MemberSelection::Parents { read, .. }) => Some(read),
-        _ => None,
-    }
-}
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
 
 pub struct ArtistReleaseRoutePreamble {
@@ -608,7 +600,7 @@ impl ArtistReleaseProjections {
         let columns = Rc::new(Cell::new(1));
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
         let counts = Rc::new(Cell::new(counts));
-        let release = release_read(&read.view);
+        let release = read.view.list().cloned();
         let sparse = Rows::over_view(shell.products.runtime.clone(), read);
         let mut start = 0_usize;
         let sections = Rc::new(
@@ -762,7 +754,7 @@ impl ArtistReleaseProjections {
     /// read in another order or filter, or their count changes, since its positions then name
     /// other releases.
     pub fn take(&self, read: &Opened) {
-        let releases = release_read(&read.view);
+        let releases = read.view.list().cloned();
         let (counts, source_counts) = read.view.release_counts().unwrap_or_default();
         if self.counts.replace(counts) != counts
             || self.release_read.replace(releases.clone()) != releases
@@ -910,7 +902,7 @@ fn artist_route_list(
         }
         Some(crate::widgets::media_drag::CollectionTargets::Parents(
             vec![(
-                release_read(&*releases.view()?)?,
+                releases.view()?.list()?.clone(),
                 crate::widgets::selection::selected_ranges(&selected),
             )],
         ))
