@@ -74,14 +74,6 @@ fn rating(value: Option<i64>) -> u8 {
     value.map_or(UNRATED, |rating| rating.clamp(0, 100) as u8)
 }
 
-/// The plays and last play a source reports for an album or artist.
-fn native_plays(state: &NativeState) -> [u32; 2] {
-    [
-        optional_u32(state.play_count),
-        optional_u32(state.last_played),
-    ]
-}
-
 fn native_flags(indexed: bool, native: bool, picture: bool, state: &NativeState) -> u16 {
     u16::from(indexed) * INDEXED
         | u16::from(native) * NATIVE
@@ -203,8 +195,6 @@ pub(crate) struct AlbumRec {
     pub(crate) release: u32,
     /// The start of the run of artists and genres.
     pub(crate) edges: u32,
-    /// The plays and last play its source reports; NONE when it reports none.
-    pub(crate) native: [u32; 2],
     pub(crate) lens: [u16; 2],
     pub(crate) year: i16,
     pub(crate) source: u16,
@@ -220,8 +210,6 @@ pub(crate) struct ArtistRec {
     pub(crate) name: StrId,
     pub(crate) sort: StrId,
     pub(crate) object: StrId,
-    /// The plays and last play its source reports; NONE when it reports none.
-    pub(crate) native: [u32; 2],
     pub(crate) source: u16,
     pub(crate) flags: u16,
     pub(crate) native_rating: u8,
@@ -936,7 +924,6 @@ impl Snapshot {
             added: optional_u32(added),
             release,
             edges,
-            native: native_plays(&album.state),
             lens: [artists as u16, genres.len() as u16],
             year: year(facts.year),
             source,
@@ -970,7 +957,6 @@ impl Snapshot {
                 true,
             ),
             object: strings.text(old(|record| record.object), &artist.object, false),
-            native: native_plays(&artist.state),
             source,
             flags: native_flags(artist.indexed, artist.native, picture, &artist.state)
                 | previous.map_or(0, |record| record.flags & (FAVORITE_KNOWN | FAVORITE)),

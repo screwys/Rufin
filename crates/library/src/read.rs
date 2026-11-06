@@ -543,15 +543,13 @@ fn state(flags: u16, user: u8, native: u8, played: Played) -> TrackState {
     }
 }
 
-/// Displayed plays of an album or artist: its source's own counts, else its members' when the
-/// list asks for them.
-fn collection_played(native: [u32; 2], totals: &Totals, activity: bool) -> Played {
+/// Displayed plays of an album or artist: its members' when the list asks for them, as it
+/// orders by them.
+fn collection_played(totals: &Totals, activity: bool) -> Played {
     Played {
-        plays: known(native[0])
-            .or(activity.then_some(totals.plays as u32))
-            .unwrap_or(0),
+        plays: if activity { totals.plays as u32 } else { 0 },
         skips: 0,
-        last: known(native[1]).or(totals.last_played.filter(|_| activity)),
+        last: totals.last_played.filter(|_| activity),
     }
 }
 
@@ -910,7 +908,7 @@ impl<'a> Builder<'a> {
                 record.flags,
                 record.rating,
                 record.native_rating,
-                collection_played(record.native, &totals, activity),
+                collection_played(&totals, activity),
             ),
             summary: totals.summary(),
             links: AlbumLinks {
@@ -969,7 +967,7 @@ impl<'a> Builder<'a> {
                 record.flags,
                 record.rating,
                 record.native_rating,
-                collection_played(record.native, &totals, activity),
+                collection_played(&totals, activity),
             ),
             summary: totals.summary(),
             artwork_binding: got.binding(self.context.artist_art(&self.covers, slot))?,
