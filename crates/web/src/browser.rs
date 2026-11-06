@@ -960,19 +960,12 @@ async fn index(
         }
         let reverse = parameters.remove("reverse").is_some();
         let mut token = page::token(&products, "page", &parameters)?;
-        let selected = products.source.selected_library();
         if token.source.is_none() {
-            token.source = configured
-                .selected_source_id
-                .clone()
-                .or_else(|| configured.sources.first().map(|source| source.id.clone()));
-            if let Some(selected) = selected
-                .as_ref()
-                .filter(|selected| Some(&selected.source_id) == token.source.as_ref())
-            {
-                token.folder.clone_from(&selected.music_folder_object_id);
-            }
+            let selected = page::PageToken::selected(&products);
+            token.source = selected.source;
+            token.folder = selected.folder;
         }
+        let selected = products.source.selected_library();
         if reverse {
             let saved = products
                 .settings
