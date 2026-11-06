@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use futures_util::TryStreamExt;
 use sqlx::{Connection, SqliteConnection};
 
+use crate::catalog::{snapshot::Packed, views::Context};
 use crate::{
     Catalog, LibraryResult, LyricsSnippet, LyricsSnippetPart, ReadCancellation, SearchRequest,
     SearchResults, TrackKey,
@@ -37,16 +38,14 @@ impl Catalog {
             return Ok(SearchResults::default());
         }
         self.loaded().await;
-        let Some(folder) =
-            crate::catalog::views::Context::new(&self.snapshot()).folder_slot(folder, None)
-        else {
+        let Some(folder) = Context::new(&self.snapshot()).folder_slot(folder, None) else {
             return Ok(SearchResults::default());
         };
         // A music folder narrows only its own source's tracks.
         let kept = |key: i64| {
             let snapshot = self.snapshot();
             snapshot.tracks.get(key).is_none_or(|track| {
-                crate::catalog::views::Context::new(&snapshot).in_source_folder(track, folder)
+                track.indexed() && Context::new(&snapshot).in_source_folder(track, folder)
             })
         };
         let mut connection = self.acquire_cancellable(cancellation).await?;
