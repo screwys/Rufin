@@ -343,6 +343,7 @@ impl SearchSession {
             ..Default::default()
         };
         let source = self.source.clone();
+        let reading = self.source.reading();
         let task = self.runtime.spawn(async move {
             source
                 .open(
@@ -355,7 +356,7 @@ impl SearchSession {
                 )
                 .await
         });
-        self.show(task, generation);
+        self.show(task, reading, generation);
     }
 
     /// Sorts the shown results again when `settings` change how their lists sort.
@@ -370,6 +371,7 @@ impl SearchSession {
         let generation = self.generation.get();
         let cancellation = ReadCancellation::new();
         self.cancellation.replace(Some(cancellation.clone()));
+        let reading = self.source.reading();
         let task = self.runtime.spawn(async move {
             view.reread(
                 view.options().clone(),
@@ -378,13 +380,15 @@ impl SearchSession {
             )
             .await
         });
-        self.show(task, generation);
+        self.show(task, reading, generation);
     }
 
-    /// Shows what the Search page `task` reads, unless another read started since.
+    /// Shows what the Search page `task` reads, unless another read started since, with what
+    /// changed while it read.
     fn show(
         self: &Rc<Self>,
         task: tokio::task::JoinHandle<library::LibraryResult<rufin_core::view::Opened>>,
+        reading: rufin_core::shown::Reading,
         generation: u64,
     ) {
         let weak = Rc::downgrade(self);
@@ -407,6 +411,9 @@ impl SearchSession {
                     ));
                     session.view.replace(Some(opened.view));
                     session.status.set("results");
+                    if let Some(missed) = reading.missed() {
+                        session.show_changes(&missed);
+                    }
                 }
                 Err(error) => {
                     tracing::warn!(%error, "failed to load Search results");

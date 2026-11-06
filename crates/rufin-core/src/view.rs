@@ -904,6 +904,11 @@ impl View {
         &self.route
     }
 
+    /// The source owner it reads from.
+    pub fn owner(&self) -> &SourceOwner {
+        &self.owner
+    }
+
     pub fn selected(&self) -> Option<&SelectedLibrary> {
         self.selected.as_ref()
     }

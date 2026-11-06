@@ -97,6 +97,11 @@ impl SourceOwner {
     pub(crate) fn notice(&self, notice: Notice) {
         let _ = self.shared.feed.notices.send(notice);
     }
+
+    /// Starts noting what committed changes rows read from now may miss.
+    pub fn reading(&self) -> crate::shown::Reading {
+        crate::shown::Reading(self.shared.feed.changed.subscribe())
+    }
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]

@@ -911,10 +911,14 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                 state.active = Some(first);
                 let cancel = ReadCancellation::new();
                 state.running = Some(cancel.clone());
-                return Some((first..end, cancel, read_window(&state.source)));
+                let reading = match &state.source {
+                    Source::View { view, .. } => Some(view.owner().reading()),
+                    _ => None,
+                };
+                return Some((first..end, cancel, read_window(&state.source), reading));
             }
         });
-        let Some((range, cancel, reader)) = read else {
+        let Some((range, cancel, reader, reading)) = read else {
             return;
         };
         let task = runtime.spawn(reader(range.clone(), cancel.clone()));
@@ -969,6 +973,13 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                 }
                 if let Some(span) = span {
                     list.emit_ready_changed(span.start, span.len());
+                }
+                // A change committed while the window read is shown in its rows too.
+                if let Some(missed) = reading.and_then(rufin_core::shown::Reading::missed)
+                    && let Some(rows) = (&this as &dyn Any).downcast_ref::<Rows<Row>>()
+                    && let Some(view) = rows.view()
+                {
+                    rows.show_changes(view.owner(), &missed);
                 }
             }
             this.start(true);
@@ -1241,6 +1252,7 @@ impl Rows<Row> {
         let generation = imp.reread_generation.get().wrapping_add(1);
         imp.reread_generation.set(generation);
         let cancel = ReadCancellation::new();
+        let reading = view.owner().reading();
         let task = runtime.spawn({
             let cancel = cancel.clone();
             async move {
@@ -1261,8 +1273,14 @@ impl Rows<Row> {
             list.imp().reread.borrow_mut().take();
             match result {
                 Ok(Ok(mut opened)) => {
-                    Self::from_list(&list).take(&mut opened);
+                    let rows = Self::from_list(&list);
+                    rows.take(&mut opened);
+                    let owner = opened.view.owner().clone();
                     apply(opened);
+                    // A change committed while it read is shown in the rows read too.
+                    if let Some(missed) = reading.missed() {
+                        rows.show_changes(&owner, &missed);
+                    }
                 }
                 Ok(Err(library::LibraryError::ReadCancelled)) | Err(_) => {}
                 Ok(Err(error)) => tracing::warn!(%error, "failed to read page again"),

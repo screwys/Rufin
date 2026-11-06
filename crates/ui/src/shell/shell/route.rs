@@ -211,6 +211,7 @@ impl Shell {
         let (generation, cancellation) = self.begin_root_order_read();
         let load_route = route.clone();
         let load_selected = selected.clone();
+        let reading = self.products.source.reading();
         let task = self.products.runtime.spawn(async move {
             source
                 .open(
@@ -261,6 +262,10 @@ impl Shell {
                 _ => shell.replace_mounted_route(route, selected, render_started, move |catalog| {
                     catalog.opened_collection_view(read)
                 }),
+            }
+            // A change committed while the route read shows in what it read too.
+            if let Some(missed) = reading.missed() {
+                shell.show_changes_in_mounted_route(&missed);
             }
         });
     }

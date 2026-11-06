@@ -533,10 +533,11 @@ impl AndroidLibrary {
             ..Default::default()
         };
         let runtime = self.runtime.clone();
+        let reading = self.source.reading();
         run_read(&runtime, move |cancel| async move {
             let seed = library::RouteSeedWindow::top();
             let mut previous = previous.map(|previous| Arc::clone(&previous.view));
-            let opened = loop {
+            let mut opened = loop {
                 let selected = self.source.selected_library();
                 let opened = match previous.take().filter(|previous| {
                     *previous.route() == route && previous.reads_same_in(selected.as_ref())
@@ -564,6 +565,24 @@ impl AndroidLibrary {
                 }
             };
             let view = self.view_of(opened.view);
+            // A change committed while it read shows in the rows it read too.
+            if let Some(missed) = reading.missed() {
+                let shown = view.changes.show(
+                    &self.source,
+                    &mut opened.rows,
+                    &missed,
+                    view.view.smart_count(),
+                );
+                if let Some(read) = match shown.downloads {
+                    Some(downloads) => downloads.await,
+                    None => None,
+                } {
+                    use library::ShowsState;
+                    for (index, mut row) in read {
+                        opened.rows[index].take_downloads(&mut row);
+                    }
+                }
+            }
             let rows = view.rows_from(opened.rows, opened.first);
             let groups = view
                 .view

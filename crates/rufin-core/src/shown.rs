@@ -9,6 +9,31 @@ use library::{FolderKey, ReadCancellation, ShowsState};
 use crate::source::SourceOwner;
 use crate::source::feed::Changed;
 
+/// The favorites, ratings and downloads committed while a surface reads rows. Rows read
+/// before a change committed and shown after it went out would miss it, so a surface takes
+/// one before it reads and shows what it [`missed`](Self::missed) once it shows the rows.
+pub struct Reading(pub(crate) tokio::sync::broadcast::Receiver<Arc<Changed>>);
+
+impl Reading {
+    /// The favorites, ratings and downloads committed since it started; None when nothing was.
+    /// A surface shows it in the rows it read as any other change.
+    pub fn missed(mut self) -> Option<Changed> {
+        use tokio::sync::broadcast::error::TryRecvError;
+        let mut missed = Changed::default();
+        loop {
+            match self.0.try_recv() {
+                Ok(changed) => {
+                    missed.items.extend(changed.items.iter().cloned());
+                    missed.downloads.extend(changed.downloads.iter().cloned());
+                }
+                Err(TryRecvError::Lagged(_)) => {}
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+            }
+        }
+        (!missed.items.is_empty() || !missed.downloads.is_empty()).then_some(missed)
+    }
+}
+
 /// The download read a surface's newest change started.
 #[derive(Default)]
 struct Pending {
