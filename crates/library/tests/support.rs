@@ -521,6 +521,8 @@ pub async fn export(catalog: &Catalog, name: &str) -> Vec<u8> {
 /// Rows written straight to the Store reach the Catalog when it opens again.
 pub async fn reopen(catalog: Catalog, path: &std::path::Path) -> Catalog {
     catalog.close().await.expect("close Library");
+    // Fixtures write the Store outside the Catalog, which the image written at close misses.
+    let _ = std::fs::remove_file(path.with_extension("image"));
     Catalog::open(path).await.expect("reopen Library")
 }
 

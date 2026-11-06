@@ -3,7 +3,7 @@
 //! from the Store's is not read. The first Write after an image is written raises the counter.
 
 use std::collections::HashMap;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
@@ -74,23 +74,35 @@ pub(crate) fn path(store: &Path) -> PathBuf {
     store.with_extension("image")
 }
 
-struct Out(Vec<u8>);
+/// Writes the image as it encodes, summing what it wrote. The first failure is kept.
+struct Out<W> {
+    out: W,
+    sum: blake3::Hasher,
+    failed: std::io::Result<()>,
+}
 
-impl Out {
+impl<W: std::io::Write> Out<W> {
+    fn bytes(&mut self, bytes: &[u8]) {
+        self.sum.update(bytes);
+        if self.failed.is_ok() {
+            self.failed = self.out.write_all(bytes);
+        }
+    }
+
     fn u8(&mut self, value: u8) {
-        self.0.push(value);
+        self.bytes(&[value]);
     }
 
     fn u16(&mut self, value: u16) {
-        self.0.extend_from_slice(&value.to_le_bytes());
+        self.bytes(&value.to_le_bytes());
     }
 
     fn u32(&mut self, value: u32) {
-        self.0.extend_from_slice(&value.to_le_bytes());
+        self.bytes(&value.to_le_bytes());
     }
 
     fn i64(&mut self, value: i64) {
-        self.0.extend_from_slice(&value.to_le_bytes());
+        self.bytes(&value.to_le_bytes());
     }
 
     fn len(&mut self, len: usize) {
@@ -100,7 +112,7 @@ impl Out {
     /// Plain records as they are in memory. Every target Rufin runs on is little-endian.
     fn slice<T: Pod>(&mut self, items: &[T]) {
         self.len(items.len());
-        self.0.extend_from_slice(bytemuck::cast_slice(items));
+        self.bytes(bytemuck::cast_slice(items));
     }
 
     fn text(&mut self, text: &str) {
@@ -206,12 +218,28 @@ impl In<'_> {
     }
 }
 
-pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
-    let mut out = Out(Vec::with_capacity(snapshot.bytes() + 4_096));
-    out.0.extend_from_slice(MAGIC);
-    out.0.extend_from_slice(&FORMAT);
+/// What an image of the Store with this stamp starts with.
+fn header(stamp: &Stamp) -> Vec<u8> {
+    let mut out = Out {
+        out: Vec::new(),
+        sum: blake3::Hasher::new(),
+        failed: Ok(()),
+    };
+    out.bytes(MAGIC);
+    out.bytes(&FORMAT);
     out.slice(&stamp.store);
     out.i64(stamp.commits);
+    out.out
+}
+
+/// The image after its header, followed by the sum of the header and everything after it.
+fn encode<W: std::io::Write>(snapshot: &Snapshot, stamp: &Stamp, out: W) -> std::io::Result<W> {
+    let mut out = Out {
+        out,
+        sum: blake3::Hasher::new(),
+        failed: Ok(()),
+    };
+    out.sum.update(&header(stamp));
     out.i64(snapshot.revision as i64);
     let strings = &snapshot.strings;
     out.len(strings.chunks.len());
@@ -280,17 +308,15 @@ pub(crate) fn encode(snapshot: &Snapshot, stamp: &Stamp) -> Vec<u8> {
         out.text(&folder.name);
         out.u8(u8::from(folder.smart));
     }
-    out.0
+    let sum = *out.sum.finalize().as_bytes();
+    out.failed?;
+    out.out.write_all(&sum)?;
+    Ok(out.out)
 }
 
-fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
+/// Decodes what follows the header.
+fn decode(bytes: &[u8]) -> Option<Snapshot> {
     let mut input = In(bytes);
-    if input.take(MAGIC.len())? != MAGIC || input.take(FORMAT.len())? != FORMAT {
-        return None;
-    }
-    if input.slice::<u8>()? != stamp.store || input.i64()? != stamp.commits {
-        return None;
-    }
     let mut snapshot = Snapshot {
         revision: input.i64()? as u64,
         ..Snapshot::default()
@@ -418,12 +444,12 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
 }
 
 /// Writes the image beside the Store, replacing the previous one only once it is complete.
-pub(crate) fn write(store: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write(store: &Path, snapshot: &Snapshot, stamp: &Stamp) -> std::io::Result<()> {
     let target = path(store);
     let partial = target.with_extension("image-partial");
-    let mut file = std::fs::File::create(&partial)?;
-    file.write_all(bytes)?;
-    file.write_all(blake3::hash(bytes).as_bytes())?;
+    let mut file = std::io::BufWriter::new(std::fs::File::create(&partial)?);
+    file.write_all(&header(stamp))?;
+    let file = encode(snapshot, stamp, file)?.into_inner()?;
     file.sync_data()?;
     drop(file);
     std::fs::rename(partial, target)
@@ -431,11 +457,24 @@ pub(crate) fn write(store: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// The Catalog the image holds, when it matches the Store's stamp.
 pub(crate) fn read(store: &Path, stamp: &Stamp) -> Option<Snapshot> {
-    let bytes = std::fs::read(path(store)).ok()?;
+    let mut file = std::fs::File::open(path(store)).ok()?;
+    let header = header(stamp);
+    let mut start = vec![0; header.len()];
+    let mut bytes = Vec::new();
+    // An image of another state is rejected before the rest is read.
+    let read = file.read_exact(&mut start).is_ok()
+        && start == header
+        && file.read_to_end(&mut bytes).is_ok();
     // Decode trusts what it reads, so a damaged image is not decoded.
     let (bytes, sum) = bytes.split_at_checked(bytes.len().checked_sub(32)?)?;
-    let snapshot = (blake3::hash(bytes).as_bytes() == sum)
-        .then(|| decode(bytes, stamp))
+    let summed = || {
+        blake3::Hasher::new()
+            .update(&header)
+            .update(bytes)
+            .finalize()
+    };
+    let snapshot = (read && summed().as_bytes() == sum)
+        .then(|| decode(bytes))
         .flatten();
     if snapshot.is_none() {
         tracing::debug!("the Catalog image does not match the Store");
@@ -453,5 +492,6 @@ pub(crate) fn round_trip(snapshot: &Snapshot) -> Option<Snapshot> {
         store: vec![1; 16],
         commits: 7,
     };
-    decode(&encode(snapshot, &stamp), &stamp)
+    let bytes = encode(snapshot, &stamp, Vec::new()).ok()?;
+    decode(&bytes[..bytes.len() - 32])
 }

@@ -1387,7 +1387,8 @@ impl<'a> Write<'a> {
         };
         self.stage = Stage::Done;
         if resident {
-            self.catalog.committed();
+            self.catalog
+                .committed(self.reload || rows[0] || !self.forgotten.is_empty());
         }
         if let Some(scope) = self.shown_after(shown) {
             scopes.push(scope);

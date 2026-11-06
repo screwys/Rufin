@@ -183,9 +183,10 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
     }
 }
 
+/// Every table but the commit counter, which closing raises when it writes the image.
 async fn durable_rows(path: &Path) -> Vec<(String, Vec<String>)> {
     let mut raw = connection(path, false).await;
-    let tables=sqlx::query_scalar::<_,String>("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").fetch_all(&mut raw).await.unwrap();
+    let tables=sqlx::query_scalar::<_,String>("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'store_commits' ORDER BY name").fetch_all(&mut raw).await.unwrap();
     let mut result = Vec::new();
     for table in tables {
         let columns = sqlx::query_scalar::<_, String>("SELECT name FROM pragma_table_info(?1)")

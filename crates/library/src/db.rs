@@ -29,10 +29,8 @@ const MIN_READERS: u32 = 1;
 const MAX_READERS: u32 = 2;
 /// Changes a subscriber may fall behind by before it hears it lagged.
 const CHANGE_BUFFER: usize = 1_024;
-/// The Catalog image is written once no Write committed for this long,
+/// The Catalog image is written once no Write changed the catalog for this long after one did.
 const IMAGE_QUIET: Duration = Duration::from_secs(10);
-/// and no sooner than this after the previous one, so listens do not rewrite it each time.
-const IMAGE_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// A Catalog with more than one removed slot in this many is loaded again before its image is
 /// written, so neither memory nor the image keeps them.
 const REMOVED_SLOTS: usize = 16;
@@ -98,12 +96,14 @@ struct Walks {
     expired: HashMap<SourceKey, i64>,
 }
 
-/// When the Catalog image is written.
+/// When the Catalog image is written: at quiet after the catalog's facts change, and at close
+/// after any change, so listens alone do not rewrite it.
 #[derive(Default)]
 struct ImageState {
-    /// The Catalog changed since the image was written, and when it last did.
+    /// The facts changed since the image was written, and when they last did.
     changed: Option<Instant>,
-    written: Option<Instant>,
+    /// Something changed since the image was written.
+    dirty: bool,
     closed: bool,
 }
 
@@ -397,11 +397,10 @@ impl Catalog {
         snapshot.revision
     }
 
-    /// A Write committed, so the image is written again once the Catalog is quiet.
-    pub(crate) fn committed(&self) {
-        let (state, wake) = &*self.inner.image;
-        state.lock().unwrap_or_else(PoisonError::into_inner).changed = Some(Instant::now());
-        wake.notify_one();
+    /// A Write committed, so the image is written again at close, or once the Catalog is quiet
+    /// when it changed the facts.
+    pub(crate) fn committed(&self, facts: bool) {
+        self.inner.changed(facts);
     }
 
     pub(crate) fn views_lock(&self) -> &std::sync::Mutex<crate::catalog::views::Views> {
@@ -647,6 +646,11 @@ impl Catalog {
             store.readers.close(),
             self.loaded()
         );
+        // Changes since the image, listens among them, so the next start reads the image.
+        let catalog = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        let _ = tokio::task::spawn_blocking(move || catalog.write_image()).await;
         if let Some(writer) = store.writer.lock().await.take() {
             writer.close().await?;
         }
@@ -752,6 +756,16 @@ impl Catalog {
 }
 
 impl CatalogInner {
+    fn changed(&self, facts: bool) {
+        let (state, wake) = &*self.image;
+        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.dirty = true;
+        if facts {
+            state.changed = Some(Instant::now());
+            wake.notify_one();
+        }
+    }
+
     fn finish_load(&self, loaded: LibraryResult<(Snapshot, bool)>, elapsed: Duration) {
         let revision = match loaded {
             Ok((snapshot, from_image)) => {
@@ -770,12 +784,7 @@ impl CatalogInner {
                 drop(previous);
                 process_memory::request_reclaim();
                 if !from_image {
-                    self.image
-                        .0
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .changed = Some(Instant::now());
-                    self.image.1.notify_one();
+                    self.changed(true);
                 }
                 revision
             }
@@ -869,11 +878,7 @@ fn write_images(
             guard = wake.wait(guard).unwrap_or_else(PoisonError::into_inner);
             continue;
         };
-        let due = (changed + IMAGE_QUIET).max(
-            guard
-                .written
-                .map_or(changed, |written| written + IMAGE_INTERVAL),
-        );
+        let due = changed + IMAGE_QUIET;
         let now = Instant::now();
         if now < due {
             guard = wake
@@ -883,7 +888,6 @@ fn write_images(
             continue;
         }
         guard.changed = None;
-        guard.written = Some(now);
         // A Write that commits locks this state while it holds the writer.
         drop(guard);
         let Some(inner) = weak.upgrade() else {
@@ -901,8 +905,10 @@ impl Catalog {
     /// slots or replaced strings is loaded again first, so the image holds none of them.
     fn write_image(&self) {
         let writer = futures_executor::block_on(self.inner.store.writer.lock());
+        let (state, _) = &*self.inner.image;
+        let dirty = std::mem::take(&mut state.lock().unwrap_or_else(PoisonError::into_inner).dirty);
         // A Write whose apply failed left memory behind the Store.
-        if writer.is_none() || self.reload_pending() {
+        if writer.is_none() || self.reload_pending() || !dirty {
             return;
         }
         let mut writer = WriterGuard(writer);
@@ -922,11 +928,9 @@ impl Catalog {
         }
         let snapshot = self.snapshot();
         drop(writer);
-        let encoded = sealed.map(|stamp| image::encode(&snapshot, &stamp));
-        drop(snapshot);
-        match encoded {
-            Ok(bytes) => {
-                if let Err(error) = image::write(&self.inner.store.path, &bytes) {
+        match sealed {
+            Ok(stamp) => {
+                if let Err(error) = image::write(&self.inner.store.path, &snapshot, &stamp) {
                     tracing::debug!(%error, "could not write the Catalog image");
                 }
             }
