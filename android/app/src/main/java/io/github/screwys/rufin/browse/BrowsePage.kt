@@ -159,7 +159,7 @@ internal class BrowsePage(
         for ((view, read) in items) if (view !== page) showRead(changed, revision, view, null, read)
     }
 
-    private fun showRead(changed: Changed, revision: Int, view: AndroidView?, header: BrowseItem?, items: List<BrowseItem>) {
+    private fun showRead(changed: Changed, revision: Int, view: AndroidView?, header: AndroidDetailSummary?, items: List<BrowseItem>) {
         val library = browse.library ?: return
         val offset = if (header != null) 1 else 0
         val showing = library.showChanges(listOfNotNull(header?.row) + items.map(::current), changed, view)
