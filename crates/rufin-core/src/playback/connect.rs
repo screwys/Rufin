@@ -230,8 +230,7 @@ impl RufinPlayback {
             .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
         let page = request
             .prepare(&self.catalog, shuffled, random_u64())
-            .await
-            .map_err(string_error)?;
+            .await?;
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).collect(),
             current_index: Some(page.current_index),

@@ -226,16 +226,17 @@ impl PlayRequest {
         catalog: &library::Catalog,
         shuffled: bool,
         seed: u64,
-    ) -> library::LibraryResult<QueueBatch> {
+    ) -> Result<QueueBatch, String> {
         let replacing = matches!(self.placement, QueuePlacement::Replace { .. });
         let random_start = replacing && shuffled && self.start == QueueStart::RandomIfShuffled;
         let selected = if random_start { None } else { self.anchor };
-        let mut batch = catalog.queue_entries(self.input, selected).await?;
+        let mut batch = catalog
+            .queue_entries(self.input, selected)
+            .await
+            .map_err(crate::string_error)?;
         // A play that finds no tracks plays nothing and leaves the queue as it is.
         if batch.entries.is_empty() {
-            return Err(library::LibraryError::InvalidRequest(localization::tr(
-                "Nothing to play here",
-            )));
+            return Err(localization::tr("Nothing to play here"));
         }
         let fallback = match self.placement {
             QueuePlacement::Replace { anchor_index } => anchor_index,
@@ -251,9 +252,7 @@ impl PlayRequest {
             let index = match (selected, batch.anchor_index) {
                 (_, Some(index)) => index,
                 (Some(_), None) => {
-                    return Err(library::LibraryError::InvalidRequest(localization::tr(
-                        "The anchored track is gone",
-                    )));
+                    return Err(localization::tr("The anchored track is gone"));
                 }
                 (None, None) => fallback,
             };
@@ -273,7 +272,8 @@ impl PlayRequest {
             .collect::<Vec<_>>();
         let rows = catalog
             .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
-            .await?;
+            .await
+            .map_err(crate::string_error)?;
         Ok(QueueBatch {
             entries: batch.entries,
             rows,

@@ -1413,8 +1413,7 @@ impl Player {
         let task = owner.runtime.spawn(async move {
             let result = request
                 .prepare(&catalog, shuffled, super::random_u64())
-                .await
-                .map_err(crate::string_error);
+                .await;
             playback.post(move |player, sample| {
                 if let Err(error) = player.complete_queue(id, result, sample) {
                     player.report_error(error.to_string());

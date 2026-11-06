@@ -108,8 +108,7 @@ impl PlexPlayback {
             .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
         let page = request
             .prepare(&self.catalog, shuffled, random_u64())
-            .await
-            .map_err(string_error)?;
+            .await?;
         let anchor = page.current_index;
         let keys = queue_keys(&self.catalog, &page.entries, &self.connection().1.source_id).await?;
         if keys.is_empty() {
