@@ -2823,10 +2823,12 @@ impl Catalog {
         periods: Vec<i64>,
         now: i64,
     ) -> LibraryResult<()> {
-        let periods = periods
+        let mut periods = periods
             .into_iter()
             .filter(|seconds| !inputs.periods.contains_key(&Some(*seconds)))
             .collect::<Vec<_>>();
+        periods.sort_unstable();
+        periods.dedup();
         if periods.is_empty() {
             return Ok(());
         }

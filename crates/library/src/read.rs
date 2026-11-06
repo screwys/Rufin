@@ -1343,8 +1343,6 @@ impl Catalog {
                     }
                 }
             }
-            periods.sort_unstable();
-            periods.dedup();
             periods
         };
         if !periods.is_empty() {
