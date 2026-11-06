@@ -270,18 +270,16 @@ impl Catalog {
         Ok(members)
     }
 
+    /// The files of every track an edit of this collection writes, from one membership read.
     pub async fn file_edit_rows(
         &self,
         collection_uri: &str,
-        after: Option<crate::TrackKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<FileEditRow>> {
         let mut connection = self.acquire_cancellable(cancellation).await?;
-        let mut members = self
+        let members = self
             .collection_members(&mut connection, collection_uri, None, None)
             .await?;
-        members.retain(|key| after.is_none_or(|after| *key > after.raw()));
-        members.truncate(128);
         Ok(sqlx::query_as("SELECT track.track_key,track.object_id,track.media_uri,CASE WHEN (SELECT kind FROM sources WHERE source_key=track.source_key)='local' THEN(SELECT file.path FROM files file WHERE file.source_key=track.source_key AND file.path=details.source_path) ELSE details.source_path END source_path,track.source_format,details.cue_path cue_path FROM json_each(?1) requested JOIN tracks track ON track.track_key=requested.value LEFT JOIN track_details details USING(track_key) ORDER BY track.track_key")
             .bind(serde_json::to_string(&members)?).fetch_all(&mut *connection).await?)
     }

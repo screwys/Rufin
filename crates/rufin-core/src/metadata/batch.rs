@@ -779,25 +779,18 @@ impl MetadataBatch {
         session: Arc<super::EditSession>,
         draft: MetadataDraft,
     ) -> Result<Arc<Self>, Error> {
-        let mut uris = Vec::new();
-        let mut can_embed_artist = true;
-        let mut after = None;
-        loop {
-            let page = source
-                .shared
-                .catalog
-                .file_edit_rows(&session.media_uri, after, &library::ReadCancellation::new())
-                .await
-                .map_err(error)?;
-            if page.is_empty() {
-                break;
-            }
-            after = page.last().map(|row| row.track_key);
-            can_embed_artist &= page.iter().all(|row| {
-                sources::FileEditSession::can_embed_artist(row.source_format.as_deref())
-            });
-            uris.extend(page.into_iter().map(|row| Arc::<str>::from(row.media_uri)));
-        }
+        let rows = source
+            .shared
+            .catalog
+            .file_edit_rows(&session.media_uri, &library::ReadCancellation::new())
+            .await
+            .map_err(error)?;
+        let can_embed_artist = rows
+            .iter()
+            .all(|row| sources::FileEditSession::can_embed_artist(row.source_format.as_deref()));
+        let uris = (rows.into_iter())
+            .map(|row| Arc::<str>::from(row.media_uri))
+            .collect::<Vec<_>>();
         let artist = draft
             .fields
             .iter()

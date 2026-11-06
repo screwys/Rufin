@@ -676,7 +676,6 @@ impl MetadataLookupReview {
             .catalog
             .file_edit_rows(
                 &editor.session.as_ref().ok_or(Error::Unavailable)?.media_uri,
-                None,
                 &library::ReadCancellation::new(),
             )
             .await
