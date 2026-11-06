@@ -146,7 +146,7 @@ rufin --headless --listen
 
 ## Fedora
 
-Rufin is available for Fedora 44.
+Rufin is available for Fedora 44 and 45.
 
 ```bash
 sudo dnf copr enable screwyy/rufin
