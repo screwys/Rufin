@@ -144,21 +144,21 @@ pub(super) fn token(
     Ok(token)
 }
 
-/// The source and music folder a page shows, as a selection of its own.
-async fn scope(
+/// The source and music folder a page or request shows, as a selection of its own.
+pub(super) async fn scope(
     products: &ProductHandles,
-    token: &PageToken,
+    source: Option<&sources::SourceId>,
+    folder: Option<&str>,
 ) -> Result<Option<rufin_core::runtime::SelectedLibrary>, Error> {
-    let Some(source) = &token.source else {
+    let Some(source) = source else {
         return Ok(None);
     };
-    let (source_key, music_folder_key) =
-        catalog::scope(products, source.as_str(), token.folder.as_deref()).await?;
+    let (source_key, music_folder_key) = catalog::scope(products, source.as_str(), folder).await?;
     Ok(Some(rufin_core::runtime::SelectedLibrary {
         source_id: source.clone(),
         source_key,
         music_folder_key,
-        music_folder_object_id: token.folder.clone(),
+        music_folder_object_id: folder.map(str::to_owned),
         music_folders: Arc::from([]),
     }))
 }
@@ -169,7 +169,7 @@ pub(super) async fn play(
     token: &PageToken,
     placement: rufin_core::playback::QueuePlacement,
 ) -> Result<Option<rufin_core::playback::PlayRequest>, Error> {
-    let selected = scope(products, token).await?;
+    let selected = scope(products, token.source.as_ref(), token.folder.as_deref()).await?;
     products
         .source
         .play_route(
@@ -200,7 +200,7 @@ pub(super) async fn open(
     offset: usize,
     limit: usize,
 ) -> Result<Opened, Error> {
-    let selected = scope(products, &token).await?;
+    let selected = scope(products, token.source.as_ref(), token.folder.as_deref()).await?;
     let cancel = ReadCancellation::new();
     let opened = products
         .source

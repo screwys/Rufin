@@ -344,7 +344,12 @@ impl PlayTarget {
                 keys: vec![*key].into(),
             })),
             Self::Route(route) => source
-                .route_selection(route, scope, &library::ReadCancellation::new())
+                .route_selection(
+                    route,
+                    source.selected_library().as_ref(),
+                    scope,
+                    &library::ReadCancellation::new(),
+                )
                 .await
                 .map_err(|error| error.to_string()),
         }

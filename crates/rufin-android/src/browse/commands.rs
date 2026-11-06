@@ -606,7 +606,7 @@ impl AndroidLibrary {
         let source = self.source.clone();
         run_read(&self.runtime, move |cancel| async move {
             source
-                .route_selection(&route, scope, &cancel)
+                .route_selection(&route, source.selected_library().as_ref(), scope, &cancel)
                 .await
                 .map_err(error)?
                 .ok_or_else(|| error("Choose a collection"))

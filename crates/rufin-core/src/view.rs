@@ -205,15 +205,16 @@ impl SourceOwner {
         .await
     }
 
-    /// Everything `route` holds for `scope`, in the selected library. None when the route lists
+    /// Everything `route` holds for `scope`, read in `selected`. None when the route lists
     /// nothing.
     pub async fn route_selection(
         &self,
         route: &Route,
+        selected: Option<&SelectedLibrary>,
         scope: SelectionScope,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
-        let mut selected = self.selected_library();
+        let mut selected = selected.cloned();
         if !scope.keeps_folder(matches!(
             route,
             Route::Folders { .. } | Route::SmartPlaylistDetail(_)
