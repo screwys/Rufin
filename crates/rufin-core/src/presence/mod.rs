@@ -139,6 +139,11 @@ impl Running {
                         return;
                     };
                     sink.observe(projection.as_ref());
+                    // Presence stopped meanwhile: the sink's threads end off the runtime.
+                    if let Some(sink) = Arc::into_inner(sink) {
+                        tokio::task::spawn_blocking(move || drop(sink));
+                        return;
+                    }
                 }
             })
             .abort_handle();
