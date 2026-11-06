@@ -124,9 +124,11 @@ fn row_caption(
         item => caption(
             row.route.as_ref().and_then(CollectionTarget::for_route),
             row.display_title.clone().or_else(|| match item {
+                AndroidBrowseItem::Library {
+                    row: Row::Folder(_),
+                } => None,
                 AndroidBrowseItem::Library { row } => Some(row_field(row, LibraryField::Title)),
                 AndroidBrowseItem::Recent { row } => Some(row.title.clone()),
-                AndroidBrowseItem::Folder { .. } => None,
             }),
         ),
     }
@@ -199,22 +201,13 @@ impl AndroidView {
             .map(|(row, position)| match row {
                 Row::Track(_) => shown_row(row, &self.fields, position.saturating_sub(folders)),
                 Row::AlbumTrack { index, .. } => shown_row(row, &self.fields, index as usize),
-                Row::Folder(folder) => {
-                    let Route::Folders { path } = self.view.route() else {
-                        unreachable!("Folder rows belong to a folder route")
-                    };
-                    let mut path = path.clone();
-                    path.push(rufin_core::route::FolderPathItem {
-                        id: folder.object_id,
-                        name: folder.name,
-                    });
-                    AndroidBrowseRow::opening(
-                        AndroidBrowseItem::Folder {
-                            artwork: folder.artwork_binding,
-                        },
-                        Route::Folders { path },
-                    )
-                }
+                // A child folder opens the folder core names, and shows no fields.
+                row @ Row::Folder(_) => match self.view.row_route(&row) {
+                    Some(route) => {
+                        AndroidBrowseRow::opening(AndroidBrowseItem::Library { row }, route)
+                    }
+                    None => AndroidBrowseRow::new(AndroidBrowseItem::Library { row }),
+                },
                 row => shown_row(row, &self.fields, position),
             })
             .collect()
@@ -642,21 +635,6 @@ impl AndroidLibrary {
                         None => Ok(None),
                     }
                 }
-                // A child folder plays the folder it opens.
-                (AndroidBrowseItem::Folder { .. }, _) => match row.route.clone() {
-                    Some(route) => {
-                        source
-                            .play_target(
-                                &PlayTarget::Route(route),
-                                selected,
-                                placement,
-                                shuffled,
-                                &cancel,
-                            )
-                            .await
-                    }
-                    None => Ok(None),
-                },
             }
             .map_err(error)
         })

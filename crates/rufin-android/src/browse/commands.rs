@@ -16,8 +16,7 @@ fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
 #[uniffi::export]
 impl AndroidLibrary {
     /// The row's menu, as core's Menu offers it under the saved menu settings. A remembered
-    /// search result has its library row's menu; a child folder offers its plays, playlists
-    /// and downloads.
+    /// search result has its library row's menu.
     pub async fn menu(
         &self,
         row: AndroidBrowseRow,
@@ -25,12 +24,6 @@ impl AndroidLibrary {
         let settings = self.settings.load();
         let row = match row.item {
             AndroidBrowseItem::Library { row } => row,
-            AndroidBrowseItem::Folder { .. } => {
-                return Ok(rufin_core::menu::Menu {
-                    edit_metadata: false,
-                    ..rufin_core::menu::selection(&settings)
-                });
-            }
             AndroidBrowseItem::Recent { row } => {
                 let catalog = self.catalog.clone();
                 let read = run_read(&self.runtime, move |cancel| async move {

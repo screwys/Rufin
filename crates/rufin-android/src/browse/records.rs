@@ -238,16 +238,8 @@ pub struct AndroidPinPage {
     reason = "nearly every row is a library row"
 )]
 pub enum AndroidBrowseItem {
-    Library {
-        row: library::Row,
-    },
-    /// A child folder; the row's route opens it.
-    Folder {
-        artwork: Option<Vec<u8>>,
-    },
-    Recent {
-        row: RecentSearchResult,
-    },
+    Library { row: library::Row },
+    Recent { row: RecentSearchResult },
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -281,6 +273,9 @@ impl AndroidBrowseRow {
                 let text = format_duration((millis / 1_000) as u32);
                 (1, millis, text, track.artwork_binding.clone())
             }
+            AndroidBrowseItem::Library {
+                row: Row::Folder(folder),
+            } => (0, 0, String::new(), folder.artwork_binding.clone()),
             AndroidBrowseItem::Library { row } => row.collection().map_or_else(
                 || (0, 0, String::new(), None),
                 |shown| {
@@ -293,7 +288,6 @@ impl AndroidBrowseRow {
                     )
                 },
             ),
-            AndroidBrowseItem::Folder { artwork } => (0, 0, String::new(), artwork.clone()),
             AndroidBrowseItem::Recent { row } => (0, 0, String::new(), row.artwork_binding.clone()),
         };
         Self {
