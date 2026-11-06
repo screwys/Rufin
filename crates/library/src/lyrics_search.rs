@@ -38,14 +38,19 @@ impl Catalog {
             return Ok(SearchResults::default());
         }
         self.loaded().await;
-        let Some(folder) = Context::new(&self.snapshot()).folder_slot(folder, None) else {
+        if Context::new(&self.snapshot())
+            .folder_slot(folder, None)
+            .is_none()
+        {
             return Ok(SearchResults::default());
-        };
-        // A music folder narrows only its own source's tracks.
+        }
+        // A music folder narrows only its own source's tracks; a reload may move its slot.
         let kept = |key: i64| {
             let snapshot = self.snapshot();
+            let context = Context::new(&snapshot);
             snapshot.tracks.get(key).is_none_or(|track| {
-                track.indexed() && Context::new(&snapshot).in_source_folder(track, folder)
+                let slot = context.folder_slot(folder, None);
+                track.indexed() && slot.is_some_and(|slot| context.in_source_folder(track, slot))
             })
         };
         let mut connection = self.acquire_cancellable(cancellation).await?;
