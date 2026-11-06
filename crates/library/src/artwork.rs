@@ -434,35 +434,19 @@ pub(crate) async fn playlist_artwork_choices_on(
     .fetch_all(&mut *connection)
     .await?;
     let arts = catalog.arts(rows.iter().map(|(key, ..)| Some(Owner::Track(*key))));
-    let pictured = rows
-        .iter()
-        .zip(&arts)
-        .filter(|(_, art)| **art != Art::None)
-        .map(|((key, uri, album, _), _)| (*key, uri.as_str(), *album))
-        .collect::<Vec<_>>();
     // Each album, or each track without one, is a group; its cover is its first member with a
     // picture.
-    let mut groups = std::collections::BTreeMap::<&str, (&str, Option<i64>)>::new();
-    for (_, uri, album, album_uri) in &rows {
-        let group = groups
-            .entry(album_uri.as_deref().unwrap_or(uri))
-            .or_insert((uri, *album));
-        group.0 = group.0.min(uri);
+    let mut first = std::collections::BTreeMap::<&str, (&str, i64)>::new();
+    for ((key, uri, _, album_uri), art) in rows.iter().zip(&arts) {
+        if *art != Art::None {
+            let cover = first
+                .entry(album_uri.as_deref().unwrap_or(uri))
+                .or_insert((uri, *key));
+            *cover = (*cover).min((uri, *key));
+        }
     }
-    let mut covers = groups
-        .into_values()
-        .filter_map(|(first, album)| {
-            pictured
-                .iter()
-                .find(|(_, uri, _)| *uri == first)
-                .or_else(|| {
-                    pictured
-                        .iter()
-                        .filter(|(_, _, member)| album.is_some() && *member == album)
-                        .min_by_key(|(_, uri, _)| *uri)
-                })
-                .map(|(key, uri, _)| (*key, uri.to_string()))
-        })
+    let mut covers = (first.into_values())
+        .map(|(uri, key)| (key, uri.to_owned()))
         .collect::<Vec<_>>();
     if random {
         let seed = std::time::SystemTime::now()
