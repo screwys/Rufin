@@ -1221,30 +1221,26 @@ impl Snapshot {
         let mut artists = std::collections::HashSet::new();
         let mut albums = std::collections::HashSet::new();
         let Some(slot) = self.source_slot(source) else {
-            return artists;
+            return std::collections::HashSet::new();
         };
         for (_, track) in self.tracks.iter() {
             if !track.indexed() || track.source != slot {
                 continue;
             }
-            let links = self.track_links(track);
-            artists.extend(
-                links
-                    .artists
-                    .iter()
-                    .chain(&links.album_artists)
-                    .map(|key| key.raw()),
-            );
+            let runs = self.track_runs(track);
+            artists.extend(runs[0].iter().chain(runs[1]));
             if self.albums.live(track.album).is_some() {
                 albums.insert(track.album);
             }
         }
         for (index, album) in self.albums.iter() {
             if album.source == slot && (album.indexed() || albums.contains(&index)) {
-                artists.extend(self.album_links(album).0.iter().map(|key| key.raw()));
+                artists.extend(self.album_runs(album)[0]);
             }
         }
-        artists
+        (artists.into_iter())
+            .filter_map(|slot: &u32| self.artists.key_of(*slot))
+            .collect()
     }
 
     /// Keys of every record a source owns.
