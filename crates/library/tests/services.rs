@@ -320,12 +320,8 @@ async fn source_artwork_pages_distinct_bindings() {
         .await
         .unwrap();
     let mut retained = Vec::new();
-    loop {
-        let page = retention.next_bindings().await.unwrap();
+    while let Some(page) = retention.next_bindings().await.unwrap() {
         assert!(page.len() <= 128);
-        if page.is_empty() {
-            break;
-        }
         retained.extend(page);
     }
     assert_eq!(retained.len(), 131);

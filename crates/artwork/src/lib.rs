@@ -273,11 +273,7 @@ impl Artwork {
         active_media_uris: &[String],
     ) -> Result<(), ArtworkError> {
         let mut retention = catalog.artwork_cache_retention(active_media_uris).await?;
-        loop {
-            let bindings = retention.next_bindings().await?;
-            if bindings.is_empty() {
-                break;
-            }
+        while let Some(bindings) = retention.next_bindings().await? {
             let families: Vec<_> = bindings
                 .iter()
                 .flat_map(|binding| {

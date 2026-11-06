@@ -509,19 +509,24 @@ pub struct ArtworkCacheRetention<'a> {
 }
 
 impl ArtworkCacheRetention<'_> {
-    /// Pictures of the next downloaded or active tracks.
-    pub async fn next_bindings(&mut self) -> LibraryResult<Vec<Vec<u8>>> {
+    /// Pictures of the next downloaded or active tracks; None once every track was paged.
+    pub async fn next_bindings(&mut self) -> LibraryResult<Option<Vec<Vec<u8>>>> {
+        if self.tracks.is_empty() {
+            return Ok(None);
+        }
         let page = self
             .tracks
             .split_off(self.tracks.len().saturating_sub(ARTWORK_PAGE_LIMIT));
         let arts = self
             .catalog
             .arts(page.into_iter().rev().map(|key| Some(Owner::Track(key))));
-        Ok(crate::catalog::fetch::bindings(&mut self.connection, &arts)
-            .await?
-            .into_iter()
-            .flatten()
-            .collect())
+        Ok(Some(
+            crate::catalog::fetch::bindings(&mut self.connection, &arts)
+                .await?
+                .into_iter()
+                .flatten()
+                .collect(),
+        ))
     }
 
     pub async fn retain(&mut self, families: &[String]) -> LibraryResult<()> {
