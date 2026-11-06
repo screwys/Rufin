@@ -1227,10 +1227,12 @@ impl<'a> Write<'a> {
     pub(crate) fn put_entries(&mut self, playlist: i64, entries: Vec<Entry<TrackKey>>) {
         if !entries.is_empty() {
             let edit = self.edits.playlists.entry(playlist).or_default();
-            edit.removed
-                .retain(|key| !entries.iter().any(|entry| entry.key == *key));
-            edit.put
-                .retain(|put| !entries.iter().any(|entry| entry.key == put.key));
+            let keys = entries
+                .iter()
+                .map(|entry| entry.key)
+                .collect::<HashSet<_>>();
+            edit.removed.retain(|key| !keys.contains(key));
+            edit.put.retain(|put| !keys.contains(&put.key));
             edit.put.extend(entries);
         }
     }
@@ -1552,12 +1554,13 @@ impl<'a> Write<'a> {
             if playlist != resident {
                 let entries = playlist.as_ref().map(|playlist| &playlist.entries)
                     != resident.as_ref().map(|playlist| &playlist.entries);
-                let shown = match (&playlist, &resident) {
+                // Linking alone shows nothing; compared in place, without another copy.
+                let shown = match (&mut playlist, &resident) {
                     (Some(next), Some(before)) => {
-                        Playlist {
-                            linked: before.linked,
-                            ..next.clone()
-                        } != *before
+                        let linked = std::mem::replace(&mut next.linked, before.linked);
+                        let shown = next != before;
+                        next.linked = linked;
+                        shown
                     }
                     _ => true,
                 };
@@ -2146,11 +2149,8 @@ fn edit_entries(entries: &mut Vec<Entry<TrackKey>>, removed: &[i64], put: Vec<En
         .chain(put.iter().map(|entry| &entry.key))
         .collect::<std::collections::HashSet<_>>();
     entries.retain(|entry| !gone.contains(&entry.key));
-    for entry in put {
-        let at =
-            entries.partition_point(|other| (&other.rank, other.key) < (&entry.rank, entry.key));
-        entries.insert(at, entry);
-    }
+    entries.extend(put);
+    entries.sort_by(|a, b| (&a.rank, a.key).cmp(&(&b.rank, b.key)));
 }
 
 /// The smart playlist columns the Catalog holds. Statements that write one return them.
