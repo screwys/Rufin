@@ -27,9 +27,18 @@ impl PageToken {
     pub fn selected(products: &ProductHandles) -> Self {
         let selected = products.source.selected_library();
         Self {
-            route: Route::Home,
             source: selected.as_ref().map(|selected| selected.source_id.clone()),
             folder: selected.and_then(|selected| selected.music_folder_object_id),
+            ..Self::new(Route::Home)
+        }
+    }
+
+    /// The page `route` shows of no source, opened plainly.
+    pub fn new(route: Route) -> Self {
+        Self {
+            route,
+            source: None,
+            folder: None,
             options: page_options(OpenOptions::default()),
         }
     }
@@ -37,10 +46,9 @@ impl PageToken {
     /// The page `route` shows of this page's source and music folder, opened plainly.
     pub fn at(&self, route: Route) -> Self {
         Self {
-            route,
             source: self.source.clone(),
             folder: self.folder.clone(),
-            options: page_options(OpenOptions::default()),
+            ..Self::new(route)
         }
     }
 
@@ -108,12 +116,7 @@ pub(super) fn token(
         _ => return Err(bad_request("Unknown library view")),
     };
     let mut token = match route {
-        Some(route) => PageToken {
-            route,
-            source: None,
-            folder: None,
-            options: page_options(OpenOptions::default()),
-        },
+        Some(route) => PageToken::new(route),
         None => serde_json::from_str(required(parameters, "page")?).map_err(bad_request)?,
     };
     // The web shows lists as cards.

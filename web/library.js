@@ -304,30 +304,27 @@ function markSection(section) {
   });
 }
 
-// Opens `target`: a page token, a navigation entry such as "Albums", or "sources"; an entry
-// opens searching `filter`.
-function navigate(target, filter = "") {
+// Opens `target`: a page token, a navigation entry such as "Albums", or "sources".
+function navigate(target) {
   opened = typeof target === "string" && target !== "sources"
-    ? {
-        route: target,
-        source: state.source || undefined,
-        folder: state.selectedLibrary || undefined,
-        ...(filter ? { options: { filter } } : {}),
-      }
+    ? { route: target, source: state.source || undefined, folder: state.selectedLibrary || undefined }
     : target;
   shown = {};
   offset = 0;
-  $("search").value = filter;
+  $("search").value = opened.options?.filter || "";
   showOrder($("sort").value, false);
   $("navigation").classList.remove("open");
   run(() => loadView());
 }
 
-// The navigation entry the page belongs to, opened again in the selected source and music
-// folder, searching what it searched.
+// The page opened again in the selected source and music folder, searching what it searched,
+// as GTK opens its page again.
 function reopen() {
-  if (opened === "sources") navigate("sources");
-  else navigate(shown.section || "Home", opened.options?.filter || "");
+  navigate(
+    opened === "sources"
+      ? "sources"
+      : { ...opened, source: state.source || undefined, folder: state.selectedLibrary || undefined },
+  );
 }
 
 function showOrder(sort, descending) {
@@ -964,8 +961,8 @@ export {
   navigate,
   opened,
   playUris,
-  refreshPage,
   reopen,
+  refreshPage,
   setFavorite,
   showPage,
   viewRequest,

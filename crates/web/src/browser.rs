@@ -809,12 +809,13 @@ impl Page {
 
     /// A link to the navigation entry `route`, in this page's source and music folder.
     fn nav(&self, route: &str) -> String {
-        let token = page::PageToken {
-            route: serde_json::from_value(json!(route)).expect("navigation route"),
-            source: (!self.source.is_empty()).then(|| sources::SourceId::new(&self.source)),
-            folder: Some(self.folder.clone()).filter(|folder| !folder.is_empty()),
-            options: Default::default(),
-        };
+        let route: rufin_core::route::Route =
+            serde_json::from_value(json!(route)).expect("navigation route");
+        // Without a page, the entry opens in the selected source and music folder.
+        let token = self.token.as_ref().map_or_else(
+            || page::PageToken::new(route.clone()),
+            |token| token.at(route.clone()),
+        );
         link(&HashMap::from([("page".to_owned(), token.json())]))
     }
     pub fn source_name(&self) -> &str {
