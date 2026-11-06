@@ -37,7 +37,10 @@ pub struct SearchSession {
     selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
     mode: Cell<library::SearchMode>,
-    pub(super) items: RefCell<[Vec<SearchItem>; 3]>,
+    /// The results by category, which the header and the Search page show.
+    pub(super) models: [gio::ListStore; 3],
+    /// The committed changes the results show.
+    changes: rufin_core::shown::ShownChanges,
     status: Cell<&'static str>,
     pub(super) revision: Cell<u64>,
     generation: Cell<u64>,
@@ -48,17 +51,71 @@ pub struct SearchSession {
 }
 
 impl SearchSession {
-    /// Shows committed favorites and ratings in the results the session keeps, also while no
-    /// Search route shows them.
-    pub fn show_states(&self, changes: &[library::StateChange]) {
+    /// Shows a committed change in the results, also while no Search route shows them,
+    /// through core's [`rufin_core::shown::ShownChanges`].
+    pub fn show_changes(&self, changed: &rufin_core::source::feed::Changed) {
         use library::ShowsState;
-        for row in self.items.borrow_mut().iter_mut().flatten() {
-            for change in changes {
-                if let Some(state) = row.state_mut(change) {
-                    change.show_in(state);
+        let shown = self
+            .models
+            .iter()
+            .flat_map(|model| {
+                (0..model.n_items()).filter_map(|position| model.item(position).and_downcast())
+            })
+            .filter_map(|item: RowItem| {
+                let row = item.value::<Arc<SearchItem>>()?;
+                Some((item, row))
+            })
+            .collect::<Vec<_>>();
+        let mut rows = shown
+            .iter()
+            .map(|(_, row)| SearchItem::clone(row))
+            .collect::<Vec<_>>();
+        let changes = self
+            .changes
+            .show(&self.source, &mut rows, changed, (None, None));
+        if changes.states {
+            for ((item, before), row) in shown.iter().zip(rows) {
+                if **before != row {
+                    item.replace(Arc::new(row), true);
                 }
             }
         }
+        let Some(downloads) = changes.downloads else {
+            return;
+        };
+        glib::spawn_future_local(async move {
+            let Some(read) = downloads.await else { return };
+            // The downloads go into the result each item shows now when it is the same row.
+            for (index, mut row) in read {
+                let item = &shown[index].0;
+                let Some(current) = item.value::<Arc<SearchItem>>() else {
+                    continue;
+                };
+                let mut merged = SearchItem::clone(&current);
+                if merged.take_downloads(&mut row) && merged != *current {
+                    item.replace(Arc::new(merged), true);
+                }
+            }
+        });
+    }
+
+    /// Shows `items` as the results.
+    fn show_items(&self, items: [Vec<SearchItem>; 3]) {
+        for (model, items) in self.models.iter().zip(items) {
+            let items = items
+                .into_iter()
+                .map(|row| RowItem::new(Arc::new(row), true))
+                .collect::<Vec<_>>();
+            model.splice(0, model.n_items(), &items);
+        }
+    }
+
+    /// The result at `index` of `category`.
+    fn item(&self, category: CollectionCategory, index: usize) -> Option<Arc<SearchItem>> {
+        self.models[category as usize]
+            .item(u32::try_from(index).ok()?)
+            .and_downcast::<RowItem>()?
+            .value::<Arc<SearchItem>>()
     }
 
     pub fn new(source: rufin_core::runtime::SourceHandle, runtime: tokio::runtime::Handle) -> Self {
@@ -69,7 +126,8 @@ impl SearchSession {
             selected: RefCell::new(None),
             query: RefCell::new(String::new()),
             mode: Cell::new(library::SearchMode::Title),
-            items: RefCell::new(Default::default()),
+            models: CollectionCategory::ALL.map(|_| gio::ListStore::new::<RowItem>()),
+            changes: Default::default(),
             status: Cell::new("initial"),
             revision: Cell::new(0),
             generation: Cell::new(0),
@@ -234,7 +292,7 @@ impl SearchSession {
     fn schedule(self: &Rc<Self>) {
         self.cancel();
         self.view.replace(None);
-        self.items.replace(Default::default());
+        self.show_items(Default::default());
         self.revision.set(self.revision.get().wrapping_add(1));
         if self.query.borrow().is_empty()
             || (self.mode() == library::SearchMode::Title && self.selected.borrow().is_none())
@@ -344,7 +402,7 @@ impl SearchSession {
             session.cancellation.borrow_mut().take();
             match result {
                 Ok(opened) => {
-                    session.items.replace(cached_items(
+                    session.show_items(cached_items(
                         opened.view.search_results().cloned().unwrap_or_default(),
                     ));
                     session.view.replace(Some(opened.view));
@@ -361,7 +419,7 @@ impl SearchSession {
     }
 
     pub fn previews(&self) -> [Vec<SearchPreview>; 3] {
-        let items = self.items.borrow();
+        let lengths = self.models.each_ref().map(|model| model.n_items() as usize);
         let mut counts = [0; 3];
         let mut total = 0;
         while total < SEARCH_PREVIEW_LIMIT {
@@ -373,7 +431,7 @@ impl SearchSession {
                 CollectionCategory::Artists,
             ] {
                 let index = category as usize;
-                if total < SEARCH_PREVIEW_LIMIT && counts[index] < items[index].len() {
+                if total < SEARCH_PREVIEW_LIMIT && counts[index] < lengths[index] {
                     counts[index] += 1;
                     total += 1;
                 }
@@ -383,9 +441,8 @@ impl SearchSession {
             }
         }
         std::array::from_fn(|index| {
-            items[index]
-                .iter()
-                .take(counts[index])
+            (0..counts[index])
+                .filter_map(|position| self.item(CollectionCategory::ALL[index], position))
                 .map(|item| SearchPreview {
                     title: item.title().to_owned(),
                     subtitle: item.subtitle().to_owned(),
@@ -397,14 +454,14 @@ impl SearchSession {
     }
 
     pub fn activate(&self, category: CollectionCategory, index: usize, catalog: &Rc<CatalogUi>) {
-        let item = self.items.borrow()[category as usize].get(index).cloned();
+        let item = self.item(category, index);
         if let Some(item) = item {
             item.activate(catalog);
         }
     }
 
     pub fn play(&self, category: CollectionCategory, index: usize, catalog: &Rc<CatalogUi>) {
-        let item = self.items.borrow()[category as usize].get(index).cloned();
+        let item = self.item(category, index);
         if let Some(item) = item {
             item.play(catalog, QueuePlacement::Now);
         }
@@ -416,16 +473,14 @@ impl SearchSession {
         index: usize,
         current: &crate::widgets::mounted_route::RouteCurrentTrack,
     ) -> bool {
-        self.items.borrow()[category as usize]
-            .get(index)
-            .is_some_and(|item| {
-                let (kind, uri) = match item {
-                    SearchItem::Track(row, _) => (RecentSearchKind::Track, row.media_uri.as_str()),
-                    SearchItem::Album(row) => (RecentSearchKind::Album, row.media_uri.as_str()),
-                    SearchItem::Artist(row) => (RecentSearchKind::Artist, row.media_uri.as_str()),
-                };
-                search_result_matches(kind, uri, current)
-            })
+        self.item(category, index).is_some_and(|item| {
+            let (kind, uri) = match &*item {
+                SearchItem::Track(row, _) => (RecentSearchKind::Track, row.media_uri.as_str()),
+                SearchItem::Album(row) => (RecentSearchKind::Album, row.media_uri.as_str()),
+                SearchItem::Artist(row) => (RecentSearchKind::Artist, row.media_uri.as_str()),
+            };
+            search_result_matches(kind, uri, current)
+        })
     }
 
     pub fn recent_matches(
@@ -442,7 +497,7 @@ impl SearchSession {
         target: &gtk::Widget,
         catalog: &Rc<CatalogUi>,
     ) {
-        let item = self.items.borrow()[category as usize].get(index).cloned();
+        let item = self.item(category, index);
         if let Some(item) = item {
             let generation = self.generation.get();
             let session = Rc::downgrade(self);

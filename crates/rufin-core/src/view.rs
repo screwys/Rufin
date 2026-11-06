@@ -1773,6 +1773,27 @@ pub enum HomeItem {
     Album(Box<HomeAlbumRow>),
 }
 
+impl library::ShowsState for HomeItem {
+    fn state(&self, change: &library::StateChange) -> Option<&library::TrackState> {
+        match self {
+            Self::Track(row) => row.track.state(change),
+            Self::Album(row) => row.album.state(change),
+        }
+    }
+    fn state_mut(&mut self, change: &library::StateChange) -> Option<&mut library::TrackState> {
+        match self {
+            Self::Track(row) => row.track.state_mut(change),
+            Self::Album(row) => row.album.state_mut(change),
+        }
+    }
+    fn downloads(&mut self) -> Option<library::Shown<'_>> {
+        Some(match self {
+            Self::Track(row) => library::Shown::Track(&mut row.track),
+            Self::Album(row) => library::Shown::Album(&mut row.album),
+        })
+    }
+}
+
 impl HomeSection {
     /// The block it shows; None for the server's own sections.
     pub fn block(&self) -> Option<HomeBlockKind> {

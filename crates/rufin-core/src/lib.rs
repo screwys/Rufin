@@ -22,6 +22,7 @@ pub mod route;
 pub mod runtime;
 pub mod scrobbling;
 pub mod settings;
+pub mod shown;
 pub mod source;
 pub mod themes;
 pub mod view;

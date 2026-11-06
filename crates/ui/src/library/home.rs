@@ -4,9 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use library::{
-    HomeAlbumRow, HomeProviderSection, HomeSectionRows, HomeTrackRow, RadioSeed, TagRow,
-};
+use library::{HomeAlbumRow, HomeProviderSection, RadioSeed, TagRow};
 use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -21,7 +19,7 @@ use crate::widgets::localization::{bind_label_text_with, localized_label};
 use crate::widgets::mounted_route::MountedRoute;
 use rufin_core::settings::presentation::format_duration_units;
 use rufin_core::settings::{HomeBlockKind, HomeSectionKind};
-use rufin_core::view::HomeSection;
+use rufin_core::view::{HomeItem, HomeSection};
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -42,16 +40,6 @@ use rufin_core::route::Route;
 use rufin_core::route::detail_links::album_row_artist_links;
 
 const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
-
-#[derive(Clone, PartialEq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "Home sections are hard-bounded and keep final rows inline"
-)]
-enum HomeItem {
-    Track(HomeTrackRow),
-    Album(HomeAlbumRow),
-}
 
 type HomeItemBinding = Rc<dyn Fn(HomeItem)>;
 
@@ -206,14 +194,6 @@ impl ShownHomeSection {
     }
 }
 
-/// A Home row as the Catalog shows its downloads.
-fn home_item_shown(item: &mut HomeItem) -> library::Shown<'_> {
-    match item {
-        HomeItem::Track(item) => library::Shown::Track(&mut item.track),
-        HomeItem::Album(item) => library::Shown::Album(&mut item.album),
-    }
-}
-
 #[derive(Clone)]
 struct HomeRouteProjection {
     shell: std::rc::Weak<CatalogUi>,
@@ -223,92 +203,84 @@ struct HomeRouteProjection {
     shown: Rc<RefCell<Vec<(HomeSectionId, ShownHomeSection)>>>,
     content: gtk::Box,
     empty: gtk::Widget,
-    /// The download update being applied; a newer one replaces it.
-    downloads: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
+    /// The committed changes Home shows.
+    changes: rufin_core::shown::ShownChanges,
 }
 
 impl HomeRouteProjection {
-    /// Shows committed favorites and ratings in the rows and hearts Home shows.
-    fn show_states(&self, changes: &[library::StateChange]) {
-        use library::ShowsState;
-        if let Some(showcase) = &mut *self.showcase.borrow_mut() {
-            for change in changes {
-                if let Some(state) = showcase.album.state_mut(change) {
-                    change.show_in(state);
-                    for heart in self.hearts.borrow().iter() {
-                        crate::favorites::set_favorite_button_active(heart, change.favorite);
-                    }
+    /// Shows a committed change in the showcase album, its hearts and the rows Home shows,
+    /// through core's [`rufin_core::shown::ShownChanges`]: the showcase first, then each
+    /// section's rows.
+    fn show_changes(
+        &self,
+        owner: &rufin_core::source::SourceOwner,
+        changed: &rufin_core::source::feed::Changed,
+    ) {
+        let sections = self.sections();
+        let showcase = self.showcase.borrow().clone();
+        let mut rows = showcase
+            .map(|row| HomeItem::Album(Box::new(row)))
+            .into_iter()
+            .collect::<Vec<_>>();
+        let first = rows.len();
+        for view in &sections {
+            rows.extend(view.mounted.data.borrow().iter().cloned());
+        }
+        let shown = self.changes.show(owner, &mut rows, changed, (None, None));
+        if shown.states {
+            let mut rows = rows.into_iter();
+            if first == 1
+                && let Some(HomeItem::Album(row)) = rows.next()
+            {
+                for heart in self.hearts.borrow().iter() {
+                    crate::favorites::set_favorite_button_active(heart, row.album.state.favorite);
                 }
+                self.showcase.replace(Some(*row));
+            }
+            for view in &sections {
+                let len = view.mounted.data.borrow().len();
+                view.mounted.replace(rows.by_ref().take(len).collect());
             }
         }
-        for view in self.sections() {
-            view.mounted.update(|item| {
-                let mut changed = false;
-                for change in changes {
-                    let state = match item {
-                        HomeItem::Track(item) => item.track.state_mut(change),
-                        HomeItem::Album(item) => item.album.state_mut(change),
-                    };
-                    if let Some(state) = state
-                        && !change.shown_in(state)
-                    {
-                        change.show_in(state);
-                        changed = true;
-                    }
-                }
-                changed
-            });
-        }
-    }
-
-    /// Shows the current downloads in the showcase album and the rows Home shows.
-    fn show_downloads(&self) {
-        let Some(shell) = self.shell.upgrade() else {
+        let Some(downloads) = shown.downloads else {
             return;
         };
-        let sections = self.sections();
-        let mut items = sections
-            .iter()
-            .map(|view| view.mounted.data.borrow().clone())
-            .collect::<Vec<_>>();
-        let mut showcase = self.showcase.borrow().clone();
-        let catalog = std::sync::Arc::clone(&shell.products.library);
-        let task = shell.products.runtime.spawn(async move {
-            let shown = showcase
-                .iter_mut()
-                .map(|row| library::Shown::Album(&mut row.album))
-                .chain(items.iter_mut().flatten().map(home_item_shown))
-                .collect();
-            catalog
-                .show_downloads(shown, (None, None), &library::ReadCancellation::new())
-                .await
-                .map(|()| (showcase, items))
-        });
         let home = self.clone();
-        let apply = glib::spawn_future_local(async move {
-            let Ok(Ok((showcase, items))) = task.await else {
+        glib::spawn_future_local(async move {
+            use library::ShowsState;
+            let Some(read) = downloads.await else {
                 return;
             };
-            if let (Some(shown), Some(showcase)) = (&mut *home.showcase.borrow_mut(), showcase)
-                && shown.album.album_key == showcase.album.album_key
-            {
-                shown.album.summary = showcase.album.summary;
-            }
-            // The downloads go into the rows each section shows now when they are the same rows.
-            for (view, mut items) in sections.iter().zip(items) {
-                let current = view.mounted.data.borrow().clone();
-                let mut merged = current.clone();
-                for (into, from) in merged.iter_mut().zip(&mut items) {
-                    home_item_shown(into).take_downloads(home_item_shown(from));
+            // The downloads go into the rows Home shows now when they are the same rows.
+            let mut sections = sections
+                .iter()
+                .map(|view| (view, view.mounted.data.borrow().clone()))
+                .collect::<Vec<_>>();
+            for (index, mut row) in read {
+                if index < first {
+                    if let (Some(shown), HomeItem::Album(row)) =
+                        (&mut *home.showcase.borrow_mut(), &mut row)
+                    {
+                        library::Shown::Album(&mut shown.album)
+                            .take_downloads(library::Shown::Album(&mut row.album));
+                    }
+                    continue;
                 }
-                if merged != current {
-                    view.mounted.replace(merged);
+                let mut index = index - first;
+                for (_, items) in &mut sections {
+                    if index < items.len() {
+                        items[index].take_downloads(&mut row);
+                        break;
+                    }
+                    index -= items.len();
+                }
+            }
+            for (view, items) in sections {
+                if *view.mounted.data.borrow() != items {
+                    view.mounted.replace(items);
                 }
             }
         });
-        if let Some(previous) = self.downloads.replace(Some(apply)) {
-            previous.abort();
-        }
     }
 
     /// Shows Home's sections in the order core composed them.
@@ -330,13 +302,15 @@ impl HomeRouteProjection {
                 self.showcase.replace(Some(HomeAlbumRow::clone(row)));
             }
             let next = match (kept, section) {
-                (Some(ShownHomeSection::Rows(view)), HomeSection::Rows { rows, .. }) => {
-                    view.mounted.replace(home_items(&rows));
+                (Some(ShownHomeSection::Rows(view)), section @ HomeSection::Rows { .. }) => {
+                    view.mounted.replace(section.items());
                     ShownHomeSection::Rows(view)
                 }
-                (Some(ShownHomeSection::Rows(view)), HomeSection::Provider(provider)) => {
-                    view.header.set_title(&home_provider_title(&provider));
-                    view.mounted.replace(home_items(&provider.rows));
+                (Some(ShownHomeSection::Rows(view)), section @ HomeSection::Provider(_)) => {
+                    if let HomeSection::Provider(provider) = &section {
+                        view.header.set_title(&home_provider_title(provider));
+                    }
+                    view.mounted.replace(section.items());
                     ShownHomeSection::Rows(view)
                 }
                 (Some(ShownHomeSection::Built(widget, built)), section) if built == section => {
@@ -366,15 +340,16 @@ impl HomeRouteProjection {
     }
 
     fn build(&self, shell: &Rc<CatalogUi>, section: HomeSection) -> ShownHomeSection {
+        let items = section.items();
         match section {
-            HomeSection::Rows { block, rows } => ShownHomeSection::Rows(shell.home_section_view(
+            HomeSection::Rows { block, .. } => ShownHomeSection::Rows(shell.home_section_view(
                 &tr(rufin_core::settings::presentation::home_block_title(block)),
-                home_items(&rows),
+                items,
                 block.section_kind(),
             )),
             HomeSection::Provider(provider) => ShownHomeSection::Rows(shell.home_section_view(
                 &home_provider_title(&provider),
-                home_items(&provider.rows),
+                items,
                 None,
             )),
             HomeSection::Showcase(row) => ShownHomeSection::Built(
@@ -404,15 +379,6 @@ fn home_provider_title(provider: &HomeProviderSection) -> String {
         &provider.section_id,
         provider.title.as_deref(),
     )
-}
-
-fn home_items(rows: &HomeSectionRows) -> Vec<HomeItem> {
-    rows.tracks
-        .iter()
-        .cloned()
-        .map(HomeItem::Track)
-        .chain(rows.albums.iter().cloned().map(HomeItem::Album))
-        .collect()
 }
 
 fn clamped_page_start(start: usize, page_size: usize, count: usize) -> usize {
@@ -447,20 +413,16 @@ impl CatalogUi {
             shown: Rc::new(RefCell::new(Vec::new())),
             content,
             empty,
-            downloads: Rc::new(RefCell::new(None)),
+            changes: Default::default(),
         };
         projection.apply(sections);
         let widget = route_scroller_widget(scroller);
         let apply = projection.clone();
         let states = projection.clone();
+        let owner = self.products.source.clone();
         MountedRoute::new(widget, Rc::new(|| {}))
             .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
-            .with_states(Rc::new(move |changes, downloads| {
-                states.show_states(changes);
-                if !downloads.is_empty() {
-                    states.show_downloads();
-                }
-            }))
+            .with_states(Rc::new(move |changed| states.show_changes(&owner, changed)))
     }
 
     fn home_section_view(

@@ -3,7 +3,6 @@ use adw::prelude::*;
 use gtk::glib;
 use library::Row;
 use playback::TransportStatus;
-use std::cell::RefCell;
 use std::rc::Rc;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteCurrentTrackContext {
@@ -50,9 +49,8 @@ pub type MountedRouteResume = Rc<dyn Fn()>;
 pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
 pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
-/// Shows committed favorites, ratings and downloads in what a route shows outside its rows and
-/// header.
-pub type MountedStates = Rc<dyn Fn(&[library::StateChange], &[library::DownloadChange])>;
+/// Shows a committed change in what a route shows outside its rows and header.
+pub type MountedStates = Rc<dyn Fn(&rufin_core::source::feed::Changed)>;
 /// Shows a route's header read again.
 pub type MountedHeader = Rc<dyn Fn(Option<library::Header>)>;
 /// The header a route shows now.
@@ -196,8 +194,8 @@ pub struct MountedRoute {
     pub states: Option<MountedStates>,
     /// The header the route shows now, and showing it with other downloads.
     pub header: Option<(MountedCurrentHeader, MountedHeader)>,
-    /// The header download update being applied; a newer one replaces it.
-    header_downloads: Rc<RefCell<Option<(glib::JoinHandle<()>, tokio::task::AbortHandle)>>>,
+    /// The committed changes the header shows.
+    header_changes: rufin_core::shown::ShownChanges,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
 
@@ -217,7 +215,7 @@ impl MountedRoute {
             view: None,
             states: None,
             header: None,
-            header_downloads: Rc::default(),
+            header_changes: Default::default(),
             home_page_apply: None,
         }
     }
@@ -314,62 +312,52 @@ impl MountedRoute {
         self
     }
 
-    /// Shows committed favorites, ratings and downloads in what the route shows; its View says
-    /// when they make it read again instead. Downloads show as the Catalog counts them now.
+    /// Shows a committed change in what the route shows, through core's
+    /// [`rufin_core::shown::ShownChanges`]; its View says when it makes the route read again
+    /// instead. The header's favorite shows through the route's own states.
     pub fn show_changes(
         &self,
-        items: &[library::StateChange],
-        downloads: &[library::DownloadChange],
-        catalog: &std::sync::Arc<library::Catalog>,
-        runtime: &tokio::runtime::Handle,
+        owner: &rufin_core::source::SourceOwner,
+        changed: &rufin_core::source::feed::Changed,
     ) {
-        if items.is_empty() && downloads.is_empty() {
+        if changed.items.is_empty() && changed.downloads.is_empty() {
             return;
         }
         if let Some(states) = &self.states {
-            states(items, downloads);
+            states(changed);
         }
         for rows in &self.rows {
-            rows.show_states(items);
-            if !downloads.is_empty() {
-                rows.show_downloads(catalog);
-            }
+            rows.show_changes(owner, changed);
         }
-        if let (false, Some((current, show))) = (downloads.is_empty(), self.header.clone())
-            && let Some(mut read) = current()
-        {
-            let smart = self
-                .view()
-                .map(|view| view.smart_count())
-                .unwrap_or_default();
-            let catalog = std::sync::Arc::clone(catalog);
-            let task = runtime.spawn(async move {
-                catalog
-                    .show_downloads(vec![read.shown()], smart, &library::ReadCancellation::new())
-                    .await
-                    .map(|()| read)
-            });
-            let reading = task.abort_handle();
-            // The downloads go into the header shown now, which keeps what changed meanwhile.
-            let apply = glib::spawn_future_local(async move {
-                match task.await {
-                    Ok(Ok(mut read)) => {
-                        if let Some(shown) = current() {
-                            let mut merged = shown.clone();
-                            if merged.shown().take_downloads(read.shown()) && merged != shown {
-                                show(Some(merged));
-                            }
-                        }
-                    }
-                    Ok(Err(error)) => tracing::warn!(%error, "failed to show header downloads"),
-                    Err(_) => {}
+        let Some((current, show)) = self.header.clone() else {
+            return;
+        };
+        let Some(header) = current() else {
+            return;
+        };
+        let smart = self
+            .view()
+            .map(|view| view.smart_count())
+            .unwrap_or_default();
+        let shown = self
+            .header_changes
+            .show(owner, &mut [header], changed, smart);
+        let Some(downloads) = shown.downloads else {
+            return;
+        };
+        // The downloads go into the header shown now, which keeps what changed meanwhile.
+        glib::spawn_future_local(async move {
+            use library::ShowsState;
+            let Some(mut read) = downloads.await else {
+                return;
+            };
+            if let (Some((_, read)), Some(shown)) = (read.first_mut(), current()) {
+                let mut merged = shown.clone();
+                if merged.take_downloads(read) && merged != shown {
+                    show(Some(merged));
                 }
-            });
-            if let Some((apply, reading)) = self.header_downloads.replace(Some((apply, reading))) {
-                apply.abort();
-                reading.abort();
             }
-        }
+        });
     }
 
     pub fn widget(&self) -> gtk::Widget {

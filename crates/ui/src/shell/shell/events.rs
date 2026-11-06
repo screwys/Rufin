@@ -238,7 +238,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     {
         install_selected(shell, selected);
     }
-    shell.search_session.show_states(&changed.items);
+    shell.search_session.show_changes(changed);
     shell.show_activity_states(&changed.items);
     shell.show_changes_in_mounted_route(changed);
     if changed.all

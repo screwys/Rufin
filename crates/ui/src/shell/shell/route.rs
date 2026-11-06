@@ -694,12 +694,7 @@ impl Shell {
             .as_ref()
             .map(|entry| entry.view.clone())
         {
-            view.show_changes(
-                &changed.items,
-                &changed.downloads,
-                &self.products.library,
-                &self.products.runtime,
-            );
+            view.show_changes(&self.products.source, changed);
         }
     }
 

@@ -77,18 +77,16 @@ impl library::ShowsState for SearchItem {
             Self::Artist(row) => row.state_mut(change),
         }
     }
-}
-
-impl SearchItem {
-    /// The result as the Catalog shows its downloads.
-    fn shown(&mut self) -> library::Shown<'_> {
-        match self {
+    fn downloads(&mut self) -> Option<library::Shown<'_>> {
+        Some(match self {
             Self::Track(row, _) => library::Shown::Track(row),
             Self::Album(row) => library::Shown::Album(row),
             Self::Artist(row) => library::Shown::Artist(row),
-        }
+        })
     }
+}
 
+impl SearchItem {
     fn lyrics(&self) -> Option<&library::LyricsSnippet> {
         match self {
             Self::Track(_, snippet) => snippet.as_ref(),
@@ -439,8 +437,6 @@ struct SearchRouteProjection {
     models: [gio::ListStore; 3],
     playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     active: RefCell<Option<SearchPresentation>>,
-    /// The download update being applied; a newer one replaces it.
-    downloads: RefCell<Option<glib::JoinHandle<()>>>,
 }
 
 struct SearchPresentation {
@@ -471,7 +467,8 @@ impl SearchRouteProjection {
         let wrapper = SearchRouteView::new();
         let search = shell.chrome.topbar.search.clone();
 
-        let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<RowItem>());
+        // The page shows the session's results, the one copy the header shows too.
+        let models = shell.search_session.models.clone();
         let category_pages =
             CollectionCategory::ALL.map(|_| gtk::Box::new(gtk::Orientation::Vertical, 0).upcast());
         let (results, switcher) =
@@ -501,7 +498,6 @@ impl SearchRouteProjection {
             models,
             playing: crate::widgets::recycled_cells::TrackRowPlayingIndicator::new(),
             active: RefCell::new(None),
-            downloads: RefCell::new(None),
         });
         projection.connect();
         projection.mount_category(projection.session.category.get());
@@ -625,111 +621,10 @@ impl SearchRouteProjection {
         {
             return;
         }
-        let items = self.session.items.borrow().clone();
-        self.apply(items);
-        self.status.set_visible_child_name(self.session.status());
-    }
-
-    fn update_matching(
-        &self,
-        matches: impl Fn(&SearchItem) -> bool,
-        update: impl Fn(&mut SearchItem),
-    ) {
-        for model in &self.models {
-            for position in 0..model.n_items() {
-                let Some(item) = model.item(position).and_downcast::<RowItem>() else {
-                    continue;
-                };
-                let Some(mut row) = item.value::<Arc<SearchItem>>() else {
-                    continue;
-                };
-                if matches(&row) {
-                    update(Arc::make_mut(&mut row));
-                    item.replace(row, true);
-                }
-            }
-        }
-    }
-
-    /// Shows the current downloads in the shown results: a track's copy and how many tracks of
-    /// an album or artist are downloaded.
-    fn show_downloads(&self) {
-        let Some(shell) = self.shell.upgrade() else {
-            return;
-        };
-        let read = self
-            .models
-            .iter()
-            .flat_map(|model| {
-                (0..model.n_items()).filter_map(|position| model.item(position).and_downcast())
-            })
-            .filter_map(|item: RowItem| {
-                let row = item.value::<Arc<SearchItem>>()?;
-                Some((item, row))
-            })
-            .collect::<Vec<_>>();
-        let mut rows = read
-            .iter()
-            .map(|(_, row)| SearchItem::clone(row))
-            .collect::<Vec<_>>();
-        let catalog = Arc::clone(&shell.products.library);
-        let task = shell.products.runtime.spawn(async move {
-            let shown = rows.iter_mut().map(SearchItem::shown).collect();
-            catalog
-                .show_downloads(shown, (None, None), &ReadCancellation::new())
-                .await
-                .map(|()| rows)
-        });
-        let apply = glib::spawn_future_local(async move {
-            let Ok(Ok(rows)) = task.await else { return };
-            // The downloads go into the result each item shows now when it is the same row.
-            for ((item, _), mut row) in read.into_iter().zip(rows) {
-                let Some(current) = item.value::<Arc<SearchItem>>() else {
-                    continue;
-                };
-                let mut merged = SearchItem::clone(&current);
-                if merged.shown().take_downloads(row.shown()) && merged != *current {
-                    item.replace(Arc::new(merged), true);
-                }
-            }
-        });
-        if let Some(previous) = self.downloads.replace(Some(apply)) {
-            previous.abort();
-        }
-    }
-
-    /// Shows committed favorites and ratings in the shown results; the session's own copy
-    /// follows them through `SearchSession::show_states`.
-    fn show_states(&self, items: &[library::StateChange]) {
-        use library::ShowsState;
-        for change in items {
-            self.update_matching(
-                |row| {
-                    row.state(change)
-                        .is_some_and(|state| !change.shown_in(state))
-                },
-                |row| {
-                    if let Some(state) = row.state_mut(change) {
-                        change.show_in(state);
-                    }
-                },
-            );
-        }
-    }
-
-    fn apply(&self, items: [Vec<SearchItem>; 3]) {
-        for index in 0..3 {
-            let additions = items[index]
-                .iter()
-                .cloned()
-                .map(|row| RowItem::new(Arc::new(row), true))
-                .collect::<Vec<_>>();
-            self.models[index].splice(0, self.models[index].n_items(), &additions);
-        }
         if let Some(active) = self.active.borrow().as_ref() {
             self.show_results(self.models[active.category as usize].n_items() != 0);
         }
-        self.status.set_visible_child_name("results");
+        self.status.set_visible_child_name(self.session.status());
     }
 
     fn resume(&self) {
@@ -843,7 +738,6 @@ impl CatalogUi {
                 projection.cycle_category();
             }
         });
-        let states_projection = Rc::downgrade(&projection);
         let resume_projection = Rc::clone(&projection);
         let navigation_projection = Rc::downgrade(&projection);
         let navigation = Rc::new(move |direction| {
@@ -863,14 +757,6 @@ impl CatalogUi {
             projection.root.clone(),
             Rc::new(move || resume_projection.resume()),
         )
-        .with_states(Rc::new(move |items, downloads| {
-            if let Some(projection) = states_projection.upgrade() {
-                projection.show_states(items);
-                if !downloads.is_empty() {
-                    projection.show_downloads();
-                }
-            }
-        }))
         .with_search(projection.search.clone())
         .with_layout_cycle(layout_cycle)
         .with_tab_cycle(tab_cycle)

@@ -69,11 +69,10 @@ fn show_card_states<T: library::ShowsState>(
     let Some(row) = current.as_mut() else {
         return;
     };
-    for change in changes {
-        if let Some(state) = row.state_mut(change) {
-            change.show_in(state);
-            set_favorite_button_active(favorite, change.favorite);
-        }
+    if row.show_states(changes)
+        && let Some(state) = changes.iter().find_map(|change| row.state(change))
+    {
+        set_favorite_button_active(favorite, state.favorite);
     }
 }
 

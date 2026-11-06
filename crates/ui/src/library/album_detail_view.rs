@@ -230,20 +230,15 @@ impl CatalogUi {
             })
         };
         let heart_album = Rc::clone(&current_album);
-        let states = Rc::new(
-            move |changes: &[::library::StateChange], _: &[::library::DownloadChange]| {
-                use ::library::ShowsState;
-                let mut album = heart_album.borrow_mut();
-                for change in changes {
-                    if let Some(state) = album.row.state_mut(change) {
-                        change.show_in(state);
-                        for heart in &hearts {
-                            set_favorite_button_active(heart, change.favorite);
-                        }
-                    }
+        let states = Rc::new(move |changed: &rufin_core::source::feed::Changed| {
+            use ::library::ShowsState;
+            let mut album = heart_album.borrow_mut();
+            if album.row.show_states(&changed.items) {
+                for heart in &hearts {
+                    set_favorite_button_active(heart, album.row.state.favorite);
                 }
-            },
-        );
+            }
+        });
         let header_album = Rc::clone(&current_album);
         MountedRoute::new(route_stack.upcast(), resume)
             .with_rows(&rows)

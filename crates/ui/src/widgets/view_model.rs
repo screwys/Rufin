@@ -455,7 +455,8 @@ mod imp {
         pub(super) reread: RefCell<Option<(ReadCancellation, tokio::task::AbortHandle)>>,
         pub(super) reread_generation: Cell<u64>,
         /// The download update being applied; a newer one replaces it.
-        pub(super) downloads: RefCell<Option<glib::JoinHandle<()>>>,
+        /// The committed changes its rows show.
+        pub(super) shown: rufin_core::shown::ShownChanges,
     }
 
     #[glib::object_subclass]
@@ -1298,36 +1299,15 @@ impl Rows<Row> {
         }
     }
 
-    /// Shows committed favorites and ratings in the rows that show them.
-    pub fn show_states(&self, changes: &[library::StateChange]) {
-        use library::ShowsState;
-        if changes.is_empty() {
-            return;
-        }
-        self.update(
-            |row| {
-                changes.iter().any(|change| {
-                    row.state(change)
-                        .is_some_and(|state| !change.shown_in(state))
-                })
-            },
-            |row| {
-                for change in changes {
-                    if let Some(state) = row.state_mut(change) {
-                        change.show_in(state);
-                    }
-                }
-            },
-        );
-    }
-
-    /// Shows the current downloads in the rows read so far: a track's copy and how many tracks
-    /// of a collection are downloaded.
-    pub fn show_downloads(&self, catalog: &Arc<library::Catalog>) {
+    /// Shows a committed change in the rows read so far, through core's
+    /// [`rufin_core::shown::ShownChanges`]: favorites and ratings at once, downloads once read.
+    pub fn show_changes(
+        &self,
+        owner: &rufin_core::source::SourceOwner,
+        changed: &rufin_core::source::feed::Changed,
+    ) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
-        let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
-            return;
-        };
+        use library::ShowsState;
         let read = self.with(|state| {
             state
                 .ready
@@ -1335,9 +1315,6 @@ impl Rows<Row> {
                 .map(|(position, row)| (*position, Arc::clone(row)))
                 .collect::<Vec<_>>()
         });
-        if read.is_empty() {
-            return;
-        }
         let mut rows = read
             .iter()
             .map(|(_, row)| Row::clone(row))
@@ -1346,45 +1323,32 @@ impl Rows<Row> {
             .view()
             .map(|view| view.smart_count())
             .unwrap_or_default();
-        let catalog = Arc::clone(catalog);
-        let task = runtime.spawn(async move {
-            catalog
-                .show_downloads(
-                    rows.iter_mut().filter_map(Row::shown).collect(),
-                    smart,
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map(|()| rows)
-        });
+        let shown = self.list.imp().shown.show(owner, &mut rows, changed, smart);
+        if shown.states {
+            for ((position, _), row) in read.iter().zip(rows) {
+                self.set_ready(*position, row);
+            }
+        }
+        let Some(downloads) = shown.downloads else {
+            return;
+        };
         let list = self.list.downgrade();
-        let apply = glib::spawn_future_local(async move {
-            let rows = match task.await {
-                Ok(Ok(rows)) => rows,
-                Ok(Err(error)) => {
-                    tracing::warn!(%error, "failed to show downloads");
-                    return;
-                }
-                Err(_) => return,
-            };
+        glib::spawn_future_local(async move {
+            let Some(rows) = downloads.await else { return };
             let Some(list) = list.upgrade() else { return };
             let shown = Self::from_list(&list);
             // The downloads go into the row now at each position when it is the same row.
-            for ((position, _), mut row) in read.into_iter().zip(rows) {
+            for (index, mut row) in rows {
+                let position = read[index].0;
                 let Some(current) = shown.ready(position) else {
                     continue;
                 };
                 let mut merged = Row::clone(&current);
-                if let (Some(mut into), Some(from)) = (merged.shown(), row.shown())
-                    && into.take_downloads(from)
-                {
+                if merged.take_downloads(&mut row) {
                     shown.set_ready(position, merged);
                 }
             }
         });
-        if let Some(previous) = self.list.imp().downloads.replace(Some(apply)) {
-            previous.abort();
-        }
     }
 
     /// The tracks at `positions`, for selections; a folder's child folders come first.

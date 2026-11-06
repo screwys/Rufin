@@ -326,60 +326,81 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
     }
 }
 
-/// `row` showing a committed favorite or rating; None when it shows another item, or this one
-/// as it is.
-#[uniffi::export]
-pub fn show_state(
-    mut row: AndroidBrowseRow,
-    change: library::StateChange,
-) -> Option<AndroidBrowseRow> {
-    use library::ShowsState;
-    let AndroidBrowseItem::Library { row: library } = &mut row.item else {
-        return None;
-    };
-    let state = library.state_mut(&change)?;
-    if change.shown_in(state) {
-        return None;
-    }
-    change.show_in(state);
-    for field in &mut row.fields {
-        if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
-            field.text = rufin_core::settings::presentation::row_field(library, field.id);
-        }
-    }
-    Some(row)
+/// A row a page shows that a committed change shows differently, by its index among the rows
+/// the page passed.
+#[derive(uniffi::Record)]
+pub struct AndroidShownRow {
+    pub index: u64,
+    pub row: AndroidBrowseRow,
 }
 
 #[uniffi::export]
 impl AndroidLibrary {
-    /// `row` showing the current downloads: a track's copy, or whether a collection's tracks
-    /// are all downloaded. `view` is the page that read it.
-    pub async fn show_downloads(
+    /// The rows of `rows`, those a page shows now, that `changed` shows differently: their
+    /// favorites and ratings, and their downloads as the Catalog counts them, through core's
+    /// [`rufin_core::shown::ShownChanges`]. `view` is the page that read them; a newer change of
+    /// the same page supersedes the download read of an older one.
+    pub async fn show_changes(
         &self,
-        mut row: AndroidBrowseRow,
+        rows: Vec<AndroidBrowseRow>,
+        changed: rufin_core::source::feed::Changed,
         view: Option<Arc<super::AndroidView>>,
-    ) -> AndroidBrowseRow {
-        let AndroidBrowseItem::Library { row: library } = &row.item else {
-            return row;
-        };
-        let mut library = library.clone();
-        let catalog = self.catalog.clone();
+    ) -> Vec<AndroidShownRow> {
+        use library::ShowsState;
+        let library = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| match &row.item {
+                AndroidBrowseItem::Library { row } => Some((index, row.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut shown = library
+            .iter()
+            .map(|(_, row)| row.clone())
+            .collect::<Vec<_>>();
+        let changes = view
+            .as_ref()
+            .map_or_else(|| self.changes.clone(), |view| view.changes.clone());
         let smart = view.map(|view| view.view.smart_count()).unwrap_or_default();
-        let shown = run_read(&self.runtime, move |cancel| async move {
-            catalog
-                .show_downloads(library.shown().into_iter().collect(), smart, &cancel)
-                .await
-                .map_err(error)?;
-            Ok(library)
-        })
-        .await;
-        match shown {
-            Ok(library) => {
+        let showing = changes.show(&self.source, &mut shown, &changed, smart);
+        let mut patched = std::collections::BTreeMap::new();
+        for ((index, before), after) in library.iter().zip(&shown) {
+            if before != after {
+                patched.insert(*index, after.clone());
+            }
+        }
+        if let Some(downloads) = showing.downloads
+            && let Some(read) = downloads.await
+        {
+            for (at, mut read) in read {
+                let index = library[at].0;
+                let mut merged = patched
+                    .get(&index)
+                    .cloned()
+                    .unwrap_or_else(|| shown[at].clone());
+                if merged.take_downloads(&mut read) {
+                    patched.insert(index, merged);
+                }
+            }
+        }
+        patched
+            .into_iter()
+            .map(|(index, library)| {
+                let mut row = rows[index].clone();
+                for field in &mut row.fields {
+                    if matches!(field.id, LibraryField::Favorite | LibraryField::UserRating) {
+                        field.text =
+                            rufin_core::settings::presentation::row_field(&library, field.id);
+                    }
+                }
                 row.downloaded = library.downloaded();
                 row.item = AndroidBrowseItem::Library { row: library };
-            }
-            Err(error) => tracing::warn!(%error, "failed to show downloads"),
-        }
-        row
+                AndroidShownRow {
+                    index: index as u64,
+                    row,
+                }
+            })
+            .collect()
     }
 }

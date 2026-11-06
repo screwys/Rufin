@@ -172,7 +172,8 @@ impl StateChange {
     }
 }
 
-/// A row that shows a track's, album's or artist's favorite and rating.
+/// A row a client shows, which committed changes patch: the favorite and rating of the track,
+/// album or artist it shows, and its downloads.
 pub trait ShowsState {
     /// The state this row shows of the item `change` names, if it shows that item.
     fn state(&self, _change: &crate::StateChange) -> Option<&crate::TrackState> {
@@ -180,6 +181,36 @@ pub trait ShowsState {
     }
     fn state_mut(&mut self, _change: &crate::StateChange) -> Option<&mut crate::TrackState> {
         None
+    }
+    /// The row as [`crate::Catalog::show_downloads`] shows its downloads; None when it shows
+    /// none.
+    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+        None
+    }
+
+    /// Shows the favorites and ratings of `changes`; true when it showed something new.
+    fn show_states(&mut self, changes: &[crate::StateChange]) -> bool {
+        let mut shown = false;
+        for change in changes {
+            if let Some(state) = self.state_mut(change)
+                && !change.shown_in(state)
+            {
+                change.show_in(state);
+                shown = true;
+            }
+        }
+        shown
+    }
+
+    /// Takes the downloads `read` shows when it is this row read again.
+    fn take_downloads(&mut self, read: &mut Self) -> bool
+    where
+        Self: Sized,
+    {
+        match (self.downloads(), read.downloads()) {
+            (Some(mut into), Some(from)) => into.take_downloads(from),
+            _ => false,
+        }
     }
 }
 
@@ -227,10 +258,46 @@ impl ShowsState for crate::Row {
             Self::Tag(_) | Self::Playlist(_) | Self::Folder(_) => None,
         }
     }
+    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+        self.shown()
+    }
 }
 
-impl ShowsState for crate::TagRow {}
-impl ShowsState for crate::PlaylistListRow {}
+impl ShowsState for crate::TagRow {
+    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+        Some(crate::Shown::Tag(self))
+    }
+}
+
+impl ShowsState for crate::PlaylistListRow {
+    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+        match self {
+            Self::Playlist(playlist) => Some(crate::Shown::Playlist(playlist)),
+            Self::SmartPlaylist(smart) => Some(crate::Shown::Smart(smart)),
+            Self::Folder(_) => None,
+        }
+    }
+}
+
+impl ShowsState for crate::Header {
+    fn state(&self, change: &crate::StateChange) -> Option<&crate::TrackState> {
+        match self {
+            Self::Album(album) => album.row.state(change),
+            Self::Artist(artist) => artist.row.state(change),
+            Self::Playlist(_) | Self::Smart(_) | Self::Tag(_) => None,
+        }
+    }
+    fn state_mut(&mut self, change: &crate::StateChange) -> Option<&mut crate::TrackState> {
+        match self {
+            Self::Album(album) => album.row.state_mut(change),
+            Self::Artist(artist) => artist.row.state_mut(change),
+            Self::Playlist(_) | Self::Smart(_) | Self::Tag(_) => None,
+        }
+    }
+    fn downloads(&mut self) -> Option<crate::Shown<'_>> {
+        Some(self.shown())
+    }
+}
 
 /// One committed Write, as clients and features see it.
 #[derive(Clone, Debug)]

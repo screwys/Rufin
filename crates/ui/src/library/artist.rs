@@ -497,15 +497,12 @@ impl ArtistDetailHeaderProjection {
     fn states(&self) -> crate::widgets::mounted_route::MountedStates {
         let current = Rc::clone(&self.current);
         let hearts = Rc::clone(&self.hearts);
-        Rc::new(move |changes, _| {
+        Rc::new(move |changed| {
             use library::ShowsState;
             let mut artist = current.borrow_mut();
-            for change in changes {
-                if let Some(state) = artist.row.state_mut(change) {
-                    change.show_in(state);
-                    for heart in hearts.iter() {
-                        set_favorite_button_active(heart, change.favorite);
-                    }
+            if artist.row.show_states(&changed.items) {
+                for heart in hearts.iter() {
+                    set_favorite_button_active(heart, artist.row.state.favorite);
                 }
             }
         })

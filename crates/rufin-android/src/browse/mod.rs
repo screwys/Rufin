@@ -182,6 +182,8 @@ pub struct AndroidView {
     /// The fields its rows show, and the fields an artist's favorite tracks show.
     fields: Vec<LibraryField>,
     favorite_fields: Vec<LibraryField>,
+    /// The committed changes its rows show.
+    changes: rufin_core::shown::ShownChanges,
 }
 
 impl AndroidView {
@@ -312,8 +314,7 @@ impl AndroidView {
     }
 
     /// Whether a committed change means the page reads again, in the library selected now.
-    /// Rows show favorites and ratings through `show_state`, and downloads through
-    /// `AndroidLibrary::show_downloads`.
+    /// Rows show favorites, ratings and downloads through `AndroidLibrary::show_changes`.
     pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
         self.view
             .refresh_selected(self.source.selected_library().as_ref(), &changed)
@@ -325,8 +326,6 @@ impl AndroidView {
         self.view.context_id()
     }
 
-    /// Plays the page from its shown track `row` at `index`. A track of the Albums list in
-    /// Detail layout plays its album, which `context_title` names.
     /// Plays or queues the page whole, as its header does.
     pub fn play_all(
         &self,
@@ -558,6 +557,7 @@ impl AndroidLibrary {
                 playback: self.playback.clone(),
                 settings: self.settings.clone(),
                 source: self.source.clone(),
+                changes: Default::default(),
             });
             let rows = view.rows_from(opened.rows, opened.first);
             let groups = view

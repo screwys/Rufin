@@ -2,8 +2,7 @@ package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
 import io.github.screwys.rufin.shared.library.LibraryField
-import io.github.screwys.rufin.shared.library.FavoriteTarget
-import io.github.screwys.rufin.shared.library.StateChange
+import io.github.screwys.rufin.shared.rufin_core.Changed
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.LibraryLayout
 import io.github.screwys.rufin.shared.rufin_core.DisplaySize
@@ -70,12 +69,13 @@ internal class BrowsePage(
     private var openedPage by mutableStateOf<AndroidOpened?>(null)
     private var preparedContext by mutableStateOf<PageContext?>(null)
     private var capturedLabelsVersion = browse.labelsVersion
-    /** The favorites and ratings committed while the page is open; rows it read before show
-     * them through [shown]. */
-    private val states = mutableStateMapOf<FavoriteTarget, StateChange>()
-    /** How many download changes were committed while the page is open; rows read before the
-     * latest show the current downloads through [shown]. */
+    /** How many favorite, rating and download changes were committed while the page is open. */
     private var downloads by mutableIntStateOf(0)
+    /** The rows on screen by identity, which committed changes patch through core. */
+    private val onScreen = mutableMapOf<String, BrowseItem>()
+    /** Rows core patched, by identity, with the change count they show; a row read since shows
+     * itself. */
+    private val patched = mutableStateMapOf<String, Pair<Int, AndroidBrowseRow>>()
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
 
@@ -111,21 +111,37 @@ internal class BrowsePage(
         val parentPage: AndroidOpened?,
     )
 
-    /** `item` showing the favorite and rating committed for it since the page read it, and the
-     * downloads as they are now. */
+    /** `item` showing the favorites, ratings and downloads committed since the page read it. */
     @Composable
     fun shown(item: BrowseItem): BrowseItem {
-        val change = item.row.target?.let { states[it] }
-        val revision = downloads
-        var current by remember(item.row) { mutableStateOf(item.row) }
-        LaunchedEffect(item.row, revision) {
-            if (item.downloads != revision) browse.library?.showDownloads(item.row, item.view)?.let { current = it }
+        val key = shownKey(item.row)
+        DisposableEffect(key, item) {
+            onScreen[key] = item
+            onDispose { if (onScreen[key] === item) onScreen.remove(key) }
         }
-        if (change == null && current === item.row) return item
-        return remember(current, change) {
-            var row = current
-            change?.let { showState(row, it) }?.let { row = it }
-            if (row === item.row) item else item.copy(row = row)
+        val (revision, row) = patched[key] ?: return item
+        return if (revision > item.downloads) remember(item, row) { item.copy(row = row) } else item
+    }
+
+    private fun shownKey(row: AndroidBrowseRow) = "${row.sourceId.orEmpty()}:${row.key}"
+
+    /** Shows a committed change in the header and the rows on screen, through core. */
+    private suspend fun showChanges(changed: Changed) {
+        val revision = ++downloads
+        val header = summary
+        val rows = withContext(Dispatchers.Main) {
+            onScreen.values.map { item ->
+                patched[shownKey(item.row)]?.takeIf { it.first > item.downloads }?.second ?: item.row
+            }
+        }
+        val all = listOfNotNull(header?.row) + rows
+        val shown = browse.library?.showChanges(all, changed, currentView) ?: return
+        Snapshot.withMutableSnapshot {
+            for (row in shown) {
+                if (header != null && row.index == 0UL) {
+                    if (summary === header) summary = header.copy(row = row.row)
+                } else patched[shownKey(row.row)] = revision to row.row
+            }
         }
     }
 
@@ -194,13 +210,7 @@ internal class BrowsePage(
             previous != null && previous == current
         launch {
             connection.changes.collect { changed ->
-                changed.items.forEach { states[it.target] = it }
-                if (changed.downloads.isNotEmpty()) {
-                    downloads++
-                    val read = summary
-                    val row = read?.let { browse.library?.showDownloads(it.row, currentView) }
-                    if (row != null && summary === read) summary = read.copy(row = row)
-                }
+                if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) launch { showChanges(changed) }
                 if (if (pins) browse.library?.pinsRefresh(changed) == true else currentView?.refresh(changed) == true) changes++
             }
         }
