@@ -172,7 +172,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                             return@collectLatest
                         }
                         val rows = found.rows.mapIndexed { index, row ->
-                            BrowseItem(row, index.toULong(), null, searchResult = true, contextTitle = context.text)
+                            BrowseItem(row, index.toULong(), found.view, searchResult = true, contextTitle = context.text)
                         }
                         searchView = found.view
                         searchRows = rows

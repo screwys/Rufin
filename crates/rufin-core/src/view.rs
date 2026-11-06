@@ -309,8 +309,7 @@ impl SourceOwner {
 
     /// What playing the track, album or artist `uri` outside a page queues, read in `selected`:
     /// a remembered search result or a listening overview row. An album or artist plays its
-    /// page whole, once its source has fetched it, since a live search result may not be held
-    /// whole yet; a track plays alone.
+    /// page whole, once its source has fetched it; a track plays alone.
     pub async fn play_uri(
         &self,
         uri: &str,
@@ -319,16 +318,33 @@ impl SourceOwner {
         shuffled: bool,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<PlayRequest>> {
-        let Some(route) = Route::of_uri(uri) else {
-            return Ok(Some(
+        match Route::of_uri(uri) {
+            Some(route) => {
+                self.play_fetched(route, uri, selected, placement, shuffled, cancel)
+                    .await
+            }
+            None => Ok(Some(
                 PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
-            ));
-        };
+            )),
+        }
+    }
+
+    /// What playing the album or artist page `route` of `uri` queues once its source has
+    /// fetched it whole: a live search holds a result only as its row. Offline, the page plays
+    /// what the Catalog holds of it.
+    async fn play_fetched(
+        &self,
+        route: Route,
+        uri: &str,
+        selected: Option<&SelectedLibrary>,
+        placement: QueuePlacement,
+        shuffled: bool,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<PlayRequest>> {
         tokio::select! {
             () = self.shared.catalog.loaded() => {}
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
-        // Offline, the page plays what the Catalog holds of it.
         if let Err(error) = self.fetch_collection(uri).await {
             tracing::warn!(%error, "could not fetch the collection to play");
         }
@@ -1113,7 +1129,8 @@ impl View {
     /// What activating `row`, shown at `index` on this page, queues, by the one rule
     /// (decisions.md, "What a row plays is one rule", 2026-11-06): a track plays the page from
     /// it ([`View::play_track`]), a track of the Albums list in Detail layout its album from it,
-    /// and any other row what its [`PlayTarget`] plays. The row's track and playlist entry
+    /// a search result's album or artist its page once its source has fetched it, and any other
+    /// row what its [`PlayTarget`] plays. The row's track and playlist entry
     /// anchor the play, so a row that moved since it showed still plays. None when it plays
     /// nothing.
     pub async fn play(
@@ -1137,6 +1154,32 @@ impl View {
             ),
             Row::AlbumTrack { track, .. } => {
                 self.play_album_track(track, placement, shuffled, result)
+            }
+            Row::Album(album) if self.route == Route::Search => {
+                return self
+                    .owner
+                    .play_fetched(
+                        Route::of_album(album),
+                        &album.media_uri,
+                        self.selected.as_ref(),
+                        placement,
+                        shuffled,
+                        cancel,
+                    )
+                    .await;
+            }
+            Row::Artist(artist) if self.route == Route::Search => {
+                return self
+                    .owner
+                    .play_fetched(
+                        Route::of_artist(artist),
+                        &artist.media_uri,
+                        self.selected.as_ref(),
+                        placement,
+                        shuffled,
+                        cancel,
+                    )
+                    .await;
             }
             row => match PlayTarget::of_row(row) {
                 Some(target) => {

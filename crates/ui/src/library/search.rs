@@ -130,6 +130,15 @@ impl SearchItem {
         }
     }
 
+    /// The row it shows.
+    fn row(&self) -> library::Row {
+        match self {
+            Self::Track(row, _) => library::Row::Track(row.clone()),
+            Self::Album(row) => library::Row::Album(row.clone()),
+            Self::Artist(row) => library::Row::Artist(row.clone()),
+        }
+    }
+
     fn media_uri(&self) -> Option<&str> {
         match self {
             Self::Track(row, _) => Some(&row.media_uri),
@@ -217,12 +226,7 @@ impl SearchItem {
             .update_app_settings("recent search", |settings| {
                 settings.remember_search_result(self.recent_result())
             });
-        crate::menus::media_menus::play_target(
-            &shell.products,
-            &self.play_target(),
-            placement,
-            false,
-        );
+        shell.search_session.play_row(self.row(), placement, shell);
     }
     fn activate(&self, shell: &Rc<CatalogUi>) {
         if matches!(self, Self::Track(..)) {

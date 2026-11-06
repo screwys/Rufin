@@ -463,6 +463,27 @@ impl SearchSession {
         }
     }
 
+    /// Plays result `row` at `placement` as the Search page that found it plays its rows.
+    pub(super) fn play_row(
+        &self,
+        row: library::Row,
+        placement: QueuePlacement,
+        catalog: &CatalogUi,
+    ) {
+        let Some(view) = self.view.borrow().clone() else {
+            return;
+        };
+        let playback = catalog.products.playback.clone();
+        self.runtime.spawn(async move {
+            let cancel = ReadCancellation::new();
+            match view.play(&row, 0, placement, false, None, &cancel).await {
+                Ok(Some(request)) => playback.play_selection(request),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%error, "could not play the search result"),
+            }
+        });
+    }
+
     pub fn play(&self, category: CollectionCategory, index: usize, catalog: &Rc<CatalogUi>) {
         let item = self.item(category, index);
         if let Some(item) = item {
