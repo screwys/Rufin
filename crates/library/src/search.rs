@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::catalog::views::Context;
+use crate::catalog::views::{Context, holds};
+use crate::read::Members;
 use crate::{
     AlbumKey, AlbumRow, ArtistKey, ArtistRow, Catalog, Collection, FolderKey, Item, LibraryField,
     LibraryResult, ListKind, ListRead, MemberRead, Read, ReadCancellation, Row, SourceKey,
@@ -246,8 +247,12 @@ impl Catalog {
         if request.query.is_empty() {
             return Ok(SearchResults::default());
         }
-        let terms = request.query.split_whitespace().collect::<Vec<_>>();
-        let matches = |text: &str| terms.iter().all(|term| term_match(text, term));
+        // A one-letter term matches a whole word; a longer one matches anywhere.
+        let terms = request
+            .query
+            .split_whitespace()
+            .map(|term| (term, term.chars().count() == 1))
+            .collect::<Vec<_>>();
         let tracks = MemberRead {
             folder,
             ..MemberRead::new(Collection::Source(source))
@@ -269,83 +274,41 @@ impl Catalog {
             )
         };
         let artists = self.order(&Read::List(artists), cancellation).await?;
-        let keys = |order: &crate::Order| {
-            order
-                .items(0..order.len())
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::Track { key, .. } => Some(key.raw()),
-                    Item::Album(key) => Some(key.raw()),
-                    Item::Artist { key, .. } => Some(key.raw()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
-        let (tracks, albums, artists) = (keys(&tracks), keys(&albums), keys(&artists));
         let keys = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
-            let name = |id| snapshot.text(id).to_lowercase();
+            let all = |holds: &dyn Fn(&str, bool) -> bool| {
+                terms.iter().all(|(term, word)| holds(term, *word))
+            };
+            let found = |order: &crate::Order, kept: &dyn Fn(u32) -> bool| match &order.0.members {
+                Members::Tracks(keys) | Members::Keys(keys) => keys
+                    .iter()
+                    .filter(|key| kept(**key))
+                    .map(|key| i64::from(*key))
+                    .take(request.limit)
+                    .collect(),
+                _ => Vec::new(),
+            };
             [
-                tracks
-                    .iter()
-                    .filter_map(|key| snapshot.tracks.get(*key))
-                    .filter(|record| matches(&context.track_search(record)))
-                    .map(|record| i64::from(record.key))
-                    .take(request.limit)
-                    .collect::<Vec<_>>(),
-                albums
-                    .iter()
-                    .filter_map(|key| snapshot.albums.get(*key))
-                    .filter(|album| {
-                        let caption = format!(
-                            "{} {}",
-                            snapshot.text(album.title),
-                            snapshot.text(album.artist)
-                        )
-                        .to_lowercase();
-                        let year = (album.year != i16::MIN).then(|| album.year.to_string());
-                        let runs = snapshot.album_runs(album);
-                        terms.iter().all(|term| {
-                            term_match(&caption, term)
-                                || year.as_deref() == Some(*term)
-                                || runs[0].iter().any(|slot| {
-                                    snapshot
-                                        .artists
-                                        .live(*slot)
-                                        .is_some_and(|artist| term_match(&name(artist.name), term))
-                                })
-                                || runs[1].iter().any(|slot| {
-                                    snapshot
-                                        .tags
-                                        .live(*slot)
-                                        .is_some_and(|tag| term_match(&name(tag.name), term))
-                                })
-                        })
+                found(&tracks, &|key| {
+                    snapshot.tracks.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| context.track_holds(record, term, word))
                     })
-                    .map(|album| i64::from(album.key))
-                    .take(request.limit)
-                    .collect(),
-                artists
-                    .iter()
-                    .filter_map(|key| snapshot.artists.get(*key))
-                    .filter(|artist| matches(&name(artist.name)))
-                    .map(|artist| i64::from(artist.key))
-                    .take(request.limit)
-                    .collect(),
+                }),
+                found(&albums, &|key| {
+                    snapshot.albums.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| context.album_holds(record, term, word))
+                    })
+                }),
+                found(&artists, &|key| {
+                    snapshot.artists.get(key.into()).is_some_and(|record| {
+                        all(&|term, word| holds(snapshot.text(record.name), term, word))
+                    })
+                }),
             ]
         };
         let mut connection = self.acquire_loaded(cancellation).await?;
         self.search_rows(&mut connection, &keys, album_artists, folder)
             .await
-    }
-}
-
-/// A one-letter term matches a whole word; a longer one matches anywhere.
-fn term_match(text: &str, term: &str) -> bool {
-    if term.chars().count() == 1 {
-        format!(" {text} ").contains(&format!(" {term} "))
-    } else {
-        text.contains(term)
     }
 }

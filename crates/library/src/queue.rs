@@ -266,10 +266,9 @@ impl Catalog {
         let mut total = 0;
         for (position, index) in queue.order.iter().enumerate() {
             let key = queue.entries[*index as usize].track_key;
-            let matched = snapshot
-                .tracks
-                .get(key.raw())
-                .is_some_and(|record| context.track_search(record).contains(&filter));
+            let matched = snapshot.tracks.get(key.raw()).is_some_and(|record| {
+                (filter.split_whitespace()).all(|term| context.track_holds(record, term, false))
+            });
             if matched {
                 if total >= offset && positions.len() < limit as usize {
                     positions.push(position);

@@ -651,9 +651,26 @@ pub(crate) struct Inputs {
     pub(crate) history: Vec<Listen>,
 }
 
-/// A lowercase haystack matcher for list filters.
-fn contains(haystack: &str, needle: &str) -> bool {
-    needle.is_empty() || haystack.to_lowercase().contains(needle)
+/// Whether `text` holds the lowercase `term`, ignoring case, without copying either. A `word`
+/// term matches a whole word only.
+pub(crate) fn holds(text: &str, term: &str, word: bool) -> bool {
+    fn lower(text: &str) -> impl Iterator<Item = char> + '_ {
+        text.chars().flat_map(char::to_lowercase)
+    }
+    if word {
+        text.split_whitespace()
+            .any(|word| lower(word).eq(term.chars()))
+    } else if text.is_ascii() && term.is_ascii() {
+        let term = term.as_bytes();
+        term.is_empty()
+            || (text.as_bytes())
+                .windows(term.len())
+                .any(|window| window.eq_ignore_ascii_case(term))
+    } else {
+        let len = term.chars().count();
+        let mut starts = text.char_indices().map(|(start, _)| start);
+        len == 0 || starts.any(|start| lower(&text[start..]).take(len).eq(term.chars()))
+    }
 }
 
 /// A filter as clients type it: trimmed, lowercase and bounded.
@@ -661,46 +678,44 @@ pub(crate) fn filter_text(filter: &str) -> String {
     filter.trim().to_lowercase().chars().take(256).collect()
 }
 
+/// Whether a year shows a term.
+fn year_holds(year: i16, term: &str) -> bool {
+    year_of(year).is_some_and(|year| {
+        term.bytes().all(|byte| byte.is_ascii_digit()) && year.to_string().contains(term)
+    })
+}
+
 impl Context<'_> {
-    /// The text a track filter matches: title, artist, album, comment and year.
-    pub(crate) fn track_search(&self, record: &TrackRec) -> String {
-        let snapshot = self.snapshot;
-        format!(
-            "{} {} {} {} {}",
-            snapshot.text(record.title),
-            snapshot.text(record.artist),
-            snapshot.text(record.album_title),
-            snapshot.text(record.comment),
-            year_of(record.year)
-                .map(|year| year.to_string())
-                .unwrap_or_default()
-        )
-        .to_lowercase()
+    /// Whether a track's title, artist, album, comment or year holds a term.
+    pub(crate) fn track_holds(&self, record: &TrackRec, term: &str, word: bool) -> bool {
+        [
+            record.title,
+            record.artist,
+            record.album_title,
+            record.comment,
+        ]
+        .into_iter()
+        .any(|text| holds(self.snapshot.text(text), term, word))
+            || year_holds(record.year, term)
     }
 
-    fn album_matches(&self, record: &AlbumRec, filter: &str) -> bool {
+    /// Whether an album's title, artist, year, credited artists or tags hold a term.
+    pub(crate) fn album_holds(&self, record: &AlbumRec, term: &str, word: bool) -> bool {
         let snapshot = self.snapshot;
-        filter.is_empty()
-            || format!(
-                "{} {}",
-                snapshot.text(record.title),
-                snapshot.text(record.artist)
-            )
-            .to_lowercase()
-            .contains(filter)
-            || year_of(record.year).is_some_and(|year| year.to_string() == filter)
-            || snapshot.album_runs(record)[0].iter().any(|slot| {
+        let named = |name| holds(snapshot.text(name), term, word);
+        let runs = snapshot.album_runs(record);
+        named(record.title)
+            || named(record.artist)
+            || year_holds(record.year, term)
+            || runs[0].iter().any(|slot| {
                 snapshot
                     .artists
                     .live(*slot)
-                    .is_some_and(|artist| contains(snapshot.text(artist.name), filter))
+                    .is_some_and(|artist| named(artist.name))
             })
-            || snapshot.album_runs(record)[1].iter().any(|slot| {
-                snapshot
-                    .tags
-                    .live(*slot)
-                    .is_some_and(|tag| contains(snapshot.text(tag.name), filter))
-            })
+            || runs[1]
+                .iter()
+                .any(|slot| snapshot.tags.live(*slot).is_some_and(|tag| named(tag.name)))
     }
 }
 
@@ -1130,7 +1145,9 @@ impl Context<'_> {
 
     /// Whether a track passes a member read's filters.
     fn member_keep(&self, read: &MemberRead, filter: &str, record: &TrackRec) -> bool {
-        (filter.is_empty() || self.track_search(record).contains(filter))
+        filter
+            .split_whitespace()
+            .all(|term| self.track_holds(record, term, false))
             && (!read.favorites_only || favorite(record.flags))
             && (!read.downloaded_only || record.flags & DOWNLOADED != 0)
     }
@@ -1606,7 +1623,9 @@ impl Context<'_> {
         match &read.kind {
             ListKind::Albums => snapshot.albums.slot(key).is_some_and(|slot| {
                 let record = &snapshot.albums.records[slot as usize];
-                self.album_matches(record, filter)
+                filter
+                    .split_whitespace()
+                    .all(|term| self.album_holds(record, term, false))
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::ArtistAlbums {
@@ -1619,28 +1638,26 @@ impl Context<'_> {
                 let text = filters.as_ref().map_or(filter.to_owned(), |filters| {
                     filter_text(&filters[usize::from(class.code())])
                 });
-                let matched = text.is_empty()
-                    || format!(
-                        "{} {}",
-                        snapshot.text(record.title),
-                        snapshot.text(record.artist)
-                    )
-                    .to_lowercase()
-                    .contains(&text)
-                    || year_of(record.year).is_some_and(|year| year.to_string() == text);
+                let matched = text.split_whitespace().all(|term| {
+                    [record.title, record.artist]
+                        .into_iter()
+                        .any(|text| holds(snapshot.text(text), term, false))
+                        || year_holds(record.year, term)
+                });
                 matched
                     && release_class.is_none_or(|wanted| wanted == class)
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Artists { .. } => snapshot.artists.slot(key).is_some_and(|slot| {
                 let record = &snapshot.artists.records[slot as usize];
-                contains(snapshot.text(record.name), filter)
+                holds(snapshot.text(record.name), filter, false)
                     && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Genres | ListKind::Moods => snapshot.tags.slot(key).is_some_and(|slot| {
-                contains(
+                holds(
                     snapshot.text(snapshot.tags.records[slot as usize].name),
                     filter,
+                    false,
                 )
             }),
             ListKind::Playlists | ListKind::SmartPlaylists { .. } => true,
@@ -3092,7 +3109,7 @@ impl Context<'_> {
             .folder_children(source, parent)
             .into_iter()
             .map(|slot| &self.snapshot.folders.records[slot as usize])
-            .filter(|folder| contains(self.snapshot.text(folder.name), &filter))
+            .filter(|folder| holds(self.snapshot.text(folder.name), &filter, false))
             .map(|folder| {
                 (
                     i64::from(folder.key),
