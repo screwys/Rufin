@@ -3064,7 +3064,7 @@ impl Catalog {
             .collect();
         let mut members = HashMap::<i64, Vec<Member>>::new();
         let mut owned = Vec::new();
-        for (slot, record) in snapshot.tracks.iter() {
+        for (slot, record) in snapshot.tracks.iter().take_while(|_| !wanted.is_empty()) {
             if !record.indexed() {
                 continue;
             }
