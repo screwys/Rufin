@@ -293,11 +293,13 @@ impl Catalog {
     }
 
     /// Rows of the pins the Catalog still holds, in pin order, with their totals: smart
-    /// playlists and their folders evaluated at `now`, playlist folders over every source.
+    /// playlists and their folders evaluated at `now` in music folder `folder`, playlist
+    /// folders over every source.
     pub async fn pin_rows(
         &self,
         pins: &[SidebarPin],
         now: i64,
+        folder: Option<crate::FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(SidebarPin, Row)>> {
         tokio::select! {
@@ -312,6 +314,7 @@ impl Catalog {
         let mut connection = self.acquire_cancellable(cancellation).await?;
         let shape = crate::read::Shape {
             now,
+            folder,
             ..crate::read::Shape::of(None)
         };
         let mut built = std::collections::HashMap::new();

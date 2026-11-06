@@ -1130,7 +1130,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             album_id: "missing".into(),
         },
     ];
-    let rows = catalog.pin_rows(&pins, 1000, &cancel).await.unwrap();
+    let rows = catalog.pin_rows(&pins, 1000, None, &cancel).await.unwrap();
     let totals = |index: usize| {
         rows[index]
             .1
@@ -2310,7 +2310,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         assert_eq!(
             fixture
                 .catalog
-                .pin_rows(std::slice::from_ref(&pin), 0, &cancel)
+                .pin_rows(std::slice::from_ref(&pin), 0, None, &cancel)
                 .await
                 .unwrap()
                 .into_iter()
@@ -2328,6 +2328,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
                     pinned(Some("missing-source"), "global"),
                 ],
                 0,
+                None,
                 &cancel
             )
             .await
@@ -2993,7 +2994,11 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         .into_iter()
         .map(|playlist_id| library::SidebarPin::SmartPlaylist { playlist_id })
         .collect::<Vec<_>>();
-    let rows = fixture.catalog.pin_rows(&pins, 0, &cancel).await.unwrap();
+    let rows = fixture
+        .catalog
+        .pin_rows(&pins, 0, None, &cancel)
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 70);
     for (index, (pin, row)) in rows.iter().enumerate() {
         assert_eq!(*pin, pins[index]);

@@ -23,7 +23,15 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     let configured = products.source.list_sources();
     let rows = products
         .library
-        .pin_rows(&sidebar.pins, catalog::now(), &ReadCancellation::new())
+        .pin_rows(
+            &sidebar.pins,
+            catalog::now(),
+            products
+                .source
+                .selected_library()
+                .and_then(|selected| selected.music_folder_key),
+            &ReadCancellation::new(),
+        )
         .await
         .map_err(internal)?;
     let mut items = Vec::new();

@@ -1925,11 +1925,12 @@ fn changes(
     refresh
 }
 
-/// Whether a committed change can change the sidebar pins. Plays and ratings change only what
-/// smart playlist pins count.
+/// Whether a committed change can change the sidebar pins. Plays, ratings and the music
+/// folder change only what smart playlist pins count.
 pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
     changed.all
         || changed.pins
+        || changed.scope.is_some()
         || changed.playlist_lists
         || !changed.sources.is_empty()
         || !changed.playlists.is_empty()

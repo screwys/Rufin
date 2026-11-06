@@ -546,9 +546,15 @@ impl SidebarPinItem {
     ) {
         let catalog = shell.products.library.clone();
         let pin = self.pin.clone();
+        let folder = music_folder(shell);
         let task = shell.products.runtime.spawn(async move {
             catalog
-                .pin_rows(&[pin], unix_now(), &library::ReadCancellation::new())
+                .pin_rows(
+                    &[pin],
+                    unix_now(),
+                    folder,
+                    &library::ReadCancellation::new(),
+                )
                 .await
                 .map(|mut rows| rows.pop().map(|(_, row)| row))
         });
@@ -637,10 +643,12 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         .pin_cancellation
         .replace(Some(cancellation.clone()));
     let catalog = Arc::clone(&shell.products.library);
-    let task = shell
-        .products
-        .runtime
-        .spawn(async move { catalog.pin_rows(&pins, unix_now(), &cancellation).await });
+    let folder = music_folder(shell);
+    let task = shell.products.runtime.spawn(async move {
+        catalog
+            .pin_rows(&pins, unix_now(), folder, &cancellation)
+            .await
+    });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let result = task.await.ok().and_then(Result::ok);
@@ -686,6 +694,15 @@ fn unix_now() -> i64 {
 
 fn sidebar_pin_publication_is_current(expected_generation: u64, current_generation: u64) -> bool {
     expected_generation == current_generation
+}
+
+/// The music folder pins count smart playlists in: the selected one.
+fn music_folder(shell: &Shell) -> Option<library::FolderKey> {
+    shell
+        .products
+        .source
+        .selected_library()
+        .and_then(|selected| selected.music_folder_key)
 }
 
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {

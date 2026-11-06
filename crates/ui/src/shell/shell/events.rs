@@ -237,6 +237,7 @@ fn apply_selected_source(
         .install(super::selected_ui::SelectedUiSession::new(selected.clone()));
     shell.search_session.set_selected(Some(selected));
     shell.refresh_playlist_picker();
+    super::navigation::refresh_sidebar_pins(shell);
     let route = shell.navigation.routes.borrow().current().clone();
     if shell.route_uses_selected_source(&route) {
         shell.replace_current_route_when_ready();
