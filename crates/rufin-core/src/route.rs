@@ -74,26 +74,37 @@ pub enum Route {
 impl Route {
     /// The page a collection row opens; None for tracks and child folders.
     pub fn of_row(row: &library::Row) -> Option<Self> {
-        use library::{PlaylistListRow, Row, TagKind};
+        use library::Row;
         Some(match row {
             Row::Album(album) | Row::AlbumHeading(album) => Self::of_album(album),
             Row::Artist(artist) => Self::of_artist(artist),
-            Row::Tag(tag) if tag.kind == TagKind::Genre => {
-                Self::GenreDetail(GenreKey::from_raw(tag.key))
-            }
-            Row::Tag(tag) => Self::MoodDetail(MoodKey::from_raw(tag.key)),
-            Row::Playlist(PlaylistListRow::Playlist(playlist)) => {
-                Self::PlaylistDetail(playlist.playlist_key)
-            }
-            Row::Playlist(PlaylistListRow::SmartPlaylist(smart)) => {
+            Row::Tag(tag) => Self::of_tag(tag),
+            Row::Playlist(playlist) => Self::of_playlist(playlist),
+            Row::Track(_) | Row::AlbumTrack { .. } | Row::Folder(_) => return None,
+        })
+    }
+
+    /// The page a genre or mood row opens.
+    pub fn of_tag(tag: &library::TagRow) -> Self {
+        match tag.kind {
+            library::TagKind::Genre => Self::GenreDetail(GenreKey::from_raw(tag.key)),
+            library::TagKind::Mood => Self::MoodDetail(MoodKey::from_raw(tag.key)),
+        }
+    }
+
+    /// The page a playlist, smart playlist or playlist folder row opens.
+    pub fn of_playlist(row: &library::PlaylistListRow) -> Self {
+        use library::PlaylistListRow;
+        match row {
+            PlaylistListRow::Playlist(playlist) => Self::PlaylistDetail(playlist.playlist_key),
+            PlaylistListRow::SmartPlaylist(smart) => {
                 Self::SmartPlaylistDetail(smart.smart_playlist_key)
             }
-            Row::Playlist(PlaylistListRow::Folder(folder)) => Self::PlaylistFolder {
+            PlaylistListRow::Folder(folder) => Self::PlaylistFolder {
                 key: folder.folder_key,
                 smart: folder.smart,
             },
-            Row::Track(_) | Row::AlbumTrack { .. } | Row::Folder(_) => return None,
-        })
+        }
     }
 
     /// The page the album or artist `uri` opens, by the kind it names; None for a track and

@@ -51,7 +51,7 @@ impl CatalogUi {
             .imp()
             .breadcrumb_host
             .append(&folder_path_switcher(self, &path));
-        let (content, rows, resume, refresh) = folder_page(self, path, search.clone(), read);
+        let (content, rows, resume, refresh) = folder_page(self, search.clone(), read);
         wrapper.append(&content);
         let shell = Rc::downgrade(self);
         let resume = Rc::new(move || {
@@ -79,7 +79,6 @@ impl CatalogUi {
 
 fn folder_page(
     shell: &Rc<CatalogUi>,
-    path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
     mut read: Opened,
 ) -> (gtk::Widget, Rows<Row>, FolderResume, FolderResume) {
@@ -96,7 +95,6 @@ fn folder_page(
     let table = folder_table(
         shell,
         rows.clone(),
-        path.clone(),
         table_initial_width,
         &settings.row_fields,
     );
@@ -163,7 +161,6 @@ fn folder_page(
 fn folder_table(
     shell: &Rc<CatalogUi>,
     rows: Rows<Row>,
-    path: Vec<FolderPathItem>,
     initial_width: i32,
     fields: &[LibraryField],
 ) -> crate::library::collections::CollectionTableProjection {
@@ -181,19 +178,11 @@ fn folder_table(
         true
     }));
     let column_shell = Rc::clone(shell);
-    let column_path = path.clone();
     let column_rows = rows.clone();
     let activate_shell = Rc::clone(shell);
     let activate_rows = rows.clone();
     let activate = move |position: u32, row: Row| match row {
-        Row::Folder(folder) => {
-            let mut next = path.clone();
-            next.push(FolderPathItem {
-                id: folder.object_id.clone(),
-                name: folder.name.clone(),
-            });
-            activate_shell.open_route(Route::Folders { path: next });
-        }
+        Row::Folder(_) => open_child(&activate_shell, &activate_rows, &row),
         Row::Track(_) => activate_rows.play(
             &activate_shell.products,
             position as usize,
@@ -208,15 +197,7 @@ fn folder_table(
         rows.list_model(),
         fields,
         Vec::new(),
-        move |field| {
-            folder_column(
-                &column_shell,
-                column_path.clone(),
-                column_rows.clone(),
-                &playing,
-                field,
-            )
-        },
+        move |field| folder_column(&column_shell, column_rows.clone(), &playing, field),
         |field| super::columns::track_column_width(LibraryListKey::Folders, field),
         false,
         Some(Box::new(activate)),
@@ -288,7 +269,7 @@ fn folder_index_column(
     column
 }
 
-fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
+fn folder_merged_column(shell: &Rc<CatalogUi>, rows: Rows<Row>) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
     factory.connect_setup(move |_, item| {
@@ -309,25 +290,8 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
         icon.set_valign(gtk::Align::Center);
         icon.set_visible(false);
         cell.prepend(&icon);
-        let weak = item.downgrade();
-        let shell = Rc::downgrade(&setup_shell);
-        install_context_menu_openers(
-            &cell,
-            Rc::new(move |target, position| {
-                let (Some(item), Some(shell)) = (weak.upgrade(), shell.upgrade()) else {
-                    return;
-                };
-                let Some(Row::Track(track)) =
-                    crate::widgets::view_model::item_at_from_item::<Row>(&item)
-                else {
-                    return;
-                };
-                super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
-                );
-            }),
-        );
-        install_folder_cell_activation(&cell, item, &setup_shell, path.clone());
+        install_folder_cell_menu(&cell, item, &setup_shell, &rows);
+        install_folder_cell_activation(&cell, item, &setup_shell, rows.clone());
         item.set_child(Some(&cell));
     });
     let bind_shell = Rc::clone(shell);
@@ -421,7 +385,6 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
 
 fn folder_column(
     shell: &Rc<CatalogUi>,
-    path: Vec<FolderPathItem>,
     rows: Rows<Row>,
     playing: &crate::widgets::recycled_cells::TrackRowPlayingIndicator,
     field: LibraryField,
@@ -430,7 +393,7 @@ fn folder_column(
     let width = super::columns::track_column_width(LibraryListKey::Folders, field);
     match field {
         LibraryField::RowIndex => return folder_index_column(rows, playing.clone()),
-        LibraryField::TitleMerged => return folder_merged_column(shell, path),
+        LibraryField::TitleMerged => return folder_merged_column(shell, rows),
         LibraryField::Image => {
             return super::columns::mapped_track_image_column::<Row, _, _>(
                 shell,
@@ -467,7 +430,7 @@ fn folder_column(
     let value_shell = Rc::clone(shell);
     let column = folder_text_column(
         shell,
-        path,
+        rows,
         super::columns::track_column_title(field),
         24,
         !matches!(
@@ -523,7 +486,7 @@ fn folder_name_field(fields: &[LibraryField]) -> Option<LibraryField> {
 
 fn folder_text_column(
     shell: &Rc<CatalogUi>,
-    path: Vec<FolderPathItem>,
+    rows: Rows<Row>,
     title: &str,
     max_width_chars: i32,
     tabular_numeric: bool,
@@ -548,23 +511,8 @@ fn folder_text_column(
         label.set_hexpand(true);
         label.set_halign(gtk::Align::Fill);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        let weak = item.downgrade();
-        let shell = Rc::clone(&setup_shell);
-        install_context_menu_openers(
-            &cell,
-            Rc::new(move |target, position| {
-                let Some(item) = weak.upgrade() else { return };
-                let Some(Row::Track(track)) =
-                    crate::widgets::view_model::item_at_from_item::<Row>(&item)
-                else {
-                    return;
-                };
-                super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
-                );
-            }),
-        );
-        install_folder_cell_activation(&cell, item, &setup_shell, path.clone());
+        install_folder_cell_menu(&cell, item, &setup_shell, &rows);
+        install_folder_cell_activation(&cell, item, &setup_shell, rows.clone());
         item.set_child(Some(&cell));
     });
     connect_row_bind(&factory, move |item| {
@@ -602,7 +550,7 @@ fn install_folder_cell_activation(
     target: &impl IsA<gtk::Widget>,
     item: &gtk::ListItem,
     shell: &Rc<CatalogUi>,
-    path: Vec<FolderPathItem>,
+    rows: Rows<Row>,
 ) {
     let item = item.downgrade();
     let shell = Rc::clone(shell);
@@ -613,18 +561,57 @@ fn install_folder_cell_activation(
             return;
         }
         let Some(item) = item.upgrade() else { return };
-        let Some(Row::Folder(folder)) = crate::widgets::view_model::item_at_from_item::<Row>(&item)
-        else {
-            return;
-        };
-        let mut next = path.clone();
-        next.push(FolderPathItem {
-            id: folder.object_id,
-            name: folder.name,
-        });
-        shell.open_route(Route::Folders { path: next });
+        if let Some(row @ Row::Folder(_)) =
+            crate::widgets::view_model::item_at_from_item::<Row>(&item)
+        {
+            open_child(&shell, &rows, &row);
+        }
     });
     target.add_controller(click);
+}
+
+/// Opens the child folder `row` of `rows`' page, as core names its route.
+fn open_child(shell: &CatalogUi, rows: &Rows<Row>, row: &Row) {
+    if let Some(route) = rows.view().and_then(|view| view.row_route(row)) {
+        shell.open_route(route);
+    }
+}
+
+/// A folder page row's menu: a track's, or a child folder's, which plays the folder it opens.
+fn install_folder_cell_menu(
+    target: &impl IsA<gtk::Widget>,
+    item: &gtk::ListItem,
+    shell: &Rc<CatalogUi>,
+    rows: &Rows<Row>,
+) {
+    let weak = item.downgrade();
+    let shell = Rc::downgrade(shell);
+    let rows = rows.clone();
+    install_context_menu_openers(
+        target,
+        Rc::new(move |target, position| {
+            let (Some(item), Some(shell)) = (weak.upgrade(), shell.upgrade()) else {
+                return;
+            };
+            match crate::widgets::view_model::item_at_from_item::<Row>(&item) {
+                Some(Row::Track(track)) => super::collection_context::present_track_context_menu(
+                    target, &shell, track, position,
+                ),
+                Some(row @ Row::Folder(_)) => {
+                    if let Some(view) = rows.view() {
+                        crate::menus::media_menus::present_view_row_menu(
+                            target,
+                            shell.shell(),
+                            &view,
+                            row,
+                            position,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }),
+    );
 }
 
 fn configure_folder_column(column: &gtk::ColumnViewColumn, width: i32) {

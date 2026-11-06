@@ -61,12 +61,6 @@ impl CatalogUi {
             })
     }
 
-    /// `is_current` for work that finishes after this call.
-    pub fn current_check(self: &Rc<Self>) -> Rc<dyn Fn() -> bool> {
-        let page = Rc::downgrade(self);
-        Rc::new(move || page.upgrade().is_some_and(|page| page.is_current()))
-    }
-
     /// Whether the selected source is a Local one, whose tracks are on this device already.
     pub fn local_source(&self) -> bool {
         let selected = self.selected_library();

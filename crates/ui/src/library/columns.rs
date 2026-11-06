@@ -29,7 +29,6 @@ use crate::widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use crate::widgets::view_model::connect_row_bind;
-use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
@@ -323,9 +322,7 @@ impl AlbumTableCell {
                 let cell = weak.upgrade()?;
                 let row = cell.imp().row.borrow().clone()?;
                 Some((
-                    MediaDragSource::capture_target(PlayTarget::Route(
-                        rufin_core::route::Route::of_album(&row),
-                    )),
+                    MediaDragSource::capture_target(PlayTarget::of_album(&row)),
                     row.title.clone(),
                 ))
             });
@@ -377,9 +374,7 @@ impl AlbumTableCell {
             return;
         };
         let view = imp.view.borrow();
-        let target = row
-            .as_deref()
-            .map(|row| PlayTarget::Route(rufin_core::route::Route::of_album(row)));
+        let target = row.as_deref().map(PlayTarget::of_album);
         if let Some(playing) = imp.title_playing.borrow().as_ref() {
             playing.bind(&shell, target.clone());
         }
@@ -441,7 +436,7 @@ pub fn artist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnV
     match field {
         LibraryField::RowIndex => {
             mapped_row_index_column::<ArtistRow>(shell, column_width(field), move |row| {
-                Some(PlayTarget::Route(Route::of_artist(row)))
+                Some(PlayTarget::of_artist(row))
             })
         }
         LibraryField::Image => artist_image_column(shell),
@@ -860,10 +855,7 @@ fn install_artist_list_item_context_menu(
         target,
         shell,
         item,
-        Rc::new(move |artist: ArtistRow| {
-            let target = PlayTarget::Route(Route::of_artist(&artist));
-            Some((target, artist.name))
-        }),
+        Rc::new(move |artist: ArtistRow| Some((PlayTarget::of_artist(&artist), artist.name))),
     );
     let item = item.downgrade();
     let shell = Rc::clone(shell);
@@ -1014,7 +1006,7 @@ where
     let factory = gtk::SignalListItemFactory::new();
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
         bind_collection_title::<ArtistRow>(&factory, shell, move |row| {
-            Some(PlayTarget::Route(Route::of_artist(row)))
+            Some(PlayTarget::of_artist(row))
         });
     }
     let shell = Rc::clone(shell);

@@ -131,9 +131,9 @@ impl SearchItem {
     }
     fn play_target(&self) -> PlayTarget {
         match self {
-            Self::Track(row, _) => PlayTarget::Track(row.track_key),
-            Self::Album(row) => PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
-            Self::Artist(row) => PlayTarget::Route(Route::of_artist(row)),
+            Self::Track(row, _) => PlayTarget::of_track(row),
+            Self::Album(row) => PlayTarget::of_album(row),
+            Self::Artist(row) => PlayTarget::of_artist(row),
         }
     }
 
@@ -247,43 +247,14 @@ impl SearchItem {
         target: &gtk::Widget,
         shell: &Rc<CatalogUi>,
         position: Option<(f64, f64)>,
-        is_current: Rc<dyn Fn() -> bool>,
     ) {
         if present_collection_selection_menu(target, shell.shell(), self.play_target(), position) {
             return;
         }
-        let media_uri = match self {
-            Self::Track(row, _) => {
-                present_track_context_menu(target, shell, row.clone(), position);
-                return;
-            }
-            Self::Album(row) => row.media_uri.clone(),
-            Self::Artist(row) => row.media_uri.clone(),
-        };
-        let receiver = shell.products.source.prepare_collection(media_uri);
-        let item = self.clone();
-        let target = target.downgrade();
-        let menus = Rc::clone(shell.shell());
-        gtk::glib::spawn_future_local(async move {
-            if let Ok(Err(error)) = receiver.recv().await {
-                tracing::warn!(%error, "could not acquire Search collection");
-            }
-            let Some(target) = target.upgrade() else {
-                return;
-            };
-            if !target.is_mapped() || !is_current() {
-                return;
-            }
-            match item {
-                Self::Album(row) => {
-                    present_row_menu(&target, &menus, library::Row::Album(row), None, position)
-                }
-                Self::Artist(row) => {
-                    present_row_menu(&target, &menus, library::Row::Artist(row), None, position)
-                }
-                Self::Track(..) => unreachable!(),
-            }
-        });
+        match self {
+            Self::Track(row, _) => present_track_context_menu(target, shell, row.clone(), position),
+            _ => present_row_menu(target, shell.shell(), self.row(), None, position),
+        }
     }
 }
 
@@ -346,9 +317,7 @@ impl SearchGridCell {
             &menu,
             &overlay,
             &body.card,
-            |target, shell, item, point| {
-                item.present_context(target, shell, point, shell.current_check())
-            },
+            |target, shell, item, point| item.present_context(target, shell, point),
         );
         Self {
             snippet,
@@ -927,7 +896,7 @@ fn search_column(
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                 {
-                    value.present_context(target, &shell, position, shell.current_check());
+                    value.present_context(target, &shell, position);
                 }
             }),
         );
@@ -1022,7 +991,7 @@ fn search_merged_column(
                 if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                 {
-                    value.present_context(target, &shell, position, shell.current_check());
+                    value.present_context(target, &shell, position);
                 }
             }),
         );
@@ -1119,7 +1088,7 @@ fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Col
                     && let Some(value) = item_at_from_item::<SearchItem>(&item)
                     && value.favorite().is_some()
                 {
-                    value.present_context(target, &shell, position, shell.current_check());
+                    value.present_context(target, &shell, position);
                 }
             }),
         );

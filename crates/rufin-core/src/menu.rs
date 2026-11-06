@@ -126,7 +126,15 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
             menu.play_later = false;
             (None, false, false)
         }
-        Row::Folder(_) => return Menu::default(),
+        // A child folder plays the folder it opens, as a collection row plays its page.
+        Row::Folder(_) => {
+            return Menu {
+                add_to_playlist: shown(ContextMenuItem::AddToPlaylist),
+                download: shown(ContextMenuItem::Download),
+                remove_download: shown(ContextMenuItem::Download),
+                ..menu
+            };
+        }
     };
     menu.radio = radio.filter(|_| shown(ContextMenuItem::PlayRadio));
     menu.add_to_playlist = add_to_playlist && shown(ContextMenuItem::AddToPlaylist);

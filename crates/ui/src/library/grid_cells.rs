@@ -27,7 +27,6 @@ use crate::widgets::library_fields::{
     opaque_artwork,
 };
 use crate::widgets::view_model::{bind_row_item, unbind_row_item};
-use rufin_core::route::Route;
 use rufin_core::route::detail_links::DetailLinks;
 use rufin_core::route::detail_links::album_row_artist_links;
 use rufin_core::settings::presentation::{album_field, artist_field};
@@ -695,9 +694,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> TrackGridCell<T> {
                 Some(selection) => {
                     MediaDragSource::selection(selection.dragged_tracks_for(track.media_uri()))
                 }
-                None => MediaDragSource::capture_target(PlayTarget::Track(
-                    track.track_key().expect("catalog song key"),
-                )),
+                None => MediaDragSource::capture_target(PlayTarget::of_track(track.track_row()?)),
             };
             Some((source, track.title().to_string()))
         });
@@ -731,10 +728,10 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
         );
         self.body
             .bind(row.title(), |value| (self.field)(position, &row, value));
-        self.body.bind_playing_target(
-            &shell,
-            PlayTarget::Track(row.track_key().expect("catalog song key")),
-        );
+        if let Some(track) = row.track_row() {
+            self.body
+                .bind_playing_target(&shell, PlayTarget::of_track(track));
+        }
         self.body.set_download_target(&shell, row.download_badge());
         set_grid_favorite(&self.favorite, Some(row.favorite()));
         self.current.replace(Some(row));
@@ -822,9 +819,7 @@ impl AlbumGridCell {
             let _shell = drag_shell.upgrade()?;
             let row = drag_current.borrow();
             let row = row.as_ref()?;
-            let source = MediaDragSource::capture_target(PlayTarget::Route(
-                rufin_core::route::Route::of_album(row),
-            ));
+            let source = MediaDragSource::capture_target(PlayTarget::of_album(row));
             Some((source, row.title.clone()))
         });
         install_grid_context(
@@ -844,7 +839,7 @@ impl AlbumGridCell {
             move |shell, row, placement| {
                 crate::menus::media_menus::play_target(
                     &shell.products,
-                    &PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
+                    &PlayTarget::of_album(&row),
                     placement,
                     false,
                 );
@@ -901,8 +896,7 @@ impl ArtistGridCell {
             let _shell = drag_shell.upgrade()?;
             let row = drag_current.borrow();
             let row = row.as_ref()?;
-            let target = PlayTarget::Route(Route::of_artist(row));
-            let source = MediaDragSource::capture_target(target);
+            let source = MediaDragSource::capture_target(PlayTarget::of_artist(row));
             Some((source, row.name.clone()))
         });
         install_grid_context(
@@ -926,8 +920,12 @@ impl ArtistGridCell {
             &current,
             [play, play_next, play_last],
             move |shell, row, placement| {
-                let target = PlayTarget::Route(Route::of_artist(&row));
-                crate::menus::media_menus::play_target(&shell.products, &target, placement, false);
+                crate::menus::media_menus::play_target(
+                    &shell.products,
+                    &PlayTarget::of_artist(&row),
+                    placement,
+                    false,
+                );
             },
         );
         install_grid_favorite(shell, &current, &favorite, |row| {
@@ -953,7 +951,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
             return;
         };
         self.body
-            .bind_playing_target(&shell, PlayTarget::Route(Route::of_artist(&row)));
+            .bind_playing_target(&shell, PlayTarget::of_artist(&row));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -999,10 +997,8 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        self.body.bind_playing_target(
-            &shell,
-            PlayTarget::Route(rufin_core::route::Route::of_album(&row)),
-        );
+        self.body
+            .bind_playing_target(&shell, PlayTarget::of_album(&row));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),

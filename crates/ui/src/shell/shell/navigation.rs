@@ -522,12 +522,9 @@ impl SidebarPinItem {
     fn route(&self) -> Route {
         Route::of_row(&self.row).expect("pin_rows returns pinned collections only")
     }
-    /// What the pin plays: the page it opens; a playlist folder plays nothing.
+    /// What the pin plays, as core decides for its row.
     fn playback_target(&self) -> Option<PlayTarget> {
-        match self.route() {
-            Route::PlaylistFolder { .. } => None,
-            route => Some(PlayTarget::Route(route)),
-        }
+        PlayTarget::of_row(&self.row)
     }
     fn artwork(&self) -> Vec<ArtworkBinding> {
         self.summary()

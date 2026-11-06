@@ -144,8 +144,35 @@ pub fn present_row_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    let playback = PlayTarget::of_row(&row);
+    present_menu(target, shell, row, playback, play, position);
+}
+
+/// The menu of `row` on `view`'s page, which plays what [`View::row_target`] gives: a child
+/// folder plays the folder it opens.
+///
+/// [`View::row_target`]: rufin_core::view::View::row_target
+pub fn present_view_row_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    view: &rufin_core::view::View,
+    row: Row,
+    position: Option<(f64, f64)>,
+) {
+    let playback = view.row_target(&row);
+    present_menu(target, shell, row, playback, None, position);
+}
+
+fn present_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    row: Row,
+    playback: Option<PlayTarget>,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+) {
     let menu = row_menu(shell, &row);
-    if let Some(clicked) = PlayTarget::of_row(&row) {
+    if let Some(clicked) = playback.clone() {
         let selected = match &row {
             Row::Playlist(_) => present_playlist_selection_menu(
                 target,
@@ -160,7 +187,16 @@ pub fn present_row_menu(
             return;
         }
     }
-    present_row_surface(target, shell, &row, &menu, play, position, Place::List);
+    present_row_surface(
+        target,
+        shell,
+        &row,
+        playback,
+        &menu,
+        play,
+        position,
+        Place::List,
+    );
 }
 
 /// The menu of the player's or the queue's `track`; `queue_entry` is its queue position and
@@ -179,7 +215,9 @@ pub fn present_track_menu(
         Some((position, occurrence)) => Place::Queue(position, occurrence),
         None => Place::List,
     };
-    if let Some(surface) = row_surface(target, shell, &row, &menu, None, position, place) {
+    let playback = PlayTarget::of_row(&row);
+    if let Some(surface) = row_surface(target, shell, &row, playback, &menu, None, position, place)
+    {
         if let Some(position) = popover_position {
             surface.popover().set_position(position);
         }
@@ -200,6 +238,7 @@ pub fn present_playlist_entry_menu(
         target,
         shell,
         &row,
+        PlayTarget::of_row(&row),
         &menu,
         None,
         position,
@@ -215,24 +254,28 @@ fn row_menu(shell: &Shell, row: &Row) -> Menu {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn present_row_surface(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
     row: &Row,
+    playback: Option<PlayTarget>,
     menu: &Menu,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
     place: Place,
 ) {
-    if let Some(surface) = row_surface(target, shell, row, menu, play, position, place) {
+    if let Some(surface) = row_surface(target, shell, row, playback, menu, play, position, place) {
         surface.popup();
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn row_surface(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
     row: &Row,
+    playback: Option<PlayTarget>,
     menu: &Menu,
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
@@ -249,7 +292,7 @@ fn row_surface(
         (_, Row::Playlist(PlaylistListRow::Playlist(_))) => "playlist",
         (_, Row::Playlist(PlaylistListRow::SmartPlaylist(_))) => "smart-playlist",
         (_, Row::Playlist(PlaylistListRow::Folder(_))) => "playlist-folder",
-        (_, Row::Folder(_)) => return None,
+        (_, Row::Folder(_)) => "folder",
     };
     let surface = ContextMenuSurface::new(target, group, position);
     let rated = rated(row);
@@ -270,7 +313,6 @@ fn row_surface(
             },
         );
     }
-    let playback = PlayTarget::of_row(row);
     match (place, &playback) {
         (Place::Queue(position, occurrence), Some(PlayTarget::Track(track))) => {
             append_queue_entry_actions(&surface, shell, menu, *track, position, occurrence);
@@ -889,10 +931,9 @@ fn collection_selection_surface(
         let edit_metadata = move || {
             let targets = metadata_targets.clone();
             let shell = Rc::clone(&metadata_shell);
-            let catalog = shell.products.library.clone();
             let source = shell.products.source.clone();
             let task = shell.products.runtime.spawn(async move {
-                targets.requests(&catalog, &source).await.map(|requests| {
+                targets.requests(&source).await.map(|requests| {
                     library::MemberSelection::Concat(
                         requests.iter().filter_map(PlayRequest::selection).collect(),
                     )
@@ -921,14 +962,10 @@ fn collection_selection_surface(
     let play_payload = payload.clone();
     surface.append_play_actions(&menu, move |placement, shuffled| {
         let payload = play_payload.clone();
-        let catalog = play_shell.products.library.clone();
         let source = play_shell.products.source.clone();
         let playback = play_shell.products.playback.clone();
         let task = play_shell.products.runtime.spawn(async move {
-            let mut request = payload
-                .play_request(&catalog, &source)
-                .await?
-                .shuffled(shuffled);
+            let mut request = payload.play_request(&source).await?.shuffled(shuffled);
             request.placement = placement;
             playback.play_selection(request);
             Ok::<_, String>(())

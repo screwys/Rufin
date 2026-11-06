@@ -551,19 +551,16 @@ impl CatalogUi {
         let drag_shell = Rc::downgrade(self);
         install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
             let _shell = drag_shell.upgrade()?;
-            let source =
-                MediaDragSource::capture_target(crate::widgets::selection::PlayTarget::Route(
-                    rufin_core::route::Route::of_album(&drag_album),
-                ));
+            let source = MediaDragSource::capture_target(
+                crate::widgets::selection::PlayTarget::of_album(&drag_album),
+            );
             Some((source, drag_title.clone()))
         });
 
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
-        let play_target = crate::widgets::selection::PlayTarget::Route(
-            rufin_core::route::Route::of_album(&album),
-        );
+        let play_target = crate::widgets::selection::PlayTarget::of_album(&album);
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             crate::menus::media_menus::play_target(
                 &play_shell.products,
@@ -723,11 +720,11 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
             let mut track = item.track;
             track.title = item.title;
             let play_shell = Rc::clone(shell);
-            let play_key = track.track_key;
+            let play_target = crate::widgets::selection::PlayTarget::of_track(&track);
             let play = Rc::new(move |_, placement| {
                 crate::menus::media_menus::play_target(
                     &play_shell.products,
-                    &crate::widgets::selection::PlayTarget::Track(play_key),
+                    &play_target,
                     placement,
                     false,
                 );
@@ -777,7 +774,7 @@ fn activate_home_item(shell: &Rc<CatalogUi>, item: HomeItem) {
     match item {
         HomeItem::Track(item) => crate::menus::media_menus::play_target(
             &shell.products,
-            &crate::widgets::selection::PlayTarget::Track(item.track.track_key),
+            &crate::widgets::selection::PlayTarget::of_track(&item.track),
             rufin_core::playback::QueuePlacement::Now,
             false,
         ),

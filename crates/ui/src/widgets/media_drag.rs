@@ -5,7 +5,6 @@ use crate::widgets::{
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
-use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::PlayRequest;
 use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};
@@ -55,19 +54,23 @@ impl CollectionTargets {
             }
         }
     }
-    /// What each selected row plays.
-    pub async fn resolve(&self, catalog: &library::Catalog) -> Result<Vec<PlayTarget>, String> {
+    /// What each selected row plays, as core decides it.
+    pub async fn resolve(
+        &self,
+        source: &rufin_core::runtime::SourceHandle,
+    ) -> Result<Vec<PlayTarget>, String> {
         match self {
             Self::Ready(targets) => Ok(targets.clone()),
             Self::Parents(reads) => {
+                let cancel = library::ReadCancellation::new();
                 let mut targets = Vec::new();
                 for (read, ranges) in reads {
-                    let collections = selected_parent_collections(catalog, read, ranges).await?;
-                    targets.extend(collections.iter().filter_map(|collection| {
-                        Some(PlayTarget::Route(
-                            CollectionTarget::of(catalog, collection)?.route(),
-                        ))
-                    }));
+                    targets.extend(
+                        source
+                            .list_targets(read.clone(), ranges, &cancel)
+                            .await
+                            .map_err(|error| error.to_string())?,
+                    );
                 }
                 Ok(targets)
             }
@@ -76,11 +79,10 @@ impl CollectionTargets {
     /// What playing every selected row queues, each as its page plays.
     pub async fn requests(
         &self,
-        catalog: &library::Catalog,
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<Vec<PlayRequest>, String> {
         let mut requests = Vec::new();
-        for target in self.resolve(catalog).await? {
+        for target in self.resolve(source).await? {
             requests.extend(
                 target_request(source, &target, rufin_core::playback::QueuePlacement::Now).await?,
             );
@@ -108,12 +110,7 @@ pub fn install_parent_selection(rows: &crate::widgets::view_model::Rows<library:
         .set_collection_selection(Box::new(move |dragged, positions| {
             let rows = crate::widgets::view_model::Rows::<library::Row>::of(&weak.upgrade()?);
             let read = rows.view()?.list()?.clone();
-            let PlayTarget::Route(dragged) = dragged else {
-                return None;
-            };
-            let same = |row: &library::Row| {
-                rufin_core::route::Route::of_row(row).as_ref() == Some(dragged)
-            };
+            let same = |row: &library::Row| PlayTarget::of_row(row).as_ref() == Some(dragged);
             let position = rows.ready_position(same)?;
             positions.contains(position).then(|| {
                 CollectionTargets::Parents(vec![(
@@ -579,7 +576,6 @@ impl MediaDragSource {
 
     pub async fn play_request(
         &self,
-        catalog: &library::Catalog,
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<PlayRequest, String> {
         let placement = rufin_core::playback::QueuePlacement::Now;
@@ -589,7 +585,7 @@ impl MediaDragSource {
                 .await?
                 .ok_or_else(gone)?,
             Self::Targets { targets } => {
-                PlayRequest::group(targets.requests(catalog, source).await?, placement)
+                PlayRequest::group(targets.requests(source).await?, placement)
             }
             Self::Selection(selection) => PlayRequest::tracks(selection.input.clone(), placement),
             Self::PlaylistEntries(selection) => {

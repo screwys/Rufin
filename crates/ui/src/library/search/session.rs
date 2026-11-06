@@ -535,22 +535,8 @@ impl SearchSession {
         target: &gtk::Widget,
         catalog: &Rc<CatalogUi>,
     ) {
-        let item = self.item(category, index);
-        if let Some(item) = item {
-            let generation = self.generation.get();
-            let session = Rc::downgrade(self);
-            let current = catalog.current_check();
-            item.present_context(
-                target,
-                catalog,
-                None,
-                Rc::new(move || {
-                    current()
-                        && session
-                            .upgrade()
-                            .is_some_and(|session| session.generation.get() == generation)
-                }),
-            );
+        if let Some(item) = self.item(category, index) {
+            item.present_context(target, catalog, None);
         }
     }
 }

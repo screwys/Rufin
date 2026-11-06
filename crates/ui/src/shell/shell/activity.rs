@@ -8,6 +8,7 @@ use crate::player::fullscreen_background::FullscreenBackground;
 use crate::widgets::mounted_route::RouteCurrentTrack;
 use crate::widgets::mounted_route::route_current_track;
 use crate::widgets::recycled_cells::TrackRowPlayingIndicator;
+use crate::widgets::selection::PlayTarget;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use library::{ActivityOverview, CalendarActivityPeriod, TrackRow};
@@ -635,7 +636,7 @@ impl ActivityView {
             }
             match result {
                 Ok(data) => {
-                    let top = data.tracks.first().map(|row| row.track_key);
+                    let top = data.tracks.first().map(PlayTarget::of_track);
                     view.transition.skip();
                     let animate = view.report.is_visible() && view.report.is_mapped();
                     if animate {
@@ -695,11 +696,11 @@ impl ActivityView {
                             .application
                             .activity_overview
                             .autoplay_first_track
-                        && let Some(uri) = top
+                        && let Some(top) = top
                     {
                         crate::menus::media_menus::play_target(
                             &shell.products,
-                            &crate::widgets::selection::PlayTarget::Track(uri),
+                            &top,
                             rufin_core::playback::QueuePlacement::Now,
                             false,
                         );
@@ -1013,7 +1014,7 @@ impl ActivityCollections {
                 let row = item.borrow::<TrackRow>();
                 crate::menus::media_menus::play_target(
                     &shell.products,
-                    &crate::widgets::selection::PlayTarget::Track(row.track_key),
+                    &PlayTarget::of_track(&row),
                     rufin_core::playback::QueuePlacement::Now,
                     false,
                 );

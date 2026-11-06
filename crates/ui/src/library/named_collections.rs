@@ -184,7 +184,7 @@ pub trait NamedCollectionRow: CollectionRow {
 
 impl CollectionRow for ArtistRow {
     fn playback(&self) -> Option<PlayTarget> {
-        Some(PlayTarget::Route(Route::of_artist(self)))
+        Some(PlayTarget::of_artist(self))
     }
     fn downloaded(&self) -> bool {
         self.summary.downloaded()
@@ -200,7 +200,7 @@ impl CollectionRow for ArtistRow {
 
 impl CollectionRow for TagRow {
     fn playback(&self) -> Option<PlayTarget> {
-        Some(PlayTarget::Route(NamedCollectionRow::route(self)))
+        Some(PlayTarget::of_tag(self))
     }
 
     fn downloaded(&self) -> bool {
@@ -220,10 +220,7 @@ impl NamedCollectionRow for TagRow {
         &self.name
     }
     fn route(&self) -> Route {
-        match self.kind {
-            TagKind::Genre => Route::GenreDetail(library::GenreKey::from_raw(self.key)),
-            TagKind::Mood => Route::MoodDetail(library::MoodKey::from_raw(self.key)),
-        }
+        Route::of_tag(self)
     }
     fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
         self.artwork_binding
@@ -264,13 +261,7 @@ impl NamedCollectionRow for TagRow {
 
 impl CollectionRow for library::PlaylistListRow {
     fn playback(&self) -> Option<PlayTarget> {
-        match self {
-            Self::Playlist(row) => Some(PlayTarget::Route(Route::PlaylistDetail(row.playlist_key))),
-            Self::SmartPlaylist(row) => Some(PlayTarget::Route(
-                rufin_core::route::Route::SmartPlaylistDetail(row.smart_playlist_key),
-            )),
-            Self::Folder(_) => None,
-        }
+        PlayTarget::of_playlist(self)
     }
     fn downloaded(&self) -> bool {
         library::PlaylistListRow::downloaded(self)
@@ -303,14 +294,7 @@ impl NamedCollectionRow for library::PlaylistListRow {
         }
     }
     fn route(&self) -> Route {
-        match self {
-            Self::Playlist(row) => Route::PlaylistDetail(row.playlist_key),
-            Self::SmartPlaylist(row) => Route::SmartPlaylistDetail(row.smart_playlist_key),
-            Self::Folder(row) => Route::PlaylistFolder {
-                key: row.folder_key,
-                smart: row.smart,
-            },
-        }
+        Route::of_playlist(self)
     }
     fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
         let binding = match self {

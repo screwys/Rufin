@@ -155,6 +155,9 @@ enum Plan {
     Missing,
 }
 
+/// The most rows one Catalog read returns.
+const ROWS_WINDOW: usize = 256;
+
 /// What of the selected library a page reads, by the one music folder rule (decisions.md,
 /// 2026-11-06), as Feishin: clients pass the selection and core applies it by route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,13 +262,45 @@ pub enum PlayTarget {
 }
 
 impl PlayTarget {
-    /// What `row` plays outside a page; None for a child folder and a playlist folder, which
-    /// its menu offers no Play for.
+    /// What `row` plays outside a page; None for a playlist folder, which its menu offers no
+    /// Play for, and for a child folder, which plays what its page's
+    /// [`View::row_target`] gives.
     pub fn of_row(row: &Row) -> Option<Self> {
         match row {
-            Row::Track(track) | Row::AlbumTrack { track, .. } => Some(Self::Track(track.track_key)),
-            Row::Playlist(library::PlaylistListRow::Folder(_)) => None,
-            row => Route::of_row(row).map(Self::Route),
+            Row::Track(track) | Row::AlbumTrack { track, .. } => Some(Self::of_track(track)),
+            Row::Album(album) | Row::AlbumHeading(album) => Some(Self::of_album(album)),
+            Row::Artist(artist) => Some(Self::of_artist(artist)),
+            Row::Tag(tag) => Some(Self::of_tag(tag)),
+            Row::Playlist(playlist) => Self::of_playlist(playlist),
+            Row::Folder(_) => None,
+        }
+    }
+
+    /// What a track row plays outside a page: only itself.
+    pub fn of_track(track: &library::TrackRow) -> Self {
+        Self::Track(track.track_key)
+    }
+
+    /// What an album row plays: its page.
+    pub fn of_album(album: &library::AlbumRow) -> Self {
+        Self::Route(Route::of_album(album))
+    }
+
+    /// What an artist row plays: its page, in the role it was read with.
+    pub fn of_artist(artist: &library::ArtistRow) -> Self {
+        Self::Route(Route::of_artist(artist))
+    }
+
+    /// What a genre or mood row plays: its page.
+    pub fn of_tag(tag: &library::TagRow) -> Self {
+        Self::Route(Route::of_tag(tag))
+    }
+
+    /// What a playlist or smart playlist row plays: its page; None for a playlist folder.
+    pub fn of_playlist(row: &library::PlaylistListRow) -> Option<Self> {
+        match row {
+            library::PlaylistListRow::Folder(_) => None,
+            row => Some(Self::Route(Route::of_playlist(row))),
         }
     }
 
@@ -309,7 +344,7 @@ impl SourceOwner {
 
     /// What playing the track, album or artist `uri` outside a page queues, read in `selected`:
     /// a remembered search result or a listening overview row. An album or artist plays its
-    /// page whole, once its source has fetched it; a track plays alone.
+    /// page whole; a track plays alone.
     pub async fn play_uri(
         &self,
         uri: &str,
@@ -320,42 +355,19 @@ impl SourceOwner {
     ) -> LibraryResult<Option<PlayRequest>> {
         match Route::of_uri(uri) {
             Some(route) => {
-                self.play_fetched(route, uri, selected, placement, shuffled, cancel)
-                    .await
+                self.play_target(
+                    &PlayTarget::Route(route),
+                    selected,
+                    placement,
+                    shuffled,
+                    cancel,
+                )
+                .await
             }
             None => Ok(Some(
                 PlayRequest::uris(vec![uri.to_owned()], placement).shuffled(shuffled),
             )),
         }
-    }
-
-    /// What playing the album or artist page `route` of `uri` queues once its source has
-    /// fetched it whole: a live search holds a result only as its row. Offline, the page plays
-    /// what the Catalog holds of it.
-    async fn play_fetched(
-        &self,
-        route: Route,
-        uri: &str,
-        selected: Option<&SelectedLibrary>,
-        placement: QueuePlacement,
-        shuffled: bool,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<PlayRequest>> {
-        tokio::select! {
-            () = self.shared.catalog.loaded() => {}
-            () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
-        }
-        if let Err(error) = self.fetch_collection(uri).await {
-            tracing::warn!(%error, "could not fetch the collection to play");
-        }
-        self.play_target(
-            &PlayTarget::Route(route),
-            selected,
-            placement,
-            shuffled,
-            cancel,
-        )
-        .await
     }
 
     /// The tracks `target` holds for `scope`, read in `selected`. None when it holds nothing.
@@ -436,9 +448,59 @@ impl SourceOwner {
         rows_selection(read, Some(ranges), &self.shared.settings.committed(), scope)
     }
 
+    /// What each of the `ranges` of a list's rows plays, by [`PlayTarget::of_row`]: a playlist
+    /// folder plays nothing.
+    pub async fn list_targets(
+        &self,
+        read: ListRead,
+        ranges: &[Range<usize>],
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlayTarget>> {
+        let catalog = &self.shared.catalog;
+        let order = catalog.order(&Read::List(read), cancel).await?;
+        let mut targets = Vec::new();
+        for range in ranges {
+            for start in range.clone().step_by(ROWS_WINDOW) {
+                let end = (start + ROWS_WINDOW).min(range.end);
+                let rows = catalog.rows(&order, start..end, false, cancel).await?;
+                targets.extend(rows.iter().filter_map(PlayTarget::of_row));
+            }
+        }
+        Ok(targets)
+    }
+
     /// Everything `route` lists, in the order and filter `options` ask, without reading its rows
     /// or header. None when the route lists nothing or its collection is gone or empty.
+    ///
+    /// An album or artist the Catalog holds no tracks of is fetched whole from its source first:
+    /// a live search holds what it finds only as its row. Offline it lists nothing.
     async fn selection(
+        &self,
+        route: &Route,
+        selected: Option<&SelectedLibrary>,
+        options: &OpenOptions,
+        cancel: &ReadCancellation,
+    ) -> LibraryResult<Option<MemberSelection>> {
+        if let Some(selection) = self
+            .held_selection(route, selected, options, cancel)
+            .await?
+        {
+            return Ok(Some(selection));
+        }
+        let (Route::AlbumDetail(uri) | Route::ArtistDetail(uri) | Route::AlbumArtistDetail(uri)) =
+            route
+        else {
+            return Ok(None);
+        };
+        if let Err(error) = self.fetch_collection(uri).await {
+            tracing::warn!(%error, "could not fetch the collection");
+            return Ok(None);
+        }
+        self.held_selection(route, selected, options, cancel).await
+    }
+
+    /// What [`SourceOwner::selection`] reads of the Catalog as it holds it now.
+    async fn held_selection(
         &self,
         route: &Route,
         selected: Option<&SelectedLibrary>,
@@ -449,12 +511,17 @@ impl SourceOwner {
         let (header, plan) = self
             .plan(route, selected, options, &settings, cancel)
             .await?;
+        // An album, artist or tag page with no tracks reads as missing, as its header counts
+        // them.
+        let empty = |folder| {
+            header.as_ref().is_some_and(|header| {
+                !matches!(header, HeaderKey::Playlist(_) | HeaderKey::Smart { .. })
+                    && self.shared.catalog.track_count(header, folder) == 0
+            })
+        };
         Ok(Some(match plan {
             Plan::Rows(Read::Members(read)) | Plan::Folders { tracks: read, .. } => {
-                // A tag page with no tracks reads as missing, as its header counts them.
-                if let Some(header @ (HeaderKey::Genre(_) | HeaderKey::Mood(_))) = &header
-                    && self.shared.catalog.tag_track_count(header, read.folder) == 0
-                {
+                if empty(read.folder) {
                     return Ok(None);
                 }
                 read.selection()
@@ -463,6 +530,7 @@ impl SourceOwner {
                 rows_selection(read, None, &settings, SelectionScope::Page)
             }
             Plan::Releases { read, .. } => match artist_tracks(route, &read, &settings) {
+                Some(_) if empty(read.folder) => return Ok(None),
                 Some(tracks) => tracks.selection(),
                 None => return Ok(None),
             },
@@ -1130,8 +1198,7 @@ impl View {
     /// What activating `row`, shown at `index` on this page, queues, by the one rule
     /// (decisions.md, "What a row plays is one rule", 2026-11-06): a track plays the page from
     /// it ([`View::play_track`]), a track of the Albums list in Detail layout its album from it,
-    /// a search result's album or artist its page once its source has fetched it, and any other
-    /// row what its [`PlayTarget`] plays. The row's track and playlist entry
+    /// and any other row what [`View::row_target`] gives. The row's track and playlist entry
     /// anchor the play, so a row that moved since it showed still plays. None when it plays
     /// nothing.
     pub async fn play(
@@ -1156,33 +1223,7 @@ impl View {
             Row::AlbumTrack { track, .. } => {
                 self.play_album_track(track, placement, shuffled, result)
             }
-            Row::Album(album) if self.route == Route::Search => {
-                return self
-                    .owner
-                    .play_fetched(
-                        Route::of_album(album),
-                        &album.media_uri,
-                        self.selected.as_ref(),
-                        placement,
-                        shuffled,
-                        cancel,
-                    )
-                    .await;
-            }
-            Row::Artist(artist) if self.route == Route::Search => {
-                return self
-                    .owner
-                    .play_fetched(
-                        Route::of_artist(artist),
-                        &artist.media_uri,
-                        self.selected.as_ref(),
-                        placement,
-                        shuffled,
-                        cancel,
-                    )
-                    .await;
-            }
-            row => match PlayTarget::of_row(row) {
+            row => match self.row_target(row) {
                 Some(target) => {
                     return self
                         .owner
@@ -1192,6 +1233,32 @@ impl View {
                 None => None,
             },
         })
+    }
+
+    /// The page `row` of this page opens: a child folder the folder it names under this one,
+    /// any other row what [`Route::of_row`] gives.
+    pub fn row_route(&self, row: &Row) -> Option<Route> {
+        match (row, &self.route) {
+            (Row::Folder(folder), Route::Folders { path }) => {
+                let mut path = path.clone();
+                path.push(crate::route::FolderPathItem {
+                    id: folder.object_id.clone(),
+                    name: folder.name.clone(),
+                });
+                Some(Route::Folders { path })
+            }
+            _ => Route::of_row(row),
+        }
+    }
+
+    /// What `row` of this page plays outside the page's order, as its menu, card and drag
+    /// take it: a child folder plays the folder it opens (decisions.md, "Round nine
+    /// follow-ups"), any other row what [`PlayTarget::of_row`] gives.
+    pub fn row_target(&self, row: &Row) -> Option<PlayTarget> {
+        match row {
+            Row::Folder(_) => self.row_route(row).map(PlayTarget::Route),
+            row => PlayTarget::of_row(row),
+        }
     }
 
     /// What playing a track of the Albums list in Detail layout queues: its album from it.

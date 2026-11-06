@@ -1648,30 +1648,42 @@ impl Catalog {
         track_keys_on(&mut connection, uris).await
     }
 
-    /// How many listed tracks a genre's or mood's header counts in music folder `folder`.
-    pub fn tag_track_count(&self, header: &HeaderKey, folder: Option<FolderKey>) -> i64 {
-        let (key, kind) = match header {
-            HeaderKey::Genre(key) => (key.raw(), TagKind::Genre),
-            HeaderKey::Mood(key) => (key.raw(), TagKind::Mood),
-            _ => return 0,
-        };
+    /// How many listed tracks an album's, artist's, genre's or mood's header counts in music
+    /// folder `folder`; 0 for one the Catalog does not hold, and for a playlist.
+    pub fn track_count(&self, header: &HeaderKey, folder: Option<FolderKey>) -> i64 {
         let snapshot = self.snapshot();
-        let Some(slot) = snapshot.tags.slot(key) else {
-            return 0;
-        };
         let shape = Shape {
             folder,
             ..Shape::of(None)
         };
         let inputs = Inputs::default();
         let builder = Builder::new(self, &snapshot, &shape, &inputs, false);
-        let folder =
-            builder.counted_in(kind.catalog(), snapshot.tags.records[slot as usize].source);
-        builder
-            .totals(folder, false)
-            .tag(slot)
-            .summary()
-            .track_count
+        let tag = |key: i64| {
+            let slot = snapshot.tags.slot(key)?;
+            let record = &snapshot.tags.records[slot as usize];
+            let folder = builder.counted_in(record.kind().catalog(), record.source);
+            Some(builder.totals(folder, false).tag(slot))
+        };
+        let totals = match *header {
+            HeaderKey::Genre(key) => tag(key.raw()),
+            HeaderKey::Mood(key) => tag(key.raw()),
+            HeaderKey::Album { key, .. } => snapshot.albums.slot(key.raw()).map(|slot| {
+                let source = snapshot.albums.records[slot as usize].source;
+                let folder = builder.counted_in(CatalogKind::Album, source);
+                builder.totals(folder, false).album(slot)
+            }),
+            HeaderKey::Artist {
+                key, album_artist, ..
+            } => snapshot.artists.slot(key.raw()).map(|slot| {
+                let source = snapshot.artists.records[slot as usize].source;
+                let folder = builder.counted_in(CatalogKind::Artist, source);
+                builder
+                    .totals(folder, false)
+                    .artist(usize::from(album_artist), slot)
+            }),
+            HeaderKey::Playlist(_) | HeaderKey::Smart { .. } => None,
+        };
+        totals.map_or(0, |totals| totals.summary().track_count)
     }
 
     /// A detail header's full view, as a page shows it.
