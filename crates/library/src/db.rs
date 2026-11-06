@@ -551,7 +551,19 @@ impl Catalog {
                 .map_or(true, |version| version != 0);
         let mut imported = false;
         if !current && released.exists() {
-            match Self::import_released(released, path, catalog).await {
+            let mut result = Self::import_released(released, path, catalog).await;
+            if result
+                .as_ref()
+                .is_err_and(|error| !error.is_store_unavailable())
+                && catalog.exists()
+            {
+                // A damaged catalog file fails the import; favorites, playlists, history and the
+                // queue import without it.
+                tracing::warn!("could not import the released catalog file; importing without it");
+                move_store(catalog, None)?;
+                result = Self::import_released(released, path, catalog).await;
+            }
+            match result {
                 Ok(()) => imported = true,
                 Err(error) if error.is_store_unavailable() => return Err(error),
                 Err(error) => {
@@ -560,7 +572,7 @@ impl Catalog {
             }
         }
         // The release's catalog file is a cache it rebuilds after a downgrade.
-        let _ = remove_store(catalog);
+        let _ = move_store(catalog, None);
         let opened = async {
             if path.exists() {
                 Self::check_version(path).await?;
@@ -576,8 +588,8 @@ impl Catalog {
                     if error.is_store_unavailable() {
                         return Err(error);
                     }
-                    tracing::warn!(%error, "could not read the Store; starting a new one");
-                    remove_store(path)?;
+                    tracing::warn!(%error, "could not read the Store; keeping it aside");
+                    move_store(path, Some(&path.with_extension("unreadable")))?;
                 }
                 (Self::open(path).await?, true)
             }
@@ -999,12 +1011,19 @@ async fn open_readers(
     }
 }
 
-/// Deletes a Store file with its journal files.
-pub(crate) fn remove_store(path: &Path) -> std::io::Result<()> {
+/// Removes a Store with its journal files, or moves them to `aside`.
+pub(crate) fn move_store(path: &Path, aside: Option<&Path>) -> std::io::Result<()> {
     for suffix in ["", "-wal", "-shm"] {
-        let mut file = path.as_os_str().to_os_string();
-        file.push(suffix);
-        match std::fs::remove_file(file) {
+        let file = |path: &Path| {
+            let mut file = path.as_os_str().to_os_string();
+            file.push(suffix);
+            file
+        };
+        let moved = match aside {
+            Some(aside) => std::fs::rename(file(path), file(aside)),
+            None => std::fs::remove_file(file(path)),
+        };
+        match moved {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
             _ => {}
         }
