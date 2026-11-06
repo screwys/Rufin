@@ -679,6 +679,11 @@ async fn copy_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
     copy_named(connection, "folders", "folder_key", "folder").await?;
     copy_albums(connection).await?;
     copy_tracks(connection).await?;
+    // The plays servers report; Rufin's own listens come from the Store.
+    if has_table(connection, "old_catalog", "activity_baseline").await? {
+        sqlx::query("UPDATE main.tracks SET native_play_count=old.play_count,native_last_played=old.last_played_at FROM old_catalog.activity_baseline old JOIN migration_source_keys mapping ON mapping.old_key=old.source_key WHERE old.period='lifetime' AND old.item_kind='track' AND tracks.source_key=mapping.source_key AND tracks.object_id=old.track_object_id")
+            .execute(&mut *connection).await?;
+    }
     copy_links(connection, mood_offset).await?;
     copy_table(
         connection,
