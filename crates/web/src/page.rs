@@ -241,7 +241,7 @@ pub(super) async fn open(
     };
     let missed = reading.missed().map(|missed| {
         let mut value = json!({});
-        show_changed(&mut value, Some(&opened.view), &missed);
+        show_changed(products, &mut value, Some(&opened.view), &missed);
         value
     });
     Ok(Opened {

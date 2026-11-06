@@ -1141,7 +1141,7 @@ fn changed_json(
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
         "activity_changed": changed.listened,
     });
-    show_changed(&mut first, shown, changed);
+    show_changed(products, &mut first, shown, changed);
     if changed.playlist_lists {
         first["playlists"] = Value::Null;
         return vec![first];
@@ -1158,15 +1158,17 @@ fn changed_json(
 }
 
 /// What `changed` shows on `shown`, the page a client shows: whether it reads the page again
-/// (`page_refresh`: reread or reopen) and the favorites and ratings that changed, which the rows
-/// that show them patch in.
+/// (`page_refresh`: reread, or reopen in the selected source and music folder) and the
+/// favorites and ratings that changed, which the rows that show them patch in.
 fn show_changed(
+    products: &ProductHandles,
     value: &mut Value,
     shown: Option<&rufin_core::view::View>,
     changed: &rufin_core::source::feed::Changed,
 ) {
     use rufin_core::view::Refresh;
-    match shown.map(|view| view.refresh(view.selected(), changed)) {
+    let current = products.source.selected_library();
+    match shown.map(|view| view.refresh(current.as_ref(), changed)) {
         Some(Refresh::Reread) => value["page_refresh"] = json!("reread"),
         Some(Refresh::Reopen) => value["page_refresh"] = json!("reopen"),
         Some(Refresh::Nothing) | None => {}

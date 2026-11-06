@@ -430,10 +430,17 @@ function showChanged(value) {
   if (value.page_refresh) run(() => refreshPage(value.page_refresh));
 }
 
-// Reads the page again as a committed change asks: in place, or opened again.
-function refreshPage(verdict) {
+// Reads the page again as a committed change asks: in place, or opened again in the selected
+// source and music folder.
+async function refreshPage(verdict) {
   if (opened === "sources") return;
-  if (verdict === "reread" && opened.route !== "Home") return rereadPage();
+  if (verdict === "reopen") {
+    const configured = await api("/sources");
+    state.source = configured.selected || state.source;
+    updateSources(configured);
+    return reopen();
+  }
+  if (opened.route !== "Home") return rereadPage();
   return loadView(false, libraryTotal);
 }
 

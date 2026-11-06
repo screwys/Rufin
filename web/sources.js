@@ -212,12 +212,12 @@ function showSourceProgress(value) {
   previousOperation = value.state;
 }
 
-// Selects `source` or one of its music folders; the page opens again in it once.
+// Selects `source` or one of its music folders; a page that reads them opens again in them
+// when the change reaches the events stream.
 async function select(path, body, source = state.source) {
   await api(path, "POST", body);
   state.source = source;
   updateSources(await api("/sources"));
-  reopen();
 }
 
 let editingSource = null;
