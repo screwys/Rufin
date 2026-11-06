@@ -43,13 +43,11 @@ pub(crate) fn known(value: u32) -> Option<u32> {
 }
 
 /// The favorite a row shows: the user's own, else the one its source reports.
-pub(crate) fn favorite(flags: u16) -> Option<bool> {
+pub(crate) fn favorite(flags: u16) -> bool {
     if flags & FAVORITE_KNOWN != 0 {
-        Some(flags & FAVORITE != 0)
-    } else if flags & NATIVE_FAVORITE_KNOWN != 0 {
-        Some(flags & NATIVE_FAVORITE != 0)
+        flags & FAVORITE != 0
     } else {
-        None
+        flags & NATIVE_FAVORITE_KNOWN != 0 && flags & NATIVE_FAVORITE != 0
     }
 }
 
@@ -861,11 +859,7 @@ fn compare_tracks(
             descending,
         ),
         S::Duration => first(left.duration_ms.cmp(&right.duration_ms)),
-        S::Favorite => first(
-            favorite(left.flags)
-                .unwrap_or(false)
-                .cmp(&favorite(right.flags).unwrap_or(false)),
-        ),
+        S::Favorite => first(favorite(left.flags).cmp(&favorite(right.flags))),
         S::AlbumCount | S::SongCount => Ordering::Equal,
         _ => return first(text).then(key),
     };
@@ -1137,7 +1131,7 @@ impl Context<'_> {
     /// Whether a track passes a member read's filters.
     fn member_keep(&self, read: &MemberRead, filter: &str, record: &TrackRec) -> bool {
         (filter.is_empty() || self.track_search(record).contains(filter))
-            && (!read.favorites_only || favorite(record.flags) == Some(true))
+            && (!read.favorites_only || favorite(record.flags))
             && (!read.downloaded_only || record.flags & DOWNLOADED != 0)
     }
 
@@ -1598,7 +1592,7 @@ impl Context<'_> {
         let mut row = ListRow::new(i64::from(record.key), self.snapshot.album_sort(record));
         row.totals = totals;
         row.rating = rating(record.rating, record.native_rating);
-        row.favorite = favorite(record.flags) == Some(true);
+        row.favorite = favorite(record.flags);
         row.year = year_of(record.year);
         row.release = release_of(record.release);
         row.added = known(record.added);
@@ -1613,7 +1607,7 @@ impl Context<'_> {
             ListKind::Albums => snapshot.albums.slot(key).is_some_and(|slot| {
                 let record = &snapshot.albums.records[slot as usize];
                 self.album_matches(record, filter)
-                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::ArtistAlbums {
                 release_class,
@@ -1636,12 +1630,12 @@ impl Context<'_> {
                     || year_of(record.year).is_some_and(|year| year.to_string() == text);
                 matched
                     && release_class.is_none_or(|wanted| wanted == class)
-                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Artists { .. } => snapshot.artists.slot(key).is_some_and(|slot| {
                 let record = &snapshot.artists.records[slot as usize];
                 contains(snapshot.text(record.name), filter)
-                    && (!read.favorites_only || favorite(record.flags) == Some(true))
+                    && (!read.favorites_only || favorite(record.flags))
             }),
             ListKind::Genres | ListKind::Moods => snapshot.tags.slot(key).is_some_and(|slot| {
                 contains(
@@ -1718,7 +1712,7 @@ impl Context<'_> {
                             ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
                         row.totals = totals;
                         row.rating = rating(record.rating, record.native_rating);
-                        row.favorite = favorite(record.flags) == Some(true);
+                        row.favorite = favorite(record.flags);
                         rows.push(row);
                     }
                 }
@@ -1862,7 +1856,7 @@ impl Context<'_> {
             F::Bpm => Fact::Number((record.bpm != u16::MAX).then_some(i64::from(record.bpm))),
             F::Year => Fact::Number(year_of(record.year).map(i64::from)),
             F::DateAdded => Fact::Date(known(record.added).and_then(date_text)),
-            F::Favorite => Fact::Number(favorite(record.flags).map(i64::from)),
+            F::Favorite => Fact::Number(Some(i64::from(favorite(record.flags)))),
             F::Rating => Fact::Number(
                 rating(record.rating, record.native_rating).map(|rating| i64::from(rating / 10)),
             ),
@@ -2906,7 +2900,7 @@ impl Catalog {
                         .artist(usize::from(row.album_artist), slot);
                 }
                 listed.rating = rating(record.rating, record.native_rating);
-                listed.favorite = favorite(record.flags) == Some(true);
+                listed.favorite = favorite(record.flags);
                 Some((position, listed))
             })
             .collect::<Vec<_>>();

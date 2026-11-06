@@ -520,7 +520,7 @@ pub(crate) fn shown_rating(rating: Option<u8>) -> Option<i64> {
 /// The state a row shows: its favorite and rating, user's first, and its plays.
 fn state(flags: u16, user: u8, native: u8, played: Played) -> TrackState {
     TrackState {
-        favorite: favorite(flags).unwrap_or(false),
+        favorite: favorite(flags),
         rating: shown_rating(rating(user, native)),
         last_played: played.last.map(i64::from),
         play_count: i64::from(played.plays),

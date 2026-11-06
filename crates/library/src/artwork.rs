@@ -812,7 +812,7 @@ impl Catalog {
                         && match scope {
                             RepresentativeArtworkScope::AllTracks => true,
                             RepresentativeArtworkScope::FavoriteTracks => {
-                                crate::catalog::views::favorite(record.flags) == Some(true)
+                                crate::catalog::views::favorite(record.flags)
                             }
                             RepresentativeArtworkScope::PlaylistTracks => held.contains(slot),
                             RepresentativeArtworkScope::LatestAlbums(_) => latest

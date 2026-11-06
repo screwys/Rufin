@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// The favorite and rating a row shows.
-type Shown = (Option<bool>, Option<u8>);
+type Shown = (bool, Option<u8>);
 
 const PERSIST_ROWS: usize = 256;
 const READ_KEYS: usize = 256;
@@ -1447,7 +1447,7 @@ impl<'a> Write<'a> {
                 (after != before).then(|| StateChange {
                     target: item.target(uri),
                     key: item.key(),
-                    favorite: after.0.unwrap_or(false),
+                    favorite: after.0,
                     rating: after.1,
                     rating_changed: after.1 != before.1,
                 })

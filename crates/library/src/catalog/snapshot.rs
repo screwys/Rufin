@@ -1075,7 +1075,7 @@ impl Snapshot {
 
     /// The favorite and rating a track, album or artist shows: the user's own, else its
     /// source's.
-    pub(crate) fn shown_state(&self, item: UserItem) -> Option<(Option<bool>, Option<u8>)> {
+    pub(crate) fn shown_state(&self, item: UserItem) -> Option<(bool, Option<u8>)> {
         let (flags, rating, native) = match item {
             UserItem::Track(key) => self
                 .tracks
