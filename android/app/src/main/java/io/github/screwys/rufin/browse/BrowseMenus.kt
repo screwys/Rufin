@@ -653,7 +653,7 @@ internal class BrowseChoiceSource(
                     is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
                     else -> route
                 }
-                val opened = library.open(tracks, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false, false, null, true)
+                val opened = library.open(tracks, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false, null, null, true)
                 try {
                     val count = opened.count.toInt()
                     val rows = opened.view.rows(offset.toULong(), params.loadSize.toUInt())
