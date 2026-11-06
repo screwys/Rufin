@@ -14,6 +14,7 @@ ignore = [
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2026-0387", reason = "age 0.12 pulls p256 0.13 -> elliptic-curve 0.13 -> crypto-bigint 0.5, which has no patched release. Rufin uses only age X25519 identities, so the affected P-256 arithmetic (p256tag recipients) is unused. crypto-bigint 0.7 is patched; remove when age moves to p256 0.14." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
+    { id = "RUSTSEC-2026-0441", reason = "smb 0.12 pins sspi 0.21, which pulls async-dnssd -> pin-utils on macOS only. Maintenance advisory with no successor release of async-dnssd; remove when smb moves to an sspi without async-dnssd." },
 ]
 
 [licenses]
