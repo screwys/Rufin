@@ -553,17 +553,12 @@ impl Catalog {
         refresh: bool,
     ) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        let written = sqlx::query("INSERT INTO artwork_previews(family,hash) VALUES(?1,?2) ON CONFLICT(family) DO UPDATE SET hash=excluded.hash WHERE ?3 AND hash IS NOT excluded.hash")
+        sqlx::query("INSERT INTO artwork_previews(family,hash) VALUES(?1,?2) ON CONFLICT(family) DO UPDATE SET hash=excluded.hash WHERE ?3 AND hash IS NOT excluded.hash")
             .bind(family)
             .bind(hash)
             .bind(refresh)
             .execute(write.connection().await?)
-            .await?
-            .rows_affected();
-        // Previews ride on artwork reads; showing one changes nothing a client lists.
-        if written != 0 {
-            write.keep();
-        }
+            .await?;
         write.commit().await?;
         Ok(())
     }

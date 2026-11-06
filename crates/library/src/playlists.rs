@@ -1457,7 +1457,6 @@ pub(crate) async fn import_playlists_jsonl_on(
             }
             PlaylistRecord::File(record) => {
                 crate::playlist_links::restore_record_on(write.connection().await?, record).await?;
-                write.keep();
             }
         }
     }

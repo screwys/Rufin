@@ -632,8 +632,9 @@ pub(crate) struct Write<'a> {
     forgotten: Vec<(SourceKey, Vec<TrackKey>)>,
     scopes: Vec<Scope>,
     rekeys: Vec<(TrackKey, TrackKey)>,
-    /// Plain SQL changed rows no client shows.
-    kept: bool,
+    /// The connection's changed rows when the Write began. A Write whose statements changed
+    /// none and that changed nothing memory holds rolls back.
+    changes: i64,
     /// Plain SQL replaced whole tables, so the Catalog loads again after the commit.
     reload: bool,
     /// Something was staged since the last flush.
@@ -655,6 +656,7 @@ impl Catalog {
             }));
         }
         SqliteTransactionManager::begin(&mut writer, None).await?;
+        let changes = total_changes(&mut writer).await?;
         Ok(Write {
             catalog: self,
             writer,
@@ -670,12 +672,18 @@ impl Catalog {
             forgotten: Vec::new(),
             scopes: Vec::new(),
             rekeys: Vec::new(),
-            kept: false,
+            changes,
             reload: false,
             dirty: false,
             stage: Stage::Open,
         })
     }
+}
+
+async fn total_changes(connection: &mut SqliteConnection) -> LibraryResult<i64> {
+    Ok(sqlx::query_scalar("SELECT total_changes()")
+        .fetch_one(connection)
+        .await?)
 }
 
 /// Rows per statement for rows of `width` parameters.
@@ -1088,12 +1096,6 @@ impl<'a> Write<'a> {
         }
     }
 
-    /// Keeps what plain SQL changed in tables no client shows, such as freshness markers and
-    /// delivery queues. The commit publishes nothing for it.
-    pub(crate) fn keep(&mut self) {
-        self.kept = true;
-    }
-
     /// Loads the Catalog again after the commit instead of applying what was staged. A restore
     /// that replaces whole tables of user data uses it.
     pub(crate) fn reload(&mut self) {
@@ -1348,7 +1350,8 @@ impl<'a> Write<'a> {
         let rows = self.row_changes();
         let resident =
             self.reload || rows.contains(&true) || !self.forgotten.is_empty() || !user.is_empty();
-        if scopes.is_empty() && !self.kept && !resident {
+        let changed = total_changes(&mut self.writer).await? != self.changes;
+        if scopes.is_empty() && !changed && !resident {
             SqliteTransactionManager::rollback(&mut self.writer).await?;
             self.stage = Stage::Done;
             self.catalog

@@ -250,7 +250,6 @@ impl super::Observation<'_> {
         let source = self.source.raw();
         sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE source_key=?1 AND object_id=?2 AND(provider_revision,valid_until) IS NOT(?3,?4)").bind(source).bind(id).bind(revision).bind(valid_until).execute(write.connection().await?).await?;
         // Freshness is read by key only, so clients hear nothing of it.
-        write.keep();
         write.commit().await?;
         Ok(())
     }

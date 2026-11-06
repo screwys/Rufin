@@ -63,7 +63,6 @@ impl Catalog {
             .bind(if file.owners.is_empty() { "[]" } else { &file.owners }).bind(&file.storage_root).bind(&file.relative_path).bind(file.completed_size)
             .bind(if file.retired_documents.is_empty() { "[]" } else { &file.retired_documents })
             .execute(write.connection().await?).await?;
-        write.keep();
         write.read_downloads(&[&file.media_uri]).await?;
         write.commit().await?;
         Ok(())
@@ -80,7 +79,6 @@ impl Catalog {
             .rows_affected()
             > 0;
         if removed {
-            write.keep();
             write.read_downloads(&[&file.media_uri]).await?;
         }
         write.commit().await?;

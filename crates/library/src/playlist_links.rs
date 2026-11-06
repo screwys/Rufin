@@ -564,7 +564,6 @@ impl Catalog {
                     .bind(source.as_str()).execute(&mut *connection).await?;
             }
         }
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -604,7 +603,6 @@ impl Catalog {
             sqlx::query("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE files SET playlist_identity=(SELECT identity FROM target) WHERE file_key=(SELECT file.file_key FROM files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target)")
                 .bind(source.as_str()).bind(path).bind(playlist).execute(&mut *connection).await?;
         }
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -651,7 +649,6 @@ impl Catalog {
         let mut write = self.write().await?;
         let saved = save_link_on(write.connection().await?, link).await?;
         write.link_playlist(link.playlist.raw(), true);
-        write.keep();
         write.commit().await?;
         Ok(saved)
     }
@@ -666,7 +663,6 @@ impl Catalog {
         if removed != 0 {
             write.link_playlist(playlist.raw(), false);
         }
-        write.keep();
         write.commit().await?;
         Ok(removed != 0)
     }
@@ -695,7 +691,6 @@ impl Catalog {
         let mut write = self.write().await?;
         sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=0,error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR dirty<>0 OR error IS NOT NULL)")
             .bind(playlist).bind(revision).execute(write.connection().await?).await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -713,7 +708,6 @@ impl Catalog {
         .bind(error)
         .execute(write.connection().await?)
         .await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -729,7 +723,6 @@ impl Catalog {
             .bind(path)
             .execute(write.connection().await?)
             .await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -771,7 +764,6 @@ impl Catalog {
         let mut write = self.write().await?;
         sqlx::query("INSERT INTO playlist_file_settings(source_id,auto_save) VALUES(?1,?2) ON CONFLICT(source_id) DO UPDATE SET auto_save=excluded.auto_save WHERE auto_save<>excluded.auto_save")
             .bind(location_source(source_id)).bind(enabled).execute(write.connection().await?).await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }

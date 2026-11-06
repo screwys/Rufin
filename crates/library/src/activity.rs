@@ -135,9 +135,6 @@ impl Catalog {
                 .bind(key).bind(&delivery.service).bind(&delivery.account_id)
                 .bind(delivery.next_attempt_at).execute(write.connection().await?).await?;
         }
-        if !deliveries.is_empty() {
-            write.keep();
-        }
         write.commit().await?;
         Ok(key)
     }
@@ -215,7 +212,6 @@ impl Catalog {
         .bind(serde_json::to_string(ids)?)
         .fetch_all(write.connection().await?)
         .await?;
-        write.keep();
         write
             .recount(&uris.iter().map(String::as_str).collect::<Vec<_>>())
             .await?;
@@ -254,7 +250,6 @@ impl Catalog {
         .bind(serde_json::to_string(keys)?)
         .fetch_all(write.connection().await?)
         .await?;
-        write.keep();
         let uris: Vec<String> = sqlx::query_scalar(
             "SELECT track.media_uri FROM json_each(?1) removed JOIN sources source ON source.object_id=removed.value->>0
              JOIN tracks track ON track.source_key=source.source_key AND track.object_id=removed.value->>1",
@@ -379,7 +374,6 @@ impl Catalog {
             .execute(write.connection().await?)
             .await?
             .rows_affected();
-        write.keep();
         write.commit().await?;
         Ok(removed == 1)
     }
@@ -393,7 +387,6 @@ impl Catalog {
         let mut write = self.write().await?;
         let deferred = sqlx::query("UPDATE listen_outbox SET attempts=attempts+1,next_attempt_at=?2,last_error=?3 WHERE outbox_key=?1")
             .bind(outbox).bind(next_attempt_at).bind(last_error).execute(write.connection().await?).await?.rows_affected();
-        write.keep();
         write.commit().await?;
         Ok(deferred == 1)
     }
@@ -407,7 +400,6 @@ impl Catalog {
         let mut write = self.write().await?;
         let blocked = sqlx::query("UPDATE listen_outbox SET attempts=attempts+1,next_attempt_at=NULL,last_error=?3 WHERE service=?1 AND account_id=?2")
             .bind(service).bind(account_id).bind(last_error).execute(write.connection().await?).await?.rows_affected();
-        write.keep();
         write.commit().await?;
         Ok(blocked)
     }
@@ -424,7 +416,6 @@ impl Catalog {
             .execute(write.connection().await?)
             .await?
             .rows_affected();
-        write.keep();
         write.commit().await?;
         Ok(removed)
     }
@@ -438,7 +429,6 @@ impl Catalog {
         let mut write = self.write().await?;
         let woken = sqlx::query("UPDATE listen_outbox SET next_attempt_at=?3,last_error=NULL WHERE service=?1 AND account_id=?2 AND next_attempt_at IS NULL")
             .bind(service).bind(account_id).bind(now).execute(write.connection().await?).await?.rows_affected();
-        write.keep();
         write.commit().await?;
         Ok(woken)
     }
@@ -569,10 +559,6 @@ pub(crate) async fn write_listen(
             (updated.as_ref().map(|(key, _)| *key), updated.is_some())
         }
     };
-    // History reads listens.
-    if changed {
-        write.keep();
-    }
     // A repeated listen that changed nothing is read back for its key.
     let key = if let Some(key) = key {
         key
@@ -781,7 +767,6 @@ pub(crate) async fn write_legacy_activity(
         .bind(record.play_count).bind(record.skip_count).bind(record.last_played_at)
         .bind(&record.title).bind(&record.artist).bind(&record.album)
         .execute(write.connection().await?).await?;
-    write.keep();
     let uri: Option<String> = sqlx::query_scalar("SELECT media_uri FROM tracks WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND object_id=?2")
         .bind(&record.source_id).bind(&record.track_object_id)
         .fetch_optional(write.connection().await?).await?;

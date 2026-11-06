@@ -151,8 +151,6 @@ async fn put_lyrics_on(
                 write.changed(crate::Scope::Lyrics {
                     uri: row.media_uri.clone(),
                 });
-            } else {
-                write.keep();
             }
         }
     }
@@ -178,9 +176,6 @@ async fn remove_lyrics_on(
         &removed.iter().map(|(key, ..)| *key).collect::<Vec<_>>(),
     )
     .await?;
-    if !removed.is_empty() {
-        write.keep();
-    }
     let mut uris = removed
         .iter()
         .filter(|(.., picked)| *picked)

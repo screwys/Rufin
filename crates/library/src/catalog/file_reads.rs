@@ -144,25 +144,15 @@ impl super::Observation<'_> {
             return Ok(());
         }
         let mut write = self.write().await?;
-        let cleared = sqlx::query(sqlx::AssertSqlSafe(format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE files SET artist_pictures=NULL WHERE {PARTIAL}"
         )))
         .bind(self.source)
         .execute(write.connection().await?)
-        .await?
-        .rows_affected();
-        keep_file_rows(write, cleared).await
+        .await?;
+        write.commit().await?;
+        Ok(())
     }
-}
-
-/// File rows are not resident and no client shows them, so a Write that changed some keeps
-/// them without publishing.
-async fn keep_file_rows(mut write: super::write::Write<'_>, changed: u64) -> LibraryResult<()> {
-    if changed != 0 {
-        write.keep();
-    }
-    write.commit().await?;
-    Ok(())
 }
 
 // A sole zero-start CUE entry plays its backing file through EOF.

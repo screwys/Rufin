@@ -32,25 +32,19 @@ impl Catalog {
             .bind(key).bind(payload).bind(now).bind(now + 7 * 86400).execute(&mut *transaction).await?;
         sqlx::query("DELETE FROM metadata_lookup_cache WHERE key IN (SELECT key FROM (SELECT key,row_number() OVER(ORDER BY written_at DESC,key DESC) AS position,sum(length(payload)) OVER(ORDER BY written_at DESC,key DESC) AS bytes FROM metadata_lookup_cache) WHERE position>10000 OR bytes>67108864)")
             .execute(&mut *transaction).await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }
 
     pub async fn link_fingerprint_lookup(&self, uri: &str, key: &str) -> LibraryResult<()> {
         let mut write = self.write().await?;
-        if sqlx::query(
+        sqlx::query(
             "UPDATE fingerprint SET lookup_key=?2 WHERE audio_hash=(SELECT details.audio_hash FROM tracks JOIN track_details details USING(track_key) WHERE media_uri=?1) AND lookup_key<>?2",
         )
         .bind(uri)
         .bind(key)
         .execute(write.connection().await?)
-        .await?
-        .rows_affected()
-            != 0
-        {
-            write.keep();
-        }
+        .await?;
         write.commit().await?;
         Ok(())
     }

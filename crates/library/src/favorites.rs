@@ -290,7 +290,6 @@ impl Catalog {
         .bind(next_attempt_at)
         .execute(write.connection().await?)
         .await?;
-        write.keep();
         write.commit().await?;
         Ok(())
     }
@@ -434,10 +433,7 @@ impl Catalog {
     pub async fn put_user_states(&self, states: &[UserMediaStateWrite]) -> LibraryResult<()> {
         let mut write = self.write().await?;
         for state in states {
-            // A URI the Catalog holds no track for stages nothing resident, so keep its row.
-            if write_user_media_state(&mut write, state).await? {
-                write.keep();
-            }
+            write_user_media_state(&mut write, state).await?;
         }
         write.commit().await?;
         Ok(())
@@ -487,7 +483,7 @@ pub(crate) async fn import_user_media_state_jsonl_on(
 pub(crate) async fn write_user_media_state(
     write: &mut Write<'_>,
     state: &UserMediaStateWrite,
-) -> LibraryResult<bool> {
+) -> LibraryResult<()> {
     if state.media_uri.is_empty()
         || state
             .rating
@@ -518,7 +514,6 @@ pub(crate) async fn write_user_media_state(
         .fetch_all(&mut *connection)
         .await?
     };
-    let changed = !states.is_empty();
     write.states_changed(states);
-    Ok(changed)
+    Ok(())
 }

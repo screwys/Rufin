@@ -273,7 +273,6 @@ impl super::Observation<'_> {
         }
         if !batch.files.is_empty() || !removed.is_empty() || !batch.identities.is_empty() {
             // File rows are not resident. Folder pages list directories and the tracks in them.
-            write.keep();
             if batch
                 .files
                 .iter()
@@ -309,7 +308,6 @@ impl super::Observation<'_> {
             .bind(self.source).bind(playlist).bind(serde_json::to_string(configured)?).execute(write.connection().await?).await?.rows_affected();
         if inserted != 0 {
             // Import locators are read by key only, so clients hear nothing of them.
-            write.keep();
         }
         self.commit(write).await
     }
@@ -690,7 +688,6 @@ pub(super) async fn merge_local_file_uris_on(
             .bind(previous)
             .execute(write.connection().await?)
             .await?;
-        write.keep();
     }
     for (table, key) in [
         ("playlists", "playlist_key"),
