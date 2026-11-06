@@ -477,36 +477,7 @@ impl SourceOwner {
 
     /// Everything `route` lists, in the order and filter `options` ask, without reading its rows
     /// or header. None when the route lists nothing or its collection is gone or empty.
-    ///
-    /// An album or artist the Catalog holds no tracks of is fetched whole from its source first:
-    /// a live search holds what it finds only as its row. Offline it lists nothing.
     async fn selection(
-        &self,
-        route: &Route,
-        selected: Option<&SelectedLibrary>,
-        options: &OpenOptions,
-        cancel: &ReadCancellation,
-    ) -> LibraryResult<Option<MemberSelection>> {
-        if let Some(selection) = self
-            .held_selection(route, selected, options, cancel)
-            .await?
-        {
-            return Ok(Some(selection));
-        }
-        let (Route::AlbumDetail(uri) | Route::ArtistDetail(uri) | Route::AlbumArtistDetail(uri)) =
-            route
-        else {
-            return Ok(None);
-        };
-        if let Err(error) = self.fetch_collection(uri).await {
-            tracing::warn!(%error, "could not fetch the collection");
-            return Ok(None);
-        }
-        self.held_selection(route, selected, options, cancel).await
-    }
-
-    /// What [`SourceOwner::selection`] reads of the Catalog as it holds it now.
-    async fn held_selection(
         &self,
         route: &Route,
         selected: Option<&SelectedLibrary>,
@@ -569,6 +540,31 @@ impl SourceOwner {
         )))
     }
 
+    /// Fetches the album or artist `route` shows whole first when a live search admitted only
+    /// part of it. Offline it shows that part.
+    async fn complete_collection(&self, route: &Route) {
+        let (Route::AlbumDetail(uri)
+        | Route::ArtistDetail(uri)
+        | Route::AlbumArtistDetail(uri)
+        | Route::ArtistDiscography(uri)
+        | Route::AlbumArtistDiscography(uri)
+        | Route::ArtistTracks(uri)
+        | Route::AlbumArtistTracks(uri)
+        | Route::ArtistFavoriteTracks(uri)
+        | Route::AlbumArtistFavoriteTracks(uri)) = route
+        else {
+            return;
+        };
+        let Some(source) = library::source_entity_parts(uri)
+            .and_then(|(source_id, _, _)| self.cached_client(&source_id))
+        else {
+            return;
+        };
+        if let Err(error) = source.complete_collection(&self.shared.catalog, uri).await {
+            tracing::warn!(%error, "could not fetch the collection");
+        }
+    }
+
     /// What `route` reads and the header it shows, from the resident Catalog: no rows.
     async fn plan(
         &self,
@@ -583,6 +579,7 @@ impl SourceOwner {
             () = catalog.loaded() => {}
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
+        self.complete_collection(route).await;
         let (sort, descending, activity) = read_order(route, options, settings);
         let selected = Scope::of(route).apply(selected);
         let selected = selected.as_ref();

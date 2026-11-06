@@ -1562,20 +1562,6 @@ impl SourceOwner {
         }
         Ok(None)
     }
-
-    pub fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, _| async move { owner.fetch_collection(&media_uri).await })
-    }
-
-    /// Fetches the album or artist `media_uri` whole from its source, which a live search
-    /// result may not be held as yet.
-    pub(crate) async fn fetch_collection(&self, media_uri: &str) -> Result<(), String> {
-        self.media_client(media_uri)
-            .await?
-            .prepare_collection(&self.shared.catalog, media_uri)
-            .await
-            .map_err(string_error)
-    }
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -2782,14 +2768,6 @@ impl SourceOwner {
                 .await
                 .map_err(string_error),
         }
-    }
-
-    pub(crate) async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
-        let source_id = self
-            .media_source_id(media_uri)
-            .await?
-            .ok_or_else(source_access_unavailable)?;
-        self.client(&source_id)
     }
 
     pub(crate) fn client(&self, source_id: &SourceId) -> Result<Arc<Source>, String> {

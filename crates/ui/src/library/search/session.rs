@@ -164,7 +164,7 @@ impl SearchSession {
         });
     }
 
-    /// Opens a recent album or artist result once its source has it; a track plays.
+    /// Opens a recent album or artist result; a track plays.
     pub fn activate_recent(result: &RecentSearchResult, catalog: &Rc<CatalogUi>) {
         let Some(route) = Route::of_uri(&result.media_uri) else {
             Self::play_recent(result, catalog, QueuePlacement::Now);
@@ -175,21 +175,7 @@ impl SearchSession {
             .update_app_settings("recent search", |settings| {
                 settings.remember_search_result(result.clone())
             });
-        let receiver = catalog
-            .products
-            .source
-            .prepare_collection(result.media_uri.clone());
-        // The top bar's popup hands over a page made for this activation, so the future
-        // holds it to ask whether its route still shows.
-        let catalog = Rc::clone(catalog);
-        glib::spawn_future_local(async move {
-            if let Ok(Err(error)) = receiver.recv().await {
-                tracing::warn!(%error, "could not acquire recent search collection");
-            }
-            if catalog.is_current() {
-                catalog.open_route(route);
-            }
-        });
+        catalog.open_route(route);
     }
 
     pub fn observe(&self, callback: impl Fn() + 'static) -> Rc<dyn Fn()> {

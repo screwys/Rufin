@@ -88,13 +88,9 @@ internal fun DetailContent(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = maxWidth
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
-            if (page.options.preparing) item("detail-loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             item("detail-header") {
                 DetailHeader(route, summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
             }
-            page.options.preparationError?.let { message -> item("detail-error") {
-                io.github.screwys.rufin.ui.ErrorNotice(message, Modifier.padding(horizontal = 16.dp))
-            } }
             if (artist && favorites != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))

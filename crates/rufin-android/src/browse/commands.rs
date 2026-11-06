@@ -389,15 +389,6 @@ impl AndroidLibrary {
             .collect()
     }
 
-    pub async fn prepare_collection(&self, media_uri: String) -> Result<(), AndroidError> {
-        self.source
-            .prepare_collection(media_uri)
-            .recv()
-            .await
-            .map_err(error)?
-            .map_err(error)
-    }
-
     pub async fn rating(
         &self,
         target: library::FavoriteTarget,

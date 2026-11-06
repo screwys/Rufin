@@ -10,7 +10,6 @@ import io.github.screwys.rufin.shared.library.HomeBlockKind
 import io.github.screwys.rufin.shared.rufin_core.CollectionCategory
 import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.app.RufinConnection
-import io.github.screwys.rufin.ui.userMessage
 
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.Snapshot
@@ -21,8 +20,6 @@ import kotlinx.coroutines.flow.*
 internal enum class AppSection { Browse, Search, Pins, More }
 
 internal class BrowseOptions {
-    var preparing by mutableStateOf(false)
-    var preparationError by mutableStateOf<String?>(null)
     var category by mutableStateOf(CollectionCategory.TRACKS)
     /** The source whose plays History lists, the one selected when it was picked; every
      * source's when null. */
@@ -248,19 +245,11 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         connection.runAction {
             item.row.sourceId?.takeIf { it != connection.sources?.selectedSourceId }?.let { source -> connection.sourceOwner?.selectSource(source) }
             section = AppSection.Browse
-            val target = item.row.target
             val options = BrowseOptions().also {
                 it.category = if (route.showsReleases) CollectionCategory.ALBUMS else CollectionCategory.TRACKS
-                it.preparing = item.searchResult && (target is FavoriteTarget.Album || target is FavoriteTarget.Artist)
             }
             details = details + BrowseLocation(route, item.row.title, options)
             rememberSearchResult(item)
-            if (options.preparing) scope.launch {
-                try { library?.prepareCollection(item.row.mediaUri) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { options.preparationError = error.userMessage() }
-                finally { options.preparing = false }
-            }
         }
     }
 

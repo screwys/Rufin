@@ -1,7 +1,7 @@
 //! Provider operations write canonical catalog data directly.
 //! Source owns native client lifetimes and publishes committed changes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -782,6 +782,9 @@ pub enum Implementation {
 pub struct Source {
     source_id: SourceId,
     retired: AtomicBool,
+    /// The albums and artists, by URI, that a live search admitted while the Catalog held
+    /// none of them: it holds only what the search found of them until they are fetched whole.
+    partial: Mutex<HashSet<String>>,
     pub implementation: Implementation,
 }
 
@@ -905,6 +908,7 @@ impl Source {
         Self {
             source_id,
             retired: AtomicBool::new(false),
+            partial: Mutex::default(),
             implementation,
         }
     }
@@ -1520,7 +1524,12 @@ impl Source {
             if self.is_retired() {
                 return Err(SourceError::Cancelled);
             }
+            let partial = self.unheld_collections(catalog, &batch);
             changes.apply_catalog(&(batch), true).await?;
+            self.partial
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .extend(partial);
             let source = changes.source;
             Ok(catalog
                 .search_rows_by_objects(
@@ -2152,21 +2161,69 @@ impl Source {
         Ok(())
     }
 
-    pub async fn prepare_collection(&self, catalog: &Catalog, media_uri: &str) -> SourceResult<()> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_)
-        ) {
+    /// The albums and artists `batch` names that the Catalog holds none of, by URI.
+    fn unheld_collections(&self, catalog: &Catalog, batch: &library::CatalogBatch) -> Vec<String> {
+        let credits = |credits: &[library::ArtistCredit]| {
+            credits
+                .iter()
+                .map(|credit| credit.object_id.clone())
+                .collect::<Vec<_>>()
+        };
+        let albums = batch
+            .albums
+            .iter()
+            .map(|album| album.object_id.clone())
+            .chain(
+                batch
+                    .tracks
+                    .iter()
+                    .filter_map(|track| track.album_object_id.clone()),
+            );
+        let artists = batch
+            .artists
+            .iter()
+            .map(|artist| artist.object_id.clone())
+            .chain(
+                batch
+                    .albums
+                    .iter()
+                    .flat_map(|album| credits(&album.metadata.album_artists)),
+            )
+            .chain(batch.tracks.iter().flat_map(|track| {
+                let mut ids = credits(&track.metadata.artists);
+                ids.extend(credits(&track.metadata.album_artists));
+                ids
+            }));
+        let mut unheld = albums
+            .map(|id| ("album", id))
+            .chain(artists.map(|id| ("artist", id)))
+            .filter(|(_, id)| !id.is_empty())
+            .map(|(kind, id)| library::source_entity_uri(&self.source_id, kind, &id))
+            .filter(|uri| catalog.item(uri).is_none())
+            .collect::<Vec<_>>();
+        unheld.sort_unstable();
+        unheld.dedup();
+        unheld
+    }
+
+    /// Fetches the album or artist `media_uri` whole when a live search admitted only part of
+    /// it; anything else the Catalog already holds whole.
+    pub async fn complete_collection(
+        &self,
+        catalog: &Catalog,
+        media_uri: &str,
+    ) -> SourceResult<()> {
+        if !self
+            .partial
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(media_uri)
+        {
             return Ok(());
         }
-        let Some((source_id, kind, object_id)) = library::source_entity_parts(media_uri) else {
+        let Some((_, kind, object_id)) = library::source_entity_parts(media_uri) else {
             return Err(SourceError::InvalidRequest("collection URI is unavailable"));
         };
-        if source_id != self.source_id {
-            return Err(SourceError::InvalidRequest(
-                "collection belongs to another source",
-            ));
-        }
         let collection = match kind.as_str() {
             "album" => SourceCollection::Album(object_id),
             "artist" => SourceCollection::Artist(object_id),
@@ -2193,11 +2250,16 @@ impl Source {
                         .acquire_collection(changes, &collection, false, &|| self.is_retired())
                         .await?
                 }
-                _ => unreachable!(),
+                Implementation::Local(_) | Implementation::Files(_) | Implementation::Peer(_) => {}
             }
-            Ok(())
+            Ok::<_, SourceError>(())
         })
-        .await
+        .await?;
+        self.partial
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(media_uri);
+        Ok(())
     }
 
     pub async fn refresh_home_section(
