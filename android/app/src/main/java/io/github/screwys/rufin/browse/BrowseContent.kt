@@ -55,8 +55,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
@@ -277,14 +276,14 @@ private fun BrowseFastScroll(letters: List<String>, sections: List<AndroidScroll
                     }
                 } finally { touched = null }
             }
-        }
-        .clearAndSetSemantics {
-            contentDescription = letters.joinToString(" · ")
-            customActions = letters.map { letter -> CustomAccessibilityAction(letter) { release(letter); true } }
         }) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             letters.forEachIndexed { index, letter ->
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // Each letter is its own accessibility node: a widget takes at most 32 custom actions.
+                Box(Modifier.weight(1f).fillMaxWidth().clearAndSetSemantics {
+                    contentDescription = letter
+                    onClick { release(letter); true }
+                }, contentAlignment = Alignment.Center) {
                     Text(letter, style = fittedStyle, maxLines = 1,
                         fontWeight = if (index == active) FontWeight.Bold else FontWeight.Normal,
                         color = if (index == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
