@@ -1789,6 +1789,7 @@ impl<'a> Write<'a> {
             downloads,
             playlists,
         ];
+        let downloads_before = self.catalog.snapshot().downloads;
         let mut applier = Applier {
             catalog: self.catalog,
             changed,
@@ -1807,8 +1808,8 @@ impl<'a> Write<'a> {
         for (key, stats) in user.listened {
             applier.snapshot().set_listened(key, stats);
         }
-        for (key, downloaded, _) in user.downloads {
-            applier.snapshot().set_downloaded(key, downloaded);
+        for (key, downloaded, _) in &user.downloads {
+            applier.snapshot().set_downloaded(*key, *downloaded);
         }
         for (key, playlist, _, _) in user.playlists {
             match playlist {
@@ -1828,7 +1829,13 @@ impl<'a> Write<'a> {
         for (source, kept) in &self.forgotten {
             applier.snapshot().forget_source(*source, kept);
         }
-        applier.snapshot().revision
+        let revision = applier.snapshot().revision;
+        drop(applier);
+        if downloads && !changed[0] {
+            self.catalog
+                .downloads_changed(downloads_before, &user.downloads);
+        }
+        revision
     }
 }
 

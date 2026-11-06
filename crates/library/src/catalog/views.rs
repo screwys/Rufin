@@ -485,8 +485,9 @@ impl Totaled<'_> {
 }
 
 /// How many visible tracks of each collection are downloaded, in a music folder, from one pass
-/// over the downloaded tracks: what [`Derived`] counts, in the same folder. A download rebuilds
-/// only this.
+/// over the downloaded tracks: what [`Derived`] counts, in the same folder. A download changes
+/// only the counts of its track.
+#[derive(Clone)]
 pub(crate) struct Downloaded {
     pub(crate) albums: Vec<u32>,
     /// Track artists and album artists.
@@ -505,37 +506,41 @@ impl Downloaded {
             tags: vec![0; snapshot.tags.records.len()],
             folders: vec![0; snapshot.folders.records.len()],
         };
-        let mut tags = Vec::new();
         // Only the downloaded tracks, so a download costs what is downloaded, not the library.
         for key in &snapshot.download_keys {
-            let Some(record) = snapshot.tracks.get(i64::from(*key)) else {
-                continue;
-            };
-            if record.flags & DOWNLOADED == 0
-                || !record.indexed()
-                || !context.in_folder(record, folder)
-            {
-                continue;
-            }
-            if let Some(album) = context.album_of(record) {
-                downloaded.albums[album as usize] += 1;
-            }
-            let runs = snapshot.track_runs(record);
-            for artist in dedup(runs[0]) {
-                downloaded.artists[0][artist as usize] += 1;
-            }
-            for artist in dedup(context.album_artists(record)) {
-                downloaded.artists[1][artist as usize] += 1;
-            }
-            context.tags_of(record, &mut tags);
-            for tag in &tags {
-                downloaded.tags[*tag as usize] += 1;
-            }
-            for folder in dedup(runs[3]) {
-                downloaded.folders[folder as usize] += 1;
+            let record = snapshot.tracks.get(i64::from(*key));
+            if let Some(record) = record.filter(|record| record.flags & DOWNLOADED != 0) {
+                downloaded.count(context, record, folder, 1);
             }
         }
         downloaded
+    }
+
+    /// Counts a visible track of the folder in its collections: `step` 1 for a download, -1
+    /// for one that went.
+    fn count(&mut self, context: &Context<'_>, record: &TrackRec, folder: Option<u32>, step: i32) {
+        if !record.indexed() || !context.in_folder(record, folder) {
+            return;
+        }
+        let add = |count: &mut u32| *count = count.wrapping_add_signed(step);
+        if let Some(album) = context.album_of(record) {
+            add(&mut self.albums[album as usize]);
+        }
+        let runs = context.snapshot.track_runs(record);
+        for artist in dedup(runs[0]) {
+            add(&mut self.artists[0][artist as usize]);
+        }
+        for artist in dedup(context.album_artists(record)) {
+            add(&mut self.artists[1][artist as usize]);
+        }
+        let mut tags = Vec::new();
+        context.tags_of(record, &mut tags);
+        for tag in tags {
+            add(&mut self.tags[tag as usize]);
+        }
+        for folder in dedup(runs[3]) {
+            add(&mut self.folders[folder as usize]);
+        }
     }
 }
 
@@ -2410,6 +2415,29 @@ impl Catalog {
             |kept| kept.0 == key.0,
             || Downloaded::build(context, folder),
         )
+    }
+
+    /// Counts downloads a Write changed into the kept counts of the downloads stamp `before`,
+    /// when its facts did not change, so a download does not count every download again.
+    pub(crate) fn downloads_changed(
+        &self,
+        before: u64,
+        changed: &[(crate::TrackKey, bool, String)],
+    ) {
+        let snapshot = self.snapshot();
+        let context = Context::new(&snapshot);
+        for ((stamps, folder), kept) in &mut self.views().downloaded {
+            if *stamps == [snapshot.facts, before] {
+                let counts = Arc::make_mut(kept);
+                for (key, downloaded, _) in changed {
+                    if let Some(record) = snapshot.tracks.get(key.raw()) {
+                        let step = if *downloaded { 1 } else { -1 };
+                        counts.count(&context, record, *folder, step);
+                    }
+                }
+                stamps[1] = snapshot.downloads;
+            }
+        }
     }
 
     /// The cached order of a read while what it depends on is unchanged.
