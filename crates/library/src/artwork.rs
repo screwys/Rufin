@@ -636,11 +636,10 @@ impl Catalog {
         .bind(serde_json::to_string(media_uris)?)
         .fetch_all(&mut *connection)
         .await?;
-        let owners = media_uris
-            .iter()
-            .zip(tracks)
-            .map(|(uri, track)| {
-                track.map(Owner::Track).or_else(|| match self.item(uri)? {
+        let items = self.items(&media_uris.iter().map(String::as_str).collect::<Vec<_>>());
+        let owners = (tracks.into_iter().zip(items))
+            .map(|(track, item)| {
+                track.map(Owner::Track).or_else(|| match item? {
                     crate::Item::Album(key) => Some(Owner::Album(key.raw())),
                     crate::Item::Artist { key, .. } => Some(Owner::Artist(key.raw())),
                     _ => None,

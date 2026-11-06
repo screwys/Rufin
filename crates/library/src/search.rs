@@ -115,9 +115,9 @@ impl Catalog {
                 .source_slot(source)
                 .unwrap_or(crate::catalog::snapshot::NO_SOURCE);
             let keys = |kind, objects: &[String]| {
-                let objects = objects.iter().map(String::as_str).collect::<Vec<_>>();
+                let objects = (objects.iter()).map(|object| (owner, object.as_str()));
                 snapshot
-                    .object_keys(kind, owner, &objects)
+                    .object_keys(kind, &objects.collect::<Vec<_>>())
                     .into_iter()
                     .flatten()
                     .collect()

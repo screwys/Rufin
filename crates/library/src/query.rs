@@ -156,9 +156,12 @@ impl Catalog {
             },
             None => crate::catalog::snapshot::NO_SOURCE,
         };
-        let objects = objects.iter().map(String::as_str).collect::<Vec<_>>();
+        let objects = objects
+            .iter()
+            .map(|object| (source, object.as_str()))
+            .collect::<Vec<_>>();
         Ok(snapshot
-            .object_keys(kind, source, &objects)
+            .object_keys(kind, &objects)
             .into_iter()
             .flatten()
             .collect())

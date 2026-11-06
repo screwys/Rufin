@@ -233,63 +233,61 @@ impl Row {
 }
 
 impl Catalog {
-    /// The item of a pinned row, when the Catalog still holds it.
-    fn pin_item(&self, pin: &SidebarPin) -> Option<Item> {
+    /// The items of pinned rows the Catalog still holds, in pin order.
+    fn pin_items(&self, pins: &[SidebarPin]) -> Vec<Option<Item>> {
+        use crate::CatalogKind as Kind;
         let snapshot = self.snapshot();
-        let find = |kind: crate::CatalogKind, source: Option<&SourceId>, object: &str| {
-            let source = match source {
-                Some(id) => snapshot.source_slot(
-                    snapshot
-                        .sources
-                        .values()
-                        .find(|source| source.object == id.as_str())?
-                        .key,
-                )?,
-                None => crate::catalog::snapshot::NO_SOURCE,
-            };
-            snapshot.object_keys(kind, source, &[object])[0]
+        let slot = |source: Option<&SourceId>| match source {
+            Some(id) => snapshot.source_slot(
+                snapshot
+                    .sources
+                    .values()
+                    .find(|source| source.object == id.as_str())?
+                    .key,
+            ),
+            None => Some(crate::catalog::snapshot::NO_SOURCE),
         };
-        match pin {
-            SidebarPin::Album {
-                source_id,
-                album_id,
-            } => find(crate::CatalogKind::Album, Some(source_id), album_id)
-                .map(|key| Item::Album(crate::AlbumKey::from_raw(key))),
-            SidebarPin::Artist {
-                source_id,
-                artist_id,
-                album_artist,
-            } => find(crate::CatalogKind::Artist, Some(source_id), artist_id).map(|key| {
-                Item::Artist {
-                    key: crate::ArtistKey::from_raw(key),
-                    album_artist: *album_artist,
+        let wanted = pins.iter().map(|pin| {
+            let (kind, source, object) = match pin {
+                SidebarPin::Album {
+                    source_id,
+                    album_id,
+                } => (Kind::Album, Some(source_id), album_id),
+                SidebarPin::Artist {
+                    source_id,
+                    artist_id,
+                    ..
+                } => (Kind::Artist, Some(source_id), artist_id),
+                SidebarPin::Genre {
+                    source_id,
+                    genre_id,
+                } => (Kind::Genre, Some(source_id), genre_id),
+                SidebarPin::Playlist {
+                    source_id,
+                    playlist_id,
+                } => (Kind::Playlist, source_id.as_ref(), playlist_id),
+                SidebarPin::SmartPlaylist { playlist_id } => {
+                    (Kind::SmartPlaylist, None, playlist_id)
                 }
-            }),
-            SidebarPin::Genre {
-                source_id,
-                genre_id,
-            } => find(crate::CatalogKind::Genre, Some(source_id), genre_id)
-                .map(|key| Item::Genre(crate::GenreKey::from_raw(key))),
-            SidebarPin::Playlist {
-                source_id,
-                playlist_id,
-            } => find(
-                crate::CatalogKind::Playlist,
-                source_id.as_ref(),
-                playlist_id,
-            )
-            .map(|key| Item::Playlist(crate::PlaylistKey::from_raw(key))),
-            SidebarPin::SmartPlaylist { playlist_id } => snapshot
-                .smart_playlists
-                .values()
-                .find(|smart| smart.object == *playlist_id)
-                .map(|smart| Item::Smart(crate::SmartPlaylistKey::from_raw(smart.key))),
-            SidebarPin::PlaylistFolder { folder_id, .. } => snapshot
-                .playlist_folders
-                .values()
-                .find(|folder| folder.object == *folder_id)
-                .map(|folder| Item::PlaylistFolder(crate::PlaylistFolderKey::from_raw(folder.key))),
+                SidebarPin::PlaylistFolder { folder_id, .. } => {
+                    (Kind::PlaylistFolder, None, folder_id)
+                }
+            };
+            Some((kind, slot(source)?, object.as_str()))
+        });
+        let mut items = snapshot.items(wanted);
+        for (pin, item) in pins.iter().zip(&mut items) {
+            if let (
+                SidebarPin::Artist { album_artist, .. },
+                Some(Item::Artist {
+                    album_artist: role, ..
+                }),
+            ) = (pin, item)
+            {
+                *role = *album_artist;
+            }
         }
+        items
     }
 
     /// Rows of the pins the Catalog still holds, in pin order, with their totals: smart
@@ -306,9 +304,8 @@ impl Catalog {
             () = self.loaded() => {}
             () = cancellation.cancelled() => return Err(crate::LibraryError::ReadCancelled),
         }
-        let pinned = pins
-            .iter()
-            .filter_map(|pin| Some((pin, self.pin_item(pin)?)))
+        let pinned = (pins.iter().zip(self.pin_items(pins)))
+            .filter_map(|(pin, item)| Some((pin, item?)))
             .collect::<Vec<_>>();
         let items = pinned.iter().map(|(_, item)| *item).collect::<Vec<_>>();
         let mut connection = self.acquire_cancellable(cancellation).await?;

@@ -1527,17 +1527,32 @@ impl Catalog {
 
     /// A collection URI's item, from resident object ids. Track URIs are not resident.
     pub fn item(&self, uri: &str) -> Option<Item> {
-        let (source, kind, object) = source_entity_parts(uri)?;
-        let kind = CatalogKind::of(&kind)?;
+        self.items(&[uri]).pop().flatten()
+    }
+
+    /// Collection URIs' items, in the order asked, with one pass over each family they name.
+    pub fn items(&self, uris: &[&str]) -> Vec<Option<Item>> {
         let snapshot = self.snapshot();
-        let source = snapshot.source_slot(
-            snapshot
-                .sources
-                .values()
-                .find(|known| known.object == source.as_str())?
-                .key,
-        )?;
-        kind.item(snapshot.object_keys(kind, source, &[&object])[0]?)
+        let parsed = uris
+            .iter()
+            .map(|uri| {
+                let (source, kind, object) = source_entity_parts(uri)?;
+                let source = snapshot
+                    .sources
+                    .values()
+                    .find(|known| known.object == source.as_str())?;
+                Some((
+                    CatalogKind::of(&kind)?,
+                    snapshot.source_slot(source.key)?,
+                    object,
+                ))
+            })
+            .collect::<Vec<_>>();
+        snapshot.items(parsed.iter().map(|parsed| {
+            parsed
+                .as_ref()
+                .map(|(kind, source, object)| (*kind, *source, object.as_str()))
+        }))
     }
 
     /// A collection item's URI, built from its resident object id. Tracks have none here.
@@ -1813,25 +1828,50 @@ impl CatalogKind {
 }
 
 impl Snapshot {
-    /// Keys of a source's collections of one kind by object id, in the order asked, from one
-    /// pass over the family. Track object ids are not resident; unnamed playlists have none.
+    /// The items of collections by kind, source slot and object id, in the order asked.
+    pub(crate) fn items<'a>(
+        &self,
+        wanted: impl Iterator<Item = Option<(CatalogKind, u16, &'a str)>>,
+    ) -> Vec<Option<Item>> {
+        let wanted = wanted.collect::<Vec<_>>();
+        let mut items = vec![None; wanted.len()];
+        let mut kinds = Vec::new();
+        for (kind, ..) in wanted.iter().flatten() {
+            if !kinds.contains(kind) {
+                kinds.push(*kind);
+            }
+        }
+        for kind in kinds {
+            let (positions, objects): (Vec<_>, Vec<_>) = (wanted.iter().enumerate())
+                .filter_map(|(position, wanted)| {
+                    let (of, source, object) = (*wanted)?;
+                    (of == kind).then_some((position, (source, object)))
+                })
+                .unzip();
+            for (position, key) in positions.into_iter().zip(self.object_keys(kind, &objects)) {
+                items[position] = key.and_then(|key| kind.item(key));
+            }
+        }
+        items
+    }
+
+    /// Keys of collections of one kind by source slot and object id, in the order asked, from
+    /// one pass over the family. Track object ids are not resident; unnamed playlists have none.
     pub(crate) fn object_keys(
         &self,
         kind: CatalogKind,
-        source: u16,
-        objects: &[&str],
+        objects: &[(u16, &str)],
     ) -> Vec<Option<i64>> {
         let mut found = objects
             .iter()
             .map(|object| (*object, None))
             .collect::<HashMap<_, Option<i64>>>();
         let mut look = |owner: u16, object: StrId, key: i64| {
-            if owner == source
-                && let Some(slot) = found.get_mut(self.text(object))
-            {
+            if let Some(slot) = found.get_mut(&(owner, self.text(object))) {
                 slot.get_or_insert(key);
             }
         };
+        let none = crate::catalog::snapshot::NO_SOURCE;
         match kind {
             CatalogKind::Album => {
                 for (_, album) in self.albums.iter() {
@@ -1866,21 +1906,21 @@ impl Snapshot {
                 }
             }
             // Smart playlists and playlist folders belong to no source.
-            CatalogKind::SmartPlaylist if source == crate::catalog::snapshot::NO_SOURCE => {
+            CatalogKind::SmartPlaylist => {
                 for smart in self.smart_playlists.values() {
-                    if let Some(slot) = found.get_mut(smart.object.as_str()) {
+                    if let Some(slot) = found.get_mut(&(none, smart.object.as_str())) {
                         slot.get_or_insert(smart.key);
                     }
                 }
             }
-            CatalogKind::PlaylistFolder if source == crate::catalog::snapshot::NO_SOURCE => {
+            CatalogKind::PlaylistFolder => {
                 for folder in self.playlist_folders.values() {
-                    if let Some(slot) = found.get_mut(folder.object.as_str()) {
+                    if let Some(slot) = found.get_mut(&(none, folder.object.as_str())) {
                         slot.get_or_insert(folder.key);
                     }
                 }
             }
-            CatalogKind::SmartPlaylist | CatalogKind::PlaylistFolder | CatalogKind::Track => {}
+            CatalogKind::Track => {}
         }
         objects.iter().map(|object| found[object]).collect()
     }

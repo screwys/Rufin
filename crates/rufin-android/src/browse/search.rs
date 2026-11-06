@@ -125,9 +125,9 @@ impl AndroidLibrary {
         let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             catalog.loaded().await;
-            let items = recent
-                .iter()
-                .filter_map(|row| catalog.item(&row.media_uri))
+            let uris = recent.iter().map(|row| row.media_uri.as_str());
+            let items = (catalog.items(&uris.collect::<Vec<_>>()).into_iter())
+                .flatten()
                 .collect::<Vec<_>>();
             let downloaded = catalog
                 .rows_of(&items, false, &cancel)

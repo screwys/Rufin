@@ -2194,12 +2194,15 @@ impl Source {
                 ids.extend(credits(&track.metadata.album_artists));
                 ids
             }));
-        let mut unheld = albums
+        let uris = albums
             .map(|id| ("album", id))
             .chain(artists.map(|id| ("artist", id)))
             .filter(|(_, id)| !id.is_empty())
             .map(|(kind, id)| library::source_entity_uri(&self.source_id, kind, &id))
-            .filter(|uri| catalog.item(uri).is_none())
+            .collect::<Vec<_>>();
+        let held = catalog.items(&uris.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut unheld = (uris.into_iter().zip(held))
+            .filter_map(|(uri, item)| item.is_none().then_some(uri))
             .collect::<Vec<_>>();
         unheld.sort_unstable();
         unheld.dedup();
