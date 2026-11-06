@@ -332,21 +332,21 @@ impl PlayTarget {
         }
     }
 
-    /// The tracks it holds for a download or a playlist, as core reads a collection whole.
+    /// The tracks it holds for `scope`, as core reads its route. None when it holds nothing.
     pub async fn selection(
         &self,
         source: &rufin_core::runtime::SourceHandle,
-    ) -> Result<library::MemberSelection, String> {
+        scope: rufin_core::view::SelectionScope,
+    ) -> Result<Option<library::MemberSelection>, String> {
         match self {
-            Self::Track(key) => Ok(library::MemberSelection::Keys {
+            Self::Track(key) => Ok(Some(library::MemberSelection::Keys {
                 source: None,
                 keys: vec![*key].into(),
-            }),
+            })),
             Self::Route(route) => source
-                .collection_selection(route, &library::ReadCancellation::new())
+                .route_selection(route, scope, &library::ReadCancellation::new())
                 .await
-                .map_err(|error| error.to_string())?
-                .ok_or_else(|| "Nothing here".to_string()),
+                .map_err(|error| error.to_string()),
         }
     }
 

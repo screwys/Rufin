@@ -528,23 +528,15 @@ fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::W
 }
 
 impl MediaDragSource {
+    /// The tracks it holds for `scope`; a collection that holds nothing adds none.
     pub async fn track_selection(
         &self,
         catalog: &library::Catalog,
         source: &rufin_core::runtime::SourceHandle,
+        scope: rufin_core::view::SelectionScope,
     ) -> Result<library::MemberSelection, String> {
+        let gone = || "Nothing here".to_string();
         match self {
-            Self::Targets {
-                targets: CollectionTargets::Parents(reads),
-            } => Ok(library::MemberSelection::Concat(
-                reads
-                    .iter()
-                    .map(|(read, ranges)| library::MemberSelection::Parents {
-                        read: read.clone(),
-                        ranges: Some(ranges.clone()),
-                    })
-                    .collect(),
-            )),
             Self::MediaUris(uris)
             | Self::Queue {
                 media_uris: uris, ..
@@ -556,19 +548,18 @@ impl MediaDragSource {
             Self::LiveCollection {
                 media_uri,
                 operations,
-            } => {
-                prepare_live_collection(catalog, operations, media_uri)
-                    .await?
-                    .selection(source)
-                    .await
-            }
-            Self::Target { target } => target.selection(source).await,
+            } => prepare_live_collection(catalog, operations, media_uri)
+                .await?
+                .selection(source, scope)
+                .await?
+                .ok_or_else(gone),
+            Self::Target { target } => target.selection(source, scope).await?.ok_or_else(gone),
             Self::Targets { targets } => {
                 let mut selections = Vec::new();
                 for target in targets.resolve(catalog).await? {
-                    selections.push(target.selection(source).await?);
+                    selections.extend(target.selection(source, scope).await?);
                 }
-                Ok(library::MemberSelection::Concat(selections.into()))
+                Ok(library::MemberSelection::Concat(selections))
             }
         }
     }
@@ -578,7 +569,9 @@ impl MediaDragSource {
         catalog: &library::Catalog,
         source: &rufin_core::runtime::SourceHandle,
     ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
-        let selection = self.track_selection(catalog, source).await?;
+        let selection = self
+            .track_selection(catalog, source, rufin_core::view::SelectionScope::Page)
+            .await?;
         let title = rufin_core::downloads::selection_title(catalog, &selection)
             .unwrap_or_else(|| localization::tr("Selection"));
         let preview = catalog

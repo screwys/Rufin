@@ -97,7 +97,13 @@ pub(crate) fn download(shell: &Shell, payload: &MediaDragSource, remove: bool) {
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
         let result = async {
-            let selection = payload.track_selection(&catalog, &source).await?;
+            let selection = payload
+                .track_selection(
+                    &catalog,
+                    &source,
+                    rufin_core::view::SelectionScope::Downloads,
+                )
+                .await?;
             let reply = if remove {
                 source.remove_download_selection(selection)
             } else {

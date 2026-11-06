@@ -421,7 +421,10 @@ fn enqueue_media_drop(
     let catalog = window.products.library.clone();
     let owner = window.products.source.clone();
     window.products.runtime.spawn(async move {
-        let Ok(input) = source.track_selection(&catalog, &owner).await else {
+        let Ok(input) = source
+            .track_selection(&catalog, &owner, rufin_core::view::SelectionScope::Page)
+            .await
+        else {
             return;
         };
         queue.insert(input, target);

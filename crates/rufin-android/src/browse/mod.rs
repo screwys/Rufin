@@ -15,7 +15,7 @@ pub use records::{
 use library::{MemberSelection, ReadCancellation, Row};
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{PlayRequest, QueuePlacement};
-use rufin_core::view::{OpenOptions, View, library_list_key};
+use rufin_core::view::{OpenOptions, SelectionScope, View, library_list_key};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
     settings::{

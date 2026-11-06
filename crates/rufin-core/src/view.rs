@@ -154,6 +154,16 @@ enum Plan {
     Missing,
 }
 
+/// What a route's tracks are taken for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionScope {
+    /// Queueing it or adding it to a playlist: what its page lists, as Play queues it.
+    Page,
+    /// Downloading it or removing its downloads: a collection in every music folder, a smart
+    /// playlist's members and a folder's tracks in the music folder they are read in.
+    Downloads,
+}
+
 impl SourceOwner {
     pub async fn open(
         &self,
@@ -187,16 +197,17 @@ impl SourceOwner {
         .await
     }
 
-    /// Everything `route` holds, for downloading it, removing its downloads or adding it to a
-    /// playlist: a collection in every music folder, a smart playlist's members and a folder's
-    /// tracks in the music folder they are read in. None when the route lists nothing.
-    pub async fn collection_selection(
+    /// Everything `route` holds for `scope`, in the selected library. None when the route lists
+    /// nothing.
+    pub async fn route_selection(
         &self,
         route: &Route,
+        scope: SelectionScope,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
         let mut selected = self.selected_library();
-        if !matches!(route, Route::Folders { .. } | Route::SmartPlaylistDetail(_))
+        if scope == SelectionScope::Downloads
+            && !matches!(route, Route::Folders { .. } | Route::SmartPlaylistDetail(_))
             && let Some(selected) = &mut selected
         {
             selected.music_folder_key = None;

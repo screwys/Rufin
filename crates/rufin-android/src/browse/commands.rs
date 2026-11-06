@@ -60,7 +60,7 @@ impl AndroidLibrary {
         remove: bool,
     ) -> Result<(), AndroidError> {
         let selection = match route {
-            Some(route) => Arc::unwrap_or_clone(self.route_selection(route).await?),
+            Some(route) => self.selection(route, SelectionScope::Downloads).await?,
             None => MemberSelection::Uris(vec![media_uri].into()),
         };
         let source = self.source.clone();
@@ -582,19 +582,29 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    /// The tracks `route` holds, for a download or a playlist: an artist page holds the
-    /// artist's tracks.
+    /// The tracks `route` lists, for a playlist: an artist page lists the artist's tracks.
     pub async fn route_selection(
         &self,
         route: Route,
     ) -> Result<Arc<MemberSelection>, AndroidError> {
+        self.selection(route, SelectionScope::Page)
+            .await
+            .map(Arc::new)
+    }
+}
+
+impl AndroidLibrary {
+    async fn selection(
+        &self,
+        route: Route,
+        scope: SelectionScope,
+    ) -> Result<MemberSelection, AndroidError> {
         let source = self.source.clone();
         run_read(&self.runtime, move |cancel| async move {
             source
-                .collection_selection(&route, &cancel)
+                .route_selection(&route, scope, &cancel)
                 .await
                 .map_err(error)?
-                .map(Arc::new)
                 .ok_or_else(|| error("Choose a collection"))
         })
         .await
