@@ -364,10 +364,10 @@ impl AndroidLibrary {
         };
         let mut library = library.clone();
         let catalog = self.catalog.clone();
-        let now = view.and_then(|view| view.view.smart_now());
+        let smart = view.map(|view| view.view.smart_count()).unwrap_or_default();
         let shown = run_read(&self.runtime, move |cancel| async move {
             catalog
-                .show_downloads(library.shown().into_iter().collect(), now, &cancel)
+                .show_downloads(library.shown().into_iter().collect(), smart, &cancel)
                 .await
                 .map_err(error)?;
             Ok(library)

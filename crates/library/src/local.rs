@@ -81,40 +81,6 @@ impl Shown<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum DownloadItem {
-    Track {
-        media_uri: String,
-    },
-    Album {
-        media_uri: String,
-    },
-    Artist {
-        media_uri: String,
-        album_artist: bool,
-    },
-    Genre {
-        key: crate::GenreKey,
-    },
-    Mood {
-        key: crate::MoodKey,
-    },
-    Playlist {
-        key: crate::PlaylistKey,
-    },
-    SmartPlaylist {
-        key: crate::SmartPlaylistKey,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct DownloadStatus {
-    pub total: u64,
-    pub downloaded: u64,
-}
-
 #[derive(Clone, Debug)]
 pub enum LocalMediaLocation {
     File(std::path::PathBuf),
@@ -404,106 +370,13 @@ impl Catalog {
         .transpose()
     }
 
-    /// How many of an item's tracks are downloaded.
-    pub async fn item_download_status(
-        &self,
-        item: &DownloadItem,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<DownloadStatus> {
-        let mut connection = self.acquire_loaded(cancellation).await?;
-        let owner: Option<i64> = match item {
-            DownloadItem::Track { media_uri } => {
-                let (total, downloaded): (i64, i64) =
-                    sqlx::query_as("SELECT 1,EXISTS(SELECT 1 FROM downloads WHERE media_uri=?1)")
-                        .bind(media_uri)
-                        .fetch_one(&mut *connection)
-                        .await?;
-                return Ok(DownloadStatus {
-                    total: total as u64,
-                    downloaded: downloaded as u64,
-                });
-            }
-            DownloadItem::Album { media_uri } => {
-                sqlx::query_scalar("SELECT album_key FROM albums WHERE media_uri=?1")
-                    .bind(media_uri)
-                    .fetch_optional(&mut *connection)
-                    .await?
-            }
-            DownloadItem::Artist { media_uri, .. } => {
-                sqlx::query_scalar("SELECT artist_key FROM artists WHERE media_uri=?1")
-                    .bind(media_uri)
-                    .fetch_optional(&mut *connection)
-                    .await?
-            }
-            DownloadItem::Genre { key } => Some(key.raw()),
-            DownloadItem::Mood { key } => Some(key.raw()),
-            DownloadItem::Playlist { key } => Some(key.raw()),
-            DownloadItem::SmartPlaylist { key } => Some(key.raw()),
-        };
-        let Some(owner) = owner else {
-            return Ok(DownloadStatus::default());
-        };
-        if let DownloadItem::SmartPlaylist { key } = item {
-            let now = chrono::Utc::now().timestamp();
-            let totals =
-                crate::smart_playlists::smart_totals(self, &mut connection, &[key.raw()], now)
-                    .await?;
-            let totals = totals.get(&owner).copied().unwrap_or_default();
-            return Ok(DownloadStatus {
-                total: u64::from(totals.tracks),
-                downloaded: u64::from(totals.downloaded),
-            });
-        }
-        drop(connection);
-        self.loaded().await;
-        let snapshot = self.snapshot();
-        let context = crate::catalog::views::Context::new(&snapshot);
-        let derived = self.derived(&context, None);
-        let downloaded = self.downloaded(&context);
-        let (total, done) = match item {
-            DownloadItem::Album { .. } => snapshot.albums.slot(owner).map(|slot| {
-                (
-                    derived.albums[slot as usize].tracks,
-                    downloaded.albums[slot as usize],
-                )
-            }),
-            DownloadItem::Artist { album_artist, .. } => {
-                let role = usize::from(*album_artist);
-                snapshot.artists.slot(owner).map(|slot| {
-                    (
-                        derived.artists[role][slot as usize].tracks,
-                        downloaded.artists[role][slot as usize],
-                    )
-                })
-            }
-            DownloadItem::Genre { .. } | DownloadItem::Mood { .. } => {
-                snapshot.tags.slot(owner).map(|slot| {
-                    (
-                        derived.tags[slot as usize].tracks,
-                        downloaded.tags[slot as usize],
-                    )
-                })
-            }
-            DownloadItem::Playlist { .. } => snapshot.playlists.get(owner).map(|playlist| {
-                let totals = context.playlist_totals(playlist, None);
-                (totals.tracks, totals.downloaded)
-            }),
-            DownloadItem::Track { .. } | DownloadItem::SmartPlaylist { .. } => None,
-        }
-        .unwrap_or_default();
-        Ok(DownloadStatus {
-            total: u64::from(total),
-            downloaded: u64::from(done),
-        })
-    }
-
     /// Shows the current downloads in rows read earlier: a track's copy and how many tracks of
     /// a collection are downloaded. Smart playlists count their members as of `now`, the time
-    /// the page read them at; None reads them as of now.
+    /// the page read them at, in the music folder it read; None reads them as of now.
     pub async fn show_downloads(
         &self,
         rows: Vec<Shown<'_>>,
-        now: Option<i64>,
+        (now, folder): (Option<i64>, Option<crate::FolderKey>),
         cancellation: &ReadCancellation,
     ) -> LibraryResult<()> {
         let smart = rows
@@ -519,7 +392,7 @@ impl Catalog {
         } else {
             let mut connection = self.acquire_loaded(cancellation).await?;
             let now = now.unwrap_or_else(|| chrono::Utc::now().timestamp());
-            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now).await?
+            crate::smart_playlists::smart_totals(self, &mut connection, &smart, now, folder).await?
         };
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);

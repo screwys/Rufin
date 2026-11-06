@@ -676,7 +676,7 @@ impl SearchRouteProjection {
         let task = shell.products.runtime.spawn(async move {
             let shown = rows.iter_mut().map(SearchItem::shown).collect();
             catalog
-                .show_downloads(shown, None, &ReadCancellation::new())
+                .show_downloads(shown, (None, None), &ReadCancellation::new())
                 .await
                 .map(|()| rows)
         });

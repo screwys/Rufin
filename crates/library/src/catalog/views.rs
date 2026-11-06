@@ -795,7 +795,7 @@ impl Context<'_> {
     /// The music folder a read of `owner`'s tracks keeps, or None when the folder is gone. A
     /// folder narrows only a read of its own source; a smart playlist, of every source, keeps
     /// it for its tracks of that source.
-    fn folder_slot(
+    pub(crate) fn folder_slot(
         &self,
         folder: Option<crate::FolderKey>,
         owner: Option<u16>,

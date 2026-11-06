@@ -420,9 +420,11 @@ pub enum HeaderKey {
         activity: bool,
     },
     Playlist(PlaylistKey),
+    /// A smart playlist counted as of `now`, in the music folder `folder`.
     Smart {
         key: SmartPlaylistKey,
         now: i64,
+        folder: Option<FolderKey>,
     },
     Genre(GenreKey),
     Mood(MoodKey),
@@ -448,12 +450,13 @@ pub struct Fetched {
 const WINDOW: usize = 256;
 
 /// What rows show besides their own record: plays when a list asks for them, the list a
-/// playlist folder's totals come from, the time smart playlists are evaluated at, and each
-/// entry row's index in its playlist.
+/// playlist folder's totals come from, the time and music folder smart playlists are counted
+/// at, and each entry row's index in its playlist.
 #[derive(Clone)]
 pub(crate) struct Shape {
     pub(crate) activity: bool,
     pub(crate) now: i64,
+    pub(crate) folder: Option<FolderKey>,
     pub(crate) list: Option<ListRead>,
     pub(crate) positions: HashMap<i64, u32>,
 }
@@ -463,18 +466,23 @@ impl Shape {
         let mut shape = Self {
             activity: false,
             now: chrono::Utc::now().timestamp(),
+            folder: None,
             list: None,
             positions: HashMap::new(),
         };
         match read {
             Some(Read::List(read) | Read::AlbumTracks(read)) => {
                 shape.activity = read.activity;
+                shape.folder = read.folder;
                 if let ListKind::SmartPlaylists { now } = read.kind {
                     shape.now = now;
                 }
                 shape.list = Some(read.clone());
             }
-            Some(Read::Members(read)) => shape.activity = read.activity,
+            Some(Read::Members(read)) => {
+                shape.activity = read.activity;
+                shape.folder = read.folder;
+            }
             _ => {}
         }
         shape
@@ -1024,7 +1032,11 @@ impl<'a> Builder<'a> {
         }))
     }
 
+    /// A smart playlist's totals in the shape's music folder, as its page lists its members.
     fn smart_totals(&self, smart: &crate::catalog::snapshot::SmartPlaylist) -> Totals {
+        let Some(folder) = self.context.folder_slot(self.shape.folder, None) else {
+            return Totals::default();
+        };
         let opened = self
             .catalog
             .opened_smart(smart.key, self.shape.now, &smart.definition);
@@ -1032,7 +1044,7 @@ impl<'a> Builder<'a> {
             &smart.definition,
             self.inputs,
             opened.as_deref().map(Vec::as_slice),
-            None,
+            folder,
         )
     }
 
@@ -1313,8 +1325,9 @@ impl Catalog {
         art: bool,
     ) -> LibraryResult<(Option<Header>, [Vec<Row>; 2])> {
         let mut shape = shape.clone();
-        if let Some(HeaderKey::Smart { now, .. }) = header {
+        if let Some(HeaderKey::Smart { now, folder, .. }) = header {
             shape.now = now;
+            shape.folder = folder;
         }
         let inputs = self
             .smart_inputs(

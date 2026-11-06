@@ -1327,13 +1327,16 @@ impl Rows<Row> {
             .iter()
             .map(|(_, row)| Row::clone(row))
             .collect::<Vec<_>>();
-        let now = self.view().and_then(|view| view.smart_now());
+        let smart = self
+            .view()
+            .map(|view| view.smart_count())
+            .unwrap_or_default();
         let catalog = Arc::clone(catalog);
         let task = runtime.spawn(async move {
             catalog
                 .show_downloads(
                     rows.iter_mut().filter_map(Row::shown).collect(),
-                    now,
+                    smart,
                     &ReadCancellation::new(),
                 )
                 .await

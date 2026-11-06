@@ -404,7 +404,11 @@ impl SourceOwner {
                 Plan::Rows(Read::Members(member(Collection::Playlist(*key)))),
             ),
             Route::SmartPlaylistDetail(key) => (
-                Some(HeaderKey::Smart { key: *key, now }),
+                Some(HeaderKey::Smart {
+                    key: *key,
+                    now,
+                    folder: selected.and_then(|selected| selected.music_folder_key),
+                }),
                 Plan::Rows(Read::Members(member(Collection::Smart { key: *key, now }))),
             ),
             Route::GenreDetail(key) => (
@@ -804,10 +808,11 @@ impl View {
         refresh
     }
 
-    /// The time its smart playlists count their members at, as its rows and header show them:
-    /// when the Smart Playlists list was read, or the Smart Playlist page opened.
-    pub fn smart_now(&self) -> Option<i64> {
-        match &self.body {
+    /// When and in which music folder its smart playlists count their members, as its rows and
+    /// header show them: when the Smart Playlists list was read, or the Smart Playlist page
+    /// opened, in the selected music folder.
+    pub fn smart_count(&self) -> (Option<i64>, Option<library::FolderKey>) {
+        let now = match &self.body {
             Body::Rows {
                 read:
                     Read::List(ListRead {
@@ -817,7 +822,12 @@ impl View {
                 ..
             } => Some(*now),
             _ => self.options.smart_opened,
-        }
+        };
+        let folder = self
+            .selected
+            .as_ref()
+            .and_then(|selected| selected.music_folder_key);
+        (now, folder)
     }
 
     /// Its header read again as it is now, such as after a download; None when it shows none.

@@ -461,7 +461,11 @@ impl Views for Catalog {
         let mut rows = Vec::new();
         for key in keys {
             let fetch = library::Fetch {
-                header: Some(library::HeaderKey::Smart { key: *key, now }),
+                header: Some(library::HeaderKey::Smart {
+                    key: *key,
+                    now,
+                    folder: None,
+                }),
                 ..library::Fetch::default()
             };
             if let Some(library::Header::Smart(row)) = self.fetch(fetch, cancel).await?.header {

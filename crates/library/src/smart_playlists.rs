@@ -377,12 +377,14 @@ pub struct SmartPlaylistValueSuggestions {
     pub moods: Vec<String>,
 }
 
-/// Totals of smart playlists by key: their members as the Catalog evaluates them now.
+/// Totals of smart playlists by key: their members as of `now` in the music folder `folder`, as
+/// their pages list them.
 pub(crate) async fn smart_totals(
     catalog: &Catalog,
     connection: &mut SqliteConnection,
     keys: &[i64],
     now: i64,
+    folder: Option<crate::FolderKey>,
 ) -> LibraryResult<std::collections::HashMap<i64, crate::catalog::views::Totals>> {
     catalog.loaded().await;
     let definitions = {
@@ -402,6 +404,9 @@ pub(crate) async fn smart_totals(
         .await?;
     let snapshot = catalog.snapshot();
     let context = crate::catalog::views::Context::new(&snapshot);
+    let Some(folder) = context.folder_slot(folder, None) else {
+        return Ok(std::collections::HashMap::new());
+    };
     Ok(definitions
         .iter()
         .map(|(key, definition)| {
@@ -412,7 +417,7 @@ pub(crate) async fn smart_totals(
                     definition,
                     &inputs,
                     opened.as_deref().map(Vec::as_slice),
-                    None,
+                    folder,
                 ),
             )
         })

@@ -280,7 +280,7 @@ impl HomeRouteProjection {
                 .chain(items.iter_mut().flatten().map(home_item_shown))
                 .collect();
             catalog
-                .show_downloads(shown, None, &library::ReadCancellation::new())
+                .show_downloads(shown, (None, None), &library::ReadCancellation::new())
                 .await
                 .map(|()| (showcase, items))
         });
