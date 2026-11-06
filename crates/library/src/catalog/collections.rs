@@ -203,17 +203,16 @@ impl super::Observation<'_> {
             state: fn(&mut R) -> &mut super::records::NativeState,
         ) -> LibraryResult<()> {
             let (table, key) = (R::TABLE.name, R::TABLE.key);
-            let keys: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND native_favorite IS NOT (object_id IN(SELECT value FROM json_each(?2)))")))
+            let rows: Vec<(i64, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("WITH listed AS(SELECT value FROM json_each(?2)) SELECT {key},coalesce(object_id IN listed,0) FROM {table} WHERE source_key=?1 AND native_favorite IS NOT (object_id IN listed)")))
                 .bind(source).bind(serde_json::to_string(ids)?).fetch_all(write.connection().await?).await?;
-            write.read_keys::<R>(&keys).await?;
-            for key in keys {
+            write
+                .read_keys::<R>(&rows.iter().map(|(key, _)| *key).collect::<Vec<_>>())
+                .await?;
+            for (key, favorite) in rows {
                 // A favorite accepted since the walk began is newer than its listing.
                 if let Some(mut record) =
                     (write.get::<R>(key).await?).filter(|_| !write.newer(R::FAMILY, key))
                 {
-                    let favorite = record
-                        .object()
-                        .is_some_and(|(_, _, object)| ids.iter().any(|id| id == object));
                     state(&mut record).favorite = Some(favorite);
                     write.put(record);
                 }
