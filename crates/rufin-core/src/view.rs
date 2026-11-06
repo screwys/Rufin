@@ -731,7 +731,8 @@ impl SourceOwner {
                     cancel,
                 )
                 .await?;
-                catalog.sort_search(&mut results, search_sorts(settings));
+                let folder = selected.and_then(|selected| selected.music_folder_key);
+                catalog.sort_search(&mut results, folder, search_sorts(settings));
                 (None, Plan::Search(Box::new(results)))
             }
         };
@@ -1715,8 +1716,11 @@ impl View {
                     .catalog()
                     .reread_search(results, self.music_folder(), cancel)
                     .await?;
-                self.catalog()
-                    .sort_search(&mut results, search_sorts(&settings));
+                self.catalog().sort_search(
+                    &mut results,
+                    self.music_folder(),
+                    search_sorts(&settings),
+                );
                 let plan = Plan::Search(Box::new(results));
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }

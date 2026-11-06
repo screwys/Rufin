@@ -1643,11 +1643,14 @@ impl Context<'_> {
     }
 
     /// The keys an unfiltered list read shows, in order; a filtered one keeps rows of this
-    /// order. Playlist lists filter here. Playlist folders have negative keys.
+    /// order. Playlist lists filter here. Playlist folders have negative keys. The list keeps
+    /// rows by `listed`, totals in its music folder, and orders them by `shown`, the totals its
+    /// rows show.
     pub(crate) fn list_order(
         &self,
         read: &ListRead,
-        totals: Totaled<'_>,
+        listed: Totaled<'_>,
+        shown: Totaled<'_>,
         inputs: &Inputs,
     ) -> Vec<i64> {
         let snapshot = self.snapshot;
@@ -1667,9 +1670,8 @@ impl Context<'_> {
         match &read.kind {
             ListKind::Albums => {
                 for (slot, record) in snapshot.albums.iter() {
-                    let album = totals.album(slot);
-                    if record.source == source && album.tracks > 0 {
-                        rows.push(self.album_row(album, slot, record));
+                    if record.source == source && listed.album(slot).tracks > 0 {
+                        rows.push(self.album_row(shown.album(slot), slot, record));
                     }
                 }
                 rows.sort_by(|a, b| compare_albums(read.sort, read.descending, a, b));
@@ -1685,7 +1687,7 @@ impl Context<'_> {
                 for slot in self.artist_albums(artist, *album_artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
                     if record.source == source {
-                        let mut row = self.album_row(totals.album(slot), slot, record);
+                        let mut row = self.album_row(shown.album(slot), slot, record);
                         row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
                         rows.push(row);
                     }
@@ -1699,7 +1701,7 @@ impl Context<'_> {
             ListKind::Artists { album_artist } => {
                 let role = usize::from(*album_artist);
                 for (slot, record) in snapshot.artists.iter() {
-                    let totals = totals.artist(role, slot);
+                    let totals = shown.artist(role, slot);
                     if record.source == source && totals.tracks > 0 {
                         let mut row =
                             ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
@@ -1718,7 +1720,7 @@ impl Context<'_> {
                     TagKind::Mood
                 };
                 for (slot, record) in snapshot.tags.iter() {
-                    let totals = totals.tag(slot);
+                    let totals = shown.tag(slot);
                     let listed = totals.tracks > 0 || folder.is_none() && record.indexed();
                     if record.source == source && record.kind() == kind && listed {
                         let mut row = ListRow::new(
@@ -2611,14 +2613,30 @@ impl Catalog {
         read_at: [u64; 5],
     ) -> Vec<i64> {
         let Some(base) = list.unfiltered() else {
-            let folder = context.list_folder(list).flatten();
-            let derived = self.derived(context, folder);
-            let activity = list.depends()[1].then(|| self.activity(context, folder));
-            let totals = Totaled {
-                derived: &derived,
-                activity: activity.as_deref(),
+            let totaled = |folder| {
+                (
+                    self.derived(context, folder),
+                    list.depends()[1].then(|| self.activity(context, folder)),
+                )
             };
-            return context.list_order(list, totals, inputs);
+            let folder = context.list_folder(list).flatten();
+            let listed = totaled(folder);
+            // Rows order by the totals they show: in the folder only when the one rule narrows
+            // their kind.
+            let shown =
+                (!list.kind.rows().follows_folder() && folder.is_some()).then(|| totaled(None));
+            fn totals((derived, activity): &(Arc<Derived>, Option<Arc<Activity>>)) -> Totaled<'_> {
+                Totaled {
+                    derived,
+                    activity: activity.as_deref(),
+                }
+            }
+            return context.list_order(
+                list,
+                totals(&listed),
+                totals(shown.as_ref().unwrap_or(&listed)),
+                inputs,
+            );
         };
         let base = self.build_in(context, &Read::List(base), inputs, read_at);
         let filter = filter_text(&list.filter);
@@ -2784,11 +2802,13 @@ impl Catalog {
         Ok(keys)
     }
 
-    /// Orders search results as the Tracks, Albums and Artists lists sort: by `sorts`, a field
-    /// and whether it descends, in that order of categories.
+    /// Orders search results read in music folder `folder` as the Tracks, Albums and Artists
+    /// lists sort: by `sorts`, a field and whether it descends, in that order of categories,
+    /// and by the totals the rows show.
     pub fn sort_search(
         &self,
         results: &mut crate::SearchResults,
+        folder: Option<crate::FolderKey>,
         sorts: [(LibraryField, bool); 3],
     ) {
         let snapshot = self.snapshot();
@@ -2811,13 +2831,23 @@ impl Catalog {
         };
         use LibraryField as S;
         let plays = by(&[S::PlayCount, S::LastPlayed]);
-        let derived = (plays || by(&[S::AlbumCount, S::SongCount, S::Duration]))
-            .then(|| self.derived(&context, None));
-        let activity = plays.then(|| self.activity(&context, None));
-        let totals = derived.as_deref().map(|derived| Totaled {
-            derived,
-            activity: activity.as_deref(),
-        });
+        let totaled = plays || by(&[S::AlbumCount, S::SongCount, S::Duration]);
+        // Each row orders by the totals it shows, counted where the one rule counts its kind.
+        let read: [std::cell::OnceCell<(Arc<Derived>, Option<Arc<Activity>>)>; 2] =
+            Default::default();
+        let totals = |kind: crate::CatalogKind, source: u16| {
+            let folder = context.row_folder(folder, kind, Some(source)).flatten();
+            let (derived, activity) = read[usize::from(folder.is_some())].get_or_init(|| {
+                (
+                    self.derived(&context, folder),
+                    plays.then(|| self.activity(&context, folder)),
+                )
+            });
+            Totaled {
+                derived,
+                activity: activity.as_deref(),
+            }
+        };
         let sort = tracks.sort();
         let mut rows = results
             .tracks
@@ -2839,7 +2869,11 @@ impl Catalog {
             .filter_map(|(position, row)| {
                 let slot = snapshot.albums.slot(row.album_key.raw())?;
                 let record = &snapshot.albums.records[slot as usize];
-                let totals = totals.map_or_else(Totals::default, |totals| totals.album(slot));
+                let totals = if totaled {
+                    totals(crate::CatalogKind::Album, record.source).album(slot)
+                } else {
+                    Totals::default()
+                };
                 Some((position, context.album_row(totals, slot, record)))
             })
             .collect::<Vec<_>>();
@@ -2856,8 +2890,9 @@ impl Catalog {
                 let slot = snapshot.artists.slot(row.artist_key.raw())?;
                 let record = &snapshot.artists.records[slot as usize];
                 let mut listed = ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
-                if let Some(totals) = totals {
-                    listed.totals = totals.artist(usize::from(row.album_artist), slot);
+                if totaled {
+                    listed.totals = totals(crate::CatalogKind::Artist, record.source)
+                        .artist(usize::from(row.album_artist), slot);
                 }
                 listed.rating = rating(record.rating, record.native_rating);
                 listed.favorite = favorite(record.flags) == Some(true);

@@ -63,6 +63,20 @@ pub enum ListKind {
     },
 }
 
+impl ListKind {
+    /// The kind of row a list of this kind shows.
+    pub fn rows(&self) -> CatalogKind {
+        match self {
+            Self::Albums | Self::ArtistAlbums { .. } => CatalogKind::Album,
+            Self::Artists { .. } => CatalogKind::Artist,
+            Self::Genres => CatalogKind::Genre,
+            Self::Moods => CatalogKind::Mood,
+            Self::Playlists => CatalogKind::Playlist,
+            Self::SmartPlaylists { .. } => CatalogKind::SmartPlaylist,
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize,
 )]
