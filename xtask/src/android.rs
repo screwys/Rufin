@@ -119,7 +119,9 @@ fn download_gstreamer(destination: &Path, architectures: &[&str]) -> Result<()> 
     let archive = temporary.path().join("gstreamer.tar.xz");
     execute(
         Command::new("curl")
-            .args(["--fail", "--location", "--progress-bar"])
+            // The 1 GB archive comes from a slow server that drops connections; resume on retry.
+            .args(["--fail", "--location", "--progress-bar", "--continue-at", "-"])
+            .args(["--retry", "20", "--retry-delay", "5", "--retry-all-errors"])
             .arg(format!(
                 "https://gstreamer.freedesktop.org/data/pkg/android/{GSTREAMER_VERSION}/gstreamer-1.0-android-universal-{GSTREAMER_VERSION}.tar.xz"
             ))

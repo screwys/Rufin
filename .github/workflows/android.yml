@@ -59,7 +59,8 @@ jobs:
           rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 
       - name: Restore GStreamer SDK
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        id: gstreamer
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: android/.toolchains/gstreamer-1.28.7
           key: gstreamer-android-arm64-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
@@ -86,3 +87,11 @@ jobs:
       - name: Check optimized Android release
         if: matrix.check == 'build' && github.event_name == 'workflow_dispatch'
         run: android/gradlew -p android assembleStableRelease lintStableRelease
+
+      # Saved even when a check fails, so the slow SDK download happens once per key.
+      - name: Save GStreamer SDK
+        if: always() && steps.gstreamer.outputs.cache-hit != 'true' && hashFiles('android/.toolchains/gstreamer-1.28.7/arm64/lib/pkgconfig/gstreamer-1.0.pc') != ''
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: android/.toolchains/gstreamer-1.28.7
+          key: ${{ steps.gstreamer.outputs.cache-primary-key }}
