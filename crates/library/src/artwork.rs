@@ -758,7 +758,7 @@ impl Catalog {
         let arts = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
-            let derived = self.covers(&context);
+            let derived = self.derived(&context, None);
             let Some(owner) = snapshot.source_slot(source) else {
                 return Ok(Vec::new());
             };

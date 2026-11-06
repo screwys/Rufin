@@ -12,8 +12,8 @@ use crate::catalog::snapshot::{
 };
 use crate::catalog::strings::StrId;
 use crate::catalog::views::{
-    Art, Context, Derived, Downloaded, Inputs, Played, Totals, date_text, favorite, known, rating,
-    year_of,
+    Activity, Art, Context, Derived, Downloaded, Inputs, Played, Totaled, Totals, date_text,
+    favorite, known, rating, year_of,
 };
 use crate::*;
 
@@ -546,9 +546,12 @@ struct Builder<'a> {
     catalog: &'a Catalog,
     context: Context<'a>,
     snapshot: &'a Snapshot,
+    /// Totals and pictures of the whole library, and of the music folder the rows read in.
     covers: Arc<Derived>,
-    derived: std::cell::OnceCell<Arc<Derived>>,
     in_folder: std::cell::OnceCell<Arc<Derived>>,
+    /// Plays of the whole library, and of the music folder, for rows that show them.
+    activity: std::cell::OnceCell<Arc<Activity>>,
+    activity_in_folder: std::cell::OnceCell<Arc<Activity>>,
     downloaded: std::cell::OnceCell<Arc<Downloaded>>,
     shape: &'a Shape,
     art: bool,
@@ -566,12 +569,13 @@ impl<'a> Builder<'a> {
     ) -> Self {
         let context = Context::new(snapshot);
         Self {
-            covers: catalog.covers(&context),
+            covers: catalog.derived(&context, None),
             catalog,
             context,
             snapshot,
-            derived: std::cell::OnceCell::new(),
             in_folder: std::cell::OnceCell::new(),
+            activity: std::cell::OnceCell::new(),
+            activity_in_folder: std::cell::OnceCell::new(),
             downloaded: std::cell::OnceCell::new(),
             shape,
             art,
@@ -579,25 +583,33 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Collection totals: with current plays when the rows show activity, else the facts-only
-    /// aggregate, whose plays may be older.
-    fn totals(&self, activity: bool) -> &Derived {
-        if activity {
-            self.derived
-                .get_or_init(|| self.catalog.derived(&self.context, None))
-        } else {
-            &self.covers
+    /// Collection totals of the whole library, with plays when the rows show activity.
+    fn totals(&self, activity: bool) -> Totaled<'_> {
+        Totaled {
+            derived: &self.covers,
+            activity: activity.then(|| {
+                &**self
+                    .activity
+                    .get_or_init(|| self.catalog.activity(&self.context, None))
+            }),
         }
     }
 
     /// An artist's or tag's totals, of source `source`: in the music folder the rows read when
     /// it is that source's, as the artist's or tag's page lists it (decisions.md, 2026-11-06).
-    fn scoped_totals(&self, activity: bool, source: u16) -> &Derived {
-        match self.context.folder_slot(self.shape.folder, Some(source)) {
-            Some(Some(folder)) => self
+    fn scoped_totals(&self, activity: bool, source: u16) -> Totaled<'_> {
+        let Some(Some(folder)) = self.context.folder_slot(self.shape.folder, Some(source)) else {
+            return self.totals(activity);
+        };
+        Totaled {
+            derived: self
                 .in_folder
                 .get_or_init(|| self.catalog.derived(&self.context, Some(folder))),
-            _ => self.totals(activity),
+            activity: activity.then(|| {
+                &**self
+                    .activity_in_folder
+                    .get_or_init(|| self.catalog.activity(&self.context, Some(folder)))
+            }),
         }
     }
 
@@ -864,7 +876,7 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.totals(activity).albums[slot as usize];
+        let mut totals = self.totals(activity).album(slot);
         totals.albums = u32::from(totals.tracks > 0);
         totals.downloaded = self.downloaded().albums[slot as usize];
         let runs = snapshot.album_runs(record);
@@ -928,8 +940,9 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.scoped_totals(activity, record.source).artists
-            [usize::from(album_artist)][slot as usize];
+        let mut totals = self
+            .scoped_totals(activity, record.source)
+            .artist(usize::from(album_artist), slot);
         totals.downloaded = self.downloaded().artists[usize::from(album_artist)][slot as usize];
         Ok(Some(ArtistRow {
             artist_key: key,
@@ -976,7 +989,7 @@ impl<'a> Builder<'a> {
             name: text(snapshot, record.name),
             summary: Totals {
                 downloaded: self.downloaded().tags[slot as usize],
-                ..self.scoped_totals(false, record.source).tags[slot as usize]
+                ..self.scoped_totals(false, record.source).tag(slot)
             }
             .summary(),
             representative_artwork: artwork_binding
@@ -1648,7 +1661,7 @@ impl Catalog {
         let inputs = Inputs::default();
         Builder::new(self, &snapshot, &shape, &inputs, false)
             .scoped_totals(false, snapshot.tags.records[slot as usize].source)
-            .tags[slot as usize]
+            .tag(slot)
             .summary()
             .track_count
     }

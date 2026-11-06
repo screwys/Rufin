@@ -2096,22 +2096,23 @@ fn changes(
             Refresh::Reread
         });
     }
+    // Plays change what a page shows where its order reads them; an artist page reads its
+    // tracks' order and its releases'.
     if changed.listened {
-        let settings = owner.shared.settings.load();
+        let settings = owner.shared.settings.committed();
         let categories: &[CollectionCategory] = match route {
-            Route::Favorites => &[options.category],
             Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
                 &[CollectionCategory::Tracks, CollectionCategory::Albums]
             }
-            _ => &[CollectionCategory::Tracks],
+            _ => std::slice::from_ref(&options.category),
         };
-        let sensitive = options.sort.is_some_and(LibraryField::activity_sensitive)
-            || categories.iter().any(|category| {
-                uses_activity(
-                    route,
-                    &settings.ui.library_list(library_list_key(route, *category)),
-                )
-            });
+        let sensitive = categories.iter().any(|category| {
+            let options = OpenOptions {
+                category: *category,
+                ..options.clone()
+            };
+            read_order(route, &options, &settings).2
+        });
         if sensitive {
             refresh = refresh.max(Refresh::Reread);
         }

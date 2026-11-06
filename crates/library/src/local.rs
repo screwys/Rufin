@@ -519,7 +519,7 @@ impl Catalog {
         self.loaded().await;
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);
-        let derived = self.covers(&context);
+        let derived = self.derived(&context, None);
         let mut counts = vec![(0usize, 0usize); snapshot.source_slots.len()];
         for (slot, album) in snapshot.albums.iter() {
             if derived.albums[slot as usize].tracks > 0

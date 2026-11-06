@@ -254,7 +254,7 @@ impl Catalog {
             after = last.album_key.raw();
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
-            let derived = self.covers(&context);
+            let derived = self.derived(&context, None);
             candidates.extend(
                 page.into_iter()
                     .filter(|candidate| {

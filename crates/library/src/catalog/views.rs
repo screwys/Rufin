@@ -187,7 +187,8 @@ impl<'a> Context<'a> {
 }
 
 /// Visible-track totals of one collection. Albums, artists, tags and folders count their
-/// downloads in [`Downloaded`]; playlists count their own.
+/// downloads in [`Downloaded`] and their plays in [`Activity`]; playlists count their own
+/// downloads.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Totals {
     pub(crate) tracks: u32,
@@ -199,17 +200,20 @@ pub(crate) struct Totals {
 }
 
 impl Totals {
-    fn add(&mut self, record: &TrackRec, played: Played) {
+    fn add(&mut self, record: &TrackRec) {
         self.tracks += 1;
         self.duration += u64::from(record.duration_ms);
-        self.plays += u64::from(played.plays);
-        self.last_played = self.last_played.max(played.last);
     }
 
     /// Adds a playlist's or smart playlist's track with its download.
     fn add_member(&mut self, record: &TrackRec) {
-        self.add(record, Played::default());
+        self.add(record);
         self.downloaded += u32::from(record.flags & DOWNLOADED != 0);
+    }
+
+    fn add_played(&mut self, played: Played) {
+        self.plays += u64::from(played.plays);
+        self.last_played = self.last_played.max(played.last);
     }
 
     pub(crate) fn summary(&self) -> crate::CollectionSummary {
@@ -231,8 +235,8 @@ pub(crate) enum Borrowed {
     Track(u32),
 }
 
-/// Totals and borrowed pictures of every collection, from one pass over the visible tracks.
-/// Built once per Catalog revision, and per music folder when a reader is scoped to one.
+/// Totals without plays and borrowed pictures of every collection, from one pass over the
+/// visible tracks. Built once per Catalog revision and music folder; listens don't touch it.
 pub(crate) struct Derived {
     pub(crate) albums: Vec<Totals>,
     /// The first pictured visible track of each album.
@@ -281,10 +285,9 @@ impl Derived {
             }
             for &(_, slot) in group {
                 let record = &snapshot.tracks.records[slot as usize];
-                let played = context.played(slot, record);
                 let runs = snapshot.track_runs(record);
                 if album != NONE {
-                    derived.albums[album as usize].add(record, played);
+                    derived.albums[album as usize].add(record);
                     if record.flags & PICTURE != 0 {
                         let rank = (
                             record.disc,
@@ -306,20 +309,20 @@ impl Derived {
                     }
                 }
                 for artist in dedup(runs[0]) {
-                    derived.artists[0][artist as usize].add(record, played);
+                    derived.artists[0][artist as usize].add(record);
                     owners[0].push(artist);
                 }
                 for artist in dedup(context.album_artists(record)) {
-                    derived.artists[1][artist as usize].add(record, played);
+                    derived.artists[1][artist as usize].add(record);
                     owners[1].push(artist);
                 }
                 context.tags_of(record, &mut tags);
                 for tag in &tags {
-                    derived.tags[*tag as usize].add(record, played);
+                    derived.tags[*tag as usize].add(record);
                     owners[2].push(*tag);
                 }
                 for folder in dedup(runs[3]) {
-                    derived.folders[folder as usize].add(record, played);
+                    derived.folders[folder as usize].add(record);
                     owners[3].push(folder);
                 }
             }
@@ -370,6 +373,92 @@ impl Derived {
             }
         }
         derived
+    }
+}
+
+/// Plays and last plays of every collection, from one pass over the visible tracks played: what
+/// rows and orders that show activity add to [`Derived`]. A listen rebuilds only this.
+pub(crate) struct Activity {
+    albums: Vec<Totals>,
+    /// Track artists and album artists.
+    artists: [Vec<Totals>; 2],
+    tags: Vec<Totals>,
+}
+
+impl Activity {
+    fn build(context: &Context<'_>, folder: Option<u32>) -> Self {
+        let snapshot = context.snapshot;
+        let artists = snapshot.artists.records.len();
+        let mut activity = Self {
+            albums: vec![Totals::default(); snapshot.albums.records.len()],
+            artists: [
+                vec![Totals::default(); artists],
+                vec![Totals::default(); artists],
+            ],
+            tags: vec![Totals::default(); snapshot.tags.records.len()],
+        };
+        let mut tags = Vec::new();
+        for (slot, record) in snapshot.tracks.iter() {
+            let runs = snapshot.track_runs(record);
+            if !record.indexed() || folder.is_some_and(|folder| !runs[3].contains(&folder)) {
+                continue;
+            }
+            let played = context.played(slot, record);
+            if played.plays == 0 && played.last.is_none() {
+                continue;
+            }
+            if let Some(album) = context.album_of(record) {
+                activity.albums[album as usize].add_played(played);
+            }
+            for artist in dedup(runs[0]) {
+                activity.artists[0][artist as usize].add_played(played);
+            }
+            for artist in dedup(context.album_artists(record)) {
+                activity.artists[1][artist as usize].add_played(played);
+            }
+            context.tags_of(record, &mut tags);
+            for tag in &tags {
+                activity.tags[*tag as usize].add_played(played);
+            }
+        }
+        activity
+    }
+}
+
+/// The collection totals a read uses: [`Derived`]'s, with [`Activity`]'s plays when the read
+/// shows or orders by them.
+#[derive(Clone, Copy)]
+pub(crate) struct Totaled<'a> {
+    pub(crate) derived: &'a Derived,
+    pub(crate) activity: Option<&'a Activity>,
+}
+
+impl Totaled<'_> {
+    fn with(&self, mut totals: Totals, plays: impl Fn(&Activity) -> Totals) -> Totals {
+        if let Some(activity) = self.activity {
+            let played = plays(activity);
+            totals.plays = played.plays;
+            totals.last_played = played.last_played;
+        }
+        totals
+    }
+
+    pub(crate) fn album(&self, slot: u32) -> Totals {
+        let slot = slot as usize;
+        self.with(self.derived.albums[slot], |activity| activity.albums[slot])
+    }
+
+    /// An artist's totals: as track artist, or as album artist when `role` is 1.
+    pub(crate) fn artist(&self, role: usize, slot: u32) -> Totals {
+        let slot = slot as usize;
+        self.with(self.derived.artists[role][slot], |activity| {
+            activity.artists[role][slot]
+        })
+    }
+
+    pub(crate) fn tag(&self, slot: u32) -> Totals {
+        let slot = slot as usize;
+        self.with(self.derived.tags[slot], |activity| activity.tags[slot])
     }
 }
 
@@ -1541,7 +1630,7 @@ impl Context<'_> {
     pub(crate) fn list_order(
         &self,
         read: &ListRead,
-        derived: &Derived,
+        totals: Totaled<'_>,
         inputs: &Inputs,
     ) -> Vec<i64> {
         let snapshot = self.snapshot;
@@ -1561,8 +1650,9 @@ impl Context<'_> {
         match &read.kind {
             ListKind::Albums => {
                 for (slot, record) in snapshot.albums.iter() {
-                    if record.source == source && derived.albums[slot as usize].tracks > 0 {
-                        rows.push(self.album_row(derived.albums[slot as usize], slot, record));
+                    let album = totals.album(slot);
+                    if record.source == source && album.tracks > 0 {
+                        rows.push(self.album_row(album, slot, record));
                     }
                 }
                 rows.sort_by(|a, b| compare_albums(read.sort, read.descending, a, b));
@@ -1578,7 +1668,7 @@ impl Context<'_> {
                 for slot in self.artist_albums(artist, *album_artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
                     if record.source == source {
-                        let mut row = self.album_row(derived.albums[slot as usize], slot, record);
+                        let mut row = self.album_row(totals.album(slot), slot, record);
                         row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
                         rows.push(row);
                     }
@@ -1592,7 +1682,7 @@ impl Context<'_> {
             ListKind::Artists { album_artist } => {
                 let role = usize::from(*album_artist);
                 for (slot, record) in snapshot.artists.iter() {
-                    let totals = derived.artists[role][slot as usize];
+                    let totals = totals.artist(role, slot);
                     if record.source == source && totals.tracks > 0 {
                         let mut row =
                             ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
@@ -1611,7 +1701,7 @@ impl Context<'_> {
                     TagKind::Mood
                 };
                 for (slot, record) in snapshot.tags.iter() {
-                    let totals = derived.tags[slot as usize];
+                    let totals = totals.tag(slot);
                     let listed = totals.tracks > 0 || folder.is_none() && record.indexed();
                     if record.source == source && record.kind() == kind && listed {
                         let mut row = ListRow::new(
@@ -2026,7 +2116,10 @@ pub(crate) fn smart_period(definition: &SmartPlaylistDefinition) -> Option<i64> 
 /// hold and the order budget allows.
 #[derive(Default)]
 pub(crate) struct Views {
-    derived: Vec<BuiltDerived>,
+    /// By the facts and music folder each counts.
+    derived: Vec<((u64, Option<u32>), Arc<Derived>)>,
+    /// By the facts, plays and music folder each counts.
+    activity: Vec<(([u64; 2], Option<u32>), Arc<Activity>)>,
     /// The facts and downloads it counts, and what it counts.
     downloaded: Option<([u64; 2], Arc<Downloaded>)>,
     /// Most recently used last.
@@ -2058,13 +2151,6 @@ struct OpenedSmart {
 }
 
 const OPENED_SMART: usize = 8;
-
-struct BuiltDerived {
-    /// The facts and plays it counts.
-    stamp: [u64; 2],
-    folder: Option<u32>,
-    derived: Arc<Derived>,
-}
 
 /// What an order depends on besides catalog records: favorites and ratings, plays, downloads,
 /// and playlists.
@@ -2190,22 +2276,61 @@ impl Catalog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Totals and borrowed pictures of the current facts and plays, scoped to a music folder.
+    /// Totals without plays and borrowed pictures of the current facts, in music folder
+    /// `folder`: what every read of collection totals takes.
     pub(crate) fn derived(&self, context: &Context<'_>, folder: Option<u32>) -> Arc<Derived> {
-        let snapshot = context.snapshot;
-        let stamp = [snapshot.facts, snapshot.plays];
-        self.derive(context, folder, |built| {
-            built.stamp == stamp && built.folder == folder
-        })
+        let key = (context.snapshot.facts, folder);
+        self.built(
+            |views| &mut views.derived,
+            key,
+            |kept| kept.0 == key.0,
+            || Derived::build(context, folder),
+        )
     }
 
-    /// Borrowed pictures and totals without plays. They change only with catalog records, so a
-    /// row read after a favorite or a listen reuses an older build.
-    pub(crate) fn covers(&self, context: &Context<'_>) -> Arc<Derived> {
-        let facts = context.snapshot.facts;
-        self.derive(context, None, |built| {
-            built.stamp[0] == facts && built.folder.is_none()
-        })
+    /// Collection plays of the current facts and plays in music folder `folder`, for a read that
+    /// shows or orders by them.
+    pub(crate) fn activity(&self, context: &Context<'_>, folder: Option<u32>) -> Arc<Activity> {
+        let key = ([context.snapshot.facts, context.snapshot.plays], folder);
+        self.built(
+            |views| &mut views.activity,
+            key,
+            |kept| kept.0 == key.0,
+            || Activity::build(context, folder),
+        )
+    }
+
+    /// The value kept at `key`, or one built now; keeps those `current` says still hold, at most
+    /// four.
+    fn built<K: Copy + PartialEq, T>(
+        &self,
+        kept: impl Fn(&mut Views) -> &mut Vec<(K, Arc<T>)>,
+        key: K,
+        current: impl Fn(&K) -> bool,
+        build: impl FnOnce() -> T,
+    ) -> Arc<T> {
+        let find = || {
+            kept(&mut self.views())
+                .iter()
+                .find(|built| built.0 == key)
+                .map(|built| built.1.clone())
+        };
+        if let Some(found) = find() {
+            return found;
+        }
+        let _building = self.deriving();
+        if let Some(found) = find() {
+            return found;
+        }
+        let value = Arc::new(build());
+        let mut views = self.views();
+        let kept = kept(&mut views);
+        kept.retain(|built| current(&built.0));
+        if kept.len() >= 4 {
+            kept.remove(0);
+        }
+        kept.push((key, value.clone()));
+        value
     }
 
     /// How many tracks of each collection are downloaded, kept while the facts and downloads
@@ -2226,44 +2351,6 @@ impl Catalog {
         let downloaded = Arc::new(Downloaded::build(context));
         self.views().downloaded = Some((stamp, downloaded.clone()));
         downloaded
-    }
-
-    fn derive(
-        &self,
-        context: &Context<'_>,
-        folder: Option<u32>,
-        reuse: impl Fn(&BuiltDerived) -> bool,
-    ) -> Arc<Derived> {
-        let find = || {
-            self.views()
-                .derived
-                .iter()
-                .find(|built| reuse(built))
-                .map(|built| built.derived.clone())
-        };
-        if let Some(derived) = find() {
-            return derived;
-        }
-        let _building = self.deriving();
-        if let Some(derived) = find() {
-            return derived;
-        }
-        let derived = Arc::new(Derived::build(context, folder));
-        let snapshot = context.snapshot;
-        let stamp = [snapshot.facts, snapshot.plays];
-        let mut views = self.views();
-        views.derived.retain(|built| {
-            built.stamp[0] == stamp[0] && (built.stamp == stamp || built.folder.is_none())
-        });
-        if views.derived.len() >= 4 {
-            views.derived.remove(0);
-        }
-        views.derived.push(BuiltDerived {
-            stamp,
-            folder,
-            derived: derived.clone(),
-        });
-        derived
     }
 
     /// The cached order of a read while what it depends on is unchanged.
@@ -2516,7 +2603,13 @@ impl Catalog {
     ) -> Vec<i64> {
         let Some(base) = list.unfiltered() else {
             let folder = context.list_folder(list).flatten();
-            return context.list_order(list, &self.derived(context, folder), inputs);
+            let derived = self.derived(context, folder);
+            let activity = list.depends()[1].then(|| self.activity(context, folder));
+            let totals = Totaled {
+                derived: &derived,
+                activity: activity.as_deref(),
+            };
+            return context.list_order(list, totals, inputs);
         };
         let base = self.build_in(context, &Read::List(base), inputs, read_at);
         let filter = filter_text(&list.filter);
@@ -2697,7 +2790,7 @@ impl Catalog {
             (artists, descending),
         ] = sorts;
         // Collection totals only when a sort of returned collection rows orders by them, and
-        // current plays only when it orders by plays.
+        // plays only when it orders by plays.
         let sorts = [
             (!results.albums.is_empty(), albums.sort()),
             (!results.artists.is_empty(), artists.sort()),
@@ -2708,13 +2801,14 @@ impl Catalog {
                 .any(|(returned, sort)| *returned && fields.contains(sort))
         };
         use LibraryField as S;
-        let derived = if by(&[S::PlayCount, S::LastPlayed]) {
-            Some(self.derived(&context, None))
-        } else if by(&[S::AlbumCount, S::SongCount, S::Duration]) {
-            Some(self.covers(&context))
-        } else {
-            None
-        };
+        let plays = by(&[S::PlayCount, S::LastPlayed]);
+        let derived = (plays || by(&[S::AlbumCount, S::SongCount, S::Duration]))
+            .then(|| self.derived(&context, None));
+        let activity = plays.then(|| self.activity(&context, None));
+        let totals = derived.as_deref().map(|derived| Totaled {
+            derived,
+            activity: activity.as_deref(),
+        });
         let sort = tracks.sort();
         let mut rows = results
             .tracks
@@ -2736,9 +2830,7 @@ impl Catalog {
             .filter_map(|(position, row)| {
                 let slot = snapshot.albums.slot(row.album_key.raw())?;
                 let record = &snapshot.albums.records[slot as usize];
-                let totals = derived
-                    .as_ref()
-                    .map_or_else(Totals::default, |derived| derived.albums[slot as usize]);
+                let totals = totals.map_or_else(Totals::default, |totals| totals.album(slot));
                 Some((position, context.album_row(totals, slot, record)))
             })
             .collect::<Vec<_>>();
@@ -2755,8 +2847,8 @@ impl Catalog {
                 let slot = snapshot.artists.slot(row.artist_key.raw())?;
                 let record = &snapshot.artists.records[slot as usize];
                 let mut listed = ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
-                if let Some(derived) = &derived {
-                    listed.totals = derived.artists[usize::from(row.album_artist)][slot as usize];
+                if let Some(totals) = totals {
+                    listed.totals = totals.artist(usize::from(row.album_artist), slot);
                 }
                 listed.rating = rating(record.rating, record.native_rating);
                 listed.favorite = favorite(record.flags) == Some(true);
@@ -2824,7 +2916,7 @@ impl Catalog {
     pub(crate) fn arts(&self, owners: impl IntoIterator<Item = Option<Owner>>) -> Vec<Art> {
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
-        let derived = self.covers(&context);
+        let derived = self.derived(&context, None);
         owners
             .into_iter()
             .map(|owner| match owner {
