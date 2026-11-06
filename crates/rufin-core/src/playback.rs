@@ -911,15 +911,6 @@ impl PlaybackOwner {
         }
     }
 
-    pub fn play_random(&self, request: RandomPlayRequest) {
-        if self.random_rufin(&request) {
-            return;
-        }
-        if self.random_plex(&request) {
-            return;
-        }
-        self.send(Command::Random(request));
-    }
     pub fn play_radio(&self, request: RadioPlayRequest) {
         if self.radio_rufin(&request) {
             return;

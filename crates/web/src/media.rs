@@ -164,39 +164,43 @@ async fn radio(
     Ok(accepted())
 }
 
+/// The source and music folder a Random Play request names, as a selection of its own.
+async fn random_library(
+    products: &ProductHandles,
+    source: &str,
+    folder: Option<&str>,
+) -> Result<rufin_core::runtime::SelectedLibrary, Error> {
+    page::scope(products, Some(&sources::SourceId::new(source)), folder)
+        .await?
+        .ok_or_else(|| bad_request("source is required"))
+}
+
 async fn random_settings(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let (source, folder) = catalog::scope(
+    let selected = random_library(
         &products,
         required(&parameters, "source")?,
         parameters.get("folder").map(String::as_str),
     )
     .await?;
     let offset = number(&parameters, "offset", 0)?;
-    let (total, rows) = products
-        .library
-        .genre_choices(
-            source,
-            folder,
-            parameters.get("q").map(String::as_str).unwrap_or(""),
-            offset..offset.saturating_add(64),
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(internal)?;
-    let settings = products.settings.load().random_play.clone();
-    let selected_genre = rufin_core::radio::saved_random_genre(
+    let (total, rows) = rufin_core::radio::random_genres(
         &products.library,
-        &settings,
-        &sources::SourceId::new(required(&parameters, "source")?),
-        source,
-        parameters.get("folder").map(String::as_str),
+        &selected,
+        parameters.get("q").map(String::as_str).unwrap_or(""),
+        offset..offset.saturating_add(64),
+        &library::ReadCancellation::new(),
     )
     .await
-    .map_err(internal)?
-    .map(|row| json!({"id":row.key,"name":row.name}));
+    .map_err(internal)?;
+    let settings = products.settings.load().random_play.clone();
+    let selected_genre =
+        rufin_core::radio::saved_random_genre(&products.library, &settings, &selected)
+            .await
+            .map_err(internal)?
+            .map(|row| json!({"id":row.key,"name":row.name}));
     let total = boolean(&parameters, "total")?.then_some(total as i64);
     Ok(json_response(
         StatusCode::OK,
@@ -221,8 +225,7 @@ async fn random(
         mode: String,
     }
     let input: Input = body(request).await?;
-    let (source, folder) =
-        catalog::scope(&products, &input.source, input.folder.as_deref()).await?;
+    let selected = random_library(&products, &input.source, input.folder.as_deref()).await?;
     let placement = match input.mode.as_str() {
         "replace" => rufin_core::playback::QueuePlacement::Now,
         "next" => rufin_core::playback::QueuePlacement::Next,
@@ -243,15 +246,10 @@ async fn random(
                 .map_or(0, |elapsed| elapsed.as_nanos() as i64),
         },
     };
-    let empty = rufin_core::radio::queue_random(
-        &products.library,
-        source,
-        folder,
-        request,
-        &products.playback,
-    )
-    .await
-    .map_err(bad_request)?;
+    let empty =
+        rufin_core::radio::queue_random(&products.library, &selected, request, &products.playback)
+            .await
+            .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"empty":empty})))
 }
 

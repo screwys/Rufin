@@ -65,7 +65,6 @@ pub struct AutoDjRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Radio(crate::playback::RadioPlayRequest),
-    Random(crate::playback::RandomPlayRequest),
     OperationFailed(String),
     ObserveExternal {
         output: PlaybackOutput,
@@ -795,33 +794,6 @@ impl Player {
         });
     }
 
-    fn play_random(&mut self, request: crate::playback::RandomPlayRequest) {
-        let owner = self.owner();
-        let Some(selected) = owner.source.selected_library() else {
-            return;
-        };
-        let catalog = owner.catalog.clone();
-        let excluded = self
-            .sequence
-            .selected()
-            .map(|entry| entry.track.track_key)
-            .into_iter()
-            .collect::<Vec<_>>();
-        self.start_candidates(request.placement, QueueProvenance::Random, async move {
-            catalog
-                .random_candidates(
-                    selected.source_key,
-                    selected.music_folder_key,
-                    &request.criteria,
-                    &excluded,
-                    request.requested,
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .map_err(crate::string_error)
-        });
-    }
-
     fn start_candidates(
         &mut self,
         placement: QueuePlacement,
@@ -927,7 +899,6 @@ impl Player {
         }
         match command {
             Command::Radio(request) => Ok(self.play_radio(request)),
-            Command::Random(request) => Ok(self.play_random(request)),
             Command::OperationFailed(message) => {
                 self.last_error = Some(message.clone());
                 Ok({

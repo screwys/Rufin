@@ -24,14 +24,7 @@ pub async fn play_saved_random(
         .clone()
         .reply(move |owner, catalog| async move {
             let selected = owner.selected_library().ok_or("No source selected")?;
-            let genre = saved_random_genre(
-                &catalog,
-                &settings,
-                &selected.source_id,
-                selected.source_key,
-                selected.music_folder_object_id.as_deref(),
-            )
-            .await?;
+            let genre = saved_random_genre(&catalog, &settings, &selected).await?;
             let request = RandomPlayRequest {
                 placement,
                 requested: settings.limit,
@@ -46,8 +39,7 @@ pub async fn play_saved_random(
                         .map_or(0, |duration| duration.as_nanos() as i64),
                 },
             };
-            let (source, folder) = random_library(&selected);
-            queue_random(&catalog, source, folder, request, &queue).await
+            queue_random(&catalog, &selected, request, &queue).await
         })
         .recv()
         .await
@@ -75,23 +67,24 @@ pub async fn random_genres(
         .await
 }
 
-/// Finds the saved Random Play genre when it was saved for this library: a source and one of
+/// Finds the saved Random Play genre when it was saved for `selected`: a source and one of
 /// its music folders.
 pub async fn saved_random_genre(
     catalog: &Catalog,
     settings: &RandomPlaySettings,
-    source_id: &sources::SourceId,
-    source: SourceKey,
-    music_folder: Option<&str>,
+    selected: &SelectedLibrary,
 ) -> Result<Option<library::TagRow>, String> {
-    let Some(object_id) = settings.selected_genre_id(source_id, music_folder) else {
+    let Some(object_id) = settings.selected_genre_id(
+        &selected.source_id,
+        selected.music_folder_object_id.as_deref(),
+    ) else {
         return Ok(None);
     };
     let cancellation = ReadCancellation::new();
     let Some(key) = catalog
         .catalog_keys(
             library::CatalogKind::Genre,
-            Some(source),
+            Some(selected.source_key),
             &[object_id.to_owned()],
             &cancellation,
         )
@@ -116,14 +109,15 @@ pub async fn saved_random_genre(
         }))
 }
 
+/// Plays what `request` picks at random in `selected`. True means nothing matched.
 pub async fn queue_random(
     catalog: &Catalog,
-    source: SourceKey,
-    folder: Option<library::FolderKey>,
+    selected: &SelectedLibrary,
     request: RandomPlayRequest,
     queue: &crate::playback::PlaybackOwner,
 ) -> Result<bool, String> {
     let cancellation = ReadCancellation::new();
+    let (source, folder) = random_library(selected);
     let order = catalog
         .random_candidates(
             source,

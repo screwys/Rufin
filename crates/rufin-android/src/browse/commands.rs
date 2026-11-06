@@ -364,14 +364,7 @@ impl AndroidLibrary {
         let genre = self
             .runtime
             .spawn(async move {
-                rufin_core::radio::saved_random_genre(
-                    &catalog,
-                    &settings,
-                    &selected.source_id,
-                    selected.source_key,
-                    selected.music_folder_object_id.as_deref(),
-                )
-                .await
+                rufin_core::radio::saved_random_genre(&catalog, &settings, &selected).await
             })
             .await
             .map_err(error)?

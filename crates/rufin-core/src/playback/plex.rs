@@ -1031,48 +1031,6 @@ impl PlaybackOwner {
         true
     }
 
-    pub(super) fn random_plex(&self, request: &RandomPlayRequest) -> bool {
-        let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
-            return false;
-        };
-        let Some(selected) = self.source.selected_library() else {
-            return true;
-        };
-        let request = request.clone();
-        self.runtime.spawn(async move {
-            let result = async {
-                let candidates = plex
-                    .catalog
-                    .random_candidates(
-                        selected.source_key,
-                        selected.music_folder_key,
-                        &request.criteria,
-                        &[],
-                        request.requested,
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                let _guard = plex.commands.lock().await;
-                plex.insert(
-                    PlayRequest::from_input(
-                        library::QueueLoad::track_keys(
-                            candidates,
-                            playback::QueueProvenance::Random,
-                        ),
-                        request.placement,
-                    ),
-                    None,
-                )
-                .await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = plex.playback.command(Command::OperationFailed(error));
-            }
-        });
-        true
-    }
     pub(super) fn select_plex(
         &self,
         output: PlaybackOutput,

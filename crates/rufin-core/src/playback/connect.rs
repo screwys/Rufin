@@ -545,54 +545,6 @@ impl PlaybackOwner {
         true
     }
 
-    pub(super) fn random_rufin(&self, request: &RandomPlayRequest) -> bool {
-        let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
-            return false;
-        };
-        let Some(selected) = self.source.selected_library() else {
-            return true;
-        };
-        let excluded = self
-            .current_media()
-            .map(|media| vec![media.row.track.track_key])
-            .unwrap_or_default();
-        let request = request.clone();
-        self.runtime.spawn(async move {
-            let result = async {
-                let candidates = receiver
-                    .catalog
-                    .random_candidates(
-                        selected.source_key,
-                        selected.music_folder_key,
-                        &request.criteria,
-                        &excluded,
-                        request.requested,
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                let _command = receiver.commands.lock().await;
-                receiver
-                    .input(
-                        PlayRequest::from_input(
-                            library::QueueLoad::track_keys(
-                                candidates,
-                                playback::QueueProvenance::Random,
-                            ),
-                            request.placement,
-                        ),
-                        None,
-                    )
-                    .await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = receiver.playback.command(Command::OperationFailed(error));
-            }
-        });
-        true
-    }
-
     pub(super) fn send_rufin(&self, command: Command) -> Option<Command> {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return Some(command);
