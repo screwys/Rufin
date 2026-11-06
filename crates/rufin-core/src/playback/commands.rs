@@ -238,10 +238,17 @@ impl PlayRequest {
         } else if random_start && !batch.entries.is_empty() {
             seed as usize % batch.entries.len()
         } else {
-            batch
-                .anchor_index
-                .unwrap_or(fallback)
-                .min(batch.entries.len().saturating_sub(1))
+            // A play anchored to an entry that is gone plays nothing rather than its neighbour.
+            let index = match (selected, batch.anchor_index) {
+                (_, Some(index)) => index,
+                (Some(_), None) => {
+                    return Err(library::LibraryError::InvalidRequest(
+                        "The anchored track is gone".into(),
+                    ));
+                }
+                (None, None) => fallback,
+            };
+            index.min(batch.entries.len().saturating_sub(1))
         };
         let shuffle = (replacing && shuffled).then_some(if random_start {
             QueueShuffle::FromSelected(seed)
