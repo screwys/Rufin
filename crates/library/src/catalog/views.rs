@@ -783,9 +783,18 @@ impl Context<'_> {
         folder.is_none_or(|folder| self.snapshot.track_runs(record)[3].contains(&folder))
     }
 
+    /// Whether a track of a collection of every source is in `folder`: a folder narrows only
+    /// its own source's tracks.
+    fn in_source_folder(&self, record: &TrackRec, folder: Option<u32>) -> bool {
+        folder.is_none_or(|folder| {
+            record.source != self.snapshot.folders.records[folder as usize].source
+                || self.snapshot.track_runs(record)[3].contains(&folder)
+        })
+    }
+
     /// The music folder a read of `owner`'s tracks keeps, or None when the folder is gone. A
-    /// folder narrows only a read of its own source; one of no source in particular, as a smart
-    /// playlist's, reads only the folder too.
+    /// folder narrows only a read of its own source; a smart playlist, of every source, keeps
+    /// it for its tracks of that source.
     fn folder_slot(
         &self,
         folder: Option<crate::FolderKey>,
@@ -1217,11 +1226,11 @@ impl Context<'_> {
                 .evaluate(definition, inputs)
                 .into_iter()
                 .map(|slot| &records[slot as usize])
-                .filter(|record| self.in_folder(record, folder))
+                .filter(|record| self.in_source_folder(record, folder))
                 .for_each(|record| totals.add_member(record)),
             None => self
                 .matching(definition, inputs)
-                .filter(|(_, record)| self.in_folder(record, folder))
+                .filter(|(_, record)| self.in_source_folder(record, folder))
                 .for_each(|(_, record)| totals.add_member(record)),
         }
         totals
@@ -1235,7 +1244,7 @@ impl Context<'_> {
             .filter(|slot| {
                 tracks
                     .live(*slot)
-                    .is_some_and(|record| record.indexed() && self.in_folder(record, folder))
+                    .is_some_and(|record| record.indexed() && self.in_source_folder(record, folder))
             })
             .collect()
     }
