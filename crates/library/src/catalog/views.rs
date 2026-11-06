@@ -287,7 +287,6 @@ impl Derived {
             .collect::<Vec<_>>();
         visible.sort_unstable();
         // Track covers ranked like an album's tracks; artist covers by album sort text.
-        let mut album_cover_rank = HashMap::<u32, (u16, u16, Cow<'_, str>, i64)>::new();
         let mut artist_album = HashMap::<u32, (Cow<'_, str>, i64)>::new();
         let mut artist_track = HashMap::<u32, (Cow<'_, str>, i64)>::new();
         let mut tags = Vec::new();
@@ -302,17 +301,18 @@ impl Derived {
                 let runs = snapshot.track_runs(record);
                 if album != NONE {
                     derived.albums[album as usize].add(record);
-                    if record.flags & PICTURE != 0 {
-                        let rank = (
-                            record.disc,
-                            record.number,
-                            snapshot.track_sort(record),
-                            i64::from(record.key),
-                        );
-                        if album_cover_rank.get(&album).is_none_or(|best| rank < *best) {
-                            derived.album_covers[album as usize] = slot;
-                            album_cover_rank.insert(album, rank);
-                        }
+                    let best = derived.album_covers[album as usize];
+                    if record.flags & PICTURE != 0
+                        && (best == NONE || {
+                            let best = &snapshot.tracks.records[best as usize];
+                            let sort = |record| snapshot.track_sort(record);
+                            ((record.disc, record.number).cmp(&(best.disc, best.number)))
+                                .then_with(|| sort(record).cmp(&sort(best)))
+                                .then(record.key.cmp(&best.key))
+                                .is_lt()
+                        })
+                    {
+                        derived.album_covers[album as usize] = slot;
                     }
                 } else if record.flags & PICTURE != 0 {
                     let rank = (snapshot.track_sort(record), i64::from(record.key));
