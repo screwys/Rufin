@@ -221,20 +221,20 @@ async fn resolve_album(
         album.input = false;
         album.writes.header = Some(None);
     }
-    // Observed file tags own the album even when its header is derived.
-    if !album.native && !album.cached_local && indexed.iter().any(tagged) {
+    let file_source =
+        (write.get::<Source>(album.source.raw()).await?).is_some_and(|source| source.file_source());
+    // Observed file tags own the album even when its header is derived, or on a file source
+    // when an imported Store gave it one.
+    if (!album.native || (file_source && album.input))
+        && !album.cached_local
+        && indexed.iter().any(tagged)
+    {
         album.native = true;
         album.input = false;
         album.writes.header = Some(None);
     }
-    // A file source lists an album only through its indexed members, whatever header an
-    // imported Store gave it.
-    if indexed.is_empty()
-        && write
-            .get::<Source>(album.source.raw())
-            .await?
-            .is_some_and(|source| source.file_source())
-    {
+    // A file source lists an album only through its indexed members.
+    if indexed.is_empty() && file_source {
         album.indexed = false;
     }
     let input = album.input.then_some(stored.input).flatten();
