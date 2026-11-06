@@ -37,8 +37,8 @@ pub struct Changed {
     pub downloads: Vec<library::DownloadChange>,
     /// Sources whose stored Home rows or Explore shuffle changed.
     pub home: Vec<SourceKey>,
-    /// The source just selected, or whose music-folder selection changed.
-    pub scope: Option<SourceKey>,
+    /// The selection changed: a source was selected or released, or its music folder changed.
+    pub scope: bool,
     /// Pins were imported; only the pin list reads again.
     pub pins: bool,
     /// The lyrics Lyrics Search finds changed: a track's shown lyrics, or a source's whose
@@ -57,7 +57,7 @@ impl Changed {
         self.playlist_lists |= later.playlist_lists;
         self.downloads.extend(later.downloads.iter().cloned());
         self.home.extend(&later.home);
-        self.scope = later.scope.or(self.scope);
+        self.scope |= later.scope;
         self.pins |= later.pins;
         self.lyrics |= later.lyrics;
     }
@@ -92,8 +92,8 @@ pub(crate) enum Notice {
     Playlist(PlaylistKey),
     /// The Home Explore shuffle.
     Home(SourceKey),
-    /// A source selected, or its music folder.
-    Scope(SourceKey),
+    /// A source selected or released, or its music folder.
+    Scope,
     Pins,
     /// A source's lyrics were downloaded.
     Lyrics,
@@ -211,7 +211,7 @@ impl Pending {
             }
             Notice::Playlist(key) => self.changed.playlists.push(key),
             Notice::Home(source) => self.changed.home.push(source),
-            Notice::Scope(source) => self.changed.scope = Some(source),
+            Notice::Scope => self.changed.scope = true,
             Notice::Pins => self.changed.pins = true,
             Notice::Lyrics => self.changed.lyrics = true,
         }

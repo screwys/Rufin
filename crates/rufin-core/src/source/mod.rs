@@ -841,7 +841,7 @@ impl SourceOwner {
             Ok(())
         })?;
         self.shared.configured();
-        self.notice(feed::Notice::Scope(selected.source_key));
+        self.notice(feed::Notice::Scope);
         self.publish_operation(SourceOperation::Idle).await;
         self.shared.present_refresh(&selected.source_id);
         if let Some(source) = source {
@@ -877,6 +877,7 @@ impl SourceOwner {
             .is_some();
         if released {
             self.shared.configured();
+            self.notice(feed::Notice::Scope);
         }
     }
 
@@ -2650,7 +2651,7 @@ impl SourceOwner {
                     current.music_folder_object_id = folder_object_id;
                 }
                 owner.shared.configured();
-                owner.notice(feed::Notice::Scope(source_key));
+                owner.notice(feed::Notice::Scope);
                 let downloads_owner = owner.clone();
                 owner.shared.runtime.spawn(async move {
                     if let Err(error) = downloads_owner

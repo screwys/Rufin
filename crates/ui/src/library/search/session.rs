@@ -35,6 +35,8 @@ pub struct SearchSession {
     /// The Search page that found the shown results; it says what a committed change means
     /// for them.
     view: RefCell<Option<Arc<rufin_core::view::View>>>,
+    /// The library the search runs or waits in.
+    searched_in: RefCell<Option<rufin_core::runtime::SelectedLibrary>>,
     query: RefCell<String>,
     mode: Cell<library::SearchMode>,
     /// The results by category, which the header and the Search page show.
@@ -117,6 +119,7 @@ impl SearchSession {
             source,
             runtime,
             view: RefCell::new(None),
+            searched_in: RefCell::new(None),
             query: RefCell::new(String::new()),
             mode: Cell::new(library::SearchMode::Title),
             models: CollectionCategory::ALL.map(|_| gio::ListStore::new::<RowItem>()),
@@ -264,6 +267,7 @@ impl SearchSession {
     fn schedule(self: &Rc<Self>) {
         self.cancel();
         self.view.replace(None);
+        self.searched_in.replace(self.source.selected_library());
         self.show_items(Default::default());
         self.revision.set(self.revision.get().wrapping_add(1));
         if self.query.borrow().is_empty()
@@ -347,14 +351,23 @@ impl SearchSession {
     /// now. A search still running hears of the change from its own read.
     pub fn apply_changed(self: &Rc<Self>, changed: &rufin_core::source::feed::Changed) {
         self.show_changes(changed);
+        let current = self.source.selected_library();
         let Some(view) = self.view.borrow().clone() else {
-            // A search that waits for a source runs once one is selected.
-            if changed.scope.is_some() && self.status.get() == "initial" {
-                self.schedule();
+            // A search that found nothing yet, such as one waiting for a source, runs again
+            // when core says the Search page opens again.
+            let searched_in = self.searched_in.borrow().clone();
+            if rufin_core::view::refresh_unread(
+                &Route::Search,
+                searched_in.as_ref(),
+                current.as_ref(),
+                changed,
+            ) == rufin_core::view::Refresh::Reopen
+            {
+                self.refresh();
             }
             return;
         };
-        match view.refresh(self.source.selected_library().as_ref(), changed) {
+        match view.refresh(current.as_ref(), changed) {
             rufin_core::view::Refresh::Nothing => {}
             rufin_core::view::Refresh::Reread => self.reread(view),
             rufin_core::view::Refresh::Reopen => self.refresh(),

@@ -157,10 +157,9 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 }
 
-/// The configured sources or the selection changed. Pages, pins and the playlist picker read a
-/// new source or music folder from the change that follows it (`Changed::scope`), which a
-/// selection made before this client subscribed never sends; the search reads once, from
-/// whichever installs it. Releasing the selection is followed by no change.
+/// The configured sources or the selection changed. Pages, pins, the search and the playlist
+/// picker read a new source or music folder, or none, from the change that follows it
+/// (`Changed::scope`), which a selection made before this client subscribed never sends.
 fn apply_source_configuration(shell: &Rc<Shell>) {
     *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
     shell.products.lyrics.refresh_write_access();
@@ -177,12 +176,7 @@ fn apply_source_configuration(shell: &Rc<Shell>) {
                 }
             }
         }
-        None => {
-            shell.refresh_playlist_picker();
-            if shell.selected_library().is_some() {
-                release_selected_source(shell);
-            }
-        }
+        None => shell.refresh_playlist_picker(),
     }
     shell.player_ui.update_bottom_player();
 }
@@ -208,15 +202,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
     }
 }
 
-/// No source is selected any more, which no change follows: the page and the search open again
-/// here.
-fn release_selected_source(shell: &Rc<Shell>) {
-    let released = shell.selected_ui.take();
-    drop(released);
-    shell.search_session.refresh();
-    shell.replace_current_route_when_ready();
-}
-
 /// Makes `selected` the selection here: a new session for another source or music folder,
 /// whose dialogs close with the old one.
 fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) {
@@ -236,16 +221,17 @@ fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLi
 fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     // The reads below run in the selection as it is now, which the configuration event may
     // not have installed yet.
-    if (changed.all || changed.scope.is_some() || !changed.sources.is_empty())
-        && let Some(selected) = shell.products.source.selected_library()
-    {
-        install_selected(shell, selected);
+    if changed.all || changed.scope || !changed.sources.is_empty() {
+        match shell.products.source.selected_library() {
+            Some(selected) => install_selected(shell, selected),
+            None => drop(shell.selected_ui.take()),
+        }
     }
     shell.search_session.apply_changed(changed);
     shell.show_activity_changes(changed);
     if changed.all
         || !changed.sources.is_empty()
-        || changed.scope.is_some()
+        || changed.scope
         || !changed.playlists.is_empty()
         || changed.playlist_lists
     {

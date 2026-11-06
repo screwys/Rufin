@@ -497,24 +497,33 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .map(|entry| (entry.view.clone(), entry.route == route));
-        let Some((mounted, current)) = mounted else {
+            .map(|entry| {
+                (
+                    entry.view.clone(),
+                    entry.route == route,
+                    entry.selected.clone(),
+                )
+            });
+        let Some((mounted, current, opened_with)) = mounted else {
             return;
         };
         mounted.show_changes(&self.products.source, changed);
         if !current {
             return;
         }
-        let Some(view) = mounted.view() else {
-            // A page without a read of its own, Search or an empty page, opens again in
-            // another library.
-            if changed.scope.is_some() && !self.mounted_catalog_is_current() {
-                self.replace_current_route_when_ready();
-            }
-            return;
-        };
         let current = self.products.source.selected_library();
-        match view.refresh(current.as_ref(), changed) {
+        // A page without a read of its own, Search or a page waiting for a source, asks core
+        // what the change means for its route.
+        let refresh = match mounted.view() {
+            Some(view) => view.refresh(current.as_ref(), changed),
+            None => rufin_core::view::refresh_unread(
+                &route,
+                opened_with.as_ref(),
+                current.as_ref(),
+                changed,
+            ),
+        };
+        match refresh {
             Refresh::Nothing => {}
             Refresh::Reread if route == Route::Home => self.refresh_mounted_home(),
             Refresh::Reread => self.refresh_mounted_catalog(),

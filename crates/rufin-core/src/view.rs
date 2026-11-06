@@ -2181,7 +2181,7 @@ fn changes(
     {
         refresh = refresh.max(Refresh::Reread);
     }
-    if changed.scope.is_some() && !same {
+    if refresh_unread(route, opened_with, current, changed) == Refresh::Reopen {
         refresh = Refresh::Reopen;
     }
     if route == &Route::Home && changed.home.iter().any(|source| affects(Some(*source))) {
@@ -2207,12 +2207,29 @@ fn changes(
     refresh
 }
 
+/// What a committed change means for a page on `route` that reads nothing itself, opened while
+/// `opened_with` was selected, now that `current` is: a page waiting for a source, or the Search
+/// page, whose search reads the results. It opens again when the selection changed so that it
+/// reads another source or music folder, as a page that reads does.
+pub fn refresh_unread(
+    route: &Route,
+    opened_with: Option<&SelectedLibrary>,
+    current: Option<&SelectedLibrary>,
+    changed: &Changed,
+) -> Refresh {
+    if changed.scope && !Scope::of(route).same(opened_with, current) {
+        Refresh::Reopen
+    } else {
+        Refresh::Nothing
+    }
+}
+
 /// Whether a committed change can change the sidebar pins. Plays, ratings and the music
 /// folder change only what smart playlist pins count.
 pub fn pins_refresh(owner: &SourceOwner, changed: &Changed) -> bool {
     changed.all
         || changed.pins
-        || changed.scope.is_some()
+        || changed.scope
         || changed.playlist_lists
         || !changed.sources.is_empty()
         || !changed.playlists.is_empty()
