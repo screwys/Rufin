@@ -3,6 +3,7 @@
 
 use sqlx::sqlite::SqliteConnection;
 
+use crate::catalog::families::Row;
 use crate::catalog::records::{Album, Artist, NativeState, Track};
 use crate::catalog::write::{STATE_DELETED, STATE_RETURNING, StateRow, Write};
 
@@ -197,6 +198,10 @@ impl Catalog {
         if deliver || !changed.is_empty() {
             write.held(vec![uri.to_owned()]);
         }
+        // A cleared rating on its way to the server no longer shows the server's.
+        if deliver && kind == DeliveryKind::Rating && value.is_none() {
+            put_native(&mut write, uri, kind, None).await?;
+        }
         write.set_states(changed);
         write.commit().await?;
         Ok(())
@@ -256,34 +261,14 @@ impl Catalog {
         }
         write.held(vec![delivery.media_uri.clone()]);
         if !keep_copy {
-            let uri = delivery.media_uri.as_str();
-            let apply = |state: &mut NativeState| match delivery.kind {
-                DeliveryKind::Favorite => state.favorite = delivery.value.map(|value| value != 0),
-                DeliveryKind::Rating => state.rating = delivery.value,
-            };
-            // Deliveries go to servers, whose URIs name the kind of their row.
-            let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
-            match kind.as_deref() {
-                Some("album") => {
-                    if let Some(mut row) = write.by_natural::<Album>(uri).await? {
-                        apply(&mut row.state);
-                        write.put(row);
-                    }
-                }
-                Some("artist") => {
-                    if let Some(mut row) = write.by_natural::<Artist>(uri).await? {
-                        apply(&mut row.state);
-                        write.put(row);
-                    }
-                }
-                _ => {
-                    if let Some(mut row) = write.by_natural::<Track>(uri).await? {
-                        apply(&mut row.state);
-                        write.put(row);
-                    }
-                }
-            }
-            drop_copy(&mut write, uri, delivery.kind).await?;
+            put_native(
+                &mut write,
+                &delivery.media_uri,
+                delivery.kind,
+                delivery.value,
+            )
+            .await?;
+            drop_copy(&mut write, &delivery.media_uri, delivery.kind).await?;
         }
         write.commit().await?;
         Ok(true)
@@ -331,6 +316,41 @@ impl Catalog {
         }
         write.commit().await?;
         Ok(removed)
+    }
+}
+
+/// Puts a value as the one the source reports on the row of a server URI.
+async fn put_native(
+    write: &mut Write<'_>,
+    uri: &str,
+    kind: DeliveryKind,
+    value: Option<i64>,
+) -> LibraryResult<()> {
+    async fn put<R: Row>(
+        write: &mut Write<'_>,
+        uri: &str,
+        apply: impl Fn(&mut NativeState),
+    ) -> LibraryResult<()> {
+        if let Some(mut row) = write.by_natural::<R>(uri).await? {
+            if let Some(state) = row.state() {
+                apply(state);
+            }
+            write.put(row);
+        }
+        Ok(())
+    }
+    let apply = |state: &mut NativeState| match kind {
+        DeliveryKind::Favorite => state.favorite = value.map(|value| value != 0),
+        DeliveryKind::Rating => state.rating = value,
+    };
+    // Deliveries go to servers, whose URIs name the kind of their row.
+    match crate::source_entity_parts(uri)
+        .map(|(_, kind, _)| kind)
+        .as_deref()
+    {
+        Some("album") => put::<Album>(write, uri, apply).await,
+        Some("artist") => put::<Artist>(write, uri, apply).await,
+        _ => put::<Track>(write, uri, apply).await,
     }
 }
 
@@ -443,7 +463,7 @@ pub(crate) async fn export_user_media_state_jsonl_on(
     Ok(count)
 }
 pub(crate) async fn import_user_media_state_jsonl_on(
-    write: &mut crate::catalog::write::Write<'_>,
+    write: &mut Write<'_>,
     input: impl std::io::BufRead,
 ) -> LibraryResult<u64> {
     let mut lines = input.lines();
