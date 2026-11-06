@@ -1625,8 +1625,8 @@ impl SourceOwner {
         self.shared.selected()
     }
 
-    /// The folder holding an album's or artist's files, in the selected music folder when the
-    /// collection is of the selected source.
+    /// The folder holding an album's or artist's files, read as the collection's page reads
+    /// it: an artist in the selected music folder, an album whole.
     pub fn collection_folder_uri(
         &self,
         media_uri: String,
@@ -1647,10 +1647,17 @@ impl SourceOwner {
             let configuration = owner
                 .configuration(&source_id)
                 .ok_or_else(source_access_unavailable)?;
-            let folder = owner
-                .selected_library()
-                .filter(|selected| selected.source_id == source_id)
-                .and_then(|selected| selected.music_folder_key);
+            let page = match catalog.item(&media_uri) {
+                Some(library::Item::Artist { .. }) if album_artist => {
+                    crate::route::Route::AlbumArtistDetail(media_uri.clone())
+                }
+                Some(library::Item::Artist { .. }) => {
+                    crate::route::Route::ArtistDetail(media_uri.clone())
+                }
+                _ => crate::route::Route::AlbumDetail(media_uri.clone()),
+            };
+            let folder = crate::view::Scope::of(&page, library::SearchMode::Title)
+                .folder(owner.selected_library().as_ref());
             let (first, last) = catalog
                 .collection_source_path_bounds(&media_uri, album_artist, folder)
                 .await

@@ -269,9 +269,8 @@ impl Catalog {
         Ok(first.zip(last))
     }
 
-    /// Tracks of an album, an artist or a single track URI, hidden ones included, by key. An
-    /// artist counts in one role, or in both when no role is given. A music folder narrows an
-    /// artist; an album stays whole, as [`crate::Collection::follows_folder`] reads it.
+    /// Tracks of an album, an artist or a single track URI, hidden ones included, by key, in
+    /// music folder `folder`. An artist counts in one role, or in both when no role is given.
     async fn collection_members(
         &self,
         connection: &mut sqlx::SqliteConnection,
@@ -280,7 +279,6 @@ impl Catalog {
         folder: Option<crate::FolderKey>,
     ) -> LibraryResult<Vec<i64>> {
         let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
-        let folder = folder.filter(|_| kind.as_deref() == Some("artist"));
         let owner: Option<i64> = match kind.as_deref() {
             Some("album") => sqlx::query_scalar("SELECT album_key FROM albums WHERE media_uri=?1"),
             Some("artist") => {
@@ -297,9 +295,15 @@ impl Catalog {
         self.loaded().await;
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);
-        let folder = folder.and_then(|folder| snapshot.folders.slot(folder.raw()));
         let album = snapshot.albums.slot(owner);
         let artist = snapshot.artists.slot(owner);
+        // A music folder narrows only its own source's artist.
+        let folder = context
+            .folder_slot(
+                folder,
+                artist.map(|slot| snapshot.artists.records[slot as usize].source),
+            )
+            .flatten();
         let mut members = snapshot
             .tracks
             .iter()

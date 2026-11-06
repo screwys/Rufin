@@ -12,6 +12,22 @@ pub struct SelectedLibrary {
     pub music_folders: Arc<[FolderChoice]>,
 }
 
+impl SelectedLibrary {
+    /// Whether reads in `a` read what they read in `b`: the same source and, when `folder`,
+    /// the same music folder. The folders offered don't count.
+    pub fn same(a: Option<&Self>, b: Option<&Self>, folder: bool) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => {
+                a.source_key == b.source_key
+                    && (!folder
+                        || (a.music_folder_key == b.music_folder_key
+                            && a.music_folder_object_id == b.music_folder_object_id))
+            }
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
+}
+
 pub enum SourceEvent {
     Notice(SourceNotice),
     PlaylistSourceMismatch(sources::SourceId),

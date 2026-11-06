@@ -218,11 +218,11 @@ fn release_selected_source(shell: &Rc<Shell>) {
 /// whose dialogs close with the old one, and the search's. Whether it was another.
 fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) -> bool {
     shell.search_session.set_selected(Some(selected.clone()));
-    let changed = shell.selected_library().as_deref().is_none_or(|previous| {
-        previous.source_key != selected.source_key
-            || previous.music_folder_key != selected.music_folder_key
-            || previous.music_folder_object_id != selected.music_folder_object_id
-    });
+    let changed = !rufin_core::runtime::SelectedLibrary::same(
+        shell.selected_library().as_deref(),
+        Some(&selected),
+        true,
+    );
     if changed {
         shell
             .selected_ui

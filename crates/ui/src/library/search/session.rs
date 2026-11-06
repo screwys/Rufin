@@ -199,14 +199,8 @@ impl SearchSession {
     }
 
     pub fn set_selected(self: &Rc<Self>, selected: Option<SelectedLibrary>) {
-        let changed = self
-            .selected
-            .borrow()
-            .as_ref()
-            .map(|s| (&s.source_id, s.music_folder_key, &s.music_folder_object_id))
-            != selected
-                .as_ref()
-                .map(|s| (&s.source_id, s.music_folder_key, &s.music_folder_object_id));
+        let changed =
+            !SelectedLibrary::same(self.selected.borrow().as_ref(), selected.as_ref(), true);
         self.selected.replace(selected);
         if changed && self.mode() == library::SearchMode::Title {
             self.schedule();

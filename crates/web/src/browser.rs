@@ -113,7 +113,7 @@ pub(super) fn row_data(
     menu: &Menu,
     scope: &page::PageToken,
 ) -> Value {
-    let mut value = page::row_json(products, row, true);
+    let mut value = page::row_json(products, row, true, scope);
     value["menu"] = json!(menu);
     if let Some(route) = opens(row) {
         value["page"] = json!(scope.at(route));
@@ -988,7 +988,11 @@ async fn index(
             csrf: page.csrf.clone(),
             return_to: page.here.clone(),
         };
-        if token.source.is_some() || !token.route.requires_selected_source() {
+        if token.source.is_some()
+            || !token
+                .route
+                .requires_selected_source(token.options.search_mode)
+        {
             match page::open(&products, token, offset, 48).await {
                 Ok(opened) => {
                     let list = opened.token.list();

@@ -420,11 +420,11 @@ pub enum HeaderKey {
         activity: bool,
     },
     Playlist(PlaylistKey),
-    /// A smart playlist counted as of `now`, in the music folder `folder`.
+    /// A smart playlist counted as of `now`. Headers count in the music folder their page's
+    /// rows read.
     Smart {
         key: SmartPlaylistKey,
         now: i64,
-        folder: Option<FolderKey>,
     },
     Genre(GenreKey),
     Mood(MoodKey),
@@ -548,6 +548,7 @@ struct Builder<'a> {
     snapshot: &'a Snapshot,
     covers: Arc<Derived>,
     derived: std::cell::OnceCell<Arc<Derived>>,
+    in_folder: std::cell::OnceCell<Arc<Derived>>,
     downloaded: std::cell::OnceCell<Arc<Downloaded>>,
     shape: &'a Shape,
     art: bool,
@@ -570,6 +571,7 @@ impl<'a> Builder<'a> {
             context,
             snapshot,
             derived: std::cell::OnceCell::new(),
+            in_folder: std::cell::OnceCell::new(),
             downloaded: std::cell::OnceCell::new(),
             shape,
             art,
@@ -585,6 +587,17 @@ impl<'a> Builder<'a> {
                 .get_or_init(|| self.catalog.derived(&self.context, None))
         } else {
             &self.covers
+        }
+    }
+
+    /// An artist's or tag's totals, of source `source`: in the music folder the rows read when
+    /// it is that source's, as the artist's or tag's page lists it (decisions.md, 2026-11-06).
+    fn scoped_totals(&self, activity: bool, source: u16) -> &Derived {
+        match self.context.folder_slot(self.shape.folder, Some(source)) {
+            Some(Some(folder)) => self
+                .in_folder
+                .get_or_init(|| self.catalog.derived(&self.context, Some(folder))),
+            _ => self.totals(activity),
         }
     }
 
@@ -915,7 +928,8 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.totals(activity).artists[usize::from(album_artist)][slot as usize];
+        let mut totals = self.scoped_totals(activity, record.source).artists
+            [usize::from(album_artist)][slot as usize];
         totals.downloaded = self.downloaded().artists[usize::from(album_artist)][slot as usize];
         Ok(Some(ArtistRow {
             artist_key: key,
@@ -962,7 +976,7 @@ impl<'a> Builder<'a> {
             name: text(snapshot, record.name),
             summary: Totals {
                 downloaded: self.downloaded().tags[slot as usize],
-                ..self.covers.tags[slot as usize]
+                ..self.scoped_totals(false, record.source).tags[slot as usize]
             }
             .summary(),
             representative_artwork: artwork_binding
@@ -1331,9 +1345,8 @@ impl Catalog {
         art: bool,
     ) -> LibraryResult<(Option<Header>, [Vec<Row>; 2])> {
         let mut shape = shape.clone();
-        if let Some(HeaderKey::Smart { now, folder, .. }) = header {
+        if let Some(HeaderKey::Smart { now, .. }) = header {
             shape.now = now;
-            shape.folder = folder;
         }
         let inputs = self
             .smart_inputs(
@@ -1615,6 +1628,29 @@ impl Catalog {
     ) -> LibraryResult<Vec<TrackKey>> {
         let mut connection = self.acquire_cancellable(cancellation).await?;
         track_keys_on(&mut connection, uris).await
+    }
+
+    /// How many listed tracks a genre's or mood's header counts in music folder `folder`.
+    pub fn tag_track_count(&self, header: &HeaderKey, folder: Option<FolderKey>) -> i64 {
+        let key = match header {
+            HeaderKey::Genre(key) => key.raw(),
+            HeaderKey::Mood(key) => key.raw(),
+            _ => return 0,
+        };
+        let snapshot = self.snapshot();
+        let Some(slot) = snapshot.tags.slot(key) else {
+            return 0;
+        };
+        let shape = Shape {
+            folder,
+            ..Shape::of(None)
+        };
+        let inputs = Inputs::default();
+        Builder::new(self, &snapshot, &shape, &inputs, false)
+            .scoped_totals(false, snapshot.tags.records[slot as usize].source)
+            .tags[slot as usize]
+            .summary()
+            .track_count
     }
 
     /// A detail header's full view, as a page shows it.

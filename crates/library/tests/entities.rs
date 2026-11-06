@@ -94,7 +94,7 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
     let catalog = &fixture.catalog;
     assert_eq!(
         catalog
-            .collection_source_path_bounds(&fixture.track_uris[2], false, Some(fixture.folder))
+            .collection_source_path_bounds(&fixture.track_uris[2], false, None)
             .await
             .unwrap(),
         Some((paths[2].clone(), paths[2].clone()))
@@ -126,17 +126,6 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
             .await
             .unwrap(),
         Some((paths[0].clone(), paths[0].clone()))
-    );
-    // An album stays whole in a music folder.
-    assert_eq!(
-        catalog
-            .collection_source_path_bounds(&fixture.album_uris[1], false, Some(fixture.folder))
-            .await
-            .unwrap(),
-        catalog
-            .collection_source_path_bounds(&fixture.album_uris[1], false, None)
-            .await
-            .unwrap()
     );
 }
 
@@ -480,18 +469,6 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             order
         );
     }
-    // An album stays whole in a music folder.
-    let album = |folder| library::MemberRead {
-        sort: Some(LibraryField::TrackNumber),
-        folder,
-        ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
-    };
-    assert_eq!(
-        tracks(&fixture.catalog, album(Some(fixture.folder)))
-            .await
-            .len(),
-        tracks(&fixture.catalog, album(None)).await.len()
-    );
     assert!(
         uris(
             &fixture.catalog,

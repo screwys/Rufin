@@ -6,8 +6,8 @@ use sqlx::{Connection, FromRow, SqliteConnection};
 use crate::catalog::snapshot::{Entry, METADATA_WRITABLE, Packed, SOURCE_OWNED, WRITABLE};
 use crate::catalog::write::{Scope, Write};
 use crate::{
-    Catalog, FolderKey, LibraryError, LibraryResult, MemberSelection, PlaylistEntryKey,
-    PlaylistKey, ReadCancellation, SourceKey, TrackKey,
+    Catalog, LibraryError, LibraryResult, MemberSelection, PlaylistEntryKey, PlaylistKey,
+    ReadCancellation, SourceKey, TrackKey,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,23 +92,6 @@ impl Catalog {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
-    /// How many listed tracks a genre's or mood's header counts.
-    pub fn tag_track_count(&self, header: &crate::HeaderKey) -> i64 {
-        let key = match header {
-            crate::HeaderKey::Genre(key) => key.raw(),
-            crate::HeaderKey::Mood(key) => key.raw(),
-            _ => return 0,
-        };
-        let snapshot = self.snapshot();
-        let Some(slot) = snapshot.tags.slot(key) else {
-            return 0;
-        };
-        let context = crate::catalog::views::Context::new(&snapshot);
-        self.derived(&context, None).tags[slot as usize]
-            .summary()
-            .track_count
-    }
-
     /// The object ids of these playlists, from their resident records.
     pub fn playlist_objects(&self, playlists: &[PlaylistKey]) -> Vec<String> {
         let snapshot = self.snapshot();
@@ -151,11 +134,11 @@ impl Catalog {
             })
     }
 
-    /// URIs of a source's tracks that some playlist holds, by title.
+    /// URIs of a source's tracks that some playlist holds, by title. A music folder does not
+    /// filter playlists.
     pub async fn all_playlist_track_order(
         &self,
         source: SourceKey,
-        folder: Option<FolderKey>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<String>> {
         self.loaded().await;
@@ -163,13 +146,6 @@ impl Catalog {
             let snapshot = self.snapshot();
             let Some(owner) = snapshot.source_slot(source) else {
                 return Ok(Vec::new());
-            };
-            let folder = match folder {
-                Some(folder) => match snapshot.folders.slot(folder.raw()) {
-                    Some(slot) => Some(slot),
-                    None => return Ok(Vec::new()),
-                },
-                None => None,
             };
             let held = snapshot
                 .playlists
@@ -179,11 +155,7 @@ impl Catalog {
             let mut tracks = held
                 .into_iter()
                 .filter_map(|slot| snapshot.tracks.live(slot))
-                .filter(|record| {
-                    record.source == owner
-                        && folder
-                            .is_none_or(|folder| snapshot.track_runs(record)[3].contains(&folder))
-                })
+                .filter(|record| record.source == owner)
                 .map(|record| (snapshot.track_sort(record), record.key))
                 .collect::<Vec<_>>();
             tracks.sort();

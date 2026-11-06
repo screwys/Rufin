@@ -184,7 +184,7 @@ impl Catalog {
         Ok((order.len(), choices))
     }
 
-    /// Track URIs of a source's latest albums, album by album.
+    /// Track URIs of a source's latest albums in music folder `folder`, each album whole.
     pub async fn latest_album_track_order(
         &self,
         source: SourceKey,
@@ -201,7 +201,6 @@ impl Catalog {
         let tracks = {
             let snapshot = self.snapshot();
             let context = Context::new(&snapshot);
-            let folder = folder.and_then(|folder| snapshot.folders.slot(folder.raw()));
             let mut albums = order
                 .items(0..album_limit.clamp(1, 100))
                 .into_iter()
@@ -214,10 +213,8 @@ impl Catalog {
                 })
                 .collect::<Vec<_>>();
             albums.sort_unstable();
-            let mut members = context.album_tracks(
-                &albums.iter().map(|(_, slot)| *slot).collect::<Vec<_>>(),
-                folder,
-            );
+            let mut members =
+                context.album_tracks(&albums.iter().map(|(_, slot)| *slot).collect::<Vec<_>>());
             albums
                 .into_iter()
                 .flat_map(|(_, slot)| members.remove(&slot).unwrap_or_default())

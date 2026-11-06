@@ -658,7 +658,7 @@ async fn rule_media_uris(
         }
         DownloadRule::AllPlaylists => {
             catalog
-                .all_playlist_track_order(source, folder, &cancellation)
+                .all_playlist_track_order(source, &cancellation)
                 .await
         }
         DownloadRule::LatestFiveAlbums => {

@@ -154,21 +154,77 @@ enum Plan {
     Missing,
 }
 
+/// What of the selected library a page reads, by the one music folder rule (decisions.md,
+/// 2026-11-06), as Feishin: clients pass the selection and core applies it by route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// Neither the source nor its music folder: album and playlist pages, which name their
+    /// members, the play history, and a lyrics search, which reads every source.
+    Whole,
+    /// The source: the playlist lists, which a music folder does not filter.
+    Source,
+    /// The source and its music folder, which narrows only that source's tracks.
+    Folder,
+}
+
+impl Scope {
+    pub fn of(route: &Route, search_mode: library::SearchMode) -> Self {
+        match route {
+            Route::AlbumDetail(_) | Route::PlaylistDetail(_) | Route::History => Self::Whole,
+            Route::Search if search_mode == library::SearchMode::Lyrics => Self::Whole,
+            Route::Playlists | Route::PlaylistFolder { smart: false, .. } => Self::Source,
+            _ => Self::Folder,
+        }
+    }
+
+    /// `selected` as a page in this scope reads it.
+    pub fn apply(self, selected: Option<&SelectedLibrary>) -> Option<SelectedLibrary> {
+        match self {
+            Self::Whole => None,
+            Self::Source => selected.map(|selected| SelectedLibrary {
+                music_folder_key: None,
+                music_folder_object_id: None,
+                ..selected.clone()
+            }),
+            Self::Folder => selected.cloned(),
+        }
+    }
+
+    /// The music folder a page in this scope reads in `selected`.
+    pub fn folder(self, selected: Option<&SelectedLibrary>) -> Option<library::FolderKey> {
+        selected
+            .and_then(|selected| selected.music_folder_key)
+            .filter(|_| self == Self::Folder)
+    }
+
+    /// Whether a page in this scope reads the same in library `a` as in `b`.
+    pub fn same(self, a: Option<&SelectedLibrary>, b: Option<&SelectedLibrary>) -> bool {
+        self == Self::Whole || SelectedLibrary::same(a, b, self == Self::Folder)
+    }
+}
+
 /// What a route's tracks are taken for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionScope {
     /// Queueing it or adding it to a playlist: what its page lists, as Play queues it.
     Page,
-    /// Downloading it or removing its downloads: a collection in every music folder, a smart
-    /// playlist's members and a folder's tracks in the music folder they are read in.
+    /// Downloading it or removing its downloads: whole collections, except a smart playlist's
+    /// members and a folder's tracks, in the music folder they are read in (decided
+    /// 2026-11-05).
     Downloads,
 }
 
 impl SelectionScope {
-    /// Whether it takes a page's tracks in the music folder the page reads; `members` is
-    /// whether they are a smart playlist's members or a folder's tracks.
-    fn keeps_folder(self, members: bool) -> bool {
-        self == Self::Page || members
+    /// Whether it takes the tracks of a page on `route` in the music folder the page reads.
+    fn keeps_folder(self, route: &Route) -> bool {
+        self == Self::Page
+            || matches!(
+                route,
+                Route::Folders { .. }
+                    | Route::SmartPlaylists
+                    | Route::PlaylistFolder { smart: true, .. }
+                    | Route::SmartPlaylistDetail(_)
+            )
     }
 }
 
@@ -215,13 +271,8 @@ impl SourceOwner {
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<MemberSelection>> {
         let mut selected = selected.cloned();
-        if !scope.keeps_folder(matches!(
-            route,
-            Route::Folders { .. }
-                | Route::SmartPlaylists
-                | Route::PlaylistFolder { smart: true, .. }
-                | Route::SmartPlaylistDetail(_)
-        )) && let Some(selected) = &mut selected
+        if !scope.keeps_folder(route)
+            && let Some(selected) = &mut selected
         {
             selected.music_folder_key = None;
         }
@@ -256,7 +307,7 @@ impl SourceOwner {
             Plan::Rows(Read::Members(read)) | Plan::Folders { tracks: read, .. } => {
                 // A tag page with no tracks reads as missing, as its header counts them.
                 if let Some(header @ (HeaderKey::Genre(_) | HeaderKey::Mood(_))) = &header
-                    && self.shared.catalog.tag_track_count(header) == 0
+                    && self.shared.catalog.tag_track_count(header, read.folder) == 0
                 {
                     return Ok(None);
                 }
@@ -313,6 +364,8 @@ impl SourceOwner {
             () = cancel.cancelled() => return Err(LibraryError::ReadCancelled),
         }
         let (sort, descending, activity) = read_order(route, options, settings);
+        let selected = Scope::of(route, options.search_mode).apply(selected);
+        let selected = selected.as_ref();
         let source = selected.map(|selected| selected.source_key);
         let require_source =
             || source.ok_or_else(|| LibraryError::InvalidRequest("No source selected".into()));
@@ -429,11 +482,7 @@ impl SourceOwner {
                 Plan::Rows(Read::Members(member(Collection::Playlist(*key)))),
             ),
             Route::SmartPlaylistDetail(key) => (
-                Some(HeaderKey::Smart {
-                    key: *key,
-                    now,
-                    folder: selected.and_then(|selected| selected.music_folder_key),
-                }),
+                Some(HeaderKey::Smart { key: *key, now }),
                 Plan::Rows(Read::Members(member(Collection::Smart { key: *key, now }))),
             ),
             Route::GenreDetail(key) => (
@@ -810,12 +859,7 @@ impl View {
 
     /// Whether it reads the same in `selected` as in the library it opened in.
     pub fn reads_same_in(&self, selected: Option<&SelectedLibrary>) -> bool {
-        same_scope(
-            &self.route,
-            self.options.search_mode,
-            self.selected.as_ref(),
-            selected,
-        )
+        Scope::of(&self.route, self.options.search_mode).same(self.selected.as_ref(), selected)
     }
 
     /// [`View::refresh`] for a page that follows the selection: now that `current` is
@@ -1777,9 +1821,9 @@ fn rows_selection(
         settings,
         Collection::Album(library::AlbumKey::from_raw(0)),
     );
-    members.folder = read
-        .folder
-        .filter(|_| scope.keeps_folder(matches!(read.kind, ListKind::SmartPlaylists { .. })));
+    members.folder = read.folder.filter(|_| {
+        Scope::of(&page, library::SearchMode::Title) == Scope::Folder && scope.keeps_folder(&page)
+    });
     MemberSelection::Parents {
         read,
         ranges,
@@ -1810,7 +1854,8 @@ pub fn context_base(route: &Route) -> String {
 }
 
 /// The context id a play of a page on `route` carries: its collection's id or its route, with
-/// the filter, source, music folder and order `options` and `sort` show.
+/// the filter, order, and the source and music folder its [`Scope`] reads, so a whole album
+/// or playlist has one id in every folder.
 pub fn context_id(
     route: &Route,
     selected: Option<&SelectedLibrary>,
@@ -1823,12 +1868,17 @@ pub fn context_id(
         (Route::History, Some(source)) => format!("|history={}", source.as_str()),
         _ => String::new(),
     };
+    let selected = Scope::of(route, options.search_mode).apply(selected);
     format!(
         "{}|query={}|source={}|folder={:?}|sort={sort:?}|descending={descending}|favorites={}|downloaded={}{history}",
         context_base(route),
         options.filter,
-        selected.map_or("", |selected| selected.source_id.as_str()),
-        selected.and_then(|selected| selected.music_folder_key),
+        selected
+            .as_ref()
+            .map_or("", |selected| selected.source_id.as_str()),
+        selected
+            .as_ref()
+            .and_then(|selected| selected.music_folder_key),
         favorites_only(route, options),
         options.downloaded_only && supports_downloaded_filter(route, options.category),
     )
@@ -1854,39 +1904,6 @@ pub fn refresh(
     )
 }
 
-/// Whether a page on `route` reads the same in library `a` as in `b`, by the one music folder
-/// rule (decisions.md, 2026-11-06): album and playlist pages and the play history read neither
-/// source nor folder, as a lyrics search; the playlist lists read the source; every other page
-/// reads the source and its music folder, which [`library::Collection::follows_folder`] applies
-/// to the collections it reads.
-pub fn same_scope(
-    route: &Route,
-    search_mode: library::SearchMode,
-    a: Option<&SelectedLibrary>,
-    b: Option<&SelectedLibrary>,
-) -> bool {
-    let (source, folder) = match route {
-        Route::AlbumDetail(_) | Route::PlaylistDetail(_) | Route::History => (false, false),
-        Route::Search if search_mode == library::SearchMode::Lyrics => (false, false),
-        Route::Playlists | Route::PlaylistFolder { smart: false, .. } => (true, false),
-        _ => (true, true),
-    };
-    let key = |selected: Option<&SelectedLibrary>| {
-        (
-            source.then(|| selected.map(|selected| selected.source_key)),
-            folder.then(|| {
-                selected.map(|selected| {
-                    (
-                        selected.music_folder_key,
-                        selected.music_folder_object_id.clone(),
-                    )
-                })
-            }),
-        )
-    };
-    key(a) == key(b)
-}
-
 /// What a committed change means for a page on `route`, opened while `opened_with` was
 /// selected, now that `current` is.
 fn changes(
@@ -1899,10 +1916,9 @@ fn changes(
 ) -> Refresh {
     let selected = current.map(|selected| selected.source_key);
     let affects = |source: Option<SourceKey>| source.is_none() || source == selected;
-    // A lyrics search reads every source.
-    let uses_source = route != &Route::Search || options.search_mode == library::SearchMode::Title;
-    let unaffected = |source| !affects(source) && route.requires_selected_source() && uses_source;
-    let same = same_scope(route, options.search_mode, opened_with, current);
+    let unaffected =
+        |source| !affects(source) && route.requires_selected_source(options.search_mode);
+    let same = Scope::of(route, options.search_mode).same(opened_with, current);
     let mut refresh = Refresh::Nothing;
     // Favorites and ratings are patched into the rows that show them; a page whose rows they
     // order or filter reads again through `View::states_reorder`.
@@ -2110,7 +2126,7 @@ fn member_read(
     let mut read = MemberRead::new(collection);
     read.sort = Some(sort);
     read.descending = descending;
-    read.folder = selected.and_then(|selected| selected.music_folder_key);
+    read.folder = Scope::of(route, options.search_mode).folder(selected);
     read.filter.clone_from(&options.filter);
     read.favorites_only = favorites_only(route, options);
     read.downloaded_only =

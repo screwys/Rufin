@@ -81,7 +81,7 @@ mod route_stack_tests {
 /// Whether a page shows its scroll position again when it opens again: the lists, Home,
 /// Search, Folders, the playlist lists and smart playlist pages.
 fn remembers_position(route: &Route) -> bool {
-    route.requires_selected_source()
+    route.requires_selected_source(library::SearchMode::Title)
         || matches!(
             route,
             Route::Playlists
@@ -431,7 +431,7 @@ impl Shell {
         self.show_route_loading();
         let render_started = tracing::enabled!(tracing::Level::WARN).then(Instant::now);
         let selected = self.selected_library().as_deref().cloned();
-        if route.requires_selected_source() && selected.is_none() {
+        if route.requires_selected_source(self.search_session.mode()) && selected.is_none() {
             self.cancel_root_order_read();
             self.replace_mounted_route(route, None, render_started, |_| {
                 MountedRoute::static_widget(crate::library::route_layout::route_empty_view(
@@ -732,12 +732,8 @@ impl Shell {
                 .borrow()
                 .as_ref()
                 .is_some_and(|entry| {
-                    rufin_core::view::same_scope(
-                        &entry.route,
-                        self.search_session.mode(),
-                        entry.selected.as_ref(),
-                        selected.as_deref(),
-                    )
+                    rufin_core::view::Scope::of(&entry.route, self.search_session.mode())
+                        .same(entry.selected.as_ref(), selected.as_deref())
                 })
     }
 

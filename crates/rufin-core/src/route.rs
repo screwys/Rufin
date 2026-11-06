@@ -110,22 +110,31 @@ impl Route {
         }
     }
 
-    /// Whether a page lists the selected source and shows nothing without one.
-    pub fn requires_selected_source(&self) -> bool {
-        matches!(
-            self,
-            Self::Home
-                | Self::Search
-                | Self::Favorites
-                | Self::Albums
-                | Self::Tracks
-                | Self::Artists
-                | Self::AlbumArtists
-                | Self::Genres
-                | Self::Moods
-                | Self::Folders { .. }
-        )
+    /// Whether a page lists the selected source and shows nothing without one; a lyrics search
+    /// reads every source.
+    pub fn requires_selected_source(&self, search_mode: library::SearchMode) -> bool {
+        crate::view::Scope::of(self, search_mode) != crate::view::Scope::Whole
+            && matches!(
+                self,
+                Self::Home
+                    | Self::Search
+                    | Self::Favorites
+                    | Self::Albums
+                    | Self::Tracks
+                    | Self::Artists
+                    | Self::AlbumArtists
+                    | Self::Genres
+                    | Self::Moods
+                    | Self::Folders { .. }
+            )
     }
+}
+
+/// Whether a page on `route` shows nothing without a selected source, as
+/// [`Route::requires_selected_source`] decides.
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub fn route_requires_selected_source(route: &Route, search_mode: library::SearchMode) -> bool {
+    route.requires_selected_source(search_mode)
 }
 
 pub struct SidebarRouteDescriptor {

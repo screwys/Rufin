@@ -56,12 +56,8 @@ impl CatalogUi {
     pub fn is_current(&self) -> bool {
         self.navigation.routes.borrow().current() == &self.route
             && self.selected.as_ref().is_none_or(|opened| {
-                rufin_core::view::same_scope(
-                    &self.route,
-                    self.search_session.mode(),
-                    Some(opened),
-                    self.selected_library().as_deref(),
-                )
+                rufin_core::view::Scope::of(&self.route, self.search_session.mode())
+                    .same(Some(opened), self.selected_library().as_deref())
             })
     }
 

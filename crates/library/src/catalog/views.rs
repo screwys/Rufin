@@ -769,7 +769,7 @@ fn compare_tracks(
 }
 
 impl Context<'_> {
-    fn in_folder(&self, record: &TrackRec, folder: Option<u32>) -> bool {
+    pub(crate) fn in_folder(&self, record: &TrackRec, folder: Option<u32>) -> bool {
         folder.is_none_or(|folder| self.snapshot.track_runs(record)[3].contains(&folder))
     }
 
@@ -978,8 +978,7 @@ impl Context<'_> {
             .iter()
             .map(|(read, _)| {
                 let owner = self.collection_source(&read.collection);
-                let folder = read.folder.filter(|_| read.collection.follows_folder());
-                let folder = self.folder_slot(folder, owner)?;
+                let folder = self.folder_slot(read.folder, owner)?;
                 Some((&read.collection, folder))
             })
             .collect::<Vec<_>>();
@@ -2438,15 +2437,13 @@ impl Catalog {
                     Members::Keys(keys) => keys.clone(),
                     _ => Box::default(),
                 };
-                let folder = context.list_folder(list).flatten();
                 let slots = keys
                     .iter()
                     .filter_map(|key| Some((*key, snapshot.albums.slot(i64::from(*key))?)))
                     .collect::<Vec<_>>();
-                let mut members = context.album_tracks(
-                    &slots.iter().map(|(_, slot)| *slot).collect::<Vec<_>>(),
-                    folder,
-                );
+                // The music folder picks the albums; each lists whole, as its page does.
+                let mut members =
+                    context.album_tracks(&slots.iter().map(|(_, slot)| *slot).collect::<Vec<_>>());
                 let mut spans = Vec::with_capacity(slots.len());
                 let mut tracks = Vec::new();
                 let mut first = 0;
@@ -2968,19 +2965,13 @@ impl Context<'_> {
         folders
     }
 
-    /// The visible tracks of these albums in disc order, within a music folder, from one pass
-    /// over the tracks.
-    pub(crate) fn album_tracks(
-        &self,
-        albums: &[u32],
-        folder: Option<u32>,
-    ) -> HashMap<u32, Vec<u32>> {
+    /// The visible tracks of these albums in disc order, from one pass over the tracks.
+    pub(crate) fn album_tracks(&self, albums: &[u32]) -> HashMap<u32, Vec<u32>> {
         let snapshot = self.snapshot;
         let wanted = albums.iter().copied().collect::<HashSet<_>>();
         let mut members = HashMap::<u32, Vec<_>>::new();
         for (slot, record) in snapshot.tracks.iter() {
-            if wanted.contains(&record.album) && record.indexed() && self.in_folder(record, folder)
-            {
+            if wanted.contains(&record.album) && record.indexed() {
                 members.entry(record.album).or_default().push((
                     record.disc,
                     record.number,
