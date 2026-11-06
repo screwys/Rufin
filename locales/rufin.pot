@@ -3920,6 +3920,9 @@ msgstr ""
 msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
+msgid "The anchored track is gone"
+msgstr ""
+
 msgid "The connection no longer exists"
 msgstr ""
 

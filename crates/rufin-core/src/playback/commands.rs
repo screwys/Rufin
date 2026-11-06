@@ -242,9 +242,9 @@ impl PlayRequest {
             let index = match (selected, batch.anchor_index) {
                 (_, Some(index)) => index,
                 (Some(_), None) => {
-                    return Err(library::LibraryError::InvalidRequest(
-                        "The anchored track is gone".into(),
-                    ));
+                    return Err(library::LibraryError::InvalidRequest(localization::tr(
+                        "The anchored track is gone",
+                    )));
                 }
                 (None, None) => fallback,
             };
