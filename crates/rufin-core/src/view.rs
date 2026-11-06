@@ -1404,10 +1404,10 @@ impl View {
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Search(results), _) if options == self.options => {
-                let mut results = results.clone();
+                let mut results = self.catalog().reread_search(results, cancel).await?;
                 self.catalog()
                     .sort_search(&mut results, search_sorts(&settings));
-                let plan = Plan::Search(results);
+                let plan = Plan::Search(Box::new(results));
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Releases { .. }, _)

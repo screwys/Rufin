@@ -165,6 +165,39 @@ impl Catalog {
         Ok(results)
     }
 
+    /// `results` read again from the current Catalog: the same rows with their current
+    /// favorites, ratings and downloads.
+    pub async fn reread_search(
+        &self,
+        results: &SearchResults,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<SearchResults> {
+        let mut connection = self.acquire_loaded(cancellation).await?;
+        let keys = [
+            results
+                .tracks
+                .iter()
+                .map(|row| row.track_key.raw())
+                .collect(),
+            results
+                .albums
+                .iter()
+                .map(|row| row.album_key.raw())
+                .collect(),
+            results
+                .artists
+                .iter()
+                .map(|row| row.artist_key.raw())
+                .collect(),
+        ];
+        let album_artists = results.artists.iter().any(|row| row.album_artist);
+        let mut reread = self
+            .search_rows(&mut connection, &keys, album_artists)
+            .await?;
+        reread.lyrics.clone_from(&results.lyrics);
+        Ok(reread)
+    }
+
     /// Tracks, albums and artists of a source whose texts hold every search term.
     pub async fn search(
         &self,

@@ -1416,9 +1416,9 @@ impl Context<'_> {
         albums
     }
 
-    fn album_row(&self, derived: &Derived, slot: u32, record: &AlbumRec) -> ListRow<'_> {
+    fn album_row(&self, totals: Totals, slot: u32, record: &AlbumRec) -> ListRow<'_> {
         let mut row = ListRow::new(i64::from(record.key), self.snapshot.album_sort(record));
-        row.totals = derived.albums[slot as usize];
+        row.totals = totals;
         row.rating = rating(record.rating, record.native_rating);
         row.favorite = favorite(record.flags) == Some(true);
         row.year = year_of(record.year);
@@ -1501,7 +1501,7 @@ impl Context<'_> {
             ListKind::Albums => {
                 for (slot, record) in snapshot.albums.iter() {
                     if record.source == source && derived.albums[slot as usize].tracks > 0 {
-                        rows.push(self.album_row(derived, slot, record));
+                        rows.push(self.album_row(derived.albums[slot as usize], slot, record));
                     }
                 }
                 rows.sort_by(|a, b| compare_albums(read.sort, read.descending, a, b));
@@ -1517,7 +1517,7 @@ impl Context<'_> {
                 for slot in self.artist_albums(artist, *album_artist, folder) {
                     let record = &snapshot.albums.records[slot as usize];
                     if record.source == source {
-                        let mut row = self.album_row(derived, slot, record);
+                        let mut row = self.album_row(derived.albums[slot as usize], slot, record);
                         row.class = usize::from(AlbumReleaseClass::of(record.flags).code());
                         rows.push(row);
                     }
@@ -2609,12 +2609,22 @@ impl Catalog {
     ) {
         let snapshot = self.snapshot();
         let context = Context::new(&snapshot);
-        let derived = self.derived(&context, None);
         let [
             (tracks, tracks_descending),
             (albums, albums_descending),
             (artists, descending),
         ] = sorts;
+        // Collection totals only when a sort of returned collection rows orders by them.
+        let by_totals = |sort: LibraryField| {
+            use LibraryField as S;
+            matches!(
+                sort.sort(),
+                S::AlbumCount | S::SongCount | S::Duration | S::PlayCount | S::LastPlayed
+            )
+        };
+        let derived = (!results.albums.is_empty() && by_totals(albums)
+            || !results.artists.is_empty() && by_totals(artists))
+        .then(|| self.derived(&context, None));
         let sort = tracks.sort();
         let mut rows = results
             .tracks
@@ -2636,7 +2646,10 @@ impl Catalog {
             .filter_map(|(position, row)| {
                 let slot = snapshot.albums.slot(row.album_key.raw())?;
                 let record = &snapshot.albums.records[slot as usize];
-                Some((position, context.album_row(&derived, slot, record)))
+                let totals = derived
+                    .as_ref()
+                    .map_or_else(Totals::default, |derived| derived.albums[slot as usize]);
+                Some((position, context.album_row(totals, slot, record)))
             })
             .collect::<Vec<_>>();
         rows.sort_by(|(_, a), (_, b)| compare_albums(albums, albums_descending, a, b));
@@ -2652,7 +2665,9 @@ impl Catalog {
                 let slot = snapshot.artists.slot(row.artist_key.raw())?;
                 let record = &snapshot.artists.records[slot as usize];
                 let mut listed = ListRow::new(i64::from(record.key), snapshot.artist_sort(record));
-                listed.totals = derived.artists[usize::from(row.album_artist)][slot as usize];
+                if let Some(derived) = &derived {
+                    listed.totals = derived.artists[usize::from(row.album_artist)][slot as usize];
+                }
                 listed.rating = rating(record.rating, record.native_rating);
                 listed.favorite = favorite(record.flags) == Some(true);
                 Some((position, listed))
