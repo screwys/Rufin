@@ -23,6 +23,7 @@ use crate::source::folders::FolderProjection;
 
 /// What a committed change means for an open page, weakest first.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum Refresh {
     Nothing,
     /// Read the page again where it is; its rows may have moved, come or gone.
@@ -2136,6 +2137,12 @@ fn changes(
         if sensitive {
             refresh = refresh.max(Refresh::Reread);
         }
+    }
+    if changed.lyrics
+        && route == &Route::Search
+        && options.search_mode == library::SearchMode::Lyrics
+    {
+        refresh = refresh.max(Refresh::Reread);
     }
     if changed.scope.is_some() && !same {
         refresh = Refresh::Reopen;

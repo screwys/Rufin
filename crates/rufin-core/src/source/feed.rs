@@ -41,6 +41,26 @@ pub struct Changed {
     pub scope: Option<SourceKey>,
     /// Pins were imported; only the pin list reads again.
     pub pins: bool,
+    /// The lyrics Lyrics Search finds changed: a track's shown lyrics, or a source's whose
+    /// lyrics were downloaded.
+    pub lyrics: bool,
+}
+
+impl Changed {
+    /// Adds what `later` changed.
+    pub fn extend(&mut self, later: &Self) {
+        self.all |= later.all;
+        self.sources.extend(&later.sources);
+        self.items.extend(later.items.iter().cloned());
+        self.listened |= later.listened;
+        self.playlists.extend(&later.playlists);
+        self.playlist_lists |= later.playlist_lists;
+        self.downloads.extend(later.downloads.iter().cloned());
+        self.home.extend(&later.home);
+        self.scope = later.scope.or(self.scope);
+        self.pins |= later.pins;
+        self.lyrics |= later.lyrics;
+    }
 }
 
 /// A client's place in the feed.
@@ -75,6 +95,8 @@ pub(crate) enum Notice {
     /// A source selected, or its music folder.
     Scope(SourceKey),
     Pins,
+    /// A source's lyrics were downloaded.
+    Lyrics,
 }
 
 pub(crate) struct Feed {
@@ -170,10 +192,10 @@ impl Pending {
                     self.held.remove(key);
                     self.now.remove(key);
                 }
+                Scope::Lyrics { .. } => self.changed.lyrics = true,
                 Scope::Rekey { .. }
                 | Scope::Queue
                 | Scope::Held { .. }
-                | Scope::Lyrics { .. }
                 | Scope::Analysis { .. } => {}
             }
         }
@@ -191,6 +213,7 @@ impl Pending {
             Notice::Home(source) => self.changed.home.push(source),
             Notice::Scope(source) => self.changed.scope = Some(source),
             Notice::Pins => self.changed.pins = true,
+            Notice::Lyrics => self.changed.lyrics = true,
         }
     }
 

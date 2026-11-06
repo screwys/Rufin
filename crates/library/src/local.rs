@@ -59,6 +59,19 @@ impl crate::Header {
 }
 
 impl Shown<'_> {
+    /// How many of its tracks it shows downloaded.
+    pub fn downloaded(&self) -> i64 {
+        match self {
+            Self::Track(row) => i64::from(row.is_downloaded),
+            Self::Album(row) => row.summary.downloaded_count,
+            Self::Artist(row) => row.summary.downloaded_count,
+            Self::Tag(row) => row.summary.downloaded_count,
+            Self::Folder(row) => row.summary.downloaded_count,
+            Self::Playlist(row) => row.downloaded_count,
+            Self::Smart(row) => row.downloaded_count,
+        }
+    }
+
     /// Takes the downloads `from` shows when it is the same row read again; false when it is
     /// another row.
     pub fn take_downloads(&mut self, from: Shown<'_>) -> bool {

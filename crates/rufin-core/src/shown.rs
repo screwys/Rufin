@@ -9,28 +9,26 @@ use library::{FolderKey, ReadCancellation, ShowsState};
 use crate::source::SourceOwner;
 use crate::source::feed::Changed;
 
-/// The favorites, ratings and downloads committed while a surface reads rows. Rows read
-/// before a change committed and shown after it went out would miss it, so a surface takes
-/// one before it reads and shows what it [`missed`](Self::missed) once it shows the rows.
+/// What committed while a surface reads rows. Rows read before a change committed and shown
+/// after it went out would miss it, so a surface takes one before it reads and, once it shows
+/// the rows, handles what it [`missed`](Self::missed) as any other change: shows it in the rows
+/// and asks its page's [`crate::view::View::refresh`] what it means.
 pub struct Reading(pub(crate) tokio::sync::broadcast::Receiver<Arc<Changed>>);
 
 impl Reading {
-    /// The favorites, ratings and downloads committed since it started; None when nothing was.
-    /// A surface shows it in the rows it read as any other change.
+    /// Everything committed since it started, everything when it fell behind; None when
+    /// nothing was.
     pub fn missed(mut self) -> Option<Changed> {
         use tokio::sync::broadcast::error::TryRecvError;
         let mut missed = Changed::default();
         loop {
             match self.0.try_recv() {
-                Ok(changed) => {
-                    missed.items.extend(changed.items.iter().cloned());
-                    missed.downloads.extend(changed.downloads.iter().cloned());
-                }
-                Err(TryRecvError::Lagged(_)) => {}
+                Ok(changed) => missed.extend(&changed),
+                Err(TryRecvError::Lagged(_)) => missed.all = true,
                 Err(TryRecvError::Empty | TryRecvError::Closed) => break,
             }
         }
-        (!missed.items.is_empty() || !missed.downloads.is_empty()).then_some(missed)
+        (missed != Changed::default()).then_some(missed)
     }
 }
 
@@ -47,9 +45,10 @@ struct Pending {
 pub struct ShownChanges(Arc<Mutex<Pending>>);
 
 /// What a change shows in a surface's rows.
-pub struct Showing<F> {
-    /// Whether favorites or ratings changed any of the rows.
-    pub states: bool,
+pub struct Showing<T, F> {
+    /// The rows whose favorites or ratings changed, by their index among the rows passed,
+    /// showing them.
+    pub states: Vec<(usize, T)>,
     /// The rows whose downloads changed, by their index among the rows passed, once the Catalog
     /// counted them; None when the change named no downloads. It resolves to None when a newer
     /// change superseded it.
@@ -59,34 +58,50 @@ pub struct Showing<F> {
 impl ShownChanges {
     /// Shows `changed` in `rows`, the rows the surface shows now: favorites and ratings at once,
     /// and, when it names downloads, the downloads as the Catalog counts them, read in the
-    /// background. Smart playlists count as of `smart`, [`crate::view::View::smart_count`]. A
-    /// client puts each returned row in place of the one it shows at that index with
-    /// [`ShowsState::take_downloads`], which keeps what changed since.
+    /// background. Smart playlists count as of `smart`, [`crate::view::View::smart_count`]. Only
+    /// the rows that change come back. A client puts each in place of the row it shows at that
+    /// index, a downloads row with [`ShowsState::take_downloads`], which keeps what changed
+    /// since.
     pub fn show<T>(
         &self,
         owner: &SourceOwner,
-        rows: &mut [T],
+        rows: &[&T],
         changed: &Changed,
         smart: (Option<i64>, Option<FolderKey>),
-    ) -> Showing<impl Future<Output = Option<Vec<(usize, T)>>> + Send + 'static + use<T>>
+    ) -> Showing<T, impl Future<Output = Option<Vec<(usize, T)>>> + Send + 'static + use<T>>
     where
-        T: ShowsState + Clone + PartialEq + Send + 'static,
+        T: ShowsState + Clone + Send + 'static,
     {
         let states = rows
-            .iter_mut()
-            .fold(false, |shown, row| row.show_states(&changed.items) || shown);
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                changed.items.iter().any(|change| {
+                    row.state(change)
+                        .is_some_and(|state| !change.shown_in(state))
+                })
+            })
+            .map(|(index, row)| {
+                let mut row = T::clone(row);
+                row.show_states(&changed.items);
+                (index, row)
+            })
+            .collect();
         if changed.downloads.is_empty() || rows.is_empty() {
             return Showing {
                 states,
                 downloads: None,
             };
         }
-        let shown = rows.to_vec();
+        let mut read = rows.iter().map(|row| T::clone(row)).collect::<Vec<_>>();
         let catalog = Arc::clone(&owner.shared.catalog);
         let cancel = ReadCancellation::new();
         let reading = cancel.clone();
         let task = owner.shared.runtime.spawn(async move {
-            let mut read = shown.clone();
+            let shown = read
+                .iter_mut()
+                .map(|row| row.downloads().map(|row| row.downloaded()))
+                .collect::<Vec<_>>();
             catalog
                 .show_downloads(
                     read.iter_mut().filter_map(ShowsState::downloads).collect(),
@@ -98,8 +113,10 @@ impl ShownChanges {
                 read.into_iter()
                     .zip(shown)
                     .enumerate()
-                    .filter(|(_, (read, shown))| read != shown)
-                    .map(|(index, (read, _))| (index, read))
+                    .filter_map(|(index, (mut row, shown))| {
+                        (row.downloads().map(|row| row.downloaded()) != shown)
+                            .then_some((index, row))
+                    })
                     .collect::<Vec<_>>(),
             )
         });

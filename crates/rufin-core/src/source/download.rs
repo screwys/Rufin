@@ -178,6 +178,9 @@ impl SourceOwner {
                     report(completed);
                 }
             }
+            if completed > 0 {
+                self.notice(super::feed::Notice::Lyrics);
+            }
         }
         Ok(())
     }
