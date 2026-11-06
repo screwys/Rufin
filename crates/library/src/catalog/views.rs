@@ -484,7 +484,11 @@ impl Downloaded {
             folders: vec![0; snapshot.folders.records.len()],
         };
         let mut tags = Vec::new();
-        for (_, record) in snapshot.tracks.iter() {
+        // Only the downloaded tracks, so a download costs what is downloaded, not the library.
+        for key in &snapshot.download_keys {
+            let Some(record) = snapshot.tracks.get(i64::from(*key)) else {
+                continue;
+            };
             if record.flags & DOWNLOADED == 0
                 || !record.indexed()
                 || !context.in_folder(record, folder)

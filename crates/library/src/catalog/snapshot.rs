@@ -4,7 +4,7 @@
 //! them. Track URIs and object ids, paths, details and artwork bindings are not resident; a
 //! Write or a window's statement reads them by key.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use bytemuck::{Pod, Zeroable};
 
@@ -479,6 +479,9 @@ pub(crate) struct Snapshot {
     pub(crate) sources: BTreeMap<SourceKey, Source>,
     pub(crate) source_slots: Vec<SourceKey>,
     pub(crate) tracks: Family<TrackRec>,
+    /// Keys of the downloaded tracks, so download counts read only them. A track removed while
+    /// downloaded may stay here: its record's flag is what counts.
+    pub(crate) download_keys: HashSet<u32>,
     pub(crate) albums: Family<AlbumRec>,
     pub(crate) artists: Family<ArtistRec>,
     pub(crate) tags: Family<TagRec>,
@@ -544,6 +547,7 @@ impl Default for Snapshot {
             sources: BTreeMap::new(),
             source_slots: Vec::new(),
             tracks: Family::default(),
+            download_keys: HashSet::new(),
             albums: Family::default(),
             artists: Family::default(),
             tags: Family::default(),
@@ -1105,6 +1109,11 @@ impl Snapshot {
         if let Some(slot) = self.tracks.slot(key.raw()) {
             let record = &mut self.tracks.records[slot as usize];
             record.flags = record.flags & !DOWNLOADED | u16::from(downloaded) * DOWNLOADED;
+            if downloaded {
+                self.download_keys.insert(record.key);
+            } else {
+                self.download_keys.remove(&record.key);
+            }
         }
     }
 

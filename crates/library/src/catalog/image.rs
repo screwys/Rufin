@@ -344,6 +344,13 @@ fn decode(bytes: &[u8], stamp: &Stamp) -> Option<Snapshot> {
         .map(SourceKey::from_raw)
         .collect();
     snapshot.tracks = input.family()?;
+    snapshot.download_keys = snapshot
+        .tracks
+        .records
+        .iter()
+        .filter(|record| record.flags & DOWNLOADED != 0)
+        .map(|record| record.key)
+        .collect();
     snapshot.albums = input.family()?;
     snapshot.artists = input.family()?;
     snapshot.tags = input.family()?;
