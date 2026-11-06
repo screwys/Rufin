@@ -747,11 +747,8 @@ impl Catalog {
 
 impl CatalogInner {
     fn finish_load(&self, loaded: LibraryResult<(Snapshot, bool)>, elapsed: Duration) {
-        match loaded {
+        let revision = match loaded {
             Ok((mut snapshot, from_image)) => {
-                // Above the empty Snapshot's revision, so nothing built from that one is reused.
-                snapshot.revision = 1;
-                snapshot.stamp_all();
                 tracing::debug!(
                     tracks = snapshot.track_count(),
                     bytes = snapshot.bytes(),
@@ -763,10 +760,14 @@ impl CatalogInner {
                     .snapshot
                     .write()
                     .unwrap_or_else(PoisonError::into_inner);
+                // Above the empty Snapshot's revision, so nothing built from that one is reused.
+                snapshot.revision = state.revision + 1;
+                snapshot.stamp_all();
                 snapshot.sort_tags = state.sort_tags;
                 snapshot.distinct_track_covers = state.distinct_track_covers;
                 snapshot.cover_lookup = state.cover_lookup;
                 let previous = std::mem::replace(&mut *state, snapshot);
+                let revision = state.revision;
                 drop(state);
                 drop(previous);
                 process_memory::request_reclaim();
@@ -778,16 +779,21 @@ impl CatalogInner {
                         .changed = Some(Instant::now());
                     self.image.1.notify_one();
                 }
+                revision
             }
             Err(error) => {
                 tracing::warn!(%error, "could not load the Catalog; the next write reloads it");
                 self.reload.store(true, Ordering::Release);
+                self.snapshot
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .revision
             }
-        }
+        };
         // Rows read by key before the load, such as now playing, showed no state or covers.
         // The Reload goes out first, so a Write that waited for the load publishes after it.
         let _ = self.changes.send(Arc::new(Change {
-            revision: 1,
+            revision,
             scopes: vec![crate::Scope::Reload],
         }));
         self.loaded.send_replace(true);
