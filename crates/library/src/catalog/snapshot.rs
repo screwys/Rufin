@@ -594,14 +594,15 @@ impl Snapshot {
         revision
     }
 
-    /// Marks everything changed at the current revision, as a load or a display flag does.
-    pub(crate) fn stamp_all(&mut self) {
-        let revision = self.revision;
-        self.facts = revision;
-        self.states = revision;
-        self.plays = revision;
-        self.downloads = revision;
-        self.playlist_stamp = revision;
+    /// Puts a loaded Snapshot in place of this one, above its revision so nothing built from
+    /// this one is reused, with this one's display flags. Returns the revision and this one.
+    pub(crate) fn succeed(&mut self, mut loaded: Self) -> (u64, Self) {
+        loaded.revision = self.revision;
+        let revision = loaded.raise([true; 5]);
+        loaded.sort_tags = self.sort_tags;
+        loaded.distinct_track_covers = self.distinct_track_covers;
+        loaded.cover_lookup = self.cover_lookup;
+        (revision, std::mem::replace(self, loaded))
     }
 
     pub(crate) fn source(&self, key: SourceKey) -> Option<&Source> {

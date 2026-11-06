@@ -463,16 +463,8 @@ impl Catalog {
     /// Builds a fresh Snapshot while the old one keeps serving readers, then swaps them.
     /// Holding the writer means no commit lands between the read and the swap.
     pub(crate) async fn reload_under(&self, _writer: &mut WriterGuard<'_>) -> LibraryResult<u64> {
-        let mut snapshot = load(&self.inner.store.path).await?;
-        let mut state = self.snapshot_mut();
-        snapshot.revision = state.revision + 1;
-        snapshot.stamp_all();
-        snapshot.sort_tags = state.sort_tags;
-        snapshot.distinct_track_covers = state.distinct_track_covers;
-        snapshot.cover_lookup = state.cover_lookup;
-        let previous = std::mem::replace(&mut *state, snapshot);
-        let revision = state.revision;
-        drop(state);
+        let snapshot = load(&self.inner.store.path).await?;
+        let (revision, previous) = self.snapshot_mut().succeed(snapshot);
         drop(previous);
         process_memory::request_reclaim();
         self.inner.reload.store(false, Ordering::Release);
@@ -533,9 +525,7 @@ impl Catalog {
         if std::mem::replace(flag(&mut snapshot), enabled) == enabled {
             return;
         }
-        snapshot.revision += 1;
-        snapshot.stamp_all();
-        let revision = snapshot.revision;
+        let revision = snapshot.raise([true; 5]);
         drop(snapshot);
         if *self.inner.loaded.borrow() {
             self.publish(Arc::new(Change {
@@ -748,7 +738,7 @@ impl Catalog {
 impl CatalogInner {
     fn finish_load(&self, loaded: LibraryResult<(Snapshot, bool)>, elapsed: Duration) {
         let revision = match loaded {
-            Ok((mut snapshot, from_image)) => {
+            Ok((snapshot, from_image)) => {
                 tracing::debug!(
                     tracks = snapshot.track_count(),
                     bytes = snapshot.bytes(),
@@ -756,19 +746,11 @@ impl CatalogInner {
                     from_image,
                     "loaded the Catalog"
                 );
-                let mut state = self
+                let (revision, previous) = self
                     .snapshot
                     .write()
-                    .unwrap_or_else(PoisonError::into_inner);
-                // Above the empty Snapshot's revision, so nothing built from that one is reused.
-                snapshot.revision = state.revision + 1;
-                snapshot.stamp_all();
-                snapshot.sort_tags = state.sort_tags;
-                snapshot.distinct_track_covers = state.distinct_track_covers;
-                snapshot.cover_lookup = state.cover_lookup;
-                let previous = std::mem::replace(&mut *state, snapshot);
-                let revision = state.revision;
-                drop(state);
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .succeed(snapshot);
                 drop(previous);
                 process_memory::request_reclaim();
                 if !from_image {
