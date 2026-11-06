@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 use sqlx::Connection;
 
-use crate::catalog::snapshot::AlbumRec;
 use crate::catalog::snapshot::Packed;
+use crate::catalog::snapshot::{AlbumRec, TrackRec};
 use crate::catalog::views::Context;
 use crate::{
     AlbumKey, AlbumRow, Catalog, FolderKey, Item, LibraryResult, ReadCancellation, Row, SourceKey,
@@ -13,6 +13,17 @@ use crate::{
 };
 
 const HOME_LIMIT: i64 = 24;
+
+/// The first rows of `items` in `order`, sorted, without sorting the rest.
+fn first<T>(mut items: Vec<T>, order: impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
+    let limit = HOME_LIMIT as usize;
+    if items.len() > limit {
+        items.select_nth_unstable_by(limit - 1, &order);
+        items.truncate(limit);
+    }
+    items.sort_by(order);
+    items
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
@@ -245,8 +256,10 @@ impl Catalog {
             let mut chosen = Chosen::default();
             if blocks.contains(&HomeBlockKind::Showcase) && !albums.is_empty() {
                 let mut ordered = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
-                ordered.sort_by_key(|album| album.key);
-                let album = ordered[showcase_variation.rem_euclid(ordered.len() as i64) as usize];
+                let index = showcase_variation.rem_euclid(ordered.len() as i64) as usize;
+                let album = *ordered
+                    .select_nth_unstable_by_key(index, |album| album.key)
+                    .1;
                 chosen
                     .showcase
                     .push((AlbumKey::from_raw(i64::from(album.key)), title(album)));
@@ -254,21 +267,15 @@ impl Catalog {
             if blocks.contains(&HomeBlockKind::Explore) {
                 // A fixed shuffle of album keys, entered at a point the variation picks.
                 let pivot = explore_album_pivot(source, explore_variation);
-                let mut ordered = albums
+                let ordered = albums
                     .iter()
                     .map(|(_, album)| {
-                        (
-                            (i64::from(album.key).wrapping_mul(1_103_515_245)) % 2_147_483_647,
-                            *album,
-                        )
+                        let hash = i64::from(album.key).wrapping_mul(1_103_515_245) % 2_147_483_647;
+                        ((hash < pivot, hash, album.key), *album)
                     })
                     .collect::<Vec<_>>();
-                ordered.sort_by_key(|(hash, album)| (*hash, album.key));
-                let split = ordered.partition_point(|(hash, _)| *hash < pivot);
-                ordered.rotate_left(split);
-                chosen.explore = ordered
+                chosen.explore = first(ordered, |a, b| a.0.cmp(&b.0))
                     .into_iter()
-                    .take(HOME_LIMIT as usize)
                     .map(|(_, album)| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
@@ -281,23 +288,18 @@ impl Catalog {
                 })
             };
             if blocks.contains(&HomeBlockKind::MostPlayed) {
-                let mut played = tracks()
+                let played = tracks()
                     .map(|(slot, track)| (context.played(slot, track).plays, track))
                     .filter(|(plays, _)| *plays > 0)
-                    .map(|(plays, track)| {
-                        (
-                            std::cmp::Reverse(plays),
-                            snapshot.track_sort(track),
-                            track.key,
-                            track,
-                        )
-                    })
                     .collect::<Vec<_>>();
-                played.sort_by(|a, b| (&a.0, &a.1, a.2).cmp(&(&b.0, &b.1, b.2)));
-                chosen.most_played = played
+                let order = |a: &(u32, &TrackRec), b: &(u32, &TrackRec)| {
+                    (b.0.cmp(&a.0))
+                        .then_with(|| snapshot.track_sort(a.1).cmp(&snapshot.track_sort(b.1)))
+                        .then(a.1.key.cmp(&b.1.key))
+                };
+                chosen.most_played = first(played, order)
                     .into_iter()
-                    .take(HOME_LIMIT as usize)
-                    .map(|(.., track)| {
+                    .map(|(_, track)| {
                         (
                             TrackKey::from_raw(i64::from(track.key)),
                             snapshot.text(track.title).to_owned(),
@@ -306,20 +308,20 @@ impl Catalog {
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::RecentlyPlayed) {
-                let mut played = tracks()
+                let played = tracks()
                     .filter_map(|(slot, track)| {
                         Some((
-                            std::cmp::Reverse(context.played(slot, track).last?),
-                            track.key,
+                            (
+                                std::cmp::Reverse(context.played(slot, track).last?),
+                                track.key,
+                            ),
                             track,
                         ))
                     })
                     .collect::<Vec<_>>();
-                played.sort_by_key(|(last, key, _)| (*last, *key));
-                chosen.recently_played = played
+                chosen.recently_played = first(played, |a, b| a.0.cmp(&b.0))
                     .into_iter()
-                    .take(HOME_LIMIT as usize)
-                    .map(|(.., track)| {
+                    .map(|(_, track)| {
                         (
                             TrackKey::from_raw(i64::from(track.key)),
                             snapshot.text(track.title).to_owned(),
@@ -328,22 +330,21 @@ impl Catalog {
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::NewlyAdded) {
-                let mut added = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
-                added.sort_by(|a, b| {
+                let added = albums.iter().map(|(_, album)| *album).collect::<Vec<_>>();
+                let order = |a: &&AlbumRec, b: &&AlbumRec| {
                     (a.added == u32::MAX)
                         .cmp(&(b.added == u32::MAX))
                         .then(b.added.cmp(&a.added))
                         .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
                         .then(a.key.cmp(&b.key))
-                });
-                chosen.newly_added = added
+                };
+                chosen.newly_added = first(added, order)
                     .into_iter()
-                    .take(HOME_LIMIT as usize)
                     .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
             if blocks.contains(&HomeBlockKind::RecentlyReleased) {
-                let mut released = albums
+                let released = albums
                     .iter()
                     .map(|(_, album)| *album)
                     .filter(|album| {
@@ -352,7 +353,7 @@ impl Catalog {
                     .collect::<Vec<_>>();
                 let dated = |value: u32| (value != 0).then_some(value);
                 let year = |value: i16| (value != i16::MIN).then_some(value);
-                released.sort_by(|a, b| {
+                let order = |a: &&AlbumRec, b: &&AlbumRec| {
                     dated(a.release)
                         .is_none()
                         .cmp(&dated(b.release).is_none())
@@ -361,10 +362,9 @@ impl Catalog {
                         .then(b.year.cmp(&a.year))
                         .then_with(|| snapshot.album_sort(a).cmp(&snapshot.album_sort(b)))
                         .then(a.key.cmp(&b.key))
-                });
-                chosen.recently_released = released
+                };
+                chosen.recently_released = first(released, order)
                     .into_iter()
-                    .take(HOME_LIMIT as usize)
                     .map(|album| (AlbumKey::from_raw(i64::from(album.key)), title(album)))
                     .collect();
             }
