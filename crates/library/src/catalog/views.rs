@@ -2624,28 +2624,33 @@ impl Catalog {
                     tracks: tracks.into(),
                 }
             }
-            Read::Folders(folders) => {
-                let parent = match folders.parent {
-                    Some(parent) => snapshot.folders.slot(parent.raw()),
-                    None => None,
+            Read::Folders(folders) if !folders.filter.trim().is_empty() => {
+                // Typing filters the unfiltered children by name.
+                let base = crate::FolderRead {
+                    filter: String::new(),
+                    ..folders.clone()
                 };
-                Members::Keys(
-                    if folders.parent.is_some() && parent.is_none() {
-                        Vec::new()
-                    } else {
-                        context
-                            .folder_order(
-                                folders.source,
-                                parent,
-                                &folders.filter,
-                                folders.descending,
-                            )
-                            .into_iter()
-                            .map(|(key, _)| key as u32)
-                            .collect()
+                let base = self.build_in(context, &Read::Folders(base), inputs, read_at);
+                let filter = filter_text(&folders.filter);
+                let Members::Keys(keys) = &base.0.members else {
+                    unreachable!("folder orders hold folder keys")
+                };
+                let named = |key: &&u32| {
+                    (snapshot.folders.get(i64::from(**key)))
+                        .is_some_and(|folder| holds(snapshot.text(folder.name), &filter, false))
+                };
+                Members::Keys(keys.iter().filter(named).copied().collect())
+            }
+            Read::Folders(folders) => {
+                let parent = folders
+                    .parent
+                    .map(|parent| snapshot.folders.slot(parent.raw()));
+                Members::Keys(match parent {
+                    Some(None) => Box::default(),
+                    parent => {
+                        context.folder_order(folders.source, parent.flatten(), folders.descending)
                     }
-                    .into(),
-                )
+                })
             }
         };
         let stamp = masked(stamps, read.depends());
@@ -3131,31 +3136,26 @@ impl Context<'_> {
             .collect()
     }
 
-    /// A folder list ordered by sort text and filtered by name.
+    /// A folder list ordered by sort text.
     pub(crate) fn folder_order(
         &self,
         source: SourceKey,
         parent: Option<u32>,
-        filter: &str,
         descending: bool,
-    ) -> Vec<(i64, String)> {
-        let filter = filter.trim().to_lowercase();
+    ) -> Box<[u32]> {
         let mut folders = self
             .folder_children(source, parent)
             .into_iter()
             .map(|slot| &self.snapshot.folders.records[slot as usize])
-            .filter(|folder| holds(self.snapshot.text(folder.name), &filter, false))
             .map(|folder| {
                 (
-                    i64::from(folder.key),
-                    self.snapshot
-                        .name_sort(folder.name, folder.sort)
-                        .into_owned(),
+                    self.snapshot.name_sort(folder.name, folder.sort),
+                    folder.key,
                 )
             })
             .collect::<Vec<_>>();
-        folders.sort_by(|a, b| directed(a.1.cmp(&b.1), descending).then(a.0.cmp(&b.0)));
-        folders
+        folders.sort_by(|a, b| directed(a.0.cmp(&b.0), descending).then(a.1.cmp(&b.1)));
+        folders.into_iter().map(|(_, key)| key).collect()
     }
 
     /// The visible tracks of these albums in disc order. `derived` is the whole library's.
