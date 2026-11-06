@@ -317,7 +317,7 @@ impl AndroidView {
     /// Rows show favorites, ratings and downloads through `AndroidLibrary::show_changes`.
     pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
         self.view
-            .refresh_selected(self.source.selected_library().as_ref(), &changed)
+            .refresh(self.source.selected_library().as_ref(), &changed)
             != rufin_core::view::Refresh::Nothing
     }
 

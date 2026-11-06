@@ -492,7 +492,7 @@ impl Shell {
             return;
         };
         let current = self.products.source.selected_library();
-        match view.refresh_selected(current.as_ref(), changed) {
+        match view.refresh(current.as_ref(), changed) {
             Refresh::Nothing => {}
             Refresh::Reread if route == Route::Home => self.refresh_mounted_home(),
             Refresh::Reread => self.refresh_mounted_catalog(),

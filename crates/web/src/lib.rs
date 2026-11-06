@@ -1145,7 +1145,7 @@ fn changed_json(
         "pins_changed": rufin_core::view::pins_refresh(&products.source, changed),
         "activity_changed": changed.listened,
     });
-    match shown.map(|view| view.refresh(changed)) {
+    match shown.map(|view| view.refresh(view.selected(), changed)) {
         Some(Refresh::Reread) => first["page_refresh"] = json!("reread"),
         Some(Refresh::Reopen) => first["page_refresh"] = json!("reopen"),
         Some(Refresh::Nothing) | None => {}

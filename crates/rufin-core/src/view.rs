@@ -970,26 +970,17 @@ impl View {
         read_order(&self.route, &self.options, &self.settings).2
     }
 
-    /// What a committed change means for this page, which keeps the source and music folder
-    /// it opened with, as a web page names them. Favorites, ratings and downloads read it again
-    /// only where they order or filter its rows; the rows and header that show them show them
-    /// through `ShowsState` and [`library::Catalog::show_downloads`].
-    pub fn refresh(&self, changed: &Changed) -> Refresh {
-        self.refresh_selected(self.selected.as_ref(), changed)
-    }
-
     /// Whether it reads the same in `selected` as in the library it opened in.
     pub fn reads_same_in(&self, selected: Option<&SelectedLibrary>) -> bool {
         Scope::of(&self.route, self.options.search_mode).same(self.selected.as_ref(), selected)
     }
 
-    /// [`View::refresh`] for a page that follows the selection: now that `current` is
-    /// selected, a page that reads another source or music folder in it opens again.
-    pub fn refresh_selected(
-        &self,
-        current: Option<&SelectedLibrary>,
-        changed: &Changed,
-    ) -> Refresh {
+    /// What a committed change means for this page now that the client shows `current`, the
+    /// selection it passes: the runtime's on GTK and Android, the page's own on the web. A page
+    /// that reads another source or music folder in it opens again. Favorites, ratings and
+    /// downloads read it again only where they order or filter its rows; the rows and header
+    /// that show them show them through [`crate::shown::ShownChanges`].
+    pub fn refresh(&self, current: Option<&SelectedLibrary>, changed: &Changed) -> Refresh {
         let refresh = changes(
             &self.owner,
             &self.route,
