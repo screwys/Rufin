@@ -1207,12 +1207,13 @@ impl Shell {
             return;
         };
         let catalog = std::sync::Arc::clone(&self.products.library);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
         let task = self.products.runtime.spawn(async move {
-            catalog
-                .smart_playlist_value_suggestions(source, folder, &library::ReadCancellation::new())
-                .await
+            rufin_core::playlists::smart_playlist_suggestions(
+                &catalog,
+                &selected,
+                &library::ReadCancellation::new(),
+            )
+            .await
         });
         let shell = Rc::downgrade(self);
         gtk::glib::spawn_future_local(async move {

@@ -13,6 +13,20 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+/// The values the smart playlist editor suggests in `selected`, in the music folder smart
+/// playlists read in.
+pub async fn smart_playlist_suggestions(
+    catalog: &Catalog,
+    selected: &crate::runtime::SelectedLibrary,
+    cancellation: &ReadCancellation,
+) -> library::LibraryResult<library::SmartPlaylistValueSuggestions> {
+    let folder =
+        crate::view::Scope::of(&crate::route::Route::SmartPlaylists).folder(Some(selected));
+    catalog
+        .smart_playlist_value_suggestions(selected.source_key, folder, cancellation)
+        .await
+}
+
 pub fn import_local_paths(
     owner: &SourceOwner,
     paths: Vec<PathBuf>,

@@ -46,18 +46,33 @@ pub async fn play_saved_random(
                         .map_or(0, |duration| duration.as_nanos() as i64),
                 },
             };
-            queue_random(
-                &catalog,
-                selected.source_key,
-                selected.music_folder_key,
-                request,
-                &queue,
-            )
-            .await
+            let (source, folder) = random_library(&selected);
+            queue_random(&catalog, source, folder, request, &queue).await
         })
         .recv()
         .await
         .map_err(|error| error.to_string())?
+}
+
+/// The source and music folder Random Play reads in `selected`: it is query-built, so the
+/// folder narrows it (decisions.md, 2026-11-06).
+fn random_library(selected: &SelectedLibrary) -> (SourceKey, Option<library::FolderKey>) {
+    (selected.source_key, selected.music_folder_key)
+}
+
+/// The genres Random Play offers in `selected` whose names hold `filter`, and how many there
+/// are.
+pub async fn random_genres(
+    catalog: &Catalog,
+    selected: &SelectedLibrary,
+    filter: &str,
+    range: std::ops::Range<usize>,
+    cancellation: &ReadCancellation,
+) -> library::LibraryResult<(usize, Vec<library::GenreChoice>)> {
+    let (source, folder) = random_library(selected);
+    catalog
+        .genre_choices(source, folder, filter, range, cancellation)
+        .await
 }
 
 /// Finds the saved Random Play genre when it was saved for this library: a source and one of
