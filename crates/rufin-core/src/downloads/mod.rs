@@ -706,13 +706,22 @@ pub enum DownloadSubject {
 impl DownloadSubject {
     /// The subject of downloading `selection`, whose tracks are `media_uris`: a whole
     /// collection by its context id, one track by its URI, other selections by their tracks.
+    /// A whole smart playlist's job is called Smart Playlist.
     pub(crate) fn of_selection(
         catalog: &library::Catalog,
         selection: &library::MemberSelection,
         media_uris: &[String],
     ) -> Self {
+        use crate::collection_context::CollectionTarget;
         use library::MemberSelection;
-        let context_id = match (collection(catalog, selection), selection, media_uris) {
+        let target = collection(catalog, selection);
+        let title = match &target {
+            Some(CollectionTarget::SmartPlaylist(_)) => {
+                Some(localization::tr(localization::msgid("Smart Playlist")))
+            }
+            _ => selection_title(catalog, selection),
+        };
+        let context_id = match (target, selection, media_uris) {
             (Some(target), _, _) => target.context_id(),
             (None, MemberSelection::Keys { .. } | MemberSelection::Uris(_), [uri]) => {
                 format!("track:{uri}")
@@ -721,10 +730,7 @@ impl DownloadSubject {
             (None, MemberSelection::Entries(_), _) => hashed_id("playlist", media_uris),
             _ => hashed_id("selection", media_uris),
         };
-        Self::Prepared {
-            context_id,
-            title: selection_title(catalog, selection),
-        }
+        Self::Prepared { context_id, title }
     }
 
     fn hashed(context: &str, title: Option<String>, media_uris: &[String]) -> Self {
