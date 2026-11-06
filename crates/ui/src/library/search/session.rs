@@ -175,14 +175,15 @@ impl SearchSession {
             .products
             .source
             .prepare_collection(result.media_uri.clone());
-        let is_current = catalog.current_check();
-        let navigate = catalog.route_navigation();
+        // The top bar's popup hands over a page made for this activation, so the future
+        // holds it to ask whether its route still shows.
+        let catalog = Rc::clone(catalog);
         glib::spawn_future_local(async move {
             if let Ok(Err(error)) = receiver.recv().await {
                 tracing::warn!(%error, "could not acquire recent search collection");
             }
-            if is_current() {
-                navigate(route);
+            if catalog.is_current() {
+                catalog.open_route(route);
             }
         });
     }
