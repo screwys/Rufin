@@ -223,8 +223,6 @@ function renderPlaylistSubmenu(menu, target, signal) {
         async () => {
           await api("/playlists/entries", "POST", {
             id: row.id,
-            source: state.source,
-            folder: state.selectedLibrary,
             ...target,
           });
           closeMenus();
@@ -454,8 +452,6 @@ function init() {
           : {
               name,
               ...newPlaylistUris,
-              selection_source: state.source,
-              folder: state.selectedLibrary,
               source:
                 $("playlist-owner").getAttribute("aria-pressed") === "true"
                   ? playlistSource.id

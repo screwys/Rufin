@@ -1,4 +1,4 @@
-import { api, state } from "./connection.js";
+import { api } from "./connection.js";
 import { el, icon } from "./ui.js";
 
 const mediaType = "application/x-rufin-media";
@@ -6,12 +6,12 @@ const pinType = "application/x-rufin-collection";
 let current = null;
 let preview = null;
 
-// What dragging or playing a row carries: a track's URI, or the page a collection opens.
+// What dragging or playing a row carries: the page core says it plays, else its track's URI.
 function mediaSelection(kind, row) {
   return {
     kind,
     row,
-    ...(row.page ? { page: row.page } : { uris: [row.uri] }),
+    ...(row.play ? { page: row.play } : { uris: [row.uri] }),
   };
 }
 
@@ -73,17 +73,7 @@ function queueMedia(media, mode = "append", position = {}) {
 function playlistMedia(id, media) {
   return api("/playlists/entries", "POST", {
     id,
-    source: state.source || null,
-    folder: state.selectedLibrary,
-    ...(media.uris
-      ? { uris: media.uris }
-      : {
-          selection: {
-            kind: media.kind.replaceAll("-", "_"),
-            id: media.row.id,
-            album_artists: !!media.row.album_artists,
-          },
-        }),
+    ...(media.uris ? { uris: media.uris } : { page: media.page }),
   });
 }
 

@@ -35,6 +35,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             &row,
             &rufin_core::menu::menu(&products.source, &settings, &row),
             &scope,
+            None,
         );
         let collection = row.collection();
         item["artwork_revision"] = json!(artwork_revision(

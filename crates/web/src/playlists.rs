@@ -1,69 +1,28 @@
 use super::*;
 use library::{PlaylistEntryKey, PlaylistKey};
 
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum MediaSelection {
-    Album {
-        id: library::AlbumKey,
-    },
-    Artist {
-        id: library::ArtistKey,
-        #[serde(default)]
-        album_artists: bool,
-    },
-    Playlist {
-        id: PlaylistKey,
-    },
-    Genre {
-        id: library::GenreKey,
-    },
-    SmartPlaylist {
-        id: library::SmartPlaylistKey,
-    },
-}
-
-/// The tracks a playlist add takes: `uris`, or what the selected collection's page lists in
-/// the request's source and music folder, as a queue of that page takes them.
+/// The tracks a playlist add takes: `uris`, or what the page a row plays lists, in that page's
+/// source and music folder, as a queue of that page takes them.
 async fn playlist_selection(
     products: &ProductHandles,
     uris: Vec<String>,
-    selection: Option<MediaSelection>,
-    source: Option<sources::SourceId>,
-    folder: Option<String>,
+    page: Option<page::PageToken>,
 ) -> Result<library::MemberSelection, Error> {
-    let Some(selection) = selection else {
+    let Some(page) = page else {
         return Ok(library::MemberSelection::Uris(uris.into()));
     };
-    let source = source.filter(|source| !source.as_str().is_empty());
-    let folder = folder.filter(|folder| !folder.is_empty());
-    let selected = page::scope(products, source.as_ref(), folder.as_deref()).await?;
-    let collection = match selection {
-        MediaSelection::Album { id } => library::Collection::Album(id),
-        MediaSelection::Artist { id, album_artists } => library::Collection::Artist {
-            key: id,
-            album_artist: album_artists,
-        },
-        MediaSelection::Playlist { id } => library::Collection::Playlist(id),
-        MediaSelection::Genre { id } => library::Collection::Genre(id),
-        MediaSelection::SmartPlaylist { id } => library::Collection::Smart { key: id, now: 0 },
-    };
-    let gone = || bad_request("Nothing to add here");
-    let route =
-        rufin_core::collection_context::CollectionTarget::of(&products.library, &collection)
-            .ok_or_else(gone)?
-            .route();
+    let selected = page::scope(products, page.source.as_ref(), page.folder.as_deref()).await?;
     products
         .source
         .route_selection(
-            &route,
+            &page.route,
             selected.as_ref(),
             rufin_core::view::SelectionScope::Page,
             &library::ReadCancellation::new(),
         )
         .await
         .map_err(page::read_error)?
-        .ok_or_else(gone)
+        .ok_or_else(|| bad_request("Nothing to add here"))
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -344,20 +303,11 @@ pub(super) async fn create(
         name: String,
         #[serde(default)]
         uris: Vec<String>,
-        selection: Option<MediaSelection>,
-        selection_source: Option<sources::SourceId>,
-        folder: Option<String>,
+        page: Option<page::PageToken>,
     }
     let input: Input = body(request).await?;
     let source = input.source.clone();
-    let selection = playlist_selection(
-        products,
-        input.uris,
-        input.selection,
-        input.selection_source,
-        input.folder,
-    )
-    .await?;
+    let selection = playlist_selection(products, input.uris, input.page).await?;
     let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
@@ -447,21 +397,12 @@ pub(super) async fn add_entries(
         id: PlaylistKey,
         #[serde(default)]
         uris: Vec<String>,
-        selection: Option<MediaSelection>,
-        source: Option<sources::SourceId>,
-        folder: Option<String>,
+        page: Option<page::PageToken>,
         #[serde(default)]
         skip_duplicates: bool,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(
-        products,
-        input.uris,
-        input.selection,
-        input.source,
-        input.folder,
-    )
-    .await?;
+    let selection = playlist_selection(products, input.uris, input.page).await?;
     let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,

@@ -105,31 +105,41 @@ struct Shown<'a> {
     form: &'a Form,
 }
 
-/// A row's JSON for the page's script: what the API lists for it, its menu, its index, and
-/// the page it opens, which keeps the source and music folder of `scope`.
+/// A row's JSON for the page's script: what the API lists for it, its menu, the page it opens
+/// and the page it plays, as core gives them for a row of `view`'s page or for a row outside a
+/// page; each keeps the source and music folder of `scope`. A track has no page it plays.
 pub(super) fn row_data(
     products: &ProductHandles,
     row: &Row,
     menu: &Menu,
     scope: &page::PageToken,
+    view: Option<&rufin_core::view::View>,
 ) -> Value {
+    use rufin_core::route::Route;
+    use rufin_core::view::PlayTarget;
     let mut value = page::row_json(products, row, true, scope);
     value["menu"] = json!(menu);
-    if let Some(route) = opens(row) {
-        value["page"] = json!(scope.at(route));
+    let (route, target) = match view {
+        Some(view) => (view.row_route(row), view.row_target(row)),
+        None => (Route::of_row(row), PlayTarget::of_row(row)),
+    };
+    if let Some(route) = route {
+        value["page"] = json!(scope.at(web_page(route)));
+    }
+    if let Some(PlayTarget::Route(route)) = target {
+        value["play"] = json!(scope.at(route));
     }
     value
 }
 
-/// The page a collection row opens on the web: an artist opens their tracks, the artist page
-/// the web draws.
-fn opens(row: &Row) -> Option<rufin_core::route::Route> {
+/// The page the web draws for `route`: an artist's tracks for the artist page.
+fn web_page(route: rufin_core::route::Route) -> rufin_core::route::Route {
     use rufin_core::route::Route;
-    Some(match Route::of_row(row)? {
+    match route {
         Route::ArtistDetail(uri) => Route::ArtistTracks(uri),
         Route::AlbumArtistDetail(uri) => Route::AlbumArtistTracks(uri),
         route => route,
-    })
+    }
 }
 
 impl<'a> Shown<'a> {
@@ -138,6 +148,7 @@ impl<'a> Shown<'a> {
         products: &ProductHandles,
         settings: &rufin_core::settings::app::Settings,
         list: &page::PageToken,
+        view: &rufin_core::view::View,
         row: Row,
         title: Option<String>,
         fields: &[LibraryField],
@@ -146,7 +157,7 @@ impl<'a> Shown<'a> {
         form: &'a Form,
     ) -> Self {
         let menu = rufin_core::menu::menu(&products.source, settings, &row);
-        let mut data = row_data(products, &row, &menu, list);
+        let mut data = row_data(products, &row, &menu, list, Some(view));
         if let Some(title) = &title {
             data[if matches!(row, Row::Tag(_)) {
                 "name"
@@ -155,21 +166,21 @@ impl<'a> Shown<'a> {
             }] = json!(title);
         }
         data["index"] = json!(index);
-        let opens = opens(&row).map(|route| list.at(route));
-        let href = opens.as_ref().map_or_else(String::new, |token| {
-            link(&HashMap::from([("page".to_owned(), token.json())]))
-        });
+        let href = match &data["page"] {
+            Value::Null => String::new(),
+            page => link(&HashMap::from([("page".to_owned(), page.to_string())])),
+        };
         // A track names its place on its list, anchored on the track and entry it shows, and
-        // core's row rule decides what that plays; a collection plays the page it opens.
-        let play = match (&row, &opens) {
+        // core's row rule decides what that plays; another row plays the page core gives it.
+        let play = match (&row, &data["play"]) {
             (Row::Track(track) | Row::AlbumTrack { track, .. }, _) => json!({
                 "page": list,
                 "index": index,
                 "anchor_uri": track.media_uri,
                 "anchor_entry": track.entry.as_ref().map(|entry| entry.key),
             }),
-            (_, Some(token)) => json!({ "page": token }),
-            (_, None) => json!({}),
+            (_, Value::Null) => json!({}),
+            (_, page) => json!({ "page": page }),
         }
         .to_string();
         let previews = data["artwork_previews"]
@@ -399,6 +410,7 @@ pub(super) fn library(
                 products,
                 &settings,
                 token,
+                &opened.view,
                 row.clone(),
                 None,
                 &fields,
@@ -515,6 +527,7 @@ pub(super) fn home(
                                 products,
                                 &settings,
                                 token,
+                                &opened.view,
                                 row,
                                 Some(title),
                                 fields,

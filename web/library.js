@@ -758,17 +758,7 @@ function bindCards(host) {
       actions.push(null);
       if (options.add_to_playlist)
         actions.push(
-          playlistMenu(
-            kind === "track"
-              ? { uris: [row.uri] }
-              : {
-                  selection: {
-                    kind: kind.replaceAll("-", "_"),
-                    id: row.id,
-                    album_artists: !!row.album_artists,
-                  },
-                },
-          ),
+          playlistMenu(row.play ? { page: row.play } : { uris: [row.uri] }),
         );
       if (options.favorite)
         actions.push([
@@ -820,7 +810,7 @@ function bindCards(host) {
     });
     if (kind === "track" || card.classList.contains("pin-row")) {
       card.addEventListener("dblclick", (event) => {
-        if (event.target.closest(".cover-open, .collection-title, .pin-open"))
+        if (event.target.closest(".cover-open, .collection-title, .pin-open") && (row.play || kind === "track"))
           run(() => play("replace"));
       });
       card.addEventListener("keydown", (event) => {

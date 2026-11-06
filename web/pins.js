@@ -87,11 +87,12 @@ function render() {
     label.append(el("span", "pin-title", title), metadata);
     openButton.replaceChildren(artwork, label);
     const controls = el("div", "pin-controls");
-    for (const [label, name, action] of [
+    // A pin plays what core says its row plays: a playlist folder plays nothing.
+    for (const [label, name, action] of item.play ? [
       [tr("Play"), "rufin-media-playback-start-symbolic", "replace"],
       [tr("Play Next"), "rufin-mail-forward-symbolic", "next"],
       [tr("Play Later"), "rufin-go-last-symbolic", "append"],
-    ]) {
+    ] : []) {
       const control = el("button", "icon-button");
       control.type = "button";
       control.title = label;
