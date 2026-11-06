@@ -2696,17 +2696,25 @@ impl Catalog {
             (albums, albums_descending),
             (artists, descending),
         ] = sorts;
-        // Collection totals only when a sort of returned collection rows orders by them.
-        let by_totals = |sort: LibraryField| {
-            use LibraryField as S;
-            matches!(
-                sort.sort(),
-                S::AlbumCount | S::SongCount | S::Duration | S::PlayCount | S::LastPlayed
-            )
+        // Collection totals only when a sort of returned collection rows orders by them, and
+        // current plays only when it orders by plays.
+        let sorts = [
+            (!results.albums.is_empty(), albums.sort()),
+            (!results.artists.is_empty(), artists.sort()),
+        ];
+        let by = |fields: &[LibraryField]| {
+            sorts
+                .iter()
+                .any(|(returned, sort)| *returned && fields.contains(sort))
         };
-        let derived = (!results.albums.is_empty() && by_totals(albums)
-            || !results.artists.is_empty() && by_totals(artists))
-        .then(|| self.derived(&context, None));
+        use LibraryField as S;
+        let derived = if by(&[S::PlayCount, S::LastPlayed]) {
+            Some(self.derived(&context, None))
+        } else if by(&[S::AlbumCount, S::SongCount, S::Duration]) {
+            Some(self.covers(&context))
+        } else {
+            None
+        };
         let sort = tracks.sort();
         let mut rows = results
             .tracks
