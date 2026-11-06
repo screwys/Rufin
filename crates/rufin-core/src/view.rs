@@ -830,25 +830,6 @@ impl View {
         (now, folder)
     }
 
-    /// Its header read again as it is now, such as after a download; None when it shows none.
-    pub async fn header(&self, cancel: &ReadCancellation) -> LibraryResult<Option<Header>> {
-        if self.header.is_none() {
-            return Ok(None);
-        }
-        Ok(self
-            .catalog()
-            .fetch(
-                Fetch {
-                    header: self.header,
-                    art: self.art,
-                    ..Fetch::default()
-                },
-                cancel,
-            )
-            .await?
-            .header)
-    }
-
     /// What playing the page whole queues, as its header Play does: everything it lists in
     /// its order and filter, from a random track when shuffle is on; an artist page plays the
     /// artist's tracks. None when it lists no tracks of its own.

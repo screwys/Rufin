@@ -248,11 +248,18 @@ impl CatalogUi {
         MountedRoute::new(route_stack.upcast(), resume)
             .with_rows(&rows)
             .with_states(states)
-            .with_header(Rc::new(move |header| {
-                if let Some(::library::Header::Album(album)) = header {
-                    header_album.replace(*album);
-                }
-            }))
+            .with_header(
+                move || {
+                    Some(::library::Header::Album(Box::new(
+                        current_album.borrow().clone(),
+                    )))
+                },
+                Rc::new(move |header| {
+                    if let Some(::library::Header::Album(album)) = header {
+                        header_album.replace(*album);
+                    }
+                }),
+            )
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(track_projection.search())
             .with_layout_cycle(layout_cycle)

@@ -47,6 +47,14 @@ enum PlaylistDetailOwner {
 }
 
 impl PlaylistDetailOwner {
+    /// The header it shows.
+    fn header(&self) -> library::Header {
+        match self {
+            Self::Saved { summary, .. } => library::Header::Playlist(Box::new(summary.clone())),
+            Self::Smart { summary, .. } => library::Header::Smart(Box::new(summary.clone())),
+        }
+    }
+
     fn source_url(&self, catalog: &CatalogUi) -> Option<String> {
         let Self::Saved { summary, .. } = self else {
             return None;
@@ -482,7 +490,7 @@ impl CatalogUi {
             })
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_rows(&rows)
-            .with_header(apply_owner)
+            .with_header(move || Some(owner_state.borrow().header()), apply_owner)
     }
 
     fn append_playlist_detail_kind_controls(

@@ -202,7 +202,7 @@ impl CatalogUi {
             .with_rows(&releases.sparse)
             .with_rows(&favorite_model)
             .with_states(header.states())
-            .with_header(header.shown(self))
+            .with_header(header.current(), header.shown(self))
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || releases.upgrade().map(|releases| releases.item_scroll()))
@@ -474,6 +474,12 @@ impl ArtistDetailHeaderProjection {
             set_favorite_button_active(heart, artist.row.state.favorite);
         }
         self.current.replace(artist);
+    }
+
+    /// The artist the header shows now.
+    fn current(&self) -> impl Fn() -> Option<library::Header> + 'static {
+        let current = Rc::clone(&self.current);
+        move || Some(library::Header::Artist(Box::new(current.borrow().clone())))
     }
 
     /// Shows the artist as a header read again shows it.

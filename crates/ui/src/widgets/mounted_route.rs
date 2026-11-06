@@ -3,6 +3,7 @@ use adw::prelude::*;
 use gtk::glib;
 use library::Row;
 use playback::TransportStatus;
+use std::cell::RefCell;
 use std::rc::Rc;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteCurrentTrackContext {
@@ -52,8 +53,10 @@ pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
 /// Shows committed favorites, ratings and downloads in what a route shows outside its rows and
 /// header.
 pub type MountedStates = Rc<dyn Fn(&[library::StateChange], &[library::DownloadChange])>;
-/// Shows a route's header read again, such as after a download.
+/// Shows a route's header read again.
 pub type MountedHeader = Rc<dyn Fn(Option<library::Header>)>;
+/// The header a route shows now.
+pub type MountedCurrentHeader = Rc<dyn Fn() -> Option<library::Header>>;
 pub type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
 
 #[derive(Clone)]
@@ -191,7 +194,10 @@ pub struct MountedRoute {
     view: Option<std::sync::Arc<rufin_core::view::View>>,
     /// Shows committed favorites and ratings in what the route shows outside its rows.
     pub states: Option<MountedStates>,
-    pub header: Option<MountedHeader>,
+    /// The header the route shows now, and showing it with other downloads.
+    pub header: Option<(MountedCurrentHeader, MountedHeader)>,
+    /// The header download update being applied; a newer one replaces it.
+    header_downloads: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
     pub home_page_apply: Option<MountedHomePageApply>,
 }
 
@@ -211,6 +217,7 @@ impl MountedRoute {
             view: None,
             states: None,
             header: None,
+            header_downloads: Rc::default(),
             home_page_apply: None,
         }
     }
@@ -292,8 +299,13 @@ impl MountedRoute {
         self
     }
 
-    pub fn with_header(mut self, header: MountedHeader) -> Self {
-        self.header = Some(header);
+    /// Shows the downloads the Catalog counts now in the header `current` gives, through `show`.
+    pub fn with_header(
+        mut self,
+        current: impl Fn() -> Option<library::Header> + 'static,
+        show: MountedHeader,
+    ) -> Self {
+        self.header = Some((Rc::new(current), show));
         self
     }
 
@@ -323,18 +335,38 @@ impl MountedRoute {
                 rows.show_downloads(catalog);
             }
         }
-        if let (false, Some(show), Some(view)) =
-            (downloads.is_empty(), self.header.clone(), self.view())
+        if let (false, Some((current, show))) = (downloads.is_empty(), self.header.clone())
+            && let Some(mut read) = current()
         {
-            let task =
-                runtime.spawn(async move { view.header(&library::ReadCancellation::new()).await });
-            glib::spawn_future_local(async move {
+            let smart = self
+                .view()
+                .map(|view| view.smart_count())
+                .unwrap_or_default();
+            let catalog = std::sync::Arc::clone(catalog);
+            let task = runtime.spawn(async move {
+                catalog
+                    .show_downloads(vec![read.shown()], smart, &library::ReadCancellation::new())
+                    .await
+                    .map(|()| read)
+            });
+            // The downloads go into the header shown now, which keeps what changed meanwhile.
+            let apply = glib::spawn_future_local(async move {
                 match task.await {
-                    Ok(Ok(header)) => show(header),
-                    Ok(Err(error)) => tracing::warn!(%error, "failed to read header again"),
+                    Ok(Ok(mut read)) => {
+                        if let Some(shown) = current() {
+                            let mut merged = shown.clone();
+                            if merged.shown().take_downloads(read.shown()) && merged != shown {
+                                show(Some(merged));
+                            }
+                        }
+                    }
+                    Ok(Err(error)) => tracing::warn!(%error, "failed to show header downloads"),
                     Err(_) => {}
                 }
             });
+            if let Some(previous) = self.header_downloads.replace(Some(apply)) {
+                previous.abort();
+            }
         }
     }
 

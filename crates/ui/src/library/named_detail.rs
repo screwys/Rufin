@@ -140,7 +140,10 @@ impl CatalogUi {
         };
         MountedRoute::new(grouped.widget(), resume)
             .with_rows(&rows)
-            .with_header(shown)
+            .with_header(
+                move || Some(library::Header::Tag(current.borrow().clone())),
+                shown,
+            )
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(grouped.search())
             .with_layout_cycle(grouped.layout_cycle())

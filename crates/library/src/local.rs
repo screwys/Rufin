@@ -43,6 +43,19 @@ impl crate::Row {
     }
 }
 
+impl crate::Header {
+    /// The header as [`Catalog::show_downloads`] shows its downloads.
+    pub fn shown(&mut self) -> Shown<'_> {
+        match self {
+            Self::Album(album) => Shown::Album(&mut album.row),
+            Self::Artist(artist) => Shown::Artist(&mut artist.row),
+            Self::Playlist(playlist) => Shown::Playlist(playlist),
+            Self::Smart(smart) => Shown::Smart(smart),
+            Self::Tag(tag) => Shown::Tag(tag),
+        }
+    }
+}
+
 impl Shown<'_> {
     /// Takes the downloads `from` shows when it is the same row read again; false when it is
     /// another row.
