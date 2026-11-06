@@ -204,7 +204,7 @@ impl Catalog {
              LEFT JOIN album_loudness album ON album.members={members}
              WHERE {condition}"
         );
-        let mut connection = self.acquire_reader().await?;
+        let mut connection = self.acquire_playable().await?;
         let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(key)
             .fetch_all(&mut *connection)

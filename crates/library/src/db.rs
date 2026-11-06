@@ -75,6 +75,8 @@ struct Store {
     path: PathBuf,
     writer: Arc<Mutex<Option<SqliteConnection>>>,
     readers: SqlitePool,
+    /// Playback's own reader, so a track change never waits behind general reads.
+    playable_readers: SqlitePool,
     export_readers: SqlitePool,
     export_read: tokio::sync::Mutex<()>,
 }
@@ -643,6 +645,7 @@ impl Catalog {
         }
         tokio::join!(
             store.export_readers.close(),
+            store.playable_readers.close(),
             store.readers.close(),
             self.loaded()
         );
@@ -741,6 +744,10 @@ impl Catalog {
         Ok(self.inner.store.readers.acquire().await?)
     }
 
+    pub(crate) async fn acquire_playable(&self) -> LibraryResult<PoolConnection<Sqlite>> {
+        Ok(self.inner.store.playable_readers.acquire().await?)
+    }
+
     pub(crate) async fn acquire_export(
         &self,
     ) -> LibraryResult<(tokio::sync::MutexGuard<'_, ()>, PoolConnection<Sqlite>)> {
@@ -824,10 +831,12 @@ impl Store {
         }
         let readers = open_readers(path, MIN_READERS, MAX_READERS, ROW_BUFFER).await?;
         let export_readers = open_readers(path, 0, 1, 1).await?;
+        let playable_readers = open_readers(path, 0, 1, ROW_BUFFER).await?;
         Ok(Self {
             path: path.to_owned(),
             writer: Arc::new(Mutex::new(Some(writer))),
             readers,
+            playable_readers,
             export_readers,
             export_read: tokio::sync::Mutex::new(()),
         })
