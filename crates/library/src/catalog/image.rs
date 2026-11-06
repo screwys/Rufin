@@ -17,7 +17,7 @@ use crate::{LibraryResult, SourceKey};
 
 const MAGIC: &[u8; 8] = b"RUFINCAT";
 /// Raised when the meaning of a record's fields or flags changes, or its fields are reordered.
-const REVISION: u8 = 6;
+const REVISION: u8 = 7;
 /// Records are written as they are in memory, so their sizes are part of the format.
 const FORMAT: [u8; 8] = [
     REVISION,
@@ -423,6 +423,7 @@ pub(crate) fn write(store: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let partial = target.with_extension("image-partial");
     let mut file = std::fs::File::create(&partial)?;
     file.write_all(bytes)?;
+    file.write_all(blake3::hash(bytes).as_bytes())?;
     file.sync_data()?;
     drop(file);
     std::fs::rename(partial, target)
@@ -431,7 +432,11 @@ pub(crate) fn write(store: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// The Catalog the image holds, when it matches the Store's stamp.
 pub(crate) fn read(store: &Path, stamp: &Stamp) -> Option<Snapshot> {
     let bytes = std::fs::read(path(store)).ok()?;
-    let snapshot = decode(&bytes, stamp);
+    // Decode trusts what it reads, so a damaged image is not decoded.
+    let (bytes, sum) = bytes.split_at_checked(bytes.len().checked_sub(32)?)?;
+    let snapshot = (blake3::hash(bytes).as_bytes() == sum)
+        .then(|| decode(bytes, stamp))
+        .flatten();
     if snapshot.is_none() {
         tracing::debug!("the Catalog image does not match the Store");
     }
