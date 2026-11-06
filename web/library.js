@@ -28,7 +28,7 @@ import {
 } from "./menus.js";
 
 import { renderSources, sources } from "./sources.js";
-import { pinAction, refreshPins, markPins } from "./pins.js";
+import { pinAction, markPins } from "./pins.js";
 import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
 let viewRequest = null;
@@ -304,22 +304,30 @@ function markSection(section) {
   });
 }
 
-// Opens `target`: a page token, a navigation entry such as "Albums", or "sources".
-function navigate(target) {
+// Opens `target`: a page token, a navigation entry such as "Albums", or "sources"; an entry
+// opens searching `filter`.
+function navigate(target, filter = "") {
   opened = typeof target === "string" && target !== "sources"
-    ? { route: target, source: state.source || undefined, folder: state.selectedLibrary || undefined }
+    ? {
+        route: target,
+        source: state.source || undefined,
+        folder: state.selectedLibrary || undefined,
+        ...(filter ? { options: { filter } } : {}),
+      }
     : target;
   shown = {};
   offset = 0;
-  $("search").value = "";
+  $("search").value = filter;
   showOrder($("sort").value, false);
   $("navigation").classList.remove("open");
   run(() => loadView());
 }
 
-// The navigation entry the page belongs to, opened again, as after choosing another source.
+// The navigation entry the page belongs to, opened again in the selected source and music
+// folder, searching what it searched.
 function reopen() {
-  navigate(opened === "sources" ? "sources" : shown.section || "Home");
+  if (opened === "sources") navigate("sources");
+  else navigate(shown.section || "Home", opened.options?.filter || "");
 }
 
 function showOrder(sort, descending) {
@@ -349,7 +357,6 @@ function empty(title, description, action) {
 }
 
 async function loadView(initial = false, knownTotal = null, extra = {}) {
-  run(refreshPins);
   for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
     $("content").removeAttribute(name);
   selectionRequest?.abort();

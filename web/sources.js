@@ -208,12 +208,16 @@ function showSourceProgress(value) {
     previousOperation !== "idle" &&
     previousOperation !== "downloading"
   )
-    run(async () => {
-      const source = state.source, library = state.selectedLibrary;
-      updateSources(await api("/sources"));
-      if (state.source !== source || state.selectedLibrary !== library) reopen();
-    });
+    run(async () => updateSources(await api("/sources")));
   previousOperation = value.state;
+}
+
+// Selects `source` or one of its music folders; the page opens again in it once.
+async function select(path, body, source = state.source) {
+  await api(path, "POST", body);
+  state.source = source;
+  updateSources(await api("/sources"));
+  reopen();
 }
 
 let editingSource = null;
@@ -340,10 +344,7 @@ function init() {
           item.name,
           async () => {
             menu.hidePopover();
-            await api("/sources/select", "POST", { id: item.id });
-            state.source = item.id;
-            updateSources(await api("/sources"));
-            reopen();
+            await select("/sources/select", { id: item.id }, item.id);
           },
           null,
           "menu-item",
@@ -388,12 +389,10 @@ function init() {
             library.name,
             async () => {
               menu.hidePopover();
-              await api("/sources/library", "POST", {
+              await select("/sources/library", {
                 source: state.source,
                 library: library.id,
               });
-              updateSources(await api("/sources"));
-              reopen();
             },
             null,
             "menu-item",
