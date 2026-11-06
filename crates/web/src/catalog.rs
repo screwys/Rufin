@@ -78,12 +78,6 @@ pub(super) async fn refresh_home(
     Ok(accepted())
 }
 
-pub(super) fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs() as i64)
-}
-
 async fn folders(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,

@@ -841,6 +841,7 @@ impl SourceOwner {
             Ok(())
         })?;
         self.shared.configured();
+        self.notice(feed::Notice::Scope(selected.source_key));
         self.publish_operation(SourceOperation::Idle).await;
         self.shared.present_refresh(&selected.source_id);
         if let Some(source) = source {

@@ -1,10 +1,29 @@
-use library::ReadCancellation;
+use library::{LibraryResult, ReadCancellation, Row, SidebarPin};
 use sources::SourceId;
 
 use super::SourceOwner;
 use super::feed::Notice;
 
 impl SourceOwner {
+    /// Rows of the pins the Catalog still holds, in pin order: smart playlists and their
+    /// folders evaluated now, in the selected music folder.
+    pub async fn pin_rows(
+        &self,
+        pins: &[SidebarPin],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<(SidebarPin, Row)>> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let folder = self
+            .selected_library()
+            .and_then(|selected| selected.music_folder_key);
+        self.shared
+            .catalog
+            .pin_rows(pins, now, folder, cancellation)
+            .await
+    }
+
     /// Pins every playlist of a remote source once, after its first successful refresh.
     pub(super) async fn import_playlist_pins_once(&self, source_id: &SourceId) {
         let stored = self.shared.settings.load();

@@ -551,20 +551,11 @@ impl AndroidLibrary {
         };
         let consumed = offset.saturating_add(pins.len() as u64);
         let next_offset = (consumed < total).then_some(consumed);
-        let catalog = self.catalog.clone();
-        let folder = self
-            .source
-            .selected_library()
-            .and_then(|selected| selected.music_folder_key);
+        let source = self.source.clone();
         self.runtime
             .spawn(async move {
-                let cancel = ReadCancellation::new();
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_err(error)?
-                    .as_secs() as i64;
-                let rows = catalog
-                    .pin_rows(&pins, now, folder, &cancel)
+                let rows = source
+                    .pin_rows(&pins, &ReadCancellation::new())
                     .await
                     .map_err(error)?
                     .into_iter()

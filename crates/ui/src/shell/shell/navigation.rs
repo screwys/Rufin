@@ -6,8 +6,6 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::widgets::cover_controls::cover_play_only_hover_controls;
@@ -544,17 +542,11 @@ impl SidebarPinItem {
         shell: &Rc<Shell>,
         position: Option<(f64, f64)>,
     ) {
-        let catalog = shell.products.library.clone();
+        let source = shell.products.source.clone();
         let pin = self.pin.clone();
-        let folder = music_folder(shell);
         let task = shell.products.runtime.spawn(async move {
-            catalog
-                .pin_rows(
-                    &[pin],
-                    unix_now(),
-                    folder,
-                    &library::ReadCancellation::new(),
-                )
+            source
+                .pin_rows(&[pin], &library::ReadCancellation::new())
                 .await
                 .map(|mut rows| rows.pop().map(|(_, row)| row))
         });
@@ -642,13 +634,11 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         .navigation
         .pin_cancellation
         .replace(Some(cancellation.clone()));
-    let catalog = Arc::clone(&shell.products.library);
-    let folder = music_folder(shell);
-    let task = shell.products.runtime.spawn(async move {
-        catalog
-            .pin_rows(&pins, unix_now(), folder, &cancellation)
-            .await
-    });
+    let source = shell.products.source.clone();
+    let task = shell
+        .products
+        .runtime
+        .spawn(async move { source.pin_rows(&pins, &cancellation).await });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let result = task.await.ok().and_then(Result::ok);
@@ -685,24 +675,8 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     });
 }
 
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
 fn sidebar_pin_publication_is_current(expected_generation: u64, current_generation: u64) -> bool {
     expected_generation == current_generation
-}
-
-/// The music folder pins count smart playlists in: the selected one.
-fn music_folder(shell: &Shell) -> Option<library::FolderKey> {
-    shell
-        .products
-        .source
-        .selected_library()
-        .and_then(|selected| selected.music_folder_key)
 }
 
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {

@@ -37,7 +37,7 @@ pub struct Changed {
     pub downloads: Vec<library::DownloadChange>,
     /// Sources whose stored Home rows or Explore shuffle changed.
     pub home: Vec<SourceKey>,
-    /// The source whose music-folder selection changed.
+    /// The source just selected, or whose music-folder selection changed.
     pub scope: Option<SourceKey>,
     /// Pins were imported; only the pin list reads again.
     pub pins: bool,
@@ -72,7 +72,7 @@ pub(crate) enum Notice {
     Playlist(PlaylistKey),
     /// The Home Explore shuffle.
     Home(SourceKey),
-    /// The music-folder selection.
+    /// A source selected, or its music folder.
     Scope(SourceKey),
     Pins,
 }
