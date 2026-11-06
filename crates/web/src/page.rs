@@ -22,13 +22,22 @@ pub(super) struct PageToken {
 }
 
 impl PageToken {
-    /// Home of the selected source and music folder, which the pages the sidebar and the
-    /// player open keep.
+    /// Home of the selected source and music folder, which the pages the player opens keep.
     pub fn selected(products: &ProductHandles) -> Self {
         let selected = products.source.selected_library();
         Self {
             source: selected.as_ref().map(|selected| selected.source_id.clone()),
             folder: selected.and_then(|selected| selected.music_folder_object_id),
+            ..Self::new(Route::Home)
+        }
+    }
+
+    /// Home of what selecting `source` selects, in the music folder it was last left in, which
+    /// a pin of that source opens its page in.
+    pub fn of_source(products: &ProductHandles, source: sources::SourceId) -> Self {
+        Self {
+            folder: products.source.music_folder(&source),
+            source: Some(source),
             ..Self::new(Route::Home)
         }
     }

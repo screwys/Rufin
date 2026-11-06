@@ -21,8 +21,12 @@ async fn metadata(
 ) -> Result<Response<Body>, Error> {
     let uri = required(&parameters, "uri")?;
     let cancel = library::ReadCancellation::new();
-    // The pages its links open keep the selected source and music folder.
-    let scope = page::PageToken::selected(&products);
+    // The pages its links open keep the source and music folder of the page that asks, or the
+    // selected ones for the player's queue.
+    let scope = match parameters.get("page") {
+        Some(page) => serde_json::from_str::<page::PageToken>(page).map_err(bad_request)?,
+        None => page::PageToken::selected(&products),
+    };
     if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album") {
         let row = products
             .library

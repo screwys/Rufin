@@ -2961,6 +2961,13 @@ impl SourceOwner {
             .ok()
             .map(|configured| configured.configuration)
     }
+
+    /// The music folder selecting `source_id` selects: the one it was last left in.
+    pub fn music_folder(&self, source_id: &SourceId) -> Option<String> {
+        configured_source(&self.shared.settings.load().sources, source_id)
+            .ok()?
+            .music_folder_id
+    }
 }
 
 fn source_error_is_cancelled(error: &SourceError) -> bool {

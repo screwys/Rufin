@@ -151,10 +151,11 @@ function playlistMenu(target) {
   ];
 }
 
-// The album and artists a row links to: track rows carry them, albums ask the server.
+// The album and artists a row links to: track rows carry them, albums ask the server in the
+// source and music folder of the page the album opens.
 async function mediaLinks(row, kind = "track") {
   if (kind !== "track")
-    return api(`/media?${new URLSearchParams({ uri: row.uri })}`);
+    return api(`/media?${new URLSearchParams({ uri: row.uri, page: JSON.stringify(row.page) })}`);
   return row.media;
 }
 

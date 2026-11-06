@@ -163,7 +163,7 @@
     },
     "POST /api/queue/clear": "Clear the queue, including from a browser form.",
     "DELETE /api/queue": "Clear the queue using the app's setting for keeping the current song.",
-    "GET /api/media?uri=...": "Get a track's album, artists and favorite state. Album URIs return their artists.",
+    "GET /api/media?uri=...": "Get a track's album, artists and favorite state. Album URIs return their artists. page, a page token, names the source and music folder the links open in; without it they open in the selected ones.",
     "POST /api/favorite": "Set favorite with {kind: track, album or artist, uri, favorite: true or false}. Returns the effective favorite state.",
     "POST /api/queue/radio": "Play radio with {kind: track, uri} or {kind: album, artist, album_artist, genre or playlist, id}. Library rows offer theirs in menu.radio in HTML responses.",
     "POST /api/queue/activate": {
