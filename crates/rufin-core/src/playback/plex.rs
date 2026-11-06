@@ -110,9 +110,6 @@ impl PlexPlayback {
             .prepare(&self.catalog, shuffled, random_u64())
             .await
             .map_err(string_error)?;
-        if page.entries.is_empty() {
-            return Ok(());
-        }
         let anchor = page.current_index;
         let keys = queue_keys(&self.catalog, &page.entries, &self.connection().1.source_id).await?;
         if keys.is_empty() {

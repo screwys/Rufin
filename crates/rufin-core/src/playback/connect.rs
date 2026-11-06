@@ -232,9 +232,6 @@ impl RufinPlayback {
             .prepare(&self.catalog, shuffled, random_u64())
             .await
             .map_err(string_error)?;
-        if page.entries.is_empty() {
-            return Ok(());
-        }
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).collect(),
             current_index: Some(page.current_index),

@@ -37,15 +37,17 @@ pub(in crate::playback) async fn seeded(
     let catalog = library::Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let page = crate::playback::PlayRequest::from_input(
-        library::QueueLoad::items(items),
-        QueuePlacement::Now,
-    )
-    .prepare(&catalog, false, 0)
-    .await
-    .unwrap();
     let mut sequence = Sequence::new();
-    sequence.add_page(page, library::QueueReorderTarget::End, true);
+    if !items.is_empty() {
+        let page = crate::playback::PlayRequest::from_input(
+            library::QueueLoad::items(items),
+            QueuePlacement::Now,
+        )
+        .prepare(&catalog, false, 0)
+        .await
+        .unwrap();
+        sequence.add_page(page, library::QueueReorderTarget::End, true);
+    }
     if let Some(request) = sequence.read_request() {
         let items = catalog
             .queue_rows_for_entries(

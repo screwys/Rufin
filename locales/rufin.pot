@@ -2551,6 +2551,9 @@ msgstr ""
 msgid "Nothing queued"
 msgstr ""
 
+msgid "Nothing to play here"
+msgstr ""
+
 msgid "Notifications"
 msgstr ""
 

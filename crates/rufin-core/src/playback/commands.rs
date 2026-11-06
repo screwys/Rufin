@@ -231,6 +231,12 @@ impl PlayRequest {
         let random_start = replacing && shuffled && self.start == QueueStart::RandomIfShuffled;
         let selected = if random_start { None } else { self.anchor };
         let mut batch = catalog.queue_entries(self.input, selected).await?;
+        // A play that finds no tracks plays nothing and leaves the queue as it is.
+        if batch.entries.is_empty() {
+            return Err(library::LibraryError::InvalidRequest(localization::tr(
+                "Nothing to play here",
+            )));
+        }
         let fallback = match self.placement {
             QueuePlacement::Replace { anchor_index } => anchor_index,
             _ => 0,
@@ -238,7 +244,7 @@ impl PlayRequest {
         let selected = if self.start == QueueStart::Shuffled {
             library::shuffle_order(&mut batch.entries, seed);
             0
-        } else if random_start && !batch.entries.is_empty() {
+        } else if random_start {
             seed as usize % batch.entries.len()
         } else {
             // A play anchored to an entry that is gone plays nothing rather than its neighbour.
@@ -251,7 +257,7 @@ impl PlayRequest {
                 }
                 (None, None) => fallback,
             };
-            index.min(batch.entries.len().saturating_sub(1))
+            index.min(batch.entries.len() - 1)
         };
         let shuffle = (replacing && shuffled).then_some(if random_start {
             QueueShuffle::FromSelected(seed)
