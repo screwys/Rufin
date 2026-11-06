@@ -27,7 +27,7 @@ import {
   mediaLinks,
 } from "./menus.js";
 
-import { renderSources, sources } from "./sources.js";
+import { renderSources, sources, updateSources } from "./sources.js";
 import { pinAction, markPins } from "./pins.js";
 import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
