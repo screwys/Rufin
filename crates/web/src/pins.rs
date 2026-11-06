@@ -27,6 +27,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         .await
         .map_err(internal)?;
     let mut items = Vec::new();
+    let scope = page::PageToken::selected(&products);
     for (pin, row) in rows {
         let source = match &pin {
             SidebarPin::Album { source_id, .. }
@@ -34,7 +35,6 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             | SidebarPin::Genre { source_id, .. } => Some(source_id.clone()),
             _ => None,
         };
-        let scope = page::PageToken::at_source(source.clone());
         let mut item = browser::row_data(
             &products,
             &row,

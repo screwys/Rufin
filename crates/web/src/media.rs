@@ -21,6 +21,8 @@ async fn metadata(
 ) -> Result<Response<Body>, Error> {
     let uri = required(&parameters, "uri")?;
     let cancel = library::ReadCancellation::new();
+    // The pages its links open keep the selected source and music folder.
+    let scope = page::PageToken::selected(&products);
     if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album") {
         let row = products
             .library
@@ -33,7 +35,7 @@ async fn metadata(
             .links
             .album_artists
             .iter()
-            .map(|link| artist_link(link.artist_key, &link.media_uri, &link.name, true))
+            .map(|link| artist_link(&scope, link.artist_key, &link.media_uri, &link.name, true))
             .collect::<Vec<_>>();
         return Ok(json_response(
             StatusCode::OK,
@@ -48,7 +50,7 @@ async fn metadata(
     let (favorite, mut links) = if let Some(row) = row {
         (
             row.state.favorite,
-            media_links(&row.links, &row.metadata.album),
+            media_links(&scope, &row.links, &row.metadata.album),
         )
     } else {
         let favorite = products
@@ -63,8 +65,12 @@ async fn metadata(
 }
 
 /// The album and artists a track's Go to menu opens, as `{album, artists}`, each with the page
-/// it opens.
-pub(super) fn media_links(links: &library::TrackLinks, album: &str) -> Value {
+/// it opens in the source and music folder of `scope`.
+pub(super) fn media_links(
+    scope: &page::PageToken,
+    links: &library::TrackLinks,
+    album: &str,
+) -> Value {
     let (artists, album_artists) = rufin_core::route::detail_links::go_to_artists(links);
     let album = links
         .album_media_uri
@@ -72,21 +78,34 @@ pub(super) fn media_links(links: &library::TrackLinks, album: &str) -> Value {
         .zip(links.album_key)
         .map(|(uri, id)| {
             let source = library::source_entity_parts(uri).map(|(source, _, _)| source);
-            let page = page::PageToken::at_source(source.clone())
-                .at(rufin_core::route::Route::AlbumDetail(uri.clone()));
+            let page = scope.at(rufin_core::route::Route::AlbumDetail(uri.clone()));
             json!({"id":id,"uri":uri,"title":album,"source":source,"page":page})
         });
     let artists = artists
         .iter()
-        .map(|link| artist_link(link.artist_key, &link.media_uri, &link.name, album_artists))
+        .map(|link| {
+            artist_link(
+                scope,
+                link.artist_key,
+                &link.media_uri,
+                &link.name,
+                album_artists,
+            )
+        })
         .collect::<Vec<_>>();
     json!({"album":album,"artists":artists})
 }
 
-fn artist_link(id: library::ArtistKey, uri: &str, name: &str, album_artists: bool) -> Value {
+fn artist_link(
+    scope: &page::PageToken,
+    id: library::ArtistKey,
+    uri: &str,
+    name: &str,
+    album_artists: bool,
+) -> Value {
     use rufin_core::route::Route;
     let source = library::source_entity_parts(uri).map(|(source, _, _)| source);
-    let page = page::PageToken::at_source(source.clone()).at(if album_artists {
+    let page = scope.at(if album_artists {
         Route::AlbumArtistTracks(uri.to_owned())
     } else {
         Route::ArtistTracks(uri.to_owned())

@@ -245,6 +245,7 @@ fn queue_json(
     state: Option<&playback::PlaybackView>,
     limit: usize,
 ) -> Value {
+    let scope = page::PageToken::selected(products);
     state.map(|state| {
         let current = state.queue_window.iter().position(|row| Some(row.position) == state.queue.current_index).unwrap_or(0);
         let start = current.saturating_sub(limit / 2).min(state.queue_window.len().saturating_sub(limit));
@@ -252,7 +253,7 @@ fn queue_json(
         let offset = rows.clone().next().map_or(0, |row| row.position);
         json!({
             "total": state.queue.total, "current_index": state.queue.current_index, "loading": state.queue_loading,
-            "offset": offset, "window": rows.map(|row| json!({"position": row.position, "track": track_json(products, &row.track, false)})).collect::<Vec<_>>()
+            "offset": offset, "window": rows.map(|row| json!({"position": row.position, "track": track_json(products, &scope, &row.track, false)})).collect::<Vec<_>>()
         })
     }).unwrap_or(json!({"total": 0, "current_index": null, "loading": false, "offset": 0, "window": []}))
 }
@@ -293,7 +294,7 @@ async fn list_page(
         let sections = page::home_sections(&opened.view, block);
         return browser::page(
             headers,
-            || page::home_json(products, &sections),
+            || page::home_json(products, &opened.token, &sections),
             |csrf| browser::home(products, &opened.token, &sections, csrf),
         );
     }
@@ -701,12 +702,14 @@ fn sort_name(key: LibraryListKey, sort: LibraryField) -> &'static str {
         .map_or("title", |(name, _)| name)
 }
 
+/// A queued or playing track, whose links open pages of the selected library `scope`.
 fn track_json(
     products: &ProductHandles,
+    scope: &page::PageToken,
     track: &library::TrackView,
     include_preview: bool,
 ) -> Value {
-    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"media":media::media_links(&track.links, &track.metadata.album)});
+    let mut row = json!({"uri":track.media_uri,"source_id":track.source_id,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis,"favorite":track.state.favorite,"media":media::media_links(scope, &track.links, &track.metadata.album)});
     if include_preview {
         row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
     }
@@ -730,7 +733,7 @@ fn playback_json(
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &current.row.track, include_preview)})),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &page::PageToken::selected(products), &current.row.track, include_preview)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::QueueRepeatMode::Off=>"off",playback::QueueRepeatMode::One=>"one",playback::QueueRepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"refilling":state.transport.refilling(),"error":state.transport.error,

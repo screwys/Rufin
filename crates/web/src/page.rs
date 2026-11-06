@@ -22,12 +22,14 @@ pub(super) struct PageToken {
 }
 
 impl PageToken {
-    /// Home of `source`, whose source the pages its rows open keep.
-    pub fn at_source(source: Option<sources::SourceId>) -> Self {
+    /// Home of the selected source and music folder, which the pages the sidebar and the
+    /// player open keep.
+    pub fn selected(products: &ProductHandles) -> Self {
+        let selected = products.source.selected_library();
         Self {
             route: Route::Home,
-            source,
-            folder: None,
+            source: selected.as_ref().map(|selected| selected.source_id.clone()),
+            folder: selected.and_then(|selected| selected.music_folder_object_id),
             options: page_options(OpenOptions::default()),
         }
     }
@@ -285,8 +287,13 @@ pub(super) fn fields(products: &ProductHandles, token: &PageToken) -> Vec<Librar
 }
 
 /// A row as the API lists it, by kind; with `art`, rows read with their pictures carry
-/// previews of them.
-pub(super) fn row_json(products: &ProductHandles, row: &Row, art: bool) -> Value {
+/// previews of them. The pages its links open keep the source and music folder of `scope`.
+pub(super) fn row_json(
+    products: &ProductHandles,
+    row: &Row,
+    art: bool,
+    scope: &PageToken,
+) -> Value {
     let previews = |bindings: &[Vec<u8>]| {
         if art {
             artwork_previews(products, bindings)
@@ -299,7 +306,7 @@ pub(super) fn row_json(products: &ProductHandles, row: &Row, art: bool) -> Value
         Row::Track(track) | Row::AlbumTrack { track, .. } => {
             let mut value = json!({"kind":"track","uri":track.media_uri,"object_id":track.object_id,"title":track.title,"artist":track.artist,"album":track.album,
                 "duration_ms":track.duration_millis,"track_number":track.track_number,"disc_number":track.disc_number,
-                "year":track.year,"favorite":track.state.favorite,"rating":track.state.rating,"source_id":track.source_id,"media":media::media_links(&track.links, &track.album)});
+                "year":track.year,"favorite":track.state.favorite,"rating":track.state.rating,"source_id":track.source_id,"media":media::media_links(scope, &track.links, &track.album)});
             if let Some(entry) = &track.entry {
                 value["id"] = json!(entry.key);
                 value["position"] = json!(entry.position);
@@ -435,7 +442,7 @@ pub(super) fn json(products: &ProductHandles, opened: &Opened, limit: usize, tot
         .rows
         .iter()
         .map(|row| {
-            let mut value = row_json(products, row, true);
+            let mut value = row_json(products, row, true, &opened.token);
             value["fields"] = field_texts(row, &fields);
             value
         })
@@ -506,14 +513,18 @@ pub(super) fn home_rows(section: &HomeSection) -> Vec<(Row, String, &'static [Li
 }
 
 /// Home's JSON: `{sections: [{block, title, items}]}`.
-pub(super) fn home_json(products: &ProductHandles, sections: &[HomeSection]) -> Value {
+pub(super) fn home_json(
+    products: &ProductHandles,
+    scope: &PageToken,
+    sections: &[HomeSection],
+) -> Value {
     let sections = sections
         .iter()
         .map(|section| {
             let items = home_rows(section)
                 .into_iter()
                 .map(|(row, title, fields)| {
-                    let mut value = row_json(products, &row, !matches!(row, Row::Tag(_)));
+                    let mut value = row_json(products, &row, !matches!(row, Row::Tag(_)), scope);
                     value[if matches!(row, Row::Tag(_)) {
                         "name"
                     } else {
