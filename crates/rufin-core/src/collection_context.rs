@@ -83,14 +83,15 @@ impl CollectionTarget {
         })
     }
 
-    /// What the collection is, as a queue names where it plays from.
+    /// What the collection is, as a download job names it.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Album(_) => localization::msgid("Album"),
             Self::Artist { .. } => localization::msgid("Artist"),
             Self::Genre(_) => localization::msgid("Genre"),
             Self::Mood(_) => localization::msgid("Mood"),
-            Self::Playlist(_) | Self::SmartPlaylist(_) => localization::msgid("Playlist"),
+            Self::Playlist(_) => localization::msgid("Playlist"),
+            Self::SmartPlaylist(_) => localization::msgid("Smart Playlist"),
         }
     }
 
