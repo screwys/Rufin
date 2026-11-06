@@ -437,7 +437,7 @@ private class BrowsePagingSource(
                 BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision)
             }
             var reading: AndroidReading? = null
-            fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt()).also { reading = it.reading }.rows
+            suspend fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt()).also { reading = it.reading }.rows
             val items = pinPage?.rows?.mapIndexed(item) ?: if (offset == 0 && seeds != null) {
                 val ready = seeds.take(params.loadSize)
                 if (ready.size >= params.loadSize || ready.size >= total) ready
