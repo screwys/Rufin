@@ -1433,14 +1433,11 @@ impl Context<'_> {
                 .into_iter()
                 .for_each(|slot| totals.add_member(&records[slot as usize])),
             None if definition.limit.is_some() => self
-                .evaluate(definition, inputs)
+                .evaluate(definition, inputs, folder)
                 .into_iter()
-                .map(|slot| &records[slot as usize])
-                .filter(|record| self.in_source_folder(record, folder))
-                .for_each(|record| totals.add_member(record)),
+                .for_each(|slot| totals.add_member(&records[slot as usize])),
             None => self
-                .matching(definition, inputs)
-                .filter(|(_, record)| self.in_source_folder(record, folder))
+                .matching(definition, inputs, folder)
                 .for_each(|(_, record)| totals.add_member(record)),
         }
         totals
@@ -2063,11 +2060,13 @@ impl Context<'_> {
         }
     }
 
-    /// The tracks a smart playlist's rules match, in slot order and before its limit.
+    /// The tracks a smart playlist's rules match in music folder `folder`, in slot order and
+    /// before its limit.
     fn matching<'s>(
         &'s self,
         definition: &'s SmartPlaylistDefinition,
         inputs: &'s Inputs,
+        folder: Option<u32>,
     ) -> impl Iterator<Item = (u32, &'s TrackRec)> + 's {
         let snapshot = self.snapshot;
         // A source the Catalog no longer holds matches nothing.
@@ -2089,7 +2088,9 @@ impl Context<'_> {
             .iter()
             .filter(move |(_, record)| {
                 source.is_some_and(|source| {
-                    record.indexed() && source.is_none_or(|source| record.source == source)
+                    record.indexed()
+                        && source.is_none_or(|source| record.source == source)
+                        && self.in_source_folder(record, folder)
                 })
             })
             .filter(move |(slot, record)| {
@@ -2105,11 +2106,13 @@ impl Context<'_> {
             })
     }
 
-    /// A smart playlist's members in its own order, cut to its limit.
+    /// A smart playlist's members in music folder `folder` in its own order, cut to its limit
+    /// there.
     pub(crate) fn evaluate(
         &self,
         definition: &SmartPlaylistDefinition,
         inputs: &Inputs,
+        folder: Option<u32>,
     ) -> Vec<u32> {
         let snapshot = self.snapshot;
         let period = definition
@@ -2117,7 +2120,7 @@ impl Context<'_> {
             .seconds()
             .and_then(|seconds| inputs.periods.get(&Some(seconds)));
         let mut members = self
-            .matching(definition, inputs)
+            .matching(definition, inputs, folder)
             .map(|(slot, record)| {
                 (
                     self.smart_sort(slot, record, definition, period),
@@ -2145,15 +2148,18 @@ enum SortValue {
     Text(String),
 }
 
-/// A smart playlist's members by track key, evaluated now.
+/// A smart playlist's members by track key in music folder `folder`, evaluated now.
 fn evaluated(
     snapshot: &Snapshot,
     definition: &SmartPlaylistDefinition,
     inputs: &Inputs,
+    folder: Option<crate::FolderKey>,
 ) -> Arc<Vec<i64>> {
+    let context = Context::new(snapshot);
+    let folder = context.folder_slot(folder, None).flatten();
     Arc::new(
-        Context::new(snapshot)
-            .evaluate(definition, inputs)
+        context
+            .evaluate(definition, inputs, folder)
             .into_iter()
             .filter_map(|slot| snapshot.tracks.key_of(slot))
             .collect(),
@@ -2216,6 +2222,7 @@ impl Views {
 struct OpenedSmart {
     key: i64,
     now: i64,
+    folder: Option<crate::FolderKey>,
     definition: SmartPlaylistDefinition,
     tracks: Arc<Vec<i64>>,
 }
@@ -2736,7 +2743,8 @@ impl Catalog {
                         .get(&key.raw())
                         .map(|smart| smart.definition.clone());
                     if let Some(definition) = definition {
-                        let tracks = match self.opened_smart(key.raw(), *now, &definition) {
+                        let folder = read.folder;
+                        let tracks = match self.opened_smart(key.raw(), *now, folder, &definition) {
                             Some(tracks) => tracks,
                             None => {
                                 self.read_periods(
@@ -2746,14 +2754,17 @@ impl Catalog {
                                     *now,
                                 )
                                 .await?;
-                                let tracks = evaluated(&self.snapshot(), &definition, &inputs);
+                                let tracks =
+                                    evaluated(&self.snapshot(), &definition, &inputs, folder);
                                 let mut views = self.views();
-                                views
-                                    .opened
-                                    .retain(|opened| opened.key != key.raw() || opened.now != *now);
+                                views.opened.retain(|opened| {
+                                    (opened.key, opened.now, opened.folder)
+                                        != (key.raw(), *now, folder)
+                                });
                                 views.opened.push(OpenedSmart {
                                     key: key.raw(),
                                     now: *now,
+                                    folder,
                                     definition,
                                     tracks: tracks.clone(),
                                 });
@@ -2792,13 +2803,15 @@ impl Catalog {
         &self,
         key: i64,
         now: i64,
+        folder: Option<crate::FolderKey>,
         definition: &SmartPlaylistDefinition,
     ) -> Option<Arc<Vec<i64>>> {
         self.views()
             .opened
             .iter()
             .find(|opened| {
-                opened.key == key && opened.now == now && opened.definition == *definition
+                (opened.key, opened.now, opened.folder) == (key, now, folder)
+                    && opened.definition == *definition
             })
             .map(|opened| opened.tracks.clone())
     }
@@ -3224,9 +3237,10 @@ impl Catalog {
                     if let Collection::Smart { key, now } = member.collection
                         && let Some(smart) = self.snapshot().smart_playlists.get(&key.raw())
                     {
-                        inputs.smart = self.opened_smart(key.raw(), now, &smart.definition);
+                        inputs.smart =
+                            self.opened_smart(key.raw(), now, member.folder, &smart.definition);
                         if inputs.smart.is_none() {
-                            unfrozen.push((whole.len(), key, now));
+                            unfrozen.push((whole.len(), key, now, member.folder));
                         }
                     }
                     whole.push((index, inputs));
@@ -3239,23 +3253,26 @@ impl Catalog {
             };
             tracks[index] = crate::selection::order_tracks(&order, None);
         }
-        let mut times = unfrozen.iter().map(|(.., now)| *now).collect::<Vec<_>>();
+        let mut times = unfrozen
+            .iter()
+            .map(|(_, _, now, _)| *now)
+            .collect::<Vec<_>>();
         times.sort_unstable();
         times.dedup();
         for time in times {
-            let at = || unfrozen.iter().filter(|(.., now)| *now == time);
+            let at = || unfrozen.iter().filter(|(_, _, now, _)| *now == time);
             let periods = self
                 .smart_inputs(
                     connection,
-                    at().map(|(_, key, _)| crate::Item::Smart(*key)),
+                    at().map(|(_, key, ..)| crate::Item::Smart(*key)),
                     time,
                 )
                 .await?;
             let snapshot = self.snapshot();
-            for (position, key, _) in at() {
+            for (position, key, _, folder) in at() {
                 if let Some(smart) = snapshot.smart_playlists.get(&key.raw()) {
                     whole[*position].1.smart =
-                        Some(evaluated(&snapshot, &smart.definition, &periods));
+                        Some(evaluated(&snapshot, &smart.definition, &periods, *folder));
                 }
             }
         }

@@ -1074,9 +1074,12 @@ impl<'a> Builder<'a> {
         else {
             return Totals::default();
         };
-        let opened = self
-            .catalog
-            .opened_smart(smart.key, self.shape.now, &smart.definition);
+        let opened = self.catalog.opened_smart(
+            smart.key,
+            self.shape.now,
+            self.shape.folder,
+            &smart.definition,
+        );
         self.context.smart_totals(
             &smart.definition,
             self.inputs,
