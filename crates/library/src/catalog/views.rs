@@ -2123,10 +2123,16 @@ impl Catalog {
     /// hold.
     pub(crate) fn downloaded(&self, context: &Context<'_>) -> Arc<Downloaded> {
         let stamp = [context.snapshot.facts, context.snapshot.downloads];
-        if let Some((built, downloaded)) = &self.views().downloaded
-            && *built == stamp
-        {
-            return downloaded.clone();
+        let find = || match &self.views().downloaded {
+            Some((built, downloaded)) if *built == stamp => Some(downloaded.clone()),
+            _ => None,
+        };
+        if let Some(downloaded) = find() {
+            return downloaded;
+        }
+        let _building = self.deriving();
+        if let Some(downloaded) = find() {
+            return downloaded;
         }
         let downloaded = Arc::new(Downloaded::build(context));
         self.views().downloaded = Some((stamp, downloaded.clone()));

@@ -485,7 +485,8 @@ impl Catalog {
         };
         let snapshot = self.snapshot();
         let context = crate::catalog::views::Context::new(&snapshot);
-        let downloaded = self.downloaded(&context);
+        let downloaded = std::cell::OnceCell::new();
+        let downloaded = || downloaded.get_or_init(|| self.downloaded(&context));
         let count =
             |counts: &[u32], slot: Option<u32>| slot.map(|slot| i64::from(counts[slot as usize]));
         for row in rows {
@@ -499,25 +500,25 @@ impl Catalog {
                 Shown::Album(row) => (
                     &mut row.summary.downloaded_count,
                     count(
-                        &downloaded.albums,
+                        &downloaded().albums,
                         snapshot.albums.slot(row.album_key.raw()),
                     ),
                 ),
                 Shown::Artist(row) => (
                     &mut row.summary.downloaded_count,
                     count(
-                        &downloaded.artists[usize::from(row.album_artist)],
+                        &downloaded().artists[usize::from(row.album_artist)],
                         snapshot.artists.slot(row.artist_key.raw()),
                     ),
                 ),
                 Shown::Tag(row) => (
                     &mut row.summary.downloaded_count,
-                    count(&downloaded.tags, snapshot.tags.slot(row.key)),
+                    count(&downloaded().tags, snapshot.tags.slot(row.key)),
                 ),
                 Shown::Folder(row) => (
                     &mut row.summary.downloaded_count,
                     count(
-                        &downloaded.folders,
+                        &downloaded().folders,
                         row.folder_key
                             .and_then(|key| snapshot.folders.slot(key.raw())),
                     ),
