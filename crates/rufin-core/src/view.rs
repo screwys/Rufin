@@ -1036,10 +1036,10 @@ impl View {
         refresh
     }
 
-    /// When and in which music folder its smart playlists count their members, as its rows and
-    /// header show them: when the Smart Playlists list was read, or the Smart Playlist page
-    /// opened, in the selected music folder.
-    pub fn smart_count(&self) -> (Option<i64>, Option<library::FolderKey>) {
+    /// When and in which music folder its rows count their totals and downloads: smart
+    /// playlists as of when the Smart Playlists list was read, or the Smart Playlist page
+    /// opened; every row in the music folder the page reads.
+    pub(crate) fn counted(&self) -> (Option<i64>, Option<library::FolderKey>) {
         let now = match &self.body {
             Body::Rows {
                 read:

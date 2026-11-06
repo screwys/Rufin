@@ -1306,14 +1306,15 @@ impl Rows<Row> {
     ) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         use library::ShowsState;
-        let smart = self
-            .view()
-            .map(|view| view.smart_count())
-            .unwrap_or_default();
+        let view = self.view();
         let (read, shown) = self.with(|state| {
             let read = state.ready.keys().copied().collect::<Vec<_>>();
             let rows = state.ready.values().map(Arc::as_ref).collect::<Vec<_>>();
-            let shown = self.list.imp().shown.show(owner, &rows, changed, smart);
+            let shown = self
+                .list
+                .imp()
+                .shown
+                .show(owner, &rows, changed, view.as_deref());
             (read, shown)
         });
         for (index, row) in shown.states {

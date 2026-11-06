@@ -149,14 +149,20 @@ internal class BrowsePage(
 
     /** Shows a committed change in the header and the rows the page holds, through core:
      * favorites and ratings at once, and downloads once read, into each row as it shows then, so
-     * an older change never undoes a newer one. Runs on the main thread. */
+     * an older change never undoes a newer one. Each row counts as the View that read it counts
+     * (a search result as its search), the header as the page. Runs on the main thread. */
     fun showChanges(changed: Changed) {
-        val library = browse.library ?: return
         val revision = ++downloads
-        val header = summary
-        val items = synchronized(held) { held.values.toList() }
+        val items = synchronized(held) { held.values.toList() }.groupBy { it.view }
+        val page = currentView
+        showRead(changed, revision, page, summary, items[page].orEmpty())
+        for ((view, read) in items) if (view !== page) showRead(changed, revision, view, null, read)
+    }
+
+    private fun showRead(changed: Changed, revision: Int, view: AndroidView?, header: BrowseItem?, items: List<BrowseItem>) {
+        val library = browse.library ?: return
         val offset = if (header != null) 1 else 0
-        val showing = library.showChanges(listOfNotNull(header?.row) + items.map(::current), changed, currentView)
+        val showing = library.showChanges(listOfNotNull(header?.row) + items.map(::current), changed, view)
         Snapshot.withMutableSnapshot {
             for (shown in showing.states) {
                 val index = shown.index.toInt() - offset

@@ -230,6 +230,7 @@ impl HomeRouteProjection {
         &self,
         owner: &rufin_core::source::SourceOwner,
         changed: &rufin_core::source::feed::Changed,
+        view: Option<&rufin_core::view::View>,
     ) {
         let sections = self.sections();
         let showcase = self
@@ -246,7 +247,7 @@ impl HomeRouteProjection {
                 .iter()
                 .chain(data.iter().flat_map(|items| items.iter()))
                 .collect::<Vec<_>>();
-            self.changes.show(owner, &rows, changed, (None, None))
+            self.changes.show(owner, &rows, changed, view)
         };
         // Where the row at each index shows: the showcase, then each section's rows.
         let at = showcase
@@ -445,7 +446,9 @@ impl CatalogUi {
         let owner = self.products.source.clone();
         MountedRoute::new(widget, Rc::new(|| {}))
             .with_home_page_apply(Rc::new(move |sections| apply.apply(sections)))
-            .with_states(Rc::new(move |changed| states.show_changes(&owner, changed)))
+            .with_states(Rc::new(move |changed, view| {
+                states.show_changes(&owner, changed, view)
+            }))
     }
 
     fn home_section_view(

@@ -4,7 +4,7 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use library::{FolderKey, ReadCancellation, ShowsState};
+use library::{ReadCancellation, ShowsState};
 
 use crate::source::SourceOwner;
 use crate::source::feed::Changed;
@@ -56,10 +56,10 @@ pub struct Showing<T, F> {
 }
 
 impl ShownChanges {
-    /// Shows `changed` in `rows`, the rows the surface shows now: favorites and ratings at once,
-    /// and, when it names downloads, the downloads as the Catalog counts them, read in the
-    /// background. Smart playlists count as of `smart`, [`crate::view::View::smart_count`]. Only
-    /// the rows that change come back. A client puts each in place of the row it shows at that
+    /// Shows `changed` in `rows`, the rows the surface shows now, read by `view` (None for rows
+    /// read with no page, in no music folder): favorites and ratings at once, and, when it names
+    /// downloads, the downloads as the Catalog counts them in the music folder `view` reads,
+    /// read in the background. Only the rows that change come back. A client puts each in place of the row it shows at that
     /// index, a downloads row with [`ShowsState::take_downloads`], which keeps what changed
     /// since.
     pub fn show<T>(
@@ -67,7 +67,7 @@ impl ShownChanges {
         owner: &SourceOwner,
         rows: &[&T],
         changed: &Changed,
-        smart: (Option<i64>, Option<FolderKey>),
+        view: Option<&crate::view::View>,
     ) -> Showing<T, impl Future<Output = Option<Vec<(usize, T)>>> + Send + 'static + use<T>>
     where
         T: ShowsState + Clone + Send + 'static,
@@ -93,6 +93,7 @@ impl ShownChanges {
                 downloads: None,
             };
         }
+        let counted = view.map(crate::view::View::counted).unwrap_or_default();
         let mut read = rows.iter().map(|row| T::clone(row)).collect::<Vec<_>>();
         let catalog = Arc::clone(&owner.shared.catalog);
         let cancel = ReadCancellation::new();
@@ -105,7 +106,7 @@ impl ShownChanges {
             catalog
                 .show_downloads(
                     read.iter_mut().filter_map(ShowsState::downloads).collect(),
-                    smart,
+                    counted,
                     &reading,
                 )
                 .await?;

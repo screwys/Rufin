@@ -67,9 +67,10 @@ impl SearchSession {
             })
             .collect::<Vec<_>>();
         let rows = shown.iter().map(|(_, row)| &**row).collect::<Vec<_>>();
+        let view = self.view.borrow().clone();
         let changes = self
             .changes
-            .show(&self.source, &rows, changed, (None, None));
+            .show(&self.source, &rows, changed, view.as_deref());
         for (index, row) in changes.states {
             shown[index].0.replace(Arc::new(row), true);
         }

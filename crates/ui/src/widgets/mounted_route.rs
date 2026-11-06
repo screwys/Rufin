@@ -50,7 +50,8 @@ pub type MountedRouteCommand = Rc<dyn Fn()>;
 pub type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
 pub type MountedHomePageApply = Rc<dyn Fn(Vec<rufin_core::view::HomeSection>)>;
 /// Shows a committed change in what a route shows outside its rows and header.
-pub type MountedStates = Rc<dyn Fn(&rufin_core::source::feed::Changed)>;
+pub type MountedStates =
+    Rc<dyn Fn(&rufin_core::source::feed::Changed, Option<&rufin_core::view::View>)>;
 /// Shows a route's header read again.
 pub type MountedHeader = Rc<dyn Fn(Option<library::Header>)>;
 /// The header a route shows now.
@@ -323,8 +324,9 @@ impl MountedRoute {
         if changed.items.is_empty() && changed.downloads.is_empty() {
             return;
         }
+        let view = self.view();
         if let Some(states) = &self.states {
-            states(changed);
+            states(changed, view.as_deref());
         }
         for rows in &self.rows {
             rows.show_changes(owner, changed);
@@ -335,11 +337,9 @@ impl MountedRoute {
         let Some(header) = current() else {
             return;
         };
-        let smart = self
-            .view()
-            .map(|view| view.smart_count())
-            .unwrap_or_default();
-        let shown = self.header_changes.show(owner, &[&header], changed, smart);
+        let shown = self
+            .header_changes
+            .show(owner, &[&header], changed, view.as_deref());
         if let Some((_, header)) = shown.states.into_iter().next() {
             show(Some(header));
         }

@@ -449,8 +449,12 @@ impl AndroidLibrary {
         let changes = view
             .as_ref()
             .map_or_else(|| self.changes.clone(), |view| view.changes.clone());
-        let smart = view.map(|view| view.view.smart_count()).unwrap_or_default();
-        let showing = changes.show(&self.source, &shown, &changed, smart);
+        let showing = changes.show(
+            &self.source,
+            &shown,
+            &changed,
+            view.as_ref().map(|view| &*view.view),
+        );
         AndroidShowing {
             states: showing
                 .states

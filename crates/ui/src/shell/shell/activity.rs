@@ -141,7 +141,7 @@ impl Shell {
     }
 
     /// Shows a committed change on the activity cards, through core's
-    /// [`rufin_core::shown::ShownChanges`].
+    /// [`rufin_core::shown::ShownChanges`]; they read every source with no page.
     pub(crate) fn show_activity_changes(&self, changed: &rufin_core::source::feed::Changed) {
         let Some(view) = self.activity.borrow().clone() else {
             return;
@@ -154,7 +154,7 @@ impl Shell {
             &self.products.source,
             &rows.iter().collect::<Vec<_>>(),
             changed,
-            (None, None),
+            None,
         );
         for (index, row) in shown.states {
             view.collections.show_row(index, row);
