@@ -58,24 +58,6 @@ fn install_grid_favorite<T: 'static>(
     });
 }
 
-/// Shows committed favorites and ratings in a card's row and heart, for cards bound outside a
-/// page model that shows them in its rows.
-fn show_card_states<T: library::ShowsState>(
-    current: &RefCell<Option<T>>,
-    favorite: &gtk::Button,
-    changes: &[library::StateChange],
-) {
-    let mut current = current.borrow_mut();
-    let Some(row) = current.as_mut() else {
-        return;
-    };
-    if row.show_states(changes)
-        && let Some(state) = changes.iter().find_map(|change| row.state(change))
-    {
-        set_favorite_button_active(favorite, state.favorite);
-    }
-}
-
 pub fn install_grid_context<T: Clone + 'static>(
     shell: &Rc<CatalogUi>,
     current: &Rc<RefCell<Option<T>>>,
@@ -809,9 +791,9 @@ impl AlbumGridCell {
         self.body.set_play_count_caption(count);
     }
 
-    /// Shows committed favorites on a card no page model shows them in.
-    pub(crate) fn show_states(&self, changes: &[library::StateChange]) {
-        show_card_states(&self.current, &self.favorite, changes);
+    /// The album the card shows.
+    pub(crate) fn row(&self) -> Option<AlbumRow> {
+        self.current.borrow().clone()
     }
 
     pub fn enable_card_activation(&self) {
@@ -909,9 +891,9 @@ impl ArtistGridCell {
         self.body.set_play_count_caption(count);
     }
 
-    /// Shows committed favorites on a card no page model shows them in.
-    pub(crate) fn show_states(&self, changes: &[library::StateChange]) {
-        show_card_states(&self.current, &self.favorite, changes);
+    /// The artist the card shows.
+    pub(crate) fn row(&self) -> Option<ArtistRow> {
+        self.current.borrow().clone()
     }
 
     pub fn new(shell: &Rc<CatalogUi>, fields: &[LibraryField]) -> Self {

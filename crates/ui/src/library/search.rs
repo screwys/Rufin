@@ -22,7 +22,6 @@ use crate::library::{LibraryField, LibraryLayout};
 use crate::widgets::artwork::ArtworkTile;
 use crate::widgets::interactions::install_context_menu_openers;
 use crate::widgets::mounted_route::{MountedRoute, MountedRouteItemNavigation};
-use rufin_core::runtime::SelectedLibrary;
 
 use super::cards;
 use super::collection_context::present_track_context_menu;

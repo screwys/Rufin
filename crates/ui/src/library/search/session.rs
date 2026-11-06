@@ -32,9 +32,9 @@ pub const SEARCH_PREVIEW_LIMIT: usize = 30;
 pub struct SearchSession {
     source: rufin_core::runtime::SourceHandle,
     runtime: tokio::runtime::Handle,
-    /// The Search page that found the shown results.
+    /// The Search page that found the shown results; it says what a committed change means
+    /// for them.
     view: RefCell<Option<Arc<rufin_core::view::View>>>,
-    selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
     mode: Cell<library::SearchMode>,
     /// The results by category, which the header and the Search page show.
@@ -53,7 +53,7 @@ pub struct SearchSession {
 impl SearchSession {
     /// Shows a committed change in the results, also while no Search route shows them,
     /// through core's [`rufin_core::shown::ShownChanges`].
-    pub fn show_changes(&self, changed: &rufin_core::source::feed::Changed) {
+    fn show_changes(&self, changed: &rufin_core::source::feed::Changed) {
         use library::ShowsState;
         let shown = self
             .models
@@ -66,19 +66,12 @@ impl SearchSession {
                 Some((item, row))
             })
             .collect::<Vec<_>>();
-        let mut rows = shown
-            .iter()
-            .map(|(_, row)| SearchItem::clone(row))
-            .collect::<Vec<_>>();
+        let rows = shown.iter().map(|(_, row)| &**row).collect::<Vec<_>>();
         let changes = self
             .changes
-            .show(&self.source, &mut rows, changed, (None, None));
-        if changes.states {
-            for ((item, before), row) in shown.iter().zip(rows) {
-                if **before != row {
-                    item.replace(Arc::new(row), true);
-                }
-            }
+            .show(&self.source, &rows, changed, (None, None));
+        for (index, row) in changes.states {
+            shown[index].0.replace(Arc::new(row), true);
         }
         let Some(downloads) = changes.downloads else {
             return;
@@ -92,7 +85,7 @@ impl SearchSession {
                     continue;
                 };
                 let mut merged = SearchItem::clone(&current);
-                if merged.take_downloads(&mut row) && merged != *current {
+                if merged.take_downloads(&mut row) {
                     item.replace(Arc::new(merged), true);
                 }
             }
@@ -123,7 +116,6 @@ impl SearchSession {
             source,
             runtime,
             view: RefCell::new(None),
-            selected: RefCell::new(None),
             query: RefCell::new(String::new()),
             mode: Cell::new(library::SearchMode::Title),
             models: CollectionCategory::ALL.map(|_| gio::ListStore::new::<RowItem>()),
@@ -256,15 +248,6 @@ impl SearchSession {
         self.notify();
     }
 
-    pub fn set_selected(self: &Rc<Self>, selected: Option<SelectedLibrary>) {
-        let changed =
-            !SelectedLibrary::same(self.selected.borrow().as_ref(), selected.as_ref(), true);
-        self.selected.replace(selected);
-        if changed {
-            self.schedule();
-        }
-    }
-
     pub fn set_query(self: &Rc<Self>, query: &str) {
         let query = query.trim();
         if *self.query.borrow() == query {
@@ -296,7 +279,7 @@ impl SearchSession {
         self.revision.set(self.revision.get().wrapping_add(1));
         if self.query.borrow().is_empty()
             || (rufin_core::route::Route::Search.requires_selected_source(self.mode())
-                && self.selected.borrow().is_none())
+                && self.source.selected_library().is_none())
             || (self.mode() == library::SearchMode::Lyrics
                 && self.query.borrow().chars().nth(1).is_none())
         {
@@ -329,7 +312,6 @@ impl SearchSession {
         if let Some(source) = self.debounce.borrow_mut().take() {
             source.remove();
         }
-        let selected = self.selected.borrow().clone();
         let generation = self.generation.get();
         let cancellation = ReadCancellation::new();
         self.cancellation.replace(Some(cancellation.clone()));
@@ -345,6 +327,7 @@ impl SearchSession {
         };
         let source = self.source.clone();
         let reading = self.source.reading();
+        let selected = self.source.selected_library();
         let task = self.runtime.spawn(async move {
             source
                 .open(
@@ -365,9 +348,32 @@ impl SearchSession {
         let Some(view) = self.view.borrow().clone() else {
             return;
         };
-        if view.settings_reread(settings).is_none() {
-            return;
+        if view.settings_reread(settings).is_some() {
+            self.reread(view);
         }
+    }
+
+    /// Handles a committed change as the Search page that found the results says: shows it
+    /// in them, searches again keeping them shown, or searches again in the library selected
+    /// now. A search still running hears of the change from its own read.
+    pub fn apply_changed(self: &Rc<Self>, changed: &rufin_core::source::feed::Changed) {
+        self.show_changes(changed);
+        let Some(view) = self.view.borrow().clone() else {
+            // A search that waits for a source runs once one is selected.
+            if changed.scope.is_some() && self.status.get() == "initial" {
+                self.schedule();
+            }
+            return;
+        };
+        match view.refresh(self.source.selected_library().as_ref(), changed) {
+            rufin_core::view::Refresh::Nothing => {}
+            rufin_core::view::Refresh::Reread => self.reread(view),
+            rufin_core::view::Refresh::Reopen => self.refresh(),
+        }
+    }
+
+    /// Reads the Search page `view` again, keeping its results shown until then.
+    fn reread(self: &Rc<Self>, view: Arc<rufin_core::view::View>) {
         self.cancel();
         let generation = self.generation.get();
         let cancellation = ReadCancellation::new();
@@ -412,8 +418,9 @@ impl SearchSession {
                     ));
                     session.view.replace(Some(opened.view));
                     session.status.set("results");
+                    // What committed while it searched reaches the results as any other change.
                     if let Some(missed) = reading.missed() {
-                        session.show_changes(&missed);
+                        session.apply_changed(&missed);
                     }
                 }
                 Err(error) => {

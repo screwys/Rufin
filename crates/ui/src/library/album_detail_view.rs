@@ -229,20 +229,9 @@ impl CatalogUi {
                 reads.resume(&shell.settings.current.borrow());
             })
         };
-        let heart_album = Rc::clone(&current_album);
-        let states = Rc::new(move |changed: &rufin_core::source::feed::Changed| {
-            use ::library::ShowsState;
-            let mut album = heart_album.borrow_mut();
-            if album.row.show_states(&changed.items) {
-                for heart in &hearts {
-                    set_favorite_button_active(heart, album.row.state.favorite);
-                }
-            }
-        });
         let header_album = Rc::clone(&current_album);
         MountedRoute::new(route_stack.upcast(), resume)
             .with_rows(&rows)
-            .with_states(states)
             .with_header(
                 move || {
                     Some(::library::Header::Album(Box::new(
@@ -251,6 +240,9 @@ impl CatalogUi {
                 },
                 Rc::new(move |header| {
                     if let Some(::library::Header::Album(album)) = header {
+                        for heart in &hearts {
+                            set_favorite_button_active(heart, album.row.state.favorite);
+                        }
                         header_album.replace(*album);
                     }
                 }),

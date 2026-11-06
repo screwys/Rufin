@@ -115,14 +115,30 @@ impl MountedHomeSection {
                 .filter_map(|(position, item)| update(item).then(|| (position, item.clone())))
                 .collect::<Vec<_>>()
         };
-        let cells = self.cells.borrow().clone();
         for (position, item) in changed {
-            if let Some((_, bind)) = cells
-                .iter()
-                .find(|(cell, _)| self.page_start.get().saturating_add(*cell as usize) == position)
-            {
-                bind(item);
-            }
+            self.bind(position, item);
+        }
+    }
+
+    /// Shows `item` at `position`.
+    fn set(&self, position: usize, item: HomeItem) {
+        match self.data.borrow_mut().get_mut(position) {
+            Some(shown) => *shown = item.clone(),
+            None => return,
+        }
+        self.bind(position, item);
+    }
+
+    /// Binds `item` to the cell that shows `position`, if one does.
+    fn bind(&self, position: usize, item: HomeItem) {
+        let bind = self
+            .cells
+            .borrow()
+            .iter()
+            .find(|(cell, _)| self.page_start.get().saturating_add(*cell as usize) == position)
+            .map(|(_, bind)| Rc::clone(bind));
+        if let Some(bind) = bind {
+            bind(item);
         }
     }
 
@@ -209,38 +225,39 @@ struct HomeRouteProjection {
 
 impl HomeRouteProjection {
     /// Shows a committed change in the showcase album, its hearts and the rows Home shows,
-    /// through core's [`rufin_core::shown::ShownChanges`]: the showcase first, then each
-    /// section's rows.
+    /// through core's [`rufin_core::shown::ShownChanges`]: only the rows it changes.
     fn show_changes(
         &self,
         owner: &rufin_core::source::SourceOwner,
         changed: &rufin_core::source::feed::Changed,
     ) {
         let sections = self.sections();
-        let showcase = self.showcase.borrow().clone();
-        let mut rows = showcase
-            .map(|row| HomeItem::Album(Box::new(row)))
-            .into_iter()
+        let showcase = self
+            .showcase
+            .borrow()
+            .clone()
+            .map(|row| HomeItem::Album(Box::new(row)));
+        let shown = {
+            let data = sections
+                .iter()
+                .map(|view| view.mounted.data.borrow())
+                .collect::<Vec<_>>();
+            let rows = showcase
+                .iter()
+                .chain(data.iter().flat_map(|items| items.iter()))
+                .collect::<Vec<_>>();
+            self.changes.show(owner, &rows, changed, (None, None))
+        };
+        // Where the row at each index shows: the showcase, then each section's rows.
+        let at = showcase
+            .iter()
+            .map(|_| None)
+            .chain(sections.iter().enumerate().flat_map(|(section, view)| {
+                (0..view.mounted.data.borrow().len()).map(move |position| Some((section, position)))
+            }))
             .collect::<Vec<_>>();
-        let first = rows.len();
-        for view in &sections {
-            rows.extend(view.mounted.data.borrow().iter().cloned());
-        }
-        let shown = self.changes.show(owner, &mut rows, changed, (None, None));
-        if shown.states {
-            let mut rows = rows.into_iter();
-            if first == 1
-                && let Some(HomeItem::Album(row)) = rows.next()
-            {
-                for heart in self.hearts.borrow().iter() {
-                    crate::favorites::set_favorite_button_active(heart, row.album.state.favorite);
-                }
-                self.showcase.replace(Some(*row));
-            }
-            for view in &sections {
-                let len = view.mounted.data.borrow().len();
-                view.mounted.replace(rows.by_ref().take(len).collect());
-            }
+        for (index, row) in shown.states {
+            self.show_row(&sections, at[index], row);
         }
         let Some(downloads) = shown.downloads else {
             return;
@@ -251,36 +268,42 @@ impl HomeRouteProjection {
             let Some(read) = downloads.await else {
                 return;
             };
-            // The downloads go into the rows Home shows now when they are the same rows.
-            let mut sections = sections
-                .iter()
-                .map(|view| (view, view.mounted.data.borrow().clone()))
-                .collect::<Vec<_>>();
+            // The downloads go into the row Home shows there now when it is the same row.
             for (index, mut row) in read {
-                if index < first {
-                    if let (Some(shown), HomeItem::Album(row)) =
-                        (&mut *home.showcase.borrow_mut(), &mut row)
-                    {
-                        library::Shown::Album(&mut shown.album)
-                            .take_downloads(library::Shown::Album(&mut row.album));
-                    }
-                    continue;
-                }
-                let mut index = index - first;
-                for (_, items) in &mut sections {
-                    if index < items.len() {
-                        items[index].take_downloads(&mut row);
-                        break;
-                    }
-                    index -= items.len();
-                }
-            }
-            for (view, items) in sections {
-                if *view.mounted.data.borrow() != items {
-                    view.mounted.replace(items);
+                let current = match at[index] {
+                    None => home
+                        .showcase
+                        .borrow()
+                        .clone()
+                        .map(|row| HomeItem::Album(Box::new(row))),
+                    Some((section, position)) => sections[section]
+                        .mounted
+                        .data
+                        .borrow()
+                        .get(position)
+                        .cloned(),
+                };
+                if let Some(mut current) = current
+                    && current.take_downloads(&mut row)
+                {
+                    home.show_row(&sections, at[index], current);
                 }
             }
         });
+    }
+
+    /// Shows `row` where `at` says: the showcase and its hearts, or a section's position.
+    fn show_row(&self, sections: &[HomeSectionView], at: Option<(usize, usize)>, row: HomeItem) {
+        match (at, row) {
+            (None, HomeItem::Album(row)) => {
+                for heart in self.hearts.borrow().iter() {
+                    crate::favorites::set_favorite_button_active(heart, row.album.state.favorite);
+                }
+                self.showcase.replace(Some(*row));
+            }
+            (Some((section, position)), row) => sections[section].mounted.set(position, row),
+            (None, HomeItem::Track(_)) => {}
+        }
     }
 
     /// Shows Home's sections in the order core composed them.

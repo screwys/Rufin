@@ -140,16 +140,47 @@ impl Shell {
         }
     }
 
-    /// Shows committed favorites and ratings on the activity cards.
-    pub(crate) fn show_activity_states(&self, changes: &[library::StateChange]) {
-        if let Some(view) = self.activity.borrow().as_ref() {
-            for cell in view.collections.artist_cells.borrow().iter() {
-                cell.show_states(changes);
-            }
-            for cell in view.collections.album_cells.borrow().iter() {
-                cell.show_states(changes);
-            }
+    /// Shows a committed change on the activity cards, through core's
+    /// [`rufin_core::shown::ShownChanges`].
+    pub(crate) fn show_activity_changes(&self, changed: &rufin_core::source::feed::Changed) {
+        let Some(view) = self.activity.borrow().clone() else {
+            return;
+        };
+        if changed.items.is_empty() && changed.downloads.is_empty() {
+            return;
         }
+        let rows = view.collections.rows();
+        let shown = view.collections.changes.show(
+            &self.products.source,
+            &rows.iter().collect::<Vec<_>>(),
+            changed,
+            (None, None),
+        );
+        for (index, row) in shown.states {
+            view.collections.show_row(index, row);
+        }
+        let Some(downloads) = shown.downloads else {
+            return;
+        };
+        let view = Rc::downgrade(&view);
+        glib::spawn_future_local(async move {
+            use library::ShowsState;
+            let Some(read) = downloads.await else {
+                return;
+            };
+            let Some(view) = view.upgrade() else {
+                return;
+            };
+            // The downloads go into the card there now when it shows the same row.
+            let rows = view.collections.rows();
+            for (index, mut row) in read {
+                if let Some(mut current) = rows.get(index).cloned()
+                    && current.take_downloads(&mut row)
+                {
+                    view.collections.show_row(index, current);
+                }
+            }
+        });
     }
 
     pub(crate) fn refresh_activity_playback(&self) {
@@ -905,9 +936,49 @@ struct ActivityCollections {
     album_cells: RefCell<Vec<AlbumGridCell>>,
     artist_uris: Rc<RefCell<Vec<String>>>,
     album_uris: Rc<RefCell<Vec<String>>>,
+    /// The committed changes its cards show.
+    changes: rufin_core::shown::ShownChanges,
 }
 
 impl ActivityCollections {
+    /// The rows its cards show: the artists', then the albums'.
+    fn rows(&self) -> Vec<library::Row> {
+        let artists = self.artist_cells.borrow();
+        let albums = self.album_cells.borrow();
+        artists
+            .iter()
+            .filter_map(|cell| cell.row().map(library::Row::Artist))
+            .chain(
+                albums
+                    .iter()
+                    .filter_map(|cell| cell.row().map(library::Row::Album)),
+            )
+            .collect()
+    }
+
+    /// Shows `row` on the card at `index` of [`Self::rows`].
+    fn show_row(&self, index: usize, row: library::Row) {
+        let artists = self.artist_cells.borrow();
+        match row {
+            library::Row::Artist(row) => {
+                if let Some(cell) = artists.get(index) {
+                    let plays = row.state.play_count;
+                    cell.bind(index as u32, row);
+                    cell.set_play_count_caption(plays);
+                }
+            }
+            library::Row::Album(row) => {
+                let index = index.saturating_sub(artists.len());
+                if let Some(cell) = self.album_cells.borrow().get(index) {
+                    let plays = row.state.play_count;
+                    cell.bind(index as u32, row);
+                    cell.set_play_count_caption(plays);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn new(catalog: Rc<CatalogUi>) -> Self {
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::NoSelection::new(Some(model.clone()));
@@ -998,6 +1069,7 @@ impl ActivityCollections {
             album_cells: RefCell::new(Vec::new()),
             artist_uris,
             album_uris,
+            changes: Default::default(),
         }
     }
 

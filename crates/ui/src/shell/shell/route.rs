@@ -257,15 +257,24 @@ impl Shell {
             } else {
                 None
             };
+            // A change committed while the route read reaches it as any other change; a route
+            // that opens again in another library is not shown first.
+            let missed = reading.missed();
+            let current = shell.products.source.selected_library();
+            if missed.as_ref().is_some_and(|missed| {
+                read.view.refresh(current.as_ref(), missed) == Refresh::Reopen
+            }) {
+                shell.replace_current_route_when_ready();
+                return;
+            }
             match (read.view.home_sections(), apply_home) {
                 (Some(sections), Some(apply)) => apply(sections),
                 _ => shell.replace_mounted_route(route, selected, render_started, move |catalog| {
                     catalog.opened_collection_view(read)
                 }),
             }
-            // A change committed while the route read shows in what it read too.
-            if let Some(missed) = reading.missed() {
-                shell.show_changes_in_mounted_route(&missed);
+            if let Some(missed) = missed {
+                shell.apply_to_mounted_route(&missed);
             }
         });
     }
@@ -478,19 +487,27 @@ impl Shell {
         }
     }
 
-    /// Rereads or reopens the mounted route when a committed change touches it.
-    pub(crate) fn refresh_mounted_route(self: &Rc<Self>, changed: &Changed) {
+    /// Shows a committed change in the mounted route, and reads it again or opens it again
+    /// when its View says the change means that. A route still loading hears of the change
+    /// from its own read.
+    pub(crate) fn apply_to_mounted_route(self: &Rc<Self>, changed: &Changed) {
         let route = self.navigation.routes.borrow().current().clone();
-        let view = self
+        let mounted = self
             .route_viewport
             .mounted_route
             .borrow()
             .as_ref()
-            .filter(|entry| entry.route == route)
-            .and_then(|entry| entry.view.view());
-        let Some(view) = view else {
-            // A page without a read of its own (Search, an empty page) or one still loading
-            // opens again in a new selection.
+            .map(|entry| (entry.view.clone(), entry.route == route));
+        let Some((mounted, current)) = mounted else {
+            return;
+        };
+        mounted.show_changes(&self.products.source, changed);
+        if !current {
+            return;
+        }
+        let Some(view) = mounted.view() else {
+            // A page without a read of its own, Search or an empty page, opens again in
+            // another library.
             if changed.scope.is_some() && !self.mounted_catalog_is_current() {
                 self.replace_current_route_when_ready();
             }
@@ -568,6 +585,15 @@ impl Shell {
             .catalog
             .replace(Some(Rc::clone(&catalog)));
         let view = build(catalog);
+        // What a later read of its rows misses reaches the route as any other change.
+        for rows in &view.rows {
+            let shell = Rc::downgrade(self);
+            rows.on_missed(Rc::new(move |missed| {
+                if let Some(shell) = shell.upgrade() {
+                    shell.apply_to_mounted_route(missed);
+                }
+            }));
+        }
         let model_ms = model_started.map(elapsed_ms);
 
         let removal_started = render_started.as_ref().map(|_| Instant::now());
@@ -688,19 +714,6 @@ impl Shell {
 
     fn cancel_route_loading(&self) {
         self.route_viewport.route_loading.set_visible(false);
-    }
-
-    /// Shows committed favorites, ratings and downloads in the mounted route.
-    pub(crate) fn show_changes_in_mounted_route(&self, changed: &Changed) {
-        if let Some(view) = self
-            .route_viewport
-            .mounted_route
-            .borrow()
-            .as_ref()
-            .map(|entry| entry.view.clone())
-        {
-            view.show_changes(&self.products.source, changed);
-        }
     }
 
     pub(crate) fn reconcile_mounted_route(&self) {

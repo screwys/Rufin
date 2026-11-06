@@ -190,7 +190,8 @@ pub struct MountedRoute {
     pub rows: Vec<Rows<Row>>,
     /// The View of a route that shows no rows of its own, such as Home.
     view: Option<std::sync::Arc<rufin_core::view::View>>,
-    /// Shows committed favorites and ratings in what the route shows outside its rows.
+    /// Shows committed changes in what the route shows outside its rows and header, such as
+    /// Home's sections.
     pub states: Option<MountedStates>,
     /// The header the route shows now, and showing it with other downloads.
     pub header: Option<(MountedCurrentHeader, MountedHeader)>,
@@ -313,8 +314,7 @@ impl MountedRoute {
     }
 
     /// Shows a committed change in what the route shows, through core's
-    /// [`rufin_core::shown::ShownChanges`]; its View says when it makes the route read again
-    /// instead. The header's favorite shows through the route's own states.
+    /// [`rufin_core::shown::ShownChanges`]: its rows, its header and what `states` shows.
     pub fn show_changes(
         &self,
         owner: &rufin_core::source::SourceOwner,
@@ -339,9 +339,10 @@ impl MountedRoute {
             .view()
             .map(|view| view.smart_count())
             .unwrap_or_default();
-        let shown = self
-            .header_changes
-            .show(owner, &mut [header], changed, smart);
+        let shown = self.header_changes.show(owner, &[&header], changed, smart);
+        if let Some((_, header)) = shown.states.into_iter().next() {
+            show(Some(header));
+        }
         let Some(downloads) = shown.downloads else {
             return;
         };
@@ -351,11 +352,10 @@ impl MountedRoute {
             let Some(mut read) = downloads.await else {
                 return;
             };
-            if let (Some((_, read)), Some(shown)) = (read.first_mut(), current()) {
-                let mut merged = shown.clone();
-                if merged.take_downloads(read) && merged != shown {
-                    show(Some(merged));
-                }
+            if let (Some((_, read)), Some(mut shown)) = (read.first_mut(), current())
+                && shown.take_downloads(read)
+            {
+                show(Some(shown));
             }
         });
     }

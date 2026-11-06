@@ -205,18 +205,18 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
     }
 }
 
-/// No source is selected any more, which no change follows: the page opens again here.
+/// No source is selected any more, which no change follows: the page and the search open again
+/// here.
 fn release_selected_source(shell: &Rc<Shell>) {
-    shell.search_session.set_selected(None);
     let released = shell.selected_ui.take();
     drop(released);
+    shell.search_session.refresh();
     shell.replace_current_route_when_ready();
 }
 
 /// Makes `selected` the selection here: a new session for another source or music folder,
-/// whose dialogs close with the old one, and the search's.
+/// whose dialogs close with the old one.
 fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) {
-    shell.search_session.set_selected(Some(selected.clone()));
     if !rufin_core::runtime::SelectedLibrary::same(
         shell.selected_library().as_deref(),
         Some(&selected),
@@ -238,9 +238,8 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     {
         install_selected(shell, selected);
     }
-    shell.search_session.show_changes(changed);
-    shell.show_activity_states(&changed.items);
-    shell.show_changes_in_mounted_route(changed);
+    shell.search_session.apply_changed(changed);
+    shell.show_activity_changes(changed);
     if changed.all
         || !changed.sources.is_empty()
         || changed.scope.is_some()
@@ -252,7 +251,7 @@ fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
     if rufin_core::view::pins_refresh(&shell.products.source, changed) {
         super::navigation::refresh_sidebar_pins(shell);
     }
-    shell.refresh_mounted_route(changed);
+    shell.apply_to_mounted_route(changed);
 }
 
 fn apply_source_notice(shell: &Rc<Shell>, notice: SourceNotice) {
@@ -288,11 +287,6 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
         SourceOperation::Idle | SourceOperation::Failed { .. }
     ) {
         shell.chrome.topbar.refresh_lyrics_cache_prompt();
-        if shell.search_session.mode() == library::SearchMode::Lyrics
-            && matches!(&previous_operation, SourceOperation::Downloading { .. })
-        {
-            shell.search_session.refresh();
-        }
     }
     if operation.blocks_library() {
         shell.chrome.source_refresh_feedback.set_visible(false);

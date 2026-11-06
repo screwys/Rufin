@@ -201,7 +201,6 @@ impl CatalogUi {
         MountedRoute::new(releases.widget(), resume)
             .with_rows(&releases.sparse)
             .with_rows(&favorite_model)
-            .with_states(header.states())
             .with_header(header.current(), header.shown(self))
             .with_item_scroll({
                 let releases = Rc::downgrade(&releases);
@@ -489,21 +488,6 @@ impl ArtistDetailHeaderProjection {
         Rc::new(move |read| {
             if let (Some(shell), Some(library::Header::Artist(artist))) = (shell.upgrade(), read) {
                 header.replace(&shell, *artist);
-            }
-        })
-    }
-
-    /// Shows a committed favorite of the artist in its hearts.
-    fn states(&self) -> crate::widgets::mounted_route::MountedStates {
-        let current = Rc::clone(&self.current);
-        let hearts = Rc::clone(&self.hearts);
-        Rc::new(move |changed| {
-            use library::ShowsState;
-            let mut artist = current.borrow_mut();
-            if artist.row.show_states(&changed.items) {
-                for heart in hearts.iter() {
-                    set_favorite_button_active(heart, artist.row.state.favorite);
-                }
             }
         })
     }

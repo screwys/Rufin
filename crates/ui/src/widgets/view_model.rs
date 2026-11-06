@@ -454,9 +454,11 @@ mod imp {
             RefCell<Option<crate::widgets::selection::CollectionSelection>>,
         pub(super) reread: RefCell<Option<(ReadCancellation, tokio::task::AbortHandle)>>,
         pub(super) reread_generation: Cell<u64>,
-        /// The download update being applied; a newer one replaces it.
         /// The committed changes its rows show.
         pub(super) shown: rufin_core::shown::ShownChanges,
+        /// Handles what a read of its rows missed, as the page that shows them handles any
+        /// committed change.
+        pub(super) missed: RefCell<Option<Rc<dyn Fn(&rufin_core::source::feed::Changed)>>>,
     }
 
     #[glib::object_subclass]
@@ -603,6 +605,15 @@ impl RowList {
         ));
     }
 
+    /// Handles a change a read of its rows missed through [`Rows::on_missed`].
+    fn show_missed(&self, missed: &rufin_core::source::feed::Changed) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let handler = self.imp().missed.borrow().clone();
+        if let Some(handler) = handler {
+            handler(missed);
+        }
+    }
+
     fn emit_ready_changed(&self, position: usize, count: usize) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         let handler = self.imp().ready_handler.borrow().clone();
@@ -744,6 +755,13 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
             .imp()
             .ready_handler
             .replace(Some(Rc::new(handler)));
+    }
+
+    /// Hands what a read of the rows missed to `handler`: the page that shows them handles it
+    /// as any committed change.
+    pub fn on_missed(&self, handler: Rc<dyn Fn(&rufin_core::source::feed::Changed)>) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        self.list.imp().missed.replace(Some(handler));
     }
 
     /// Updates the read rows `matches` accepts, and the items that show them.
@@ -974,12 +992,9 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                 if let Some(span) = span {
                     list.emit_ready_changed(span.start, span.len());
                 }
-                // A change committed while the window read is shown in its rows too.
-                if let Some(missed) = reading.and_then(rufin_core::shown::Reading::missed)
-                    && let Some(rows) = (&this as &dyn Any).downcast_ref::<Rows<Row>>()
-                    && let Some(view) = rows.view()
-                {
-                    rows.show_changes(view.owner(), &missed);
+                // A change committed while the window read reaches its rows too.
+                if let Some(missed) = reading.and_then(rufin_core::shown::Reading::missed) {
+                    list.show_missed(&missed);
                 }
             }
             this.start(true);
@@ -1273,13 +1288,11 @@ impl Rows<Row> {
             list.imp().reread.borrow_mut().take();
             match result {
                 Ok(Ok(mut opened)) => {
-                    let rows = Self::from_list(&list);
-                    rows.take(&mut opened);
-                    let owner = opened.view.owner().clone();
+                    Self::from_list(&list).take(&mut opened);
                     apply(opened);
-                    // A change committed while it read is shown in the rows read too.
+                    // A change committed while it read reaches the rows read too.
                     if let Some(missed) = reading.missed() {
-                        rows.show_changes(&owner, &missed);
+                        list.show_missed(&missed);
                     }
                 }
                 Ok(Err(library::LibraryError::ReadCancelled)) | Err(_) => {}
@@ -1326,26 +1339,18 @@ impl Rows<Row> {
     ) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         use library::ShowsState;
-        let read = self.with(|state| {
-            state
-                .ready
-                .iter()
-                .map(|(position, row)| (*position, Arc::clone(row)))
-                .collect::<Vec<_>>()
-        });
-        let mut rows = read
-            .iter()
-            .map(|(_, row)| Row::clone(row))
-            .collect::<Vec<_>>();
         let smart = self
             .view()
             .map(|view| view.smart_count())
             .unwrap_or_default();
-        let shown = self.list.imp().shown.show(owner, &mut rows, changed, smart);
-        if shown.states {
-            for ((position, _), row) in read.iter().zip(rows) {
-                self.set_ready(*position, row);
-            }
+        let (read, shown) = self.with(|state| {
+            let read = state.ready.keys().copied().collect::<Vec<_>>();
+            let rows = state.ready.values().map(Arc::as_ref).collect::<Vec<_>>();
+            let shown = self.list.imp().shown.show(owner, &rows, changed, smart);
+            (read, shown)
+        });
+        for (index, row) in shown.states {
+            self.set_ready(read[index], row);
         }
         let Some(downloads) = shown.downloads else {
             return;
@@ -1357,7 +1362,7 @@ impl Rows<Row> {
             let shown = Self::from_list(&list);
             // The downloads go into the row now at each position when it is the same row.
             for (index, mut row) in rows {
-                let position = read[index].0;
+                let position = read[index];
                 let Some(current) = shown.ready(position) else {
                     continue;
                 };
