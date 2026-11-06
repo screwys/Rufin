@@ -788,7 +788,7 @@ async fn insert_playlist_tracks(
             .playlists
             .get(playlist.raw())
             .map_or(&[][..], |record| record.entries.as_slice());
-        let held = entries
+        let mut held = entries
             .iter()
             .filter(|_| skip_existing)
             .map(|entry| entry.track)
@@ -800,7 +800,7 @@ async fn insert_playlist_tracks(
                 snapshot
                     .tracks
                     .slot(track.raw())
-                    .is_none_or(|slot| !held.contains(&slot))
+                    .is_none_or(|slot| !skip_existing || held.insert(slot))
             })
             .collect::<Vec<_>>();
         (tracks, entries.last().map(|entry| entry.rank.clone()))
