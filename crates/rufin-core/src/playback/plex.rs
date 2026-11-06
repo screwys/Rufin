@@ -112,7 +112,7 @@ impl PlexPlayback {
         let anchor = page.current_index;
         let keys = queue_keys(&self.catalog, &page.entries, &self.connection().1.source_id).await?;
         if keys.is_empty() {
-            return Ok(());
+            return Err(localization::tr("Nothing to play here"));
         }
         let replacing = matches!(
             placement,

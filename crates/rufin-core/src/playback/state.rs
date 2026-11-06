@@ -263,8 +263,14 @@ struct FailedRun {
 
 #[derive(Clone, Debug)]
 enum QueueCompletion {
-    Replace,
-    Insert { target: QueueReorderTarget },
+    /// Replaces the queue, and drops the first `superseded` deferred commands, which were
+    /// waiting for the request it cancelled.
+    Replace {
+        superseded: usize,
+    },
+    Insert {
+        target: QueueReorderTarget,
+    },
 }
 
 pub(super) struct Player {
@@ -1370,11 +1376,12 @@ impl Player {
             return Ok(());
         }
         if replacing {
-            self.deferred_queue.clear();
             self.queue_transport = None;
         }
         let completion = match request.placement {
-            QueuePlacement::Replace { .. } => QueueCompletion::Replace,
+            QueuePlacement::Replace { .. } => QueueCompletion::Replace {
+                superseded: self.deferred_queue.len(),
+            },
             QueuePlacement::AfterCurrent => QueueCompletion::Insert {
                 target: self
                     .sequence
@@ -1472,7 +1479,10 @@ impl Player {
         if self.external.is_some() {
             return;
         }
-        if matches!(self.pending_queue, Some((_, QueueCompletion::Replace, _))) {
+        if matches!(
+            self.pending_queue,
+            Some((_, QueueCompletion::Replace { .. }, _))
+        ) {
             return;
         }
         if self.current_run.is_none()
@@ -1563,7 +1573,9 @@ impl Player {
                 self.dirty = true;
             }
             Ok(page) => match completion {
-                QueueCompletion::Replace => {
+                QueueCompletion::Replace { superseded } => {
+                    self.deferred_queue
+                        .drain(..superseded.min(self.deferred_queue.len()));
                     self.finish_queue_run(sample, RunEndReason::ManualSkip);
                     self.sequence.add_page(page, QueueReorderTarget::End, true);
                     self.restored_paused = false;
