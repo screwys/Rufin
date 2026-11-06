@@ -12,7 +12,7 @@ pub use records::{
     AndroidScrollSection, AndroidSortField,
 };
 
-use library::{Collection, MemberSelection, ReadCancellation, Row};
+use library::{MemberSelection, ReadCancellation, Row};
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 use rufin_core::view::{OpenOptions, View, library_list_key};
