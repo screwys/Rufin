@@ -1636,7 +1636,8 @@ impl View {
     }
 
     /// Whether a favorite or rating change can move or drop rows: the page lists only favorites
-    /// or sorts by favorites or ratings. Other pages patch the shown values into their rows.
+    /// or sorts by favorites or ratings, Search by the sorts of the lists it orders by. Other
+    /// pages patch the shown values into their rows.
     pub fn states_reorder(&self) -> bool {
         let orders = |field: LibraryField| {
             matches!(field, LibraryField::Favorite | LibraryField::UserRating)
@@ -1654,6 +1655,9 @@ impl View {
                 ..
             }
             | Body::Releases { read, .. } => read.favorites_only || orders(read.sort),
+            Body::Search(_) => search_sorts(&self.settings)
+                .into_iter()
+                .any(|(field, _)| orders(field)),
             _ => false,
         }
     }
@@ -1661,8 +1665,7 @@ impl View {
     /// Reads the page again with `options` and current settings. A folder keeps the folder it
     /// opened, so new child folders show when the route opens again. Album, artist track, genre
     /// and mood pages and Discography read their rows again and keep their header, so a
-    /// collection that is gone reads as empty. A search with the same query sorts what it found
-    /// again.
+    /// collection that is gone reads as empty. A search runs its query again.
     pub async fn reread(
         &self,
         options: OpenOptions,
@@ -1709,19 +1712,6 @@ impl View {
                     members.collection.clone(),
                 );
                 let plan = Plan::Rows(Read::Members(members));
-                read(self.again(options, settings), plan, None, seed, cancel).await
-            }
-            (Body::Search(results), _) if options == self.options => {
-                let mut results = self
-                    .catalog()
-                    .reread_search(results, self.music_folder(), cancel)
-                    .await?;
-                self.catalog().sort_search(
-                    &mut results,
-                    self.music_folder(),
-                    search_sorts(&settings),
-                );
-                let plan = Plan::Search(Box::new(results));
                 read(self.again(options, settings), plan, None, seed, cancel).await
             }
             (Body::Releases { .. }, _)
@@ -2160,22 +2150,27 @@ fn changes(
         });
     }
     // Plays change what a page shows where its order reads them; an artist page reads its
-    // tracks' order and its releases'.
+    // tracks' order and its releases', Search the orders of the Tracks, Albums and Artists
+    // lists.
     if changed.listened {
         let settings = owner.shared.settings.committed();
-        let categories: &[CollectionCategory] = match route {
+        let sensitive = match route {
+            Route::Search => CollectionCategory::ALL
+                .into_iter()
+                .any(|category| uses_activity(route, &settings.library_list(category.key()))),
             Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => {
-                &[CollectionCategory::Tracks, CollectionCategory::Albums]
+                [CollectionCategory::Tracks, CollectionCategory::Albums]
+                    .into_iter()
+                    .any(|category| {
+                        let options = OpenOptions {
+                            category,
+                            ..options.clone()
+                        };
+                        read_order(route, &options, &settings).2
+                    })
             }
-            _ => std::slice::from_ref(&options.category),
+            _ => read_order(route, options, &settings).2,
         };
-        let sensitive = categories.iter().any(|category| {
-            let options = OpenOptions {
-                category: *category,
-                ..options.clone()
-            };
-            read_order(route, &options, &settings).2
-        });
         if sensitive {
             refresh = refresh.max(Refresh::Reread);
         }
