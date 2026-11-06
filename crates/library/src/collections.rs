@@ -213,8 +213,10 @@ impl Catalog {
                 })
                 .collect::<Vec<_>>();
             albums.sort_unstable();
-            let mut members =
-                context.album_tracks(&albums.iter().map(|(_, slot)| *slot).collect::<Vec<_>>());
+            let mut members = context.album_tracks(
+                &self.derived(&context, None),
+                &albums.iter().map(|(_, slot)| *slot).collect::<Vec<_>>(),
+            );
             albums
                 .into_iter()
                 .flat_map(|(_, slot)| members.remove(&slot).unwrap_or_default())

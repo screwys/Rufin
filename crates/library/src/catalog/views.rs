@@ -246,9 +246,22 @@ pub(crate) struct Derived {
     pub(crate) artist_covers: Vec<Borrowed>,
     pub(crate) tags: Vec<Totals>,
     pub(crate) folders: Vec<Totals>,
+    /// The visible tracks by album and slot, kept for the whole library only.
+    album_tracks: Box<[(u32, u32)]>,
 }
 
 impl Derived {
+    /// The visible tracks of an album, by slot. `self` is the whole library's.
+    fn album_members(&self, album: u32) -> impl Iterator<Item = u32> + '_ {
+        let start = self
+            .album_tracks
+            .partition_point(|(owner, _)| *owner < album);
+        self.album_tracks[start..]
+            .iter()
+            .take_while(move |(owner, _)| *owner == album)
+            .map(|(_, slot)| *slot)
+    }
+
     fn build(context: &Context<'_>, folder: Option<u32>) -> Self {
         let snapshot = context.snapshot;
         let mut derived = Self {
@@ -261,6 +274,7 @@ impl Derived {
             artist_covers: vec![Borrowed::None; snapshot.artists.records.len()],
             tags: vec![Totals::default(); snapshot.tags.records.len()],
             folders: vec![Totals::default(); snapshot.folders.records.len()],
+            album_tracks: Box::default(),
         };
         let mut visible = snapshot
             .tracks
@@ -371,6 +385,9 @@ impl Derived {
             if let Some(slot) = snapshot.albums.slot(key) {
                 derived.artist_covers[artist as usize] = Borrowed::Album(slot);
             }
+        }
+        if folder.is_none() {
+            derived.album_tracks = visible.into();
         }
         derived
     }
@@ -1019,15 +1036,17 @@ impl Context<'_> {
     }
 
     /// The tracks of each album, artist, genre and mood among `wanted`, each in its music
-    /// folder, from one pass over the catalog; None for other collections.
+    /// folder: albums from the whole library's `derived`, the others from one pass over the
+    /// catalog; None for other collections.
     fn scanned_members(
         &self,
+        derived: &Derived,
         wanted: &[Option<(&Collection, Option<u32>)>],
     ) -> Vec<Option<Vec<Member>>> {
         let snapshot = self.snapshot;
-        // Positions in `wanted` by the slot that owns them: albums, artists, album artists,
-        // genres and moods.
-        let mut owners: [HashMap<u32, Vec<usize>>; 5] = Default::default();
+        // Positions in `wanted` by the slot that owns them: artists, album artists, genres and
+        // moods.
+        let mut owners: [HashMap<u32, Vec<usize>>; 4] = Default::default();
         let mut found = vec![None; wanted.len()];
         for (position, (collection, _)) in wanted
             .iter()
@@ -1035,13 +1054,25 @@ impl Context<'_> {
             .filter_map(|(position, wanted)| Some((position, (*wanted)?)))
         {
             let (kind, slot) = match collection {
-                Collection::Album(key) => (0, snapshot.albums.slot(key.raw())),
-                Collection::Artist { key, album_artist } => (
-                    1 + usize::from(*album_artist),
-                    snapshot.artists.slot(key.raw()),
-                ),
-                Collection::Genre(key) => (3, snapshot.tags.slot(key.raw())),
-                Collection::Mood(key) => (4, snapshot.tags.slot(key.raw())),
+                Collection::Album(key) => {
+                    let folder = wanted[position].and_then(|(_, folder)| folder);
+                    let tracks = snapshot
+                        .albums
+                        .slot(key.raw())
+                        .into_iter()
+                        .flat_map(|album| {
+                            derived.album_members(album).filter(|slot| {
+                                self.in_folder(&snapshot.tracks.records[*slot as usize], folder)
+                            })
+                        });
+                    found[position] = Some(tracks.map(|slot| (slot, 0, 0)).collect());
+                    continue;
+                }
+                Collection::Artist { key, album_artist } => {
+                    (usize::from(*album_artist), snapshot.artists.slot(key.raw()))
+                }
+                Collection::Genre(key) => (2, snapshot.tags.slot(key.raw())),
+                Collection::Mood(key) => (3, snapshot.tags.slot(key.raw())),
                 _ => continue,
             };
             found[position] = Some(Vec::new());
@@ -1052,7 +1083,7 @@ impl Context<'_> {
         if owners.iter().all(HashMap::is_empty) {
             return found;
         }
-        let [albums, artists, album_artists, genres, moods] = &owners;
+        let [artists, album_artists, genres, moods] = &owners;
         let mut tags = Vec::new();
         for (slot, record) in snapshot.tracks.iter() {
             if !record.indexed() {
@@ -1068,9 +1099,6 @@ impl Context<'_> {
                     }
                 }
             };
-            if !albums.is_empty() {
-                add(albums.get(&record.album));
-            }
             if !artists.is_empty() {
                 for artist in dedup(snapshot.track_runs(record)[0]) {
                     add(artists.get(&artist));
@@ -1098,7 +1126,11 @@ impl Context<'_> {
 
     /// Member reads' rows in order, before their filters. Albums, artists, genres and moods
     /// among them take their tracks from one pass over the catalog.
-    fn member_bases(&self, reads: &[(&MemberRead, &Inputs)]) -> Vec<Vec<Member>> {
+    fn member_bases(
+        &self,
+        derived: &Derived,
+        reads: &[(&MemberRead, &Inputs)],
+    ) -> Vec<Vec<Member>> {
         // Each read's collection in the music folder it keeps; None when that folder is gone.
         let wanted = reads
             .iter()
@@ -1108,7 +1140,7 @@ impl Context<'_> {
                 Some((&read.collection, folder))
             })
             .collect::<Vec<_>>();
-        let scanned = self.scanned_members(&wanted);
+        let scanned = self.scanned_members(derived, &wanted);
         reads
             .iter()
             .zip(wanted)
@@ -2510,7 +2542,7 @@ impl Catalog {
                     }
                 } else {
                     let rows = context
-                        .member_bases(&[(member, inputs)])
+                        .member_bases(&self.derived(context, None), &[(member, inputs)])
                         .pop()
                         .unwrap_or_default();
                     let records = &snapshot.tracks.records;
@@ -2562,8 +2594,11 @@ impl Catalog {
                     .filter_map(|key| Some((*key, snapshot.albums.slot(i64::from(*key))?)))
                     .collect::<Vec<_>>();
                 // The music folder picks the albums; each lists whole, as its page does.
-                let mut members =
-                    context.album_tracks(&slots.iter().map(|(_, slot)| *slot).collect::<Vec<_>>());
+                let derived = self.derived(context, None);
+                let mut members = context.album_tracks(
+                    &derived,
+                    &slots.iter().map(|(_, slot)| *slot).collect::<Vec<_>>(),
+                );
                 let mut spans = Vec::with_capacity(slots.len());
                 let mut tracks = Vec::new();
                 let mut first = 0;
@@ -3123,27 +3158,22 @@ impl Context<'_> {
         folders
     }
 
-    /// The visible tracks of these albums in disc order, from one pass over the tracks.
-    pub(crate) fn album_tracks(&self, albums: &[u32]) -> HashMap<u32, Vec<u32>> {
+    /// The visible tracks of these albums in disc order. `derived` is the whole library's.
+    pub(crate) fn album_tracks(&self, derived: &Derived, albums: &[u32]) -> HashMap<u32, Vec<u32>> {
         let snapshot = self.snapshot;
-        let wanted = albums.iter().copied().collect::<HashSet<_>>();
-        let mut members = HashMap::<u32, Vec<_>>::new();
-        for (slot, record) in snapshot.tracks.iter() {
-            if wanted.contains(&record.album) && record.indexed() {
-                members.entry(record.album).or_default().push((
-                    record.disc,
-                    record.number,
-                    snapshot.track_sort(record),
-                    record.key,
-                    slot,
-                ));
-            }
-        }
-        members
-            .into_iter()
-            .map(|(album, mut tracks)| {
+        albums
+            .iter()
+            .map(|album| {
+                let mut tracks = derived
+                    .album_members(*album)
+                    .map(|slot| {
+                        let record = &snapshot.tracks.records[slot as usize];
+                        let sort = snapshot.track_sort(record);
+                        (record.disc, record.number, sort, record.key, slot)
+                    })
+                    .collect::<Vec<_>>();
                 tracks.sort();
-                (album, tracks.into_iter().map(|track| track.4).collect())
+                (*album, tracks.into_iter().map(|track| track.4).collect())
             })
             .collect()
     }
@@ -3232,7 +3262,9 @@ impl Catalog {
             }
         }
         let snapshot = self.snapshot();
-        let bases = Context::new(&snapshot).member_bases(
+        let context = Context::new(&snapshot);
+        let bases = context.member_bases(
+            &self.derived(&context, None),
             &whole
                 .iter()
                 .map(|(index, inputs)| (&reads[*index], inputs))
