@@ -168,10 +168,13 @@ fn apply_source_configuration(shell: &Rc<Shell>) {
     match shell.products.source.selected_library() {
         Some(selected) => {
             install_selected(shell, selected);
-            if !shell.startup.route_revealed.get()
-                && !shell.source.operation.borrow().blocks_library()
-            {
-                shell.prepare_startup_route_content();
+            // The startup selection's change went out before the change feed was followed:
+            // the pins read before it count again in it, as the startup route reads in it.
+            if !shell.startup.route_revealed.get() {
+                super::navigation::refresh_sidebar_pins(shell);
+                if !shell.source.operation.borrow().blocks_library() {
+                    shell.prepare_startup_route_content();
+                }
             }
         }
         None => {
