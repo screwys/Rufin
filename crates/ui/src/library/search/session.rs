@@ -95,9 +95,29 @@ impl SearchSession {
         });
     }
 
-    /// Shows `items` as the results.
+    /// Shows `items` as the results. A category that shows the same results in the same order
+    /// updates its rows in place, so their selection stays.
     fn show_items(&self, items: [Vec<SearchItem>; 3]) {
         for (model, items) in self.models.iter().zip(items) {
+            let shown = (0..model.n_items())
+                .filter_map(|position| model.item(position).and_downcast::<RowItem>())
+                .collect::<Vec<_>>();
+            let same = shown.len() == items.len()
+                && shown.iter().zip(&items).all(|(item, row)| {
+                    item.value::<Arc<SearchItem>>()
+                        .is_some_and(|shown| shown.uri() == row.uri())
+                });
+            if same {
+                for (item, row) in shown.iter().zip(items) {
+                    if item
+                        .value::<Arc<SearchItem>>()
+                        .is_none_or(|shown| *shown != row)
+                    {
+                        item.replace(Arc::new(row), true);
+                    }
+                }
+                continue;
+            }
             let items = items
                 .into_iter()
                 .map(|row| RowItem::new(Arc::new(row), true))

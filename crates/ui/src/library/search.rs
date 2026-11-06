@@ -93,6 +93,15 @@ impl library::ShowsState for SearchItem {
 }
 
 impl SearchItem {
+    /// The track, album or artist it shows.
+    fn uri(&self) -> &str {
+        match self {
+            Self::Track(row, _) => &row.media_uri,
+            Self::Album(row) => &row.media_uri,
+            Self::Artist(row) => &row.media_uri,
+        }
+    }
+
     fn lyrics(&self) -> Option<&library::LyricsSnippet> {
         match self {
             Self::Track(_, snippet) => snippet.as_ref(),
