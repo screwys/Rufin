@@ -72,9 +72,12 @@ internal class BrowsePage(
     private var capturedLabelsVersion = browse.labelsVersion
     /** How many favorite, rating and download changes were committed while the page is open. */
     private var downloads by mutableIntStateOf(0)
-    /** Rows core patched, by identity, with the change count they show; a row read since shows
-     * itself. A patch goes with its row when the page stops holding it. */
-    private val patched = mutableStateMapOf<String, Pair<Int, AndroidBrowseRow>>()
+    /** Rows core patched, by identity: each patches only rows of the View that read the row it
+     * patched, read before its change; a row read since shows itself. A patch goes with its row
+     * when the page stops holding it or holds another View's row in its place, such as a new
+     * search's. */
+    private val patched = mutableStateMapOf<String, Patch>()
+    private class Patch(val revision: Int, val view: AndroidView?, val row: AndroidBrowseRow)
     /** The rows the page holds by identity, most recently read or shown last: those on screen
      * and those read lately, which scroll back in without a read. Committed changes patch them
      * through core. */
@@ -125,8 +128,8 @@ internal class BrowsePage(
             hold(listOf(item))
             onDispose {}
         }
-        val (revision, row) = patched[key] ?: return item
-        return if (revision > item.downloads) remember(item, row) { item.copy(row = row) } else item
+        val row = patchOf(item)?.row ?: return item
+        return remember(item, row) { item.copy(row = row) }
     }
 
     /** A row's identity among those the page holds; a search result shows its own fields, so it
@@ -139,13 +142,20 @@ internal class BrowsePage(
     fun hold(items: List<BrowseItem>) = synchronized(held) {
         for (item in items) {
             val key = shownKey(item)
-            if ((held[key]?.downloads ?: -1) <= item.downloads) held[key] = item
+            val previous = held[key]
+            if ((previous?.downloads ?: -1) <= item.downloads) {
+                if (previous?.view !== item.view) patched.remove(key)
+                held[key] = item
+            }
         }
     }
 
+    /** The patch `item` shows: one of its View that came since it was read. */
+    private fun patchOf(item: BrowseItem): Patch? =
+        patched[shownKey(item)]?.takeIf { it.view === item.view && it.revision > item.downloads }
+
     /** The row `item` shows now: its patch when one came since it was read. */
-    private fun current(item: BrowseItem): AndroidBrowseRow =
-        patched[shownKey(item)]?.takeIf { it.first > item.downloads }?.second ?: item.row
+    private fun current(item: BrowseItem): AndroidBrowseRow = patchOf(item)?.row ?: item.row
 
     /** Shows a committed change in the header and the rows the page holds, through core:
      * favorites and ratings at once, and downloads once read, into each row as it shows then, so
@@ -167,7 +177,7 @@ internal class BrowsePage(
             for (shown in showing.states) {
                 val index = shown.index.toInt() - offset
                 if (index < 0) { if (summary === header) summary = header!!.copy(row = shown.row) }
-                else patched[shownKey(items[index])] = revision to shown.row
+                else items[index].let { patched[shownKey(it)] = Patch(revision, it.view, shown.row) }
             }
         }
         val downloads = showing.downloads ?: return
@@ -182,10 +192,10 @@ internal class BrowsePage(
                         continue
                     }
                     val key = shownKey(items[index])
-                    val item = synchronized(held) { held[key] } ?: continue
-                    val patch = patched[key]?.takeIf { it.first > item.downloads }
-                    val merged = library.takeDownloads(patch?.second ?: item.row, shown.row) ?: continue
-                    patched[key] = maxOf(revision, patch?.first ?: 0) to merged
+                    val item = synchronized(held) { held[key] }?.takeIf { it.view === items[index].view } ?: continue
+                    val patch = patchOf(item)
+                    val merged = library.takeDownloads(patch?.row ?: item.row, shown.row) ?: continue
+                    patched[key] = Patch(maxOf(revision, patch?.revision ?: 0), item.view, merged)
                 }
             }
         }
