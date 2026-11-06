@@ -2119,8 +2119,8 @@ impl Catalog {
         })
     }
 
-    /// Borrowed pictures and whether an album lists a track. They change only with catalog
-    /// records, so a row read after a favorite or a listen reuses an older build.
+    /// Borrowed pictures and totals without plays. They change only with catalog records, so a
+    /// row read after a favorite or a listen reuses an older build.
     pub(crate) fn covers(&self, context: &Context<'_>) -> Arc<Derived> {
         let facts = context.snapshot.facts;
         self.derive(context, None, |built| {

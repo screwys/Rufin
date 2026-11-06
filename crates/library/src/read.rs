@@ -577,9 +577,15 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn derived(&self) -> &Derived {
-        self.derived
-            .get_or_init(|| self.catalog.derived(&self.context, None))
+    /// Collection totals: with current plays when the rows show activity, else the facts-only
+    /// aggregate, whose plays may be older.
+    fn totals(&self, activity: bool) -> &Derived {
+        if activity {
+            self.derived
+                .get_or_init(|| self.catalog.derived(&self.context, None))
+        } else {
+            &self.covers
+        }
     }
 
     fn downloaded(&self) -> &Downloaded {
@@ -594,12 +600,12 @@ impl<'a> Builder<'a> {
 
     fn album_art(&self, key: AlbumKey) -> Option<Art> {
         let slot = self.snapshot.albums.slot(key.raw())?;
-        Some(self.context.album_art(self.derived(), slot))
+        Some(self.context.album_art(&self.covers, slot))
     }
 
     fn artist_art(&self, key: ArtistKey) -> Option<Art> {
         let slot = self.snapshot.artists.slot(key.raw())?;
-        Some(self.context.artist_art(self.derived(), slot))
+        Some(self.context.artist_art(&self.covers, slot))
     }
 
     /// A genre shows its own picture, else its mosaic; a mood its mosaic.
@@ -845,7 +851,7 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.derived().albums[slot as usize];
+        let mut totals = self.totals(activity).albums[slot as usize];
         totals.albums = u32::from(totals.tracks > 0);
         totals.downloaded = self.downloaded().albums[slot as usize];
         let runs = snapshot.album_runs(record);
@@ -890,7 +896,7 @@ impl<'a> Builder<'a> {
                     })
                     .collect(),
             },
-            artwork_binding: got.binding(self.context.album_art(self.derived(), slot))?,
+            artwork_binding: got.binding(self.context.album_art(&self.covers, slot))?,
         }))
     }
 
@@ -909,7 +915,7 @@ impl<'a> Builder<'a> {
         let Some(source_key) = snapshot.source_key(record.source) else {
             return Ok(None);
         };
-        let mut totals = self.derived().artists[usize::from(album_artist)][slot as usize];
+        let mut totals = self.totals(activity).artists[usize::from(album_artist)][slot as usize];
         totals.downloaded = self.downloaded().artists[usize::from(album_artist)][slot as usize];
         Ok(Some(ArtistRow {
             artist_key: key,
@@ -926,7 +932,7 @@ impl<'a> Builder<'a> {
                 collection_played(record.native, &totals, activity),
             ),
             summary: totals.summary(),
-            artwork_binding: got.binding(self.context.artist_art(self.derived(), slot))?,
+            artwork_binding: got.binding(self.context.artist_art(&self.covers, slot))?,
         }))
     }
 
@@ -956,7 +962,7 @@ impl<'a> Builder<'a> {
             name: text(snapshot, record.name),
             summary: Totals {
                 downloaded: self.downloaded().tags[slot as usize],
-                ..self.derived().tags[slot as usize]
+                ..self.covers.tags[slot as usize]
             }
             .summary(),
             representative_artwork: artwork_binding
@@ -1204,7 +1210,7 @@ impl<'a> Builder<'a> {
                         name: text(self.snapshot, record.name),
                         summary: Totals {
                             downloaded: self.downloaded().folders[slot as usize],
-                            ..self.derived().folders[slot as usize]
+                            ..self.covers.folders[slot as usize]
                         }
                         .summary(),
                         artwork_binding: got.own(Part::FolderArt, key.raw())?,
