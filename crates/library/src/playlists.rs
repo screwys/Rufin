@@ -870,7 +870,7 @@ pub(crate) async fn write_entries(
     let mut matched = wanted
         .iter()
         .map(|(object, _)| {
-            let index = by_object.get(object.as_str()).copied()?;
+            let index = by_object.remove(object.as_str())?;
             used[index] = true;
             Some(index)
         })
