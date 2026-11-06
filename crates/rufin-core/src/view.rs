@@ -276,6 +276,12 @@ impl PlayTarget {
         }
     }
 
+    /// Whether `row` offers Play: every row [`PlayTarget::of_row`] gives a target, and a child
+    /// folder, which plays what its page's [`View::row_target`] gives.
+    pub fn plays(row: &Row) -> bool {
+        matches!(row, Row::Folder(_)) || Self::of_row(row).is_some()
+    }
+
     /// What a track row plays outside a page: only itself.
     pub fn of_track(track: &library::TrackRow) -> Self {
         Self::Track(track.track_key)

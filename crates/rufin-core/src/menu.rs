@@ -57,10 +57,11 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
     let shown = |item| settings.application.context_menu.is_visible(item);
     let stored = owner.shared.settings.load();
     let source = row_source(&stored.sources, row);
+    let plays = crate::view::PlayTarget::plays(row);
     let mut menu = Menu {
-        play: shown(ContextMenuItem::Play),
-        play_next: shown(ContextMenuItem::PlayNext),
-        play_later: shown(ContextMenuItem::PlayLater),
+        play: plays && shown(ContextMenuItem::Play),
+        play_next: plays && shown(ContextMenuItem::PlayNext),
+        play_later: plays && shown(ContextMenuItem::PlayLater),
         ..Menu::default()
     };
     let (radio, add_to_playlist, rated) = match row {
@@ -121,9 +122,6 @@ pub fn menu(owner: &SourceOwner, settings: &Settings, row: &Row) -> Menu {
         Row::Playlist(PlaylistListRow::Folder(_)) => {
             menu.edit = true;
             menu.delete = true;
-            menu.play = false;
-            menu.play_next = false;
-            menu.play_later = false;
             (None, false, false)
         }
         // A child folder plays the folder it opens, as a collection row plays its page.

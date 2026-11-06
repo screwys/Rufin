@@ -535,11 +535,12 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn bind(&self, _: u32, item: T) {
-        if let Some(target) = item.playback() {
-            self.body.bind_playing_target(&self.shell, target);
-        }
+        let target = item.playback();
         for button in &self.play_buttons {
-            button.set_visible(!item.folder());
+            button.set_visible(target.is_some());
+        }
+        if let Some(target) = target {
+            self.body.bind_playing_target(&self.shell, target);
         }
         self.body.set_folder(item.folder());
         let artwork = item.artwork();
