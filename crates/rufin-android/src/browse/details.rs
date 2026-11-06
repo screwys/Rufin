@@ -29,12 +29,8 @@ impl AndroidLibrary {
                 .as_ref()
                 .is_some_and(|source| source.is_local());
         let folder_uri = if local {
-            let folder = view
-                .view
-                .selected()
-                .and_then(|selected| selected.music_folder_key);
             self.source
-                .collection_folder_uri(uri.to_owned(), album_artist, folder)
+                .collection_folder_uri(uri.to_owned(), album_artist)
                 .recv()
                 .await
                 .map_err(error)?

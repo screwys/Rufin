@@ -62,7 +62,7 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
                     leadingContent = { DetailLinkIcon(link.iconId, Modifier.size(40.dp)) },
                     modifier = Modifier.clickable {
                         player.model.runAction {
-                            openMediaUri(context, link.url ?: bridge?.folderUri(metadata.mediaUri, metadata.sourceId, originRoute) ?: return@runAction)
+                            openMediaUri(context, link.url ?: bridge?.folderUri(metadata.mediaUri, originRoute) ?: return@runAction)
                             onDismiss()
                         }
                     })

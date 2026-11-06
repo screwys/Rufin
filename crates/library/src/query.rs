@@ -26,6 +26,18 @@ pub enum Collection {
     },
 }
 
+impl Collection {
+    /// Whether a music folder narrows it, as Feishin narrows what it queries: albums and
+    /// playlists, which name their members, and the play history stay whole. A folder narrows
+    /// only its own source's tracks.
+    pub fn follows_folder(&self) -> bool {
+        !matches!(
+            self,
+            Self::Album(_) | Self::Playlist(_) | Self::History { .. }
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MemberRead {
     pub collection: Collection,

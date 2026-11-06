@@ -12,9 +12,7 @@ use std::time::Instant;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::SourceKey;
 use localization::{msgid, tr};
-use sources::SourceId;
 use tracing::{debug, warn};
 
 use super::Shell;
@@ -80,12 +78,17 @@ mod route_stack_tests {
     }
 }
 
-fn route_is_current(shell: &Shell, route: &Route, source: SourceKey) -> bool {
-    shell.navigation.routes.borrow().current() == route
-        && shell
-            .selected_library()
-            .as_deref()
-            .is_some_and(|selected| selected.source_key == source)
+/// Whether a page shows its scroll position again when it opens again: the lists, Home,
+/// Search, Folders, the playlist lists and smart playlist pages.
+fn remembers_position(route: &Route) -> bool {
+    route.requires_selected_source()
+        || matches!(
+            route,
+            Route::Playlists
+                | Route::SmartPlaylists
+                | Route::PlaylistFolder { .. }
+                | Route::SmartPlaylistDetail(_)
+        )
 }
 
 pub(crate) struct RouteViewport {
@@ -173,11 +176,6 @@ impl RouteStack {
 }
 
 impl Shell {
-    pub(super) fn route_uses_selected_source(&self, route: &Route) -> bool {
-        route.uses_selected_source()
-            && (route != &Route::Search || self.search_session.mode() == library::SearchMode::Title)
-    }
-
     fn route_seed_window(&self, route: &Route) -> library::RouteSeedWindow {
         let mounted = self.route_viewport.mounted_route.borrow();
         let current = mounted.as_ref().filter(|entry| entry.route == *route);
@@ -205,7 +203,6 @@ impl Shell {
         render_started: RouteTiming,
     ) {
         let source = self.products.source.clone();
-        let source_scoped = self.route_uses_selected_source(&route);
         let window = if refresh_home {
             library::RouteSeedWindow::top()
         } else {
@@ -232,26 +229,19 @@ impl Shell {
             let Some(shell) = shell.upgrade() else { return };
             if !shell.finish_root_order_read(generation)
                 || shell.navigation.routes.borrow().current() != &route
-                || source_scoped
-                    && selected.as_ref().is_some_and(|selected| {
-                        !route_is_current(&shell, &route, selected.source_key)
-                    })
             {
                 return;
             }
-            let source_id = source_scoped
-                .then(|| selected.as_ref().map(|selected| selected.source_id.clone()))
-                .flatten();
             let read = match result {
                 Ok(Ok(read)) => read,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, "failed to open collection");
-                    shell.show_route_load_error(route, source_id, render_started);
+                    shell.show_route_load_error(route, selected, render_started);
                     return;
                 }
                 Err(error) => {
                     warn!(%error, ?route, "collection task failed");
-                    shell.show_route_load_error(route, source_id, render_started);
+                    shell.show_route_load_error(route, selected, render_started);
                     return;
                 }
             };
@@ -268,11 +258,9 @@ impl Shell {
             };
             match (read.view.home_sections(), apply_home) {
                 (Some(sections), Some(apply)) => apply(sections),
-                _ => {
-                    shell.replace_mounted_route(route, source_id, render_started, move |catalog| {
-                        catalog.opened_collection_view(read)
-                    })
-                }
+                _ => shell.replace_mounted_route(route, selected, render_started, move |catalog| {
+                    catalog.opened_collection_view(read)
+                }),
             }
         });
     }
@@ -442,9 +430,8 @@ impl Shell {
         self.cancel_route_loading();
         self.show_route_loading();
         let render_started = tracing::enabled!(tracing::Level::WARN).then(Instant::now);
-        let source_scoped = self.route_uses_selected_source(&route);
         let selected = self.selected_library().as_deref().cloned();
-        if source_scoped && route.requires_selected_source() && selected.is_none() {
+        if route.requires_selected_source() && selected.is_none() {
             self.cancel_root_order_read();
             self.replace_mounted_route(route, None, render_started, |_| {
                 MountedRoute::static_widget(crate::library::route_layout::route_empty_view(
@@ -453,11 +440,9 @@ impl Shell {
             });
             return;
         }
-        let selected = if source_scoped { selected } else { None };
         if route == Route::Search {
             self.cancel_root_order_read();
-            let source_id = selected.as_ref().map(|selected| selected.source_id.clone());
-            self.replace_mounted_route(route, source_id, render_started, |catalog| {
+            self.replace_mounted_route(route, selected, render_started, |catalog| {
                 catalog.search_route()
             });
             return;
@@ -491,13 +476,19 @@ impl Shell {
     /// Rereads or reopens the mounted route when a committed change touches it.
     pub(crate) fn refresh_mounted_route(self: &Rc<Self>, changed: &Changed) {
         let route = self.navigation.routes.borrow().current().clone();
-        let Some(view) = self
+        let view = self
             .route_viewport
             .mounted_route
             .borrow()
             .as_ref()
-            .and_then(|entry| entry.view.view())
-        else {
+            .filter(|entry| entry.route == route)
+            .and_then(|entry| entry.view.view());
+        let Some(view) = view else {
+            // A page without a read of its own (Search, an empty page) or one still loading
+            // opens again in a new selection.
+            if changed.scope.is_some() && !self.mounted_catalog_is_current() {
+                self.replace_current_route_when_ready();
+            }
             return;
         };
         let current = self.products.source.selected_library();
@@ -552,10 +543,11 @@ impl Shell {
         }
     }
 
+    /// Mounts what `build` makes of `route`, read in `selected`.
     fn replace_mounted_route(
         self: &Rc<Self>,
         route: Route,
-        source_id: Option<SourceId>,
+        selected: Option<rufin_core::runtime::SelectedLibrary>,
         render_started: RouteTiming,
         build: impl FnOnce(Rc<crate::library::CatalogUi>) -> MountedRoute,
     ) {
@@ -563,8 +555,7 @@ impl Shell {
         let previous = self.begin_mounted_route_replacement();
         let release_ms = teardown_started.map(elapsed_ms);
         let model_started = render_started.as_ref().map(|_| Instant::now());
-        let selected = self.selected_library().as_deref().cloned();
-        let catalog = crate::library::CatalogUi::new(self, &route, source_id.as_ref());
+        let catalog = crate::library::CatalogUi::new(self, &route, selected.as_ref());
         catalog.refresh_current_route_now_playing_selections(route_current_track(
             self.player_ui.selected_playback().as_deref(),
         ));
@@ -591,9 +582,9 @@ impl Shell {
             removal_started.map(|started| elapsed_ms(started) + release_ms.unwrap_or(0));
         let mount_started = render_started.as_ref().map(|_| Instant::now());
         let scroll_adjustment = primary_route_scroll_adjustment(&widget);
-        let position_key = source_id
-            .filter(|_| scroll_adjustment.is_some())
-            .map(|_| RoutePositionKey::new(route.clone()));
+        let position_key =
+            (selected.is_some() && scroll_adjustment.is_some() && remembers_position(&route))
+                .then(|| RoutePositionKey::new(route.clone()));
         let restore_position = position_key.as_ref().and_then(|key| {
             self.route_viewport
                 .position_memory
@@ -644,7 +635,7 @@ impl Shell {
     fn show_route_load_error(
         self: &Rc<Self>,
         route: Route,
-        source_id: Option<SourceId>,
+        selected: Option<rufin_core::runtime::SelectedLibrary>,
         render_started: RouteTiming,
     ) {
         let resource = "shell/route_error.ui";
@@ -678,7 +669,7 @@ impl Shell {
         });
         let clicked = Rc::clone(&reload);
         refresh.connect_clicked(move |_| clicked());
-        self.replace_mounted_route(route, source_id, render_started, move |_| {
+        self.replace_mounted_route(route, selected, render_started, move |_| {
             MountedRoute::static_widget(root.upcast()).with_catalog_refresh(reload)
         });
         if let Some(entry) = self.route_viewport.mounted_route.borrow_mut().as_mut() {
@@ -729,24 +720,25 @@ impl Shell {
     }
 
     fn mounted_catalog_is_current(&self) -> bool {
-        let scope = |selected: &rufin_core::runtime::SelectedLibrary| {
-            (selected.source_key, selected.music_folder_key)
-        };
-        let source_scoped =
-            self.route_uses_selected_source(self.navigation.routes.borrow().current());
-        let selected_scope = self.selected_library().as_deref().map(scope);
+        let selected = self.selected_library();
         self.route_viewport
             .catalog
             .borrow()
             .as_ref()
             .is_some_and(|catalog| catalog.is_current())
-            && (!source_scoped
-                || self
-                    .route_viewport
-                    .mounted_route
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|entry| entry.selected.as_ref().map(scope) == selected_scope))
+            && self
+                .route_viewport
+                .mounted_route
+                .borrow()
+                .as_ref()
+                .is_some_and(|entry| {
+                    rufin_core::view::same_scope(
+                        &entry.route,
+                        self.search_session.mode(),
+                        entry.selected.as_ref(),
+                        selected.as_deref(),
+                    )
+                })
     }
 
     fn begin_mounted_route_replacement(&self) -> Option<MountedRouteEntry> {

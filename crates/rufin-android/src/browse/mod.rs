@@ -281,10 +281,13 @@ impl AndroidView {
         .await
     }
 
-    /// Whether a committed change means the page reads again. Rows show favorites and ratings
-    /// through `show_state`, and downloads through `AndroidLibrary::show_downloads`.
+    /// Whether a committed change means the page reads again, in the library selected now.
+    /// Rows show favorites and ratings through `show_state`, and downloads through
+    /// `AndroidLibrary::show_downloads`.
     pub fn refresh(&self, changed: rufin_core::source::feed::Changed) -> bool {
-        self.view.refresh(&changed) != rufin_core::view::Refresh::Nothing
+        self.view
+            .refresh_selected(self.source.selected_library().as_ref(), &changed)
+            != rufin_core::view::Refresh::Nothing
     }
 
     /// The context id the page's plays carry.
@@ -374,13 +377,7 @@ impl AndroidView {
         let (uri, album_artist) =
             detail_identity(self.view.route()).ok_or_else(|| error("Choose an album or artist"))?;
         self.source
-            .collection_folder_uri(
-                uri.to_owned(),
-                album_artist,
-                self.view
-                    .selected()
-                    .and_then(|selected| selected.music_folder_key),
-            )
+            .collection_folder_uri(uri.to_owned(), album_artist)
             .recv()
             .await
             .map_err(error)?
@@ -523,13 +520,9 @@ impl AndroidLibrary {
         };
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
-            let scope = |selected: Option<&rufin_core::runtime::SelectedLibrary>| {
-                selected.map(|selected| (selected.source_key, selected.music_folder_key))
-            };
             let seed = library::RouteSeedWindow::top();
             let opened = match previous.filter(|previous| {
-                *previous.view.route() == route
-                    && scope(previous.view.selected()) == scope(selected.as_ref())
+                *previous.view.route() == route && previous.view.reads_same_in(selected.as_ref())
             }) {
                 Some(previous) => previous.view.reread(options, seed, &cancel).await,
                 None => {

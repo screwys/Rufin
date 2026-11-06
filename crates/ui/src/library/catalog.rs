@@ -6,12 +6,12 @@ use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// A page of the window: the route and source it was opened for, and what it shows of the
+/// A page of the window: the route and library it was opened for, and what it shows of the
 /// current track and its selections. Everything else is the window's, through `Deref`.
 pub(crate) struct CatalogUi {
     shell: Rc<Shell>,
     route: rufin_core::route::Route,
-    source_id: Option<sources::SourceId>,
+    selected: Option<rufin_core::runtime::SelectedLibrary>,
     pub current: RefCell<Option<RouteCurrentTrack>>,
     pub current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
     pub media_playing_cells:
@@ -32,12 +32,12 @@ impl CatalogUi {
     pub(crate) fn new(
         shell: &Rc<Shell>,
         route: &rufin_core::route::Route,
-        source_id: Option<&sources::SourceId>,
+        selected: Option<&rufin_core::runtime::SelectedLibrary>,
     ) -> Rc<Self> {
         Rc::new(Self {
             shell: Rc::clone(shell),
             route: route.clone(),
-            source_id: source_id.cloned(),
+            selected: selected.cloned(),
             current: RefCell::new(None),
             current_track_selections: RefCell::new(Vec::new()),
             media_playing_cells: RefCell::new(Vec::new()),
@@ -51,13 +51,17 @@ impl CatalogUi {
         &self.shell
     }
 
-    /// Whether the window still shows the route and source this page was opened for.
+    /// Whether the window still shows the route this page was opened for, reading what it read
+    /// in the library it was opened for.
     pub fn is_current(&self) -> bool {
         self.navigation.routes.borrow().current() == &self.route
-            && self.source_id.as_ref().is_none_or(|id| {
-                self.selected_library()
-                    .as_deref()
-                    .is_some_and(|selected| &selected.source_id == id)
+            && self.selected.as_ref().is_none_or(|opened| {
+                rufin_core::view::same_scope(
+                    &self.route,
+                    self.search_session.mode(),
+                    Some(opened),
+                    self.selected_library().as_deref(),
+                )
             })
     }
 

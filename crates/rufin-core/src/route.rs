@@ -110,6 +110,7 @@ impl Route {
         }
     }
 
+    /// Whether a page lists the selected source and shows nothing without one.
     pub fn requires_selected_source(&self) -> bool {
         matches!(
             self,
@@ -124,18 +125,6 @@ impl Route {
                 | Self::Moods
                 | Self::Folders { .. }
         )
-    }
-    /// Whether a page reads in the selected library: the playlist lists of its source, smart
-    /// playlists and their lists in its music folder.
-    pub fn uses_selected_source(&self) -> bool {
-        self.requires_selected_source()
-            || matches!(
-                self,
-                Self::Playlists
-                    | Self::SmartPlaylists
-                    | Self::PlaylistFolder { .. }
-                    | Self::SmartPlaylistDetail(_)
-            )
     }
 }
 

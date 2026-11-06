@@ -873,12 +873,7 @@ impl Context<'_> {
                     .entries
                     .iter()
                     .zip(0..)
-                    .filter(|(entry, _)| {
-                        snapshot
-                            .tracks
-                            .live(entry.track)
-                            .is_some_and(|record| self.in_folder(record, folder))
-                    })
+                    .filter(|(entry, _)| snapshot.tracks.live(entry.track).is_some())
                     .map(|(entry, position)| (entry.track, entry.key as u32, position))
                     .collect()
             }
@@ -983,7 +978,8 @@ impl Context<'_> {
             .iter()
             .map(|(read, _)| {
                 let owner = self.collection_source(&read.collection);
-                let folder = self.folder_slot(read.folder, owner)?;
+                let folder = read.folder.filter(|_| read.collection.follows_folder());
+                let folder = self.folder_slot(folder, owner)?;
                 Some((&read.collection, folder))
             })
             .collect::<Vec<_>>();
@@ -1254,15 +1250,11 @@ fn compare_items(
 }
 
 impl Context<'_> {
-    /// Totals of a playlist's entries, hidden tracks included. A source playlist in a music
-    /// folder counts only the entries in it.
-    pub(crate) fn playlist_totals(&self, record: &PlaylistRec, folder: Option<u32>) -> Totals {
+    /// Totals of a playlist's entries, hidden tracks included, in every music folder.
+    pub(crate) fn playlist_totals(&self, record: &PlaylistRec) -> Totals {
         let mut totals = Totals::default();
-        let scoped = record.source != NO_SOURCE;
         for entry in &record.entries {
-            if let Some(track) = self.snapshot.tracks.live(entry.track)
-                && (!scoped || self.in_folder(track, folder))
-            {
+            if let Some(track) = self.snapshot.tracks.live(entry.track) {
                 totals.add_member(track);
             }
         }
@@ -1355,9 +1347,6 @@ impl Context<'_> {
                 self.listed_playlist(record)
                     && (record.source == NO_SOURCE
                         || source.is_some_and(|source| record.source == source))
-                    && (record.source == NO_SOURCE
-                        || folder.is_none()
-                        || self.playlist_totals(record, folder).tracks > 0)
             })
             .map(|(_, record)| {
                 let name = snapshot.text(record.name);
@@ -1366,7 +1355,7 @@ impl Context<'_> {
                     name,
                     sort: name.to_lowercase(),
                     position: i64::from(record.created),
-                    totals: self.playlist_totals(record, folder),
+                    totals: self.playlist_totals(record),
                     folder: (record.folder != 0).then_some(record.folder),
                 }
             })

@@ -539,17 +539,12 @@ fn source_item(
     row: &Row,
     link: rufin_core::detail_links::DetailLink,
 ) -> gtk::gio::MenuItem {
-    let (media_uri, source_id, album_artist) = match row {
-        Row::Track(track) | Row::AlbumTrack { track, .. } => {
-            (&track.media_uri, track.source_id.as_deref(), false)
-        }
-        Row::Album(album) | Row::AlbumHeading(album) => (&album.media_uri, None, false),
-        Row::Artist(artist) => (&artist.media_uri, None, artist.album_artist),
+    let (media_uri, album_artist) = match row {
+        Row::Track(track) | Row::AlbumTrack { track, .. } => (&track.media_uri, false),
+        Row::Album(album) | Row::AlbumHeading(album) => (&album.media_uri, false),
+        Row::Artist(artist) => (&artist.media_uri, artist.album_artist),
         _ => unreachable!("Go to leads to a source only from tracks, albums and artists"),
     };
-    let source_id = source_id
-        .map(sources::SourceId::new)
-        .or_else(|| library::source_entity_parts(media_uri).map(|(id, _, _)| id));
     let window = surface
         .popover()
         .root()
@@ -563,10 +558,6 @@ fn source_item(
             return;
         };
         let source = shell.products.source.clone();
-        let folder = source
-            .selected_library()
-            .filter(|selected| source_id.as_ref() == Some(&selected.source_id))
-            .and_then(|selected| selected.music_folder_key);
         let media_uri = media_uri.clone();
         let url = link.url.clone();
         let feedback = Rc::clone(&shell.control_feedback);
@@ -579,7 +570,7 @@ fn source_item(
                         .map_err(|error| error.to_string())
                 } else {
                     let uri = source
-                        .collection_folder_uri(media_uri, album_artist, folder)
+                        .collection_folder_uri(media_uri, album_artist)
                         .recv()
                         .await
                         .map_err(|error| error.to_string())??;

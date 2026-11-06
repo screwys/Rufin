@@ -1625,13 +1625,12 @@ impl SourceOwner {
         self.shared.selected()
     }
 
-    /// Browsing uses the requested source and folder without changing desktop selection.
-    #[allow(clippy::too_many_arguments)]
+    /// The folder holding an album's or artist's files, in the selected music folder when the
+    /// collection is of the selected source.
     pub fn collection_folder_uri(
         &self,
         media_uri: String,
         album_artist: bool,
-        folder: Option<library::FolderKey>,
     ) -> Receiver<Result<String, String>> {
         self.reply(move |owner, catalog| async move {
             let Some(source_id) = owner.media_source_id(&media_uri).await? else {
@@ -1648,6 +1647,10 @@ impl SourceOwner {
             let configuration = owner
                 .configuration(&source_id)
                 .ok_or_else(source_access_unavailable)?;
+            let folder = owner
+                .selected_library()
+                .filter(|selected| selected.source_id == source_id)
+                .and_then(|selected| selected.music_folder_key);
             let (first, last) = catalog
                 .collection_source_path_bounds(&media_uri, album_artist, folder)
                 .await

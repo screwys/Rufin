@@ -310,22 +310,16 @@ impl AndroidPlayer {
     pub async fn folder_uri(
         &self,
         media_uri: String,
-        source_id: Option<String>,
         origin_route: Option<rufin_core::route::Route>,
     ) -> Result<String, AndroidError> {
-        let source = &self.products.source;
-        let folder = source
-            .selected_library()
-            .filter(|selected| Some(selected.source_id.as_str()) == source_id.as_deref())
-            .and_then(|selected| selected.music_folder_key);
-        source
+        self.products
+            .source
             .collection_folder_uri(
                 media_uri,
                 matches!(
                     origin_route,
                     Some(rufin_core::route::Route::AlbumArtistDetail(_))
                 ),
-                folder,
             )
             .recv()
             .await

@@ -101,7 +101,7 @@ internal class BrowsePage(
     }
 
     private data class PageContext(
-        val library: AndroidLibrary?, val sourceId: String?, val changes: Int,
+        val library: AndroidLibrary?, val opens: Boolean, val changes: Int,
         val route: Route, val category: CollectionCategory, val historyCurrent: Boolean, val filter: String,
         val sort: LibraryField?, val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
@@ -231,7 +231,14 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library, connection.sources?.selectedSourceId,
+            // A page that lists a source opens once one is selected; selecting another source or
+            // music folder reaches it through `changes`.
+            val route = location.route
+            val needsSource = !pins && !(route is Route.Playlists || route is Route.PlaylistDetail ||
+                route is Route.SmartPlaylists || route is Route.SmartPlaylistDetail || route is Route.PlaylistFolder) &&
+                !(route is Route.History && !options.historyCurrent)
+            if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library,
+                !needsSource || connection.sources?.selectedSourceId != null,
                 if (parent != null) parent.preparedContext?.changes ?: 0 else changes,
                 location.route, options.category, options.historyCurrent, options.filter, options.sort, options.descending,
                 options.favoritesOnly, options.downloadedOnly,
@@ -244,9 +251,7 @@ internal class BrowsePage(
             try {
                 val labelsVersion = browse.labelsVersion
                 val route = context.route
-                val playlists = route is Route.Playlists || route is Route.PlaylistDetail || route is Route.SmartPlaylists ||
-                    route is Route.SmartPlaylistDetail || route is Route.PlaylistFolder
-                if (!pins && context.sourceId == null && !playlists && !(route is Route.History && !context.historyCurrent)) return@mapLatest null
+                if (!context.opens) return@mapLatest null
                 // An artist's favorite tracks start from the rows the artist's page read.
                 val favoriteSeed = context.parentPage?.takeIf {
                     context.filter == parent?.preparedContext?.filter && !context.favoritesOnly && !context.downloadedOnly

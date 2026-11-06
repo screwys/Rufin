@@ -453,7 +453,8 @@ function init() {
           : {
               name,
               ...newPlaylistUris,
-              selection_source: newPlaylistUris.source ?? state.source,
+              selection_source: state.source,
+              folder: state.selectedLibrary,
               source:
                 $("playlist-owner").getAttribute("aria-pressed") === "true"
                   ? playlistSource.id

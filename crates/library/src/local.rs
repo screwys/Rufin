@@ -270,8 +270,8 @@ impl Catalog {
     }
 
     /// Tracks of an album, an artist or a single track URI, hidden ones included, by key. An
-    /// artist counts in one role, or in both when no role is given. A music folder scopes
-    /// albums and artists.
+    /// artist counts in one role, or in both when no role is given. A music folder narrows an
+    /// artist; an album stays whole, as [`crate::Collection::follows_folder`] reads it.
     async fn collection_members(
         &self,
         connection: &mut sqlx::SqliteConnection,
@@ -280,7 +280,7 @@ impl Catalog {
         folder: Option<crate::FolderKey>,
     ) -> LibraryResult<Vec<i64>> {
         let kind = crate::source_entity_parts(uri).map(|(_, kind, _)| kind);
-        let folder = folder.filter(|_| matches!(kind.as_deref(), Some("album" | "artist")));
+        let folder = folder.filter(|_| kind.as_deref() == Some("artist"));
         let owner: Option<i64> = match kind.as_deref() {
             Some("album") => sqlx::query_scalar("SELECT album_key FROM albums WHERE media_uri=?1"),
             Some("artist") => {
@@ -452,9 +452,7 @@ impl Catalog {
                     snapshot
                         .playlists
                         .get(row.playlist_key.raw())
-                        .map(|playlist| {
-                            i64::from(context.playlist_totals(playlist, None).downloaded)
-                        }),
+                        .map(|playlist| i64::from(context.playlist_totals(playlist).downloaded)),
                 ),
                 Shown::Smart(row) => (
                     &mut row.downloaded_count,

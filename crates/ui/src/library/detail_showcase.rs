@@ -848,16 +848,13 @@ fn detail_source_button(
     let source = shell.products.source.clone();
     let window = shell.chrome.window.downgrade();
     let media_uri = media_uri.to_owned();
-    let scope = shell
-        .selected_library()
-        .and_then(|selected| selected.music_folder_key);
     button.connect_clicked(move |button| {
         let Some(window) = window.upgrade() else {
             return;
         };
         button.set_sensitive(false);
         let button = button.downgrade();
-        let receiver = source.collection_folder_uri(media_uri.clone(), album_artist, scope);
+        let receiver = source.collection_folder_uri(media_uri.clone(), album_artist);
         glib::spawn_future_local(async move {
             let result = async {
                 let uri = receiver.recv().await.map_err(|error| error.to_string())??;

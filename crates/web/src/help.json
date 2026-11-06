@@ -101,7 +101,7 @@
         "track URI"
       ]
     },
-    "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), selection_source (origin of a collection being added), current (optional saved destination preference), and public (optional visibility for supported server playlists). Omit public to keep the existing creation default. Newly created playlists are pinned like in the desktop app.",
+    "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), uris or a selection to start with (see playlist_selection; its source is selection_source, as source names the owner), and public (optional visibility for supported server playlists). Omit public to keep the existing creation default. Newly created playlists are pinned like in the desktop app.",
     "PATCH /api/playlists": {
       "id": 1,
       "name": "New name",
@@ -345,7 +345,7 @@
   "events": "Update routes use server-sent events (SSE). Each data line contains JSON. The combined events route also follows theme changes.",
   "browser": "GET / serves full HTML pages for login, browsing and playback without JavaScript. POST /session accepts a token form field and sets a persistent HttpOnly, SameSite=Lax session cookie. Reconnecting renews the same browser session so open tabs remain valid. It survives browser and controller restarts while the API token is unchanged. Signing out clears the browser cookie; changing the API token invalidates existing cookies. Accept: application/json returns the browser CSRF token. Cookie-authenticated API writes require X-Rufin-CSRF for JSON requests or a csrf form field. The same API routes accept browser forms and redirect after success; logout forms also require csrf. API clients can continue using Authorization: Bearer without cookies.",
   "html": "Library browsing routes return HTML for the web page when HX-Request is true. Other callers receive JSON.",
-  "playlist_selection": "When creating a playlist or adding entries, selection can replace uris: {kind: album, artist, playlist or smart_playlist, id}. Source and folder select the library for the tracks.",
+  "playlist_selection": "When creating a playlist or adding entries, selection can replace uris: {kind: album, artist, genre, playlist or smart_playlist, id}; an artist also takes album_artists. The tracks are what the collection's page lists, in its saved order, in the source and music folder the request names: source and folder on POST /api/playlists/entries, selection_source and folder on POST /api/playlists. folder is a music folder id from GET /api/sources (libraries); it narrows artists, genres and smart playlists to that source's tracks in the folder, while albums and playlists stay whole. Without a folder the collection is read in every folder.",
   "queue_modes": {
     "replace": "Play now and replace the queue",
     "append": "Add to the end of the queue",

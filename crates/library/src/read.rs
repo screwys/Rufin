@@ -1010,7 +1010,7 @@ impl<'a> Builder<'a> {
             })
             .collect::<Vec<_>>();
         genres.sort_by(|a, b| (&a.0, &a.1, a.2.key).cmp(&(&b.0, &b.1, b.2.key)));
-        let summary = self.context.playlist_totals(record, None).summary();
+        let summary = self.context.playlist_totals(record).summary();
         let object_id = text(snapshot, record.object);
         let source = self.source(record.source);
         let source_id = source.map(|source| source.object.clone());

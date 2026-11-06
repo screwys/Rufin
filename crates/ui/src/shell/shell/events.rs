@@ -1,5 +1,4 @@
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use gtk::glib;
@@ -158,21 +157,31 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 }
 
-/// The configured sources or the selection changed.
+/// The configured sources or the selection changed. A new source or music folder is read
+/// from the change that follows it (`Changed::scope`), once the selection here is current.
 fn apply_source_configuration(shell: &Rc<Shell>) {
-    let configured = shell.products.source.list_sources();
+    *shell.source.configured.borrow_mut() = shell.products.source.list_sources();
+    shell.products.lyrics.refresh_write_access();
+    shell.chrome.topbar.refresh_lyrics_cache_prompt();
     match shell.products.source.selected_library() {
-        Some(selected) if selected_changed(shell, &selected) => {
-            apply_selected_source(shell, configured, selected)
+        Some(selected) => {
+            if !install_selected(shell, selected) {
+                shell.refresh_playlist_picker();
+            }
+            if !shell.startup.route_revealed.get()
+                && !shell.source.operation.borrow().blocks_library()
+            {
+                shell.prepare_startup_route_content();
+            }
         }
-        Some(_) => apply_configured_sources(shell, configured),
         None => {
-            apply_configured_sources(shell, configured);
+            shell.refresh_playlist_picker();
             if shell.selected_library().is_some() {
                 release_selected_source(shell);
             }
         }
     }
+    shell.player_ui.update_bottom_player();
 }
 
 fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
@@ -196,70 +205,39 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
     }
 }
 
+/// No source is selected any more, which no change follows: the page opens again here.
 fn release_selected_source(shell: &Rc<Shell>) {
     shell.search_session.set_selected(None);
     let released = shell.selected_ui.take();
     drop(released);
-    let route = shell.navigation.routes.borrow().current().clone();
-    if shell.route_uses_selected_source(&route) {
-        shell.replace_current_route_when_ready();
-    }
-    shell.player_ui.update_bottom_player();
+    shell.replace_current_route_when_ready();
 }
 
-fn apply_configured_sources(
-    shell: &Rc<Shell>,
-    configured: rufin_core::runtime::source::ConfiguredSources,
-) {
-    *shell.source.configured.borrow_mut() = configured;
-    shell.products.lyrics.refresh_write_access();
-    shell.chrome.topbar.refresh_lyrics_cache_prompt();
-    shell.refresh_playlist_picker();
-    shell.player_ui.update_bottom_player();
-}
-
-fn selected_changed(shell: &Rc<Shell>, selected: &rufin_core::runtime::SelectedLibrary) -> bool {
-    shell.selected_library().as_deref().is_none_or(|previous| {
+/// Makes `selected` the selection here: a new session for another source or music folder,
+/// whose dialogs close with the old one. Whether it was another.
+fn install_selected(shell: &Rc<Shell>, selected: rufin_core::runtime::SelectedLibrary) -> bool {
+    let changed = shell.selected_library().as_deref().is_none_or(|previous| {
         previous.source_key != selected.source_key
             || previous.music_folder_key != selected.music_folder_key
             || previous.music_folder_object_id != selected.music_folder_object_id
-    })
-}
-
-fn apply_selected_source(
-    shell: &Rc<Shell>,
-    configured: rufin_core::runtime::source::ConfiguredSources,
-    selected: rufin_core::runtime::SelectedLibrary,
-) {
-    *shell.source.configured.borrow_mut() = configured;
-    shell
-        .selected_ui
-        .install(super::selected_ui::SelectedUiSession::new(selected.clone()));
-    shell.search_session.set_selected(Some(selected));
-    shell.refresh_playlist_picker();
-    let route = shell.navigation.routes.borrow().current().clone();
-    if shell.route_uses_selected_source(&route) {
-        shell.replace_current_route_when_ready();
+    });
+    if changed {
+        shell
+            .selected_ui
+            .install(super::selected_ui::SelectedUiSession::new(selected));
+    } else if let Some(mut session) = shell.selected_ui.session_mut() {
+        session.library = selected;
     }
-    if !shell.startup.route_revealed.get() && !shell.source.operation.borrow().blocks_library() {
-        shell.prepare_startup_route_content();
-    }
+    changed
 }
 
 fn apply_changed(shell: &Rc<Shell>, changed: &Changed) {
-    if let Some(selected) = shell.products.source.selected_library()
-        && (changed.sources.contains(&selected.source_key)
-            || changed.scope == Some(selected.source_key))
-        && shell
-            .selected_library()
-            .is_some_and(|current| current.source_key == selected.source_key)
+    // The reads below run in the selection as it is now, which the configuration event may
+    // not have installed yet.
+    if (changed.all || changed.scope.is_some() || !changed.sources.is_empty())
+        && let Some(selected) = shell.products.source.selected_library()
     {
-        {
-            let mut session = shell.selected_ui.session_mut().unwrap();
-            session.library.music_folder_key = selected.music_folder_key;
-            session.library.music_folder_object_id = selected.music_folder_object_id.clone();
-            session.library.music_folders = Arc::clone(&selected.music_folders);
-        }
+        install_selected(shell, selected.clone());
         shell.search_session.set_selected(Some(selected));
     }
     shell.search_session.show_states(&changed.items);

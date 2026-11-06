@@ -11,9 +11,6 @@ function mediaSelection(kind, row) {
   return {
     kind,
     row,
-    source: row.source ?? state.source,
-    folder:
-      row.source && row.source !== state.source ? null : state.selectedLibrary,
     ...(row.page ? { page: row.page } : { uris: [row.uri] }),
   };
 }
@@ -76,8 +73,8 @@ function queueMedia(media, mode = "append", position = {}) {
 function playlistMedia(id, media) {
   return api("/playlists/entries", "POST", {
     id,
-    source: media.source || null,
-    folder: media.folder,
+    source: state.source || null,
+    folder: state.selectedLibrary,
     ...(media.uris
       ? { uris: media.uris }
       : {

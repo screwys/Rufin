@@ -217,7 +217,10 @@ impl SourceOwner {
         let mut selected = selected.cloned();
         if !scope.keeps_folder(matches!(
             route,
-            Route::Folders { .. } | Route::SmartPlaylistDetail(_)
+            Route::Folders { .. }
+                | Route::SmartPlaylists
+                | Route::PlaylistFolder { smart: true, .. }
+                | Route::SmartPlaylistDetail(_)
         )) && let Some(selected) = &mut selected
         {
             selected.music_folder_key = None;
@@ -805,8 +808,18 @@ impl View {
         self.refresh_selected(self.selected.as_ref(), changed)
     }
 
+    /// Whether it reads the same in `selected` as in the library it opened in.
+    pub fn reads_same_in(&self, selected: Option<&SelectedLibrary>) -> bool {
+        same_scope(
+            &self.route,
+            self.options.search_mode,
+            self.selected.as_ref(),
+            selected,
+        )
+    }
+
     /// [`View::refresh`] for a page that follows the selection: now that `current` is
-    /// selected, a page opened for another source or music folder opens again.
+    /// selected, a page that reads another source or music folder in it opens again.
     pub fn refresh_selected(
         &self,
         current: Option<&SelectedLibrary>,
@@ -947,31 +960,36 @@ impl View {
                 Some(PlayRequest::track(track.track_key, placement))
             }
             Row::AlbumTrack { track, .. } => {
-                let list = self
-                    .settings
-                    .library_list(LibraryListKey::AlbumDetailTracks);
-                let mut read = MemberRead::new(Collection::Album(track.links.album_key?));
-                read.sort = Some(list.sort_key);
-                read.descending = list.descending;
-                let uri = track.links.album_media_uri.clone()?;
+                let route = Route::AlbumDetail(track.links.album_media_uri.clone()?);
+                let read = self.page_members(&route, Collection::Album(track.links.album_key?));
+                let context = context_id(
+                    &route,
+                    self.selected.as_ref(),
+                    &OpenOptions::default(),
+                    read.sort?,
+                    read.descending,
+                );
                 Some(
                     PlayRequest::captured(read.selection(), 0, placement, false)
-                        .with_context(with_result(
-                            context_id(
-                                &Route::AlbumDetail(uri),
-                                None,
-                                &OpenOptions::default(),
-                                list.sort_key,
-                                list.descending,
-                            ),
-                            result,
-                        ))
+                        .with_context(with_result(context, result))
                         .with_anchor(track.track_key, None)
                         .shuffled(shuffled),
                 )
             }
             _ => None,
         }
+    }
+
+    /// What the page of `collection` on `route` lists unfiltered, in its saved order and this
+    /// page's music folder: the read its card Play queues.
+    fn page_members(&self, route: &Route, collection: Collection) -> MemberRead {
+        member_read(
+            route,
+            self.selected.as_ref(),
+            &OpenOptions::default(),
+            &self.settings,
+            collection,
+        )
     }
 
     /// What playing Home's section `index` queues: its rows in the order it shows them, from
@@ -985,25 +1003,19 @@ impl View {
         result: Option<&str>,
     ) -> Option<PlayRequest> {
         let section = self.home_sections()?.into_iter().nth(index)?;
-        // Each album and genre as its page lists it whole.
-        let page = |collection, list| {
-            let mut read = saved_members(collection, list, &self.settings);
-            read.folder = self
-                .selected
-                .as_ref()
-                .and_then(|selected| selected.music_folder_key);
-            read.selection()
+        // Each album and genre as its page lists it: an album whole, a genre in the folder.
+        let album = |album: &library::AlbumRow| {
+            self.page_members(&Route::of_album(album), Collection::Album(album.album_key))
+                .selection()
         };
-        let album = |key| page(Collection::Album(key), LibraryListKey::AlbumDetailTracks);
         let selections = match &section {
-            HomeSection::Showcase(row) => vec![album(row.album.album_key)],
+            HomeSection::Showcase(row) => vec![album(&row.album)],
             HomeSection::Genres(genres) => genres
                 .iter()
                 .map(|genre| {
-                    page(
-                        Collection::Genre(library::GenreKey::from_raw(genre.key)),
-                        LibraryListKey::GenreTracks,
-                    )
+                    let key = library::GenreKey::from_raw(genre.key);
+                    self.page_members(&Route::GenreDetail(key), Collection::Genre(key))
+                        .selection()
                 })
                 .collect(),
             HomeSection::Rows { .. } | HomeSection::Provider(_) => section
@@ -1014,7 +1026,7 @@ impl View {
                         source: None,
                         keys: vec![row.track.track_key].into(),
                     },
-                    HomeItem::Album(row) => album(row.album.album_key),
+                    HomeItem::Album(row) => album(&row.album),
                 })
                 .collect(),
         };
@@ -1717,13 +1729,15 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
     else {
         return None;
     };
-    let mut read = saved_members(
+    let mut read = member_read(
+        &Route::ArtistTracks(String::new()),
+        None,
+        &OpenOptions::default(),
+        settings,
         Collection::Artist {
             key: *artist,
             album_artist: *album_artist,
         },
-        LibraryListKey::ArtistTracks,
-        settings,
     );
     read.folder = releases.folder;
     let filtered = !releases.filter.trim().is_empty()
@@ -1736,16 +1750,6 @@ fn artist_tracks(releases: &ListRead, settings: &Settings) -> Option<MemberRead>
     Some(read)
 }
 
-/// `collection`'s tracks in `list`'s saved order, as its page lists them unfiltered.
-fn saved_members(collection: Collection, list: LibraryListKey, settings: &Settings) -> MemberRead {
-    let list = settings.library_list(list);
-    let mut read = MemberRead::new(collection);
-    read.sort = Some(list.sort_key);
-    read.descending = list.descending;
-    read.activity = list.sort_key.activity_sensitive();
-    read
-}
-
 /// The `ranges` of a list's rows for `scope`, all of them when None, in the list's order:
 /// each row's collection as route_selection reads its page, in that page's saved order and
 /// the list's music folder as `scope` keeps it.
@@ -1756,18 +1760,22 @@ fn rows_selection(
     scope: SelectionScope,
 ) -> MemberSelection {
     let page = match read.kind {
-        ListKind::Albums | ListKind::ArtistAlbums { .. } => LibraryListKey::AlbumDetailTracks,
-        ListKind::Artists { .. } => LibraryListKey::ArtistTracks,
-        ListKind::Genres => LibraryListKey::GenreTracks,
-        ListKind::Moods => LibraryListKey::MoodTracks,
-        ListKind::Playlists => LibraryListKey::PlaylistTracks,
-        ListKind::SmartPlaylists { .. } => LibraryListKey::SmartPlaylistTracks,
+        ListKind::Albums | ListKind::ArtistAlbums { .. } => Route::AlbumDetail(String::new()),
+        ListKind::Artists { .. } => Route::ArtistTracks(String::new()),
+        ListKind::Genres => Route::GenreDetail(library::GenreKey::from_raw(0)),
+        ListKind::Moods => Route::MoodDetail(library::MoodKey::from_raw(0)),
+        ListKind::Playlists => Route::PlaylistDetail(library::PlaylistKey::from_raw(0)),
+        ListKind::SmartPlaylists { .. } => {
+            Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(0))
+        }
     };
-    // Each row's collection takes the place of this one.
-    let mut members = saved_members(
-        Collection::Album(library::AlbumKey::from_raw(0)),
-        page,
+    // Each row's page reads its collection, which takes the place of this one.
+    let mut members = member_read(
+        &page,
+        None,
+        &OpenOptions::default(),
         settings,
+        Collection::Album(library::AlbumKey::from_raw(0)),
     );
     members.folder = read
         .folder
@@ -1846,6 +1854,39 @@ pub fn refresh(
     )
 }
 
+/// Whether a page on `route` reads the same in library `a` as in `b`, by the one music folder
+/// rule (decisions.md, 2026-11-06): album and playlist pages and the play history read neither
+/// source nor folder, as a lyrics search; the playlist lists read the source; every other page
+/// reads the source and its music folder, which [`library::Collection::follows_folder`] applies
+/// to the collections it reads.
+pub fn same_scope(
+    route: &Route,
+    search_mode: library::SearchMode,
+    a: Option<&SelectedLibrary>,
+    b: Option<&SelectedLibrary>,
+) -> bool {
+    let (source, folder) = match route {
+        Route::AlbumDetail(_) | Route::PlaylistDetail(_) | Route::History => (false, false),
+        Route::Search if search_mode == library::SearchMode::Lyrics => (false, false),
+        Route::Playlists | Route::PlaylistFolder { smart: false, .. } => (true, false),
+        _ => (true, true),
+    };
+    let key = |selected: Option<&SelectedLibrary>| {
+        (
+            source.then(|| selected.map(|selected| selected.source_key)),
+            folder.then(|| {
+                selected.map(|selected| {
+                    (
+                        selected.music_folder_key,
+                        selected.music_folder_object_id.clone(),
+                    )
+                })
+            }),
+        )
+    };
+    key(a) == key(b)
+}
+
 /// What a committed change means for a page on `route`, opened while `opened_with` was
 /// selected, now that `current` is.
 fn changes(
@@ -1858,16 +1899,10 @@ fn changes(
 ) -> Refresh {
     let selected = current.map(|selected| selected.source_key);
     let affects = |source: Option<SourceKey>| source.is_none() || source == selected;
-    let uses_source = route.uses_selected_source()
-        && (route != &Route::Search || options.search_mode == library::SearchMode::Title);
+    // A lyrics search reads every source.
+    let uses_source = route != &Route::Search || options.search_mode == library::SearchMode::Title;
     let unaffected = |source| !affects(source) && route.requires_selected_source() && uses_source;
-    let scope = |selected: &SelectedLibrary| {
-        (
-            selected.source_key,
-            selected.music_folder_key,
-            selected.music_folder_object_id.clone(),
-        )
-    };
+    let same = same_scope(route, options.search_mode, opened_with, current);
     let mut refresh = Refresh::Nothing;
     // Favorites and ratings are patched into the rows that show them; a page whose rows they
     // order or filter reads again through `View::states_reorder`.
@@ -1879,7 +1914,7 @@ fn changes(
     for source in catalog {
         refresh = refresh.max(if unaffected(source) {
             Refresh::Nothing
-        } else if uses_source && opened_with.map(scope) != current.map(scope) {
+        } else if !same {
             Refresh::Reopen
         } else {
             Refresh::Reread
@@ -1905,10 +1940,7 @@ fn changes(
             refresh = refresh.max(Refresh::Reread);
         }
     }
-    if changed
-        .scope
-        .is_some_and(|source| affects(Some(source)) && uses_source)
-    {
+    if changed.scope.is_some() && !same {
         refresh = Refresh::Reopen;
     }
     if route == &Route::Home && changed.home.iter().any(|source| affects(Some(*source))) {

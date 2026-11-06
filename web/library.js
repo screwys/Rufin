@@ -744,11 +744,6 @@ function bindCards(host) {
                     id: row.id,
                     album_artists: !!row.album_artists,
                   },
-                  source: row.source ?? state.source,
-                  folder:
-                    row.source && row.source !== state.source
-                      ? null
-                      : state.selectedLibrary,
                 },
           ),
         );

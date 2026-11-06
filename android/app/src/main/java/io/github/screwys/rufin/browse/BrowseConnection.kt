@@ -1,7 +1,6 @@
 package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.library.QueuePlacement
-import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.shared.library.SearchMode
@@ -108,7 +107,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         ?.let { BrowseLocation(it.route, it.title, optionsFor(it.id)) }
 
     private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
-        val library: AndroidLibrary?, val source: ConfiguredSources?, val changes: Int, val submission: Int)
+        val library: AndroidLibrary?, val changes: Int, val submission: Int)
 
     fun submitSearch() {
         if (searchMode == SearchMode.LYRICS) searchSubmission++
@@ -145,8 +144,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
         scope.launch {
             var submitted = 0
-            snapshotFlow { SearchContext(section, searchText, searchMode, library,
-                if (searchMode == SearchMode.TITLE) connection.sources else null, searchChanges, searchSubmission) }
+            snapshotFlow { SearchContext(section, searchText, searchMode, library, searchChanges, searchSubmission) }
                 .debounce { if (it.submission != submitted) 0L else 250L }.collectLatest { context ->
                     val explicit = context.submission != submitted
                     submitted = context.submission
@@ -160,10 +158,11 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     searchLoading = true
                     try {
                         searchRows = withContext(Dispatchers.Default) {
-                            val rows = context.library.search(context.text, context.mode)
+                            val found = context.library.search(context.text, context.mode)
+                            val rows = found.rows
                             val order = rows.filter { it.isTrack }.map { it.mediaUri }
                             val capture = if (context.mode == SearchMode.LYRICS) "search:lyrics:${context.text}"
-                                else "search:${context.source?.selectedSourceId}:title:${context.text}"
+                                else "search:${found.sourceId}:title:${context.text}"
                             rows.mapIndexed { index, row ->
                                 BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
                             }
