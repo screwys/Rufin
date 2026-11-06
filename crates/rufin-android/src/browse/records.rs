@@ -124,6 +124,14 @@ pub struct AndroidOpened {
     pub reading: Arc<AndroidReading>,
 }
 
+/// A window of a page's rows and what committed while it read them.
+#[derive(uniffi::Record)]
+pub struct AndroidRows {
+    pub rows: Vec<AndroidBrowseRow>,
+    /// What committed while it read, which the page handles once it holds the rows.
+    pub reading: Arc<AndroidReading>,
+}
+
 /// What committed while a page read, which the page handles as any other change once it shows
 /// what it read.
 #[derive(uniffi::Object)]

@@ -656,7 +656,7 @@ internal class BrowseChoiceSource(
                 val opened = library.open(tracks, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false, null, null, true)
                 try {
                     val count = opened.count.toInt()
-                    val rows = opened.view.rows(offset.toULong(), params.loadSize.toUInt())
+                    val rows = opened.view.rows(offset.toULong(), params.loadSize.toUInt()).rows
                     LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))

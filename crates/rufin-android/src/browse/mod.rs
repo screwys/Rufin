@@ -9,7 +9,7 @@ pub use records::{
     AndroidDetailSummary, AndroidFieldChoice, AndroidFieldValue, AndroidHomeSection,
     AndroidHomeSectionKind, AndroidMusicFolder, AndroidMusicFolderState, AndroidOpened,
     AndroidPinPage, AndroidPlaylistImport, AndroidReading, AndroidRouteDescriptor,
-    AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
+    AndroidRouteSetting, AndroidRows, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{MemberSelection, ReadCancellation, Row};
@@ -294,13 +294,14 @@ impl AndroidView {
         self.view.route().clone()
     }
 
-    /// Rows `offset` onwards, at most `limit` and 256.
+    /// Rows `offset` onwards, at most `limit` and 256, and what committed while they read.
     pub async fn rows(
         self: Arc<Self>,
         offset: u64,
         limit: u32,
-    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
+    ) -> Result<AndroidRows, AndroidError> {
         let runtime = self.runtime.clone();
+        let reading = AndroidReading::new(self.source.reading());
         run_read(&runtime, move |cancel| async move {
             let offset = usize::try_from(offset).map_err(error)?;
             let rows = self
@@ -308,7 +309,10 @@ impl AndroidView {
                 .rows(offset..offset + limit.min(256) as usize, &cancel)
                 .await
                 .map_err(error)?;
-            Ok(self.rows_from(rows, offset))
+            Ok(AndroidRows {
+                rows: self.rows_from(rows, offset),
+                reading,
+            })
         })
         .await
     }

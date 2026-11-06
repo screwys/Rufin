@@ -387,7 +387,8 @@ internal class BrowsePage(
                 context to Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
                     maxSize = 192, enablePlaceholders = !pins,
                     jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
-                    BrowsePagingSource(library, view, count, pins, display, location.playbackTitle, seeds, ::hold) { downloads }
+                    BrowsePagingSource(library, view, count, pins, display, location.playbackTitle, seeds, ::hold,
+                        { missed -> withContext(Dispatchers.Main) { handle(missed) } }) { downloads }
                 }.flow
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { connection.runAction { throw error }; null }
@@ -410,6 +411,8 @@ private class BrowsePagingSource(
     private val seeds: List<BrowseItem>?,
     /** Holds the rows it reads on the page, which patches them. */
     private val hold: (List<BrowseItem>) -> Unit,
+    /** Handles what committed while it read, once it holds the rows, as the page does any change. */
+    private val missed: suspend (Changed) -> Unit,
     /** The page's download changes so far, which the rows it reads show. */
     private val downloads: () -> Int,
 ) : PagingSource<Int, BrowseItem>() {
@@ -423,13 +426,16 @@ private class BrowsePagingSource(
             val item = { index: Int, row: AndroidBrowseRow ->
                 BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision)
             }
+            var reading: AndroidReading? = null
+            fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt()).also { reading = it.reading }.rows
             val items = pinPage?.rows?.mapIndexed(item) ?: if (offset == 0 && seeds != null) {
                 val ready = seeds.take(params.loadSize)
                 if (ready.size >= params.loadSize || ready.size >= total) ready
-                else ready + view!!.rows(ready.size.toULong(), (params.loadSize - ready.size).toUInt())
+                else ready + window(ready.size, params.loadSize - ready.size)
                     .mapIndexed { index, row -> item(ready.size + index, row) }
-            } else view!!.rows(offset.toULong(), params.loadSize.toUInt()).mapIndexed(item)
+            } else window(offset, params.loadSize).mapIndexed(item)
             hold(items)
+            reading?.missed()?.let { missed(it) }
             LoadResult.Page(items,
                 if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                 if (pins) pinPage?.nextOffset?.toInt() else if (offset + items.size >= total) null else offset + items.size,
