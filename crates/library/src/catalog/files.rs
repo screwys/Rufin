@@ -57,8 +57,8 @@ impl FileBatch {
 impl super::Observation<'_> {
     /// Stored rows in walk order, from `start` on (`inclusive`) or after it. `walked` are
     /// the roots this walk lists; rows of the source's other `configured` roots are left out,
-    /// and rows of roots no longer configured are included for the walk to vanish. A row is
-    /// imported when an import locator names it or, for a CUE sheet, one of its inputs.
+    /// and rows of roots no longer configured are included for the walk to vanish. A row no
+    /// configured root holds is imported when an import locator names it or a CUE input.
     pub async fn file_rows(
         &self,
         walked: &[String],
@@ -76,8 +76,8 @@ impl super::Observation<'_> {
         // roots after it. One OR'd cursor would scan the source from its first row.
         let arm = |cursor: &str| {
             format!(
-                "SELECT * FROM(SELECT {FILE_COLUMNS},EXISTS(SELECT 1 FROM local_locators locator WHERE locator.path=file.path AND {import})
-                    OR file.kind='cue' AND EXISTS(SELECT 1 FROM file_inputs input JOIN local_locators locator ON locator.path=input.path WHERE input.file_key=file.file_key AND {import}) imported
+                "SELECT * FROM(SELECT {FILE_COLUMNS},(EXISTS(SELECT 1 FROM local_locators locator WHERE locator.path=file.path AND {import})
+                    OR file.kind='cue' AND EXISTS(SELECT 1 FROM file_inputs input JOIN local_locators locator ON locator.path=input.path WHERE input.file_key=file.file_key AND {import})) AND root NOT IN(SELECT value FROM json_each(?3)) imported
                  FROM files file WHERE source_key=?1
                    AND(root IN(SELECT value FROM json_each(?2)) OR root NOT IN(SELECT value FROM json_each(?3))) AND {cursor}
                  ORDER BY root,replace(relative_path,'/',char(1)) LIMIT ?6)"
