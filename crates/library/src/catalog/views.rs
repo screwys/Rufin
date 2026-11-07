@@ -2236,9 +2236,7 @@ impl MemberRead {
             _ => [
                 self.favorites_only
                     || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
-                self.activity
-                    || sort.activity_sensitive()
-                    || matches!(self.collection, Collection::History { .. }),
+                sort.activity_sensitive() || matches!(self.collection, Collection::History { .. }),
                 self.downloaded_only,
                 matches!(self.collection, Collection::Playlist(_)),
             ],
@@ -2271,7 +2269,7 @@ impl ListRead {
             _ => [
                 self.favorites_only
                     || matches!(sort, LibraryField::Favorite | LibraryField::UserRating),
-                self.activity || sort.activity_sensitive(),
+                sort.activity_sensitive(),
                 false,
                 self.kind == ListKind::Playlists,
             ],
