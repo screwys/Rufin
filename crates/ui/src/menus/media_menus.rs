@@ -1001,74 +1001,18 @@ fn present_playlist_selection_menu(
     else {
         return false;
     };
-    let folder_targets = targets.clone();
-    let delete_shell = Rc::clone(shell);
-    let delete_target = target.downgrade();
-    let delete = move || {
-        let Some(target) = delete_target.upgrade() else {
-            return;
-        };
-        let shell = Rc::clone(&delete_shell);
-        let targets = targets.clone();
-        let dialog = crate::playlists::delete_playlists_dialog(targets.count(), move || {
-            let targets = targets.clone();
-            let source = shell.products.source.clone();
-            let catalog = Arc::clone(&shell.products.library);
-            let task = shell.products.runtime.spawn(async move {
-                let targets = targets.collections(&catalog).await?;
-                let mut smart = Vec::new();
-                let mut failure = None;
-                for collection in targets {
-                    match collection {
-                        library::Collection::Playlist(key) => {
-                            if let Err(error) =
-                                rufin_core::playlists::delete_playlist(&source, key).await
-                            {
-                                failure.get_or_insert_with(|| error.to_string());
-                            }
-                        }
-                        library::Collection::Smart { key, .. } => smart.push(key),
-                        _ => unreachable!("playlist selection contains playlists"),
-                    }
-                }
-                Ok::<_, String>((smart, failure))
-            });
-            let shell = Rc::clone(&shell);
-            glib::spawn_future_local(async move {
-                match task.await {
-                    Ok(Ok((smart, failure))) => {
-                        for key in smart {
-                            shell.publish_smart_playlist_change(
-                                SmartPlaylistChange::Delete(key),
-                                None,
-                                None,
-                            );
-                        }
-                        if let Some(error) = failure {
-                            shell.control_feedback.show_feedback_toast(error);
-                        }
-                    }
-                    Ok(Err(error)) => shell.control_feedback.show_feedback_toast(error),
-                    Err(error) => shell
-                        .control_feedback
-                        .show_feedback_toast(error.to_string()),
-                }
-            });
-        });
-        dialog.present(Some(&target));
-    };
     let catalog = shell.products.library.clone();
     let task = shell
         .products
         .runtime
-        .spawn(async move { folder_targets.collections(&catalog).await });
-    let shell = Rc::clone(shell);
+        .spawn(async move { targets.collections(&catalog).await });
+    let (shell, target) = (Rc::clone(shell), target.clone());
     glib::spawn_future_local(async move {
         match task.await {
             Ok(Ok(collections)) => {
                 let members = collections
-                    .into_iter()
-                    .filter_map(|collection| match collection {
+                    .iter()
+                    .filter_map(|collection| match *collection {
                         library::Collection::Playlist(key) => {
                             Some(library::PlaylistFolderMember::Playlist { key })
                         }
@@ -1083,6 +1027,63 @@ fn present_playlist_selection_menu(
                         &surface, &shell, members, in_folder,
                     );
                 }
+                let delete_shell = Rc::clone(&shell);
+                let delete_target = target.downgrade();
+                let delete = move || {
+                    let Some(target) = delete_target.upgrade() else {
+                        return;
+                    };
+                    let shell = Rc::clone(&delete_shell);
+                    let targets = collections.clone();
+                    let dialog =
+                        crate::playlists::delete_playlists_dialog(targets.len(), move || {
+                            let targets = targets.clone();
+                            let source = shell.products.source.clone();
+                            let task = shell.products.runtime.spawn(async move {
+                                let mut smart = Vec::new();
+                                let mut failure = None;
+                                for collection in targets {
+                                    match collection {
+                                        library::Collection::Playlist(key) => {
+                                            if let Err(error) =
+                                                rufin_core::playlists::delete_playlist(&source, key)
+                                                    .await
+                                            {
+                                                failure.get_or_insert_with(|| error.to_string());
+                                            }
+                                        }
+                                        library::Collection::Smart { key, .. } => smart.push(key),
+                                        _ => unreachable!("playlist selection contains playlists"),
+                                    }
+                                }
+                                Ok::<_, String>((smart, failure))
+                            });
+                            let shell = Rc::clone(&shell);
+                            glib::spawn_future_local(async move {
+                                match task.await {
+                                    Ok(Ok((smart, failure))) => {
+                                        for key in smart {
+                                            shell.publish_smart_playlist_change(
+                                                SmartPlaylistChange::Delete(key),
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                        if let Some(error) = failure {
+                                            shell.control_feedback.show_feedback_toast(error);
+                                        }
+                                    }
+                                    Ok(Err(error)) => {
+                                        shell.control_feedback.show_feedback_toast(error)
+                                    }
+                                    Err(error) => shell
+                                        .control_feedback
+                                        .show_feedback_toast(error.to_string()),
+                                }
+                            });
+                        });
+                    dialog.present(Some(&target));
+                };
                 surface.append_fixed_action(msgid("Delete"), DELETE_ICON, delete);
                 surface.popup();
             }
