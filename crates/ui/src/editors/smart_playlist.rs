@@ -127,13 +127,7 @@ fn suggestions_for(
 impl SmartPlaylistEditor {
     fn definition(&self) -> Option<(String, SmartPlaylistDefinition)> {
         let name = playlist_name(&self.name.text())?;
-        let limit = self
-            .limit
-            .text()
-            .trim()
-            .parse::<usize>()
-            .ok()
-            .filter(|value| *value > 0);
+        let limit = playlist_limit(&self.limit.text())?;
         let sort_field = SmartPlaylistSort::ALL
             .get(self.sort.selected() as usize)
             .copied()
@@ -893,18 +887,33 @@ fn playlist_name(value: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-fn sync_editor_button_enabled(button: &gtk::Button, editor: &SmartPlaylistEditor) {
-    button.set_sensitive(playlist_name(&editor.name.text()).is_some());
+/// The limit `value` sets, none when blank; a value that is not a positive number does not save.
+fn playlist_limit(value: &str) -> Option<Option<usize>> {
+    let value = value.trim();
+    let limit = value.parse::<usize>().ok().filter(|limit| *limit > 0);
+    (value.is_empty() || limit.is_some()).then_some(limit)
 }
 
-fn connect_editor_name_validation(button: &gtk::Button, editor: &SmartPlaylistEditor) {
-    let button = button.downgrade();
-    editor.name.connect_changed(move |name| {
-        let Some(button) = button.upgrade() else {
-            return;
-        };
-        button.set_sensitive(playlist_name(&name.text()).is_some());
+fn connect_editor_validation(button: &gtk::Button, editor: &SmartPlaylistEditor) {
+    let (button, name, limit) = (
+        button.downgrade(),
+        editor.name.downgrade(),
+        editor.limit.downgrade(),
+    );
+    let sync = Rc::new(move || {
+        if let (Some(button), Some(name), Some(limit)) =
+            (button.upgrade(), name.upgrade(), limit.upgrade())
+        {
+            button.set_sensitive(
+                playlist_name(&name.text()).is_some() && playlist_limit(&limit.text()).is_some(),
+            );
+        }
     });
+    sync();
+    for entry in [&editor.name, &editor.limit] {
+        let sync = Rc::clone(&sync);
+        entry.connect_changed(move |_| sync());
+    }
 }
 
 #[cfg(test)]
@@ -1110,8 +1119,7 @@ fn build_dialog(
         submit,
         ..
     } = surface;
-    sync_editor_button_enabled(&submit, &editor);
-    connect_editor_name_validation(&submit, &editor);
+    connect_editor_validation(&submit, &editor);
 
     let close = dialog.downgrade();
     cancel.connect_clicked(move |_| {
