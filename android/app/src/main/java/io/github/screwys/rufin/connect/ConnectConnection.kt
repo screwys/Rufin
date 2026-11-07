@@ -31,7 +31,7 @@ internal class ConnectConnection(private val model: RufinConnection) {
         private set
     private var bridge: ConnectOwner? = null
     private var dismissedStatusError: String? = null
-    private var offered: Pair<String, Long>? = null
+    private var offered: String? = null
     val visibleError get() = error ?: state?.error?.takeUnless { it == dismissedStatusError }
 
     suspend fun observe() {
@@ -56,7 +56,7 @@ internal class ConnectConnection(private val model: RufinConnection) {
                             val next = withContext(Dispatchers.Default) { subscription.next() }
                             if (next.connecting && state?.connecting != true) operationActive = true
                             if (!next.connecting && next.error == null) operationActive = false
-                            val offer = next.continuation?.let { it.device to it.at }
+                            val offer = next.continuation?.device
                             if (offer != null && offer != offered) model.showFeedback(
                                 translate("Continue from {device}").replace("{device}", next.continuation!!.name))
                             offered = offer

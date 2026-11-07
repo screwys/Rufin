@@ -30,10 +30,11 @@ pub fn install(shell: &Rc<Shell>) {
             }
             previous = session;
             working = active;
+            // A device's next track or pause is no new offer.
             let offer = state
                 .continuation
                 .as_ref()
-                .map(|continuation| (continuation.device.clone(), continuation.at));
+                .map(|continuation| continuation.device.clone());
             if let Some(continuation) = &state.continuation
                 && offer != offered
             {
