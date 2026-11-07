@@ -1319,13 +1319,8 @@ impl ConnectOwner {
         let answer = match serde_json::from_slice(body).map_err(string_error)? {
             Request::Presence => {
                 let session = self.active()?;
-                let playing = self
-                    .playback
-                    .current_projection()
-                    .is_some_and(|projection| {
-                        projection.view.transport.effective_state()
-                            == playback::TransportStatus::Playing
-                    });
+                let playing = (self.playback.current_projection())
+                    .is_some_and(|projection| projection.view.transport.desired_playing);
                 let addresses = self
                     .network
                     .lock()

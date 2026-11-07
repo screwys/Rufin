@@ -439,9 +439,9 @@ impl PlaybackOwner {
             cancelled: AtomicBool::new(false),
             observer: Mutex::new(None),
         });
-        let playing = self.current_projection().is_some_and(|projection| {
-            projection.view.transport.effective_state() == TransportStatus::Playing
-        });
+        // A buffering track that is to play continues playing there.
+        let playing = (self.current_projection())
+            .is_some_and(|projection| projection.view.transport.desired_playing);
         let observing = self.runtime.block_on(async {
             let queue = active.handoff_snapshot().map_err(string_error)?.0;
             if !queue.entries.is_empty() {
