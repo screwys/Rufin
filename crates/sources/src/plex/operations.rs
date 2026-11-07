@@ -353,10 +353,12 @@ impl PlexSource {
         folder: Option<&str>,
         section: Option<&str>,
     ) -> SourceResult<crate::LiveFolderPage> {
-        let path = folder
-            .map(|id| format!("/library/metadata/{}/children", raw_item_id(id)))
-            .or_else(|| section.map(|id| format!("/library/sections/{}/folder", raw_item_id(id))))
-            .unwrap_or_else(|| "/library/sections".into());
+        // A folder is the path Plex lists it at; a top-level one is a section.
+        let path = match folder.or(section).map(raw_item_id) {
+            Some(key) if key.starts_with('/') => key.to_owned(),
+            Some(section) => format!("/library/sections/{section}/folder"),
+            None => "/library/sections".into(),
+        };
         let response = self.get(&path, &[]).await?;
         let container = &response["MediaContainer"];
         let mut page = crate::LiveFolderPage::default();
@@ -364,10 +366,11 @@ impl PlexSource {
             .iter()
             .chain(items(&container["Metadata"]))
         {
-            let Some(raw) = id(&entry["ratingKey"]).or_else(|| id(&entry["key"])) else {
+            let track = entry["type"] == "track";
+            let Some(raw) = id(&entry[if track { "ratingKey" } else { "key" }]) else {
                 continue;
             };
-            if entry["type"] == "track" {
+            if track {
                 page.tracks.push(plex_id("track", &raw));
             } else {
                 page.folders.push(crate::LiveFolder {
