@@ -16,7 +16,7 @@ localization.workspace = true
 netdev = { version = "0.46.3", default-features = false }
 rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 sqlx.workspace = true
 swarm-discovery = "0.6.3"
 tokio = { workspace = true, features = ["fs", "io-util", "sync", "time"] }

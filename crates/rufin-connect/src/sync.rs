@@ -50,10 +50,10 @@ enum Request {
     },
 }
 
-/// What a pull reads after its row count.
+/// What a pull reads after its row count. A page is sent as its rows' JSON.
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Frame {
-    Page(Vec<Row>),
+pub enum Frame<R = Row> {
+    Page(Vec<R>),
     /// The last sequence the device examined; rows it left out lie at or below it.
     End {
         sequence: i64,
@@ -241,14 +241,15 @@ async fn serve(
             break;
         }
     }
-    write_frame(send, &Frame::End { sequence: after }, MAX_FRAME).await
+    write_frame(send, &Frame::<Row>::End { sequence: after }, MAX_FRAME).await
 }
 
 async fn write_page(send: &mut SendStream, rows: Vec<Row>) -> Result<()> {
     let mut page = Vec::new();
     let mut size = 0;
     for row in rows {
-        let length = serde_json::to_vec(&row)?.len() + 1;
+        let row = serde_json::value::to_raw_value(&row)?;
+        let length = row.get().len() + 1;
         if size + length > PAGE_BYTES && !page.is_empty() {
             write_frame(send, &Frame::Page(std::mem::take(&mut page)), TRUSTED_FRAME).await?;
             size = 0;
