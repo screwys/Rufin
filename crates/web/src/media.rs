@@ -240,7 +240,6 @@ async fn random(
             max_year: input.max_year,
             genre: input.genre,
             played: input.played,
-            require_media: false,
             variation: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos() as i64),

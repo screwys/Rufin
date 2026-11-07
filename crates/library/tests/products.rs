@@ -26,15 +26,7 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
         ] {
             let mut candidates = fixture
                 .catalog
-                .radio_candidates(
-                    fixture.source,
-                    seed.clone(),
-                    &[],
-                    20,
-                    false,
-                    variation,
-                    &cancel,
-                )
+                .radio_candidates(fixture.source, seed.clone(), &[], 20, variation, &cancel)
                 .await
                 .unwrap();
             if matches!(seed, RadioSeed::Track(_)) {
@@ -63,15 +55,7 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
         assert_eq!(
             fixture
                 .catalog
-                .radio_candidates(
-                    fixture.source,
-                    seed,
-                    &[fixture.tracks[2]],
-                    20,
-                    false,
-                    3,
-                    &cancel,
-                )
+                .radio_candidates(fixture.source, seed, &[fixture.tracks[2]], 20, 3, &cancel,)
                 .await
                 .unwrap(),
             vec![fixture.tracks[3]]
@@ -177,7 +161,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         );
         let result = fixture
             .catalog
-            .radio_candidates(fixture.source, seed, &[], 20, false, 0, &cancel)
+            .radio_candidates(fixture.source, seed, &[], 20, 0, &cancel)
             .await
             .unwrap();
         assert_eq!(result, fixture.tracks[2..]);
@@ -215,7 +199,6 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
                 RadioSeed::Track(fixture.track_uris[0].clone()),
                 &[],
                 1,
-                false,
                 0,
                 &cancel
             )
@@ -232,7 +215,6 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
                 RadioSeed::Album(fixture.albums[1]),
                 &[],
                 1,
-                false,
                 2,
                 &cancel
             )
@@ -3525,7 +3507,6 @@ async fn home_search_and_radio_results_stay_bounded() {
                 max_year: Some(2030),
                 genre: Some(fixture.genre),
                 played: PlayedFilter::All,
-                require_media: true,
                 variation: 7,
             },
             &[fixture.tracks[0]],
@@ -3543,7 +3524,6 @@ async fn home_search_and_radio_results_stay_bounded() {
             RadioSeed::Genre(fixture.genre),
             &[],
             3,
-            false,
             9,
             &cancel,
         )
@@ -3563,7 +3543,6 @@ async fn home_search_and_radio_results_stay_bounded() {
                 RadioSeed::Genre(fixture.genre),
                 &[],
                 2,
-                false,
                 9,
                 &cancel
             )
@@ -3580,7 +3559,6 @@ async fn home_search_and_radio_results_stay_bounded() {
                 RadioSeed::Genre(fixture.genre),
                 &vec![fixture.tracks[1]; 501],
                 2,
-                false,
                 9,
                 &cancel
             )
@@ -3595,7 +3573,6 @@ async fn home_search_and_radio_results_stay_bounded() {
             RadioSeed::Album(fixture.albums[0]),
             &[],
             2,
-            false,
             0,
             &cancel,
         )
@@ -3623,7 +3600,6 @@ async fn home_search_and_radio_results_stay_bounded() {
             RadioSeed::Playlist(playlist),
             &[],
             2,
-            false,
             0,
             &cancel,
         )

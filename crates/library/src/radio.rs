@@ -82,7 +82,6 @@ pub struct RandomCriteria {
     pub max_year: Option<i64>,
     pub genre: Option<GenreKey>,
     pub played: PlayedFilter,
-    pub require_media: bool,
     pub variation: i64,
 }
 
@@ -182,7 +181,6 @@ impl Catalog {
         seed: RadioSeed,
         extra_excluded: &[TrackKey],
         requested: usize,
-        _require_media: bool,
         variation: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
