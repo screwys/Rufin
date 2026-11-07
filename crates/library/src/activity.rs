@@ -540,13 +540,17 @@ pub(crate) async fn write_listen(
         }
         None => {
             // A repeated listen that was heard longer, or no longer counts as a skip.
-            let updated: Option<(ListenKey, String)> = sqlx::query_as("UPDATE listens SET listened_millis=max(listened_millis,?2),skipped=min(skipped,?3) WHERE external_id=?1 AND(?2>listened_millis OR ?3<skipped) RETURNING listen_key,media_uri")
+            let updated: Option<(ListenKey, String, Option<TrackKey>)> = sqlx::query_as("UPDATE listens SET listened_millis=max(listened_millis,?2),skipped=min(skipped,?3) WHERE external_id=?1 AND(?2>listened_millis OR ?3<skipped) RETURNING listen_key,media_uri,(SELECT track_key FROM tracks WHERE tracks.media_uri=listens.media_uri)")
                 .bind(&listen.external_id).bind(listen.listened_millis).bind(listen.skipped)
                 .fetch_optional(write.connection().await?).await?;
-            if let Some((_, uri)) = &updated {
+            if let Some((_, uri, track)) = &updated {
                 write.recount(&[uri]).await?;
+                // The listen changed even when its track's counts did not.
+                if let Some(track) = *track {
+                    write.changed(crate::Scope::Listened { track });
+                }
             }
-            (updated.as_ref().map(|(key, _)| *key), updated.is_some())
+            (updated.as_ref().map(|(key, ..)| *key), updated.is_some())
         }
     };
     // A repeated listen that changed nothing is read back for its key.
