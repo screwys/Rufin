@@ -156,11 +156,13 @@ impl Records {
         entries: bool,
     ) -> Result<Vec<store::Change>, String> {
         let auto_dj = self.owner()?.settings.file().load().ui.auto_dj_enabled;
-        let queue = self.catalog.restore_queue().await.map_err(string_error)?;
-        let revision = match self.sessions.borrow().get(&self.device) {
-            Some(session) if !entries => session.queue_revision.clone(),
-            _ => store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?,
-        };
+        let recorded = (self.sessions.borrow().get(&self.device))
+            .filter(|_| !entries)
+            .map(|session| session.queue_revision.clone());
+        let queue = (self.catalog.restore_queue(recorded.is_some()).await).map_err(string_error)?;
+        let revision = (recorded.map(Ok))
+            .unwrap_or_else(|| store::digest(&(&queue.entries, &queue.order)))
+            .map_err(string_error)?;
         let ids = [
             format!("queue:{}", self.device),
             format!("session:{}", self.device),
@@ -203,7 +205,11 @@ impl Records {
     /// This device's queue record as it leaves the device.
     pub(super) async fn queue_item(&self) -> Result<Item, String> {
         let auto_dj = self.owner()?.settings.file().load().ui.auto_dj_enabled;
-        let queue = self.catalog.restore_queue().await.map_err(string_error)?;
+        let queue = self
+            .catalog
+            .restore_queue(false)
+            .await
+            .map_err(string_error)?;
         let revision = store::digest(&(&queue.entries, &queue.order)).map_err(string_error)?;
         let shape = (&revision, queue.repeat_mode, queue.shuffled, auto_dj);
         let value = QueueValue {

@@ -232,7 +232,7 @@ async fn published_queue_snapshot(
         tokio::task::spawn_blocking(move || done.recv().unwrap())
             .await
             .unwrap();
-        return owner.catalog.restore_queue().await.unwrap();
+        return owner.catalog.restore_queue(false).await.unwrap();
     }
 }
 
@@ -339,7 +339,7 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     playback.projection().unwrap();
     let projection = updates.recv().await.unwrap().unwrap();
     assert_eq!(projection.view.controls.volume, 0.137);
-    let after_volume = catalog.restore_queue().await.unwrap();
+    let after_volume = catalog.restore_queue(false).await.unwrap();
     assert_eq!(after_volume.entries, before_volume.entries);
     assert_eq!(after_volume.order, before_volume.order);
     assert_eq!(after_volume.current_index, before_volume.current_index);

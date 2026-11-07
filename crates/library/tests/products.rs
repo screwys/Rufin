@@ -2095,7 +2095,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .await
             .unwrap();
         assert_eq!(uri_rows[0].artwork_binding, expected_binding);
-        let restored = catalog.restore_queue().await.unwrap();
+        let restored = catalog.restore_queue(false).await.unwrap();
         let queue = catalog
             .queue_rows_for_entries(&[(0, restored.entries[0].clone())], &cancel)
             .await

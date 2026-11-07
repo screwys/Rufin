@@ -86,7 +86,7 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
         .unwrap();
     assert!(pending.lock().unwrap().is_none());
     assert!(work.is_empty());
-    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue(false).await.unwrap(), &expected);
 }
 
 #[tokio::test]
@@ -142,7 +142,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue(false).await.unwrap(), &expected);
 
     sequence.shuffle(false, 0);
     enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
@@ -164,7 +164,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue(false).await.unwrap(), &expected);
 
     sequence.set_progress_millis(43_000);
     sequence.persist_state();
@@ -179,7 +179,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue(false).await.unwrap(), &expected);
     assert!(work.is_empty());
 
     let mut failed = None;
@@ -223,7 +223,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         .unwrap();
     assert!(failed.is_none());
     assert_restored_state(
-        &reopened.restore_queue().await.unwrap(),
+        &reopened.restore_queue(false).await.unwrap(),
         &sequence.snapshot(),
     );
 }

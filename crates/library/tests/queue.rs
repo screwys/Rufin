@@ -51,7 +51,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
 
     let restored = fixture
         .catalog
-        .restore_queue()
+        .restore_queue(false)
         .await
         .expect("restore Queue");
     // A restore reads now playing only.
@@ -128,7 +128,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
             .expect("persist progress");
         let restored = fixture
             .catalog
-            .restore_queue()
+            .restore_queue(false)
             .await
             .expect("restore progress");
         let restored_occurrence = restored
@@ -263,7 +263,7 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_now_playing() {
         std::sync::Arc::make_mut(row).occurrence_id = Some(state.ids[row.position]);
     }
     fixture.catalog.save_queue(&state).await.unwrap();
-    let restored = fixture.catalog.restore_queue().await.unwrap();
+    let restored = fixture.catalog.restore_queue(false).await.unwrap();
     assert_eq!(
         restored
             .rows
@@ -299,7 +299,7 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_now_playing() {
         library::QueueRestore {
             ranks: Default::default(),
             rows: Vec::new(),
-            ..target.catalog.restore_queue().await.unwrap()
+            ..target.catalog.restore_queue(false).await.unwrap()
         },
         library::QueueRestore {
             rows: Vec::new(),
@@ -366,7 +366,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         true,
     )
     .await;
-    let mut state = fixture.catalog.restore_queue().await.unwrap();
+    let mut state = fixture.catalog.restore_queue(false).await.unwrap();
     let mut entries = state.entries.to_vec();
     entries[6].track_key = fixture.tracks[0];
     let missing_uri = library::source_entity_uri(
@@ -394,7 +394,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     let mut raw = connection(&fixture.path).await;
     {
         fixture.catalog.save_queue(&state).await.unwrap();
-        let restored = fixture.catalog.restore_queue().await.unwrap();
+        let restored = fixture.catalog.restore_queue(false).await.unwrap();
         assert_eq!(restored.entries, state.entries);
         assert_eq!(restored.order, state.order);
         assert_eq!(restored.current_index, state.current_index);
@@ -445,7 +445,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         );
         let target = super::support::fixture().await;
         restore(&target.catalog, &[("queue.jsonl", &exported)]).await;
-        assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
+        assert_eq!(target.catalog.restore_queue(false).await.unwrap(), restored);
         let mut released = header["queue"].clone();
         for (index, entry) in released["entries"]
             .as_array_mut()
@@ -483,7 +483,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             )],
         )
         .await;
-        assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
+        assert_eq!(target.catalog.restore_queue(false).await.unwrap(), restored);
     }
     state.entries = state.entries[..6].to_vec().into();
     state.ids = state.ids[..6].to_vec().into();
@@ -494,7 +494,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         .filter(|index| *index < 6)
         .collect();
     fixture.catalog.save_queue(&state).await.unwrap();
-    let removed = fixture.catalog.restore_queue().await.unwrap();
+    let removed = fixture.catalog.restore_queue(false).await.unwrap();
     assert_eq!(removed.entries, state.entries);
     assert_eq!(removed.order, state.order);
     assert_eq!(removed.current_index, state.current_index);
@@ -519,7 +519,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         })
         .await
         .unwrap();
-    let stopped = fixture.catalog.restore_queue().await.unwrap();
+    let stopped = fixture.catalog.restore_queue(false).await.unwrap();
     assert_eq!(stopped.entries, state.entries);
     assert_eq!(stopped.current_index, None);
     assert_eq!(stopped.progress_millis, 0);
@@ -592,7 +592,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         false,
     )
     .await;
-    let restored = fixture.catalog.restore_queue().await.unwrap();
+    let restored = fixture.catalog.restore_queue(false).await.unwrap();
     assert_eq!(
         fixture
             .catalog
@@ -698,7 +698,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
             .unwrap(),
         0
     );
-    let restored = fixture.catalog.restore_queue().await.unwrap();
+    let restored = fixture.catalog.restore_queue(false).await.unwrap();
     assert_eq!(restored.entries, latest.entries);
     assert_eq!(restored.order, latest.order);
     assert_eq!(restored.current_index, latest.current_index);

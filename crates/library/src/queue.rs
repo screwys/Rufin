@@ -454,24 +454,30 @@ impl Catalog {
             .bind(serde_json::to_string(entries)?).fetch_all(&mut *reader).await?)
     }
 
-    pub async fn restore_queue(&self) -> LibraryResult<QueueRestore> {
+    /// The saved queue; with `current`, its repeat, shuffle and progress with the current
+    /// entry as the only one.
+    pub async fn restore_queue(&self, current: bool) -> LibraryResult<QueueRestore> {
         let mut reader = self.acquire_reader().await?;
         let mut transaction = reader.begin().await?;
-        let mut state = restore_queue_on(&mut transaction).await?;
+        let mut state = restore_queue_on(&mut transaction, current).await?;
         transaction.commit().await?;
         drop(reader);
         // Now playing reads its one track; playback reads the rest of the shown window.
-        let entries = state
-            .current_index
-            .and_then(|position| Some((position, *state.order.get(position)?)))
-            .map(|(position, index)| (position, state.entries[index as usize].clone()))
+        let current = state.current_index.and_then(|position| {
+            Some((
+                position,
+                *state.order.get(if current { 0 } else { position })? as usize,
+            ))
+        });
+        let entries = current
+            .map(|(position, index)| (position, state.entries[index].clone()))
             .into_iter()
             .collect::<Vec<_>>();
         state.rows = self
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await?;
-        for row in &mut state.rows {
-            Arc::make_mut(row).occurrence_id = Some(state.ids[state.order[row.position] as usize]);
+        if let (Some(row), Some((_, index))) = (state.rows.first_mut(), current) {
+            Arc::make_mut(row).occurrence_id = Some(state.ids[index]);
         }
         Ok(state)
     }
@@ -698,17 +704,25 @@ async fn stored_contexts<'a>(
     Ok(keys)
 }
 
-async fn restore_queue_on(connection: &mut sqlx::SqliteConnection) -> LibraryResult<QueueRestore> {
+/// The saved queue; with `current`, only the entry at the current index in play order.
+async fn restore_queue_on(
+    connection: &mut sqlx::SqliteConnection,
+    current: bool,
+) -> LibraryResult<QueueRestore> {
     let mut state = QueueRestore::default();
     read_settings(connection, &mut state).await?;
-    let contexts =
-        sqlx::query_as::<_, (i64, String)>("SELECT context_key,context FROM queue_contexts")
-            .fetch_all(&mut *connection)
-            .await?
-            .into_iter()
-            .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
-            .collect::<LibraryResult<HashMap<_, _>>>()?;
-    let rows = sqlx::query("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance FROM queue_entries ORDER BY rank,entry_id")
+    let entries = if current {
+        "(SELECT * FROM queue_entries ORDER BY CASE WHEN (SELECT shuffled FROM queue_state WHERE singleton=1) THEN coalesce(shuffle_rank,rank) ELSE rank END,entry_id LIMIT (SELECT count(current_index) FROM queue_state) OFFSET (SELECT coalesce(max(current_index),0) FROM queue_state))"
+    } else {
+        "queue_entries"
+    };
+    let contexts = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!("SELECT context_key,context FROM queue_contexts WHERE context_key IN(SELECT context_key FROM {entries})")))
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|(key, json)| Ok((key, serde_json::from_str::<SavedContext<Arc<str>>>(&json)?)))
+        .collect::<LibraryResult<HashMap<_, _>>>()?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT entry_id,track_key,rank,shuffle_rank,context_key,source_rank,provenance FROM {entries} ORDER BY rank,entry_id")))
         .fetch_all(&mut *connection)
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
@@ -796,7 +810,7 @@ pub(crate) async fn export_queue_jsonl_on(
     connection: &mut SqliteConnection,
     mut output: impl std::io::Write,
 ) -> LibraryResult<()> {
-    let state = restore_queue_on(connection).await?;
+    let state = restore_queue_on(connection, false).await?;
     let keys = state
         .entries
         .iter()

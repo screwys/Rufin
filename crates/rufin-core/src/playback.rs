@@ -334,7 +334,7 @@ impl PlaybackOwner {
                 return;
             };
             let stored = strong.settings.load();
-            let sequence = match strong.catalog.restore_queue().await {
+            let sequence = match strong.catalog.restore_queue(false).await {
                 Ok(mut restore) => {
                     if restore.entries.is_empty() {
                         restore.repeat_mode = stored.ui.repeat_mode;

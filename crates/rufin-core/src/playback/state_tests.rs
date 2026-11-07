@@ -728,7 +728,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     assert_eq!(session.status(), TransportStatus::Stopped);
     assert!(session.view().transport.current.is_none());
     assert!(!session.view().queue_loading);
-    assert_eq!(catalog.restore_queue().await.unwrap().rows.len(), 0);
+    assert_eq!(catalog.restore_queue(false).await.unwrap().rows.len(), 0);
     assert!(commands.lock().unwrap().iter().any(
         |command| matches!(command, BackendCommand::Stop { run: stopped } if *stopped == run)
     ));
@@ -754,7 +754,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
             .unwrap()
     );
     finish_queue(&mut session, &inbox, &sample).await;
-    assert_eq!(catalog.restore_queue().await.unwrap().rows.len(), 1);
+    assert_eq!(catalog.restore_queue(false).await.unwrap().rows.len(), 1);
     assert_eq!(
         session.sequence.selected().unwrap().track.media_uri,
         "https://example.test/track-10"
@@ -956,7 +956,7 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                     assert_eq!(&result[..at], &original[..at]);
                     assert_eq!(&result[at + count as usize..], &original[at..]);
                 }
-                let restored = catalog.restore_queue().await.unwrap();
+                let restored = catalog.restore_queue(false).await.unwrap();
                 assert_eq!(restored.shuffled, global_shuffle);
                 assert_eq!(ordered(&restored), result);
             }
@@ -1058,7 +1058,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 }
             ));
             assert_eq!(session.view().controls.shuffle_enabled, shuffled);
-            let restored = catalog.restore_queue().await.unwrap();
+            let restored = catalog.restore_queue(false).await.unwrap();
             assert_eq!(restored.current_index, Some(selected.position));
             assert_eq!(restored.shuffled, shuffled);
             assert_eq!(
@@ -1672,7 +1672,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
         );
         finish_queue(&mut session, &inbox, &sample).await;
         assert_eq!(
-            catalog.restore_queue().await.unwrap().entries.len(),
+            catalog.restore_queue(false).await.unwrap().entries.len(),
             queue_length + 2
         );
         assert_eq!(
