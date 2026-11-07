@@ -67,7 +67,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var currentContextId by mutableStateOf<String?>(null)
         private set
-    var currentSourceRank by mutableStateOf<ULong?>(null)
+    var currentRow by mutableStateOf<io.github.screwys.rufin.shared.library.QueueRow?>(null)
         private set
     var currentContext by mutableStateOf<Triple<String?, String, String?>?>(null)
         private set
@@ -118,7 +118,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
             playback = null
             currentItem = null
             currentContextId = null
-            currentSourceRank = null
+            currentRow = null
             currentContext = null
             metadataLinks = null
             if (service == null) return@collectLatest
@@ -211,7 +211,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                 if (rowChanged) {
                                     currentItem = row?.track()
                                     currentContextId = row?.contextId()
-                                    currentSourceRank = row?.sourceRank()
+                                    currentRow = row
                                     currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
                                 }
                                 favorite = update?.favorite ?: false

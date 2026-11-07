@@ -317,9 +317,15 @@ impl AndroidView {
             .refresh(self.source.selected_library().as_ref(), &changed)
     }
 
-    /// The context id the page's plays carry.
-    pub fn context_id(&self) -> String {
-        self.view.play_context()
+    /// The row `current` shows at among the page's rows, as core places the playing track.
+    pub fn playing_position(&self, current: Arc<library::QueueRow>) -> Option<u64> {
+        let context = current.context_id();
+        self.view
+            .playing_position(
+                current.track.track_key,
+                context.as_deref().zip(current.source_rank()),
+            )
+            .map(|position| position as u64)
     }
 
     /// Plays or queues the page whole, as its header does.

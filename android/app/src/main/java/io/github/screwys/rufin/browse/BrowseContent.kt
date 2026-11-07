@@ -374,12 +374,11 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     val row = item.row
     val occurrence = row.track?.entry != null
     val track = row.isTrack
-    val viewContext = remember(item.view, occurrence) { if (occurrence) item.view?.contextId() else null }
-    val playing by remember(track, row.mediaUri, row.contextId, occurrence, item.index, viewContext, player) { derivedStateOf {
+    val playing by remember(track, row.mediaUri, row.contextId, occurrence, item.index, item.view, player) { derivedStateOf {
         player != null && player.playingMediaUri != null &&
             if (track) {
                 player.playingMediaUri == row.mediaUri && (!occurrence ||
-                    viewContext != null && viewContext == player.currentContextId && item.index == player.currentSourceRank)
+                    player.currentRow?.let { item.view?.playingPosition(it) } == item.index)
             } else {
                 val target = row.contextId
                 val context = player.currentContextId
