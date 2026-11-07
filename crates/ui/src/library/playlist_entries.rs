@@ -23,8 +23,7 @@ use super::collections::{
 };
 use super::columns::track_column_fit_width;
 use super::grid_cells::{
-    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
-    collection_grid_with_selection_and_demand,
+    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell, collection_grid,
 };
 use crate::widgets::recycled_cells::{TrackRowPlayingIndicator, set_track_row_index_text};
 
@@ -866,7 +865,7 @@ fn playlist_entry_grid(
     let cell_shell = Rc::clone(shell);
     let activate_model = model.clone();
     let products = shell.products.clone();
-    collection_grid_with_selection_and_demand(
+    collection_grid(
         model.list_model(),
         Some(selection.selection_model()),
         &fields,
@@ -881,7 +880,6 @@ fn playlist_entry_grid(
                 false,
             )
         },
-        |_| {},
     )
 }
 

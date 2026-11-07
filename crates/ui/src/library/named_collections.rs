@@ -24,8 +24,8 @@ use super::collections::{
 };
 use super::columns::{artwork_column, mapped_row_index_column, text_column};
 use super::grid_cells::{
-    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
-    collection_grid_with_demand, install_grid_context, install_grid_play,
+    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell, collection_grid,
+    install_grid_context, install_grid_play,
 };
 use crate::menus::media_menus::present_row_menu;
 use crate::widgets::library_fields::column_fit_width;
@@ -447,13 +447,12 @@ where
 {
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = sparse.clone();
-    collection_grid_with_demand(
+    collection_grid(
         sparse.list_model(),
+        None,
         fields,
         move |fields| NamedCollectionGridCell::<T>::new(Rc::clone(&cell_shell), fields),
         move |_, row: T| activate_shell.open_route(row.route()),
-        move |position| demand.demand_positions([position as usize]),
     )
 }
 

@@ -29,8 +29,8 @@ use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, dynamic_collection_table,
 };
 use super::grid_cells::{
-    CollectionGridCardCell, ReusableCollectionGridCell, collection_grid_with_selection_and_demand,
-    install_grid_context, install_grid_play,
+    CollectionGridCardCell, ReusableCollectionGridCell, collection_grid, install_grid_context,
+    install_grid_play,
 };
 use crate::menus::media_menus::{present_collection_selection_menu, present_row_menu};
 use crate::widgets::library_fields::column_fit_width;
@@ -790,13 +790,12 @@ fn search_collection(
                     .grid_fields;
                 let cell_shell = Rc::clone(&shell);
                 let activate_shell = Rc::clone(&shell);
-                LibraryPresentationProjection::Grid(collection_grid_with_selection_and_demand(
+                LibraryPresentationProjection::Grid(collection_grid(
                     model.clone(),
                     Some(selection.clone().upcast()),
                     &fields,
                     move |fields| SearchGridCell::new(Rc::clone(&cell_shell), fields),
                     move |_, item: SearchItem| item.activate(&activate_shell),
-                    |_| {},
                 ))
             }
             LibraryLayout::Row | LibraryLayout::Detail => {

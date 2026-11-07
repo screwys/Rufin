@@ -394,38 +394,18 @@ impl CollectionGridProjection {
     }
 }
 
-pub fn collection_grid_with_demand<T, Cell, Make, Activate, Demand, M>(
-    model: M,
-    fields: &[LibraryField],
-    make_cell: Make,
-    activate: Activate,
-    demand: Demand,
-) -> CollectionGridProjection
-where
-    T: Clone + 'static,
-    Cell: ReusableCollectionGridCell<T>,
-    Make: Fn(&[LibraryField]) -> Cell + 'static,
-    Activate: Fn(u32, T) + 'static,
-    Demand: Fn(u32) + 'static,
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    collection_grid_with_selection_and_demand(model, None, fields, make_cell, activate, demand)
-}
-
-pub fn collection_grid_with_selection_and_demand<T, Cell, Make, Activate, Demand, M>(
+pub fn collection_grid<T, Cell, Make, Activate, M>(
     model: M,
     selection: Option<gtk::SelectionModel>,
     fields: &[LibraryField],
     make_cell: Make,
     activate: Activate,
-    demand: Demand,
 ) -> CollectionGridProjection
 where
     T: Clone + 'static,
     Cell: ReusableCollectionGridCell<T>,
     Make: Fn(&[LibraryField]) -> Cell + 'static,
     Activate: Fn(u32, T) + 'static,
-    Demand: Fn(u32) + 'static,
     M: IsA<gio::ListModel> + Clone + 'static,
 {
     let selection = selection.unwrap_or_else(|| {
@@ -463,13 +443,10 @@ where
         item.set_child(Some(&child));
         setup_cells.borrow_mut().push(child.downgrade());
     });
-    let demand = Rc::new(demand);
-    let bind_demand = Rc::clone(&demand);
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        bind_demand(item.position());
         bind_row_item(
             item,
             Rc::new(move |item| {
@@ -549,7 +526,6 @@ where
     grid.set_hexpand(true);
     grid.set_vexpand(true);
     grid.connect_activate(move |_, position| {
-        demand(position);
         if let Some(value) = item_at::<T>(&model, position) {
             activate(position, value);
         }

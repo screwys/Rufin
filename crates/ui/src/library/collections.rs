@@ -16,8 +16,7 @@ use crate::widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
 use super::columns::{album_column, artist_column, track_column_fit_width, track_column_for_key};
 use super::grid_cells::{
-    AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
-    collection_grid_with_demand,
+    AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell, collection_grid,
 };
 use crate::library::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
 use crate::library::track_selection::TrackSelection;
@@ -647,15 +646,14 @@ pub fn album_grid(
         .expect("Album grid has an Album row model");
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = sparse.clone();
-    collection_grid_with_demand(
+    collection_grid(
         sparse.list_model(),
+        None,
         &fields,
         move |fields| AlbumGridCell::new(&cell_shell, fields),
         move |_, album: AlbumRow| {
             activate_shell.open_route(Route::AlbumDetail(album.media_uri.clone()))
         },
-        move |position| demand.demand_positions([position as usize]),
     )
 }
 
@@ -672,15 +670,14 @@ pub fn artist_grid(
         .grid_fields;
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let demand = sparse.clone();
-    collection_grid_with_demand(
+    collection_grid(
         sparse.list_model(),
+        None,
         &fields,
         move |fields| ArtistGridCell::new(&cell_shell, fields),
         move |_, artist: ArtistRow| {
             activate_shell.open_route(Route::of_artist(&artist));
         },
-        move |position| demand.demand_positions([position as usize]),
     )
 }
 pub fn track_grid(
@@ -690,10 +687,7 @@ pub fn track_grid(
     play_from_collection: Rc<dyn Fn(u32, rufin_core::playback::QueuePlacement)>,
     selection: TrackSelection,
 ) -> CollectionGridProjection {
-    let demand = model.clone();
     let model = model.list_model();
-    let demand: Rc<dyn Fn(u32)> =
-        Rc::new(move |position| demand.demand_positions([position as usize]));
     let fields = shell
         .settings
         .current
@@ -704,8 +698,7 @@ pub fn track_grid(
     let cell_shell = Rc::clone(shell);
     let cell_play = Rc::clone(&play_from_collection);
     let activate = Rc::clone(&play_from_collection);
-    let bind_demand = Rc::clone(&demand);
-    super::grid_cells::collection_grid_with_selection_and_demand(
+    super::grid_cells::collection_grid(
         model,
         Some(selection.selection_model()),
         &fields,
@@ -719,7 +712,6 @@ pub fn track_grid(
             )
         },
         move |position, _: TrackRow| activate(position, rufin_core::playback::QueuePlacement::Now),
-        move |position| bind_demand(position),
     )
 }
 pub fn album_table<M>(

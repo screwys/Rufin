@@ -396,13 +396,13 @@ impl<T> State<T> {
         windows
     }
 
-    /// Queues the windows `demanded`; true when the running read is no longer wanted.
-    fn want(&mut self, demanded: Vec<usize>) -> bool {
+    /// Queues the windows `demanded`, and cancels the running read when it is not one.
+    fn want(&mut self, demanded: Vec<usize>) {
         self.failed.retain(|window| demanded.contains(window));
-        let cancelled = self
+        if self
             .active
-            .is_some_and(|active| !demanded.contains(&active));
-        if cancelled {
+            .is_some_and(|active| !demanded.contains(&active))
+        {
             self.active = None;
             if let Some(cancel) = self.running.take() {
                 cancel.cancel();
@@ -421,7 +421,6 @@ impl<T> State<T> {
                 self.pending.push_back(window);
             }
         }
-        cancelled
     }
 
     fn reset_reads(&mut self) {
@@ -653,7 +652,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
         })));
         list.imp().runtime.replace(runtime);
         list.imp().start.replace(Some(Rc::new(|list: &RowList| {
-            Self::from_list(list).start(true);
+            Self::from_list(list).start();
         })));
         Self::from_list(&list)
     }
@@ -796,13 +795,6 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
         }
     }
 
-    /// Asks for the windows of `positions`, such as grid cells being laid out.
-    pub fn demand_positions(&self, positions: impl IntoIterator<Item = usize>) {
-        let windows = positions.into_iter().map(window_first).collect();
-        self.with(|state| state.want(windows));
-        self.start(false);
-    }
-
     /// Stops reading until rows are asked for again.
     pub fn cancel(&self) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
@@ -815,7 +807,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
     /// Starts reading once the route shows the window it was seeded at.
     pub fn resume_initial_demand(&self) {
         if self.with(|state| std::mem::replace(&mut state.deferred, false)) {
-            self.start(true);
+            self.start();
         }
     }
 
@@ -878,11 +870,11 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
             }
             self.list.emit_ready_changed(position, 1);
         }
-        self.start(true);
+        self.start();
     }
 
-    /// Reads the wanted windows one at a time; `reconcile` first takes the windows on screen.
-    fn start(&self, reconcile: bool) {
+    /// Reads the windows on screen one at a time.
+    fn start(&self) {
         use glib::subclass::prelude::ObjectSubclassIsExt;
         let Some(runtime) = self.list.imp().runtime.borrow().clone() else {
             return;
@@ -891,10 +883,8 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
             if state.deferred {
                 return None;
             }
-            if reconcile {
-                let cold = state.cold_windows();
-                state.want(cold);
-            }
+            let cold = state.cold_windows();
+            state.want(cold);
             if state.active.is_some() {
                 return None;
             }
@@ -978,7 +968,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Rows<T> {
                     list.show_missed(&missed);
                 }
             }
-            this.start(true);
+            this.start();
         });
     }
 }
