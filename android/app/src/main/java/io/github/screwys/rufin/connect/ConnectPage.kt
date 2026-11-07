@@ -143,7 +143,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
         SettingsGroup(translate("Connection settings")) {
             SettingsRow(translate("Nearby discovery"),
                 trailing = { Switch(state.settings.nearby, { connect.action(ConnectAction.Network(it, state.settings.relay)) }, enabled = enabled) })
-            SettingsRow(translate("Relay address"), summary = state.settings.relay ?: translate("Default"),
+            SettingsRow(translate("Relay address"), summary = state.settings.relay ?: translate("Off"),
                 modifier = Modifier.clickable(enabled) { relayEdit = true })
         }
         }
