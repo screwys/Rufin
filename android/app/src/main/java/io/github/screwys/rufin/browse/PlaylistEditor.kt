@@ -7,7 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -265,7 +265,7 @@ internal fun PlaylistEditor(
                     state.artwork?.let { artwork ->
                         val bindings = listOfNotNull(if (state.removed || artwork.binding == null) artwork.automaticBinding else artwork.binding)
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            if (state.preview != null) Artwork(state.preview, Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)))
+                            if (state.preview != null) Artwork(state.preview, Modifier.size(220.dp).clip(CoverShape))
                             else PlaylistCover(bindings, player)
                         }
                         if (artwork.writable) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -351,8 +351,8 @@ internal fun PlaylistEditor(
 @Composable
 private fun PlaylistCover(bindings: List<ByteArray>, player: PlayerConnection) {
     val size = 220.dp
-    if (bindings.size <= 1) Artwork(rememberArtwork(bindings.firstOrNull(), player, with(LocalDensity.current) { size.roundToPx() }), Modifier.size(size).clip(RoundedCornerShape(12.dp)))
-    else Column(Modifier.size(size).clip(RoundedCornerShape(12.dp))) {
+    if (bindings.size <= 1) Artwork(rememberArtwork(bindings.firstOrNull(), player, with(LocalDensity.current) { size.roundToPx() }), Modifier.size(size).clip(CoverShape))
+    else Column(Modifier.size(size).clip(CoverShape)) {
         repeat(2) { y -> Row { repeat(2) { x -> Artwork(rememberArtwork(bindings[(y * 2 + x) % bindings.size], player, with(LocalDensity.current) { (size / 2).roundToPx() }), Modifier.size(size / 2)) } } }
     }
 }

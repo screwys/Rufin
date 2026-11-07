@@ -176,7 +176,7 @@
 .cover {
   aspect-ratio: 1;
   position: relative;
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: #77767b;
   display: grid;
   place-items: center;
@@ -248,7 +248,6 @@
   width: 54px;
   height: 54px;
   flex-shrink: 0;
-  border-radius: 7px;
 }
 
 @media (max-width: 1100px) {
@@ -360,7 +359,7 @@
   opacity: 0;
   pointer-events: none;
   background: rgb(0 0 0 / 34%);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .album-card.controls-visible .cover-controls,

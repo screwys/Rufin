@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -170,7 +170,7 @@ private fun SearchResults(
                         RecentSearchKind.TRACK -> "Track"
                     })).filter(String::isNotBlank).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
+                leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(CoverShape)) },
                 trailingContent = {
                     if (item != null) PlayerIconButton("rufin-view-more-symbolic", "More", { selected = recent })
                     else PlayerIconButton("rufin-user-trash-symbolic", "Remove", { browse.removeRecentSearch(result) })

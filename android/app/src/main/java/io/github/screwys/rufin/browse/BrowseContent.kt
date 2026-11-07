@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -223,7 +224,7 @@ private fun BoxScope.BrowseLoadOverlay(refresh: LoadState, count: Int, retry: ()
 internal fun BrowseEmptyState(filtered: Boolean = false, icon: String? = null, resetFilters: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (icon == null) FallbackCover(Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
+        if (icon == null) FallbackCover(Modifier.size(64.dp).clip(CoverShape))
         else RufinIcon(icon, null, Modifier.size(64.dp), MaterialTheme.colorScheme.onSurfaceVariant)
         Text(translate(if (filtered) "No results" else "Nothing here yet"),
             style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -453,7 +454,7 @@ private fun rememberBrowseArtwork(item: BrowseItem, player: PlayerConnection, si
 
 @Composable
 private fun BrowseCover(item: BrowseItem, artwork: PlayerArtwork?, modifier: Modifier) {
-    Box(modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+    Box(modifier.clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         if (artwork != null) Artwork(artwork, Modifier.fillMaxSize())
         else if (item.row.isFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(24.dp))
         else FallbackCover(Modifier.fillMaxSize())
@@ -495,7 +496,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
 @Composable
 private fun CoverPlaceholder() {
     Column {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest))
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CoverShape).background(MaterialTheme.colorScheme.surfaceContainerHighest))
         Spacer(Modifier.height(60.dp))
     }
 }
@@ -514,8 +515,8 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
             color = androidx.compose.ui.graphics.Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BrowseCover(item, artwork, Modifier.size(coverSize).shadow(6.dp, RoundedCornerShape(12.dp),
-                    ambientColor = Color.Black.copy(alpha = .18f), spotColor = Color.Black.copy(alpha = .18f)).clip(RoundedCornerShape(12.dp)))
+                BrowseCover(item, artwork, Modifier.size(coverSize).shadow(6.dp, CoverShape,
+                    ambientColor = Color.Black.copy(alpha = .18f), spotColor = Color.Black.copy(alpha = .18f)).clip(CoverShape))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (section.isNotBlank()) Text(section.uppercase(), color = MaterialTheme.colorScheme.primary,

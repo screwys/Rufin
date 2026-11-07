@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -54,7 +53,7 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
                 val artwork = rememberArtwork(link.artworkIdentity, player, pixels)
                 ListItem(headlineContent = { Text(link.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(translate(kind), style = MaterialTheme.typography.bodySmall) },
-                    leadingContent = { Artwork(artwork, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) },
+                    leadingContent = { Artwork(artwork, Modifier.size(40.dp).clip(CoverShape)) },
                     modifier = Modifier.clickable { onDismiss(); onNavigate(link.route, link.title, resolved?.sourceId) })
             }
             resolved?.let { metadata -> metadata.sourceLink?.let { link -> item {

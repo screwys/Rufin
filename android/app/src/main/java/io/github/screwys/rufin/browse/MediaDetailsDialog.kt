@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.screwys.rufin.ui.CoverShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -101,7 +102,7 @@ internal fun MediaDetailsDialog(
                     Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Artwork(artwork, Modifier.size(76.dp).clip(RoundedCornerShape(10.dp)))
+                            Artwork(artwork, Modifier.size(76.dp).clip(CoverShape))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(details.title, style = MaterialTheme.typography.headlineSmall)
                                 if (details.subtitle.isNotBlank()) Text(details.subtitle,
