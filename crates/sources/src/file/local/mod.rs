@@ -762,7 +762,6 @@ impl walk::FileSource for LocalFiles<'_> {
                 );
                 track.revision_hashes_audio = true;
             }
-            file.parse_version = Some(crate::file::remote::scan::PARSER_VERSION);
             return Ok(read);
         }
         let path = PathBuf::from(&file.path);
