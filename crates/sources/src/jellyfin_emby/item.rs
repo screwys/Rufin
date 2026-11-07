@@ -77,8 +77,10 @@ pub(super) fn track_from_item(
     let Some(item_id) = id(&item["Id"]) else {
         return Ok(None);
     };
-    let image_ref = album_image_ref(server, item)
-        .or_else(|| primary_image_ref(server, "track", &item_id, item))
+    // The track's own cover first: the library shows the album's unless distinct track
+    // covers are on, and that setting needs the track's image to choose
+    let image_ref = primary_image_ref(server, "track", &item_id, item)
+        .or_else(|| album_image_ref(server, item))
         .or_else(|| alternate_primary_image_ref(server, item))
         .or_else(|| backdrop_image_ref(server, item));
     let artists = artist_credits_from_pairs(server, &item["ArtistItems"]);
@@ -623,6 +625,19 @@ mod tests {
             );
             assert_eq!(album_binding[0].blur_hash.as_deref(), Some("own-preview"));
             let track = track_from_item(server, "source", &item).unwrap().unwrap();
+            let track_binding: Vec<library::ArtworkCandidate> =
+                serde_json::from_slice(track.artwork_binding.as_deref().unwrap()).unwrap();
+            assert_eq!(
+                match &track_binding[0].image {
+                    library::ArtworkImage::Native { item_id, .. } => item_id.as_str(),
+                    _ => panic!("native image"),
+                },
+                server.object_id("track", "1")
+            );
+            assert_eq!(track_binding[0].blur_hash.as_deref(), Some("own-preview"));
+            // Without a cover of its own, a track takes its album's
+            let bare = json!({"Id":"1", "AlbumId":"3", "AlbumPrimaryImageTag":"album", "ImageBlurHashes":{"Primary":{"album":"album-preview"}}});
+            let track = track_from_item(server, "source", &bare).unwrap().unwrap();
             let track_binding: Vec<library::ArtworkCandidate> =
                 serde_json::from_slice(track.artwork_binding.as_deref().unwrap()).unwrap();
             assert_eq!(
