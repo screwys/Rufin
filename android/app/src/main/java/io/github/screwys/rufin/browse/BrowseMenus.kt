@@ -72,6 +72,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.screwys.rufin.core.AndroidBrowseRow
 import io.github.screwys.rufin.core.AndroidLibrary
+import io.github.screwys.rufin.core.AndroidOpened
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -612,6 +613,9 @@ internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
     private val folderKind: Boolean? = null,
 ) : PagingSource<Int, BrowseItem>() {
+    /** The page it lists, opened once for the filter it reads. */
+    private var opened: AndroidOpened? = null
+    init { registerInvalidatedCallback { opened?.view?.destroy() } }
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
@@ -629,21 +633,13 @@ internal class BrowseChoiceSource(
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
                 }
-                val tracks = when (route) {
-                    is Route.ArtistDetail -> Route.ArtistTracks(route.v1)
-                    is Route.AlbumArtistDetail -> Route.AlbumArtistTracks(route.v1)
-                    is Route.ArtistDiscography -> Route.ArtistTracks(route.v1)
-                    is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
-                    else -> route
-                }
-                val opened = library.open(tracks, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false, null, null, true)
-                try {
-                    val count = opened.count.toInt()
-                    val rows = opened.view.rows(offset.toULong(), params.loadSize.toUInt()).rows
-                    LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-                        if (offset + rows.size >= count) null else offset + rows.size,
-                        itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
-                } finally { opened.view.destroy() }
+                val page = opened ?: library.open(route, CollectionCategory.TRACKS, filter, LibraryField.TITLE, false, false, false,
+                    null, null, true).also { opened = it }
+                val count = page.count.toInt()
+                val rows = page.view.rows(offset.toULong(), params.loadSize.toUInt()).rows
+                LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                    if (offset + rows.size >= count) null else offset + rows.size,
+                    itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
             }
         }
     } catch (cancelled: CancellationException) { throw cancelled }
