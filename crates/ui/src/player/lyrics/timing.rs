@@ -18,26 +18,25 @@ impl PlayerUi {
         self: &Rc<Self>,
         position_millis: u64,
         observed_at: Instant,
+        lyrics_position_millis: i128,
     ) {
         if !self.lyrics_surface_visible() {
             return;
         }
         // Receiver positions anchor the same animation clock as local playback;
         // waiting for every remote poll makes karaoke advance in visible steps.
-        if !self
+        let Some(rate) = self
             .selected_playback()
             .as_deref()
-            .is_some_and(|player| player.transport.state == TransportStatus::Playing)
-        {
+            .filter(|player| player.transport.state == TransportStatus::Playing)
+            .map(|player| player.transport.playback_rate)
+        else {
             return;
-        }
+        };
 
         if self.visible_lyrics().is_none() {
             return;
         }
-        let current_position =
-            position_millis.saturating_add(observed_at.elapsed().as_millis() as u64);
-        let lyrics_position_millis = self.lyrics_position_millis(current_position);
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
@@ -69,7 +68,8 @@ impl PlayerUi {
         drop(lyrics);
 
         let shell = Rc::clone(self);
-        let source = glib::timeout_add_local_once(Duration::from_millis(delay_millis), move || {
+        let delay = Duration::from_millis(delay_millis).div_f64(rate);
+        let source = glib::timeout_add_local_once(delay, move || {
             let Some(lyrics) = shell.selected_lyrics() else {
                 return;
             };

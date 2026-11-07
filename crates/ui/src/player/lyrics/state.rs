@@ -215,8 +215,13 @@ impl PlayerUi {
             return;
         }
         let lyrics = self.visible_lyrics();
-        let current_position =
-            position_millis.saturating_add(observed_at.elapsed().as_millis() as u64);
+        // Playback moves on at its rate since it was observed.
+        let rate = self
+            .selected_playback()
+            .as_deref()
+            .map_or(1.0, |player| player.transport.playback_rate);
+        let current_position = position_millis
+            .saturating_add((observed_at.elapsed().as_millis() as f64 * rate) as u64);
         let lyrics_position_millis = self.lyrics_position_millis(current_position);
         let Some(selected_lyrics) = self.selected_lyrics() else {
             return;
@@ -231,7 +236,7 @@ impl PlayerUi {
                 .fullscreen_pane
                 .update_highlight(lyrics.as_deref(), lyrics_position_millis);
         }
-        self.schedule_next_lyrics_highlight(position_millis, observed_at);
+        self.schedule_next_lyrics_highlight(position_millis, observed_at, lyrics_position_millis);
     }
 
     pub fn lyrics_position_millis(&self, position_millis: u64) -> i128 {
