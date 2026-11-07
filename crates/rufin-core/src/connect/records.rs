@@ -1937,7 +1937,7 @@ impl Records {
         let settings = owner.settings.clone();
         owner
             .source
-            .restore_user_state(true, true, || async move {
+            .restore_user_state(true, false, || async move {
                 let changed = prepared.clone();
                 tokio::task::spawn_blocking(move || {
                     settings.restore(
