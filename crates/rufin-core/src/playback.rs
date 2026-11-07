@@ -129,7 +129,7 @@ async fn follow_source(
                     return;
                 };
                 let now = owner.source.selected_library();
-                if now != selected {
+                if !crate::runtime::SelectedLibrary::same(now.as_ref(), selected.as_ref(), true) {
                     selected = now;
                     owner.library_changed(None);
                     if owner.ebu_r128() {

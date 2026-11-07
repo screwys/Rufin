@@ -13,7 +13,7 @@ use tokio::sync::broadcast::{self, error::RecvError, error::TryRecvError};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
 
-use super::{Shared, SourceOwner, configured_source};
+use super::{Shared, SourceOwner};
 
 /// While a source's changes keep coming, clients hear of them at most this often.
 const PUBLISH_INTERVAL: Duration = Duration::from_secs(1);
@@ -143,6 +143,8 @@ struct Pending {
     held: BTreeSet<SourceKey>,
     /// Held sources that go out without waiting.
     now: BTreeSet<SourceKey>,
+    /// A listing completed or a source went, so the source counts read again.
+    recount: bool,
 }
 
 impl Pending {
@@ -165,12 +167,15 @@ impl Pending {
                 } => {
                     self.held.insert(*source);
                 }
+                // A source that went changes what its pages and pins show, as a completed
+                // listing does.
                 Scope::Source {
                     key,
-                    phase: SourcePhase::Completed,
+                    phase: SourcePhase::Completed | SourcePhase::Removed,
                 } => {
                     self.held.insert(*key);
                     self.now.insert(*key);
+                    self.recount = true;
                 }
                 Scope::State { items } => self.changed.items.extend(items.iter().cloned()),
                 Scope::Listened { .. } => self.changed.listened = true,
@@ -183,14 +188,6 @@ impl Pending {
                 Scope::Home { source } => self.changed.home.push(*source),
                 Scope::Downloads { tracks } => {
                     self.changed.downloads.extend(tracks.iter().cloned())
-                }
-                // The source's held rows, from this Write or an earlier one, are gone with it.
-                Scope::Source {
-                    key,
-                    phase: SourcePhase::Removed,
-                } => {
-                    self.held.remove(key);
-                    self.now.remove(key);
                 }
                 Scope::Lyrics { .. } => self.changed.lyrics = true,
                 Scope::Rekey { .. }
@@ -285,7 +282,8 @@ pub(super) async fn run(
             let Some(shared) = shared.upgrade() else {
                 return;
             };
-            SourceOwner { shared }.flush(ready).await;
+            let recount = std::mem::take(&mut pending.recount) || ready.all;
+            SourceOwner { shared }.flush(ready, recount).await;
             continue;
         }
         let deadline = pending.deadline(&published);
@@ -306,46 +304,45 @@ pub(super) async fn run(
 }
 
 impl SourceOwner {
-    /// Brings the selected library and the source counts up to date with a catalog change,
-    /// then sends the change.
-    async fn flush(&self, mut changed: Changed) {
+    /// Brings the selected library's music folder and the folders it offers up to date with a
+    /// catalog change, and the source counts with a completed listing, then sends the change.
+    async fn flush(&self, mut changed: Changed, recount: bool) {
         let shared = &self.shared;
         changed.playlists.sort_unstable();
         changed.playlists.dedup();
         changed.home.sort_unstable();
         changed.home.dedup();
-        if changed.all || !changed.sources.is_empty() {
-            if let Some(selected) = shared
-                .selected()
-                .filter(|selected| changed.all || changed.sources.contains(&selected.source_key))
-                && let Ok(configured) =
-                    configured_source(&shared.settings.load().sources, &selected.source_id)
-            {
-                match self
-                    .library(
-                        selected.source_id.clone(),
-                        selected.source_key,
-                        configured.music_folder_id,
-                    )
-                    .await
-                {
-                    Ok(library) => {
-                        if let Some(current) = shared
-                            .selected
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .as_mut()
-                            .filter(|current| current.source_key == selected.source_key)
-                        {
-                            *current = library;
-                        }
+        let mut configured = recount;
+        if let Some(selected) = shared
+            .selected()
+            .filter(|selected| changed.all || changed.sources.contains(&selected.source_key))
+        {
+            let folder = selected.music_folder_object_id.clone();
+            match (self.library(selected.source_id, selected.source_key, folder)).await {
+                // A music folder chosen meanwhile resolves itself.
+                Ok(library) => {
+                    if let Some(current) = shared
+                        .selected
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .as_mut()
+                        .filter(|current| {
+                            current.source_key == library.source_key
+                                && current.music_folder_object_id == library.music_folder_object_id
+                                && **current != library
+                        })
+                    {
+                        *current = library;
+                        configured = true;
                     }
-                    Err(error) => shared.warn_nonfatal(&error),
                 }
+                Err(error) => shared.warn_nonfatal(&error),
             }
-            if let Err(error) = shared.load_source_counts().await {
-                shared.warn_nonfatal(&error);
-            }
+        }
+        if recount && let Err(error) = shared.load_source_counts().await {
+            shared.warn_nonfatal(&error);
+        }
+        if configured {
             shared.configured();
         }
         let _ = shared.feed.changed.send(Arc::new(changed));
