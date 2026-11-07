@@ -1,8 +1,7 @@
 use rufin_core::view::OpenOptions;
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
-use gtk::glib;
 
 use crate::library::CatalogUi;
 use crate::library::{LibraryLayout, LibraryListKey, LibraryListSettings};
@@ -19,8 +18,6 @@ use super::collections::{
 };
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use rufin_core::route::{CollectionCategory, Route};
-
-const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub struct SearchableTrackOptions {
     pub content_inset: i32,
@@ -156,8 +153,7 @@ impl TrackListProjection {
         self.collection.apply_settings(&settings);
     }
 
-    /// The page's rereads, for this list's search and the inputs `scope` adds. A search reads
-    /// at once when it clears and after a pause while typing.
+    /// The page's rereads, for this list's search and the inputs `scope` adds.
     pub fn page_reads(
         &self,
         scope: impl Fn(&mut OpenOptions) + 'static,
@@ -173,26 +169,7 @@ impl TrackListProjection {
             },
             move |read| changed(read.header),
         );
-        let reread: Rc<dyn Fn()> = Rc::new(reads.weak(PageReads::reread));
-        let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
-        self.search.connect_search_changed(move |search| {
-            if let Some(source) = pending.borrow_mut().take() {
-                source.remove();
-            }
-            if search.text().trim().is_empty() {
-                reread();
-                return;
-            }
-            let reread = Rc::clone(&reread);
-            let pending_timeout = Rc::clone(&pending);
-            pending.replace(Some(glib::timeout_add_local_once(
-                TRACK_FILTER_DEBOUNCE,
-                move || {
-                    pending_timeout.borrow_mut().take();
-                    reread();
-                },
-            )));
-        });
+        connect_list_search(&self.search, &reads);
         reads
     }
 }
