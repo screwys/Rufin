@@ -154,7 +154,6 @@ pub enum Action {
     Enable {
         enabled: bool,
     },
-    Create,
     Join {
         invitation: String,
         replace: bool,
@@ -175,7 +174,6 @@ pub enum Action {
     Remove {
         peer: String,
     },
-    Leave,
     Refresh,
     Retry,
     Discover,
@@ -1151,10 +1149,10 @@ impl ConnectOwner {
         self.turn_off().await
     }
 
-    /// Creates a profile on this device. Connect is on once its row commits.
+    /// Creates a profile on this device unless it has one. Connect is on once its row commits.
     async fn create(self: &Arc<Self>) -> Result<(), String> {
         if self.session().is_some() {
-            return Err("This device already has a Connect profile".into());
+            return Ok(());
         }
         let network = self.network().await?;
         let profile = rufin_connect::store::new_profile();
@@ -1644,13 +1642,8 @@ impl ConnectOwner {
 impl ConnectOwner {
     async fn act(self: &Arc<Self>, action: Action) -> Result<(), ActionError> {
         match action {
-            Action::Enable { enabled: false } | Action::Leave => self.leave(false).await?,
-            Action::Enable { enabled: true } => {
-                if self.session().is_none() {
-                    self.create().await?;
-                }
-            }
-            Action::Create => self.create().await?,
+            Action::Enable { enabled: false } => self.leave(false).await?,
+            Action::Enable { enabled: true } => self.create().await?,
             Action::Join { invitation, .. } => {
                 self.status.send_modify(|status| {
                     status.connecting = true;
@@ -1665,9 +1658,7 @@ impl ConnectOwner {
                 }
             }
             Action::Invite { peer } => {
-                if self.session().is_none() {
-                    self.create().await?;
-                }
+                self.create().await?;
                 self.status.send_modify(|status| {
                     status.connecting = true;
                     status.profile_status = localization::tr("Connecting devices");

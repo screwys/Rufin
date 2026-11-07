@@ -86,7 +86,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
                 trailing = { IconButton({ rename = true }, enabled = enabled) { RufinIcon("rufin-document-edit-symbolic", translate("Edit")) } },
                 modifier = Modifier.clickable(enabled) { rename = true })
             if (state.settings.profile == null) {
-                Button({ connect.action(ConnectAction.Create) }, Modifier.fillMaxWidth(), enabled = enabled) {
+                Button({ connect.action(ConnectAction.Enable(true)) }, Modifier.fillMaxWidth(), enabled = enabled) {
                     Text(translate("Enable Rufin Connect"))
                 }
             } else SettingsRow(translate("Enable Rufin Connect"), summary = state.profileStatus.takeIf { failure == null },
@@ -166,7 +166,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
         confirmButton = { TextButton({ connect.action(ConnectAction.Enable(false)); disable = false }) { Text(translate("Continue")) } },
         dismissButton = { TextButton({ disable = false }) { Text(translate("Cancel")) } })
     if (leave) AlertDialog(onDismissRequest = { leave = false }, title = { Text(translate("Disconnect this device?")) },
-        confirmButton = { TextButton({ connect.action(ConnectAction.Leave); leave = false }) { Text(translate("Disconnect")) } },
+        confirmButton = { TextButton({ connect.action(ConnectAction.Enable(false)); leave = false }) { Text(translate("Disconnect")) } },
         dismissButton = { TextButton({ leave = false }) { Text(translate("Cancel")) } })
     removeDevice?.let { device -> AlertDialog(onDismissRequest = { removeDevice = null }, title = { Text(translate("Remove device")) }, text = { Text(device.name) },
         confirmButton = { TextButton({ connect.action(ConnectAction.Remove(device.id)); removeDevice = null }) { Text(translate("Remove")) } },

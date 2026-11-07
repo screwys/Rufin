@@ -667,7 +667,7 @@ pub(super) fn page(shell: &Rc<Shell>, connect_dialog: &adw::Dialog) -> gtk::Widg
             let dialog: adw::AlertDialog =
                 crate::ui_resource::object(&builder, resource, "disconnect_confirmation");
             if dialog.choose_future(Some(&parent)).await == "disconnect" {
-                run(&shell, Action::Leave);
+                run(&shell, Action::Enable { enabled: false });
             }
         });
     });
