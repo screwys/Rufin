@@ -748,12 +748,7 @@ const requestedCovers = new WeakSet();
 // What a card's picture is read by; None for a playlist folder, whose preview is its picture.
 function cardCover(kind, row) {
   if (kind === "playlist") return { playlist: row.id };
-  if (kind === "smart-playlist")
-    return {
-      smart_playlist: row.id,
-      ...(state.source ? { source: state.source } : {}),
-      ...(state.selectedLibrary ? { folder: state.selectedLibrary } : {}),
-    };
+  if (kind === "smart-playlist") return { smart_playlist: row.id };
   if (kind === "genre" || kind === "mood") return { genre: row.id, source: row.source };
   return row.uri;
 }

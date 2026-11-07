@@ -308,12 +308,7 @@ async fn artwork(
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
     let binding = if parameters.contains_key("genre") {
-        let (source, _) = catalog::scope(
-            &products,
-            required(&parameters, "source")?,
-            parameters.get("folder").map(String::as_str),
-        )
-        .await?;
+        let (source, _) = catalog::scope(&products, required(&parameters, "source")?, None).await?;
         products
             .library
             .rows_of(
