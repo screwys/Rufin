@@ -123,24 +123,24 @@ function renderSources(configured) {
     card.append(quality);
     $("content").append(card);
   }
-  const cache = $("cache-settings-template").content.firstElementChild.cloneNode(true);
-  $("content").append(cache);
+  const settings = $("cache-settings-template").content.cloneNode(true);
+  const cache = settings.firstElementChild, choices = settings.querySelectorAll("select");
+  $("content").append(settings);
   run(async () => {
     let current = await api("/downloads/cache-settings");
     if (!cache.isConnected) return;
-    const choices = cache.querySelectorAll("select");
     for (const choice of choices) {
-      choice.value = String(current[choice.dataset.cache]);
+      choice.value = String(current[choice.dataset.setting]);
       choice.disabled = false;
       choice.onchange = () => run(async () => {
         for (const select of choices) select.disabled = true;
         try {
           current = await api("/downloads/cache-settings", "POST", {
-            ...current, [choice.dataset.cache]: choice.value === "true",
+            ...current, [choice.dataset.setting]: choice.value === "true",
           });
         } finally {
           for (const select of choices) {
-            select.value = String(current[select.dataset.cache]);
+            select.value = String(current[select.dataset.setting]);
             select.disabled = false;
           }
         }

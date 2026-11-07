@@ -450,8 +450,14 @@
       <fieldset class="source-actions">
         <legend>{{ localization::tr("Cache") }}</legend>
         <div class="download-quality-controls">
-          <label>{{ localization::tr("Artwork") }}<select data-cache="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="artwork" hidden></output></label>
-          <label>{{ localization::tr("Lyrics") }}<select data-cache="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="lyrics" hidden></output></label>
+          <label>{{ localization::tr("Artwork") }}<select data-setting="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="artwork" hidden></output></label>
+          <label>{{ localization::tr("Lyrics") }}<select data-setting="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="lyrics" hidden></output></label>
+        </div>
+      </fieldset>
+      <fieldset class="source-actions">
+        <legend>{{ localization::tr("Metadata") }}</legend>
+        <div class="download-quality-controls">
+          <label>{{ localization::tr("Use sort tags") }}<select data-setting="sort_tags" disabled><option value="false">{{ localization::tr("Off") }}</option><option value="true">{{ localization::tr("On") }}</option></select></label>
         </div>
       </fieldset>
     </template>

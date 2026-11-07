@@ -334,6 +334,7 @@ async fn cache_settings(
     struct Input {
         artwork: bool,
         lyrics: bool,
+        sort_tags: bool,
     }
     if request.method() == hyper::Method::POST {
         let input: Input = body(request).await?;
@@ -342,6 +343,7 @@ async fn cache_settings(
             .update_preferences(|settings| {
                 settings.application.download_artwork_automatically = input.artwork;
                 settings.application.download_lyrics_automatically = input.lyrics;
+                settings.application.use_sort_tags = input.sort_tags;
                 Ok(())
             })
             .map_err(bad_request)?;
@@ -352,6 +354,7 @@ async fn cache_settings(
         json!({
             "artwork": settings.application.download_artwork_automatically,
             "lyrics": settings.application.download_lyrics_automatically,
+            "sort_tags": settings.application.use_sort_tags,
         }),
     ))
 }
