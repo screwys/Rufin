@@ -538,28 +538,19 @@ impl PlexPlayback {
                 selection: crate::playback::QueueSelection::Positions(positions),
                 target,
             } => self.reorder(&positions, &target).await?,
-            Command::MoveAfterCurrent(position) => {
+            Command::MoveAfterCurrentSelection(crate::playback::QueueSelection::Positions(
+                positions,
+            )) => {
                 let timeline = self.current().await?;
-                let queue_id = timeline
+                let queue = timeline
                     .play_queue_id
                     .ok_or("The Plex player has no queue")?;
                 let current = timeline
                     .play_queue_item_id
                     .ok_or("The Plex player has no current queue item")?;
-                let occurrence_id = self.items_at(&timeline, &[position]).await?[0].occurrence_id;
-                if occurrence_id != current {
-                    self.connection()
-                        .0
-                        .plex_queue_mutation(PlexQueueMutation::Move {
-                            queue_id,
-                            occurrence_id,
-                            after: Some(current),
-                        })
-                        .await
-                        .map_err(string_error)?;
-                    self.control(move |client| client.refresh_queue(queue_id))
-                        .await?;
-                }
+                let mut moving = self.items_at(&timeline, &positions).await?;
+                moving.retain(|item| item.occurrence_id != current);
+                self.move_items(queue, moving, Some(current)).await?
             }
             Command::Insert { input, target } => {
                 self.insert(
@@ -716,7 +707,7 @@ impl PlexPlayback {
             .play_queue_id
             .ok_or("The Plex player has no queue")?;
         let moving = self.items_at(&timeline, positions).await?;
-        let mut after = match target {
+        let after = match target {
             crate::playback::QueueReorderTarget::BeforeOccurrence(_)
             | crate::playback::QueueReorderTarget::AfterOccurrence(_) => return Ok(()),
             crate::playback::QueueReorderTarget::After(position) => {
@@ -743,6 +734,16 @@ impl PlexPlayback {
                 .find(|(position, _)| !positions.contains(position))
                 .map(|(_, item)| item.occurrence_id),
         };
+        self.move_items(queue, moving, after).await
+    }
+
+    /// Moves `moving` in order after the queue item `after`, or to the start.
+    async fn move_items(
+        &self,
+        queue: u64,
+        moving: Vec<sources::PlexQueueItem>,
+        mut after: Option<u64>,
+    ) -> Result<(), String> {
         for item in moving {
             self.connection()
                 .0

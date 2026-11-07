@@ -211,9 +211,13 @@ pub(super) async fn play_next(
     }
     let input: Input = body(request).await?;
     let queue = products.playback.clone();
-    tokio::task::spawn_blocking(move || queue.move_after_current(input.position))
-        .await
-        .map_err(internal)?;
+    tokio::task::spawn_blocking(move || {
+        queue.move_selection_after_current(rufin_core::playback::QueueSelection::Positions(vec![
+            input.position,
+        ]))
+    })
+    .await
+    .map_err(internal)?;
     Ok(accepted())
 }
 

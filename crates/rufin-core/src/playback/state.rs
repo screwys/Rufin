@@ -83,7 +83,6 @@ pub enum Command {
         input: library::QueueLoad,
         target: crate::playback::QueueReorderTarget,
     },
-    MoveAfterCurrent(usize),
     MoveAfterCurrentSelection(QueueSelection),
     Clear {
         include_current: bool,
@@ -915,7 +914,6 @@ impl Player {
             Command::RemoveMany(selection) => Ok(self.remove_many(&selection, sample)),
             Command::Reorder { selection, target } => Ok(self.reorder(&selection, &target, sample)),
             Command::Insert { input, target } => Ok(self.insert(input, &target)),
-            Command::MoveAfterCurrent(position) => Ok(self.move_after_current(&position, sample)),
             Command::MoveAfterCurrentSelection(selection) => Ok({
                 let target = self
                     .sequence
@@ -1717,15 +1715,6 @@ impl Player {
                 },
             },
         )
-    }
-    fn move_after_current(&mut self, id: &usize, sample: &ClockSample) {
-        let target = self
-            .sequence
-            .selected()
-            .map_or(QueueReorderTarget::End, |row| {
-                QueueReorderTarget::AfterOccurrence(row.occurrence_id.expect("local queue entry"))
-            });
-        self.reorder(&QueueSelection::Positions(vec![*id]), &target, sample)
     }
     fn clear(&mut self, include_current: bool, sample: &ClockSample) {
         let previous = self.sequence.selected_index();

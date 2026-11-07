@@ -592,7 +592,9 @@ impl PlaybackOwner {
                 selection: crate::playback::QueueSelection::Positions(positions),
                 target,
             } => Control::Reorder { positions, target },
-            Command::MoveAfterCurrent(position) => Control::MoveNext { position },
+            Command::MoveAfterCurrentSelection(crate::playback::QueueSelection::Positions(
+                positions,
+            )) => Control::MoveNext { positions },
             Command::Clear { include_current } => Control::Clear { include_current },
             command => return Some(command),
         };

@@ -285,7 +285,7 @@ pub enum Control {
         target: library::QueueReorderTarget,
     },
     MoveNext {
-        position: usize,
+        positions: Vec<usize>,
     },
     Clear {
         include_current: bool,
@@ -1375,7 +1375,9 @@ impl ConnectOwner {
                         crate::playback::QueueSelection::Positions(positions),
                         target,
                     ),
-                    Control::MoveNext { position } => playback.move_after_current(position),
+                    Control::MoveNext { positions } => playback.move_selection_after_current(
+                        crate::playback::QueueSelection::Positions(positions),
+                    ),
                     Control::Clear { include_current } => playback.clear(include_current),
                 })
                 .await

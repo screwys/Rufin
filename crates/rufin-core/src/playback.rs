@@ -864,9 +864,6 @@ impl PlaybackOwner {
     pub fn move_selection_after_current(&self, selection: QueueSelection) {
         self.send(Command::MoveAfterCurrentSelection(selection));
     }
-    pub fn move_after_current(&self, position: usize) {
-        self.send(Command::MoveAfterCurrent(position));
-    }
     pub fn reorder(&self, selection: QueueSelection, target: QueueReorderTarget) {
         self.send(Command::Reorder { selection, target });
     }
