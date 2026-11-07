@@ -399,7 +399,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 FloatingActionButton({ random = true }, Modifier.padding(bottom = playerPadding)) { RufinIcon("rufin-random-symbolic", label("Play random")) }
         }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-            CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding, io.github.screwys.rufin.ui.LocalDownloadBadges provides model) {
+            CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding) {
             Column(Modifier.fillMaxSize()) {
                 if (!model.connect.operationActive && connectState?.let { it.connecting } == true) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -626,7 +626,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         if (location.route is Route.Folders) FolderNavigation(model, browse, page)
         if (summary != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            DetailContent(summary, page, rows, player, page.favoritesPage, page.releaseGroups,
+            DetailContent(summary, page, rows, player, page.releaseGroups,
                 browse::open, onMenu, { item, placement, shuffled -> page.play(placement, shuffled, item.row.title) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, summary.row.title) },
                 onLink = { link -> model.runAction {

@@ -48,7 +48,7 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
             if (item == null) Spacer(Modifier.height(64.dp)) else {
                 val artwork = rememberArtwork(item.row.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
                 BrowseSwipeActions(item, true) {
-                ListItem(headlineContent = { BrowseTitle(item, player = player) },
+                ListItem(headlineContent = { BrowseTitle(page.shown(item), player = player) },
                     supportingContent = { if (item.row.subtitle.isNotBlank()) Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     leadingContent = {
                         Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))

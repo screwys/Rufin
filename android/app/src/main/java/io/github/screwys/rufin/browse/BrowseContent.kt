@@ -361,10 +361,10 @@ internal fun ShowcaseAction(icon: String, label: String, action: () -> Unit, shu
 
 private fun browseItemKey(item: BrowseItem): String = "${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
 
-/** The item showing the favorites and ratings committed while the visible page is open. */
+/** The item showing the favorites, ratings and downloads committed since it was read. */
 @Composable
 internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, item: BrowseItem): BrowseItem =
-    model.browse.visiblePage?.shown(item) ?: item
+    model.browse.shown(item)
 
 @Composable
 internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
@@ -477,7 +477,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                BrowseTitle(item, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
+                BrowseTitle(shown, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
                     style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
                 item.row.playlistFolderMember?.let { member -> PlaylistDragHandle(member, Modifier.size(32.dp)) }
             }
@@ -524,7 +524,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                             PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                         }
                     }
-                    BrowseTitle(item, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
+                    BrowseTitle(projected, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
                     Text(item.row.subtitle, Modifier.rufinMarquee(), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }

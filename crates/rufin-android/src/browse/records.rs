@@ -120,6 +120,8 @@ pub struct AndroidOpened {
     pub keeps_summary: bool,
     pub groups: Vec<AndroidArtistReleaseGroup>,
     pub favorite_rows: Vec<AndroidBrowseRow>,
+    /// How many favorite tracks an artist page lists.
+    pub favorite_count: u64,
     pub home: Vec<AndroidHomeSection>,
     /// What committed while the page read.
     pub reading: Arc<AndroidReading>,
@@ -174,7 +176,7 @@ pub struct AndroidHomeSection {
 }
 
 /// What a detail page's header shows besides its row: its pictures, credited artists, label
-/// and links, and an artist's favorite tracks count.
+/// and links.
 #[derive(uniffi::Record)]
 pub struct AndroidDetailSummary {
     pub row: AndroidBrowseRow,
@@ -184,7 +186,6 @@ pub struct AndroidDetailSummary {
     /// What the collection is, untranslated: an album's release class, Artist, Playlist.
     pub label: String,
     pub links: Vec<AndroidDetailLink>,
-    pub favorite_total: u64,
 }
 
 #[derive(uniffi::Record)]

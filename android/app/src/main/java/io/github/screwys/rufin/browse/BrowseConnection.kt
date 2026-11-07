@@ -42,7 +42,7 @@ internal data class BrowseLocation(
 internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val view: AndroidView?,
     val displaySettings: AndroidBrowseDisplay? = null,
     val searchResult: Boolean = false, val contextTitle: String? = null,
-    val downloads: Int = 0)
+    val downloads: Int = 0, val favorite: Boolean = false)
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -73,6 +73,11 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var library by mutableStateOf<AndroidLibrary?>(null)
         private set
     var visiblePage by mutableStateOf<BrowsePage?>(null)
+    /** The holder of Search's results and recent searches. */
+    private val search = ShownRows(this, scope)
+    /** `item` showing the changes committed since the surface that holds it read it. */
+    @Composable
+    fun shown(item: BrowseItem): BrowseItem = (if (item.searchResult) search else visiblePage)?.shown(item) ?: item
     var labelsVersion by mutableIntStateOf(0)
         private set
     var artistAlbumsRevision by mutableIntStateOf(0)
@@ -149,6 +154,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
         scope.launch(Dispatchers.Main) {
             connection.changes.collect { changed ->
+                if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) search.showChanges(changed)
                 when (searchView?.refresh(changed)) {
                     Refresh.REOPEN -> searchChanges++
                     Refresh.REREAD -> searchRereads++
@@ -192,11 +198,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                         }
                         searchView = found.view
                         searchRows = rows
-                        // Results show changes through the visible page, as its rows do.
-                        visiblePage?.let { page ->
-                            page.hold(rows)
-                            missed?.let(page::showChanges)
-                        }
+                        search.hold(rows)
+                        missed?.let(search::showChanges)
                         if (refresh == Refresh.REREAD) searchRereads++
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { connection.runAction { throw error } }
@@ -286,7 +289,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         val library = library ?: return@runAction
         // Core decides what the row plays from where it shows.
         connection.connectedService().playRequest {
-            library.play(item.row, item.view, item.index, placement, shuffled, item.contextTitle)
+            library.play(item.row, item.view, item.favorite, item.index, placement, shuffled, item.contextTitle)
         }
         rememberSearchResult(item)
     }

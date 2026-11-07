@@ -188,20 +188,26 @@ impl AndroidView {
         library_list_key(self.view.route(), self.view.options().category)
     }
 
-    /// The rows of the view that start at `first`.
-    fn rows_from(&self, rows: Vec<Row>, first: usize) -> Vec<AndroidBrowseRow> {
+    /// The rows of the view that start at `first`, of an artist page's favorite tracks when
+    /// `favorites`.
+    fn rows_from(&self, rows: Vec<Row>, first: usize, favorites: bool) -> Vec<AndroidBrowseRow> {
+        let fields = if favorites {
+            &self.favorite_fields
+        } else {
+            &self.fields
+        };
         let folders = self.view.folder_len().unwrap_or(0);
         rows.into_iter()
             .zip(first..)
             .map(|(row, position)| match row {
-                Row::Track(_) => shown_row(row, &self.fields, position.saturating_sub(folders)),
-                Row::AlbumTrack { index, .. } => shown_row(row, &self.fields, index as usize),
+                Row::Track(_) => shown_row(row, fields, position.saturating_sub(folders)),
+                Row::AlbumTrack { index, .. } => shown_row(row, fields, index as usize),
                 // A child folder opens the folder core names, and shows no fields.
                 row @ Row::Folder(_) => match self.view.row_route(&row) {
                     Some(route) => AndroidBrowseRow::opening(row, route),
                     None => AndroidBrowseRow::new(row),
                 },
-                row => shown_row(row, &self.fields, position),
+                row => shown_row(row, fields, position),
             })
             .collect()
     }
@@ -280,23 +286,26 @@ impl AndroidView {
         self.view.route().clone()
     }
 
-    /// Rows `offset` onwards, at most `limit` and 256, and what committed while they read.
+    /// Rows `offset` onwards, at most `limit` and 256, an artist page's favorite tracks when
+    /// `favorites`, and what committed while they read.
     pub async fn rows(
         self: Arc<Self>,
         offset: u64,
         limit: u32,
+        favorites: bool,
     ) -> Result<AndroidRows, AndroidError> {
         let runtime = self.runtime.clone();
         let reading = AndroidReading::new(self.source.reading());
         run_read(&runtime, move |cancel| async move {
             let offset = usize::try_from(offset).map_err(error)?;
-            let rows = self
-                .view
-                .rows(offset..offset + limit.min(256) as usize, &cancel)
-                .await
-                .map_err(error)?;
+            let range = offset..offset + limit.min(256) as usize;
+            let rows = if favorites {
+                self.view.favorite_rows(range, &cancel).await
+            } else {
+                self.view.rows(range, &cancel).await
+            };
             Ok(AndroidRows {
-                rows: self.rows_from(rows, offset),
+                rows: self.rows_from(rows.map_err(error)?, offset, favorites),
                 reading,
             })
         })
@@ -459,6 +468,20 @@ impl AndroidView {
             .map(|field| AndroidSortField::of(*field))
             .collect()
     }
+
+    /// The fields an artist page's favorite tracks show, by title.
+    pub fn favorite_fields(&self) -> Vec<AndroidSortField> {
+        self.favorite_fields
+            .iter()
+            .map(|field| AndroidSortField::of(*field))
+            .collect()
+    }
+
+    /// The display settings of an artist page's favorite tracks, an artist's tracks list.
+    pub fn favorite_display(&self) -> AndroidBrowseDisplay {
+        let key = LibraryListKey::ArtistTracks;
+        browse_display(key, &self.settings.load().library_list(key))
+    }
 }
 
 impl AndroidLibrary {
@@ -549,7 +572,7 @@ impl AndroidLibrary {
             }
             .map_err(error)?;
             let view = self.view_of(opened.view);
-            let rows = view.rows_from(opened.rows, opened.first);
+            let rows = view.rows_from(opened.rows, opened.first, false);
             let groups = view
                 .view
                 .release_counts()
@@ -572,13 +595,7 @@ impl AndroidLibrary {
                         .collect()
                 })
                 .unwrap_or_default();
-            let favorite_rows = opened
-                .favorites
-                .unwrap_or_default()
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| shown_row(row, &view.favorite_fields, index))
-                .collect();
+            let favorite_rows = view.rows_from(opened.favorites.unwrap_or_default(), 0, true);
             let shown = !view.view.is_missing() && !embedded;
             let header = opened.header.filter(|_| shown);
             let summary = header
@@ -591,6 +608,7 @@ impl AndroidLibrary {
                 keeps_summary: reread && shown,
                 groups,
                 favorite_rows,
+                favorite_count: view.view.favorites_len().unwrap_or(0) as u64,
                 home: view.home_sections(),
                 view,
                 reading,
@@ -600,12 +618,15 @@ impl AndroidLibrary {
     }
 
     /// Plays `row` at `placement` as core's row rule decides (decisions.md, "What a row plays
-    /// is one rule"): shown at `index` on `view`'s page, or outside a page when `view` is None.
-    /// A play of the page is captioned `page_title`.
+    /// is one rule"): shown at `index` on `view`'s page, among its artist's favorite tracks
+    /// when `favorite`, or outside a page when `view` is None. A play of the page is captioned
+    /// `page_title`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn play(
         &self,
         row: AndroidBrowseRow,
         view: Option<Arc<AndroidView>>,
+        favorite: bool,
         index: u64,
         placement: QueuePlacement,
         shuffled: bool,
@@ -618,6 +639,13 @@ impl AndroidLibrary {
         let request = run_read(&self.runtime, move |cancel| async move {
             let selected = selected.as_ref();
             match (&view, PlayTarget::of_row(&row.row)) {
+                (Some(view), _) if favorite => Ok(match &row.row {
+                    Row::Track(track) => {
+                        view.view
+                            .play_favorite(track.track_key, index, placement, shuffled)
+                    }
+                    _ => None,
+                }),
                 (Some(view), _) => {
                     view.view
                         .play(&row.row, index, placement, shuffled, &cancel)

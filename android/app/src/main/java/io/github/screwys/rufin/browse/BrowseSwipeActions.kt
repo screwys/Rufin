@@ -106,7 +106,7 @@ internal fun BrowseSwipeActions(
 ) {
     val configured = LocalBrowseGestureActions.current
     // A swipe acts on the row as it shows now, with the favorites and ratings committed since.
-    val item = configured?.browse?.visiblePage?.shown(listed) ?: listed
+    val item = configured?.browse?.shown(listed) ?: listed
     val library = configured?.browse?.library
     val offered = remember(item.row, library) { library?.swipes(item.row) }
     val left = configured?.left?.takeIf { offered != null && it.availableFor(offered) }

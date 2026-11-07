@@ -62,13 +62,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @Composable
 internal fun DetailContent(
     summary: AndroidDetailSummary?, page: BrowsePage, rows: LazyPagingItems<BrowseItem>, player: PlayerConnection,
-    favoritesPage: BrowsePage?, releaseGroups: List<AndroidArtistReleaseGroup>,
+    releaseGroups: List<AndroidArtistReleaseGroup>,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     onPlay: (BrowseItem, QueuePlacement, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (Route, String) -> Unit,
     onLink: (AndroidDetailLink) -> Unit, onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
 ) {
-    val favorites = favoritesPage?.pages?.collectAsLazyPagingItems()
+    val favorites = page.favoritePages.collectAsLazyPagingItems()
     val state = rememberLazyListState()
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }
@@ -91,21 +91,22 @@ internal fun DetailContent(
             item("detail-header") {
                 DetailHeader(route, summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
             }
-            if (artist && favorites != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
+            if (artist && page.favoriteCount > 0UL) item("detail-favorites") {
                 Column {
+                    val display = favorites.itemSnapshotList.items.firstOrNull()?.displaySettings
                     DetailSectionHeading(translate("Favorite tracks"))
-                    if (favoritesPage.displaySettings?.showHeader != false) FieldHeader(favoritesPage.fields, favoritesPage.displaySettings?.size)
+                    if (display?.showHeader != false) FieldHeader(page.favoriteFields, display?.size)
                     val visibleRows = if (favorites.loadState.refresh is LoadState.Loading)
-                        minOf(summary.favoriteTotal, 4UL).toInt() else minOf(favorites.itemCount, 4)
-                    val baseHeight = when (favoritesPage.displaySettings?.size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> 64.dp }
+                        minOf(page.favoriteCount, 4UL).toInt() else minOf(favorites.itemCount, 4)
+                    val baseHeight = when (display?.size) { DisplaySize.COMPACT -> 48.dp; DisplaySize.LARGE -> 80.dp; else -> 64.dp }
                     val rowHeight = baseHeight * LocalDensity.current.fontScale.coerceAtLeast(1f)
                     if (favorites.itemCount == 0 && favorites.loadState.refresh is LoadState.NotLoading) {
-                        BrowseEmptyState(favoritesPage.hasActiveFilters, resetFilters = page::resetFilters)
+                        BrowseEmptyState(page.options.filter.isNotBlank(), resetFilters = page::resetFilters)
                     } else LazyColumn(Modifier.fillMaxWidth().height(rowHeight * visibleRows.coerceAtLeast(1))) {
                         items(favorites.itemCount, key = favorites.itemKey { "${it.row.key}:${it.index}" }) { index ->
                             val item = favorites[index]
-                            if (item == null) Spacer(Modifier.height(64.dp)) else FieldRow(item.copy(displaySettings = favoritesPage.options.displaySettings ?: favoritesPage.displaySettings), player,
-                                images(favoritesPage.fields), favoritesPage.fields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
+                            if (item == null) Spacer(Modifier.height(64.dp)) else FieldRow(item, player,
+                                images(page.favoriteFields), page.favoriteFields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                         }
                         item { DetailLoadState(favorites.loadState.append, favorites::retry) }
                     }
@@ -188,7 +189,6 @@ private fun DetailHeader(
     onOpenRoute: (Route, String) -> Unit, onLink: (AndroidDetailLink) -> Unit, onMenu: (BrowseItem) -> Unit,
     onRadio: (BrowseItem) -> Unit,
 ) {
-    val projected = favoriteItem(player.model, item)
     val albumCount = (item.row.artistRow?.summary?.albumCount ?: 0L).coerceAtLeast(0).toULong()
     val playlist = item.row.playlist != null || item.row.smartPlaylist != null
     val sectionTitle = when (route) {
@@ -278,8 +278,8 @@ private fun DetailHeader(
                     ShowcaseAction("rufin-mail-forward-symbolic", "Play Next", { onPlay(item, QueuePlacement.AfterCurrent, false) }, { onPlay(item, QueuePlacement.AfterCurrent, true) })
                     ShowcaseAction("rufin-go-last-symbolic", "Play Later", { onPlay(item, QueuePlacement.End, false) }, { onPlay(item, QueuePlacement.End, true) })
                     if (item.row.albumRow != null || item.row.artistRow != null)
-                        ShowcaseAction(if (projected.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
-                            { onFavorite(projected) }, tint = if (projected.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        ShowcaseAction(if (item.row.favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", "Favorite",
+                            { onFavorite(item) }, tint = if (item.row.favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -372,14 +372,14 @@ internal fun FieldRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
                     Column(Modifier.weight(1f)) {
-                        BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
+                        BrowseTitle(projected, maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                         Text(item.row.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
                     }
                 }
                 else -> if (field.id == LibraryField.TITLE) Column(detailColumn(field.id)) {
-                    BrowseTitle(item, maxLines = 2, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
+                    BrowseTitle(projected, maxLines = 2, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                     item.row.lyricsSnippet?.let { LyricsSnippetText(it) }
                 }
                 else Text(value, detailColumn(field.id), maxLines = 2, overflow = TextOverflow.Ellipsis,

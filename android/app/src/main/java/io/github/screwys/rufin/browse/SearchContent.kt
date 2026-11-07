@@ -159,7 +159,7 @@ private fun SearchResults(
             val artwork = rememberArtwork(item.row.artworkIdentity, player, pixels)
             BrowseSwipeActions(item, true) {
             ListItem(
-                headlineContent = { BrowseTitle(item, player = player) },
+                headlineContent = { BrowseTitle(favoriteItem(player.model, item), player = player) },
                 supportingContent = {
                     Text(listOf(item.row.subtitle, translate(when (item.row.target) {
                         is FavoriteTarget.Album -> "Album"

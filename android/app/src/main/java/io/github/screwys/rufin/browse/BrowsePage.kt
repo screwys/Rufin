@@ -29,12 +29,14 @@ internal class BrowsePage(
     private val browse: BrowseConnection,
     val location: BrowseLocation,
     val options: BrowseOptions,
-    private val scope: CoroutineScope,
+    scope: CoroutineScope,
     private val pins: Boolean = false,
-    private val parent: BrowsePage? = null,
-) {
+) : ShownRows(browse, scope) {
     var active by mutableStateOf(false)
-    var favoritesPage by mutableStateOf<BrowsePage?>(null)
+    /** An artist page's favorite tracks: how many, the fields and display they show. */
+    var favoriteCount by mutableStateOf(0UL)
+        private set
+    var favoriteFields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
     var releaseGroups by mutableStateOf<List<AndroidArtistReleaseGroup>>(emptyList())
         private set
@@ -58,6 +60,9 @@ internal class BrowsePage(
     private val artistAlbums get() = location.route.showsReleases && options.category == CollectionCategory.ALBUMS
     var summary by mutableStateOf<AndroidDetailSummary?>(null)
         private set
+    override val header get() = summary?.row
+    override val pageView get() = currentView
+    override fun showHeader(row: AndroidBrowseRow) { summary = summary?.copy(row = row) }
     /** The fields the page's rows show, in its layout. */
     var fields by mutableStateOf<List<AndroidSortField>>(emptyList())
         private set
@@ -70,24 +75,13 @@ internal class BrowsePage(
     private var openedPage by mutableStateOf<AndroidOpened?>(null)
     private var preparedContext by mutableStateOf<PageContext?>(null)
     private var capturedLabelsVersion = browse.labelsVersion
-    /** How many favorite, rating and download changes were committed while the page is open. */
-    private var downloads by mutableIntStateOf(0)
     /** The favorite, rating and download changes committed while the page was not shown, which its
      * rows show once it is. */
     private var unshown: Changed? = null
-    /** Rows core patched, by identity: each patches only rows of the View that read the row it
-     * patched, read before its change; a row read since shows itself. Written on the main thread
-     * only; a patch goes once the page stops holding its row. */
-    private val patched = mutableStateMapOf<String, Patch>()
-    private class Patch(val revision: Int, val view: AndroidView?, val row: AndroidBrowseRow)
-    /** The rows the page holds by identity, most recently read or shown last: those on screen
-     * and those read lately, which scroll back in without a read. Committed changes patch them
-     * through core. */
-    private val held = object : LinkedHashMap<String, BrowseItem>(HELD_ROWS, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BrowseItem>): Boolean = size > HELD_ROWS
-    }
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
+    private val favoriteData = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
+    val favoritePages: Flow<PagingData<BrowseItem>> = favoriteData.cachedIn(scope)
 
     val covers get() = displaySettings?.layout == LibraryLayout.GRID
     val hasActiveFilters get() = options.filter.isNotBlank() ||
@@ -99,7 +93,6 @@ internal class BrowsePage(
             options.downloadedOnly = false
         }
     }
-    private val embedded get() = parent != null
     var supportsLetterIndex by mutableStateOf(false)
         private set
     suspend fun letterPosition(letter: String): ULong? {
@@ -117,95 +110,13 @@ internal class BrowsePage(
         val route: Route, val category: CollectionCategory, val historySource: String?, val filter: String,
         val sort: LibraryField?, val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
-        val parentPage: AndroidOpened?,
     )
-
-    /** `item` showing the favorites, ratings and downloads committed since the page read it. */
-    @Composable
-    fun shown(item: BrowseItem): BrowseItem {
-        val key = shownKey(item)
-        DisposableEffect(key, item) {
-            hold(listOf(item))
-            onDispose {}
-        }
-        val row = patchOf(item)?.row ?: return item
-        return remember(item, row) { item.copy(row = row) }
-    }
-
-    /** A row's identity among those the page holds, at its place: a listen or entry differs from
-     * another of the same track, and a search result shows its own fields, so it is held apart
-     * from the page's row of the same item. */
-    private fun shownKey(item: BrowseItem) =
-        "${if (item.searchResult) "search:" else ""}${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
-
-    /** Holds `items`, rows the page read or shows, so committed changes patch them. A row read
-     * later replaces one read earlier. */
-    fun hold(items: List<BrowseItem>) = synchronized(held) {
-        for (item in items) {
-            val key = shownKey(item)
-            val previous = held[key]
-            if ((previous?.downloads ?: -1) <= item.downloads) held[key] = item
-        }
-    }
-
-    /** The patch `item` shows: one of its View that came since it was read. */
-    private fun patchOf(item: BrowseItem): Patch? =
-        patched[shownKey(item)]?.takeIf { it.view === item.view && it.revision > item.downloads }
-
-    /** The row `item` shows now: its patch when one came since it was read. */
-    private fun current(item: BrowseItem): AndroidBrowseRow = patchOf(item)?.row ?: item.row
-
-    /** Shows a committed change in the header and the rows the page holds, through core:
-     * favorites and ratings at once, and downloads once read, into each row as it shows then, so
-     * an older change never undoes a newer one. Each row counts as the View that read it counts
-     * (a search result as its search), the header as the page. Runs on the main thread. */
-    fun showChanges(changed: Changed) {
-        val revision = ++downloads
-        val holding = synchronized(held) { held.toMap() }
-        patched.keys.retainAll(holding.keys)
-        val items = holding.values.groupBy { it.view }
-        val page = currentView
-        showRead(changed, revision, page, summary, items[page].orEmpty())
-        for ((view, read) in items) if (view !== page) showRead(changed, revision, view, null, read)
-    }
-
-    private fun showRead(changed: Changed, revision: Int, view: AndroidView?, header: AndroidDetailSummary?, items: List<BrowseItem>) {
-        val library = browse.library ?: return
-        val offset = if (header != null) 1 else 0
-        val showing = library.showChanges(listOfNotNull(header?.row) + items.map(::current), changed, view)
-        Snapshot.withMutableSnapshot {
-            for (shown in showing.states) {
-                val index = shown.index.toInt() - offset
-                if (index < 0) { if (summary === header) summary = header!!.copy(row = shown.row) }
-                else items[index].let { patched[shownKey(it)] = Patch(revision, it.view, shown.row) }
-            }
-        }
-        val downloads = showing.downloads ?: return
-        scope.launch(Dispatchers.Main) {
-            val read = downloads.read()
-            Snapshot.withMutableSnapshot {
-                for (shown in read) {
-                    val index = shown.index.toInt() - offset
-                    if (index < 0) {
-                        val current = summary?.takeIf { currentView === view && it.row.key == header!!.row.key } ?: continue
-                        library.takeDownloads(current.row, shown.row)?.let { summary = current.copy(row = it) }
-                        continue
-                    }
-                    val key = shownKey(items[index])
-                    val item = synchronized(held) { held[key] }?.takeIf { it.view === items[index].view } ?: continue
-                    val patch = patchOf(item)
-                    val merged = library.takeDownloads(patch?.row ?: item.row, shown.row) ?: continue
-                    patched[key] = Patch(maxOf(revision, patch?.revision ?: 0), item.view, merged)
-                }
-            }
-        }
-    }
 
     /** Handles a committed change: shows it in the rows and header, and reads the page again
      * when its View says so. Runs on the main thread. */
     private fun handle(changed: Changed) {
         if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) {
-            if (parent?.active ?: active) showChanges(changed)
+            if (active) showChanges(changed)
             else unshown = unshown?.let { it.copy(items = it.items + changed.items, downloads = it.downloads.ifEmpty { changed.downloads }) } ?: changed
         }
         val refresh = if (pins) browse.library?.pinsRefresh(changed) == true
@@ -273,14 +184,13 @@ internal class BrowsePage(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun observe(): Unit = withContext(Dispatchers.IO) { coroutineScope {
-        val lifetime = coroutineContext
         fun sameContext(previous: PageContext?, current: PageContext?): Boolean =
             previous != null && previous == current
         launch {
             connection.changes.collect { changed -> withContext(Dispatchers.Main) { handle(changed) } }
         }
         launch(Dispatchers.Main) {
-            snapshotFlow { parent?.active ?: active }.collect { shown ->
+            snapshotFlow { active }.collect { shown ->
                 if (shown) unshown?.let { unshown = null; showChanges(it) }
             }
         }
@@ -291,15 +201,15 @@ internal class BrowsePage(
                     withContext(Dispatchers.Main) { if (pins || currentView?.settingsReread() == true) refresh() }
                 }
         }
-        var favoriteJob: Job? = null
         launch {
-            snapshotFlow { Triple(parent?.active ?: active, browse.labelsVersion, currentView) }
+            snapshotFlow { Triple(active, browse.labelsVersion, currentView) }
                 .collectLatest { (active, labelsVersion, view) ->
                     if (!active || view == null || labelsVersion == capturedLabelsVersion) return@collectLatest
                     try {
                     val sorts = view.sortFields()
                     val display = view.displaySettings()
                     val shownFields = view.fields()
+                    val favoriteShown = view.favoriteFields()
                     val homeTitles = view.homeTitles()
                     if (currentView !== view) return@collectLatest
                     Snapshot.withMutableSnapshot {
@@ -307,6 +217,7 @@ internal class BrowsePage(
                         sortFields = sorts
                         capturedDisplay = display
                         fields = shownFields
+                        favoriteFields = favoriteShown
                         summary = openedPage?.summary?.let { detail ->
                             detail.copy(links = detail.links.map { it.copy(title = translate(it.title)) })
                         }
@@ -323,12 +234,11 @@ internal class BrowsePage(
             // A page that lists a source opens once one is selected; selecting another source or
             // music folder reaches it through `changes`.
             val needsSource = !pins && routeRequiresSelectedSource(location.route, SearchMode.TITLE)
-            if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library,
-                !needsSource || connection.sources?.selectedSourceId != null,
-                if (parent != null) parent.preparedContext?.changes ?: 0 else changes,
+            if (!active) null else PageContext(browse.library,
+                !needsSource || connection.sources?.selectedSourceId != null, changes,
                 location.route, options.category, options.historySource, options.filter, options.sort, options.descending,
                 options.favoritesOnly, options.downloadedOnly,
-                revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0, parent?.openedPage)
+                revision, if (artistAlbums) browse.artistAlbumsRevision else 0)
         }.distinctUntilChanged(::sameContext).mapLatest { context ->
             val library = context?.library ?: return@mapLatest null
             if (sameContext(preparedContext, context)) return@mapLatest null
@@ -337,46 +247,27 @@ internal class BrowsePage(
                 val labelsVersion = browse.labelsVersion
                 val route = context.route
                 if (!context.opens) return@mapLatest null
-                // An artist's favorite tracks start from the rows the artist's page read.
-                val favoriteSeed = context.parentPage?.takeIf {
-                    context.filter == parent?.preparedContext?.filter && !context.favoritesOnly && !context.downloadedOnly
-                }
                 // The rows it reads show the changes heard so far; later ones reach them as patches.
                 val opening = downloads
                 val opened = if (pins) null else library.open(route, context.category, context.filter, context.sort,
                     context.descending, context.favoritesOnly, context.downloadedOnly, context.historySource,
-                    currentView, embedded)
+                    currentView, false)
                 val view = opened?.view
-                val count = favoriteSeed?.summary?.favoriteTotal?.toInt() ?: opened?.count?.toInt()
-                val seedRows = if (context.sort == null) favoriteSeed?.favoriteRows ?: opened?.rows else opened?.rows
                 val display = view?.displaySettings()
-                val seeds = seedRows?.mapIndexed { index, row ->
-                    BrowseItem(row, index.toULong(), view, display, contextTitle = location.playbackTitle, downloads = opening)
-                }
+                val favoriteDisplay = view?.favoriteDisplay()
+                fun seeds(rows: List<AndroidBrowseRow>?, display: AndroidBrowseDisplay?, favorite: Boolean = false) =
+                    rows?.mapIndexed { index, row ->
+                        BrowseItem(row, index.toULong(), view, display, contextTitle = location.playbackTitle,
+                            downloads = opening, favorite = favorite)
+                    }
+                val seeds = seeds(opened?.rows, display)
+                val favoriteSeeds = seeds(opened?.favoriteRows, favoriteDisplay, favorite = true)
                 val detail = opened?.summary ?: summary.takeIf { opened?.keepsSummary == true }
                 val home = if (view != null && route is Route.Home) homeSections(view, opened.home, display, opening) else emptyList()
-                val favoriteRoute = when (route) {
-                    is Route.ArtistDetail -> Route.ArtistFavoriteTracks(route.v1)
-                    is Route.AlbumArtistDetail -> Route.AlbumArtistFavoriteTracks(route.v1)
-                    else -> null
-                }?.takeIf { detail != null }
-                val favorite = if (favoritesPage?.location?.route == favoriteRoute) favoritesPage else {
-                    favoriteJob?.cancel()
-                    favoriteJob = null
-                    favoriteRoute?.let { favorites ->
-                        val childJob = Job(lifetime[Job])
-                        val childScope = CoroutineScope(lifetime + childJob)
-                        val childOptions = BrowseOptions().also { it.filter = context.filter }
-                        val childLocation = BrowseLocation(favorites, "Favorite tracks", childOptions, location.playbackTitle)
-                        BrowsePage(connection, browse, childLocation, childOptions, childScope, parent = this@BrowsePage).also { page ->
-                            favoriteJob = childJob
-                            childScope.launch { page.observe() }
-                        }
-                    }
-                }
                 val sorts = view?.sortFields().orEmpty()
                 val shownFields = view?.fields().orEmpty()
-                val crumbs = if (embedded) emptyList() else view?.breadcrumbs().orEmpty()
+                val favoriteShown = view?.favoriteFields().orEmpty()
+                val crumbs = view?.breadcrumbs().orEmpty()
                 val folders = if (route is Route.Folders) library.musicFolders() else null
                 withContext(Dispatchers.Main) {
                     Snapshot.withMutableSnapshot {
@@ -385,40 +276,44 @@ internal class BrowsePage(
                         openedPage = opened?.copy(summary = detail)
                         preparedContext = if (home.isNotEmpty() || route is Route.Home) context else null
                         scrollSections = emptyList()
-                        supportsLetterIndex = !embedded && view?.hasLetterSections() == true
+                        supportsLetterIndex = view?.hasLetterSections() == true
                         supportsFavoriteFilter = view?.supportsFavoriteFilter() == true
                         supportsDownloadedFilter = view?.supportsDownloadedFilter() == true
                         sortFields = sorts
                         capturedDisplay = display
                         summary = detail
                         fields = shownFields
+                        favoriteFields = favoriteShown
+                        favoriteCount = opened?.favoriteCount ?: 0UL
                         breadcrumbs = crumbs
                         musicFolders = folders
                         homeSections = home
-                        favorite?.let { page ->
-                            if (page.options.filter != context.filter) page.loading = true
-                            page.options.filter = context.filter
-                        }
-                        favoritesPage = favorite
                         releaseGroups = opened?.groups.orEmpty()
                     }
                     // What committed while it read reaches what it shows as any other change.
-                    hold(seeds.orEmpty() + home.flatMap { it.items })
+                    hold(seeds.orEmpty() + favoriteSeeds.orEmpty() + home.flatMap { it.items })
                     opened?.reading?.missed()?.let(::handle)
                 }
                 if (route is Route.Home && !pins) return@mapLatest null
-                context to Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-                    maxSize = 192, enablePlaceholders = !pins,
-                    jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
-                    BrowsePagingSource(library, view, count, pins, display, location.playbackTitle, seeds, ::hold,
-                        { missed -> withContext(Dispatchers.Main) { handle(missed) } }) { downloads }
-                }.flow
+                fun pager(count: Int?, display: AndroidBrowseDisplay?, seeds: List<BrowseItem>?, favorites: Boolean = false) =
+                    Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
+                        maxSize = 192, enablePlaceholders = !pins,
+                        jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
+                        BrowsePagingSource(library, view, count, pins, favorites, display, location.playbackTitle, seeds, ::hold,
+                            { missed -> withContext(Dispatchers.Main) { handle(missed) } }) { downloads }
+                    }.flow
+                Triple(context, pager(opened?.count?.toInt(), display, seeds),
+                    opened?.takeIf { it.favoriteCount > 0UL }?.let { pager(it.favoriteCount.toInt(), favoriteDisplay, favoriteSeeds, true) })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { connection.runAction { throw error }; null }
             finally { loading = false }
-        }.filterNotNull().collectLatest { (context, pages) ->
+        }.filterNotNull().collectLatest { (context, pages, favorites) ->
             preparedContext = context
-            pages.collect { data.value = it }
+            if (favorites == null) favoriteData.value = PagingData.empty()
+            coroutineScope {
+                favorites?.let { launch { it.collect { favoriteData.value = it } } }
+                pages.collect { data.value = it }
+            }
         }
     } }
 }
@@ -428,6 +323,8 @@ private class BrowsePagingSource(
     private val view: AndroidView?,
     private val count: Int?,
     private val pins: Boolean,
+    /** Whether it lists an artist page's favorite tracks. */
+    private val favorites: Boolean,
     private val display: AndroidBrowseDisplay?,
     private val contextTitle: String,
     /** The first rows, which the page read as it opened. */
@@ -447,10 +344,11 @@ private class BrowsePagingSource(
             val pinPage = if (pins) library.pins(offset.toULong(), params.loadSize.toUInt()) else null
             val total = pinPage?.total?.toInt() ?: count ?: 0
             val item = { index: Int, row: AndroidBrowseRow ->
-                BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision)
+                BrowseItem(row, (offset + index).toULong(), view, display, contextTitle = contextTitle, downloads = revision,
+                    favorite = favorites)
             }
             var reading: AndroidReading? = null
-            suspend fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt()).also { reading = it.reading }.rows
+            suspend fun window(from: Int, size: Int) = view!!.rows(from.toULong(), size.toUInt(), favorites).also { reading = it.reading }.rows
             val items = pinPage?.rows?.mapIndexed(item) ?: if (offset == 0 && seeds != null) {
                 val ready = seeds.take(params.loadSize)
                 if (ready.size >= params.loadSize || ready.size >= total) ready
@@ -473,8 +371,6 @@ private class BrowsePagingSource(
     }
 }
 
-/** How many rows a page holds for patches: more than paging keeps and the screen shows. */
-private const val HELD_ROWS = 512
 
 internal val AndroidBrowseDisplay.layout get() = settings.layout
 internal val AndroidBrowseDisplay.size get() = settings.display.size

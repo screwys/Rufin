@@ -16,7 +16,6 @@ impl AndroidLibrary {
             artist_links: Vec::new(),
             label: label.into(),
             links,
-            favorite_total: view.view.favorites_len().unwrap_or(0) as u64,
         };
         let (uri, _) = detail_identity(view.view.route()).unwrap_or_default();
         let link_settings = self.settings.load().application.external_site_links.clone();
