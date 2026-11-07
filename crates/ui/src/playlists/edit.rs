@@ -185,6 +185,7 @@ impl Shell {
                     }
                 });
             });
+            let saved = Rc::new(std::cell::RefCell::new((current_name, public)));
             for (button, action) in [
                 (save_edit, "edit"),
                 (link_file, "link"),
@@ -205,7 +206,7 @@ impl Shell {
                 let unlinked_subtitle = unlinked_subtitle.clone();
                 let artwork = Rc::downgrade(&artwork);
                 let public_toggle = playlist_public.clone();
-                let current_name = current_name.clone();
+                let saved = Rc::clone(&saved);
                 button.connect_clicked(move |_| {
                     if let Some(shell) = weak_shell.upgrade() {
                         let name = entry.text().trim().to_owned();
@@ -229,10 +230,11 @@ impl Shell {
                             2 => PlaylistPathMode::Absolute,
                             _ => PlaylistPathMode::Automatic,
                         };
-                        let changed_public = public
-                            .filter(|value| *value != public_toggle.is_active())
-                            .map(|_| public_toggle.is_active());
-                        let changed_name = name != current_name;
+                        let (saved_name, saved_public) = saved.borrow().clone();
+                        let public = saved_public.map(|_| public_toggle.is_active());
+                        let changed_public = public.filter(|_| public != saved_public);
+                        let changed_name = name != saved_name;
+                        let saved = Rc::clone(&saved);
                         let dialog = dialog.clone();
                         let rows = rows.clone();
                         let linked_row = linked_row.clone();
@@ -257,12 +259,13 @@ impl Shell {
                                     rufin_core::playlists::update_playlist(
                                         &shell.products.source,
                                         playlist_id,
-                                        changed_name.then_some(name),
+                                        changed_name.then(|| name.clone()),
                                         changed_public,
                                         change,
                                     )
                                     .await
                                     .map_err(|error| error.to_string())?;
+                                    saved.replace((name, public));
                                 }
                                 Ok(())
                             }
