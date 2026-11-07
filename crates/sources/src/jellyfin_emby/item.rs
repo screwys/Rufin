@@ -15,13 +15,11 @@ pub(super) struct Playlist {
     /// Changes when the playlist or its entries change.
     pub revision: Option<String>,
     pub image_ref: Option<ImageRef>,
-    pub duration_seconds: u32,
-    pub track_count: usize,
 }
 
 pub(super) const ALBUM_FIELDS: &str = "SortName,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
 pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
-pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ImageBlurHashes,ChildCount,Etag";
+pub(super) const PLAYLIST_FIELDS: &str = "ImageTags,ImageBlurHashes,Etag";
 pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,MediaStreams,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,ImageBlurHashes,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
 pub(super) fn album_from_item(
@@ -320,10 +318,6 @@ pub(super) fn playlist_from_item(server: ServerKind, item: &Value) -> Option<Pla
         name: field(item, "Name").unwrap_or_else(|| "Untitled Playlist".to_string()),
         revision: field(item, "Etag"),
         image_ref: primary_image_ref(server, "playlist", &item_id, item),
-        duration_seconds: duration_seconds(field(item, "RunTimeTicks")),
-        track_count: field::<i32>(item, "ChildCount")
-            .and_then(|count| usize::try_from(count).ok())
-            .unwrap_or_default(),
     })
 }
 
