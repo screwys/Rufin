@@ -680,7 +680,7 @@ function bindCards(host) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite(row, kind),
         ]);
-      if (options.pin) actions.push(pinAction(options.pin, options.pinned));
+      if (options.pin) actions.push(pinAction(options.pin));
       // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
       if (options.export && kind === "playlist")
         actions.push([tr("Export Playlist"), () => openPlaylistTransfer(row), "rufin-document-save-symbolic"]);

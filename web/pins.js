@@ -27,21 +27,19 @@ let previous = "";
 let request;
 let covers;
 
-// The action that adds `pin` to the pins, or removes it when `pinned`.
-function pinAction(pin, pinned) {
+// The action that adds `pin` to the pins, or removes it when it is pinned. The pins show what
+// changed when the events stream says they changed, in every tab alike.
+function pinAction(pin) {
+  const pinned = pins.some((shown) => JSON.stringify(shown) === JSON.stringify(pin));
   return [
     pinned ? tr("Remove from Pins") : tr("Add to Pins"),
-    async () => {
-      await api("/pins", "POST", { pin, pinned: !pinned });
-      await refreshPins();
-    },
+    () => api("/pins", "POST", { pin, pinned: !pinned }),
     pinned ? "rufin-list-remove-symbolic" : "rufin-list-add-symbolic",
   ];
 }
 
-async function move(moved, target) {
-  await api("/pins", "PATCH", { moved, target });
-  await refreshPins();
+function move(moved, target) {
+  return api("/pins", "PATCH", { moved, target });
 }
 
 function open(item) {
@@ -134,10 +132,8 @@ function render() {
       run(async () => {
         const media = await payload;
         if (media.pin) await move(media.pin, item.pin);
-        else if (item.kind === "playlist" && (media.page || media.uris)) {
-          await playlistMedia(item.id, media);
-          await refreshPins();
-        } else await addPin(media, item.pin);
+        else if (item.kind === "playlist" && (media.page || media.uris)) await playlistMedia(item.id, media);
+        else await addPin(media, item.pin);
       });
     });
     list.append(row);
@@ -161,7 +157,6 @@ async function addPin(media, target) {
   if (!pin) return;
   await api("/pins", "POST", { pin, pinned: true });
   if (target) await move(pin, target);
-  else await refreshPins();
 }
 
 function initPins() {
