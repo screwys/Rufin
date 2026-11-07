@@ -216,10 +216,7 @@ impl LibraryCollectionProjection {
         root.set_vexpand(true);
         let presentation = build(settings.layout);
         presentation.apply_fields(&settings);
-        let widget = presentation.widget();
-        if widget.parent().is_none() {
-            root.append(&widget);
-        }
+        root.append(&presentation.widget());
         Self {
             host: Rc::new(RefCell::new(LibraryCollectionHost::Embedded(root))),
             settings: Rc::new(RefCell::new(settings)),
@@ -352,48 +349,27 @@ impl LibraryCollectionProjection {
             let presentation = (self.build)(settings.layout);
             presentation.apply_fields(settings);
             let widget = presentation.widget();
-            let host = self.host.borrow().clone();
-            if widget.parent().is_some() {
-                match host {
-                    LibraryCollectionHost::Embedded(root) => {
-                        while let Some(child) = root.first_child() {
-                            root.remove(&child);
-                        }
+            match self.host.borrow().clone() {
+                LibraryCollectionHost::Embedded(root) => {
+                    while let Some(child) = root.first_child() {
+                        root.remove(&child);
                     }
-                    LibraryCollectionHost::Scrolled {
-                        scroller, frame, ..
-                    } => {
-                        scroller.set_child(None::<&gtk::Widget>);
-                        frame.set_header(None);
-                        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-                        root.set_hexpand(true);
-                        root.set_vexpand(true);
-                        self.host.replace(LibraryCollectionHost::Embedded(root));
-                    }
+                    widget.set_margin_start(0);
+                    widget.set_margin_end(0);
+                    root.append(&widget);
                 }
-            } else {
-                match host {
-                    LibraryCollectionHost::Embedded(root) => {
-                        while let Some(child) = root.first_child() {
-                            root.remove(&child);
-                        }
-                        widget.set_margin_start(0);
-                        widget.set_margin_end(0);
-                        root.append(&widget);
-                    }
-                    LibraryCollectionHost::Scrolled {
-                        scroller,
-                        frame,
-                        margin_start,
-                        margin_end,
-                        ..
-                    } => {
-                        let inset = matches!(&presentation, LibraryPresentationProjection::Grid(_));
-                        widget.set_margin_start(if inset { margin_start } else { 0 });
-                        widget.set_margin_end(if inset { margin_end } else { 0 });
-                        scroller.set_child(Some(&widget));
-                        frame.set_header(presentation.header_widget().as_ref());
-                    }
+                LibraryCollectionHost::Scrolled {
+                    scroller,
+                    frame,
+                    margin_start,
+                    margin_end,
+                    ..
+                } => {
+                    let inset = matches!(&presentation, LibraryPresentationProjection::Grid(_));
+                    widget.set_margin_start(if inset { margin_start } else { 0 });
+                    widget.set_margin_end(if inset { margin_end } else { 0 });
+                    scroller.set_child(Some(&widget));
+                    frame.set_header(presentation.header_widget().as_ref());
                 }
             }
             self.presentation.replace(presentation);
