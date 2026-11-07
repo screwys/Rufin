@@ -1,0 +1,4736 @@
+# Rufin translation template.
+# Copyright (C) 2026 Rufin contributors
+# This file is distributed under the same license as the Rufin package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Rufin\n"
+"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: 2026-10-28 21:51+0000\n"
+"Last-Translator: Daniel Arafat <arafat90@users.noreply.hosted.weblate.org>\n"
+"Language-Team: Portuguese (Brazil) <https://hosted.weblate.org/projects/"
+"rufin/app/pt_BR/>\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n > 1;\n"
+"X-Generator: Weblate 2026.11.dev0\n"
+
+msgid ""
+"A Japanese dictionary is downloaded for furigana and romaji readings. This "
+"setting also increases resource usage."
+msgstr ""
+"Um dicionário japonês é baixado para as leituras de furigana e romaji. Esta "
+"configuração também aumenta o uso de recursos."
+
+msgid ""
+"Approving gives this device access to your profile and saved source logins."
+msgstr ""
+"Aprovar concede a este dispositivo acesso ao seu perfil e logins de fontes "
+"salvas."
+
+msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+"O arquivo de backup pode conter informações confidenciais. Deseja definir "
+"uma senha?"
+
+#, rust-format
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+"Backup restaurado com {entries} entradas de playlist ignoradas e {listens} "
+"reproduções ignoradas."
+
+msgid ""
+"Choose where this device stores local music received through Connect. "
+"Matching files already in the folder are reused; missing files are "
+"downloaded here."
+msgstr ""
+"Escolha onde este dispositivo armazena as músicas locais recebidas através "
+"do Connect. Os arquivos correspondentes que já estão na pasta são "
+"reutilizados; os arquivos ausentes são baixados aqui."
+
+msgid ""
+"Connecting an existing profile will remove all data in this device, do you "
+"really want to continue?"
+msgstr ""
+"Conectar um perfil existente removerá todos os dados deste dispositivo, tem "
+"certeza de que deseja continuar?"
+
+msgid ""
+"Devices using Rufin Connect are no longer compatible. Please update Rufin."
+msgstr ""
+"Dispositivos que usam o Rufin Connect não são mais compatíveis. Atualize o "
+"Rufin."
+
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+"Deseja colocar em cache todas as letras automaticamente? Você também pode "
+"habilitar isso em Preferências -> Armazenamento"
+
+msgid ""
+"Downloads from this source will be removed, and automatic rules will be "
+"turned off"
+msgstr ""
+"Os downloads desta fonte serão removidos e as regras automáticas serão "
+"desativadas"
+
+msgid ""
+"If Discord is not installed as a flatpak, you need to give socket access to "
+"Rufin. If it is installed as a flatpak, this is not needed."
+msgstr ""
+"Se o Discord não estiver instalado como um flatpak, você precisará dar "
+"acesso de soquete ao Rufin. Se estiver instalado como um flatpak, isso não é "
+"necessário."
+
+msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+"Listar pastas compartilhadas neste servidor usando as credenciais inseridas "
+"ou acesso de convidado"
+
+msgid ""
+"Logs have secrets and absolute folder paths redacted, but you may still want "
+"to review the logs before sharing them"
+msgstr ""
+"Os registros contêm segredos e caminhos absolutos de pastas ocultados, mas "
+"você ainda pode querer revisar os registros antes de compartilhá-los"
+
+msgid ""
+"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgstr "Nenhum resultado ¯\\_(°╭╮°)_/¯"
+
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+"Nenhum serviço secreto encontrado. O Rufin usará um arquivo para armazenar "
+"suas credenciais. Cancelar não salvará as credenciais."
+
+#, python-brace-format
+msgid ""
+"No secret service found. You might have a secret service but the portal can "
+"be broken, you can check {link_start}this issue{link_end} to fix it, "
+"otherwise Rufin will use a file to store its credentials. Cancelling will "
+"not save credentials at all."
+msgstr ""
+"Nenhum serviço secreto encontrado. Você pode ter um serviço secreto, mas o "
+"portal pode estar corrompido, você pode verificar {link_start}este problema"
+"{link_end} para corrigi-lo, caso contrário, o Rufin usará um arquivo para "
+"armazenar suas credenciais. Cancelar não salvará as credenciais."
+
+msgid ""
+"Only downloads from this rule will be deleted. Shared and manual downloads "
+"stay"
+msgstr ""
+"Apenas os downloads desta regra serão excluídos. Os downloads compartilhados "
+"e manuais permanecem"
+
+msgid ""
+"Only imports the tracks as a playlist, does not watch the folder for changes."
+msgstr ""
+"Importa as faixas apenas como uma playlist, sem monitorar alterações na "
+"pasta."
+
+msgid ""
+"Open Rufin Connect on another device, connect via Join button or by copying "
+"invitation code"
+msgstr ""
+"Abra o Rufin Connect em outro dispositivo, conecte-se pelo botão Entrar ou "
+"copiando o código de convite"
+
+msgid ""
+"Relative paths start at the music folder or source URL. Local paths can also "
+"be absolute."
+msgstr ""
+"Os caminhos relativos começam na pasta de músicas ou URL da fonte. Os "
+"caminhos locais também podem ser absolutos."
+
+msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+"Remover o Local e sua biblioteca em cache do Rufin? Seus arquivos de música "
+"não serão excluídos."
+
+msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+"Remover todos os dados e configurações do Rufin, exceto conexões e "
+"credenciais salvas? O Rufin será reiniciado após limpar os dados."
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+"Remover todos os dados, configurações e logins salvos do Rufin? O Rufin será "
+"reiniciado após limpar os dados."
+
+#, rust-format
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+"Substituir os conteúdos selecionados e remover estas fontes configuradas?\n"
+"{sources}\n"
+"O estado de usuário retido e os logins salvos permanecerão, a menos que "
+"sejam selecionados."
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+"Substituir os conteúdos selecionados por este backup? As permissões da pasta "
+"local podem precisar ser selecionadas novamente."
+
+msgid ""
+"Route server media through this device instead of sharing provider URLs with "
+"the renderer"
+msgstr ""
+"Rotear a mídia do servidor através deste dispositivo em vez de compartilhar "
+"as URLs do provedor com o renderizador"
+
+msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+"O Rufin calculará os metadados EBU R128 ausentes para toda a biblioteca. "
+"Isso pode usar uma quantidade significativa de CPU, bateria e largura de "
+"banda de rede por um longo período."
+
+msgid ""
+"Some changes were saved. Close this editor and reopen it to review the "
+"result."
+msgstr ""
+"Algumas alterações foram salvas. Feche este editor e abra-o novamente para "
+"revisar o resultado."
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
+msgstr ""
+"O armazenamento temporário da biblioteca está em uso. As alterações podem "
+"ser perdidas quando o Rufin for fechado."
+
+msgid ""
+"Thank you for trying out Rufin! If you have problems or suggestions, please "
+"open an issue in Github."
+msgstr ""
+"Obrigado por experimentar o Rufin! Se tiver problemas ou sugestões, abra um "
+"problema no Github."
+
+msgid ""
+"This is a fallback artwork Rufin uses, do you want to set this as the item "
+"artwork?"
+msgstr ""
+"Esta é uma capa alternativa que o Rufin usa, deseja definir esta como a capa "
+"do item?"
+
+msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+"Isso não é suportado nativamente por esta fonte, mas o Rufin pode mostrar "
+"estrelas parciais e arredondá-las para cima para a fonte"
+
+msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+"Isto pertence ao Rufin. Pode incluir entradas de todas as fontes "
+"configuradas, mas não é sincronizado com remotos."
+
+msgid ""
+"This removes the server, cached library metadata, queue snapshot, and saved "
+"token for"
+msgstr ""
+"Isso remove o servidor, metadados da biblioteca em cache, instantâneo da "
+"fila e token salvo para"
+
+msgid ""
+"This will log you out and clear your secrets including API ones. Your app "
+"cache is not touched."
+msgstr ""
+"Isso desconectará você e limpará seus segredos, incluindo os de API. O cache "
+"do seu aplicativo não é afetado."
+
+msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
+"Isso substituirá o arquivo de letras pelo que o Rufin obteve; pode ser uma "
+"experiência melhor usar um programa ou plugin dedicado para buscar letras."
+
+msgid ""
+"Track evens out every song, while Album preserves the intended differences "
+"within each album"
+msgstr ""
+"A faixa nivela cada música, enquanto o Álbum preserva as diferenças "
+"pretendidas em cada álbum"
+
+msgid ""
+"You will need to reconnect through the clients you use with the new API key."
+msgstr ""
+"Você precisará se reconectar através dos clientes que usa com a nova chave "
+"de API."
+
+msgid "(hold to shuffle)"
+msgstr "(segure para reproduzir aleatoriamente)"
+
+msgid ". You only need to fill email and an application name parts"
+msgstr ". Você só precisa preencher as partes de e-mail e nome do aplicativo"
+
+msgid "1 hour"
+msgstr "1 hora"
+
+msgid "10 bands"
+msgstr "10 bandas"
+
+msgid "12 hours"
+msgstr "12 horas"
+
+msgid "128 kbps"
+msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr "18 bandas"
+
+msgid "192 kbps"
+msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr "24 horas"
+
+msgid "256 kbps"
+msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr "31 bandas"
+
+msgid "320 kbps"
+msgstr "320 kbps"
+
+msgid "5 Latest Albums"
+msgstr "5 últimos álbuns"
+
+msgid "6 hours"
+msgstr "6 horas"
+
+msgid "A new update is available, restart to apply"
+msgstr "Uma nova atualização está disponível, reinicie para aplicar"
+
+msgid "A"
+msgstr "A"
+
+msgid "API key (Subsonic)"
+msgstr "Chave de API (Subsonic)"
+
+msgid "API key"
+msgstr "Chave de API"
+
+msgid "API keys"
+msgstr "Chaves de API"
+
+msgid "About Rufin"
+msgstr "Sobre o Rufin"
+
+msgid "Absolute"
+msgstr "Absoluto"
+
+msgid "Accent color"
+msgstr "Cor de destaque"
+
+msgid "Access denied"
+msgstr "Acesso negado"
+
+msgid "Access token"
+msgstr "Token de acesso"
+
+msgid "Accessibility"
+msgstr "Acessibilidade"
+
+msgid "Actions"
+msgstr "Ações"
+
+msgid "Activity"
+msgstr "Atividade"
+
+msgid "Add Rule"
+msgstr "Adicionar regra"
+
+msgid "Add Source"
+msgstr "Adicionar fonte"
+
+msgid "Add a matching server prefix"
+msgstr "Adicionar um prefixo de servidor correspondente"
+
+msgid "Add a music folder"
+msgstr "Adicionar uma pasta de músicas"
+
+msgid "Add a music source to start listening."
+msgstr "Adicione uma fonte de música para começar a ouvir."
+
+msgid "Add a new source"
+msgstr "Adicionar nova fonte"
+
+msgid "Add a source to configure downloads."
+msgstr "Adicione uma fonte para configurar os downloads."
+
+msgid "Add a title"
+msgstr "Adicionar um título"
+
+msgid "Add band"
+msgstr "Adicionar banda"
+
+msgid "Add current"
+msgstr "Adicionar atual"
+
+msgid "Add folder"
+msgstr "Adicionar pasta"
+
+msgid "Add image"
+msgstr "Adicionar imagem"
+
+msgid "Add music"
+msgstr "Adicionar música"
+
+msgid "Add to Favorites"
+msgstr "Adicionar aos favoritos"
+
+msgid "Add to Pins"
+msgstr "Adicionar aos pins"
+
+msgid "Add to Playlist"
+msgstr "Adicionar à playlist"
+
+msgid "Add to folder"
+msgstr "Adicionar à pasta"
+
+msgid "Add to library"
+msgstr "Adicionar à biblioteca"
+
+msgid "Add tracks when fewer than this many remain"
+msgstr "Adicionar faixas quando restarem menos do que esta quantidade"
+
+msgid "Add"
+msgstr "Adicionar"
+
+msgid "Added to"
+msgstr "Adicionado a"
+
+msgid "Album Artists"
+msgstr "Artistas do álbum"
+
+msgid "Album artist sort"
+msgstr "Ordenação de artista do álbum"
+
+msgid "Album artist"
+msgstr "Artista do álbum"
+
+msgid "Album artists"
+msgstr "Artistas do álbuns"
+
+msgid "Album details"
+msgstr "Detalhes do álbum"
+
+msgid "Album gain"
+msgstr "Ganho do álbum"
+
+msgid "Album peak"
+msgstr "Pico do álbum"
+
+msgid "Album radio"
+msgstr "Rádio do álbum"
+
+msgid "Album sort"
+msgstr "Ordenação do álbum"
+
+msgid "Album title"
+msgstr "Título do álbum"
+
+msgid "Album tracks"
+msgstr "Faixas do álbum"
+
+msgid "Album unavailable"
+msgstr "Álbum indisponível"
+
+msgid "Album"
+msgstr "Álbum"
+
+msgid "Albums"
+msgstr "Álbuns"
+
+msgid "All Music"
+msgstr "Todas as músicas"
+
+msgid "All Playlists"
+msgstr "Todas as playlists"
+
+msgid "All time"
+msgstr "Todo o tempo"
+
+msgid "All tracks"
+msgstr "Todas as faixas"
+
+msgid "All"
+msgstr "Tudo"
+
+msgid "Allow remote connections"
+msgstr "Permitir conexões remotas"
+
+msgid "Alternate addresses"
+msgstr "Endereços alternativos"
+
+msgid "Alternate row colors"
+msgstr "Cores de linha alternadas"
+
+msgid "Anonymous (WebDAV / SMB)"
+msgstr "Anônimo (WebDAV / SMB)"
+
+msgid "Anonymous"
+msgstr "Anônimo"
+
+msgid "Another device"
+msgstr "Outro dispositivo"
+
+msgid "Any genre"
+msgstr "Qualquer gênero"
+
+msgid "Any"
+msgstr "Qualquer"
+
+msgid "App settings"
+msgstr "Configurações do app"
+
+msgid "Appearance"
+msgstr "Aparência"
+
+msgid "Appears On"
+msgstr "Aparece em"
+
+msgid "Application name"
+msgstr "Nome do aplicativo"
+
+msgid "Applied"
+msgstr "Aplicado"
+
+msgid "Applies to sidebar and fullscreen separately"
+msgstr "Aplica-se à barra lateral e tela cheia separadamente"
+
+msgid "Apply Template"
+msgstr "Aplicar modelo"
+
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Applying profile"
+msgstr "Aplicando perfil"
+
+msgid "Approve sign-in in your browser"
+msgstr "Aprove a entrada no seu navegador"
+
+msgid "Approve"
+msgstr "Aprovar"
+
+#, rust-format
+msgid "April {year}"
+msgstr "Abril de {year}"
+
+msgid "Artist albums"
+msgstr "Álbuns do artista"
+
+msgid "Artist details"
+msgstr "Detalhes do artista"
+
+msgid "Artist name"
+msgstr "Nome do artista"
+
+msgid "Artist radio"
+msgstr "Rádio do artista"
+
+msgid "Artist sort"
+msgstr "Ordem por artista"
+
+msgid "Artist tracks"
+msgstr "Faixas do artista"
+
+msgid "Artist unavailable"
+msgstr "Artista indisponível"
+
+msgid "Artist"
+msgstr "Artista"
+
+msgid "Artists"
+msgstr "Artistas"
+
+msgid "Artwork cache cleared"
+msgstr "Cache de capas de álbuns limpo"
+
+msgid "Artwork editing is no longer available"
+msgstr "A edição de capas não está mais disponível"
+
+msgid "Artwork selected"
+msgstr "Capa selecionada"
+
+msgid "Artwork storage"
+msgstr "Armazenamento de capas"
+
+msgid "Artwork"
+msgstr "Capa de Álbum"
+
+msgid "Audio effects"
+msgstr "Efeitos de áudio"
+
+msgid "Audio fade on play/pause"
+msgstr "Fade de áudio ao reproduzir/pausar"
+
+msgid "Audio fingerprints"
+msgstr "Impressões digitais de áudio"
+
+msgid "Audio output failed"
+msgstr "Falha na saída de áudio"
+
+msgid "Audio output"
+msgstr "Saída de áudio"
+
+msgid "Audio processing is unavailable while casting"
+msgstr "O processamento de áudio está indisponível durante a transmissão"
+
+msgid "Audio"
+msgstr "Áudio"
+
+#, rust-format
+msgid "August {year}"
+msgstr "Agosto de {year}"
+
+msgid "Authentication"
+msgstr "Autenticação"
+
+msgid "Authorization timed out"
+msgstr "Tempo limite de autorização esgotado"
+
+msgid "Auto DJ refill threshold"
+msgstr "Limite de reabastecimento do Auto DJ"
+
+msgid "Auto DJ"
+msgstr "Auto DJ"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "AutoEQ / APO"
+msgstr "AutoEQ / APO"
+
+msgid "Automatic Backups"
+msgstr "Backups automáticos"
+
+msgid "Automatic headroom"
+msgstr "Margem automática"
+
+msgid "Automatic preamp"
+msgstr "Pré-amplificador automático"
+
+msgid "Automatic updates"
+msgstr "Atualizações automáticas"
+
+msgid "Automatic"
+msgstr "Automático"
+
+msgid "BPM"
+msgstr "BPM"
+
+msgid "Back"
+msgstr "Voltar"
+
+msgid "Backup Folder"
+msgstr "Pasta de backup"
+
+msgid "Backup Password"
+msgstr "Senha de backup"
+
+msgid "Backup Settings"
+msgstr "Configurações de backup"
+
+msgid "Backup exported"
+msgstr "Backup exportado"
+
+#, rust-format
+msgid "Backup failed: {error}"
+msgstr "Falha no backup: {error}"
+
+#, rust-format
+msgid "Backup restored with warnings: {warnings}"
+msgstr "Backup restaurado com avisos: {warnings}"
+
+msgid "Backup restored"
+msgstr "Backup restaurado"
+
+msgid "Backups"
+msgstr "Backups"
+
+msgid "Balance"
+msgstr "Balanço"
+
+msgid "Band layout"
+msgstr "Layout da banda"
+
+msgid "Band"
+msgstr "Banda"
+
+msgid "Bands"
+msgstr "Bandas"
+
+msgid "Bandwidth"
+msgstr "Largura de banda"
+
+msgid "Bar count"
+msgstr "Contagem de barras"
+
+msgid "Bar spacing (px)"
+msgstr "Espaçamento de barras (px)"
+
+msgid "Bass"
+msgstr "Grave"
+
+msgid "Bearer token (WebDAV)"
+msgstr "Token Bearer (WebDAV)"
+
+msgid "Bearer token"
+msgstr "Token Bearer"
+
+msgid "Bit depth"
+msgstr "Profundidade de bits"
+
+msgid "Bitrate"
+msgstr "Taxa de bits"
+
+msgid "Bitstream"
+msgstr "Bitstream"
+
+msgid "Blue"
+msgstr "Azul"
+
+msgid "Brightness (%)"
+msgstr "Brilho (%)"
+
+msgid "Browse"
+msgstr "Navegar"
+
+msgid "By Lyrics"
+msgstr "Por letras"
+
+msgid "By Title"
+msgstr "Por título"
+
+msgid "C"
+msgstr "C"
+
+msgid "CUE file"
+msgstr "Arquivo CUE"
+
+msgid "Cache"
+msgstr "Cache"
+
+msgid "Cached data"
+msgstr "Dados em cache"
+
+msgid "Cached"
+msgstr "Em cache"
+
+msgid "Caching Library"
+msgstr "Cache da biblioteca"
+
+msgid "Caching local library..."
+msgstr "Armazenando biblioteca em cache..."
+
+msgid "Calculating fingerprint..."
+msgstr "Calculando impressão digital de áudio..."
+
+msgid "Cancel download and clear downloaded items"
+msgstr "Cancelar download e limpar itens baixados"
+
+msgid "Cancel download"
+msgstr "Cancelar download"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Cast format"
+msgstr "Formato de transmissão"
+
+msgid "Casting changes apply to the next stream"
+msgstr "As alterações de transmissão se aplicam à próxima transmissão"
+
+msgid "Casting network"
+msgstr "Rede de transmissão"
+
+msgid "Casting"
+msgstr "Transmissão"
+
+msgid "Centered bars"
+msgstr "Barras centralizadas"
+
+msgid "Certificate authority (PEM)"
+msgstr "Autoridade certificadora (PEM)"
+
+msgid "Change Profile"
+msgstr "Mudar perfil"
+
+msgid "Change Secret Storage"
+msgstr "Alterar armazenamento secreto"
+
+msgid "Change Source"
+msgstr "Mudar fonte"
+
+msgid "Change sort order"
+msgstr "Alterar ordem de ordenação"
+
+msgid "Change"
+msgstr "Alterar"
+
+#, rust-format
+msgid "Changes apply to {count} track"
+msgid_plural "Changes apply to {count} tracks"
+msgstr[0] "As alterações se aplicam à faixa {count}"
+msgstr[1] "As alterações se aplicam às faixas {count}"
+
+msgid "Changes take effect after restarting Rufin"
+msgstr "As alterações entram em vigor após reiniciar o Rufin"
+
+msgid "Channels"
+msgstr "Canais"
+
+msgid "Check for updates"
+msgstr "Verificar atualizações"
+
+msgid "Checking profile"
+msgstr "Verificando perfil"
+
+msgid "Choose Folder"
+msgstr "Escolher pasta"
+
+msgid "Choose Server"
+msgstr "Escolher servidor"
+
+msgid "Choose a local music folder"
+msgstr "Escolher uma pasta de música local"
+
+msgid "Choose an address"
+msgstr "Escolher um endereço"
+
+msgid "Choose at least one local music folder"
+msgstr "Escolher pelo menos uma pasta de música local"
+
+msgid "Choose connection"
+msgstr "Escolher conexão"
+
+msgid "Choose folder"
+msgstr "Escolher pasta"
+
+msgid "Choose one or more folders to scan and play directly from this computer"
+msgstr ""
+"Escolha uma ou mais pastas para escanear e reproduzir diretamente deste "
+"computador"
+
+msgid "Choose playback output"
+msgstr "Escolher saída de reprodução"
+
+msgid "Choose whether to keep the completed downloads."
+msgstr "Escolha se deseja manter os downloads concluídos."
+
+msgid "Choose"
+msgstr "Escolher"
+
+msgid "Circular spectrum"
+msgstr "Espectro circular"
+
+msgid "Classical"
+msgstr "Clássico"
+
+msgid "Clear EBU R128 cache"
+msgstr "Limpar cache EBU R128"
+
+msgid "Clear Japanese dictionary"
+msgstr "Limpar dicionário japonês"
+
+msgid "Clear Mapping"
+msgstr "Limpar mapeamento"
+
+msgid "Clear album"
+msgstr "Limpar álbum"
+
+msgid "Clear all cache"
+msgstr "Limpar todo o cache"
+
+msgid "Clear all cache?"
+msgstr "Limpar todo o cache?"
+
+msgid "Clear all data"
+msgstr "Limpar todos os dados"
+
+msgid "Clear all data?"
+msgstr "Limpar todos os dados?"
+
+msgid "Clear artist"
+msgstr "Limpar artista"
+
+msgid "Clear artwork cache"
+msgstr "Limpar cache de capas"
+
+msgid "Clear fetched lyrics for this track"
+msgstr "Limpar letras obtidas para esta faixa"
+
+msgid "Clear fingerprint cache"
+msgstr "Limpar cache de impressões digitais"
+
+msgid "Clear lookup cache"
+msgstr "Limpar cache de pesquisa"
+
+msgid "Clear lyrics cache"
+msgstr "Limpar cache de letras"
+
+msgid "Clear queue"
+msgstr "Limpar fila"
+
+msgid "Clear this cache?"
+msgstr "Limpar este cache?"
+
+msgid "Clear title"
+msgstr "Limpar título"
+
+msgid "Clear waveform cache"
+msgstr "Limpar cache de formas de onda"
+
+msgid "Clear"
+msgstr "Limpar"
+
+msgid "Clearing queue also clears the current song"
+msgstr "Limpar a fila também limpa a música atual"
+
+msgid "Clipping"
+msgstr "Clipping"
+
+msgid "Close Window"
+msgstr "Fechar janela"
+
+msgid "Close app window"
+msgstr "Fechar janela do app"
+
+msgid "Close fullscreen player"
+msgstr "Fechar player em tela cheia"
+
+msgid "Close"
+msgstr "Fechar"
+
+msgid "Club"
+msgstr "Clube"
+
+msgid "Collapse sidebar"
+msgstr "Recolher barra lateral"
+
+msgid "Collapse/expand sidebar"
+msgstr "Recolher/expandir barra lateral"
+
+msgid "Collection"
+msgstr "Coleção"
+
+msgid "Collections"
+msgstr "Coleções"
+
+msgid "Color for the active word during playback"
+msgstr "Cor para a palavra ativa durante a reprodução"
+
+msgid "Column borders"
+msgstr "Bordas de coluna"
+
+msgid "Columns"
+msgstr "Colunas"
+
+msgid "Combine lyrics and visualizer"
+msgstr "Combinar letras e visualizador"
+
+msgid "Comment text"
+msgstr "Texto de comentário"
+
+msgid "Comment"
+msgstr "Comentário"
+
+msgid "Compact"
+msgstr "Compacto"
+
+msgid "Compare these emoji on both devices"
+msgstr "Compare esses emojis em ambos os dispositivos"
+
+msgid "Compilation"
+msgstr "Compilação"
+
+msgid "Complete sign-in in your browser"
+msgstr "Conclua a entrada no seu navegador"
+
+msgid "Completed downloads will stay on this device."
+msgstr "Os downloads concluídos permanecerão neste dispositivo."
+
+msgid "Composer sort"
+msgstr "Ordenação de compositor"
+
+msgid "Composer"
+msgstr "Compositor"
+
+msgid "Condition"
+msgstr "Condição"
+
+msgid "Configure another"
+msgstr "Configurar outro"
+
+#, rust-format
+msgid "Configured items: {count}"
+msgstr "Itens configurados: {count}"
+
+msgid "Confirm"
+msgstr "Confirmar"
+
+msgid "Connect a device"
+msgstr "Conectar um dispositivo"
+
+msgid "Connect file"
+msgstr "Conectar arquivo"
+
+msgid "Connect is not enabled"
+msgstr "O Connect não está habilitado"
+
+msgid "Connect manually"
+msgstr "Conectar manualmente"
+
+msgid "Connect to Rufin"
+msgstr "Conectar ao Rufin"
+
+msgid "Connect your music servers or local folders."
+msgstr "Conecte seus servidores de música ou pastas locais."
+
+msgid "Connect"
+msgstr "Conectar"
+
+#, rust-format
+msgid "Connected as {username}"
+msgstr "Conectado como {username}"
+
+msgid "Connected devices"
+msgstr "Dispositivos conectados"
+
+msgid "Connected"
+msgstr "Conectado"
+
+msgid "Connecting devices"
+msgstr "Conectando dispositivos"
+
+msgid "Connecting to music server..."
+msgstr "Conectando ao servidor de música..."
+
+#, rust-format
+msgid "Connecting to {device}..."
+msgstr "Conectando a {device}..."
+
+msgid "Connecting..."
+msgstr "Conectando..."
+
+msgid "Connection failed"
+msgstr "Falha na conexão"
+
+msgid "Connection lost. Reconnecting..."
+msgstr "Conexão perdida. Reconectando..."
+
+msgid "Connection name"
+msgstr "Nome da conexão"
+
+msgid "Connection options"
+msgstr "Opções de conexão"
+
+msgid "Connection settings"
+msgstr "Configurações de conexão"
+
+msgid "Connection test has failed"
+msgstr "O teste de conexão falhou"
+
+msgid "Connection"
+msgstr "Conexão"
+
+msgid "Contents"
+msgstr "Conteúdos"
+
+msgid "Context Menus"
+msgstr "Menus de contexto"
+
+#, rust-format
+msgid "Continue from {device}"
+msgstr "Continuar de {device}"
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Control notifications"
+msgstr "Controlar notificações"
+
+msgid "Controller status"
+msgstr "Status do controlador"
+
+msgid "Controller"
+msgstr "Controlador"
+
+msgid "Copy access token"
+msgstr "Copiar token de acesso"
+
+msgid "Copy invitation"
+msgstr "Copiar convite"
+
+msgid "Copy link"
+msgstr "Copiar link"
+
+#, rust-format
+msgid "Copy of {name}"
+msgstr "Cópia de {name}"
+
+msgid "Copy"
+msgstr "Copiar"
+
+msgid "Copyright"
+msgstr "Direitos autorais"
+
+msgid "Could not load listening overview"
+msgstr "Não foi possível carregar a visão geral de reprodução"
+
+msgid "Could not load page"
+msgstr "Não foi possível carregar a página"
+
+msgid "Could not load related tracks"
+msgstr "Não foi possível carregar faixas relacionadas"
+
+msgid "Could not load this page"
+msgstr "Não foi possível carregar esta página"
+
+msgid "Could not open browser"
+msgstr "Não foi possível abrir o navegador"
+
+#, rust-format
+msgid "Could not open file: {error}"
+msgstr "Não foi possível abrir o arquivo: {error}"
+
+#, rust-format
+msgid "Could not open folder: {error}"
+msgstr "Não foi possível abrir a pasta: {error}"
+
+msgid "Could not play this track"
+msgstr "Não foi possível reproduzir esta faixa"
+
+msgid "Could not read artwork"
+msgstr "Não foi possível ler a capa"
+
+msgid "Could not receive live updates"
+msgstr "Não foi possível receber atualizações ao vivo"
+
+msgid "Could not save diagnostic log"
+msgstr "Não foi possível salvar o registro de diagnóstico"
+
+#, rust-format
+msgid "Could not update Rufin to {version}"
+msgstr "Não foi possível atualizar o Rufin para {version}"
+
+msgid "Could not update favorites"
+msgstr "Não foi possível atualizar os favoritos"
+
+msgid "Couldn't connect to the server"
+msgstr "Não foi possível conectar ao servidor"
+
+#, rust-format
+msgid "Couldn't connect to {service}"
+msgstr "Não foi possível conectar a {service}"
+
+msgid "Couldn't decode this track"
+msgstr "Não foi possível decodificar esta faixa"
+
+msgid "Couldn't load this folder"
+msgstr "Não foi possível carregar esta pasta"
+
+msgid "Couldn't search for lyrics"
+msgstr "Não foi possível buscar letras"
+
+msgid "Couldn\342\200\231t download Japanese dictionary"
+msgstr "Não foi possível baixar o dicionário japonês"
+
+msgid "Country"
+msgstr "País"
+
+msgid "Create a playlist from queue"
+msgstr "Criar uma playlist a partir da fila"
+
+msgid "Create playlist"
+msgstr "Criar playlist"
+
+msgid "Create"
+msgstr "Criar"
+
+msgid "Crossfade duration"
+msgstr "Duração do crossfade"
+
+msgid "Crossfade mode"
+msgstr "Modo crossfade"
+
+msgid "Crossfade"
+msgstr "Crossfade"
+
+msgid "Crossfeed"
+msgstr "Crossfeed"
+
+msgid "Current artwork"
+msgstr "Capa atual"
+
+msgid "Custom HTTP headers"
+msgstr "Cabeçalhos HTTP personalizados"
+
+msgid "Custom bands"
+msgstr "Bandas personalizadas"
+
+msgid "Custom"
+msgstr "Personalizado"
+
+msgid "Customization"
+msgstr "Personalização"
+
+msgid "Customize display"
+msgstr "Personalizar exibição"
+
+msgid "Customize"
+msgstr "Personalizar"
+
+msgid "Cut"
+msgstr "Cortar"
+
+msgid "Daily"
+msgstr "Diário"
+
+msgid "Dance"
+msgstr "Dança"
+
+msgid "Dark"
+msgstr "Escuro"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
+"Os tamanhos de banco de dados mostram os dados armazenados, excluindo a "
+"sobrecarga do banco de dados."
+
+msgid "Date added"
+msgstr "Data de adição"
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Days after month ends"
+msgstr "Dias após o término do mês"
+
+msgid "Days after year ends"
+msgstr "Dias após o término do ano"
+
+msgid "Days before month ends"
+msgstr "Dias antes do término do mês"
+
+msgid "Days before year ends"
+msgstr "Dias antes do término do ano"
+
+msgid "Debug logging"
+msgstr "Registro de depuração"
+
+#, rust-format
+msgid "December {year}"
+msgstr "Dezembro de {year}"
+
+msgid "Decrease"
+msgstr "Diminuir"
+
+msgid "Default left sidebar"
+msgstr "Barra lateral esquerda padrão"
+
+msgid "Default right sidebar"
+msgstr "Barra lateral direita padrão"
+
+msgid "Default"
+msgstr "Padrão"
+
+msgid "Delete Playlist"
+msgstr "Excluir playlist"
+
+#, python-brace-format, rust-format
+msgid "Delete \"{name}\"?"
+msgstr "Excluir \"{name}\"?"
+
+msgid "Delete folder"
+msgstr "Excluir pasta"
+
+msgid "Delete playlist file"
+msgstr "Excluir arquivo de playlist"
+
+msgid "Delete preset"
+msgstr "Excluir predefinição"
+
+#, rust-format
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Excluir playlist {count}?"
+msgstr[1] "Excluir playlists {count}?"
+
+msgid "Delete"
+msgstr "Excluir"
+
+msgid "Delivery"
+msgstr "Entrega"
+
+msgid "Descending"
+msgstr "Decrescente"
+
+msgid "Detail track columns"
+msgstr "Colunas detalhadas da faixa"
+
+msgid "Detail"
+msgstr "Detalhe"
+
+msgid "Details"
+msgstr "Detalhes"
+
+msgid "Device invitation"
+msgstr "Convite do dispositivo"
+
+msgid "Device name"
+msgstr "Nome do dispositivo"
+
+msgid "Device"
+msgstr "Dispositivo"
+
+msgid "Diagnostic log saved"
+msgstr "Registro de diagnóstico salvo"
+
+msgid "Diagnostic log"
+msgstr "Registro de diagnóstico"
+
+msgid "Direct"
+msgstr "Direto"
+
+msgid "Direction"
+msgstr "Direção"
+
+msgid "Disable private mode"
+msgstr "Desativar modo privado"
+
+msgid "Disabled"
+msgstr "Desativado"
+
+msgid "Disc number"
+msgstr "Número do disco"
+
+#, rust-format
+msgid "Disc {number}"
+msgstr "Disco {number}"
+
+msgid "Disc"
+msgstr "Disco"
+
+msgid "Discard changes?"
+msgstr "Descartar alterações?"
+
+msgid "Discography"
+msgstr "Discografia"
+
+msgid "Disconnect from Rufin?"
+msgstr "Desconectar do Rufin?"
+
+msgid "Disconnect this device"
+msgstr "Desconectar este dispositivo"
+
+msgid "Disconnect this device?"
+msgstr "Desconectar este dispositivo?"
+
+msgid "Disconnect"
+msgstr "Desconectar"
+
+msgid "Discord Rich Presence"
+msgstr "Discord Rich Presence"
+
+msgid "Discord access in Flatpak"
+msgstr "Acesso ao Discord no Flatpak"
+
+msgid "Discord"
+msgstr "Discord"
+
+msgid "Display"
+msgstr "Exibição"
+
+msgid "Do not encrypt"
+msgstr "Não criptografar"
+
+#, rust-format
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] "Deseja aplicar as alterações de metadados à faixa {count}?"
+msgstr[1] "Deseja aplicar as alterações de metadados às faixas {count}?"
+
+msgid "Do you want to use the existing configuration?"
+msgstr "Deseja usar a configuração existente?"
+
+msgid "Don't duplicate"
+msgstr "Não duplicar"
+
+msgid "Donate"
+msgstr "Doar"
+
+msgid "Done"
+msgstr "Concluído"
+
+msgid "Download Automatically"
+msgstr "Baixar automaticamente"
+
+msgid "Download Folder"
+msgstr "Pasta de downloads"
+
+msgid "Download Lazily"
+msgstr "Baixar preguiçosamente"
+
+msgid "Download Queue"
+msgstr "Fila de downloads"
+
+msgid "Download quality"
+msgstr "Qualidade de download"
+
+msgid "Download queued"
+msgstr "Download na fila"
+
+msgid "Download started"
+msgstr "Download iniciado"
+
+msgid "Download"
+msgstr "Download"
+
+msgid "Downloaded"
+msgstr "Baixado"
+
+msgid "Downloading Japanese dictionary..."
+msgstr "Baixando dicionário japonês..."
+
+msgid "Downloading artwork"
+msgstr "Baixando capa"
+
+#, rust-format
+msgid "Downloading artwork... {count} checked"
+msgstr "Baixando capa... {count} verificadas"
+
+msgid "Downloading lyrics"
+msgstr "Baixando letras"
+
+#, rust-format
+msgid "Downloading lyrics... {count} checked"
+msgstr "Baixando letras... {count} verificadas"
+
+msgid "Downloading"
+msgstr "Baixando"
+
+msgid "Downloads"
+msgstr "Downloads"
+
+msgid "Drag to reorder"
+msgstr "Arraste para reordenar"
+
+msgid "Duplicate preset"
+msgstr "Duplicar predefinição"
+
+msgid "Duplicate"
+msgstr "Duplicar"
+
+msgid "Duration"
+msgstr "Duração"
+
+msgid "Dynamic background"
+msgstr "Fundo dinâmico"
+
+msgid "EBU R128 analysis"
+msgstr "Análise EBU R128"
+
+msgid "EBU R128 reference level"
+msgstr "Nível de referência EBU R128"
+
+msgid "EBU R128"
+msgstr "EBU R128"
+
+msgid "EP"
+msgstr "EP"
+
+msgid "EPs"
+msgstr "EPs"
+
+msgid "ERB"
+msgstr "ERB"
+
+msgid "Edit Lyrics"
+msgstr "Editar letras"
+
+msgid "Edit Playlist"
+msgstr "Editar playlist"
+
+msgid "Edit Smart Playlist"
+msgstr "Editar playlist inteligente"
+
+msgid "Edit Source"
+msgstr "Editar fonte"
+
+msgid "Edit lyrics"
+msgstr "Editar letras"
+
+msgid "Edit metadata"
+msgstr "Editar metadados"
+
+msgid "Edit theme"
+msgstr "Editar tema"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Embed in track"
+msgstr "Incorporar na faixa"
+
+msgid "Emby Connect"
+msgstr "Emby conectado"
+
+msgid "Emby"
+msgstr "Emby"
+
+msgid "Enable Controller"
+msgstr "Ativar controlador"
+
+msgid "Enable EBU R128 Analysis?"
+msgstr "Ativar análise EBU R128?"
+
+msgid "Enable Rufin Connect"
+msgstr "Ativar Rufin Connect"
+
+msgid "Enable automatic backups"
+msgstr "Ativar backups automáticos"
+
+msgid "Enable background image"
+msgstr "Ativar imagem de fundo"
+
+msgid "Enable caching lyrics"
+msgstr "Ativar cache de letras"
+
+msgid "Enable partial star ratings"
+msgstr "Ativar classificações de estrelas parciais"
+
+msgid "Enable private mode"
+msgstr "Ativar modo privado"
+
+msgid "Enable"
+msgstr "Ativar"
+
+msgid "Enabled"
+msgstr "Ativado"
+
+msgid "Encoding peak"
+msgstr "Pico de codificação"
+
+msgid "Encoding"
+msgstr "Codificação"
+
+msgid "Encrypt backups"
+msgstr "Criptografar backups"
+
+msgid "Enter API credentials first"
+msgstr "Insira as credenciais de API primeiro"
+
+msgid "Enter a server address and API key"
+msgstr "Insira um endereço de servidor e chave de API"
+
+msgid "Enter a server address, username, and password"
+msgstr "Insira um endereço de servidor, nome de usuário e senha"
+
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr "Insira o endereço do seu servidor Nextcloud para entrar pelo navegador"
+
+msgid "Entire Library"
+msgstr "Biblioteca inteira"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr "O equalizador é controlado pelo receptor"
+
+msgid "Equalizer"
+msgstr "Equalizador"
+
+msgid "Ever played"
+msgstr "Já reproduzido"
+
+msgid "Everything, including new tracks"
+msgstr "Tudo, incluindo novas faixas"
+
+msgid "Excluded folders"
+msgstr "Pastas excluídas"
+
+msgid "Existing profile file"
+msgstr "Arquivo de perfil existente"
+
+msgid "Expand lyrics and visualizer"
+msgstr "Expandir letras e visualizador"
+
+msgid "Expand sidebar"
+msgstr "Expandir barra lateral"
+
+msgid "Explore"
+msgstr "Explorar"
+
+msgid "Export Activity"
+msgstr "Exportar atividade"
+
+msgid "Export Backup"
+msgstr "Exportar backup"
+
+msgid "Export PNG"
+msgstr "Exportar PNG"
+
+msgid "Export Playlist"
+msgstr "Exportar playlist"
+
+msgid "Export format"
+msgstr "Formato de exportação"
+
+msgid "Export playlist"
+msgstr "Exportar playlist"
+
+msgid "Export preset"
+msgstr "Exportar predefinição"
+
+msgid "Export to connection"
+msgstr "Exportar para conexão"
+
+msgid "Export your listening history in Rufin"
+msgstr "Exportar seu histórico de audição no Rufin"
+
+msgid "Export"
+msgstr "Exportar"
+
+msgid "External lyric lookup is off"
+msgstr "A busca externa de letras está desativada"
+
+msgid "External lyrics lookup"
+msgstr "Busca externa de letras"
+
+msgid "External metadata lookup"
+msgstr "Busca externa de metadados"
+
+msgid "External site links"
+msgstr "Links de sites externos"
+
+msgid "FFT size"
+msgstr "Tamanho FFT"
+
+msgid "FLAC"
+msgstr "FLAC"
+
+msgid "Fade audio when playback is paused or resumed"
+msgstr "Atenuar o áudio quando a reprodução for pausada ou retomada"
+
+msgid "Fall speed (%)"
+msgstr "Velocidade de queda (%)"
+
+msgid "Favorite current track"
+msgstr "Favoritar faixa atual"
+
+msgid "Favorite tracks"
+msgstr "Faixas favoritas"
+
+msgid "Favorite tracks, plus tracks from favorite albums and artists"
+msgstr "Faixas favoritas, mais faixas de álbuns e artistas favoritos"
+
+msgid "Favorite"
+msgstr "Favorito"
+
+msgid "Favorites and ratings"
+msgstr "Favoritos e classificações"
+
+msgid "Favorites"
+msgstr "Favoritos"
+
+msgid "Featured genres"
+msgstr "Gêneros em destaque"
+
+#, rust-format
+msgid "February {year}"
+msgstr "Fevereiro de {year}"
+
+msgid "Fetching Home"
+msgstr "Buscando Início"
+
+msgid "Fetching albums"
+msgstr "Buscando álbuns"
+
+msgid "Fetching artists"
+msgstr "Buscando artistas"
+
+msgid "Fetching artwork"
+msgstr "Buscando capas"
+
+msgid "Fetching genres"
+msgstr "Buscando gêneros"
+
+msgid "Fetching lyrics"
+msgstr "Buscando letras"
+
+msgid "Fetching metadata..."
+msgstr "Buscando metadados..."
+
+msgid "Fetching playlists"
+msgstr "Buscando playlists"
+
+msgid "Field"
+msgstr "Campo"
+
+msgid "File connection"
+msgstr "Conexão de arquivo"
+
+msgid "File connections"
+msgstr "Conexões de arquivo"
+
+msgid "File format"
+msgstr "Formato de arquivo"
+
+msgid "File path"
+msgstr "Caminho do arquivo"
+
+msgid "File size"
+msgstr "Tamanho do arquivo"
+
+msgid "Filename"
+msgstr "Nome do arquivo"
+
+msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
+msgstr ""
+"Os arquivos precisam de tags de Humor/BPM gravadas neles. Não suportado para "
+"Jellyfin"
+
+msgid "Filled spectrum"
+msgstr "Espectro preenchido"
+
+msgid "Filter type"
+msgstr "Tipo de filtro"
+
+msgid "Find shares"
+msgstr "Encontrar compartilhamentos"
+
+msgid "Find your ListenBrainz user token"
+msgstr "Encontre seu token de usuário do ListenBrainz"
+
+msgid "Finding lyrics..."
+msgstr "Encontrando letras..."
+
+msgid "Finishing setup"
+msgstr "Finalizando configuração"
+
+msgid "Fit to height"
+msgstr "Ajustar à altura"
+
+msgid "Fixed position"
+msgstr "Posição fixa"
+
+msgid "Flat"
+msgstr "Plano"
+
+msgid "Folder name"
+msgstr "Nome da pasta"
+
+msgid "Folder path"
+msgstr "Caminho da pasta"
+
+msgid "Folder"
+msgstr "Pasta"
+
+msgid "Folders"
+msgstr "Pastas"
+
+msgid "Follow the app accent with lighter and darker tones"
+msgstr "Seguir o tom de destaque do app com tons mais claros e mais escuros"
+
+msgid "Font family"
+msgstr "Família da fonte"
+
+msgid "Font size (px)"
+msgstr "Tamanho da fonte (px)"
+
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+"Apenas para esta importação ou exportação. Deixe em branco para um arquivo "
+"não criptografado."
+
+msgid "Forget Source"
+msgstr "Esquecer fonte"
+
+#, rust-format
+msgid "Forget \"{name}\"?"
+msgstr "Esquecer \"{name}\"?"
+
+msgid "Format not supported"
+msgstr "Formato não suportado"
+
+msgid "Format"
+msgstr "Formato"
+
+msgid "Forward"
+msgstr "Avançar"
+
+msgid "Found Servers"
+msgstr "Servidores encontrados"
+
+msgid "Frame rate limit"
+msgstr "Limite de taxa de quadros"
+
+msgid "Frames per second"
+msgstr "Quadros por segundo"
+
+msgid "Frequency \302\267 Hz"
+msgstr "Frequência 302267 Hz"
+
+msgid "Frequency scale"
+msgstr "Escala de frequência"
+
+msgid "Frequency"
+msgstr "Frequência"
+
+msgid "Friday"
+msgstr "Sexta-feira"
+
+msgid "Full Bass & Treble"
+msgstr "Graves e agudos completos"
+
+msgid "Full Bass"
+msgstr "Graves completos"
+
+msgid "Full Treble"
+msgstr "Agudos completos"
+
+msgid "Full"
+msgstr "Completo"
+
+msgid "Fullscreen player"
+msgstr "Player em tela cheia"
+
+msgid "Fullscreen"
+msgstr "Tela cheia"
+
+msgid "Furigana"
+msgstr "Furigana"
+
+msgid "Gain \302\267 dB"
+msgstr "Ganho 302267 dB"
+
+msgid "Gain"
+msgstr "Ganho"
+
+msgid "Gapless mode"
+msgstr "Modo sem intervalos"
+
+msgid "Gapless"
+msgstr "Sem intervalos"
+
+msgid "General"
+msgstr "Geral"
+
+msgid "Genius"
+msgstr "Genius"
+
+msgid "Genre radio"
+msgstr "Rádio por gênero"
+
+msgid "Genre tracks"
+msgstr "Faixas por gênero"
+
+msgid "Genre"
+msgstr "Gênero"
+
+msgid "Genres"
+msgstr "Gêneros"
+
+msgid "Gestures"
+msgstr "Gestos"
+
+msgid "Get token"
+msgstr "Obter token"
+
+msgid "Go to Album"
+msgstr "Ir para o álbum"
+
+#, rust-format
+msgid "Go to {artist}"
+msgstr "Ir para {artist}"
+
+msgid "Go to"
+msgstr "Ir para"
+
+msgid "Google Cast"
+msgstr "Google Cast"
+
+msgid "Gradient end"
+msgstr "Fim do gradiente"
+
+msgid "Gradient start"
+msgstr "Início do gradiente"
+
+msgid "Graphic"
+msgstr "Gráfico"
+
+msgid "Green"
+msgstr "Verde"
+
+msgid "Grid labels"
+msgstr "Rótulos de grade"
+
+msgid "Grid spacing"
+msgstr "Espaçamento de grade"
+
+msgid "Grid"
+msgstr "Grade"
+
+msgid "Grouping"
+msgstr "Agrupamento"
+
+msgid "Guest / public access"
+msgstr "Acesso de convidado / público"
+
+msgid "Halo"
+msgstr "Halo"
+
+msgid "Height (%)"
+msgstr "Altura (%)"
+
+msgid "Help"
+msgstr "Ajuda"
+
+msgid "Hidden"
+msgstr "Oculto"
+
+msgid "Hide sidebar"
+msgstr "Ocultar barra lateral"
+
+msgid "High shelf"
+msgstr "Prateleira alta"
+
+msgid "Highlight hovered row"
+msgstr "Destacar linha sobrevoada"
+
+msgid "History"
+msgstr "Histórico"
+
+msgid "Hold and drag to resize"
+msgstr "Segure e arraste para redimensionar"
+
+msgid "Home Blocks"
+msgstr "Blocos da tela inicial"
+
+msgid "Home Profile"
+msgstr "Perfil da tela inicial"
+
+msgid "Home"
+msgstr "Início"
+
+msgid "Hour"
+msgstr "Hora"
+
+msgid "Hours"
+msgstr "Horas"
+
+msgid "Hz"
+msgstr "Hz"
+
+msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
+msgstr "Se a página não carregar, o Libre.fm bloqueia sua faixa de IP/VPN"
+
+msgid "If you do not have API keys, create them"
+msgstr "Se você não tiver chaves de API, crie-as"
+
+msgid "Ignore playback volume"
+msgstr "Ignorar volume de reprodução"
+
+msgid "Image files"
+msgstr "Arquivos de imagem"
+
+msgid "Image"
+msgstr "Imagem"
+
+msgid "Import Backup"
+msgstr "Importar backup"
+
+msgid "Import Playlist"
+msgstr "Importar playlist"
+
+msgid "Import from connection"
+msgstr "Importar da conexão"
+
+msgid "Import preset"
+msgstr "Importar predefinição"
+
+msgid "Import theme"
+msgstr "Importar tema"
+
+msgid "Import"
+msgstr "Importar"
+
+msgid "Importing profile"
+msgstr "Importando perfil"
+
+msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+"Importa arquivos para a biblioteca e monitora pastas adicionadas em busca de "
+"alterações."
+
+msgid "Inactive at this sample rate"
+msgstr "Inativo nesta taxa de amostragem"
+
+msgid "Include detailed Rufin diagnostics in this session"
+msgstr "Incluir diagnósticos detalhados do Rufin nesta sessão"
+
+msgid "Increase"
+msgstr "Aumentar"
+
+msgid "Install available updates when Rufin starts"
+msgstr "Instalar atualizações disponíveis quando o Rufin iniciar"
+
+msgid "Installed"
+msgstr "Instalado"
+
+msgid "Instrumental"
+msgstr "Instrumental"
+
+msgid "Integrations"
+msgstr "Integrações"
+
+msgid "Invite"
+msgstr "Convidar"
+
+msgid "Item ID"
+msgstr "ID do item"
+
+msgid "Item is no longer available"
+msgstr "O item não está mais disponível"
+
+#, rust-format
+msgid "January {year}"
+msgstr "Janeiro de {year}"
+
+msgid "Japanese dictionary"
+msgstr "Dicionário japonês"
+
+msgid "Jellyfin"
+msgstr "Jellyfin"
+
+msgid "Join profile"
+msgstr "Entrar no perfil"
+
+msgid "Join using"
+msgstr "Entrar usando"
+
+msgid "Join"
+msgstr "Entrar"
+
+#, rust-format
+msgid "July {year}"
+msgstr "Julho de {year}"
+
+#, rust-format
+msgid "June {year}"
+msgstr "Junho de {year}"
+
+msgid "Karaoke Playback"
+msgstr "Reprodução em karaokê"
+
+msgid "Karaoke highlight color"
+msgstr "Cor de destaque do karaokê"
+
+msgid "Karaoke mode"
+msgstr "Modo karaokê"
+
+msgid "Keep Rufin running after closing the window"
+msgstr "Manter o Rufin rodando após fechar a janela"
+
+msgid "Keep music available offline. Folder changes only affect new downloads"
+msgstr ""
+"Manter músicas disponíveis offline. As alterações de pastas afetam apenas "
+"novos downloads"
+
+msgid "Keyboard Shortcuts"
+msgstr "Atalhos de teclado"
+
+msgid "LED spectrum"
+msgstr "Espectro LED"
+
+msgid "LRCLIB"
+msgstr "LRCLIB"
+
+msgid "Labels"
+msgstr "Rótulos"
+
+msgid "Language and readings"
+msgstr "Idioma e leituras"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Laptop/Headphones"
+msgstr "Laptop/Fones de ouvido"
+
+msgid "Large"
+msgstr "Grande"
+
+msgid "Last 30 days"
+msgstr "Últimos 30 dias"
+
+msgid "Last 365 days"
+msgstr "Últimos 365 dias"
+
+msgid "Last 7 days"
+msgstr "Últimos 7 dias"
+
+msgid "Last played"
+msgstr "Reproduzido pela última vez"
+
+msgid "Last.fm scrobbling"
+msgstr "Scrobbling do Last.fm"
+
+msgid "Last.fm"
+msgstr "Last.fm"
+
+msgid "Layout"
+msgstr "Layout"
+
+msgid "Leave empty for an unencrypted archive."
+msgstr "Deixe em branco para um arquivo não criptografado."
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr "Deixe a senha em branco para manter a credencial salva"
+
+msgid "Legacy authorization"
+msgstr "Autorização legada"
+
+msgid "Legacy password (Subsonic)"
+msgstr "Senha legada (Subsonic)"
+
+msgid "Legacy password"
+msgstr "Senha legada"
+
+msgid "Legacy"
+msgstr "Legado"
+
+msgid "Library"
+msgstr "Biblioteca"
+
+msgid "Libre.fm scrobbling"
+msgstr "Scrobbling do Libre.fm"
+
+msgid "Libre.fm"
+msgstr "Libre.fm"
+
+msgid "Light"
+msgstr "Claro"
+
+msgid "Limit"
+msgstr "Limite"
+
+msgid "Linear"
+msgstr "Linear"
+
+msgid "Link exported file"
+msgstr "Vincular arquivo exportado"
+
+msgid "Link to file..."
+msgstr "Vincular ao arquivo..."
+
+msgid "Linked file"
+msgstr "Arquivo vinculado"
+
+msgid "ListenBrainz scrobbling"
+msgstr "Scrobbling do ListenBrainz"
+
+msgid "ListenBrainz"
+msgstr "ListenBrainz"
+
+msgid "Listening overview"
+msgstr "Visão geral de audição"
+
+msgid "Listening"
+msgstr "Ouvindo"
+
+msgid "Load file contents"
+msgstr "Carregar conteúdo do arquivo"
+
+msgid "Loading cached lookups..."
+msgstr "Carregando buscas em cache..."
+
+msgid "Loading related tracks..."
+msgstr "Carregando faixas relacionadas..."
+
+msgid "Loading..."
+msgstr "Carregando..."
+
+msgid "Local File Access"
+msgstr "Acesso a arquivos locais"
+
+msgid "Local File Mapping"
+msgstr "Mapeamento de arquivos locais"
+
+msgid "Local Folders"
+msgstr "Pastas locais"
+
+msgid "Local Prefix"
+msgstr "Prefixo local"
+
+msgid "Local file access configured"
+msgstr "Acesso a arquivos locais configurado"
+
+msgid "Local file access is required before these tags can be saved."
+msgstr ""
+"O acesso a arquivos locais é necessário antes que essas tags possam ser "
+"salvas."
+
+#, rust-format
+msgid "Local file mapping: {matched} of {total} server path matches"
+msgid_plural "Local file mapping: {matched} of {total} server paths match"
+msgstr[0] ""
+"Mapeamento de arquivos locais: {matched} de {total} correspondências de "
+"caminho de servidor"
+msgstr[1] ""
+"Mapeamento de arquivos locais: {matched} de {total} correspondência de "
+"caminho de servidor"
+
+msgid "Local files and folders"
+msgstr "Arquivos e pastas locais"
+
+msgid "Local folder"
+msgstr "Pasta local"
+
+msgid "Local imports and access"
+msgstr "Importações e acesso locais"
+
+msgid "Local library"
+msgstr "Biblioteca local"
+
+msgid "Local music folder is unavailable"
+msgstr "A pasta de música local está indisponível"
+
+msgid "Local music folder"
+msgstr "Pasta de música local"
+
+msgid "Local music folders"
+msgstr "Pastas de música local"
+
+msgid "Local network permission is required for remote connections"
+msgstr "A permissão de rede local é necessária para conexões remotas"
+
+msgid "Local network permission was denied"
+msgstr "A permissão de rede local foi negada"
+
+msgid "Local network"
+msgstr "Rede local"
+
+msgid "Local playback saved"
+msgstr "Reprodução local salva"
+
+msgid "Local storage"
+msgstr "Armazenamento local"
+
+msgid "Local"
+msgstr "Local"
+
+msgid "Locate Folder"
+msgstr "Localizar pasta"
+
+msgid "Lock metadata"
+msgstr "Bloquear metadados"
+
+msgid "Logarithmic"
+msgstr "Logarítmico"
+
+msgid "Logs are copied"
+msgstr "Os registros foram copiados"
+
+msgid "Lookup"
+msgstr "Busca"
+
+msgid "Loudness normalization"
+msgstr "Normalização de loudness"
+
+msgid "Low shelf"
+msgstr "Prateleira baixa"
+
+msgid "Lyrics background opacity"
+msgstr "Opacidade do fundo das letras"
+
+msgid "Lyrics cache cleared"
+msgstr "Cache de letras limpo"
+
+msgid "Lyrics loaded"
+msgstr "Letras carregadas"
+
+msgid "Lyrics offset (ms)"
+msgstr "Deslocamento de letras (ms)"
+
+msgid "Lyrics storage"
+msgstr "Armazenamento de letras"
+
+msgid "Lyrics will appear here."
+msgstr "As letras aparecerão aqui."
+
+msgid "Lyrics"
+msgstr "Letras"
+
+msgid "MP3"
+msgstr "MP3"
+
+msgid "Manage"
+msgstr "Gerenciar"
+
+msgid "Mapped Local Path"
+msgstr "Caminho local mapeado"
+
+#, rust-format
+msgid "March {year}"
+msgstr "Março de {year}"
+
+msgid "Matched"
+msgstr "Correspondido"
+
+msgid "Maximum frequency (Hz)"
+msgstr "Frequência máxima (Hz)"
+
+msgid "Maximum level (dB)"
+msgstr "Nível máximo (dB)"
+
+msgid "Maximum year"
+msgstr "Ano máximo"
+
+msgid "Maximum"
+msgstr "Máximo"
+
+#, rust-format
+msgid "May {year}"
+msgstr "Maio de {year}"
+
+msgid "Menu"
+msgstr "Menu"
+
+msgid "Metadata changed before it was saved. Reload it before trying again."
+msgstr ""
+"Os metadados foram alterados antes de serem salvos. Recarregue-os antes de "
+"tentar novamente."
+
+msgid "Metadata editing is no longer available"
+msgstr "A edição de metadados não está mais disponível"
+
+msgid "Metadata editing requires Local access"
+msgstr "A edição de metadados requer acesso local"
+
+msgid "Metadata lookups"
+msgstr "Buscas de metadados"
+
+msgid "Metadata source"
+msgstr "Fonte de metadados"
+
+msgid "Metadata was saved, but refreshing the source failed."
+msgstr "Os metadados foram salvos, mas a atualização da fonte falhou."
+
+msgid "Metadata"
+msgstr "Metadados"
+
+msgid "Minimize overview"
+msgstr "Minimizar visão geral"
+
+msgid "Minimum frequency (Hz)"
+msgstr "Frequência mínima (Hz)"
+
+msgid "Minimum level (dB)"
+msgstr "Nível mínimo (dB)"
+
+msgid "Minimum year"
+msgstr "Ano mínimo"
+
+msgid "Minimum"
+msgstr "Mínimo"
+
+msgid "Mirrored bars"
+msgstr "Barras espelhadas"
+
+msgid "Mirrored"
+msgstr "Espelhado"
+
+msgid "Mode"
+msgstr "Modo"
+
+msgid "Monday"
+msgstr "Segunda-feira"
+
+msgid "Mono"
+msgstr "Mono"
+
+msgid "Month"
+msgstr "Mês"
+
+msgid "Monthly"
+msgstr "Mensal"
+
+msgid "Mood tracks"
+msgstr "Faixas por humor"
+
+msgid "Mood"
+msgstr "Humor"
+
+msgid "Moods"
+msgstr "Humores"
+
+msgid "More actions"
+msgstr "Mais ações"
+
+msgid "More"
+msgstr "Mais"
+
+msgid "Most Played (Monthly)"
+msgstr "Mais reproduzidas (Mensal)"
+
+msgid "Most Played (Weekly)"
+msgstr "Mais reproduzidas (Semanal)"
+
+msgid "Most Played (Yearly)"
+msgstr "Mais reproduzidas (Anual)"
+
+msgid "Most Played"
+msgstr "Mais reproduzidas"
+
+msgid "Most Skipped"
+msgstr "Mais ignoradas"
+
+msgid "Most played"
+msgstr "Mais reproduzidas"
+
+msgid "Motion"
+msgstr "Movimento"
+
+msgid "Move down"
+msgstr "Mover para baixo"
+
+msgid "Move provider down"
+msgstr "Mover provedor para baixo"
+
+msgid "Move provider up"
+msgstr "Mover provedor para cima"
+
+msgid "Move up"
+msgstr "Mover para cima"
+
+msgid "Multi-selection"
+msgstr "Seleção múltipla"
+
+msgid "Music Folder"
+msgstr "Pasta de música"
+
+msgid "Music access permission was denied"
+msgstr "A permissão de acesso à música foi negada"
+
+msgid "Music folders on the Rufin machine"
+msgstr "Pastas de música na máquina do Rufin"
+
+msgid "Music"
+msgstr "Música"
+
+msgid "MusicBrainz + Last.fm"
+msgstr "MusicBrainz + Last.fm"
+
+msgid "MusicBrainz album artist ID"
+msgstr "ID de artista do álbum no MusicBrainz"
+
+msgid "MusicBrainz artist ID"
+msgstr "ID de artista no MusicBrainz"
+
+msgid "MusicBrainz recording ID"
+msgstr "ID de gravação no MusicBrainz"
+
+msgid "MusicBrainz release ID"
+msgstr "ID de lançamento no MusicBrainz"
+
+msgid "MusicBrainz release group ID"
+msgstr "ID de grupo de lançamento no MusicBrainz"
+
+msgid "MusicBrainz release track ID"
+msgstr "ID de faixa de lançamento no MusicBrainz"
+
+msgid "MusicBrainz"
+msgstr "MusicBrainz"
+
+msgid "Musical key"
+msgstr "Tom musical"
+
+msgid "Mute"
+msgstr "Silenciar"
+
+msgid "Muted"
+msgstr "Mutado"
+
+msgid "My music"
+msgstr "Minha música"
+
+msgid "Name"
+msgstr "Nome"
+
+msgid "Narrow layout threshold"
+msgstr "Limite de layout estreito"
+
+msgid "Narrow left sidebar"
+msgstr "Barra lateral esquerda estreita"
+
+msgid "Narrow right sidebar"
+msgstr "Barra lateral direita estreita"
+
+msgid "Navidrome"
+msgstr "Navidrome"
+
+msgid "Navigate page items"
+msgstr "Navegar pelos itens da página"
+
+msgid "Navigate to Search"
+msgstr "Navegar para Pesquisa"
+
+msgid "Navigation"
+msgstr "Navegação"
+
+msgid "Nearby devices"
+msgstr "Dispositivos próximos"
+
+msgid "Nearby discovery"
+msgstr "Descoberta próxima"
+
+msgid "Needs attention"
+msgstr "Requer atenção"
+
+msgid "Needs review"
+msgstr "Requer revisão"
+
+msgid "NetEase"
+msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
+"Rede usada para enviar mídia local e com proxy para dispositivos de "
+"transmissão"
+
+msgid "Never Played"
+msgstr "Nunca reproduzidas"
+
+msgid "New Playlist"
+msgstr "Nova playlist"
+
+msgid "New Smart Playlist"
+msgstr "Nova playlist inteligente"
+
+msgid "New download rule"
+msgstr "Nova regra de download"
+
+msgid "New file"
+msgstr "Novo arquivo"
+
+msgid "New folder"
+msgstr "Nova pasta"
+
+msgid "New playlist"
+msgstr "Nova playlist"
+
+msgid "New release is available"
+msgstr "Novo lançamento disponível"
+
+msgid "Newly added"
+msgstr "Adicionadas recentemente"
+
+msgid "Next Track"
+msgstr "Próxima faixa"
+
+msgid "Next audio device"
+msgstr "Próximo dispositivo de áudio"
+
+msgid "Next page"
+msgstr "Próxima página"
+
+msgid "Next period"
+msgstr "Próximo período"
+
+msgid "Next source"
+msgstr "Próxima fonte"
+
+msgid "Next"
+msgstr "Próximo"
+
+msgid "No Servers Found"
+msgstr "Nenhum servidor encontrado"
+
+msgid "No albums from this artist yet"
+msgstr "Nenhum álbum deste artista ainda"
+
+msgid "No artwork found"
+msgstr "Nenhuma capa encontrada"
+
+msgid "No cached server path yet"
+msgstr "Nenhum caminho de servidor em cache ainda"
+
+msgid "No downloads queued"
+msgstr "Nenhum download na fila"
+
+msgid "No favorite albums yet"
+msgstr "Nenhum álbum favorito ainda"
+
+msgid "No favorite artists yet"
+msgstr "Nenhum artista favorito ainda"
+
+msgid "No favorites yet"
+msgstr "Nenhum favorito ainda"
+
+msgid "No file connections"
+msgstr "Nenhuma conexão de arquivo"
+
+msgid "No file linked"
+msgstr "Nenhum arquivo vinculado"
+
+msgid "No folders selected"
+msgstr "Nenhuma pasta selecionada"
+
+msgid "No limit"
+msgstr "Sem limite"
+
+msgid "No linked servers found"
+msgstr "Nenhum servidor vinculado encontrado"
+
+msgid "No listening activity in this period"
+msgstr "Nenhuma atividade de audição neste período"
+
+msgid "No local file mapping"
+msgstr "Nenhum mapeamento de arquivo local"
+
+msgid "No local files or folders configured"
+msgstr "Nenhum arquivo ou pasta local configurado"
+
+msgid "No lyrics available."
+msgstr "Nenhuma letra disponível."
+
+msgid "No lyrics"
+msgstr "Sem letras"
+
+msgid "No matching track in this release"
+msgstr "Nenhuma faixa correspondente neste lançamento"
+
+msgid "No matching tracks found"
+msgstr "Nenhuma faixa correspondente encontrada"
+
+msgid "No matching tracks"
+msgstr "Nenhuma faixa correspondente"
+
+msgid "No music from this artist yet"
+msgstr "Nenhuma música deste artista ainda"
+
+msgid "No network address available"
+msgstr "Nenhum endereço de rede disponível"
+
+msgid "No network devices found"
+msgstr "Nenhum dispositivo de rede encontrado"
+
+msgid "No playable entries were found"
+msgstr "Nenhuma entrada reproduzível foi encontrada"
+
+msgid "No playlists yet"
+msgstr "Nenhuma playlist ainda"
+
+msgid "No related tracks found"
+msgstr "Nenhuma faixa relacionada encontrada"
+
+#, rust-format
+msgid "No results for \"{query}\""
+msgstr "Nenhum resultado para"
+
+msgid "No results"
+msgstr "Nenhum resultado"
+
+msgid "No servers found, add one manually or try again"
+msgstr "Nenhum servidor encontrado, adicione um manualmente ou tente novamente"
+
+msgid "No smart playlists yet"
+msgstr "Nenhuma playlist inteligente ainda"
+
+msgid "No source"
+msgstr "Nenhuma fonte"
+
+msgid "No sources configured"
+msgstr "Nenhuma fonte configurada"
+
+msgid "No tracks here yet"
+msgstr "Nenhuma faixa aqui ainda"
+
+msgid "No"
+msgstr "Não"
+
+msgid "None"
+msgstr "Nenhum"
+
+msgid "Normalization scope"
+msgstr "Escopo de normalização"
+
+msgid "Not connected"
+msgstr "Não conectado"
+
+msgid "Not needed for most servers"
+msgstr "Desnecessário para a maioria dos servidores"
+
+msgid "Not valid"
+msgstr "Inválido"
+
+msgid "Nothing here yet"
+msgstr "Nada aqui ainda"
+
+msgid "Nothing in this folder"
+msgstr "Nada nesta pasta"
+
+msgid "Nothing played yet"
+msgstr "Nada reproduzido ainda"
+
+msgid "Nothing playing"
+msgstr "Nada reproduzindo"
+
+msgid "Nothing queued"
+msgstr "Nada na fila"
+
+msgid "Notifications"
+msgstr "Notificações"
+
+#, rust-format
+msgid "November {year}"
+msgstr "Novembro de {year}"
+
+msgid "Now playing notifications"
+msgstr "Notificações de reprodução atual"
+
+msgid "Now playing updates"
+msgstr "Atualizações de reprodução atual"
+
+msgid "Number of backups"
+msgstr "Número de backups"
+
+msgid "Number of songs"
+msgstr "Número de músicas"
+
+#, rust-format
+msgid "October {year}"
+msgstr "Outubro de {year}"
+
+msgid "Off only for a server you control"
+msgstr "Desligado apenas para um servidor que você controla"
+
+msgid "Off"
+msgstr "Desligado"
+
+msgid "Offline"
+msgstr "Offline"
+
+msgid "On this device"
+msgstr "Neste dispositivo"
+
+msgid "On"
+msgstr "Ligado"
+
+msgid "One Name: Value header per line"
+msgstr "Um cabeçalho Nome: Valor por linha"
+
+msgid "One address per line, pointing to the same collection"
+msgstr "Um endereço por linha, apontando para a mesma coleção"
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+"Um caminho de pasta por linha; deixe em branco para incluir toda a coleção"
+
+msgid "One path per line"
+msgstr "Um caminho por linha"
+
+msgid "Only fill missing information"
+msgstr "Apenas preencher informações ausentes"
+
+msgid "Only played tracks"
+msgstr "Apenas faixas reproduzidas"
+
+msgid "Only unplayed tracks"
+msgstr "Apenas faixas não reproduzidas"
+
+msgid "Opacity (%)"
+msgstr "Opacidade (%)"
+
+msgid "Open Controller"
+msgstr "Abrir controlador"
+
+msgid "Open Folder"
+msgstr "Abrir pasta"
+
+msgid "Open Rufin Connect"
+msgstr "Abrir Rufin Connect"
+
+msgid "Open approval page"
+msgstr "Abrir página de aprovação"
+
+msgid "Open automatically"
+msgstr "Abrir automaticamente"
+
+msgid "Open custom themes folder"
+msgstr "Abrir pasta de temas personalizados"
+
+msgid "Open fullscreen player"
+msgstr "Abrir player em tela cheia"
+
+msgid "Open on Emby"
+msgstr "Abrir no Emby"
+
+msgid "Open on Jellyfin"
+msgstr "Abrir no Jellyfin"
+
+msgid "Open on Last.fm"
+msgstr "Abrir no Last.fm"
+
+msgid "Open on MusicBrainz"
+msgstr "Abrir no MusicBrainz"
+
+msgid "Open on Navidrome"
+msgstr "Abrir no Navidrome"
+
+msgid "Open on Plex"
+msgstr "Abrir no Plex"
+
+msgid "Open on server"
+msgstr "Abrir no servidor"
+
+msgid "Open release notes"
+msgstr "Abrir notas de lançamento"
+
+msgid "Open settings"
+msgstr "Abrir configurações"
+
+msgid "Open"
+msgstr "Abrir"
+
+msgid "OpenSubsonic"
+msgstr "OpenSubsonic"
+
+msgid "Opening Last.fm authorization..."
+msgstr "Abrindo autorização do Last.fm..."
+
+msgid "Opening Libre.fm authorization..."
+msgstr "Abrindo autorização do Libre.fm..."
+
+msgid "Options"
+msgstr "Opções"
+
+msgid "Orange"
+msgstr "Laranja"
+
+msgid "Original audio"
+msgstr "Áudio original"
+
+msgid "Original release date"
+msgstr "Data de lançamento original"
+
+msgid "Original"
+msgstr "Original"
+
+#, rust-format
+msgid "Original: {value}"
+msgstr "Original: {value}"
+
+msgid "Other releases"
+msgstr "Outros lançamentos"
+
+msgid "Outline bars"
+msgstr "Barras de contorno"
+
+msgid "Output gain"
+msgstr "Ganho de saída"
+
+msgid "Overview"
+msgstr "Visão geral"
+
+msgid "Parametric"
+msgstr "Paramétrico"
+
+msgid "Password or token"
+msgstr "Senha ou token"
+
+msgid "Password"
+msgstr "Senha"
+
+msgid "Paste"
+msgstr "Colar"
+
+msgid "Path format"
+msgstr "Formato de caminho"
+
+msgid "Path in Source"
+msgstr "Caminho na fonte"
+
+msgid "Path"
+msgstr "Caminho"
+
+msgid "Pause"
+msgstr "Pausar"
+
+msgid "Peak fall speed (% per second)"
+msgstr "Velocidade de queda de pico (% por segundo)"
+
+msgid "Peak hold (seconds)"
+msgstr "Retenção de pico (segundos)"
+
+msgid "Peak"
+msgstr "Pico"
+
+msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
+msgstr ""
+"Perceptual para um controle mais preciso em volume baixo; Linear para uma "
+"escala direta"
+
+msgid "Perceptual"
+msgstr "Perceptivo"
+
+msgid "Performer"
+msgstr "Intérprete"
+
+msgid "Period"
+msgstr "Período"
+
+msgid "Pink"
+msgstr "Rosa"
+
+msgid "Pins"
+msgstr "Pins"
+
+msgid "Plain lyrics"
+msgstr "Letras simples"
+
+msgid "Play (shuffled)"
+msgstr "Reproduzir (aleatório)"
+
+msgid "Play Later (shuffled)"
+msgstr "Reproduzir depois (aleatório)"
+
+msgid "Play Later"
+msgstr "Reproduzir depois"
+
+msgid "Play Next (shuffled)"
+msgstr "Reproduzir em seguida (aleatório)"
+
+msgid "Play Next"
+msgstr "Reproduzir em seguida"
+
+msgid "Play album"
+msgstr "Reproduzir álbum"
+
+msgid "Play artist"
+msgstr "Reproduzir artista"
+
+msgid "Play count"
+msgstr "Contagem de reproduções"
+
+msgid "Play filter"
+msgstr "Filtro de reprodução"
+
+msgid "Play genre"
+msgstr "Reproduzir gênero"
+
+msgid "Play mood"
+msgstr "Reproduzir humor"
+
+msgid "Play playlist"
+msgstr "Reproduzir playlist"
+
+msgid "Play radio later"
+msgstr "Reproduzir rádio depois"
+
+msgid "Play radio next"
+msgstr "Reproduzir rádio em seguida"
+
+msgid "Play radio"
+msgstr "Reproduzir rádio"
+
+msgid "Play random (play later)"
+msgstr "Reproduzir aleatório (reproduzir depois)"
+
+msgid "Play random (play next)"
+msgstr "Reproduzir aleatório (reproduzir em seguida)"
+
+msgid "Play random"
+msgstr "Reproduzir aleatório"
+
+msgid "Play track"
+msgstr "Reproduzir faixa"
+
+msgid "Play"
+msgstr "Reproduzir"
+
+msgid "Play/Pause"
+msgstr "Reproduzir/Pausar"
+
+msgid "Playback controls"
+msgstr "Controles de reprodução"
+
+msgid "Playback position"
+msgstr "Posição de reprodução"
+
+msgid "Playback speed"
+msgstr "Velocidade de reprodução"
+
+msgid "Playback"
+msgstr "Reprodução"
+
+#, rust-format
+msgid "Playing from {}"
+msgstr "Reproduzindo de {}"
+
+msgid "Playing from"
+msgstr "Reproduzindo de"
+
+msgid "Playing on this device"
+msgstr "Reproduzindo neste dispositivo"
+
+#, rust-format
+msgid "Playing on {device}"
+msgstr "Reproduzindo em {device}"
+
+msgid "Playing stream"
+msgstr "Transmitindo fluxo"
+
+msgid "Playlist File"
+msgstr "Arquivo de playlist"
+
+msgid "Playlist file changed"
+msgstr "Arquivo de playlist alterado"
+
+msgid "Playlist files"
+msgstr "Arquivos de playlist"
+
+msgid "Playlist name"
+msgstr "Nome da playlist"
+
+msgid "Playlist order"
+msgstr "Ordem da playlist"
+
+msgid "Playlist radio"
+msgstr "Rádio da playlist"
+
+msgid "Playlist tracks"
+msgstr "Faixas da playlist"
+
+msgid "Playlist"
+msgstr "Playlist"
+
+msgid "Playlists"
+msgstr "Playlists"
+
+msgid "Plays"
+msgstr "Reproduções"
+
+msgid "Plex Account"
+msgstr "Conta do Plex"
+
+msgid "Plex"
+msgstr "Plex"
+
+msgid "Pop"
+msgstr "Pop"
+
+msgid "Port"
+msgstr "Porta"
+
+msgid "Position"
+msgstr "Posição"
+
+msgid "Preamp"
+msgstr "Pré-amplificador"
+
+msgid "Prefer distinct track covers"
+msgstr "Preferir capas de faixa distintas"
+
+msgid "Prefer server lyrics"
+msgstr "Preferir letras do servidor"
+
+msgid "Prefer translations"
+msgstr "Preferir traduções"
+
+msgid "Preferences"
+msgstr "Preferências"
+
+msgid "Preparing collection"
+msgstr "Preparando coleção"
+
+msgid "Preparing library..."
+msgstr "Preparando biblioteca..."
+
+msgid "Preserve channels"
+msgstr "Preservar canais"
+
+msgid "Preserve pitch"
+msgstr "Preservar tom"
+
+msgid "Preset name"
+msgstr "Nome da predefinição"
+
+msgid "Preset text"
+msgstr "Texto da predefinição"
+
+msgid "Preset"
+msgstr "Predefinição"
+
+msgid "Presets"
+msgstr "Predefinições"
+
+msgid "Prevent automatic metadata refreshes from replacing these values"
+msgstr ""
+"Evitar que atualizações automáticas de metadados substituam estes valores"
+
+msgid "Previous Track"
+msgstr "Faixa anterior"
+
+msgid "Previous audio device"
+msgstr "Dispositivo de áudio anterior"
+
+msgid "Previous page"
+msgstr "Página anterior"
+
+msgid "Previous period"
+msgstr "Período anterior"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Privacy & Security"
+msgstr "Privacidade e segurança"
+
+msgid "Privacy and Security"
+msgstr "Privacidade e Segurança"
+
+msgid "Private mode is off"
+msgstr "O modo privado está desativado"
+
+msgid "Private mode is on"
+msgstr "O modo privado está ativado"
+
+msgid "Private mode"
+msgstr "Modo privado"
+
+msgid "Profile PIN"
+msgstr "PIN do perfil"
+
+msgid "Profile download is incomplete. Retry to continue."
+msgstr "O download do perfil está incompleto. Tente novamente para continuar."
+
+msgid "Profile up to date"
+msgstr "Perfil atualizado"
+
+msgid "Pronunciation"
+msgstr "Pronúncia"
+
+msgid "Proxy casting through Rufin"
+msgstr "Fazer proxy da transmissão através do Rufin"
+
+msgid "Public"
+msgstr "Público"
+
+msgid "Purple"
+msgstr "Roxo"
+
+msgid "Q"
+msgstr "Q"
+
+msgid "Queue a track to begin"
+msgstr "Adicionar uma faixa à fila para começar"
+
+msgid "Queue and transitions"
+msgstr "Fila e transições"
+
+msgid "Queue tracks to show"
+msgstr "Faixas da fila para mostrar"
+
+msgid "Queue"
+msgstr "Fila"
+
+msgid "Queued"
+msgstr "Na fila"
+
+msgid "Quick Connect"
+msgstr "Quick Connect"
+
+msgid "Quit Rufin"
+msgstr "Sair do Rufin"
+
+msgid "Quit"
+msgstr "Sair"
+
+msgid "Radio"
+msgstr "Rádio"
+
+msgid "Range selection"
+msgstr "Seleção de intervalo"
+
+msgid "Rating"
+msgstr "Avaliação"
+
+msgid "Reading tags..."
+msgstr "Lendo tags..."
+
+msgid "Ready"
+msgstr "Pronto"
+
+msgid "Receiving collection"
+msgstr "Recebendo coleção"
+
+msgid "Receiving profile"
+msgstr "Recebendo perfil"
+
+msgid "Recent searches"
+msgstr "Pesquisas recentes"
+
+msgid "Recently played"
+msgstr "Reproduzidos recentemente"
+
+msgid "Recently released"
+msgstr "Lançados recentemente"
+
+msgid "Recommended when your server provides one"
+msgstr "Recomendado quando seu servidor fornece um"
+
+msgid "Reconnect"
+msgstr "Reconectar"
+
+msgid "Record label"
+msgstr "Gravadora"
+
+msgid "Recording"
+msgstr "Gravação"
+
+msgid "Red"
+msgstr "Vermelho"
+
+msgid "Redo"
+msgstr "Refazer"
+
+msgid "Reduce motion"
+msgstr "Reduzir movimento"
+
+msgid "Refresh automatically"
+msgstr "Atualizar automaticamente"
+
+msgid "Refresh section"
+msgstr "Atualizar seção"
+
+msgid "Refresh source"
+msgstr "Atualizar fonte"
+
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgid "Regenerate access token"
+msgstr "Regenerar token de acesso"
+
+msgid "Regenerate access token?"
+msgstr "Regenerar token de acesso?"
+
+msgid "Regenerate"
+msgstr "Regenerar"
+
+msgid "Related"
+msgstr "Relacionado"
+
+msgid "Relative"
+msgstr "Relativo"
+
+msgid "Relay address"
+msgstr "Endereço de relay"
+
+msgid "Relay"
+msgstr "Retransmissão"
+
+msgid "Release date"
+msgstr "Data de lançamento"
+
+msgid "Release group"
+msgstr "Grupo de lançamento"
+
+msgid "Release notifications"
+msgstr "Notificações de lançamento"
+
+msgid "Release type"
+msgstr "Tipo de lançamento"
+
+msgid "Release"
+msgstr "Lançamento"
+
+msgid "Reload from file"
+msgstr "Recarregar do arquivo"
+
+msgid "Reload metadata to review the current values."
+msgstr "Recarregar metadados para revisar os valores atuais."
+
+msgid "Reload themes"
+msgstr "Recarregar temas"
+
+msgid "Reload to apply changes"
+msgstr "Recarregar para aplicar alterações"
+
+msgid "Reload"
+msgstr "Recarregar"
+
+msgid "Remote lyrics"
+msgstr "Letras remotas"
+
+msgid "Remote"
+msgstr "Remoto"
+
+msgid "Remove All Downloads"
+msgstr "Remover todos os downloads"
+
+msgid "Remove Download"
+msgstr "Remover download"
+
+msgid "Remove Downloads"
+msgstr "Remover downloads"
+
+msgid "Remove Rule and Delete Downloads"
+msgstr "Remover regra e excluir downloads"
+
+msgid "Remove Rule and Downloads"
+msgstr "Remover regra e downloads"
+
+msgid "Remove Rule, Keep Downloads"
+msgstr "Remover regra, manter downloads"
+
+msgid "Remove all downloads"
+msgstr "Remover todos os downloads"
+
+msgid "Remove and Delete"
+msgstr "Remover e excluir"
+
+msgid "Remove band"
+msgstr "Remover banda"
+
+msgid "Remove device"
+msgstr "Remover dispositivo"
+
+msgid "Remove folder"
+msgstr "Remover pasta"
+
+msgid "Remove from Favorites"
+msgstr "Remover dos favoritos"
+
+msgid "Remove from Pins"
+msgstr "Remover dos pins"
+
+msgid "Remove from Playlist"
+msgstr "Remover da playlist"
+
+msgid "Remove from Queue"
+msgstr "Remover da fila"
+
+msgid "Remove from folder"
+msgstr "Remover da pasta"
+
+msgid "Remove rule"
+msgstr "Remover regra"
+
+msgid "Remove search"
+msgstr "Remover pesquisa"
+
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+"Remover o banco de dados da biblioteca? As configurações e logins salvos "
+"serão mantidos."
+
+msgid "Remove unavailable tracks"
+msgstr "Remover faixas indisponíveis"
+
+msgid "Remove"
+msgstr "Remover"
+
+msgid "Removed from"
+msgstr "Removido de"
+
+msgid "Rename file"
+msgstr "Renomear arquivo"
+
+msgid "Rename folder"
+msgstr "Renomear pasta"
+
+msgid "Rename preset"
+msgstr "Renomear predefinição"
+
+msgid "Rename"
+msgstr "Renomear"
+
+msgid "Reorder"
+msgstr "Reordenar"
+
+msgid "Repeat all"
+msgstr "Repetir tudo"
+
+msgid "Repeat off"
+msgstr "Repetição desativada"
+
+msgid "Repeat one"
+msgstr "Repetir uma"
+
+msgid "Repeat"
+msgstr "Repetir"
+
+msgid "Replace file contents"
+msgstr "Substituir conteúdo do arquivo"
+
+msgid "Replace saved custom headers"
+msgstr "Substituir cabeçalhos personalizados salvos"
+
+msgid "ReplayGain tags"
+msgstr "Tags ReplayGain"
+
+msgid "ReplayGain"
+msgstr "Normalização do volume"
+
+#, rust-format
+msgid "Request failed ({status})"
+msgstr "Falha na solicitação ({status})"
+
+msgid "Require SMB encryption"
+msgstr "Exigir criptografia SMB"
+
+msgid "Reset appearance"
+msgstr "Redefinir aparência"
+
+msgid "Reset database"
+msgstr "Redefinir banco de dados"
+
+msgid "Reset database?"
+msgstr "Redefinir banco de dados?"
+
+msgid "Reset to defaults"
+msgstr "Restaurar padrões"
+
+msgid "Reset"
+msgstr "Redefinir"
+
+msgid "Response"
+msgstr "Resposta"
+
+msgid "Restart now"
+msgstr "Reiniciar agora"
+
+msgid "Restore User State"
+msgstr "Restaurar estado do usuário"
+
+msgid "Restore defaults without deleting saved presets"
+msgstr "Restaurar padrões sem excluir predefinições salvas"
+
+msgid "Restore player layout"
+msgstr "Restaurar layout do player"
+
+msgid "Restore"
+msgstr "Restaurar"
+
+msgid "Results per section"
+msgstr "Resultados por seção"
+
+msgid "Resume"
+msgstr "Retomar"
+
+msgid "Resync Library"
+msgstr "Ressincronizar biblioteca"
+
+msgid "Retry"
+msgstr "Tentar novamente"
+
+msgid "Ribbon"
+msgstr "Fita"
+
+msgid "Rise speed (%)"
+msgstr "Velocidade de subida (%)"
+
+msgid "Rock"
+msgstr "Rock"
+
+msgid "Romaji"
+msgstr "Romanização do japonês"
+
+msgid "Rounded bars"
+msgstr "Barras arredondadas"
+
+msgid "Rounded spectrum"
+msgstr "Espectro arredondado"
+
+msgid "Row borders"
+msgstr "Bordas de linha"
+
+msgid "Rows"
+msgstr "Linhas"
+
+msgid "Rufin Connect"
+msgstr "Rufin conectado"
+
+msgid "Rufin JSON"
+msgstr "Rufin JSON"
+
+msgid "Rufin data folder"
+msgstr "Pasta de dados do Rufin"
+
+msgid "Rufin host"
+msgstr "Host do Rufin"
+
+msgid "Rule actions"
+msgstr "Ações de regra"
+
+msgid "SMB / Samba"
+msgstr "SMB / Samba"
+
+msgid "SMB Domain"
+msgstr "Domínio SMB"
+
+msgid "Sample peak"
+msgstr "Pico da amostra"
+
+msgid "Sample rate"
+msgstr "Taxa de amostragem"
+
+msgid "Saturday"
+msgstr "Sábado"
+
+msgid "Save Diagnostic Log"
+msgstr "Salvar registro de diagnóstico"
+
+msgid "Save Lyrics"
+msgstr "Salvar letras"
+
+msgid "Save Server Settings"
+msgstr "Salvar configurações do servidor"
+
+msgid "Save action saves the lyrics directly to your source"
+msgstr "A ação de salvar grava as letras diretamente na sua fonte"
+
+msgid "Save changes automatically"
+msgstr "Salvar alterações automaticamente"
+
+msgid "Save in folder"
+msgstr "Salvar na pasta"
+
+msgid "Save lyrics automatically"
+msgstr "Salvar letras automaticamente"
+
+msgid "Save playlist changes automatically"
+msgstr "Salvar alterações da playlist automaticamente"
+
+msgid "Save preset"
+msgstr "Salvar predefinição"
+
+msgid "Save"
+msgstr "Salvar"
+
+msgid "Saved Plex Login"
+msgstr "Login do Plex salvo"
+
+msgid "Saved logins"
+msgstr "Logins salvos"
+
+#, rust-format
+msgid "Saved mapping. {matched} of {total} server path matches"
+msgid_plural "Saved mapping. {matched} of {total} server paths match"
+msgstr[0] ""
+"Mapeamento salvo. {matched} de {total} correspondências de caminho de "
+"servidor"
+msgstr[1] ""
+"Mapeamento salvo. {matched} de {total} correspondência de caminho de servidor"
+
+msgid "Saved preset"
+msgstr "Predefinição salva"
+
+msgid "Saved to"
+msgstr "Salvo em"
+
+msgid "Saved"
+msgstr "Salvo"
+
+msgid "Saved..."
+msgstr "Salvando..."
+
+msgid "Saves lyrics to your source"
+msgstr "Salva letras na sua fonte"
+
+msgid "Saving changes"
+msgstr "Salvando alterações"
+
+msgid "Saving..."
+msgstr "Salvando..."
+
+msgid "Scanning tracks"
+msgstr "Escaneando faixas"
+
+msgid "Schedule"
+msgstr "Agenda"
+
+msgid "Scheduled Backup Failed"
+msgstr "Falha no backup agendado"
+
+msgid "Scheduled Backup Password"
+msgstr "Senha de backup agendado"
+
+msgid "Scheduled backup password saved"
+msgstr "Senha de backup agendado salva"
+
+msgid "Search Again"
+msgstr "Pesquisar novamente"
+
+msgid "Search Lyrics"
+msgstr "Pesquisar letras"
+
+msgid "Search MusicBrainz"
+msgstr "Pesquisar no MusicBrainz"
+
+msgid "Search artwork"
+msgstr "Pesquisar capas"
+
+msgid "Search by AcoustID"
+msgstr "Pesquisar por AcoustID"
+
+msgid "Search current folder"
+msgstr "Pesquisar pasta atual"
+
+msgid "Search genres"
+msgstr "Pesquisar gêneros"
+
+msgid "Search in page"
+msgstr "Pesquisar na página"
+
+msgid "Search is unavailable"
+msgstr "A pesquisa está indisponível"
+
+msgid "Search library"
+msgstr "Pesquisar na biblioteca"
+
+msgid "Search lyrics"
+msgstr "Pesquisar letras"
+
+msgid "Search playlists"
+msgstr "Pesquisar playlists"
+
+msgid "Search preferences"
+msgstr "Preferências de pesquisa"
+
+msgid "Search queue"
+msgstr "Pesquisar na fila"
+
+msgid "Search tracks"
+msgstr "Pesquisar faixas"
+
+msgid "Search unavailable"
+msgstr "Pesquisa indisponível"
+
+msgid "Search"
+msgstr "Pesquisar"
+
+msgid "Search..."
+msgstr "Pesquisar..."
+
+msgid "Searching AcoustID..."
+msgstr "Pesquisando no AcoustID..."
+
+msgid "Searching Local Network"
+msgstr "Pesquisando na rede local"
+
+msgid "Searching MusicBrainz..."
+msgstr "Pesquisando no MusicBrainz..."
+
+msgid "Searching for devices..."
+msgstr "Pesquisando dispositivos..."
+
+#, rust-format
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Pesquisando servidores {provider} na rede local..."
+
+msgid "Searching will start automatically"
+msgstr "A pesquisa começará automaticamente"
+
+msgid "Searching..."
+msgstr "Pesquisando..."
+
+msgid "Secret storage"
+msgstr "Armazenamento secreto"
+
+msgid "Seek Backward"
+msgstr "Retroceder"
+
+msgid "Seek Forward"
+msgstr "Avançar"
+
+msgid "Seek playback"
+msgstr "Buscar na reprodução"
+
+#, rust-format
+msgid "Seek to {time}"
+msgstr "Ir para {time}"
+
+msgid "Segment end"
+msgstr "Fim do segmento"
+
+msgid "Segment start"
+msgstr "Início do segmento"
+
+msgid "Segmented bars"
+msgstr "Barras segmentadas"
+
+msgid "Select All"
+msgstr "Selecionar tudo"
+
+msgid "Select Download Folder"
+msgstr "Selecionar pasta de download"
+
+msgid "Select Music Folder"
+msgstr "Selecionar pasta de música"
+
+msgid "Select Source"
+msgstr "Selecionar fonte"
+
+msgid "Select all"
+msgstr "Selecionar tudo"
+
+#, rust-format
+msgid "Select {title}"
+msgstr "Selecionar {title}"
+
+msgid "Selected folders"
+msgstr "Pastas selecionadas"
+
+#, rust-format
+msgid "Selected items: {count}"
+msgstr "Itens selecionados: {count}"
+
+msgid "Selection"
+msgstr "Seleção"
+
+msgid "Self-host an Iroh Relay"
+msgstr "Auto-hospedar um Relay Iroh"
+
+#, rust-format
+msgid "September {year}"
+msgstr "Setembro de {year}"
+
+msgid "Server Actions"
+msgstr "Ações do servidor"
+
+msgid "Server Address Override (optional)"
+msgstr "Substituição de endereço do servidor (opcional)"
+
+msgid "Server Address"
+msgstr "Endereço do servidor"
+
+msgid "Server Library"
+msgstr "Biblioteca do servidor"
+
+msgid "Server Prefix"
+msgstr "Prefixo do servidor"
+
+msgid "Server Sample"
+msgstr "Amostra do servidor"
+
+msgid "Server Settings"
+msgstr "Configurações do servidor"
+
+#, rust-format
+msgid "Server discovery failed: {error}"
+msgstr "A descoberta do servidor falhou: {error}"
+
+msgid "Server is unreachable"
+msgstr "O servidor está inacessível"
+
+msgid "Server lyrics are off in private mode"
+msgstr "As letras do servidor estão desativadas no modo privado"
+
+msgid "Server prefix doesn't match"
+msgstr "O prefixo do servidor não corresponde"
+
+msgid "Server"
+msgstr "Servidor"
+
+msgid "Servers"
+msgstr "Servidores"
+
+msgid "Set the Discord activity type to Listening"
+msgstr "Definir o tipo de atividade do Discord como Ouvindo"
+
+msgid "Settings and sources"
+msgstr "Configurações e fontes"
+
+msgid "Settings"
+msgstr "Configurações"
+
+msgid "Shadow"
+msgstr "Sombra"
+
+msgid "Share"
+msgstr "Compartilhar"
+
+msgid "Shared file size"
+msgstr "Tamanho de arquivo compartilhado"
+
+msgid "Shared secret"
+msgstr "Segredo compartilhado"
+
+msgid "Show Rufin in headline"
+msgstr "Mostrar Rufin no título"
+
+msgid "Show Rufin"
+msgstr "Mostrar Rufin"
+
+msgid "Show artwork"
+msgstr "Mostrar capas"
+
+msgid "Show comparison"
+msgstr "Mostrar comparação"
+
+msgid "Show current lyrics line"
+msgstr "Mostrar linha atual da letra"
+
+msgid "Show downloaded badge"
+msgstr "Mostrar selo de baixado"
+
+msgid "Show external service icons on album and artist pages"
+msgstr "Mostrar ícones de serviços externos nas páginas de álbuns e artistas"
+
+msgid "Show external site links"
+msgstr "Mostrar links de sites externos"
+
+msgid "Show header"
+msgstr "Mostrar cabeçalho"
+
+msgid "Show lyrics in the right panel"
+msgstr "Mostrar letras no painel direito"
+
+msgid "Show lyrics"
+msgstr "Mostrar letras"
+
+msgid "Show paused status"
+msgstr "Mostrar status de pausado"
+
+msgid "Show peak markers"
+msgstr "Mostrar marcadores de pico"
+
+msgid "Show playback queue"
+msgstr "Mostrar fila de reprodução"
+
+msgid "Show ratings in the bottom bar"
+msgstr "Mostrar avaliações na barra inferior"
+
+msgid "Show sidebar"
+msgstr "Mostrar barra lateral"
+
+msgid "Show tray icon"
+msgstr "Mostrar ícone na bandeja"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr "Mostrar visualizador e letras no painel direito"
+
+msgid "Show visualizer in the right panel"
+msgstr "Mostrar visualizador no painel direito"
+
+msgid "Show visualizer"
+msgstr "Mostrar visualizador"
+
+msgid "Show"
+msgstr "Mostrar"
+
+msgid "Show/hide lyrics"
+msgstr "Mostrar/ocultar letras"
+
+msgid "Show/hide right sidebar"
+msgstr "Mostrar/ocultar barra lateral"
+
+msgid "Showcase"
+msgstr "Vitrine"
+
+msgid "Shuffle"
+msgstr "Aleatório"
+
+msgid "Sidebar Items"
+msgstr "Itens da barra lateral"
+
+#, rust-format
+msgid "Sidebar item {position}"
+msgstr "Item da barra lateral {position}"
+
+msgid "Sidebar route by position"
+msgstr "Rota da barra lateral por posição"
+
+msgid "Sidebar"
+msgstr "Barra lateral"
+
+msgid "Sign In in Browser"
+msgstr "Entrar no navegador"
+
+msgid "Sign In with Password"
+msgstr "Entrar com senha"
+
+msgid "Sign in to Plex first"
+msgstr "Entrar no Plex primeiro"
+
+msgid "Sign in with Nextcloud"
+msgstr "Entrar com Nextcloud"
+
+msgid "Sign in with a code"
+msgstr "Entrar com um código"
+
+msgid "Sign in"
+msgstr "Entrar"
+
+msgid "Similar artists"
+msgstr "Artistas similares"
+
+msgid "SimpMusic"
+msgstr "SimpMusic"
+
+msgid "Single"
+msgstr "Single"
+
+msgid "Singles"
+msgstr "Singles"
+
+msgid "Size"
+msgstr "Tamanho"
+
+msgid "Skip count"
+msgstr "Contagem de saltos"
+
+msgid "Skip same-album crossfade"
+msgstr "Pular crossfade do mesmo álbum"
+
+msgid "Skip unplayable tracks"
+msgstr "Pular faixas irreproduzíveis"
+
+msgid "Slate"
+msgstr "Ardósia"
+
+msgid "Small"
+msgstr "Pequeno"
+
+msgid "Smart Playlist"
+msgstr "Playlist inteligente"
+
+msgid "Smart Playlists"
+msgstr "Playlists inteligentes"
+
+msgid "Smart playlist tracks"
+msgstr "Faixas de playlists inteligentes"
+
+msgid "Smart playlists"
+msgstr "Playlists inteligentes"
+
+msgid "Soft spectrum"
+msgstr "Espectro suave"
+
+msgid "Solid bars"
+msgstr "Barras sólidas"
+
+msgid "Some playlist entries could not be imported"
+msgstr "Algumas entradas da playlist não puderam ser importadas"
+
+msgid "Song title"
+msgstr "Título da música"
+
+msgid "Song"
+msgstr "Música"
+
+msgid "Sort by"
+msgstr "Ordenar por"
+
+msgid "Sort name"
+msgstr "Nome de ordenação"
+
+msgid "Sort title"
+msgstr "Título de ordenação"
+
+msgid "Sort"
+msgstr "Ordenar"
+
+msgid "Source by position"
+msgstr "Fonte por posição"
+
+msgid "Source is no longer available"
+msgstr "A fonte não está mais disponível"
+
+msgid "Source setup is unavailable"
+msgstr "A configuração da fonte está indisponível"
+
+msgid "Source to use for cover images and song/artist links"
+msgstr "Fonte a usar para imagens de capa e links de músicas/artistas"
+
+msgid "Source type"
+msgstr "Tipo de fonte"
+
+msgid "Source"
+msgstr "Fonte"
+
+msgid "Sources"
+msgstr "Fontes"
+
+msgid "Spectrum \302\267 dBFS"
+msgstr "Espectro 302267 dBFS"
+
+msgid "Spectrum line"
+msgstr "Linha de espectro"
+
+msgid "Spectrum"
+msgstr "Espectro"
+
+msgid "Start minimized"
+msgstr "Iniciar minimizado"
+
+msgid "Start playing automatically"
+msgstr "Iniciar reprodução automaticamente"
+
+msgid "Starting page"
+msgstr "Página inicial"
+
+msgid "Starting..."
+msgstr "Iniciando..."
+
+msgid "Status display"
+msgstr "Exibição de status"
+
+msgid "Stereo for lossy formats"
+msgstr "Estéreo para formatos com perda"
+
+msgid "Stereo"
+msgstr "Estéreo"
+
+msgid "Stop"
+msgstr "Parar"
+
+msgid "Storage"
+msgstr "Armazenamento"
+
+msgid "Store calculated loudness in supported Local music files"
+msgstr "Armazenar loudness calculada em arquivos de música local compatíveis"
+
+msgid "Stream quality"
+msgstr "Qualidade da transmissão"
+
+msgid "Streaming"
+msgstr "Transmissão"
+
+msgid "Studio"
+msgstr "Estúdio"
+
+msgid "Studios"
+msgstr "Estúdios"
+
+msgid "Style"
+msgstr "Estilo"
+
+msgid "Suggested"
+msgstr "Sugerido"
+
+msgid "Sunday"
+msgstr "Domingo"
+
+msgid "Swipe left"
+msgstr "Deslizar para a esquerda"
+
+msgid "Swipe right"
+msgstr "Deslizar para a direita"
+
+msgid "Switch Search/Favorites tabs"
+msgstr "Alternar guias de Pesquisa/Favoritos"
+
+msgid "Switch between layouts"
+msgstr "Alternar entre layouts"
+
+msgid "Switch pane"
+msgstr "Alternar painel"
+
+msgid "Switching library..."
+msgstr "Alternando biblioteca..."
+
+msgid "Synced lyrics"
+msgstr "Letras sincronizadas"
+
+msgid "System default"
+msgstr "Padrão do sistema"
+
+msgid "System flatpak:"
+msgstr "Flatpak do sistema:"
+
+msgid "System keyring"
+msgstr "Chaveiro do sistema"
+
+msgid "System"
+msgstr "Sistema"
+
+msgid "Tags"
+msgstr "Tags"
+
+msgid "Target loudness"
+msgstr "Loudness alvo"
+
+msgid "Teal"
+msgstr "Azul-petróleo"
+
+msgid "Techno"
+msgstr "Techno"
+
+msgid "Template"
+msgstr "Modelo"
+
+msgid "Test connection"
+msgstr "Testar conexão"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "The API token was not accepted. Please connect again."
+msgstr "O token de API não foi aceito. Conecte-se novamente."
+
+msgid "The connection no longer exists"
+msgstr "A conexão não existe mais"
+
+msgid "TheAudioDB album ID"
+msgstr "ID de álbum no TheAudioDB"
+
+msgid "TheAudioDB artist ID"
+msgstr "ID de artista no TheAudioDB"
+
+msgid "Theme"
+msgstr "Tema"
+
+msgid "These emoji match"
+msgstr "Estes emojis correspondem"
+
+msgid "This can be turned off after pairing if you want"
+msgstr "Isso pode ser desativado após o emparelhamento, se desejar"
+
+msgid "This device"
+msgstr "Este dispositivo"
+
+#, rust-format
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
+"Isto pertence a {source}. Playlists normais são sincronizadas com seu remoto."
+
+msgid "This isn't available"
+msgstr "Isto não está disponível"
+
+#, rust-format
+msgid "This playlist only accepts {source} tracks"
+msgstr "Esta playlist aceita apenas faixas de {source}"
+
+msgid "This source cannot edit this field"
+msgstr "Esta fonte não pode editar este campo"
+
+msgid "This will remove all configured state. Do you want to continue?"
+msgstr "Isso removerá todo o estado configurado. Deseja continuar?"
+
+msgid "Thursday"
+msgstr "Quinta-feira"
+
+msgid "Title (merged)"
+msgstr "Título (mesclado)"
+
+msgid "Title"
+msgstr "Título"
+
+msgid "Toggle Fullscreen"
+msgstr "Alternar tela cheia"
+
+msgid "Tone and channels"
+msgstr "Tom e canais"
+
+msgid "Tools"
+msgstr "Ferramentas"
+
+msgid "Top albums"
+msgstr "Principais álbuns"
+
+msgid "Top artists"
+msgstr "Principais artistas"
+
+msgid "Top genres"
+msgstr "Principais gêneros"
+
+msgid "Top tracks"
+msgstr "Principais faixas"
+
+msgid "Total discs"
+msgstr "Total de discos"
+
+msgid "Total tracks"
+msgstr "Total de faixas"
+
+msgid "Track details"
+msgstr "Detalhes da faixa"
+
+msgid "Track gain"
+msgstr "Ganho da faixa"
+
+msgid "Track number"
+msgstr "Número da faixa"
+
+msgid "Track peak"
+msgstr "Pico da faixa"
+
+msgid "Track radio"
+msgstr "Rádio da faixa"
+
+msgid "Track unavailable"
+msgstr "Faixa indisponível"
+
+msgid "Track"
+msgstr "Faixa"
+
+msgid "Tracks from every playlist"
+msgstr "Faixas de todas as playlists"
+
+msgid "Tracks from your five latest albums"
+msgstr "Faixas dos seus cinco álbuns mais recentes"
+
+msgid "Tracks"
+msgstr "Faixas"
+
+msgid "Transcoded"
+msgstr "Transcodificado"
+
+msgid "Transition mode"
+msgstr "Modo de transição"
+
+msgid "Translation language"
+msgstr "Idioma de tradução"
+
+msgid "Treble"
+msgstr "Agudos"
+
+msgid "Troubleshooting"
+msgstr "Solução de problemas"
+
+msgid "Trust self-signed certificate"
+msgstr "Confiar em certificado autoassinado"
+
+msgid "Tuesday"
+msgstr "Terça-feira"
+
+msgid "Turn off only for a server you control"
+msgstr "Desativar apenas para um servidor que você controla"
+
+msgid "Turn off private mode"
+msgstr "Desativar modo privado"
+
+msgid "Turn on private mode"
+msgstr "Ativar modo privado"
+
+msgid "Type to search or create a new playlist"
+msgstr "Digite para pesquisar ou criar uma nova playlist"
+
+msgid "Type to search"
+msgstr "Digite para pesquisar"
+
+msgid "Typography"
+msgstr "Tipografia"
+
+msgid "UPnP"
+msgstr "UPnP"
+
+msgid "Unavailable"
+msgstr "Indisponível"
+
+msgid "Undo"
+msgstr "Desfazer"
+
+msgid "Unknown artist"
+msgstr "Artista desconhecido"
+
+msgid "Unknown disc"
+msgstr "Disco desconhecido"
+
+msgid "Unlink"
+msgstr "Desvincular"
+
+msgid "Unmute"
+msgstr "Desativar mudo"
+
+msgid "Unmuted"
+msgstr "Com som ativado"
+
+msgid "Unsaved"
+msgstr "Não salvo"
+
+msgid "Untitled"
+msgstr "Sem título"
+
+msgid "Update check interval"
+msgstr "Intervalo de verificação de atualizações"
+
+msgid "Update"
+msgstr "Atualizar"
+
+#, rust-format
+msgid "Updated Rufin to {version}"
+msgstr "Rufin atualizado para {version}"
+
+#, rust-format
+msgid "Updating Rufin to {version}..."
+msgstr "Atualizando Rufin para {version}..."
+
+msgid "Upload artwork"
+msgstr "Enviar capa"
+
+msgid "Use API key"
+msgstr "Usar chave de API"
+
+msgid "Use Instant Mix for recommendations"
+msgstr "Usar Instant Mix para recomendações"
+
+msgid "Use Rufin data folder"
+msgstr "Usar pasta de dados do Rufin"
+
+msgid "Use Saved Login"
+msgstr "Usar login salvo"
+
+msgid "Use This Source"
+msgstr "Usar esta fonte"
+
+msgid "Use a number above zero"
+msgstr "Use um número acima de zero"
+
+msgid "Use a public relay"
+msgstr "Usar um relay público"
+
+msgid "Use accent color"
+msgstr "Usar cor de destaque"
+
+msgid "Use an existing connection?"
+msgstr "Usar conexão existente?"
+
+msgid "Use current artwork"
+msgstr "Usar capa atual"
+
+msgid "Use default folder"
+msgstr "Usar pasta padrão"
+
+msgid "Use different layout below a threshold width"
+msgstr "Usar layout diferente abaixo de uma largura limite"
+
+msgid "Use each track's own cover when available"
+msgstr "Usar a capa própria de cada faixa quando disponível"
+
+msgid "Use existing"
+msgstr "Usar existente"
+
+msgid "Use folder"
+msgstr "Usar pasta"
+
+msgid "Use for this output"
+msgstr "Usar para esta saída"
+
+msgid "Use listening activity"
+msgstr "Usar atividade de audição"
+
+msgid "Use local files for playback, lyrics, and supported metadata editing"
+msgstr ""
+"Usar arquivos locais para reprodução, letras e edição de metadados compatível"
+
+msgid "Use maximum year"
+msgstr "Usar ano máximo"
+
+msgid "Use minimum year"
+msgstr "Usar ano mínimo"
+
+msgid "Use source setting"
+msgstr "Usar configuração da fonte"
+
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr "Usar o Instant Mix do servidor para Rádio e Auto DJ."
+
+msgid "User flatpak:"
+msgstr "Flatpak do usuário:"
+
+msgid "User token"
+msgstr "Token de usuário"
+
+msgid "User"
+msgstr "Usuário"
+
+msgid "Username and password"
+msgstr "Nome de usuário e senha"
+
+msgid "Username or email"
+msgstr "Nome de usuário ou e-mail"
+
+msgid "Username"
+msgstr "Nome de usuário"
+
+msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr "Usa letras de karaokê disponíveis ou as busca na internet"
+
+msgid "Verification Code (optional)"
+msgstr "Código de verificação (opcional)"
+
+msgid "Verify server certificate"
+msgstr "Verificar certificado do servidor"
+
+msgid "Version History"
+msgstr "Histórico de versões"
+
+msgid "Via relay"
+msgstr "Via retransmissão"
+
+msgid "View all"
+msgstr "Ver tudo"
+
+msgid "View"
+msgstr "Visualizar"
+
+msgid "Visible"
+msgstr "Visível"
+
+msgid "Visualizer"
+msgstr "Visualizador"
+
+msgid "Volume Down"
+msgstr "Diminuir volume"
+
+msgid "Volume Up"
+msgstr "Aumentar volume"
+
+msgid "Volume scale"
+msgstr "Escala de volume"
+
+msgid "Volume"
+msgstr "Volume"
+
+msgid "Waiting for a peer"
+msgstr "Aguardando por um par"
+
+msgid "Waiting for connection"
+msgstr "Aguardando conexão"
+
+msgid "Waiting for device"
+msgstr "Aguardando dispositivo"
+
+msgid "Waiting for the other device to approve"
+msgstr "Aguardando o outro dispositivo aprovar"
+
+msgid "Waveform seekbar"
+msgstr "Barra de busca em forma de onda"
+
+msgid "Waveforms"
+msgstr "Formas de onda"
+
+msgid "WebDAV / Nextcloud"
+msgstr "WebDAV / Nextcloud"
+
+msgid "WebDAV"
+msgstr "WebDAV"
+
+msgid "Wednesday"
+msgstr "Quarta-feira"
+
+msgid "Weekday"
+msgstr "Dia da semana"
+
+msgid "Weekly"
+msgstr "Semanal"
+
+msgid "Weighting"
+msgstr "Ponderação"
+
+msgid "Wide"
+msgstr "Amplo"
+
+msgid "Width unit"
+msgstr "Unidade de largura"
+
+msgid "Width"
+msgstr "Largura"
+
+msgid "Window"
+msgstr "Janela"
+
+msgid "Write EBU R128 tags to files"
+msgstr "Escrever tags EBU R128 nos arquivos"
+
+msgid "Year"
+msgstr "Ano"
+
+msgid "Yearly"
+msgstr "Anual"
+
+msgid "Yellow"
+msgstr "Amarelo"
+
+msgid "Yes"
+msgstr "Sim"
+
+msgid "Your music belongs here"
+msgstr "Sua música pertence aqui"
+
+msgid "Your queue is empty."
+msgstr "Sua fila está vazia."
+
+#, rust-format
+msgid "Your {period} in Rufin"
+msgstr "Seu {period} no Rufin"
+
+#, rust-format
+msgid "Your {period}"
+msgstr "Seu {period}"
+
+msgid "above"
+msgstr "acima"
+
+msgid "after"
+msgstr "depois"
+
+msgid "before"
+msgstr "antes"
+
+msgid "below"
+msgstr "abaixo"
+
+msgid "contains"
+msgstr "contém"
+
+msgid "does not contain"
+msgstr "não contém"
+
+msgid "does not equal"
+msgstr "não é igual"
+
+msgid "equals"
+msgstr "é igual"
+
+msgid "excludes"
+msgstr "exclui"
+
+msgid "here"
+msgstr "aqui"
+
+msgid "is empty"
+msgstr "está vazio"
+
+msgid "is not empty"
+msgstr "não está vazio"
+
+msgid "is not"
+msgstr "não é"
+
+msgid "is"
+msgstr "é"
+
+msgid "kbps"
+msgstr "kbps"
+
+msgid "range"
+msgstr "intervalo"
+
+msgid "to"
+msgstr "para"
+
+msgid "today"
+msgstr "hoje"
+
+msgid "yesterday"
+msgstr "ontem"
+
+#, rust-format
+msgid "{action} (Shuffle)"
+msgstr "{action} (Aleatório)"
+
+#, rust-format
+msgid "{completed} of {total} ({cached} cached)"
+msgstr "{completed} de {total} ({cached} em cache)"
+
+#, rust-format
+msgid "{count} album"
+msgid_plural "{count} albums"
+msgstr[0] "{count} álbum"
+msgstr[1] "{count} álbuns"
+
+#, rust-format
+msgid "{count} day ago"
+msgid_plural "{count} days ago"
+msgstr[0] "{count} dia atrás"
+msgstr[1] "{count} dias atrás"
+
+#, rust-format
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} entrada"
+msgstr[1] "{count} entradas"
+
+#, rust-format
+msgid "{count} folder selected"
+msgid_plural "{count} folders selected"
+msgstr[0] "{count} pasta selecionada"
+msgstr[1] "{count} pastas selecionadas"
+
+#, rust-format
+msgid "{count} month ago"
+msgid_plural "{count} months ago"
+msgstr[0] "{count} mês atrás"
+msgstr[1] "{count} meses atrás"
+
+#, rust-format
+msgid "{count} play"
+msgid_plural "{count} plays"
+msgstr[0] "{count} reprodução"
+msgstr[1] "{count} reproduções"
+
+#, rust-format
+msgid "{count} result"
+msgid_plural "{count} results"
+msgstr[0] "{count} resultado"
+msgstr[1] "{count} resultados"
+
+#, rust-format
+msgid "{count} track"
+msgid_plural "{count} tracks"
+msgstr[0] "{count} faixa"
+msgstr[1] "{count} faixas"
+
+#, rust-format
+msgid "{count} week ago"
+msgid_plural "{count} weeks ago"
+msgstr[0] "{count} semana atrás"
+msgstr[1] "{count} semanas atrás"
+
+#, rust-format
+msgid "{count} year ago"
+msgid_plural "{count} years ago"
+msgstr[0] "{count} ano atrás"
+msgstr[1] "{count} anos atrás"
+
+#, rust-format
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr "{current} / {total} MiB ({percent}%)"
+
+#, rust-format
+msgid "{current} MiB"
+msgstr "{current} MiB"
+
+#, rust-format
+msgid "{field} \302\267 Different across {count} track"
+msgid_plural "{field} \302\267 Different across {count} tracks"
+msgstr[0] "{field} 302267 Diferente em {count} faixa"
+msgstr[1] "{field} 302267 Diferente em {count} faixas"
+
+#, rust-format
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{stage} ({completed} de {total}, {cached} em cache)"
+
+#, rust-format
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{stage} ({count} de {total} faixas)"
+
+#, rust-format
+msgid "{stage}: {completed} / {total}"
+msgstr "{stage}: {completed} / {total}"
+
+#, rust-format
+msgid "{stage}: {completed}"
+msgstr "{stage}: {completed}"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+"O Rufin foi instalado em seu computador.\n"
+"\n"
+"Clique em Concluir para finalizar a configuração."
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+"O Rufin é um player de música nativo para servidores Jellyfin, Navidrome/"
+"OpenSubsonic, Plex e Emby  pastas locais   WebDAV incluindo um caminho de "
+"login direto pelo navegador Nextcloud, compartilhamentos Samba e NAS.\n"
+"\n"
+"Esta configuração instalará o Rufin no seu computador.\n"
+"\n"
+"Clique em Avançar para continuar."
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+"A configuração não pôde remover os arquivos existentes do Rufin. Feche o "
+"Rufin e tente novamente."
+
+#. Windows installer: DirectoryConflict.
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Escolha uma pasta de instalação separada."
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+#, rust-format
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr "Feche o {app_name} e tente a instalação novamente."
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+#, rust-format
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr "Feche o {app_name} e tente a desinstalação novamente."
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr "Concluindo a configuração do Rufin"
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr "Criar atalho na área de trabalho"
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+#, rust-format
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr "Remover o cache do {app_name}"
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr "A configuração não pôde concluir a instalação. Tente novamente."
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+#, rust-format
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr "A opção de atualização automática do {app_name} é inválida."
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr "Bem-vindo à configuração do Rufin"
