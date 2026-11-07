@@ -356,18 +356,7 @@ async fn queue_play(
         .uris
         .filter(|_| list.is_none() && input.page.is_none())
     {
-        let keys = products
-            .library
-            .remember_media_uris(&uris)
-            .await
-            .map_err(internal)?;
-        rufin_core::playback::PlayRequest::tracks(
-            library::MemberSelection::Keys {
-                source: None,
-                keys: keys.into(),
-            },
-            placement,
-        )
+        rufin_core::playback::PlayRequest::uris(uris, placement)
     } else {
         let token = match (input.page, list) {
             (Some(token), _) => token,

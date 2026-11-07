@@ -85,8 +85,12 @@ impl PlayRequest {
         request
     }
     pub fn selection(&self) -> Option<library::MemberSelection> {
-        let library::QueueLoad::Tracks(groups) = &self.input else {
-            return None;
+        let groups = match &self.input {
+            library::QueueLoad::Tracks(groups) => groups,
+            library::QueueLoad::Uris(uris, _) => {
+                return Some(library::MemberSelection::Uris(uris.clone().into()));
+            }
+            _ => return None,
         };
         if groups.len() == 1 {
             Some(groups[0].0.clone())
