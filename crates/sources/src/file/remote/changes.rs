@@ -9,7 +9,7 @@ pub(crate) enum FileChange {
     FullRefresh,
     Paths {
         paths: Vec<String>,
-        rename: Option<(String, String)>,
+        renames: Vec<(String, String)>,
     },
 }
 
@@ -17,15 +17,16 @@ impl FileChange {
     pub(crate) fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (
-                Self::Paths { mut paths, rename },
+                Self::Paths {
+                    mut paths,
+                    mut renames,
+                },
                 Self::Paths {
                     paths: incoming,
-                    rename: next,
+                    renames: next,
                 },
             ) => {
-                if rename.is_some() && next.is_some() {
-                    return Self::FullRefresh;
-                }
+                renames.extend(next);
                 for path in incoming {
                     if !paths.contains(&path) {
                         paths.push(path);
@@ -34,10 +35,7 @@ impl FileChange {
                         return Self::FullRefresh;
                     }
                 }
-                Self::Paths {
-                    paths,
-                    rename: rename.or(next),
-                }
+                Self::Paths { paths, renames }
             }
             _ => Self::FullRefresh,
         }
@@ -82,12 +80,14 @@ impl FileSource {
                                 true
                             }
                             NotifyAction::RenamedNewName => {
-                                let rename = old_name.take().map(|old| (old, path.clone()));
+                                let renames = old_name
+                                    .take()
+                                    .map(|old| (old, path.clone()))
+                                    .into_iter()
+                                    .collect::<Vec<_>>();
                                 let mut paths = vec![path];
-                                if let Some((old, _)) = &rename {
-                                    paths.push(old.clone());
-                                }
-                                changed(FileChange::Paths { paths, rename })
+                                paths.extend(renames.iter().map(|(old, _)| old.clone()));
+                                changed(FileChange::Paths { paths, renames })
                             }
                             _ => {
                                 let mut paths = vec![path];
@@ -96,7 +96,7 @@ impl FileSource {
                                 }
                                 changed(FileChange::Paths {
                                     paths,
-                                    rename: None,
+                                    renames: Vec::new(),
                                 })
                             }
                         }

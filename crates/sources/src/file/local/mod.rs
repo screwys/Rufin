@@ -209,9 +209,9 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let configured = self.configured_file_roots()?;
-        let (paths, rename) = match scope {
-            WalkScope::Paths { paths, rename } => (Some(paths), rename),
-            WalkScope::All { .. } => (None, None),
+        let (paths, renames) = match scope {
+            WalkScope::Paths { paths, renames } => (Some(paths), renames),
+            WalkScope::All { .. } => (None, &[][..]),
         };
         let native = paths.map(|paths| {
             paths
@@ -225,10 +225,8 @@ impl LocalSource {
             observation,
             &configured,
             match &native {
-                Some(paths) => WalkScope::Paths {
-                    paths,
-                    rename: rename.filter(|(old, _)| self.document_source(old).is_none()),
-                },
+                // Each walker places the renames under its own roots.
+                Some(paths) => WalkScope::Paths { paths, renames },
                 None => scope,
             },
             &self.artwork,
@@ -256,10 +254,7 @@ impl LocalSource {
                 observation,
                 &configured,
                 match &paths {
-                    Some(paths) => WalkScope::Paths {
-                        paths,
-                        rename: rename.filter(|(old, _)| source.relative(old).is_ok()),
-                    },
+                    Some(paths) => WalkScope::Paths { paths, renames },
                     None => scope,
                 },
                 &self.artwork,
@@ -316,7 +311,7 @@ impl LocalSource {
                 &configured,
                 WalkScope::Paths {
                     paths: &paths,
-                    rename: None,
+                    renames: &[],
                 },
                 &self.artwork,
                 &|_| {},

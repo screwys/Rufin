@@ -2102,8 +2102,8 @@ async fn apply_paths(
     paths: Vec<std::path::PathBuf>,
     rename: Option<(std::path::PathBuf, std::path::PathBuf)>,
 ) -> sources::SourceResult<()> {
-    let (paths, rename) = LocalLiveChange::path_strings(paths, rename);
+    let (paths, renames) = LocalLiveChange::path_strings(paths, rename.into_iter().collect());
     source
-        .apply_file_paths(catalog, &paths, rename.as_ref(), &|| false)
+        .apply_file_paths(catalog, &paths, &renames, &|| false)
         .await
 }

@@ -306,10 +306,13 @@ fn event_evidence(mut event: Event) -> Option<LocalLiveChange> {
         event.kind,
         EventKind::Modify(ModifyKind::Name(RenameMode::Both))
     ) && event.paths.len() == 2;
-    let rename = rename.then(|| (event.paths[0].clone(), event.paths[1].clone()));
+    let renames = rename
+        .then(|| (event.paths[0].clone(), event.paths[1].clone()))
+        .into_iter()
+        .collect();
     Some(LocalLiveChange::Paths {
         paths: event.paths,
-        rename,
+        renames,
     })
 }
 
@@ -330,7 +333,7 @@ mod tests {
             evidence,
             LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/one.flac")],
-                rename: None,
+                renames: Vec::new(),
             }
         );
     }
@@ -347,7 +350,7 @@ mod tests {
             rename,
             LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/old.flac")],
-                rename: None,
+                renames: Vec::new(),
             }
         );
         assert_eq!(rescan, LocalLiveChange::Rescan);
@@ -367,7 +370,7 @@ mod tests {
             rename,
             LocalLiveChange::Paths {
                 paths: vec![old.clone(), new.clone()],
-                rename: Some((old, new)),
+                renames: vec![(old, new)],
             }
         );
     }
@@ -378,11 +381,11 @@ mod tests {
             paths: (0..LIVE_CHANGE_LIMIT)
                 .map(|index| PathBuf::from(format!("/music/{index}.flac")))
                 .collect(),
-            rename: None,
+            renames: Vec::new(),
         };
         let merged = current.merge(LocalLiveChange::Paths {
             paths: vec![PathBuf::from("/music/overflow.flac")],
-            rename: None,
+            renames: Vec::new(),
         });
         assert_eq!(merged, LocalLiveChange::Rescan);
     }
@@ -405,7 +408,7 @@ mod tests {
             &overflow,
             FeedMessage::Change(LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/one.flac")],
-                rename: None,
+                renames: Vec::new(),
             })
         ));
         assert!(admit_feed_message(
@@ -413,7 +416,7 @@ mod tests {
             &overflow,
             FeedMessage::Change(LocalLiveChange::Paths {
                 paths: vec![PathBuf::from("/music/two.flac")],
-                rename: None,
+                renames: Vec::new(),
             })
         ));
         assert!(overflow.load(Ordering::Acquire));

@@ -101,7 +101,7 @@ pub(crate) enum WalkScope<'a> {
     /// Live changes and imports: these paths, a directory with its subtree.
     Paths {
         paths: &'a [String],
-        rename: Option<&'a (String, String)>,
+        renames: &'a [(String, String)],
     },
 }
 
@@ -152,7 +152,7 @@ pub(crate) async fn walk<F: FileSource>(
     };
     let walked = match scope {
         WalkScope::All { .. } => walker.all(roots).await,
-        WalkScope::Paths { paths, rename } => walker.paths(paths, rename).await,
+        WalkScope::Paths { paths, renames } => walker.paths(paths, renames).await,
     };
     let walked = match walked {
         Ok(()) => walker.finish().await,
@@ -574,11 +574,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
         Ok(())
     }
 
-    async fn paths(
-        &mut self,
-        paths: &[String],
-        rename: Option<&(String, String)>,
-    ) -> SourceResult<()> {
+    async fn paths(&mut self, paths: &[String], renames: &[(String, String)]) -> SourceResult<()> {
         let mut places = paths
             .iter()
             .filter_map(|path| self.files.place(path))
@@ -592,8 +588,9 @@ impl<F: FileSource> Walker<'_, '_, F> {
         });
         // A rename the source reported moves the old track's identity and user data even
         // without a file identity to match the paths by.
-        if let Some(((old_root, old, old_native), (new_root, new, new_native))) =
-            rename.and_then(|(old, new)| Some((self.files.place(old)?, self.files.place(new)?)))
+        for ((old_root, old, old_native), (new_root, new, new_native)) in renames
+            .iter()
+            .filter_map(|(old, new)| Some((self.files.place(old)?, self.files.place(new)?)))
         {
             let old = self
                 .files

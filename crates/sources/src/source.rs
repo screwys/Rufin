@@ -333,18 +333,18 @@ impl SelectedFeed {
             }
             SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Paths {
                 paths,
-                rename,
+                renames,
             }) => {
                 self.source
-                    .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
+                    .apply_file_paths(catalog, &paths, &renames, &|| {
                         self.cancelled.load(Ordering::Acquire)
                     })
                     .await
             }
-            SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }) => {
-                let (paths, rename) = LocalLiveChange::path_strings(paths, rename);
+            SelectedFeedChange::Local(LocalLiveChange::Paths { paths, renames }) => {
+                let (paths, renames) = LocalLiveChange::path_strings(paths, renames);
                 self.source
-                    .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
+                    .apply_file_paths(catalog, &paths, &renames, &|| {
                         self.cancelled.load(Ordering::Acquire)
                     })
                     .await
@@ -641,21 +641,24 @@ impl RemoteItemChange {
 pub enum LocalLiveChange {
     Paths {
         paths: Vec<PathBuf>,
-        rename: Option<(PathBuf, PathBuf)>,
+        renames: Vec<(PathBuf, PathBuf)>,
     },
     Rescan,
 }
 
 impl LocalLiveChange {
-    /// The changed paths and rename as the file pipeline names them.
+    /// The changed paths and renames as the file pipeline names them.
     pub(crate) fn path_strings(
         paths: Vec<PathBuf>,
-        rename: Option<(PathBuf, PathBuf)>,
-    ) -> (Vec<String>, Option<(String, String)>) {
+        renames: Vec<(PathBuf, PathBuf)>,
+    ) -> (Vec<String>, Vec<(String, String)>) {
         let text = |path: PathBuf| path.to_string_lossy().into_owned();
         (
             paths.into_iter().map(text).collect(),
-            rename.map(|(from, to)| (text(from), text(to))),
+            renames
+                .into_iter()
+                .map(|(from, to)| (text(from), text(to)))
+                .collect(),
         )
     }
 
@@ -665,20 +668,15 @@ impl LocalLiveChange {
             (
                 Self::Paths {
                     paths: mut current,
-                    rename: current_rename,
+                    mut renames,
                 },
                 Self::Paths {
                     paths: incoming,
-                    rename: incoming_rename,
+                    renames: incoming_renames,
                 },
             ) => {
-                let rename = match (current_rename, incoming_rename) {
-                    (Some(current), Some(incoming)) if current != incoming => {
-                        return Self::Rescan;
-                    }
-                    (Some(rename), _) | (_, Some(rename)) => Some(rename),
-                    (None, None) => None,
-                };
+                renames.extend(incoming_renames);
+                renames.dedup();
                 current.extend(incoming);
                 current.sort();
                 current.dedup();
@@ -687,7 +685,7 @@ impl LocalLiveChange {
                 } else {
                     Self::Paths {
                         paths: current,
-                        rename,
+                        renames,
                     }
                 }
             }
@@ -1994,14 +1992,14 @@ impl Source {
         &self,
         catalog: &Catalog,
         paths: &[String],
-        rename: Option<&(String, String)>,
+        renames: &[(String, String)],
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         if self.is_retired() || (cancelled)() {
             return Err(SourceError::Cancelled);
         }
         self.catalog_operation(catalog, async |changes| {
-            self.acquire_paths(changes, paths, rename, cancelled).await
+            self.acquire_paths(changes, paths, renames, cancelled).await
         })
         .await
     }
@@ -2011,14 +2009,14 @@ impl Source {
         &self,
         changes: &mut library::Observation<'_>,
         paths: &[String],
-        rename: Option<&(String, String)>,
+        renames: &[(String, String)],
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let cancelled = || self.is_retired() || cancelled();
         if cancelled() {
             return Err(SourceError::Cancelled);
         }
-        let scope = crate::file::walk::WalkScope::Paths { paths, rename };
+        let scope = crate::file::walk::WalkScope::Paths { paths, renames };
         match &self.implementation {
             Implementation::Local(local) => {
                 local.walk(changes, scope, &|_| {}, &cancelled).await?;

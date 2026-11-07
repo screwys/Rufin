@@ -143,7 +143,7 @@ pub(crate) async fn import_paths(
         &configured,
         walk::WalkScope::Paths {
             paths: &paths,
-            rename: None,
+            renames: &[],
         },
         &local.artwork,
         progress,

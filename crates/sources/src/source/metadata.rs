@@ -883,7 +883,7 @@ impl FileEditSession {
                                             .acquire_paths(
                                                 observation.as_mut().unwrap(),
                                                 &[path],
-                                                None,
+                                                &[],
                                                 &|| false,
                                             )
                                             .await
@@ -969,7 +969,7 @@ impl FileEditSession {
                                                 .acquire_paths(
                                                     observation.as_mut().unwrap(),
                                                     &[directory],
-                                                    None,
+                                                    &[],
                                                     &|| false,
                                                 )
                                                 .await
@@ -995,7 +995,7 @@ impl FileEditSession {
                                         .acquire_paths(
                                             observation.as_mut().unwrap(),
                                             &paths,
-                                            None,
+                                            &[],
                                             &|| false,
                                         )
                                         .await
