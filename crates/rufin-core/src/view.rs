@@ -660,7 +660,7 @@ impl SourceOwner {
                                 member_read(&page, folder, &options, settings, tracks.collection)
                             });
                             Plan::Releases {
-                                read: release_query(read, &options, &settings),
+                                read: release_query(read, route, options, settings),
                                 favorites,
                                 kept: None,
                             }
@@ -1854,7 +1854,7 @@ impl View {
         else {
             unreachable!("releases reread an artist page");
         };
-        let releases = release_query(releases.clone(), &options, &settings);
+        let releases = release_query(releases.clone(), &self.route, &options, &settings);
         read(
             self.again(options, settings),
             Plan::Releases {
@@ -2496,18 +2496,25 @@ fn search_sorts(settings: &Settings) -> [(LibraryField, bool); 3] {
     })
 }
 
-/// An artist's releases, searched and ordered as `options` and the release list settings ask.
-fn release_query(mut query: ListRead, options: &OpenOptions, settings: &Settings) -> ListRead {
+/// An artist's releases, searched, ordered and with the plays `options` and the release list
+/// settings ask.
+fn release_query(
+    mut query: ListRead,
+    route: &Route,
+    options: &OpenOptions,
+    settings: &Settings,
+) -> ListRead {
     if let ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
         *filters = options
             .release_filters
             .as_ref()
             .map(|filters| Arc::new(std::array::from_fn(|index| filters[index].clone())));
     }
-    if options.sort.is_none() {
-        let albums = settings.library_list(LibraryListKey::ArtistAlbums);
-        query.sort = albums.sort_key;
-        query.descending = options.descending.unwrap_or(albums.descending);
-    }
+    let releases = OpenOptions {
+        category: CollectionCategory::Albums,
+        ..options.clone()
+    };
+    (query.sort, query.descending, query.activity) = read_order(route, &releases, settings);
+    query.filter.clone_from(&options.filter);
     query
 }
