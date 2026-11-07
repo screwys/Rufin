@@ -426,4 +426,3 @@ private fun DetailLoadState(state: LoadState, retry: () -> Unit) {
         TextButton(retry) { Text(translate("Retry")) }
     }
 }
-

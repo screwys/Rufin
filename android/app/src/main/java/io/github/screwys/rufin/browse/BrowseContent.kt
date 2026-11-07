@@ -596,4 +596,3 @@ internal fun LyricsSnippetText(snippet: LyricsSnippet) {
     }, maxLines = 2, overflow = TextOverflow.Ellipsis,
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
-

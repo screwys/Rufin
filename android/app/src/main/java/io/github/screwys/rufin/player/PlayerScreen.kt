@@ -501,4 +501,3 @@ internal fun RefillSpinner(size: Dp, color: Color = LocalContentColor.current) {
     CircularProgressIndicator(Modifier.requiredSize(size).semantics { contentDescription = translate("Loading...") },
         color, 3.dp, color.copy(alpha = .15f), StrokeCap.Round)
 }
-
