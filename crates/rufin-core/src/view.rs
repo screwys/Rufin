@@ -966,7 +966,13 @@ async fn read(
         ..
     } = &view.body
     {
-        view.options.smart_opened = Some(*now);
+        // Opening a pinned one reads the pins again, whose totals time moves without a change.
+        if view.options.smart_opened.replace(*now).is_none()
+            && let Some(Header::Smart(summary)) = &header
+            && (view.owner.shared.settings.load().ui.sidebar.pins).contains(&summary.pin())
+        {
+            view.owner.notice(crate::source::feed::Notice::Pins);
+        }
     }
     Ok(Opened {
         view: Arc::new(view),
