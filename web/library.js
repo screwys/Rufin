@@ -85,10 +85,6 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
     Math.max(1, extent() - scroller.clientHeight));
   const logicalPosition = () => scrollPosition() * ratio();
   const targetPage = () => Math.min(Math.max(0, pageCount() - 1), Math.floor(logicalPosition() / pageHeight));
-  const syncRows = () => {
-    state.visibleItems = [...content.querySelectorAll("[data-row]")].map(mediaRow);
-    content.style.setProperty("--index-width", `${Math.max(3, String(total).length)}ch`);
-  };
   const layout = () => {
     content.style.minHeight = `${extent() + (header?.getBoundingClientRect().height || 0)}px`;
     const ordered = [...pages.values()].sort((a, b) => a.start - b.start);
@@ -102,7 +98,7 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
     const top = Math.max(0, (ordered[0]?.start || 0) / pageSize * pageHeight - shift);
     before.style.height = `${top}px`;
     after.style.height = `${Math.max(0, extent() - top - height)}px`;
-    syncRows();
+    content.style.setProperty("--index-width", `${Math.max(3, String(total).length)}ch`);
   };
   const loadPage = async (start, existing = null) => {
     const lifetime = new AbortController();
@@ -154,10 +150,7 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
       const page = { start, node, remove, count };
       pages.set(start, page);
       // Changes committed while it read show once its rows do.
-      if (data.dataset.missed) {
-        syncRows();
-        showChanged(JSON.parse(data.dataset.missed));
-      }
+      if (data.dataset.missed) showChanged(JSON.parse(data.dataset.missed));
       if (table) bindTracks(node, lifetime.signal);
       else {
         bindCards(node);
@@ -346,7 +339,6 @@ async function loadView(initial = false, knownTotal = null, extra = {}, at = nul
   libraryTotal = null;
   selection = [];
   selectionAnchor = 0;
-  state.visibleItems = [];
   disposeHome();
   closeMenus();
   viewRequest?.abort();
@@ -398,13 +390,16 @@ async function loadView(initial = false, knownTotal = null, extra = {}, at = nul
 // Shows what a committed change means for the page: the favorites that changed on the rows
 // and hearts showing them, then the page read again when the change asks.
 function showChanged(value) {
-  for (const changed of value.states || []) {
-    for (const row of state.visibleItems)
-      if (row.uri === changed.uri) row.favorite = changed.favorite;
-    for (const node of document.querySelectorAll("[data-favorite-uri]"))
-      if (node.dataset.favoriteUri === changed.uri) showFavorite(node, changed.favorite);
-  }
+  for (const changed of value.states || []) showState(changed.uri, changed.favorite);
   if (value.page_refresh) run(() => refreshPage(value.page_refresh));
+}
+
+// Shows a media's favorite on every row that holds it, pins included, and every heart.
+function showState(uri, favorite) {
+  for (const node of document.querySelectorAll("[data-row]"))
+    if (mediaRow(node).uri === uri) mediaRow(node).favorite = favorite;
+  for (const node of document.querySelectorAll("[data-favorite-uri]"))
+    if (node.dataset.favoriteUri === uri) showFavorite(node, favorite);
 }
 
 // Reads the page again as a committed change asks: where it is, or opened again in the
@@ -424,9 +419,7 @@ async function refreshPage(verdict) {
 async function setFavorite(row, kind = "track") {
   const result = await api("/favorite", "POST", { kind, uri: row.uri, favorite: !row.favorite });
   row.favorite = result.favorite;
-  for (const track of state.visibleItems) if (track.uri === row.uri) track.favorite = result.favorite;
-  for (const node of document.querySelectorAll("[data-favorite-uri]"))
-    if (node.dataset.favoriteUri === row.uri) showFavorite(node, result.favorite);
+  showState(row.uri, result.favorite);
 }
 
 // Opens what a row's linked field names: its one page, or a menu of them.
@@ -783,7 +776,6 @@ let homeObserver;
 function bindHome(signal, offsets) {
   const layouts = [];
   bindCards($("content"));
-  state.visibleItems = [...$("content").querySelectorAll("[data-row]")].map(mediaRow);
   for (const section of $("content").querySelectorAll(".home-section")) {
     const body = section.querySelector(".home-row");
     if (!body) {

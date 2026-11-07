@@ -306,7 +306,6 @@ function init() {
 }
 
 const state = {
-  visibleItems: [],
   source: "",
   playback: null,
   currentMediaUri: null,
