@@ -231,7 +231,6 @@ pub(super) fn read_items<'a>(
                             favorite: Some(false),
                             rating: rating,
                             play_count: field::<i64>(item, "viewCount").filter(|v| *v >= 0),
-                            skip_count: field::<i64>(item, "skipCount").filter(|v| *v >= 0),
                             last_played: field::<i64>(item, "lastViewedAt").filter(|v| *v >= 0),
                             ..Default::default()
                         },

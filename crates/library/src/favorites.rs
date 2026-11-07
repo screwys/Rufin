@@ -21,7 +21,6 @@ pub struct NativeUserState {
     )]
     pub rating: Option<Option<i64>>,
     pub play_count: Option<i64>,
-    pub skip_count: Option<i64>,
     pub last_played: Option<i64>,
 }
 
@@ -36,7 +35,6 @@ impl NativeUserState {
         self.favorite = incoming.favorite.or(self.favorite);
         self.rating = incoming.rating.or(self.rating);
         self.play_count = incoming.play_count.or(self.play_count);
-        self.skip_count = incoming.skip_count.or(self.skip_count);
         self.last_played = incoming.last_played.or(self.last_played);
     }
 }

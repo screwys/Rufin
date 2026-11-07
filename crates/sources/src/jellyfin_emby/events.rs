@@ -194,7 +194,6 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
                         None => None,
                     },
                     play_count: item::play_count(item).map(i64::from),
-                    skip_count: None,
                     last_played: crate::policy::unix_seconds(crate::remote_json::field(
                         item,
                         "LastPlayedDate",

@@ -575,7 +575,6 @@ async fn write_track(
                     user_data: library::NativeUserState {
                         favorite: Some(false),
                         play_count: Some(20 + position),
-                        skip_count: Some(position),
                         last_played: Some(1_700_000_000 + position),
                         ..Default::default()
                     },
