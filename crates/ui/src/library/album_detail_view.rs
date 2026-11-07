@@ -45,14 +45,6 @@ impl CatalogUi {
         };
         let album = *album;
         let current_album = Rc::new(RefCell::new(album.clone()));
-        let applied_external_link_settings = Rc::new(RefCell::new(
-            self.settings
-                .current
-                .borrow()
-                .application
-                .external_site_links
-                .clone(),
-        ));
 
         let wrapper = detail_route_wrapper(22);
         wrapper.set_margin_top(ROUTE_TOP_MARGIN);
@@ -233,26 +225,12 @@ impl CatalogUi {
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
-            let album = Rc::clone(&current_album);
-            let showcase = showcase_view.clone();
-            let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
             let reads = reads.clone();
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
                 };
-                let external_link_settings = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .application
-                    .external_site_links
-                    .clone();
-                if *applied_external_link_settings.borrow() != external_link_settings {
-                    showcase.replace_external_links(album_external_links(&shell, &album.borrow()));
-                    applied_external_link_settings.replace(external_link_settings);
-                }
                 let settings = shell
                     .settings
                     .current
@@ -260,7 +238,6 @@ impl CatalogUi {
                     .library_list(LibraryListKey::AlbumDetailTracks);
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
-                track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
                 reads.resume(&shell.settings.current.borrow());
             })
         };

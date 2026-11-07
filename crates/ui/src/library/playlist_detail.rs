@@ -182,10 +182,8 @@ impl CatalogUi {
             self.scrolling_track_projection(rows.clone(), list_key, "smart-playlist-detail");
         let item_navigation = tracks.item_navigation();
         let apply_tracks = tracks.clone();
-        let apply_toolbar = toolbar.clone();
         let apply = Rc::new(move |settings: &LibraryListSettings| {
             apply_tracks.apply_library_list_settings(list_key, settings);
-            apply_toolbar.apply(list_key, settings);
         }) as Rc<dyn Fn(&LibraryListSettings)>;
         let search = tracks.search();
         let layout_cycle = toolbar.layout_cycle();

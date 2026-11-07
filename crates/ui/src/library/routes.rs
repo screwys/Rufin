@@ -115,9 +115,18 @@ pub struct TrackListProjection {
     collection: super::collections::LibraryCollectionProjection,
     pub(crate) rows: Rows<Row>,
     fixed_layout: Option<LibraryLayout>,
+    /// The page toolbar of these tracks, which their settings apply to too.
+    toolbar: Rc<RefCell<Option<LibraryToolbarProjection>>>,
 }
 
 impl TrackListProjection {
+    pub fn toolbar(&self, shell: &Rc<CatalogUi>) -> LibraryToolbarProjection {
+        let mut toolbar = self.toolbar.borrow_mut();
+        let toolbar = toolbar
+            .get_or_insert_with(|| shell.library_toolbar_projection(self.key, self.search()));
+        toolbar.clone()
+    }
+
     pub fn search(&self) -> gtk::SearchEntry {
         self.search.clone()
     }
@@ -145,6 +154,9 @@ impl TrackListProjection {
     ) {
         if key != self.key {
             return;
+        }
+        if let Some(toolbar) = self.toolbar.borrow().as_ref() {
+            toolbar.apply(key, settings);
         }
         let mut settings = settings.clone();
         if let Some(layout) = self.fixed_layout {
@@ -277,7 +289,7 @@ impl CatalogUi {
         wrapper.set_widget_name(context);
         wrapper.set_hexpand(true);
         wrapper.set_vexpand(true);
-        let toolbar = self.library_toolbar_projection(key, projection.search());
+        let toolbar = projection.toolbar(self);
         wrapper.append(&library_route_inset(toolbar.widget()));
         wrapper.append(&projection.scrolling_widget());
         (wrapper.upcast(), projection, toolbar)
@@ -507,6 +519,7 @@ impl CatalogUi {
             collection,
             rows,
             fixed_layout: options.fixed_layout,
+            toolbar: Rc::default(),
         }
     }
 

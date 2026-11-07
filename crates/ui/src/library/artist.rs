@@ -95,8 +95,7 @@ impl CatalogUi {
         heading.add_css_class("section-heading");
         heading.set_xalign(0.0);
         favorite_section.append(&heading);
-        let favorite_toolbar =
-            self.library_toolbar_projection(LibraryListKey::ArtistTracks, favorite.search());
+        let favorite_toolbar = favorite.toolbar(self);
         favorite_toolbar.set_layout_control_visible(false);
         favorite_section.append(&favorite_toolbar.widget());
         let favorite_scroller = gtk::ScrolledWindow::new();
@@ -190,7 +189,6 @@ impl CatalogUi {
                     .borrow()
                     .library_list(LibraryListKey::ArtistTracks);
                 favorite.apply_library_list_settings(LibraryListKey::ArtistTracks, &track_settings);
-                favorite_toolbar.apply(LibraryListKey::ArtistTracks, &track_settings);
                 let album_settings = shell
                     .settings
                     .current
@@ -388,7 +386,6 @@ impl CatalogUi {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
                 projection.apply_library_list_settings(key, &settings);
-                toolbar.apply(key, &settings);
                 reads.resume(&shell.settings.current.borrow());
             })
         };

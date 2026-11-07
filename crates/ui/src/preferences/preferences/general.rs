@@ -98,7 +98,7 @@ pub fn scrobbling_page(
                 })
                 .is_some()
             {
-                external_links_shell.reconcile_mounted_route();
+                external_links_shell.replace_current_route_when_ready();
             }
         });
         let lastfm_links_shell = Rc::clone(shell);
@@ -106,21 +106,21 @@ pub fn scrobbling_page(
             &lastfm_links_row,
             "Last.fm site links setting",
             |settings| &mut settings.application.external_site_links.lastfm,
-            move |_| lastfm_links_shell.reconcile_mounted_route(),
+            move |_| lastfm_links_shell.replace_current_route_when_ready(),
         );
         let musicbrainz_links_shell = Rc::clone(shell);
         shell.settings.bind_switch(
             &musicbrainz_links_row,
             "MusicBrainz site links setting",
             |settings| &mut settings.application.external_site_links.musicbrainz,
-            move |_| musicbrainz_links_shell.reconcile_mounted_route(),
+            move |_| musicbrainz_links_shell.replace_current_route_when_ready(),
         );
         let server_links_shell = Rc::clone(shell);
         shell.settings.bind_switch(
             &server_links_row,
             "server site links setting",
             |settings| &mut settings.application.external_site_links.server,
-            move |_| server_links_shell.reconcile_mounted_route(),
+            move |_| server_links_shell.replace_current_route_when_ready(),
         );
         presence_row.set_active(settings.rich_presence.enabled);
         let presence_shell = Rc::clone(shell);

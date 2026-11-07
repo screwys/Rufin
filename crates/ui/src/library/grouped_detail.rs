@@ -168,7 +168,7 @@ impl CatalogUi {
         track_section.set_hexpand(true);
         track_section.set_halign(gtk::Align::Fill);
         track_section.set_vexpand(true);
-        let toolbar = self.library_toolbar_projection(key, track_projection.search());
+        let toolbar = track_projection.toolbar(self);
         track_section.append(&library_route_inset(toolbar.widget()));
         track_section.append(&track_projection.scrolling_widget());
 
