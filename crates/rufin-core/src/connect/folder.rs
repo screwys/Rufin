@@ -176,16 +176,20 @@ async fn write_own(
         .await
         .map_err(string_error)?;
     let segments = folder.list(&directory).await?;
-    if segments.len() > SEGMENTS {
-        let (rows, last) = own_rows(session, 0).await?;
-        let name = format!("{:019}-{last:019}{SUFFIX}", 0);
+    // The segments after the oldest merge into one; read in order, its rows supersede the
+    // oldest one's.
+    if segments.len() > SEGMENTS
+        && let Some(oldest) = segments.iter().min_by_key(|segment| segment.first)
+    {
+        let (rows, _) = own_rows(session, oldest.last).await?;
+        let first = oldest.last + 1;
+        let name = format!("{first:019}-{last:019}{SUFFIX}");
         folder
             .write(owner, &directory, &name, seal(session, &rows)?)
             .await?;
-        for segment in segments
-            .iter()
-            .filter(|segment| segment.first != 0 || segment.last != last)
-        {
+        for segment in segments.iter().filter(|segment| {
+            segment.handle != oldest.handle && (segment.first, segment.last) != (first, last)
+        }) {
             folder.delete(&segment.handle).await?;
         }
     }
