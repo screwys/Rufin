@@ -238,9 +238,12 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let previously_blocked = previous_operation.blocks_library();
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
-    // An added server ends the add once it is selected.
+    // An added server ends the add once it is selected, whatever the watch shows next.
     if matches!(previous_operation, SourceOperation::Adding { .. })
-        && matches!(operation, SourceOperation::Idle)
+        && !matches!(
+            operation,
+            SourceOperation::Adding { .. } | SourceOperation::Failed { .. }
+        )
         && shell.products.source.selected_library().is_some()
     {
         shell.complete_add_server_dialog();
