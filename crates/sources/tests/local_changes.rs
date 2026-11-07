@@ -2107,3 +2107,72 @@ async fn apply_paths(
         .apply_file_paths(catalog, &paths, &renames, &|| false)
         .await
 }
+
+#[tokio::test]
+async fn cue_folder_rename_keeps_favorites() {
+    let root = tempfile::tempdir().expect("music root");
+    let album = root.path().join("album");
+    fs::create_dir(&album).unwrap();
+    write_silent_wav(&album.join("album.wav"), 4).expect("WAV");
+    fs::write(
+        album.join("album.cue"),
+        "PERFORMER \"Artist\"\nTITLE \"Album\"\nFILE \"album.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"One\"\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    TITLE \"Two\"\n    INDEX 01 00:02:00\n",
+    )
+    .unwrap();
+    let store = tempfile::tempdir().expect("Store");
+    let database_path = store.path().join("library.sqlite");
+    let catalog = Catalog::open(&database_path).await.expect("Catalog");
+    let (configuration, source, _) = Source::connect(
+        SourceId::new("test-source"),
+        SourceSetup::Local {
+            roots: vec![root.path().to_path_buf()],
+        },
+        "",
+    )
+    .await
+    .unwrap()
+    .into_parts();
+    catalog
+        .reconcile_source(&configuration.source_id, &configuration.kind, &configuration.name)
+        .await
+        .unwrap();
+    let refresh = async || {
+        source
+            .acquire_catalog(
+                &catalog,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                sources::Refresh::Changed,
+            )
+            .await
+            .unwrap();
+    };
+    refresh().await;
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    let uris: Vec<String> = sqlx::query_scalar(
+        "SELECT media_uri FROM tracks JOIN track_details USING(track_key) WHERE indexed=1 AND cue_path IS NOT NULL ORDER BY track_number",
+    )
+    .fetch_all(&mut stored)
+    .await
+    .unwrap();
+    for uri in &uris {
+        catalog
+            .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true, false)
+            .await
+            .unwrap();
+    }
+    fs::rename(&album, root.path().join("renamed")).unwrap();
+    refresh().await;
+    let rows: Vec<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT media_uri,user_state.favorite FROM tracks JOIN track_details USING(track_key) LEFT JOIN user_state USING(media_uri) WHERE indexed=1 AND cue_path IS NOT NULL ORDER BY track_number",
+    )
+    .fetch_all(&mut stored)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|(uri, favorite)| !uris.contains(uri) && *favorite == Some(1)));
+}
