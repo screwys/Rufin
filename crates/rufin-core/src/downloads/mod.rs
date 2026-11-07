@@ -3052,21 +3052,11 @@ async fn cache_track_assets(
 }
 
 fn download_source_failure(error: SourceError) -> DownloadFailure {
+    let text = error.to_string();
     match error {
-        SourceError::NotFound => DownloadFailure::Item(error.to_string()),
-        SourceError::Server { status, .. } if status < 500 && status != 429 => {
-            DownloadFailure::Item(error.to_string())
-        }
-        SourceError::Tls(_)
-        | SourceError::Network(_)
-        | SourceError::Server { .. }
-        | SourceError::Cancelled => DownloadFailure::Retry(error.to_string()),
-        SourceError::Auth(_)
-        | SourceError::Library(_)
-        | SourceError::Json(_)
-        | SourceError::InvalidRequest(_)
-        | SourceError::InvalidConfig(_)
-        | SourceError::Other(_) => DownloadFailure::NeedsAttention(error.to_string()),
+        error if crate::source::source_error_is_temporary(&error) => DownloadFailure::Retry(text),
+        SourceError::NotFound | SourceError::Server { .. } => DownloadFailure::Item(text),
+        _ => DownloadFailure::NeedsAttention(text),
     }
 }
 

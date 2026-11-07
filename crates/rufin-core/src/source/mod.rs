@@ -2876,14 +2876,18 @@ fn source_error_is_cancelled(error: &SourceError) -> bool {
     )
 }
 
-fn source_error_is_temporary(error: &SourceError) -> bool {
+/// Whether a request may succeed when tried again: a server or network that cannot take it
+/// now. The outbox and downloads retry these; other failures are the request's own.
+pub(crate) fn source_error_is_temporary(error: &SourceError) -> bool {
     source_error_allows_cache(error)
         || matches!(
             error,
-            SourceError::Server {
-                status: 408 | 425 | 429,
-                ..
-            }
+            SourceError::Tls(_)
+                | SourceError::Cancelled
+                | SourceError::Server {
+                    status: 408 | 425 | 429,
+                    ..
+                }
         )
 }
 
