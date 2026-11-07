@@ -1017,6 +1017,7 @@ gridview.album-grid {
   background: var(--shell-panel-bg-color);
   color: var(--window-fg-color);
   border-radius: 8px;
+  padding-top: 8px;
 }
 
 .sidebar-header {
