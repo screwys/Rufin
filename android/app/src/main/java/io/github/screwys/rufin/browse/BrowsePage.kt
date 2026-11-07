@@ -72,6 +72,9 @@ internal class BrowsePage(
     private var capturedLabelsVersion = browse.labelsVersion
     /** How many favorite, rating and download changes were committed while the page is open. */
     private var downloads by mutableIntStateOf(0)
+    /** The favorite, rating and download changes committed while the page was not shown, which its
+     * rows show once it is. */
+    private var unshown: Changed? = null
     /** Rows core patched, by identity: each patches only rows of the View that read the row it
      * patched, read before its change; a row read since shows itself. Written on the main thread
      * only; a patch goes once the page stops holding its row. */
@@ -201,7 +204,10 @@ internal class BrowsePage(
     /** Handles a committed change: shows it in the rows and header, and reads the page again
      * when its View says so. Runs on the main thread. */
     private fun handle(changed: Changed) {
-        if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) showChanges(changed)
+        if (changed.items.isNotEmpty() || changed.downloads.isNotEmpty()) {
+            if (parent?.active ?: active) showChanges(changed)
+            else unshown = unshown?.let { it.copy(items = it.items + changed.items, downloads = it.downloads.ifEmpty { changed.downloads }) } ?: changed
+        }
         val refresh = if (pins) browse.library?.pinsRefresh(changed) == true
             else currentView?.refresh(changed)?.let { it != Refresh.NOTHING } == true
         if (refresh) changes++
@@ -272,6 +278,11 @@ internal class BrowsePage(
             previous != null && previous == current
         launch {
             connection.changes.collect { changed -> withContext(Dispatchers.Main) { handle(changed) } }
+        }
+        launch(Dispatchers.Main) {
+            snapshotFlow { parent?.active ?: active }.collect { shown ->
+                if (shown) unshown?.let { unshown = null; showChanges(it) }
+            }
         }
         launch {
             // Committed settings read the page again as its View says; the Pins page, when its pins changed.
