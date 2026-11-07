@@ -3351,9 +3351,11 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            task: tokio::spawn(async { Ok(()) }),
+            task: tokio::spawn(std::future::pending()),
         };
-        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+        actor
+            .finish(active, Ok(Ok(paths.audio.clone())), &mut Vec::new())
+            .await;
 
         let access = actor
             .catalog
@@ -3438,9 +3440,11 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
             cancellation: None,
-            task: tokio::spawn(async { Ok(()) }),
+            task: tokio::spawn(std::future::pending()),
         };
-        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+        actor
+            .finish(active, Ok(Ok(paths.audio.clone())), &mut Vec::new())
+            .await;
         assert_eq!(
             std::fs::read(paths.audio.native().unwrap()).unwrap(),
             b"verified peer bytes"
@@ -3501,6 +3505,11 @@ mod tests {
                 let paths = download_paths(root.path(), group.as_ref(), &uri);
                 std::fs::create_dir_all(&paths.directory).unwrap();
                 std::fs::write(&paths.audio_part, b"completed transfer").unwrap();
+                let result = if index == 0 && fail_first {
+                    Err(DownloadFailure::Item("unavailable track".into()))
+                } else {
+                    Ok(paths.audio.clone())
+                };
                 let active = ActiveDownload {
                     source_id: group,
                     job_id: job.id,
@@ -3509,12 +3518,7 @@ mod tests {
                     paths,
                     quality: DownloadQuality::Original,
                     cancellation: None,
-                    task: tokio::spawn(async { Ok(()) }),
-                };
-                let result = if index == 0 && fail_first {
-                    Err(DownloadFailure::Item("unavailable track".into()))
-                } else {
-                    Ok(())
+                    task: tokio::spawn(std::future::pending()),
                 };
                 actor.finish(active, Ok(result), &mut Vec::new()).await;
                 if index == 0 && fail_first {
@@ -3919,10 +3923,12 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            task: tokio::spawn(async { Ok(()) }),
+            task: tokio::spawn(std::future::pending()),
         };
 
-        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+        actor
+            .finish(active, Ok(Ok(paths.audio.clone())), &mut Vec::new())
+            .await;
 
         assert!(!paths.audio.native().unwrap().exists());
         assert!(paths.audio_part.exists());
