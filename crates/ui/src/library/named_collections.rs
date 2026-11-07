@@ -538,9 +538,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
         for button in &self.play_buttons {
             button.set_visible(target.is_some());
         }
-        if let Some(target) = target {
-            self.body.bind_playing_target(&self.shell, target);
-        }
+        self.body.bind_playing_target(&self.shell, target);
         self.body.set_folder(item.folder());
         let artwork = item.artwork();
         self.cover.replace(&self.shell.artwork, &artwork);

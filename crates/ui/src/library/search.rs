@@ -371,7 +371,7 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
     fn bind(&self, _: u32, item: SearchItem) {
         self.snippet.bind(item.lyrics());
         self.body
-            .bind_playing_target(&self.shell, item.play_target());
+            .bind_playing_target(&self.shell, Some(item.play_target()));
         self.body
             .bind(item.title(), |field| item.field_links(field));
         let favorite = item.favorite();

@@ -717,7 +717,7 @@ impl<T: crate::widgets::library_fields::TrackPresentation> ReusableCollectionGri
             }
             (None, Some(track)) => self
                 .body
-                .bind_playing_target(&shell, PlayTarget::of_track(track)),
+                .bind_playing_target(&shell, Some(PlayTarget::of_track(track))),
             (None, None) => {}
         }
         self.body.set_download_target(&shell, row.download_badge());
@@ -942,7 +942,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
             return;
         };
         self.body
-            .bind_playing_target(&shell, PlayTarget::of_artist(&row));
+            .bind_playing_target(&shell, Some(PlayTarget::of_artist(&row)));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -989,7 +989,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
             return;
         };
         self.body
-            .bind_playing_target(&shell, PlayTarget::of_album(&row));
+            .bind_playing_target(&shell, Some(PlayTarget::of_album(&row)));
         shell.artwork.bind_artwork_tile(
             &self.cover,
             opaque_artwork(row.artwork_binding.as_deref()),
@@ -1151,10 +1151,11 @@ impl CollectionGridCardCell {
         self.card.imp().folder_icon.set_visible(folder);
     }
 
-    pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlayTarget) {
+    /// Shows the card as playing while `target` plays; a card that plays nothing never does.
+    pub fn bind_playing_target(&self, shell: &CatalogUi, target: Option<PlayTarget>) {
         let mut binding = self.playing_target.borrow_mut();
         let binding = binding.get_or_insert_with(|| MediaPlayingBinding::new(shell, &self.title));
-        binding.bind(shell, Some(target));
+        binding.bind(shell, target);
     }
 
     pub fn set_download_target(&self, shell: &Rc<CatalogUi>, downloaded: bool) {
