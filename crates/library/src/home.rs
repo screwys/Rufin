@@ -371,9 +371,11 @@ impl Catalog {
             (chosen, sections, blocks.contains(&HomeBlockKind::Genres))
         };
         let mut sections = sections;
-        // A provider section replaces Rufin's own block when it has rows.
+        // A provider section replaces Rufin's own block when it has rows. It holds the
+        // server's top rows of the whole library, so a selected folder keeps Rufin's own.
         let mut provided = |kind: HomeBlockKind| {
             kind.section_kind()
+                .filter(|_| folder.is_none())
                 .and_then(HomeSectionKind::source_section)
                 .and_then(|section| sections.remove(section))
                 .filter(|(_, tracks, albums)| {
