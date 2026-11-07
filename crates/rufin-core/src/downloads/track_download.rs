@@ -1430,7 +1430,7 @@ fn safe_path_component(value: &str, fallback: &str) -> String {
         })
         .take(80)
         .collect::<String>();
-    let sanitized = sanitized.trim_matches([' ', '.']);
+    let sanitized = sanitized[..sanitized.floor_char_boundary(180)].trim_matches([' ', '.']);
     if sanitized.is_empty() {
         fallback.to_string()
     } else {
