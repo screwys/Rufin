@@ -1,5 +1,3 @@
-use std::ops::RangeInclusive;
-
 pub(crate) fn raw_item_id(id: &str) -> &str {
     id.rsplit(':').next().unwrap_or(id)
 }
@@ -10,46 +8,7 @@ pub(crate) fn stable_hash(input: &str) -> u64 {
     })
 }
 
-/// A date as ISO 8601 (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) from the forms tags and servers
-/// write: ISO with or without a time, `DD.MM.YYYY` and `YYYYMMDD`. Other text stays as written.
-pub(crate) fn normalized_date(value: Option<String>) -> Option<String> {
-    let value = value?.trim().to_string();
-    if value.is_empty() {
-        return None;
-    }
-    if let Some(prefix) = value.get(..10)
-        && prefix.as_bytes().get(4) == Some(&b'-')
-        && prefix.as_bytes().get(7) == Some(&b'-')
-    {
-        return Some(prefix.to_string());
-    }
-    let number = |text: &str, digits: RangeInclusive<usize>, range: RangeInclusive<u16>| {
-        (digits.contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| text.parse::<u16>().ok())
-            .flatten()
-            .filter(|value| range.contains(value))
-    };
-    let parts = match value.split('.').collect::<Vec<_>>()[..] {
-        [day, month, year] => Some((year, month, day)),
-        _ if value.len() == 8 => value
-            .get(..4)
-            .zip(value.get(4..6))
-            .zip(value.get(6..))
-            .map(|((year, month), day)| (year, month, day)),
-        _ => None,
-    };
-    let Some((year, month, day)) = parts else {
-        return Some(value);
-    };
-    match (
-        number(year, 4..=4, 1..=9999),
-        number(month, 1..=2, 1..=12),
-        number(day, 1..=2, 1..=31),
-    ) {
-        (Some(year), Some(month), Some(day)) => Some(format!("{year:04}-{month:02}-{day:02}")),
-        _ => Some(value),
-    }
-}
+pub(crate) use library::normalized_date;
 
 /// The year of a date [`normalized_date`] returns.
 pub(crate) fn date_year(date: &str) -> Option<u16> {
@@ -138,7 +97,8 @@ mod tests {
             (Some("  "), None),
             (Some(" 2025-04-03T12:00:00Z "), Some("2025-04-03")),
             (Some("2025-04"), Some("2025-04")),
-            (Some("2025/04/03"), Some("2025/04/03")),
+            (Some("2025/04/03"), Some("2025-04-03")),
+            (Some("03/04/2025"), Some("2025-04-03")),
         ] {
             assert_eq!(
                 normalized_date(input.map(str::to_string)),

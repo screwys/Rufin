@@ -52,32 +52,15 @@ pub(crate) fn unix_time(text: &str) -> Option<i64> {
         })
 }
 
-/// Packs YYYY, YYYY-MM or YYYY-MM-DD, and day-first DD.MM.YYYY or DD/MM/YYYY, as yyyymmdd.
-/// Missing parts are zero.
+/// Packs a release date as [`crate::normalized_date`] reads it, as yyyymmdd. Missing parts are
+/// zero.
 pub(crate) fn release(text: Option<&str>) -> u32 {
-    let Some(text) = text else { return 0 };
-    let parts: Vec<Option<u32>> = text
-        .trim()
-        .splitn(3, ['-', '.', '/'])
-        .map(|part| {
-            part.get(..part.len().min(4))
-                .and_then(|digits| digits.parse::<u32>().ok())
-        })
-        .collect();
-    let day_first =
-        parts.len() == 3 && text.trim().len() >= 8 && parts[2].is_some_and(|year| year >= 1000);
-    let (year, month, day) = if day_first {
-        (parts[2], parts[1], parts[0])
-    } else {
-        (
-            parts.first().copied().flatten(),
-            parts.get(1).copied().flatten(),
-            parts.get(2).copied().flatten(),
-        )
-    };
-    year.unwrap_or(0).min(9999) * 10_000
-        + month.unwrap_or(0).min(99) * 100
-        + day.unwrap_or(0).min(99)
+    let date = crate::normalized_date(text.map(str::to_owned)).unwrap_or_default();
+    let mut parts = date.splitn(3, '-').map(|part| {
+        (part.get(..part.len().min(4))).map_or(0, |digits| digits.parse::<u32>().unwrap_or(0))
+    });
+    let mut next = |most: u32| parts.next().unwrap_or(0).min(most);
+    next(9999) * 10_000 + next(99) * 100 + next(99)
 }
 
 /// The ordering and display time of a row: its tagged date added, else its first observation.
