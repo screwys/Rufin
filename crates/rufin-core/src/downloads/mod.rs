@@ -522,6 +522,8 @@ struct ActiveDownload {
     source_id: Option<SourceId>,
     job_id: String,
     media_uri: String,
+    /// The file it copies when it is a CUE track, which its siblings wait for.
+    backing: Option<String>,
     subject: DownloadSubject,
     paths: DownloadPaths,
     quality: DownloadQuality,
@@ -1956,8 +1958,20 @@ impl Actor {
     }
 
     async fn start_next(&mut self, active: &[ActiveDownload]) -> Option<ActiveDownload> {
+        let mut waiting = HashSet::new();
         loop {
-            let (source_id, job_id, subject, quality, media_uri) = self.next_candidate(active)?;
+            let (source_id, job_id, subject, quality, media_uri) =
+                self.next_candidate(active, &waiting)?;
+            // A CUE track whose file another track copies now takes that copy once it lands.
+            let backing = (self.catalog.cue_backing(&media_uri).await).ok().flatten();
+            if backing.is_some()
+                && active
+                    .iter()
+                    .any(|download| download.source_id == source_id && download.backing == backing)
+            {
+                waiting.insert(media_uri);
+                continue;
+            }
             let attached = source_id
                 .as_ref()
                 .and_then(|source_id| self.attached.get(source_id))
@@ -2140,6 +2154,7 @@ impl Actor {
                 source_id,
                 job_id,
                 media_uri,
+                backing,
                 subject,
                 paths,
                 quality,
@@ -2152,6 +2167,7 @@ impl Actor {
     fn next_candidate(
         &self,
         active: &[ActiveDownload],
+        waiting: &HashSet<String>,
     ) -> Option<(
         Option<SourceId>,
         String,
@@ -2168,14 +2184,10 @@ impl Actor {
                     break;
                 }
                 let media_uri = job.remaining.iter().find(|media_uri| {
-                    !active.iter().any(|download| {
-                        download.source_id == *source_id
-                            && library::cue_media_parts(&download.media_uri).map_or_else(
-                                || download.media_uri.clone(),
-                                |(_, backing, _, _)| backing,
-                            ) == library::cue_media_parts(media_uri)
-                                .map_or_else(|| (*media_uri).clone(), |(_, backing, _, _)| backing)
-                    })
+                    !waiting.contains(*media_uri)
+                        && !active.iter().any(|download| {
+                            download.source_id == *source_id && download.media_uri == **media_uri
+                        })
                 });
                 if let Some(media_uri) = media_uri {
                     return Some((
@@ -3310,6 +3322,7 @@ mod tests {
             source_id: None,
             job_id: job.id,
             media_uri: media_uri.clone(),
+            backing: None,
             subject: job.subject,
             paths: paths.clone(),
             quality: DownloadQuality::Original,
@@ -3399,6 +3412,7 @@ mod tests {
             source_id: Some(source.clone()),
             job_id: actor.jobs[&Some(source.clone())][0].id.clone(),
             media_uri: uri.clone(),
+            backing: None,
             subject,
             paths: paths.clone(),
             quality: DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
@@ -3477,6 +3491,7 @@ mod tests {
                     source_id: group,
                     job_id: job.id,
                     media_uri: uri,
+                    backing: None,
                     subject: job.subject,
                     paths,
                     quality: DownloadQuality::Original,
@@ -3726,6 +3741,7 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
+            backing: None,
             subject: DownloadSubject::hashed(
                 "track",
                 Some("Track".to_owned()),
@@ -3767,6 +3783,7 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
+            backing: None,
             subject: DownloadSubject::hashed(
                 "track",
                 Some("Track".to_owned()),
@@ -3833,6 +3850,7 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
             media_uri: media_uri.clone(),
+            backing: None,
             subject: DownloadSubject::hashed(
                 "track",
                 Some("Track".to_owned()),
@@ -3866,6 +3884,7 @@ mod tests {
             source_id: Some(source_id.clone()),
             job_id: "removed".to_string(),
             media_uri: media_uri.clone(),
+            backing: None,
             subject: DownloadSubject::hashed(
                 "track",
                 Some("Track".to_owned()),

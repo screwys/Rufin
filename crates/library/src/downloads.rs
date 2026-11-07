@@ -42,18 +42,27 @@ impl Catalog {
             .await?)
     }
 
-    /// A copy of a CUE track's backing file at this encoding, kept for another track of its sheet.
+    /// The file a CUE track of a source plays a part of; None for any other track.
+    pub async fn cue_backing(&self, uri: &str) -> LibraryResult<Option<String>> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT details.source_path FROM tracks JOIN track_details details USING(track_key) WHERE media_uri=?1 AND details.cue_path IS NOT NULL")
+            .bind(uri).fetch_optional(&mut *reader).await?.flatten())
+    }
+
+    /// A copy at this encoding of the file a CUE track plays a part of, kept for another track
+    /// of that file.
     pub async fn cue_sibling_download(
         &self,
         uri: &str,
         encoding: &str,
     ) -> LibraryResult<Option<DownloadFile>> {
-        let Some(sheet) = crate::cue_media_parts(uri).and(uri.rsplitn(3, '/').nth(2)) else {
-            return Ok(None);
-        };
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT * FROM downloads WHERE substr(media_uri,1,length(?1))=?1 AND quality IN (?2,'unknown') LIMIT 1")
-            .bind(format!("{sheet}/")).bind(encoding).fetch_optional(&mut *reader).await?)
+        Ok(sqlx::query_as("SELECT copy.* FROM tracks track JOIN track_details details USING(track_key)
+            JOIN track_details sibling ON sibling.source_path=details.source_path AND sibling.cue_path IS NOT NULL
+            JOIN tracks other ON other.track_key=sibling.track_key AND other.source_key IS track.source_key
+            JOIN downloads copy ON copy.media_uri=other.media_uri AND copy.quality IN (?2,'unknown')
+            WHERE track.media_uri=?1 AND details.cue_path IS NOT NULL LIMIT 1")
+            .bind(uri).bind(encoding).fetch_optional(&mut *reader).await?)
     }
 
     /// Whether another record uses the same file.
