@@ -680,14 +680,11 @@ impl<F: FileSource> Walker<'_, '_, F> {
             {
                 return self.keep_subtree(root, &key).await;
             }
-            if !self.unchanged(stored.as_ref(), &row) {
-                self.stage(stored, row, native.to_owned(), None, true);
-            }
             let entries = match self.files.list(root, native).await {
                 Ok(entries) => entries,
                 Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
                 Err(error) => {
-                    // A directory that fails to list keeps its rows.
+                    // A directory that fails to list keeps its rows, its revision included.
                     self.fail(format!("Could not list {relative}: {error}"));
                     return self.keep_subtree(root, &key).await;
                 }
@@ -700,6 +697,9 @@ impl<F: FileSource> Walker<'_, '_, F> {
             {
                 self.fail(format!("File source root {root} is empty"));
                 return self.keep_subtree(root, &key).await;
+            }
+            if !self.unchanged(stored.as_ref(), &row) {
+                self.stage(stored, row, native.to_owned(), None, true);
             }
             let mut entries = entries
                 .into_iter()
