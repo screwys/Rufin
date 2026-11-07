@@ -85,7 +85,7 @@ fn trust(network: &ConnectNetwork, devices: &[(&ConnectNetwork, bool)]) {
     network.set_devices(
         devices
             .iter()
-            .map(|(device, trusted)| (device.identity(), *trusted))
+            .map(|(device, trusted)| (device.identity(), (*trusted, 0)))
             .collect(),
     );
 }
@@ -352,7 +352,7 @@ async fn enrollment_records_media_and_removal() {
         let refused = b.stream_request(&a.identity(), b"denied after removal".to_vec()).await;
         assert_eq!(refused.err().unwrap().to_string(), REMOVED_FROM_PROFILE);
         next(&mut b_events, |event| match event {
-            NetworkEvent::Removed { peer } => Some(assert_eq!(peer, a.identity())),
+            NetworkEvent::Removed { peer, .. } => Some(assert_eq!(peer, a.identity())),
             _ => None,
         }).await;
         assert_eq!(pull(&b, &b_store, &a, &profile).await.unwrap_err().to_string(), REMOVED_FROM_PROFILE);

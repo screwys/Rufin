@@ -318,9 +318,11 @@ pub enum NetworkEvent {
         peer: String,
         contacted: bool,
     },
-    /// `peer` refused this device because it was removed from the profile.
+    /// `peer` refused this device because it was removed from the profile, as it knew the
+    /// device when it was `paired`.
     Removed {
         peer: String,
+        paired: i64,
     },
     Discovered {
         peer: String,
@@ -338,7 +340,7 @@ pub struct ConnectNetwork {
     pub(crate) name: RwLock<String>,
     pub(crate) profile: RwLock<Option<Arc<Profile>>>,
     // Device id and whether it is trusted, from Connect's device records.
-    devices: std::sync::RwLock<HashMap<String, bool>>,
+    devices: std::sync::RwLock<HashMap<String, (bool, i64)>>,
     pub(crate) approvals: Mutex<HashMap<String, watch::Sender<Option<bool>>>>,
     pub(crate) events: mpsc::Sender<NetworkEvent>,
     routes: Routes,
@@ -525,13 +527,18 @@ impl ConnectNetwork {
         Ok(())
     }
 
-    /// The profile's devices and whether each is trusted, from Connect's device records.
-    pub fn set_devices(&self, devices: HashMap<String, bool>) {
+    /// The profile's devices, whether each is trusted and when it was last paired, from
+    /// Connect's device records.
+    pub fn set_devices(&self, devices: HashMap<String, (bool, i64)>) {
         *self.devices.write().unwrap() = devices;
     }
 
-    fn trusted(&self, peer: EndpointId) -> Option<bool> {
+    fn device(&self, peer: EndpointId) -> Option<(bool, i64)> {
         self.devices.read().unwrap().get(&peer.to_string()).copied()
+    }
+
+    fn trusted(&self, peer: EndpointId) -> Option<bool> {
+        self.device(peer).map(|(trusted, _)| trusted)
     }
 
     pub(crate) fn trusted_devices(&self) -> Vec<String> {
@@ -540,20 +547,21 @@ impl ConnectNetwork {
             .read()
             .unwrap()
             .iter()
-            .filter(|(peer, trusted)| **trusted && **peer != identity)
+            .filter(|(peer, (trusted, _))| *trusted && **peer != identity)
             .map(|(peer, _)| peer.clone())
             .collect()
     }
 
-    /// Lets a trusted device in. A removed one is told so; an unknown one is closed.
+    /// Lets a trusted device in. A removed one is told so, with the pairing its removal
+    /// ended; an unknown one is closed.
     pub(crate) async fn admit(&self, connection: &Connection) -> bool {
-        match self.trusted(connection.remote_id()) {
-            Some(true) => {
+        match self.device(connection.remote_id()) {
+            Some((true, _)) => {
                 self.reached(connection, true).await;
                 true
             }
-            Some(false) => {
-                connection.close(REMOVED, b"device removed");
+            Some((false, paired)) => {
+                connection.close(REMOVED, paired.to_string().as_bytes());
                 false
             }
             None => {
@@ -585,6 +593,10 @@ impl ConnectNetwork {
                 .events
                 .send(NetworkEvent::Removed {
                     peer: connection.remote_id().to_string(),
+                    paired: std::str::from_utf8(&close.reason)
+                        .ok()
+                        .and_then(|paired| paired.parse().ok())
+                        .unwrap_or(i64::MAX),
                 })
                 .await;
             bail!(localization::tr(REMOVED_FROM_PROFILE));

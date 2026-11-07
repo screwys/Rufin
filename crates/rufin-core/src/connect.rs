@@ -1539,7 +1539,14 @@ impl ConnectOwner {
                     self.met(peer);
                 }
             }
-            NetworkEvent::Removed { .. } => {
+            // A device that holds an earlier pairing of this one cannot remove it.
+            NetworkEvent::Removed { paired, .. } => {
+                if self
+                    .session()
+                    .is_some_and(|session| session.records.paired() > paired)
+                {
+                    return;
+                }
                 let owner = Arc::clone(self);
                 self.runtime.spawn(async move { owner.removed().await });
             }

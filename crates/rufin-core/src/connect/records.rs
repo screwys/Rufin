@@ -325,17 +325,17 @@ impl Records {
 
     /// This device's record as it writes it: its name, trusted, paired when it last joined.
     fn own(&self) -> Result<DeviceValue, String> {
-        let paired = self
-            .devices
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(&self.device)
-            .map_or(0, |value| value.paired);
         Ok(DeviceValue {
             name: self.owner()?.device_config().name,
             trusted: true,
-            paired,
+            paired: self.paired(),
         })
+    }
+
+    /// When this device was last paired, as its own record says.
+    pub(super) fn paired(&self) -> i64 {
+        let devices = self.devices.lock().unwrap_or_else(|p| p.into_inner());
+        devices.get(&self.device).map_or(0, |value| value.paired)
     }
 
     pub(super) fn add_device(&self, device: &str, value: DeviceValue) {
@@ -345,17 +345,19 @@ impl Records {
             .insert(device.to_owned(), value);
     }
 
-    /// Every device of the profile and whether it is trusted, this one included.
-    pub(super) fn trusted(&self) -> HashMap<String, bool> {
-        let mut devices = self
+    /// Every device of the profile, whether it is trusted and when it was last paired, this
+    /// one included.
+    pub(super) fn trusted(&self) -> HashMap<String, (bool, i64)> {
+        let paired = self.paired();
+        let mut trusted = (self
             .devices
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .iter()
-            .map(|(device, value)| (device.clone(), value.trusted))
-            .collect::<HashMap<_, _>>();
-        devices.insert(self.device.clone(), true);
-        devices
+            .iter())
+        .map(|(device, value)| (device.clone(), (value.trusted, value.paired)))
+        .collect::<HashMap<_, _>>();
+        trusted.insert(self.device.clone(), (true, paired));
+        trusted
     }
 
     /// The other trusted devices by name.
