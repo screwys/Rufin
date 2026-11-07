@@ -229,7 +229,7 @@ impl<'de> Deserialize<'de> for TrackReference {
 }
 
 /// A date as ISO 8601 (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) from the forms tags and servers
-/// write: ISO with or without a time, `DD.MM.YYYY`, `DD/MM/YYYY`, `YYYY/MM/DD` and `YYYYMMDD`.
+/// write: ISO with or without a time, `DD.MM.YYYY` (or with / or -), `YYYY/MM/DD` and `YYYYMMDD`.
 /// Other text stays as written. Release dates sort by it and years come from it.
 pub fn normalized_date(value: Option<String>) -> Option<String> {
     let value = value?.trim().to_string();
@@ -250,7 +250,7 @@ pub fn normalized_date(value: Option<String>) -> Option<String> {
             .flatten()
             .filter(|value| range.contains(value))
     };
-    let parts = match value.split(['.', '/']).collect::<Vec<_>>()[..] {
+    let parts = match value.split(['.', '/', '-']).collect::<Vec<_>>()[..] {
         [year, month, day] if year.len() == 4 => Some((year, month, day)),
         [day, month, year] => Some((year, month, day)),
         _ if value.len() == 8 => value
