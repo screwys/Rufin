@@ -2044,7 +2044,7 @@ impl Source {
             }
             Implementation::OpenSubsonic(source) => {
                 let result = source
-                    .acquire_items(changes, upserts, false, &|| self.is_retired())
+                    .acquire_items(changes, upserts, &|| self.is_retired())
                     .await;
                 for object in removals {
                     if let Some((kind, id)) = object.split_once(':') {
