@@ -27,7 +27,7 @@ internal open class ShownRows(private val browse: BrowseConnection, protected va
     private val viewless = AndroidShownChanges()
     /** A page's header row and View, which a change shows with the rows of that View. */
     protected open val header: AndroidBrowseRow? get() = null
-    protected open val pageView: AndroidView? get() = null
+    open val pageView: AndroidView? get() = null
     protected open fun showHeader(row: AndroidBrowseRow) {}
 
     /** `item` showing the favorites, ratings and downloads committed since the surface read it. */

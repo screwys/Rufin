@@ -81,7 +81,7 @@ internal fun DetailContent(
         return
     }
     val route = page.location.route
-    val headerItem = remember(summary, page.displaySettings) { BrowseItem(summary.row, 0UL, null, page.displaySettings) }
+    val headerItem = remember(summary, page.pageView, page.displaySettings) { BrowseItem(summary.row, 0UL, page.pageView, page.displaySettings) }
     val artist = route is Route.ArtistDetail || route is Route.AlbumArtistDetail
     val releasesVisible = route.showsReleases
     fun images(fields: List<AndroidSortField>) = fields.any { it.id == LibraryField.IMAGE || it.id == LibraryField.TITLE_MERGED }
