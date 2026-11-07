@@ -1486,7 +1486,10 @@ impl Player {
             return;
         }
         if self.current_run.is_none()
-            && self.queue_transport != Some(TransportStatus::Stopped)
+            && matches!(
+                self.queue_transport,
+                Some(TransportStatus::Playing | TransportStatus::Paused)
+            )
             && !self.restored_paused
         {
             self.begin_selected_run();
@@ -2444,6 +2447,8 @@ impl Player {
         }
         self.failed_run = None;
         let Some(entry) = self.sequence.selected().cloned() else {
+            // The run begins when the metadata read completes.
+            self.queue_transport.get_or_insert(TransportStatus::Playing);
             self.sequence.need_metadata();
             self.current_run = None;
             self.next_plan = None;
