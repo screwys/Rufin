@@ -11,7 +11,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/random", get(random_settings))
         .route("/api/queue/random", post(random))
         .route("/api/media", get(metadata))
-        .route("/api/favorite", post(favorite))
+        .route("/api/favorite", get(selection_favorite).post(favorite))
         .route("/api/queue/radio", post(radio))
 }
 
@@ -124,14 +124,33 @@ pub(super) async fn favorite(
     #[derive(Deserialize)]
     struct Input {
         kind: String,
-        uri: String,
+        uri: Option<String>,
         favorite: bool,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
+    if let (Some(page), Some(ranges)) = (input.page, input.ranges) {
+        for uri in selected_uris(&products, page, ranges).await? {
+            let target = library::FavoriteTarget::Track(uri);
+            let source = &products.source;
+            source
+                .set_favorite_with_result(target, input.favorite)
+                .await
+                .map_err(bad_request)?;
+        }
+        return Ok(json_response(
+            StatusCode::OK,
+            json!({"favorite":input.favorite}),
+        ));
+    }
+    let uri = input
+        .uri
+        .ok_or_else(|| bad_request("uri, or page and ranges, is required"))?;
     let target = match input.kind.as_str() {
-        "track" => library::FavoriteTarget::Track(input.uri),
-        "album" => library::FavoriteTarget::Album(input.uri),
-        "artist" => library::FavoriteTarget::Artist(input.uri),
+        "track" => library::FavoriteTarget::Track(uri),
+        "album" => library::FavoriteTarget::Album(uri),
+        "artist" => library::FavoriteTarget::Artist(uri),
         _ => return Err(bad_request("Unknown favorite type")),
     };
     let favorite = products
@@ -139,6 +158,39 @@ pub(super) async fn favorite(
         .set_favorite_with_result(target, input.favorite)
         .await
         .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
+}
+
+/// The tracks of the rows at `ranges` of `page`, by URI.
+async fn selected_uris(
+    products: &ProductHandles,
+    page: page::PageToken,
+    ranges: Vec<std::ops::Range<usize>>,
+) -> Result<Vec<String>, Error> {
+    let Some(selection) = page::selection(products, page, Some(ranges)).await? else {
+        return Ok(Vec::new());
+    };
+    let cancel = library::ReadCancellation::new();
+    let uris = products
+        .library
+        .selected_track_uris(&selection, None, &cancel);
+    uris.await.map_err(internal)
+}
+
+/// Whether every track of the rows at `ranges` of `page` is a favorite.
+async fn selection_favorite(
+    State(products): State<ProductHandles>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    let page = serde_json::from_str(required(&parameters, "page")?).map_err(bad_request)?;
+    let ranges = serde_json::from_str(required(&parameters, "ranges")?).map_err(bad_request)?;
+    let uris = selected_uris(&products, page, ranges).await?;
+    let states = products.library.user_states(Some(&uris)).await;
+    let states = states.map_err(internal)?;
+    let favorites: std::collections::HashSet<_> = (states.iter())
+        .filter_map(|(state, _)| (state.favorite == Some(true)).then_some(&state.media_uri))
+        .collect();
+    let favorite = uris.iter().all(|uri| favorites.contains(uri));
     Ok(json_response(StatusCode::OK, json!({"favorite":favorite})))
 }
 

@@ -200,7 +200,7 @@ async function showQueueMenu(row, anchor, event) {
         track.favorite
           ? tr("Remove from Favorites")
           : tr("Add to Favorites"),
-        () => setFavorite([track]),
+        () => setFavorite(track),
       ],
 
       [

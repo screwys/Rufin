@@ -333,6 +333,7 @@ async fn queue_play(
         after: Option<usize>,
         uris: Option<Vec<String>>,
         page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
         index: Option<usize>,
         anchor_uri: Option<String>,
         anchor_entry: Option<library::PlaylistEntryKey>,
@@ -407,10 +408,14 @@ async fn queue_play(
                 .map(|key| (key, Some(entry))),
             (None, Some(_), _) => return Err(gone()),
         };
-        match anchor {
+        match (anchor, input.ranges) {
+            // Selected rows play in the page's order.
+            (_, Some(ranges)) => page::selection(products, token, Some(ranges))
+                .await?
+                .map(|selection| rufin_core::playback::PlayRequest::tracks(selection, placement)),
             // A page without a track plays whole, as its header and the card that opens it do.
-            None => Some(page::play(products, &token, placement).await?),
-            Some((key, entry)) => page::open(products, token, 0, 0).await?.view.play_track(
+            (None, None) => Some(page::play(products, &token, placement).await?),
+            (Some((key, entry)), None) => page::open(products, token, 0, 0).await?.view.play_track(
                 key,
                 entry,
                 input.index.unwrap_or(0),

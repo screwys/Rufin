@@ -1,28 +1,19 @@
 use super::*;
 use library::{PlaylistEntryKey, PlaylistKey};
 
-/// The tracks a playlist add takes: `uris`, or what the page a row plays lists, in that page's
-/// source and music folder, as a queue of that page takes them.
+/// The tracks a playlist add takes: `uris`, or the selected rows of a page or all it lists, as
+/// a queue of that page takes them.
 async fn playlist_selection(
     products: &ProductHandles,
     uris: Vec<String>,
     page: Option<page::PageToken>,
+    ranges: Option<Vec<std::ops::Range<usize>>>,
 ) -> Result<library::MemberSelection, Error> {
     let Some(page) = page else {
         return Ok(library::MemberSelection::Uris(uris.into()));
     };
-    let selected = page::scope(products, page.source.as_ref(), page.folder.as_deref()).await?;
-    products
-        .source
-        .route_selection(
-            &page.route,
-            selected.as_ref(),
-            rufin_core::view::SelectionScope::Page,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(page::read_error)?
-        .ok_or_else(|| bad_request("Nothing to add here"))
+    let selection = page::selection(products, page, ranges).await?;
+    selection.ok_or_else(|| bad_request("Nothing to add here"))
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -311,9 +302,10 @@ pub(super) async fn create(
         #[serde(default)]
         uris: Vec<String>,
         page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(products, input.uris, input.page).await?;
+    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
     let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
@@ -384,11 +376,12 @@ pub(super) async fn add_entries(
         #[serde(default)]
         uris: Vec<String>,
         page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
         #[serde(default)]
         skip_duplicates: bool,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(products, input.uris, input.page).await?;
+    let selection = playlist_selection(products, input.uris, input.page, input.ranges).await?;
     let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,
@@ -409,13 +402,21 @@ pub(super) async fn remove_entries(
     #[derive(Deserialize)]
     struct Input {
         id: PlaylistKey,
+        #[serde(default)]
         entries: Vec<PlaylistEntryKey>,
+        page: Option<page::PageToken>,
+        ranges: Option<Vec<std::ops::Range<usize>>>,
     }
     let input: Input = body(request).await?;
+    let selection = match input.page {
+        Some(page) => page::selection(products, page, input.ranges).await?,
+        None => Some(library::MemberSelection::Entries(input.entries.into())),
+    };
+    let selection = selection.ok_or_else(|| bad_request("Nothing to remove here"))?;
     let changed = completion(rufin_core::playlists::remove_playlist_entries(
         &products.source,
         input.id,
-        library::MemberSelection::Entries(((input.entries).to_vec()).into()),
+        selection,
     ))
     .await?;
     Ok(json_response(

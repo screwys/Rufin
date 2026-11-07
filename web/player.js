@@ -372,7 +372,7 @@ function init() {
     });
   $("current-favorite").addEventListener("click", () => {
     const track = state.playback?.current?.track;
-    if (track) run(() => setFavorite([track]));
+    if (track) run(() => setFavorite(track));
   });
   $("seek").addEventListener("input", () => {
     seeking = true;

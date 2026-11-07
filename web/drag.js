@@ -61,10 +61,10 @@ function acceptsPin(event) {
   return event.dataTransfer.types.includes(pinType);
 }
 
-// Plays or queues a collection's page whole, or tracks by URI.
+// Plays or queues a collection's page whole or the selected rows of a page, or tracks by URI.
 function queueMedia(media, mode = "append", position = {}) {
   return api("/queue", "POST", {
-    ...(media.uris ? { uris: media.uris } : { page: media.page }),
+    ...(media.uris ? { uris: media.uris } : { page: media.page, ranges: media.ranges }),
     mode,
     ...position,
   });
@@ -73,7 +73,7 @@ function queueMedia(media, mode = "append", position = {}) {
 function playlistMedia(id, media) {
   return api("/playlists/entries", "POST", {
     id,
-    ...(media.uris ? { uris: media.uris } : { page: media.page }),
+    ...(media.uris ? { uris: media.uris } : { page: media.page, ranges: media.ranges }),
   });
 }
 

@@ -52,11 +52,8 @@ const pageSize = 48;
 
 let revealEntry = async () => {};
 let libraryTotal = null;
-let readRange = async () => [];
 // The row the list shows at its top, which a reread opens at again.
 let listPosition = () => 0;
-let selectionRequest;
-let selectionPending = Promise.resolve();
 
 // Pages the list of `token` in windows as it scrolls, from row `at`; `extra` parameters, such
 // as a new order, apply to the first window, which names the page as it opened.
@@ -213,19 +210,6 @@ async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
     })().finally(() => { pending = null; });
     return pending;
   };
-  readRange = async (start, end, selectionSignal) => {
-    const result = [];
-    for (let offset = start; offset <= end; offset += pageSize) {
-      const query = new URLSearchParams({
-        page: JSON.stringify(token),
-        offset,
-        limit: Math.min(pageSize, end - offset + 1),
-      });
-      const window = await api(`/page?${query}`, "GET", undefined, selectionSignal);
-      result.push(...(window.tracks || window.entries));
-    }
-    return result;
-  };
   let start = Math.floor(at / pageSize) * pageSize;
   if (at !== start) { initialPage?.remove(); initialPage = null; }
   // A reread past the end of a list that shrank opens at its end.
@@ -358,13 +342,10 @@ async function loadView(initial = false, knownTotal = null, extra = {}, at = nul
     .map((node) => [node.dataset.block, Number(node.dataset.offset)]));
   for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
     $("content").removeAttribute(name);
-  selectionRequest?.abort();
-  selectionPending = Promise.resolve();
   revealEntry = async () => {};
-  readRange = async () => [];
   listPosition = () => at ?? 0;
   libraryTotal = null;
-  selectedTracks.clear();
+  selection = [];
   selectionAnchor = 0;
   state.visibleItems = [];
   disposeHome();
@@ -440,25 +421,13 @@ async function refreshPage(verdict) {
   return loadView(false, null, {}, listPosition());
 }
 
-async function setFavorite(rows, kind = "track") {
-  const favorite = !rows.every((row) => row.favorite);
-  await Promise.all(
-    rows.map(async (row) => {
-      const result = await api("/favorite", "POST", {
-        kind,
-        uri: row.uri,
-        favorite,
-      });
-      row.favorite = result.favorite;
-      for (const track of [...state.visibleItems, ...selectedTracks.values()])
-        if (track.uri === row.uri) track.favorite = result.favorite;
-      for (const node of document.querySelectorAll("[data-favorite-uri]")) {
-        if (node.dataset.favoriteUri === row.uri) {
-          showFavorite(node, result.favorite);
-        }
-      }
-    }),
-  );
+// Turns a row's favorite over, and shows it on every row and heart that shows its media.
+async function setFavorite(row, kind = "track") {
+  const result = await api("/favorite", "POST", { kind, uri: row.uri, favorite: !row.favorite });
+  row.favorite = result.favorite;
+  for (const track of state.visibleItems) if (track.uri === row.uri) track.favorite = result.favorite;
+  for (const node of document.querySelectorAll("[data-favorite-uri]"))
+    if (node.dataset.favoriteUri === row.uri) showFavorite(node, result.favorite);
 }
 
 async function goToMedia(row, kind, anchor, rowKind = "track") {
@@ -483,93 +452,67 @@ function openMediaLink(link) {
   navigate(link.page);
 }
 
-let selectedTracks = new Map();
-
+// The selected rows as ordered [start, end) ranges, and the row Shift selects from.
+let selection = [];
 let selectionAnchor = 0;
+const selected = (index) => selection.some(({ start, end }) => start <= index && index < end);
+const selectedMany = () => selection.reduce((count, { start, end }) => count + end - start, 0) > 1;
+
+// Adds rows [start, end) to the selection, or takes them out of it.
+function mark(start, end, add) {
+  selection = selection.flatMap((range) => range.end <= start || range.start >= end ? [range] : [
+    ...(range.start < start ? [{ start: range.start, end: start }] : []),
+    ...(range.end > end ? [{ start: end, end: range.end }] : []),
+  ]);
+  if (add) selection.push({ start, end });
+  selection.sort((a, b) => a.start - b.start);
+}
 
 function selectTrack(index, event = {}) {
-  selectionRequest?.abort();
-  selectionRequest = new AbortController();
-  const signal = AbortSignal.any([viewRequest.signal, selectionRequest.signal]);
-  selectionPending = updateSelection(index, event, signal);
-  run(() => selectionPending);
-  return selectionPending;
-}
-
-async function updateSelection(index, event, signal) {
-  const rows = [...$("content").querySelectorAll("tr[data-index]")];
   if (event.shiftKey) {
-    const start = Math.min(index, selectionAnchor),
-      end = Math.max(index, selectionAnchor);
-    const mounted = rows.filter(
-      (node) =>
-        Number(node.dataset.index) >= start &&
-        Number(node.dataset.index) <= end,
-    );
-    const range =
-      mounted.length === end - start + 1
-        ? mounted.map(mediaRow)
-        : await readRange(start, end, signal);
-    signal.throwIfAborted();
-    if (!event.ctrlKey && !event.metaKey) selectedTracks.clear();
-    range.forEach((row, offset) => selectedTracks.set(start + offset, row));
+    if (!event.ctrlKey && !event.metaKey) selection = [];
+    mark(Math.min(index, selectionAnchor), Math.max(index, selectionAnchor) + 1, true);
   } else {
-    const row = mediaRow(
-      rows.find((node) => Number(node.dataset.index) === index),
-    );
-    if (event.ctrlKey || event.metaKey) {
-      if (selectedTracks.has(index)) selectedTracks.delete(index);
-      else selectedTracks.set(index, row);
-    } else selectedTracks = new Map([[index, row]]);
+    if (event.ctrlKey || event.metaKey) mark(index, index + 1, !selected(index));
+    else selection = [{ start: index, end: index + 1 }];
     selectionAnchor = index;
   }
-  for (const node of rows) {
-    const selected = selectedTracks.has(Number(node.dataset.index));
-    node.classList.toggle("selected", selected);
-    node.setAttribute("aria-selected", String(selected));
+  for (const node of $("content").querySelectorAll("tr[data-index]")) {
+    const on = selected(Number(node.dataset.index));
+    node.classList.toggle("selected", on);
+    node.setAttribute("aria-selected", String(on));
   }
 }
 
-function selectedRows() {
-  return [...selectedTracks].sort(([a], [b]) => a - b).map(([, row]) => row);
-}
-
-// Plays the page from track `row` at `index`, or the tracks selected with it.
-async function playSelection(index, row) {
-  await selectionPending;
-  const selected = selectedRows();
-  return selected.length > 1
-    ? playUris(selected.map((track) => track.uri))
+// Plays the page from track `row` at `index`, or the rows selected with it.
+function playSelection(index, row) {
+  return selectedMany()
+    ? api("/queue", "POST", { page: opened, ranges: selection, mode: "replace" })
     : api("/queue", "POST", { page: opened, index, anchor_uri: row.uri, anchor_entry: row.id, mode: "replace" });
 }
 
 async function showTrackMenu(index, row, anchor, event) {
-  if (!selectedTracks.has(index)) await selectTrack(index);
-  else await selectionPending;
-  const rows = selectedRows(),
-    uris = rows.map((row) => row.uri),
-    menu = row.menu;
+  if (!selected(index)) selectTrack(index);
+  const media = { page: opened, ranges: selection }, menu = row.menu, many = selectedMany();
   const actions = [];
   if (menu.play) actions.push([tr("Play"), () => playSelection(index, row)]);
-  if (menu.play_next) actions.push([tr("Play Next"), () => playUris(uris, "next")]);
-  if (menu.play_later) actions.push([tr("Play Later"), () => playUris(uris, "append")]);
+  if (menu.play_next) actions.push([tr("Play Next"), () => queueMedia(media, "next")]);
+  if (menu.play_later) actions.push([tr("Play Later"), () => queueMedia(media, "append")]);
   if (menu.radio) actions.push(radioMenu(menu.radio));
   actions.push(null);
-  if (menu.add_to_playlist) actions.push(playlistMenu({ uris }));
-  if (menu.favorite)
+  if (menu.add_to_playlist) actions.push(playlistMenu(media));
+  if (menu.favorite) {
+    const query = new URLSearchParams({ page: JSON.stringify(opened), ranges: JSON.stringify(selection) });
+    const favorite = many ? (await api(`/favorite?${query}`)).favorite : row.favorite;
     actions.push([
-      rows.every((row) => row.favorite)
-        ? tr("Remove from Favorites")
-        : tr("Add to Favorites"),
-      () => setFavorite(rows),
+      favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
+      () => many ? api("/favorite", "POST", { kind: "track", ...media, favorite: !favorite }) : setFavorite(row),
     ]);
+  }
   if (shown.writable === "true")
     actions.push([
       tr("Remove from Playlist"),
-      () => api("/playlists/entries", "DELETE", {
-        id: opened.route.PlaylistDetail,
-        entries: rows.map((row) => row.id),
-      }),
+      () => api("/playlists/entries", "DELETE", { id: opened.route.PlaylistDetail, ...media }),
     ]);
   const destination = menu.go_to && await goToMenu(row);
   if (destination) actions.push(null, destination);
@@ -582,22 +525,11 @@ function bindTracks(host, signal) {
     const index = Number(tr.dataset.index),
       row = mediaRow(tr);
     tr.setAttribute("aria-rowindex", index + 2);
-    bindDrag(
-      tr,
-      async () => {
-        const media = mediaSelection("track", row);
-        await selectionPending;
-        media.uris = selectedTracks.has(index)
-          ? selectedRows().map((item) => item.uri)
-          : [row.uri];
-        return media;
-      },
-      false,
-    );
-    if (selectedTracks.has(index)) selectedTracks.set(index, row);
-    const selected = selectedTracks.has(index);
-    tr.classList.toggle("selected", selected);
-    tr.setAttribute("aria-selected", String(selected));
+    bindDrag(tr, () => selected(index)
+      ? { kind: "track", row, page: opened, ranges: selection }
+      : mediaSelection("track", row), false);
+    tr.classList.toggle("selected", selected(index));
+    tr.setAttribute("aria-selected", String(selected(index)));
     tr.addEventListener(
       "click",
       (event) => {
@@ -608,7 +540,7 @@ function bindTracks(host, signal) {
             const action = button.dataset.action;
             if (action === "replace") return playSelection(index, row);
             if (action === "next" || action === "append") return playUris([row.uri], action);
-            if (action === "favorite") return setFavorite([row]);
+            if (action === "favorite") return setFavorite(row);
             if (action === "menu") return showTrackMenu(index, row, button);
             return goToMedia(row, action, button);
           });
@@ -656,11 +588,8 @@ function bindTracks(host, signal) {
           });
         } else if ((event.ctrlKey || event.metaKey) && event.key === "a") {
           event.preventDefault();
-          const visible = $("content").querySelectorAll("tr[data-index]");
-          selectionAnchor = Number(visible[0].dataset.index);
-          selectTrack(Number(visible[visible.length - 1].dataset.index), {
-            shiftKey: true,
-          });
+          selectionAnchor = 0;
+          selectTrack(libraryTotal - 1, { shiftKey: true });
         } else if (event.key === "F10" && event.shiftKey) {
           event.preventDefault();
           run(() => showTrackMenu(index, row, tr));
@@ -764,7 +693,7 @@ function bindCards(host) {
       if (options.favorite)
         actions.push([
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
-          () => setFavorite([row], kind),
+          () => setFavorite(row, kind),
         ]);
       if (options.pin) actions.push(pinAction(options.pin, options.pinned));
       // The web's playlist dialogs edit, export and delete playlists, not smart ones or folders.
@@ -800,7 +729,7 @@ function bindCards(host) {
         if (action === "open") return open();
         if (action === "artists" || action === "albums")
           return goToMedia(row, action, button, kind);
-        if (action === "favorite") return setFavorite([row], kind);
+        if (action === "favorite") return setFavorite(row, kind);
         if (action === "radio") return playRadio(row.menu.radio);
         if (action === "menu") return menu(button);
         return play(action);

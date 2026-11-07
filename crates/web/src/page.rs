@@ -167,6 +167,27 @@ pub(super) async fn scope(
     }))
 }
 
+/// The rows at `ranges` of `token`'s page, or all of them, in the order and filter it shows:
+/// what playing, adding or favoriting a selection of it takes. None when it lists nothing.
+pub(super) async fn selection(
+    products: &ProductHandles,
+    token: PageToken,
+    ranges: Option<Vec<std::ops::Range<usize>>>,
+) -> Result<Option<library::MemberSelection>, Error> {
+    let view = open(products, token, 0, 0).await?.view;
+    Ok(match (ranges, view.members(), view.list()) {
+        (None, _, _) => view.selection(),
+        (ranges, Some(read), _) => Some(library::MemberSelection::Members {
+            read: read.clone(),
+            ranges,
+        }),
+        (Some(ranges), None, list) => list.map(|read| {
+            let scope = rufin_core::view::SelectionScope::Page;
+            products.source.list_selection(read.clone(), ranges, scope)
+        }),
+    })
+}
+
 /// What playing `token`'s page whole queues at `placement`, without reading its rows.
 pub(super) async fn play(
     products: &ProductHandles,
