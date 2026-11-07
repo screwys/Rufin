@@ -811,22 +811,15 @@ impl Context<'_> {
     }
 
     /// Text of the letter index of a track order.
-    fn track_section(&self, sort: LibraryField, row: &Sorted<'_>) -> Option<String> {
+    /// The section of a row, from the text its sort compares.
+    fn track_section(sort: LibraryField, row: &Sorted<'_>) -> Option<&'static str> {
         use LibraryField as S;
-        let snapshot = self.snapshot;
-        Some(match sort {
-            S::Title => snapshot.text(row.record.title).to_owned(),
-            S::Artist | S::AlbumArtist | S::Genre => {
-                row.text.as_deref().unwrap_or_default().to_owned()
-            }
-            S::Album => row
-                .album
-                .as_ref()
-                .map(|album| album.sort.as_ref())
-                .unwrap_or_default()
-                .to_owned(),
+        Some(bucket(match sort {
+            S::Title => &row.sort,
+            S::Artist | S::AlbumArtist | S::Genre => row.text.as_deref().unwrap_or_default(),
+            S::Album => row.album.as_ref().map_or("", |album| album.sort.as_ref()),
             _ => return None,
-        })
+        }))
     }
 }
 
@@ -1193,8 +1186,8 @@ impl Context<'_> {
         let tracks = &self.snapshot.tracks;
         sections(keys.iter().enumerate().map(
             |(position, key)| match tracks.slot(i64::from(*key)) {
-                Some(slot) => self.track_section(sort, &self.sorted(sort, position, (slot, 0, 0))),
-                None => Some(String::new()),
+                Some(slot) => Self::track_section(sort, &self.sorted(sort, position, (slot, 0, 0))),
+                None => Some(bucket("")),
             },
         ))
     }
@@ -1275,14 +1268,16 @@ pub(crate) fn bucket(text: &str) -> &'static str {
 }
 
 /// Sections of an order from the texts of its rows: each bucket where it first appears.
-pub(crate) fn sections(texts: impl Iterator<Item = Option<String>>) -> Vec<crate::ScrollSection> {
+/// Where each section of these rows' buckets starts; none when a row has no bucket.
+pub(crate) fn sections(
+    buckets: impl Iterator<Item = Option<&'static str>>,
+) -> Vec<crate::ScrollSection> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
-    for (index, text) in texts.enumerate() {
-        let Some(text) = text else {
+    for (index, title) in buckets.enumerate() {
+        let Some(title) = title else {
             return Vec::new();
         };
-        let title = bucket(&text);
         if seen.insert(title) {
             sections.push(crate::ScrollSection {
                 title: title.to_owned(),
@@ -1790,19 +1785,18 @@ impl Context<'_> {
     ) -> Vec<crate::ScrollSection> {
         let snapshot = self.snapshot;
         let sort = read.sort.sort();
-        let texts = order.map(|key| -> Option<String> {
+        let texts = order.map(|key| -> Option<&'static str> {
             let key = &key;
-            Some(match &read.kind {
+            Some(bucket(&match &read.kind {
                 ListKind::Albums | ListKind::ArtistAlbums { .. } => {
                     let slot = snapshot.albums.slot(*key)?;
                     match sort {
-                        LibraryField::Title => snapshot
-                            .album_sort(&snapshot.albums.records[slot as usize])
-                            .into_owned(),
-                        LibraryField::Artist | LibraryField::AlbumArtist => self
-                            .album_artist_sort(slot)
-                            .map(Cow::into_owned)
-                            .unwrap_or_default(),
+                        LibraryField::Title => {
+                            snapshot.album_sort(&snapshot.albums.records[slot as usize])
+                        }
+                        LibraryField::Artist | LibraryField::AlbumArtist => {
+                            self.album_artist_sort(slot).unwrap_or_default()
+                        }
                         _ => return None,
                     }
                 }
@@ -1810,22 +1804,21 @@ impl Context<'_> {
                     if !matches!(sort, LibraryField::Title | LibraryField::Artist) {
                         return None;
                     }
-                    let artist = snapshot.artists.get(*key)?;
-                    snapshot.artist_sort(artist).into_owned()
+                    snapshot.artist_sort(snapshot.artists.get(*key)?)
                 }
                 ListKind::Genres | ListKind::Moods => {
                     if !matches!(sort, LibraryField::Title | LibraryField::Artist) {
                         return None;
                     }
                     let tag = snapshot.tags.get(*key)?;
-                    snapshot.name_sort(tag.name, tag.sort).into_owned()
+                    snapshot.name_sort(tag.name, tag.sort)
                 }
                 ListKind::Playlists | ListKind::SmartPlaylists { .. } => {
                     let grouped = !matches!(read.playlist_scope, PlaylistScope::All);
                     if !grouped && sort != LibraryField::Title {
                         return None;
                     }
-                    if *key < 0 {
+                    Cow::Owned(if *key < 0 {
                         snapshot.playlist_folders.get(&-key)?.name.to_lowercase()
                     } else if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
                         snapshot.smart_playlists.get(key)?.name.to_lowercase()
@@ -1833,9 +1826,9 @@ impl Context<'_> {
                         snapshot
                             .text(snapshot.playlists.get(*key)?.name)
                             .to_lowercase()
-                    }
+                    })
                 }
-            })
+            }))
         });
         sections(texts)
     }
@@ -3013,13 +3006,10 @@ impl Catalog {
                 context.list_sections(read, keys.iter().map(|(key, _)| *key))
             }
             (Read::Folders(_), Members::Keys(keys)) => sections(keys.iter().map(|key| {
-                Some(
-                    snapshot
-                        .folders
-                        .get(i64::from(*key))
-                        .map(|folder| snapshot.name_sort(folder.name, folder.sort).into_owned())
-                        .unwrap_or_default(),
-                )
+                let folder = snapshot.folders.get(i64::from(*key));
+                Some(bucket(&folder.map_or(Cow::Borrowed(""), |folder| {
+                    snapshot.name_sort(folder.name, folder.sort)
+                })))
             })),
             _ => Vec::new(),
         }

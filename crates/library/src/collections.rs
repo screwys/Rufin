@@ -145,7 +145,7 @@ impl Catalog {
         _cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<crate::ScrollSection>> {
         Ok(crate::catalog::views::sections(
-            names.map(|name| Some(name.to_owned())),
+            names.map(|name| Some(crate::catalog::views::bucket(name))),
         ))
     }
 
