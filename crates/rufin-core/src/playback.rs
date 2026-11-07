@@ -860,8 +860,8 @@ impl PlaybackOwner {
     pub fn activate_occurrence(&self, id: u64) {
         self.send(Command::ActivateOccurrence(id));
     }
-    pub fn move_occurrence_after_current(&self, id: u64) {
-        self.send(Command::MoveOccurrenceAfterCurrent(id));
+    pub fn move_selection_after_current(&self, selection: QueueSelection) {
+        self.send(Command::MoveAfterCurrentSelection(selection));
     }
     pub fn move_after_current(&self, position: usize) {
         self.send(Command::MoveAfterCurrent(position));

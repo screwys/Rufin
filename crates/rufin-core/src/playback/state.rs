@@ -84,7 +84,7 @@ pub enum Command {
         target: crate::playback::QueueReorderTarget,
     },
     MoveAfterCurrent(usize),
-    MoveOccurrenceAfterCurrent(u64),
+    MoveAfterCurrentSelection(QueueSelection),
     Clear {
         include_current: bool,
     },
@@ -117,7 +117,7 @@ impl Command {
         matches!(
             self,
             Self::ActivateOccurrence(_)
-                | Self::MoveOccurrenceAfterCurrent(_)
+                | Self::MoveAfterCurrentSelection(QueueSelection::Occurrences(_))
                 | Self::RemoveMany(QueueSelection::Occurrences(_))
                 | Self::Reorder {
                     selection: QueueSelection::Occurrences(_),
@@ -916,12 +916,12 @@ impl Player {
             Command::Reorder { selection, target } => Ok(self.reorder(&selection, &target, sample)),
             Command::Insert { input, target } => Ok(self.insert(input, &target)),
             Command::MoveAfterCurrent(position) => Ok(self.move_after_current(&position, sample)),
-            Command::MoveOccurrenceAfterCurrent(id) => Ok({
+            Command::MoveAfterCurrentSelection(selection) => Ok({
                 let target = self
                     .sequence
                     .selected_index()
                     .map_or(QueueReorderTarget::End, QueueReorderTarget::After);
-                self.reorder(&QueueSelection::Occurrences(vec![id]), &target, sample);
+                self.reorder(&selection, &target, sample);
             }),
             Command::Clear { include_current } => Ok(self.clear(include_current, sample)),
             Command::PlayPause => Ok(self.play_pause()),

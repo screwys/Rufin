@@ -7,7 +7,9 @@ use adw::prelude::*;
 use gtk::glib;
 use library::{FavoriteTarget, PlaylistListRow, RadioSeed, Row, TrackRow, TrackView};
 use rufin_core::menu::{GoTo, Menu};
-use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
+use rufin_core::playback::{
+    PlaybackOwner, QueuePlacement, QueueReorderTarget, QueueSelection, RadioPlayRequest,
+};
 
 use crate::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use crate::ratings::context_rating_row;
@@ -508,26 +510,30 @@ fn append_queue_entry_actions(
     surface.append_fixed_action(msgid("Remove from Queue"), REMOVE_ICON, move || {
         queue.remove_many(remove.clone())
     });
-    let queue = shell.products.playback.clone();
     let play_shell = Rc::clone(shell);
-    surface.append_play_actions(menu, move |placement, shuffled| {
-        match (placement, occurrence_id) {
-            _ if shuffled => play_target(
-                &play_shell.products,
-                &PlayTarget::Track(track),
-                placement,
-                true,
-            ),
-            (QueuePlacement::Next, Some(id)) => queue.move_occurrence_after_current(id),
-            (QueuePlacement::Next, None) => queue.move_after_current(position),
-            (QueuePlacement::End, _) => queue.reorder(
-                selection.clone(),
-                rufin_core::playback::QueueReorderTarget::End,
-            ),
-            (_, Some(id)) => queue.activate_occurrence(id),
-            (_, None) => queue.activate(position),
-        }
+    surface.append_play_actions(menu, move |placement, shuffled| match shuffled {
+        true => play_target(
+            &play_shell.products,
+            &PlayTarget::Track(track),
+            placement,
+            true,
+        ),
+        false => place_queue_selection(&play_shell.products.playback, selection.clone(), placement),
     });
+}
+
+/// Play Next and Play Later move the queue entries `selection`; other placements play the first.
+pub fn place_queue_selection(
+    queue: &PlaybackOwner,
+    selection: QueueSelection,
+    placement: QueuePlacement,
+) {
+    match (placement, selection) {
+        (QueuePlacement::Next, selection) => queue.move_selection_after_current(selection),
+        (QueuePlacement::End, selection) => queue.reorder(selection, QueueReorderTarget::End),
+        (_, QueueSelection::Occurrences(ids)) => queue.activate_occurrence(ids[0]),
+        (_, QueueSelection::Positions(positions)) => queue.activate(positions[0]),
+    }
 }
 
 /// The Go to submenu of what `row` links to, with the actions that open them.

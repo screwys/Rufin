@@ -7,7 +7,7 @@ use crate::widgets::media_drag::MediaDragSource;
 use crate::widgets::selection::TrackSelectionSnapshot;
 use adw::prelude::*;
 use gtk::glib;
-use rufin_core::playback::{QueuePlacement, QueueSelection};
+use rufin_core::playback::QueuePlacement;
 use std::rc::Rc;
 #[derive(Clone, Copy)]
 enum SelectionShortcut {
@@ -161,14 +161,13 @@ impl Shell {
                 return false;
             };
             match shortcut {
-                SelectionShortcut::Play(_) => match selection.selection {
-                    QueueSelection::Occurrences(ids) => {
-                        self.products.playback.activate_occurrence(ids[0]);
-                    }
-                    QueueSelection::Positions(positions) => {
-                        self.products.playback.activate(positions[0]);
-                    }
-                },
+                SelectionShortcut::Play(placement) => {
+                    crate::menus::media_menus::place_queue_selection(
+                        &self.products.playback,
+                        selection.selection,
+                        placement,
+                    );
+                }
                 SelectionShortcut::AddToPlaylist => {
                     picker::present(
                         self,
