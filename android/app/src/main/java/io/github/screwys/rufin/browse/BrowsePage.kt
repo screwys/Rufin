@@ -131,10 +131,11 @@ internal class BrowsePage(
         return remember(item, row) { item.copy(row = row) }
     }
 
-    /** A row's identity among those the page holds; a search result shows its own fields, so it
-     * is held apart from the page's row of the same item. */
+    /** A row's identity among those the page holds, at its place: a listen or entry differs from
+     * another of the same track, and a search result shows its own fields, so it is held apart
+     * from the page's row of the same item. */
     private fun shownKey(item: BrowseItem) =
-        "${if (item.searchResult) "search:" else ""}${item.row.sourceId.orEmpty()}:${item.row.key}"
+        "${if (item.searchResult) "search:" else ""}${item.row.sourceId.orEmpty()}:${item.row.key}:${item.index}"
 
     /** Holds `items`, rows the page read or shows, so committed changes patch them. A row read
      * later replaces one read earlier. */
