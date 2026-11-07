@@ -73,17 +73,15 @@ internal class BrowsePage(
     /** How many favorite, rating and download changes were committed while the page is open. */
     private var downloads by mutableIntStateOf(0)
     /** Rows core patched, by identity: each patches only rows of the View that read the row it
-     * patched, read before its change; a row read since shows itself. A patch goes with its row
-     * when the page stops holding it or holds another View's row in its place, such as a new
-     * search's. */
+     * patched, read before its change; a row read since shows itself. Written on the main thread
+     * only; a patch goes once the page stops holding its row. */
     private val patched = mutableStateMapOf<String, Patch>()
     private class Patch(val revision: Int, val view: AndroidView?, val row: AndroidBrowseRow)
     /** The rows the page holds by identity, most recently read or shown last: those on screen
      * and those read lately, which scroll back in without a read. Committed changes patch them
      * through core. */
     private val held = object : LinkedHashMap<String, BrowseItem>(HELD_ROWS, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BrowseItem>): Boolean =
-            (size > HELD_ROWS).also { if (it) patched.remove(eldest.key) }
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BrowseItem>): Boolean = size > HELD_ROWS
     }
     private val data = MutableStateFlow<PagingData<BrowseItem>>(PagingData.empty())
     val pages: Flow<PagingData<BrowseItem>> = data.cachedIn(scope)
@@ -143,10 +141,7 @@ internal class BrowsePage(
         for (item in items) {
             val key = shownKey(item)
             val previous = held[key]
-            if ((previous?.downloads ?: -1) <= item.downloads) {
-                if (previous?.view !== item.view) patched.remove(key)
-                held[key] = item
-            }
+            if ((previous?.downloads ?: -1) <= item.downloads) held[key] = item
         }
     }
 
@@ -163,7 +158,9 @@ internal class BrowsePage(
      * (a search result as its search), the header as the page. Runs on the main thread. */
     fun showChanges(changed: Changed) {
         val revision = ++downloads
-        val items = synchronized(held) { held.values.toList() }.groupBy { it.view }
+        val holding = synchronized(held) { held.toMap() }
+        patched.keys.retainAll(holding.keys)
+        val items = holding.values.groupBy { it.view }
         val page = currentView
         showRead(changed, revision, page, summary, items[page].orEmpty())
         for ((view, read) in items) if (view !== page) showRead(changed, revision, view, null, read)
