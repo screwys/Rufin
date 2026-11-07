@@ -77,6 +77,9 @@ impl SubsonicSource {
         if let Err(error) = self.acquire_favorites(observation, cancelled).await {
             crate::source::optional_collection_error(error)?;
         }
+        if let Err(error) = self.acquire_played_albums(observation, cancelled).await {
+            crate::source::optional_collection_error(error)?;
+        }
         check_cancelled(cancelled)?;
         progress(stage(SourceProgressStage::Playlists, 0));
         match self
@@ -96,6 +99,34 @@ impl SubsonicSource {
         crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
         check_cancelled(cancelled)?;
+        Ok(())
+    }
+
+    /// Plays elsewhere leave the scan marker alone: the recently played albums whose server
+    /// play is newer than their tracks' stored ones are read again.
+    async fn acquire_played_albums(
+        &self,
+        observation: &mut library::Observation<'_>,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let query = [("type", "recent".to_string()), ("size", "24".to_string())];
+        let body: Value = self.get_json("getAlbumList2", &query).await?;
+        let played = json::items(&body["albumList2"]["album"])
+            .iter()
+            .filter_map(|album| {
+                let played = crate::policy::unix_seconds(json::field(album, "played"))?;
+                Some((self.id("album", &json::id(&album["id"])?), played))
+            })
+            .collect::<Vec<_>>();
+        let catalog = observation.catalog;
+        for album in catalog
+            .albums_played_since(observation.source_id, &played)
+            .await?
+        {
+            let album = crate::SourceCollection::Album(album);
+            self.acquire_collection(observation, &album, false, cancelled)
+                .await?;
+        }
         Ok(())
     }
 
