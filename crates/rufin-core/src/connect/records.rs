@@ -649,10 +649,11 @@ impl Records {
         self.write(written, listened).await
     }
 
-    /// The setting records and this device's record, after a settings change.
+    /// The setting records, this device's record and its queue, after a settings change.
     pub(super) async fn settings_pass(&self) -> Result<Option<i64>, String> {
         let _work = self.work.lock().await;
-        let changes = self.settings_changes().await?;
+        let mut changes = self.settings_changes().await?;
+        changes.extend(self.session_changes(false).await?);
         self.write(changes, None).await
     }
 
@@ -2341,9 +2342,9 @@ fn received_source(
     }))
 }
 
-/// A digest of what the setting records read from the settings file, logins as they are
-/// sealed there: a save that leaves it as it was, such as the volume, needs no settings
-/// pass and no keyring reads.
+/// A digest of what the setting and queue records read from the settings file, logins as
+/// they are sealed there: a save that leaves it as it was, such as the volume, needs no
+/// settings pass and no keyring reads.
 pub(super) fn shared_settings(stored: &crate::settings::StoredSettings) -> Option<String> {
     let preferences = PREFERENCES
         .iter()
@@ -2357,6 +2358,7 @@ pub(super) fn shared_settings(stored: &crate::settings::StoredSettings) -> Optio
         &stored.scrobbling,
         &stored.scrobbling_credentials,
         &stored.ui.lastfm_api_key,
+        stored.ui.auto_dj_enabled,
     ))
     .ok()
 }
