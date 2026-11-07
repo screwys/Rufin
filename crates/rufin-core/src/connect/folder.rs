@@ -89,8 +89,8 @@ pub(super) fn watch(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
     let Some(SyncFolder::Path { path }) = folder else {
         return;
     };
-    let changed = Arc::new(tokio::sync::Notify::new());
-    let wake = Arc::clone(&changed);
+    // The watcher holds the sender, so the task below ends once it is replaced.
+    let (wake, mut changed) = tokio::sync::mpsc::channel(1);
     // This device's own writes are no news to it.
     let own = path
         .join(ROOT)
@@ -100,7 +100,7 @@ pub(super) fn watch(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
         if event.is_ok_and(|event| {
             !event.kind.is_access() && event.paths.iter().any(|path| !path.starts_with(&own))
         }) {
-            wake.notify_one();
+            let _ = wake.try_send(());
         }
     })
     .and_then(|mut watching| {
@@ -121,8 +121,7 @@ pub(super) fn watch(owner: &Arc<ConnectOwner>, session: &Arc<Session>) {
     owner
         .runtime
         .spawn(session.stop.clone().run_until_cancelled_owned(async move {
-            loop {
-                changed.notified().await;
+            while changed.recv().await.is_some() {
                 // A sync tool writes several files in a row.
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 let (Some(owner), Some(session)) = (weak.upgrade(), session_of.upgrade()) else {
