@@ -295,7 +295,7 @@ impl JellyfinEmbySource {
                 .append_pair("UserId", &self.user_id)
                 .append_pair("ParentId", raw_item_id(folder))
                 .append_pair("Recursive", "false")
-                .append_pair("Fields", TRACK_FIELDS)
+                .append_pair("Fields", "")
                 .append_pair("SortBy", "SortName")
                 .append_pair("SortOrder", "Ascending");
         }
