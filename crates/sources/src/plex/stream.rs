@@ -191,7 +191,6 @@ impl PlexSource {
                     .into(),
             ));
         }
-        let root = self.get("/", &[]).await?;
         let subscription = self
             .login
             .lock()
@@ -200,13 +199,13 @@ impl PlexSource {
         if !subscription {
             return Err(SourceError::Other("Plex downloads require an active Plex Pass for this listening profile or its Plex Home administrator".into()));
         }
-        if !self.config.owned
-            && !boolean(&root["MediaContainer"]["allowSync"])
-                .or_else(|| {
-                    field::<u8>(&root["MediaContainer"], "allowSync").map(|value| value != 0)
-                })
+        // A shared server says whether it allows downloads; an owned one always does.
+        let allowed = |root: Value| {
+            boolean(&root["MediaContainer"]["allowSync"])
+                .or_else(|| field::<u8>(&root["MediaContainer"], "allowSync").map(|v| v != 0))
                 .unwrap_or(false)
-        {
+        };
+        if !self.config.owned && !allowed(self.get("/", &[]).await?) {
             return Err(SourceError::Other(
                 "This Plex server has not allowed downloads for this listening profile".into(),
             ));
