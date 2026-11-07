@@ -99,15 +99,6 @@ impl PlayRequest {
             ))
         }
     }
-    pub fn context(&self) -> Option<&str> {
-        let library::QueueLoad::Tracks(groups) = &self.input else {
-            return None;
-        };
-        let (_, QueueProvenance::Context { context_id, .. }) = groups.first()? else {
-            return None;
-        };
-        Some(context_id)
-    }
     pub fn with_context(mut self, context: Arc<str>) -> Self {
         match &mut self.input {
             library::QueueLoad::Tracks(groups) => {

@@ -311,13 +311,6 @@ impl PlayTarget {
         }
     }
 
-    /// The context id its plays carry before a page's filter and order; None for a track.
-    pub fn context(&self) -> Option<String> {
-        match self {
-            Self::Route(route) => Some(context_base(route)),
-            Self::Track(_) => None,
-        }
-    }
 }
 
 impl SourceOwner {
