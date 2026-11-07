@@ -38,7 +38,7 @@ impl PageToken {
             route,
             source: None,
             folder: None,
-            options: page_options(OpenOptions::default()),
+            options: OpenOptions::default(),
         }
     }
 
@@ -58,14 +58,6 @@ impl PageToken {
     /// The list whose settings the page reads with.
     pub fn list(&self) -> LibraryListKey {
         rufin_core::view::library_list_key(&self.route, self.options.category)
-    }
-}
-
-/// The options the web opens pages with: lists show as cards.
-fn page_options(options: OpenOptions) -> OpenOptions {
-    OpenOptions {
-        layout: Some(LibraryLayout::Grid),
-        ..options
     }
 }
 
@@ -118,7 +110,7 @@ pub(super) fn token(
         Some(route) => PageToken::new(route),
         None => serde_json::from_str(required(parameters, "page")?).map_err(bad_request)?,
     };
-    // The web shows lists as cards.
+    // The web shows lists as cards: every token it opens passes here.
     token.options.layout = Some(LibraryLayout::Grid);
     if let Some(source) = parameters.get("source") {
         token.source = (!source.is_empty()).then(|| sources::SourceId::new(source));
