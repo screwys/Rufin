@@ -935,7 +935,8 @@ async fn authorize(
         .is_some_and(|h| h.split(';').next() == Some("application/x-www-form-urlencoded"));
     let form = if is_form {
         let body = std::mem::replace(request.body_mut(), Body::empty());
-        let fields = match axum::body::to_bytes(body, usize::MAX).await {
+        // Read before the session is checked, so a form is held to what a form posts.
+        let fields = match axum::body::to_bytes(body, 64 * 1024).await {
             Ok(bytes) => url::form_urlencoded::parse(&bytes)
                 .into_owned()
                 .collect::<HashMap<String, String>>(),
