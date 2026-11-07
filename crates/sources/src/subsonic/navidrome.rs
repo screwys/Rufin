@@ -574,7 +574,7 @@ fn album_from_navidrome(
         },
         user_data: library::NativeUserState {
             rating: Some(rating(field(album, "rating")).map(|rating| i64::from(rating) * 10)),
-            favorite: boolean(&album["starred"]),
+            favorite: Some(boolean(&album["starred"]).unwrap_or(false)),
             ..Default::default()
         },
         object_id: source.id("album", raw_id),
@@ -709,7 +709,7 @@ fn track_from_navidrome(
             last_played: crate::policy::unix_seconds(field(track, "playDate")),
             play_count: capped_u32(field(track, "playCount")).map(i64::from),
             rating: Some(rating(field(track, "rating")).map(|rating| i64::from(rating) * 10)),
-            favorite: boolean(&track["starred"]),
+            favorite: Some(boolean(&track["starred"]).unwrap_or(false)),
             ..Default::default()
         },
         object_id,
@@ -748,7 +748,7 @@ fn artist_from_navidrome(
             ..Default::default()
         },
         user_data: library::NativeUserState {
-            favorite: boolean(&artist["starred"]),
+            favorite: Some(boolean(&artist["starred"]).unwrap_or(false)),
             rating: Some(rating(field(artist, "rating")).map(|rating| i64::from(rating) * 10)),
             ..Default::default()
         },
