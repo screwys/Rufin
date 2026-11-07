@@ -152,6 +152,8 @@ impl TransferClients {
                     .referer(false)
                     .danger_accept_invalid_certs(trust_invalid_certificate)
                     .connect_timeout(Duration::from_secs(15))
+                    // A server that sends no response or bytes for a minute has stalled.
+                    .read_timeout(Duration::from_secs(60))
                     .build()
                     .map_err(download_request_error)
             })
@@ -341,9 +343,7 @@ async fn stream_body(
     loop {
         let chunk = tokio::select! {
             biased;
-            result = tokio::time::timeout(Duration::from_secs(60), response.chunk()) => result
-                .map_err(|_| SourceError::Network("the download stalled".to_string()))?
-                .map_err(download_request_error)?,
+            result = response.chunk() => result.map_err(download_request_error)?,
             _ = &mut *cancellation => return Err(SourceError::Cancelled),
         };
         let Some(chunk) = chunk else {
