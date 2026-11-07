@@ -1536,10 +1536,6 @@ impl Catalog {
         .fetch_all(write.connection().await?)
         .await?;
         crate::lyrics::unindex_lyrics(write.connection().await?, &lyrics).await?;
-        sqlx::query("DELETE FROM downloads WHERE source_id=?1")
-            .bind(source_id.as_str())
-            .execute(write.connection().await?)
-            .await?;
         let Some(source) = key else {
             write.commit().await?;
             return Ok(false);
