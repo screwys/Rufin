@@ -1288,7 +1288,7 @@ impl Source {
                 .complete_source_observation(
                     &[],
                     freshness.as_ref().filter(|_| complete),
-                    (!files).then_some(started),
+                    (!files && complete).then_some(started),
                 )
                 .await?;
             Ok(changes.playlist_files)
