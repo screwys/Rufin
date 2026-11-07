@@ -416,8 +416,9 @@ impl Store {
         Ok(())
     }
 
+    /// A new folder holds none of this device's records yet.
     pub async fn set_folder(&self, folder: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE connect_profile SET folder=?1")
+        sqlx::query("UPDATE connect_profile SET folder=?1,written=0")
             .bind(folder)
             .execute(&self.pool)
             .await?;
