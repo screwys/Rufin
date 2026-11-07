@@ -36,14 +36,24 @@ pub struct LyricsContext {
 
 impl LyricsService {
     async fn source(&self, context: &LyricsContext) -> Option<Arc<Source>> {
-        let source_id = match library::source_entity_parts(&context.media.id.media_uri) {
+        self.source_of(&context.media.id.media_uri, context.playable.as_deref())
+            .await
+    }
+
+    /// The source that holds track `uri`, whose audio may be `playable`.
+    async fn source_of(
+        &self,
+        uri: &str,
+        playable: Option<&library::Playable>,
+    ) -> Option<Arc<Source>> {
+        let source_id = match library::source_entity_parts(uri) {
             Some((source, kind, _)) if kind == "track" => source,
             Some(_) => return None,
-            None => match &context.playable {
+            None => match playable {
                 Some(playable) => playable.source_id.clone()?,
                 None => self
                     .catalog
-                    .track_source_by_uri(&context.media.id.media_uri, &ReadCancellation::new())
+                    .track_source_by_uri(uri, &ReadCancellation::new())
                     .await
                     .ok()??,
             },
@@ -1328,7 +1338,7 @@ impl LyricsService {
         });
     }
 
-    fn begin_edited(&self, media_id: &CurrentMediaId) -> Option<(LyricsRequest, bool)> {
+    fn begin_edited(&self, media_id: &CurrentMediaId) -> Option<LyricsRequest> {
         let settings = self.settings();
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let context = state
@@ -1341,12 +1351,11 @@ impl LyricsService {
             settings.ui.application.private_mode,
             &context.media.id.media_uri,
         );
-        let sidecar = settings.ui.lyrics.preferences.save_lyrics_as_sidecar;
         cancel_current_work(&mut state);
         let current = state.current.as_mut()?;
         current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
         current.loading = false;
-        Some((LyricsRequest::new(current.request, context, plan), sidecar))
+        Some(LyricsRequest::new(current.request, context, plan))
     }
 
     async fn accept_edited(self: &Arc<Self>, uri: &str, text: &str) {
@@ -1362,12 +1371,13 @@ impl LyricsService {
         let Some(bundle) = lyrics_from_edited_text(text) else {
             return;
         };
-        let Some((request, _)) = self.begin_edited(&media_id) else {
+        let Some(request) = self.begin_edited(&media_id) else {
             return;
         };
         self.cache_and_accept(&request, bundle, false).await;
     }
 
+    /// Writes edited lyrics to the track the editor opened for, and shows them while it plays.
     fn update_lyrics_text(self: &Arc<Self>, media_id: CurrentMediaId, text: String) {
         let Some(bundle) = lyrics_from_edited_text(&text) else {
             return;
@@ -1375,26 +1385,30 @@ impl LyricsService {
         let Some(document) = bundle.documents().first() else {
             return;
         };
-        let Some(prepared) = self.begin_edited(&media_id) else {
-            return;
-        };
-        let service = Arc::clone(self);
-        let (request, sidecar) = prepared;
         let content = lyrics_to_lrc_text(document, 0);
+        let sidecar = self.settings().ui.lyrics.preferences.save_lyrics_as_sidecar;
+        let current = self.begin_edited(&media_id);
+        let playable = current
+            .as_ref()
+            .and_then(|request| request.context.playable.clone());
+        let service = Arc::clone(self);
         let _task = self.runtime.spawn(async move {
-            let Some(source) = service.source(&request.context).await else {
+            let uri = &media_id.media_uri;
+            let Some(source) = service.source_of(uri, playable.as_deref()).await else {
                 return;
             };
             let Ok(_permit) = service.write_lane.acquire().await else {
                 return;
             };
             match source
-                .write_lyrics(&service.catalog, request.media_uri(), &content, sidecar)
+                .write_lyrics(&service.catalog, uri, &content, sidecar)
                 .await
             {
                 Ok(()) => {
                     source.refresh_written_lyrics(&service.catalog);
-                    service.cache_and_accept(&request, bundle, false).await;
+                    if let Some(request) = current {
+                        service.cache_and_accept(&request, bundle, false).await;
+                    }
                 }
                 Err(error) => {
                     warn!(%error, "could not save edited lyrics");
