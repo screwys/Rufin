@@ -147,10 +147,10 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 ScrobblingPage(preferences, embedded = true)
                 val links = state.externalSiteLinks
                 SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(links.copy(enabled = it)) } }
-                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(links.copy(lastfm = it)) } }
-                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(links.copy(musicbrainz = it)) } }
-                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(links.copy(server = it)) } }
+                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(enabled = it)) } }
+                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(lastfm = it)) } }
+                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(musicbrainz = it)) } }
+                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(applicationPreferences().externalSiteLinks.copy(server = it)) } }
                 }
                 SourcesPage(model, addSource, editSource, embedded = true, connectionsOnly = true)
             }

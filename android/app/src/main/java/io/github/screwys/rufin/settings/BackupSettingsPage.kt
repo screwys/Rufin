@@ -83,7 +83,7 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 }
             }
         }
-        BackupContentsControls(settings.contents) { preferences.changePreference { setBackupPreferences(settings.copy(contents = it)) } }
+        BackupContentsControls(settings.contents) { preferences.changePreference { setBackupPreferences(applicationPreferences().backup.copy(contents = it)) } }
     }
     if (enable) BackupPasswordDialog(false, dismiss = { enable = false }) { passphrase ->
         enable = false
