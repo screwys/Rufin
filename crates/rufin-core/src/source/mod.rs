@@ -716,21 +716,6 @@ impl SourceOwner {
             else {
                 return;
             };
-            if let Err(error) = owner
-                .shared
-                .downloads
-                .attach(
-                    source_id.clone(),
-                    selected.source_key,
-                    selected.music_folder_key,
-                )
-                .await
-            {
-                owner.shared.warn_nonfatal(&error);
-            }
-            if !owner.shared.selection_is_current(&cancelled) {
-                return;
-            }
             let source = match source {
                 Ok(source) => source,
                 Err(error) => {
@@ -846,21 +831,6 @@ impl SourceOwner {
         self.shared.present_refresh(&selected.source_id);
         if let Some(source) = source {
             self.start_observer(selected.clone(), source.clone(), true);
-            let owner = self.clone();
-            self.shared.runtime.spawn(async move {
-                if let Err(error) = owner
-                    .shared
-                    .downloads
-                    .attach(
-                        selected.source_id.clone(),
-                        selected.source_key,
-                        selected.music_folder_key,
-                    )
-                    .await
-                {
-                    owner.shared.warn_nonfatal(&error);
-                }
-            });
         }
         Ok(())
     }
@@ -2452,43 +2422,7 @@ impl SourceOwner {
         subject: crate::downloads::DownloadSubject,
         media_uris: Vec<String>,
     ) {
-        let owner = self.clone();
-        self.shared.runtime.spawn(async move {
-            let mut source_ids = Vec::new();
-            for media_uri in &media_uris {
-                let source = match library::source_entity_parts(media_uri) {
-                    Some((source, kind, _)) if kind == "track" => Some(source),
-                    _ => owner
-                        .shared
-                        .catalog
-                        .track_source_by_uri(media_uri, &ReadCancellation::new())
-                        .await
-                        .ok()
-                        .flatten(),
-                };
-                if let Some(source) = source {
-                    source_ids.push(source);
-                }
-            }
-            source_ids.sort();
-            source_ids.dedup();
-            owner.shared.catalog.loaded().await;
-            for source_id in source_ids {
-                let Some(source_key) = owner.shared.catalog.source_key(&source_id) else {
-                    owner.shared.warn_nonfatal(&source_access_unavailable());
-                    continue;
-                };
-                if let Err(error) = owner
-                    .shared
-                    .downloads
-                    .attach(source_id.clone(), source_key, None)
-                    .await
-                {
-                    owner.shared.warn_nonfatal(&error);
-                }
-            }
-            owner.shared.downloads.download(subject, media_uris);
-        });
+        self.shared.downloads.download(subject, media_uris);
     }
 
     pub fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
@@ -2642,17 +2576,6 @@ impl SourceOwner {
                 }
                 owner.shared.configured();
                 owner.notice(feed::Notice::Scope);
-                let downloads_owner = owner.clone();
-                owner.shared.runtime.spawn(async move {
-                    if let Err(error) = downloads_owner
-                        .shared
-                        .downloads
-                        .attach(source_id.clone(), source_key, key)
-                        .await
-                    {
-                        downloads_owner.shared.warn_nonfatal(&error);
-                    }
-                });
                 Ok(())
             }
             .await;

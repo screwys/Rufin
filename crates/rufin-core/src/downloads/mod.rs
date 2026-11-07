@@ -66,12 +66,6 @@ enum Command {
         limit: u32,
         response: Sender<Result<DownloadPage, String>>,
     },
-    Attach {
-        source_id: SourceId,
-        source_key: SourceKey,
-        folder: Option<FolderKey>,
-        response: Sender<Result<(), String>>,
-    },
     Download {
         subject: DownloadSubject,
         media_uris: Vec<String>,
@@ -970,28 +964,6 @@ impl Downloads {
         downloads
     }
 
-    pub async fn attach(
-        &self,
-        source_id: SourceId,
-        source_key: SourceKey,
-        folder: Option<FolderKey>,
-    ) -> Result<(), String> {
-        let (response, result) = async_channel::bounded(1);
-        self.commands
-            .send(Command::Attach {
-                source_id,
-                source_key,
-                folder,
-                response,
-            })
-            .await
-            .map_err(|_| "download operation lane is unavailable".to_string())?;
-        result
-            .recv()
-            .await
-            .map_err(|_| "download attachment did not finish".to_string())?
-    }
-
     pub fn download(&self, subject: DownloadSubject, media_uris: Vec<String>) {
         self.send(Command::Download {
             subject,
@@ -1104,6 +1076,7 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
+    actor.attach_configured(&mut active).await;
     loop {
         actor.fill_slots(&mut active).await;
         // Commands come first, then prepared rules, then transfers and the settings.
@@ -1127,6 +1100,9 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
                 let current = Arc::clone(&committed.borrow_and_update());
                 if current.ui.downloads != previous.ui.downloads {
                     actor.settings_changed(&previous, &mut active).await;
+                }
+                if current.sources.configured != previous.sources.configured {
+                    actor.attach_configured(&mut active).await;
                 }
                 previous = current;
             }
@@ -1188,33 +1164,6 @@ impl Actor {
                 let _ = response
                     .send(self.queue_page(scope, offset, limit).await)
                     .await;
-            }
-            Command::Attach {
-                source_id,
-                source_key,
-                folder,
-                response,
-            } => {
-                let directory = self.settings_for(&source_id).directory;
-                if self
-                    .attached
-                    .get(&source_id)
-                    .is_some_and(|attached| attached.directory != directory)
-                {
-                    self.discard_matching(active, false, |download| {
-                        download.source_id.as_ref() == Some(&source_id)
-                    })
-                    .await;
-                }
-                let result = self
-                    .attach(source_id.clone(), source_key, folder, directory)
-                    .await;
-                let ready = result.is_ok();
-                self.pending_rules = None;
-                let _ = response.send(result).await;
-                if ready {
-                    self.reconcile_all_rules(&source_id);
-                }
             }
             Command::Download {
                 subject,
@@ -1527,6 +1476,52 @@ impl Actor {
             }
         }
         self.start_rule_preparation();
+    }
+
+    /// Attaches every configured source with its saved music folder: the one place that
+    /// decides which sources download and over which folder their rules read.
+    async fn attach_configured(&mut self, active: &mut Vec<ActiveDownload>) {
+        self.catalog.loaded().await;
+        let configured = self.settings.load().sources.configured.clone();
+        for item in configured {
+            let source_id = item.configuration.source_id;
+            let Some(source_key) = self.catalog.source_key(&source_id) else {
+                continue;
+            };
+            let folder = match item.music_folder_id.as_deref() {
+                Some(id) => {
+                    let cancel = library::ReadCancellation::new();
+                    crate::source::folders::folder_key(&self.catalog, source_key, id, &cancel)
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                None => None,
+            };
+            if self.attached.get(&source_id).is_some_and(|attached| {
+                attached.source_key == source_key && attached.folder == folder
+            }) {
+                continue;
+            }
+            let directory = self.settings_for(&source_id).directory;
+            if self
+                .attached
+                .get(&source_id)
+                .is_some_and(|attached| attached.directory != directory)
+            {
+                self.discard_matching(active, false, |download| {
+                    download.source_id.as_ref() == Some(&source_id)
+                })
+                .await;
+            }
+            match self
+                .attach(source_id.clone(), source_key, folder, directory)
+                .await
+            {
+                Ok(()) => self.reconcile_all_rules(&source_id),
+                Err(error) => warn!(%error, %source_id, "could not attach downloads"),
+            }
+        }
     }
 
     async fn attach(
