@@ -137,19 +137,11 @@ impl AndroidPlayer {
                 sender.send_replace(Arc::new(frame));
             }
         });
-        let (events, operations) = async_channel::unbounded();
-        products.runtime.spawn(async move {
-            while let Ok(event) = lyrics_events.recv().await {
-                if events.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
         Self {
             products: products.clone(),
             visualizer,
             drawing: Mutex::new(VisualizerDrawingState::default()),
-            lyrics_events: tokio::sync::Mutex::new(operations),
+            lyrics_events: tokio::sync::Mutex::new(lyrics_events),
             waveform: tokio::sync::Mutex::new(waveform),
         }
     }
