@@ -43,18 +43,6 @@ impl CatalogUi {
         &self.shell
     }
 
-    /// Whether the selected source is a Local one, whose tracks are on this device already.
-    pub fn local_source(&self) -> bool {
-        let selected = self.selected_library();
-        let configured = self.source.configured.borrow();
-        selected.is_some_and(|selected| {
-            configured.sources.iter().any(|source| {
-                source.id == selected.source_id
-                    && library::SourceKind::parse(&source.kind) == Some(library::SourceKind::Local)
-            })
-        })
-    }
-
     pub fn route_width(&self) -> i32 {
         crate::shell::shell::layout::route_content_width(&self.shell)
     }
@@ -100,11 +88,6 @@ impl CatalogUi {
 
     pub fn cycle_favorite_category(&self) {
         self.set_favorite_category(self.navigation.favorite_category.get().next());
-    }
-
-    pub fn bind_download_badge(&self, image: &gtk::Image, downloaded: bool) {
-        self.downloads
-            .bind_download_badge(image, downloaded && !self.local_source());
     }
 
     pub fn register_current_route_track_selection(&self, selection: RouteCurrentTrackSelection) {

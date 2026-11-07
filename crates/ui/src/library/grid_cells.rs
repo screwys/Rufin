@@ -956,7 +956,7 @@ impl ReusableCollectionGridCell<ArtistRow> for ArtistGridCell {
             DetailLinks::text(&artist_field(&row, field))
         });
         self.body
-            .set_download_target(&shell, !shell.local_source() && row.summary.downloaded());
+            .set_download_target(&shell, row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }
@@ -1010,7 +1010,7 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
             }
         });
         self.body
-            .set_download_target(&shell, !shell.local_source() && row.summary.downloaded());
+            .set_download_target(&shell, row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
         self.current.replace(Some(row));
     }

@@ -387,7 +387,7 @@ impl AlbumTableCell {
                 if let Some(row) = row {
                     cell.label()
                         .set_text(&album_field(row, imp.field.get().unwrap()));
-                    shell.bind_download_badge(
+                    shell.downloads.bind_download_badge(
                         &cell.downloaded(),
                         imp.field.get() == Some(LibraryField::Title) && row.summary.downloaded(),
                     );
@@ -408,6 +408,7 @@ impl AlbumTableCell {
                     cell.bind_subtitle(album_row_artist_links(row));
                     cell.subtitle().set_visible(!row.artist.trim().is_empty());
                     shell
+                        .downloads
                         .bind_download_badge(&cell.downloaded().unwrap(), row.summary.downloaded());
                 } else {
                     cell.title().set_text("");
@@ -1041,7 +1042,9 @@ where
             return;
         };
         cell.label().set_text(&text);
-        bind_shell.bind_download_badge(&cell.downloaded(), downloaded);
+        bind_shell
+            .downloads
+            .bind_download_badge(&cell.downloaded(), downloaded);
     });
     factory.connect_unbind(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
