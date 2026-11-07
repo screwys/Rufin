@@ -116,10 +116,18 @@ impl CatalogUi {
             play_label: id.play_label(),
         });
         let tracks = grouped.tracks().clone();
-        // A reread, or a header read after a download, shows the header's counts.
+        // A reread, or a header read after a download, shows the header it read.
         let header = Rc::clone(&current);
+        let shell = Rc::downgrade(self);
+        let shown_view = grouped.clone();
         let shown: crate::widgets::mounted_route::MountedHeader = Rc::new(move |read| {
-            if let Some(library::Header::Tag(summary)) = read {
+            if let (Some(shell), Some(library::Header::Tag(summary))) = (shell.upgrade(), read) {
+                shown_view.show(
+                    &shell,
+                    &summary.name,
+                    named_artwork(&summary),
+                    &named_summary_items(&summary),
+                );
                 header.replace(summary);
             }
         });

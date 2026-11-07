@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -42,6 +42,9 @@ pub struct GroupedDetailView {
     root: gtk::Widget,
     tracks: TrackListProjection,
     toolbar: LibraryToolbarProjection,
+    showcase: DetailShowcaseView,
+    cover: crate::widgets::artwork::CoverGroupProjection,
+    artwork: Rc<RefCell<Vec<ArtworkBinding>>>,
 }
 
 impl GroupedDetailView {
@@ -63,6 +66,20 @@ impl GroupedDetailView {
 
     pub fn layout_cycle(&self) -> crate::widgets::mounted_route::MountedRouteCommand {
         self.toolbar.layout_cycle()
+    }
+
+    /// Shows a header read again: its title, artwork and counts.
+    pub fn show(
+        &self,
+        shell: &CatalogUi,
+        title: &str,
+        artwork: Vec<ArtworkBinding>,
+        summary_items: &[(&str, String)],
+    ) {
+        self.showcase.set_title(title);
+        self.showcase.replace_summary(summary_items);
+        self.cover.replace(&shell.artwork, &artwork);
+        self.artwork.replace(artwork);
     }
 }
 
@@ -129,8 +146,9 @@ impl CatalogUi {
                 present(target, position, Rc::clone(&play));
             }) as crate::widgets::interactions::ContextMenuOpen
         });
+        let artwork = Rc::new(RefCell::new(artwork));
         let showcase = collection_detail_showcase(CollectionDetailShowcase {
-            view: showcase_view,
+            view: showcase_view.clone(),
             initial_width: content_width,
             compact_spacing: 22,
             wide_spacing: 22,
@@ -139,7 +157,8 @@ impl CatalogUi {
             context_menu,
             open_cover: {
                 let shell = Rc::clone(self);
-                Rc::new(move || shell.present_full_artwork_group(artwork.clone()))
+                let artwork = Rc::clone(&artwork);
+                Rc::new(move || shell.present_full_artwork_group(artwork.borrow().clone()))
             },
         });
         wrapper.append(&library_route_inset(showcase));
@@ -175,6 +194,9 @@ impl CatalogUi {
             root: wrapper.upcast(),
             tracks: track_projection,
             toolbar,
+            showcase: showcase_view,
+            cover,
+            artwork,
         }
     }
 }

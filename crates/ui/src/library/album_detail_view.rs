@@ -194,7 +194,42 @@ impl CatalogUi {
         );
         route_stack.set_visible_child_name("content");
 
-        let reads = track_projection.page_reads(|_| {}, |_| {});
+        // A reread, or a state change, shows the header it read; an album that is gone reads
+        // as missing.
+        let show: crate::widgets::mounted_route::MountedHeader = {
+            let shell = Rc::downgrade(self);
+            let album = Rc::clone(&current_album);
+            let showcase = showcase_view.clone();
+            let route_stack = route_stack.clone();
+            Rc::new(move |header| {
+                let (Some(shell), Some(::library::Header::Album(next))) = (shell.upgrade(), header)
+                else {
+                    route_stack.set_visible_child_name("missing");
+                    return;
+                };
+                route_stack.set_visible_child_name("content");
+                for heart in &hearts {
+                    set_favorite_button_active(heart, next.row.state.favorite);
+                }
+                showcase.set_title(&next.metadata.title);
+                showcase.replace_summary(&album_summary_items(&next));
+                track_count.set(next.row.summary.track_count.max(0) as u32);
+                showcase.replace_external_links(album_external_links(&shell, &next));
+                cover.replace(
+                    &shell,
+                    crate::widgets::library_fields::opaque_artwork(
+                        next.row.artwork_binding.as_deref(),
+                    ),
+                );
+                artist.set_text(&next.metadata.artist);
+                artist_links.bind(album_artist_links(&next));
+                album.replace(*next);
+            })
+        };
+        let reads = track_projection.page_reads(|_| {}, {
+            let show = Rc::clone(&show);
+            move |header| show(header)
+        });
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -229,7 +264,6 @@ impl CatalogUi {
                 reads.resume(&shell.settings.current.borrow());
             })
         };
-        let header_album = Rc::clone(&current_album);
         MountedRoute::new(route_stack.upcast(), resume)
             .with_rows(&rows)
             .with_header(
@@ -238,14 +272,7 @@ impl CatalogUi {
                         current_album.borrow().clone(),
                     )))
                 },
-                Rc::new(move |header| {
-                    if let Some(::library::Header::Album(album)) = header {
-                        for heart in &hearts {
-                            set_favorite_button_active(heart, album.row.state.favorite);
-                        }
-                        header_album.replace(*album);
-                    }
-                }),
+                show,
             )
             .with_catalog_refresh(Rc::new(move || reads.refresh()))
             .with_search(track_projection.search())

@@ -1714,8 +1714,8 @@ impl View {
 
     /// Reads the page again with `options` and current settings. A folder keeps the folder it
     /// opened, so new child folders show when the route opens again. Album, artist track, genre
-    /// and mood pages and Discography read their rows again and keep their header, so a
-    /// collection that is gone reads as empty.
+    /// and mood pages read their rows and header again, so a collection that is gone reads as
+    /// missing; Discography keeps its header.
     pub async fn reread(
         &self,
         options: OpenOptions,
@@ -1762,7 +1762,14 @@ impl View {
                     members.collection.clone(),
                 );
                 let plan = Plan::Rows(Read::Members(members));
-                read(self.again(options, settings), plan, None, seed, cancel).await
+                read(
+                    self.again(options, settings),
+                    plan,
+                    self.header,
+                    seed,
+                    cancel,
+                )
+                .await
             }
             // A favorite, rating, play or sort change orders the results it found again; a
             // change to what they match matches the query in the Catalog again. Only a new
