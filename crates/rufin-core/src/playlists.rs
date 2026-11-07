@@ -472,14 +472,13 @@ pub async fn create_playlist(
                     ),
                     _ => unreachable!(),
                 };
-                append_native_tracks(&source, &object, &tracks[sent..])
-                    .await
-                    .map_err(string_error)?;
+                let appended = append_native_tracks(&source, &object, &tracks[sent..]).await;
                 if !written {
                     refresh_playlist(&source, catalog, Some(object.clone()), None)
                         .await
                         .map_err(string_error)?;
                 }
+                appended.map_err(|(_, error)| string_error(error))?;
                 let playlist = match catalog
                     .catalog_keys(
                         library::CatalogKind::Playlist,
@@ -889,7 +888,9 @@ pub async fn add_playlist_tracks(
                         .await?
                         .into_iter()
                         .unzip();
-                    append_native_tracks(&source, &id, &ids).await?;
+                    let appended = append_native_tracks(&source, &id, &ids).await;
+                    let mut tracks = tracks;
+                    tracks.truncate(appended.as_ref().err().map_or(ids.len(), |(sent, _)| *sent));
                     let count = tracks.len();
                     if count > 0 {
                         if matches!(source.implementation, Implementation::OpenSubsonic(_)) {
@@ -905,6 +906,7 @@ pub async fn add_playlist_tracks(
                             refresh_playlist(&source, catalog, Some(id), None).await?;
                         }
                     }
+                    appended.map_err(|(_, error)| error)?;
                     Ok(count)
                 }
                 .await
@@ -1424,26 +1426,24 @@ pub async fn apply_smart_playlist_change(
         .map_err(|error| SourceError::Other(error.to_string()))?
 }
 
+/// Sends `tracks` 256 at a time; an error says how many went before it.
 async fn append_native_tracks(
     source: &Source,
     playlist: &str,
     tracks: &[String],
-) -> Result<(), SourceError> {
-    for tracks in tracks.chunks(256) {
+) -> Result<(), (usize, SourceError)> {
+    for (index, chunk) in tracks.chunks(256).enumerate() {
         match &source.implementation {
-            Implementation::Plex(provider) => {
-                provider.add_playlist_tracks(playlist, tracks).await?
-            }
+            Implementation::Plex(provider) => provider.add_playlist_tracks(playlist, chunk).await,
             Implementation::JellyfinEmby(provider) => {
-                provider.add_playlist_tracks(playlist, tracks).await?
+                provider.add_playlist_tracks(playlist, chunk).await
             }
             Implementation::OpenSubsonic(provider) => {
-                provider
-                    .edit_playlist_entries(playlist, &[], tracks)
-                    .await?
+                provider.edit_playlist_entries(playlist, &[], chunk).await
             }
             _ => unreachable!(),
         }
+        .map_err(|error| (index * 256, error))?;
     }
     Ok(())
 }
