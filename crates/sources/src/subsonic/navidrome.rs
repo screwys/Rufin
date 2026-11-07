@@ -135,7 +135,11 @@ impl SubsonicSource {
         let ids: Vec<_> = values.iter().filter_map(|value| id(&value["id"])).collect();
         let mut result = Vec::with_capacity(ids.len());
         for ids in ids.chunks(100) {
-            let mut query = vec![("_start", "0".to_string()), ("_end", ids.len().to_string())];
+            let mut query = vec![
+                ("_start", "0".to_string()),
+                ("_end", ids.len().to_string()),
+                ("missing", "false".to_string()),
+            ];
             query.extend(ids.iter().map(|id| ("id", id.clone())));
             let page: Vec<Value> = self.navidrome_json(kind, &query).await?;
             let mut page: std::collections::HashMap<_, _> = page
