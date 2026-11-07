@@ -1161,8 +1161,8 @@ impl View {
         ))
     }
 
-    /// What playing the page from its track `key` at `index` among its tracks queues; `entry`
-    /// names a playlist entry. Play Next and Play Later queue only that track, and so does a
+    /// What playing the page from its track `key`, its row at `index`, queues; `entry` names a
+    /// playlist entry, and a folder's child folders come before its tracks. Play Next and Play Later queue only that track, and so does a
     /// track on Home or Search, which list rows outside a page.
     pub fn play_track(
         &self,
@@ -1178,6 +1178,7 @@ impl View {
         let Some(page) = page else {
             return Some(PlayRequest::track(key, placement).shuffled(shuffled));
         };
+        let index = index.saturating_sub(self.folder_len().unwrap_or(0));
         Some(
             PlayRequest::captured(page.clone().selection(), index, placement, false)
                 .with_context(self.play_context().into())
@@ -1222,12 +1223,11 @@ impl View {
         shuffled: bool,
         cancel: &ReadCancellation,
     ) -> LibraryResult<Option<PlayRequest>> {
-        let tracks = index.saturating_sub(self.folder_len().unwrap_or(0));
         Ok(match row {
             Row::Track(track) => self.play_track(
                 track.track_key,
                 track.entry.as_ref().map(|entry| entry.key),
-                tracks,
+                index,
                 placement,
                 shuffled,
             ),
