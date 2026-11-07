@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Weak};
 
 use async_channel::Receiver;
-use library::{Catalog, Change, Scope, SourceKey, TrackKey};
+use library::{Catalog, Change, Scope, SourceKey, SourcePhase};
 use sources::{SourceConfiguration, SourceError};
 
 use super::{Shared, SourceOwner};
@@ -12,7 +12,8 @@ use crate::settings::StoredSettings;
 use sources::{SourceProgress, SourceProgressStage};
 
 /// Automatic artwork and lyrics downloads while either is on: one pass over every source when
-/// they start, then fetches for the tracks the change feed reports as added.
+/// they start, then one over each source whose listing completes. A pass skips what is cached
+/// and retries what failed.
 pub(crate) struct Assets(pub(crate) Weak<Shared>);
 
 impl Feature for Assets {
@@ -26,7 +27,14 @@ impl Feature for Assets {
     }
 
     fn hears(&self, scope: &Scope) -> bool {
-        matches!(scope, Scope::Reload | Scope::Tracks { .. })
+        matches!(
+            scope,
+            Scope::Reload
+                | Scope::Source {
+                    phase: SourcePhase::Completed,
+                    ..
+                }
+        )
     }
 
     fn apply(self: Arc<Self>, changes: Option<Vec<Arc<Change>>>) -> Pass {
@@ -45,21 +53,17 @@ impl Feature for Assets {
 }
 
 impl SourceOwner {
-    /// Fetches artwork and lyrics for every source, or only for these tracks.
-    async fn download_assets(&self, only: Option<&BTreeMap<SourceKey, Vec<TrackKey>>>) {
+    /// Fetches artwork and lyrics for every source, or only for these.
+    async fn download_assets(&self, only: Option<&BTreeSet<SourceKey>>) {
         let (artwork, lyrics) = self.shared.settings.load().cache_downloads();
         for configured in &self.shared.settings.load().sources.configured {
             let source_id = &configured.configuration.source_id;
             let Some(source_key) = self.shared.catalog.source_key(source_id) else {
                 continue;
             };
-            let keys = match only {
-                Some(only) => match only.get(&source_key) {
-                    Some(keys) => Some(keys.as_slice()),
-                    None => continue,
-                },
-                None => None,
-            };
+            if only.is_some_and(|only| !only.contains(&source_key)) {
+                continue;
+            }
             for (stage, enabled) in [
                 (SourceProgressStage::Artwork, artwork),
                 (
@@ -71,7 +75,7 @@ impl SourceOwner {
                     continue;
                 }
                 if let Err(error) = self
-                    .download_source_assets(&configured.configuration, source_key, stage, keys)
+                    .download_source_assets(&configured.configuration, source_key, stage)
                     .await
                 {
                     tracing::warn!(source = %configured.configuration.name, %error, "could not download source assets");
@@ -86,7 +90,6 @@ impl SourceOwner {
         configuration: &SourceConfiguration,
         source_key: SourceKey,
         stage: SourceProgressStage,
-        keys: Option<&[TrackKey]>,
     ) -> Result<(), String> {
         let source_id = &configuration.source_id;
         let catalog = &self.shared.catalog;
@@ -108,28 +111,15 @@ impl SourceOwner {
         let mut completed = 0;
         if stage == SourceProgressStage::Artwork {
             let mut after = None;
-            let mut chunks = keys.map(|keys| keys.chunks(128));
             loop {
-                let page = match &mut chunks {
-                    Some(chunks) => match chunks.next() {
-                        Some(keys) => catalog
-                            .track_key_artwork_bindings(keys)
-                            .await
-                            .map_err(crate::string_error)?,
-                        None => break,
-                    },
-                    None => {
-                        let page = catalog
-                            .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
-                            .await
-                            .map_err(crate::string_error)?;
-                        if page.is_empty() {
-                            break;
-                        }
-                        after = page.last().cloned();
-                        page
-                    }
-                };
+                let page = catalog
+                    .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
+                    .await
+                    .map_err(crate::string_error)?;
+                if page.is_empty() {
+                    break;
+                }
+                after = page.last().cloned();
                 if completed == 0 {
                     report(0);
                 }
@@ -148,7 +138,7 @@ impl SourceOwner {
             let mut after = None;
             loop {
                 let page = catalog
-                    .uncached_source_lyrics_page(source_key, after, keys, &cancel_read)
+                    .uncached_source_lyrics_page(source_key, after, &cancel_read)
                     .await
                     .map_err(crate::string_error)?;
                 if page.is_empty() {
@@ -237,25 +227,23 @@ impl SourceOwner {
     }
 }
 
-/// Fetches artwork and lyrics for the tracks the Changes added, or for every source.
+/// Fetches artwork and lyrics for the sources whose listing completed, or for every source.
 async fn download_added(shared: Arc<Shared>, changes: Option<Vec<Arc<Change>>>) {
-    let mut added = BTreeMap::<SourceKey, Vec<TrackKey>>::new();
+    let mut completed = BTreeSet::new();
     let mut full = changes.is_none();
     for scope in changes.iter().flatten().flat_map(|change| &change.scopes) {
         match scope {
             Scope::Reload => full = true,
-            Scope::Tracks {
-                source: Some(source),
-                added: keys,
-                ..
-            } => added.entry(*source).or_default().extend(keys),
+            Scope::Source {
+                key,
+                phase: SourcePhase::Completed,
+            } => {
+                completed.insert(*key);
+            }
             _ => {}
         }
     }
-    added.retain(|_, keys| !keys.is_empty());
-    if full || !added.is_empty() {
-        SourceOwner { shared }
-            .download_assets((!full).then_some(&added))
-            .await;
-    }
+    SourceOwner { shared }
+        .download_assets((!full).then_some(&completed))
+        .await;
 }
