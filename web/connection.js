@@ -145,20 +145,16 @@ async function connect() {
   $("app").inert = false;
   updateSources(configured);
   const shown = rendered && $("content").querySelector("[data-page]");
-  if (initialPage) {
-    if (shown) {
-      state.source = $("content").dataset.source;
-      state.selectedLibrary = $("content").dataset.folder || null;
-    }
-    initialPage = false;
-    if (shown) {
-      showPage(shown.dataset);
-      await loadView(true, null, {}, Number(new URLSearchParams(location.search).get("offset")));
-    } else navigate("Home");
-  } else await loadView();
-  void refreshContinuation();
+  const initial = initialPage;
+  initialPage = false;
+  if (shown) {
+    state.source = $("content").dataset.source;
+    state.selectedLibrary = $("content").dataset.folder || null;
+    showPage(shown.dataset);
+  } else if (initial) navigate("Home");
   stream(
-    // The stream follows the page shown when it connects, then the pages it reads.
+    // The stream follows the page shown when it connects, then the pages it reads; it starts
+    // before the page loads, so it hears what commits meanwhile.
     () => `/events${opened && opened !== "sources" ? `?${new URLSearchParams({ page: JSON.stringify(opened) })}` : ""}`,
     (value) => {
       if (value.stream) state.stream = value.stream;
@@ -173,6 +169,9 @@ async function connect() {
     },
     session.signal,
   );
+  if (shown) await loadView(true, null, {}, Number(new URLSearchParams(location.search).get("offset")));
+  else if (!initial) await loadView();
+  void refreshContinuation();
 }
 
 async function stream(path, receive, signal) {

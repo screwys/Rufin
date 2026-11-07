@@ -283,8 +283,13 @@ async fn list_page(
 ) -> Result<Response<Body>, Error> {
     let token = page::token(products, list, parameters)?;
     let limit = number(parameters, "limit", default)?.min(cap);
-    let opened = page::open(products, token, number(parameters, "offset", 0)?, limit).await?;
-    pages.show(headers, &opened.view);
+    let read = pages.read(headers, &token);
+    let mut opened = page::open(products, token, number(parameters, "offset", 0)?, limit).await?;
+    if let Some(read) = read {
+        pages.show(read, &opened);
+        // A stream that followed this page all along carries what committed meanwhile.
+        opened.missed = opened.missed.filter(|_| !read.2);
+    }
     if opened.token.route == rufin_core::route::Route::Home {
         let block = parameters
             .get("block")
@@ -996,31 +1001,47 @@ fn publication_json(
     value
 }
 
-/// The page each live events stream shows, for the refresh verdicts its frames carry. A page
-/// read sent with `X-Rufin-Events: <stream>` becomes that stream's page.
+/// The page each live events stream shows, for the refresh verdicts its frames carry, after
+/// the page reads it got. A page read sent with `X-Rufin-Events: <stream>` becomes that
+/// stream's page unless the stream got a later read.
 #[derive(Clone, Default)]
-struct Pages(Arc<Mutex<HashMap<u64, Option<Arc<rufin_core::view::View>>>>>);
+struct Pages(Arc<Mutex<HashMap<u64, (u64, Option<Shown>)>>>);
+
+type Shown = (page::PageToken, Arc<rufin_core::view::View>);
 
 impl Pages {
-    fn show(&self, headers: &hyper::HeaderMap, view: &Arc<rufin_core::view::View>) {
-        let Some(stream) = headers
-            .get("x-rufin-events")
-            .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
-        else {
-            return;
-        };
-        if let Some(shown) = self.0.lock().expect("event pages").get_mut(&stream) {
-            *shown = Some(Arc::clone(view));
+    /// Counts a read of `token` for the stream the headers name: the stream, the read's place
+    /// and whether the stream follows that page already.
+    fn read(
+        &self,
+        headers: &hyper::HeaderMap,
+        token: &page::PageToken,
+    ) -> Option<(u64, u64, bool)> {
+        let stream = headers.get("x-rufin-events")?.to_str().ok()?.parse().ok()?;
+        let mut pages = self.0.lock().expect("event pages");
+        let (reads, shown) = pages.get_mut(&stream)?;
+        *reads += 1;
+        Some((
+            stream,
+            *reads,
+            shown.as_ref().is_some_and(|(page, _)| page == token),
+        ))
+    }
+
+    fn show(&self, (stream, place, _): (u64, u64, bool), opened: &page::Opened) {
+        let mut pages = self.0.lock().expect("event pages");
+        if let Some((reads, shown)) = pages.get_mut(&stream)
+            && *reads == place
+        {
+            *shown = Some((opened.token.clone(), Arc::clone(&opened.view)));
         }
     }
 
     fn page(&self, stream: u64) -> Option<Arc<rufin_core::view::View>> {
-        self.0
-            .lock()
-            .expect("event pages")
+        let pages = self.0.lock().expect("event pages");
+        pages
             .get(&stream)
-            .cloned()
-            .flatten()
+            .and_then(|(_, shown)| Some(Arc::clone(&shown.as_ref()?.1)))
     }
 }
 
@@ -1043,15 +1064,15 @@ async fn events(
 ) -> Response<Body> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Changes from before the page opens on, so none committed while it opens is lost.
+    let catalog = products.source.changes();
     // The page the client shows when it connects; one that does not open has nothing to follow.
-    let shown = match page::token(&products, "page", &parameters) {
-        Ok(token) => page::open(&products, token, 0, 0)
-            .await
-            .ok()
-            .map(|opened| opened.view),
+    let page = match page::token(&products, "page", &parameters) {
+        Ok(token) => page::open(&products, token, 0, 0).await.ok(),
         Err(_) => None,
     };
-    pages.0.lock().expect("event pages").insert(id, shown);
+    let page = page.map(|opened| (opened.token, opened.view));
+    pages.0.lock().expect("event pages").insert(id, (0, page));
     let stream = Stream { id, pages };
     let receivers = (
         products.playback.updates.subscribe(),
@@ -1059,7 +1080,7 @@ async fn events(
         products.lyrics.current(),
         products.appearance.subscribe(),
         products.settings.changes(),
-        products.source.changes(),
+        catalog,
         products.clone(),
         true,
         None,
