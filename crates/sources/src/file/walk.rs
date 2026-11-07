@@ -180,7 +180,7 @@ pub(crate) async fn walk<F: FileSource>(
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 enum Identity {
-    Inode(i64, i64),
+    Inode(i64, i64, Option<i64>, i64),
     Native(String),
 }
 
@@ -189,7 +189,7 @@ fn identity(file: &LocalFileWrite) -> Option<Identity> {
         return None;
     }
     match (file.device_id, file.inode, &file.native_id) {
-        (Some(device), Some(inode), _) => Some(Identity::Inode(device, inode)),
+        (Some(d), Some(i), _) => Some(Identity::Inode(d, i, file.size_bytes, file.mtime_ns)),
         (_, _, Some(id)) => Some(Identity::Native(id.clone())),
         _ => None,
     }
