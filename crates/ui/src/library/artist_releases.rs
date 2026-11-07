@@ -980,9 +980,7 @@ fn artist_route_list(
                     .list_model()
                     .item(position as u32)
                     .and_downcast::<RowItem>();
-                let row = value
-                    .as_ref()
-                    .and_then(|item| item.part::<library::AlbumRow>().map(Arc::new));
+                let row = value.as_ref().and_then(RowItem::row);
                 for cell in state.imp().table_cells.borrow().iter() {
                     cell.downcast_ref::<AlbumTableCell>()
                         .unwrap()
@@ -1060,11 +1058,10 @@ fn artist_route_list(
                     slot.widget.add_css_class("row-pending");
                     let position = start + offset;
                     let value = model.item(position as u32).and_downcast::<RowItem>();
-                    if let Some(album) = value
-                        .as_ref()
-                        .and_then(|item| item.part::<library::AlbumRow>())
+                    if let Some(row) = value.as_ref().and_then(RowItem::row)
+                        && let library::Row::Album(album) = row.as_ref()
                     {
-                        slot.cell.bind(position as u32, album);
+                        slot.cell.bind(position as u32, album.clone());
                         slot.widget.remove_css_class("row-pending");
                     } else {
                         slot.cell.clear();

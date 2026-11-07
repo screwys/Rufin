@@ -129,9 +129,9 @@ impl RowItem {
         self.imp().handlers.borrow_mut().remove(&owner);
     }
 
-    /// The row it shows as `T`, when it is read.
-    pub fn part<T: Clone + 'static>(&self) -> Option<T> {
-        self.ready_as(T::clone)
+    /// The library row it shows, when it is read.
+    pub fn row(&self) -> Option<Arc<Row>> {
+        self.value::<Arc<Row>>().filter(|_| self.is_ready())
     }
 
     /// The row it shows as `T`: a row of that type, or the part of a library row that is one.

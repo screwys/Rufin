@@ -2,7 +2,7 @@ use crate::widgets::media_drag::{MediaDragSource, install_media_drag_source};
 use crate::widgets::view_model::{item_at_from_item, object_item};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use ::library::{AlbumRow, ArtistRow, Row, TrackRow};
+use ::library::{ArtistRow, Row, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
@@ -186,7 +186,7 @@ pub fn album_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnVi
             let row = item
                 .item()
                 .and_downcast::<crate::widgets::view_model::RowItem>()
-                .and_then(|item| item.part::<AlbumRow>().map(std::sync::Arc::new));
+                .and_then(|item| item.row());
             cell.bind(item.position(), row);
         }
     });
@@ -234,7 +234,7 @@ mod album_table_cell_imp {
     #[derive(Default)]
     pub struct AlbumTableCell {
         pub(super) view: RefCell<Option<AlbumCellView>>,
-        pub(super) row: RefCell<Option<std::sync::Arc<AlbumRow>>>,
+        pub(super) row: RefCell<Option<std::sync::Arc<Row>>>,
         pub(super) field: std::cell::Cell<Option<LibraryField>>,
         pub(super) shell: RefCell<std::rc::Weak<CatalogUi>>,
         pub(super) title_playing:
@@ -292,7 +292,9 @@ impl AlbumTableCell {
                         return;
                     };
                     let row = cell.imp().row.borrow().clone();
-                    if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
+                    if let (Some(shell), Some(Row::Album(row))) =
+                        (cell.imp().shell.borrow().upgrade(), row.as_deref())
+                    {
                         shell.set_favorite(
                             library::FavoriteTarget::Album(row.media_uri.clone()),
                             !favorite_button_is_active(button),
@@ -312,6 +314,9 @@ impl AlbumTableCell {
             install_media_drag_source(view.widget(), move || {
                 let cell = weak.upgrade()?;
                 let row = cell.imp().row.borrow().clone()?;
+                let Row::Album(row) = row.as_ref() else {
+                    return None;
+                };
                 Some((
                     MediaDragSource::capture_target(PlayTarget::of_album(&row)),
                     row.title.clone(),
@@ -324,17 +329,9 @@ impl AlbumTableCell {
                     let Some(cell) = weak.upgrade() else {
                         return;
                     };
-                    let row = cell.imp().row.borrow().clone();
+                    let row = cell.imp().row.borrow().as_deref().cloned();
                     if let (Some(shell), Some(row)) = (cell.imp().shell.borrow().upgrade(), row) {
-                        {
-                            present_row_menu(
-                                target,
-                                shell.shell(),
-                                Row::Album((*row).clone()),
-                                None,
-                                position,
-                            );
-                        }
+                        present_row_menu(target, shell.shell(), row, None, position);
                     }
                 }),
             );
@@ -357,15 +354,19 @@ impl AlbumTableCell {
         cell
     }
 
-    pub fn bind(&self, position: u32, row: Option<std::sync::Arc<AlbumRow>>) {
+    pub fn bind(&self, position: u32, row: Option<std::sync::Arc<Row>>) {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
         let imp = self.imp();
         imp.row.replace(row.clone());
+        let row = match row.as_deref() {
+            Some(Row::Album(album)) => Some(album),
+            _ => None,
+        };
         let Some(shell) = imp.shell.borrow().upgrade() else {
             return;
         };
         let view = imp.view.borrow();
-        let target = row.as_deref().map(PlayTarget::of_album);
+        let target = row.map(PlayTarget::of_album);
         if let Some(playing) = imp.title_playing.borrow().as_ref() {
             playing.bind(&shell, target.clone());
         }
@@ -385,7 +386,7 @@ impl AlbumTableCell {
             AlbumCellView::Text(cell) => {
                 if let Some(row) = row {
                     cell.label()
-                        .set_text(&album_field(&row, imp.field.get().unwrap()));
+                        .set_text(&album_field(row, imp.field.get().unwrap()));
                     shell.bind_download_badge(
                         &cell.downloaded(),
                         imp.field.get() == Some(LibraryField::Title) && row.summary.downloaded(),
@@ -404,7 +405,7 @@ impl AlbumTableCell {
                         48,
                     );
                     cell.title().set_text(&row.title);
-                    cell.bind_subtitle(album_row_artist_links(&row));
+                    cell.bind_subtitle(album_row_artist_links(row));
                     cell.subtitle().set_visible(!row.artist.trim().is_empty());
                     shell
                         .bind_download_badge(&cell.downloaded().unwrap(), row.summary.downloaded());
@@ -416,7 +417,7 @@ impl AlbumTableCell {
                 }
             }
             AlbumCellView::Favorite(button) => {
-                set_placeholder_favorite(button, row.as_ref().map(|row| row.state.favorite))
+                set_placeholder_favorite(button, row.map(|row| row.state.favorite))
             }
             AlbumCellView::Tools(cell) => cell.set_sensitive(row.is_some()),
         }
