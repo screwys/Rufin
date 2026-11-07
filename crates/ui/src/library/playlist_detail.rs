@@ -169,6 +169,11 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
+        // Its pin reads core's totals again, which time may have moved since its last read.
+        let shell = self.shell();
+        if (shell.settings.current.borrow().sidebar.pins).contains(&summary.pin()) {
+            crate::shell::shell::navigation::refresh_sidebar_pins(shell);
+        }
         let owner = PlaylistDetailOwner::Smart { summary: *summary };
         let list_key = owner.key();
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);
