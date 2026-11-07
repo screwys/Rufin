@@ -169,7 +169,6 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        self.update_smart_playlist_pin(&summary);
         let owner = PlaylistDetailOwner::Smart { summary: *summary };
         let list_key = owner.key();
         let rows = Rows::over_view(self.products.runtime.clone(), &mut read);

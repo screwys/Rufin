@@ -19,7 +19,6 @@ use crate::widgets::interactions::{
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::{gio, glib};
-use library::SmartPlaylistRow;
 use rufin_core::playback::QueuePlacement;
 use rufin_core::playlists::smart_playlist_display_name;
 use rufin_core::route::{CollectionCategory, Route};
@@ -693,36 +692,6 @@ pub(crate) fn show_pin_changes(shell: &Shell, changed: &rufin_core::source::feed
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
     shell.navigation.pin_identity.borrow_mut().take();
     request_sidebar_pins(shell);
-}
-
-pub(crate) fn update_sidebar_smart_playlist_pin_metadata(
-    shell: &Shell,
-    summary: &SmartPlaylistRow,
-) {
-    let item = {
-        let mut items = shell.navigation.pin_items.borrow_mut();
-        let Some(item) = items.iter_mut().find(|item| {
-            matches!(&item.row, library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(smart))
-                if smart.smart_playlist_key == summary.smart_playlist_key)
-        }) else {
-            return;
-        };
-        if let library::Row::Playlist(library::PlaylistListRow::SmartPlaylist(smart)) =
-            &mut item.row
-        {
-            smart.track_count = summary.track_count;
-            smart.duration_millis = summary.duration_millis;
-        }
-        item.clone()
-    };
-    let Some(key) = sidebar_pin_route_key(&item.route()) else {
-        return;
-    };
-    if let Some(widget) =
-        keyed_sidebar_pin_widgets(&shell.navigation_view.normal_nav_pins).get(&key)
-    {
-        update_sidebar_pin_widget_metadata(widget, &item);
-    }
 }
 
 fn sidebar_pin_items(shell: &Shell) -> Vec<SidebarPinItem> {

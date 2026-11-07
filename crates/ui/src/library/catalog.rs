@@ -79,13 +79,6 @@ impl CatalogUi {
         }
     }
 
-    pub fn update_smart_playlist_pin(&self, summary: &library::SmartPlaylistRow) {
-        crate::shell::shell::navigation::update_sidebar_smart_playlist_pin_metadata(
-            &self.shell,
-            summary,
-        );
-    }
-
     pub fn cycle_favorite_category(&self) {
         self.set_favorite_category(self.navigation.favorite_category.get().next());
     }
