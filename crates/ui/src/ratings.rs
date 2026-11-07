@@ -71,9 +71,11 @@ impl RatingControl {
     pub fn set_rating(&self, rating: Option<u8>, half_stars: bool) {
         let step = if half_stars { 1 } else { 2 };
         self.step.set(step);
-        self.value.set(normalized_rating(rating, step));
-        if self.preview.get().is_none() {
-            set_rating_icons(&self.stars, self.value.get());
+        let value = normalized_rating(rating, step);
+        // A rating that changes, such as another track's, ends any hover preview.
+        if self.value.replace(value) != value || self.preview.get().is_none() {
+            self.preview.set(None);
+            set_rating_icons(&self.stars, value);
         }
     }
 
