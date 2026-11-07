@@ -686,6 +686,20 @@ impl Catalog {
             .collect()
     }
 
+    /// Pictures the rows of these tracks show, skipping tracks without one.
+    pub async fn track_key_artwork_bindings(
+        &self,
+        keys: &[crate::TrackKey],
+    ) -> LibraryResult<Vec<Vec<u8>>> {
+        let arts = self.arts(keys.iter().map(|key| Some(Owner::Track(key.raw()))));
+        let mut connection = self.acquire_reader().await?;
+        Ok(crate::catalog::fetch::bindings(&mut connection, &arts)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
     /// Pictures of tracks by URI, skipping tracks without one.
     pub async fn track_artwork_bindings(
         &self,

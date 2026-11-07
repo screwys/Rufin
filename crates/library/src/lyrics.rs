@@ -257,23 +257,26 @@ pub(crate) async fn move_lyrics_on(
 }
 
 impl Catalog {
-    /// Tracks of a source without source lyrics.
+    /// Tracks of a source without source lyrics, all of them or only these.
     pub async fn uncached_source_lyrics_page(
         &self,
         source: crate::SourceKey,
         after: Option<crate::TrackKey>,
+        only: Option<&[crate::TrackKey]>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
         let mut connection = self.acquire_cancellable(cancellation).await?;
         Ok(sqlx::query_as(
             "SELECT track_key,media_uri FROM tracks track
             WHERE source_key=?1 AND indexed=1 AND track_key>?2
+              AND (?3 IS NULL OR track_key IN (SELECT value FROM json_each(?3)))
               AND NOT EXISTS(SELECT 1 FROM lyrics_cache lyrics
                 WHERE lyrics.media_uri=track.media_uri AND lyrics.authority='source')
             ORDER BY track_key LIMIT 128",
         )
         .bind(source)
         .bind(after.map_or(0, crate::TrackKey::raw))
+        .bind(only.map(serde_json::to_string).transpose()?)
         .fetch_all(&mut *connection)
         .await?)
     }
