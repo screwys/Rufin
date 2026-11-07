@@ -480,16 +480,12 @@ function sourceInput() {
       data: {
         name: name || (integrationSaved ? (kind === "smb" ? tr("SMB / Samba") : tr("WebDAV")) : "My music"),
         settings: {
+          ...(editingSource?.preset?.file_settings || { alternate_urls: [], folders: [], domain: "", certificate_pem: null, require_smb_encryption: false }),
           url,
-          alternate_urls: [],
-          folders: [],
           excluded_folders: excludedFolders,
           username,
-          domain: "",
           authentication: $("authentication").value,
           trust_invalid_certificate: trust,
-          certificate_pem: null,
-          require_smb_encryption: false,
         },
         credentials: { secret, headers: [] },
       },
