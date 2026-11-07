@@ -397,10 +397,12 @@ pub(super) fn favorite(data: &Value) -> bool {
 pub(super) fn play_count(data: &Value) -> Option<u32> {
     field::<i32>(data, "PlayCount").map(|v| v.max(0) as u32)
 }
+/// The user's rating; Jellyfin writes a cleared one as 0.
 pub(super) fn user_rating(data: &Value) -> Option<u8> {
     field::<f64>(data, "Rating")
         .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
         .map(|v| v.round() as u8)
+        .filter(|v| *v > 0)
 }
 
 pub(super) fn primary_image_ref(

@@ -172,13 +172,9 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
                 };
                 let facts = library::NativeUserState {
                     favorite: crate::remote_json::boolean(&item["IsFavorite"]),
-                    rating: match item.get("Rating") {
-                        Some(Value::Null) => Some(None),
-                        Some(_) => {
-                            item::user_rating(item).map(|rating| Some(i64::from(rating) * 10))
-                        }
-                        None => None,
-                    },
+                    rating: item
+                        .get("Rating")
+                        .map(|_| item::user_rating(item).map(|rating| i64::from(rating) * 10)),
                     play_count: item::play_count(item).map(i64::from),
                     last_played: crate::policy::unix_seconds(crate::remote_json::field(
                         item,
