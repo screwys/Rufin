@@ -383,7 +383,9 @@ mod freedesktop {
     }
 
     fn mpris_metadata(playback: Option<&PlaybackView>, art_url: Option<String>) -> Metadata {
-        let Some(entry) = playback.and_then(|playback| playback.transport.current.as_ref()) else {
+        let Some((transport, entry)) = playback
+            .and_then(|playback| Some((&playback.transport, playback.transport.current.as_ref()?)))
+        else {
             return Metadata::builder().trackid(MprisTrackId::NO_TRACK).build();
         };
         let mut builder = Metadata::builder()
@@ -391,13 +393,9 @@ mod freedesktop {
             .title(entry.row.track.metadata.title.clone())
             .artist([entry.row.track.metadata.artist.clone()])
             .album(entry.row.track.metadata.album.clone())
+            // The length playback found, which a catalog without durations lacks.
             .length(Time::from_micros(
-                entry
-                    .row
-                    .track
-                    .metadata
-                    .duration_millis
-                    .saturating_mul(1_000),
+                (transport.duration_millis as i64).saturating_mul(1_000),
             ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
