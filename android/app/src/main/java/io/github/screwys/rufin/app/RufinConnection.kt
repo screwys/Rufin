@@ -119,6 +119,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     var debugLogging by mutableStateOf(false)
         private set
+    /** The committed preferences, followed once for every connection that shows them. */
+    var preferences by mutableStateOf<io.github.screwys.rufin.shared.rufin_core.CommittedPreferences?>(null)
+        private set
     private var observation: Job? = null
 
     private val connection = object : ServiceConnection {
@@ -164,6 +167,8 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 val sourceChanges = owner.subscribe()
                 val operations = owner.subscribeOperation()
                 val catalog = owner.changes()
+                val settings = core.settings()
+                val preferenceChanges = settings.subscribePreferences()
                 debugLogging = core.debugLogging()
                 try {
                     sources = withContext(Dispatchers.Default) { sourceChanges.next() }
@@ -180,6 +185,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                             while (isActive) {
                                 sources = withContext(Dispatchers.Default) { sourceChanges.next() }
                             }
+                        }
+                        launch {
+                            while (isActive) preferences = withContext(Dispatchers.Default) { preferenceChanges.next() }
                         }
                         launch {
                             while (isActive) {
@@ -202,6 +210,9 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                     ready = false
                     sourceOperation = SourceOperation.Idle
                     sources = null
+                    preferences = null
+                    preferenceChanges.destroy()
+                    settings.destroy()
                     operations.destroy()
                     catalog.destroy()
                     sourceChanges.destroy()

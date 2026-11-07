@@ -37,8 +37,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
         private set
     var reportLoading by mutableStateOf(false)
         private set
-    var preferences by mutableStateOf<ActivityOverviewSettings?>(null)
-        private set
+    val preferences by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.player?.application?.activityOverview }
     var releaseError by mutableStateOf<String?>(null)
         private set
     private var releasesOwner: ReleaseUpdateOwner? = null
@@ -74,11 +73,9 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                 val settings = runtime.settings()
                 val changes = runtime.releaseEvents()
                 val periodicChecks = releaseOwner.checkPeriodically()
-                val preferenceChanges = settings.subscribePreferences()
                 releasesOwner = releaseOwner
                 settingsOwner = settings
                 try {
-                    preferences = withContext(Dispatchers.Default) { preferenceChanges.next() }.player.application.activityOverview
                     releaseCheck = ReleaseCheck.Idle
                     bridge = owner
                     startupPeriod = when (val period = owner.startupActivityPeriod()) {
@@ -87,32 +84,25 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                         else -> null
                     }
                     releaseOwner.check()
-                    coroutineScope {
-                        launch {
-                            while (isActive) {
-                                preferences = withContext(Dispatchers.Default) { preferenceChanges.next() }.player.application.activityOverview
-                            }
-                        }
-                        while (isActive) {
-                            val next = withContext(Dispatchers.Default) { changes.next() }
-                            when (next) {
-                                is ReleaseUpdate.Refreshed -> {
-                                    releases = next.history
-                                    releaseError = null
-                                    next.notificationVersion?.let { version ->
-                                        connection.showFeedback(translate("New release is available"))
-                                        withContext(Dispatchers.IO) { releaseOwner.markSeen(version) }
-                                    }
+                    while (currentCoroutineContext().isActive) {
+                        val next = withContext(Dispatchers.Default) { changes.next() }
+                        when (next) {
+                            is ReleaseUpdate.Refreshed -> {
+                                releases = next.history
+                                releaseError = null
+                                next.notificationVersion?.let { version ->
+                                    connection.showFeedback(translate("New release is available"))
+                                    withContext(Dispatchers.IO) { releaseOwner.markSeen(version) }
                                 }
-                                is ReleaseUpdate.Failed -> releaseError = next.error
-                                is ReleaseUpdate.Updated -> releases = releases?.copy(installedVersion = next.version, availableVersion = null)
-                                else -> Unit
                             }
+                            is ReleaseUpdate.Failed -> releaseError = next.error
+                            is ReleaseUpdate.Updated -> releases = releases?.copy(installedVersion = next.version, availableVersion = null)
+                            else -> Unit
                         }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { connection.runAction { throw error } }
-                finally { bridge = null; releasesOwner = null; settingsOwner = null; periodicChecks.destroy(); preferenceChanges.destroy(); changes.destroy(); owner.destroy(); releaseOwner.destroy(); settings.destroy() }
+                finally { bridge = null; releasesOwner = null; settingsOwner = null; periodicChecks.destroy(); changes.destroy(); owner.destroy(); releaseOwner.destroy(); settings.destroy() }
             }
         }
         scope.launch {

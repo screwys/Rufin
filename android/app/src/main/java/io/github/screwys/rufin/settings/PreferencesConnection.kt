@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferences
 import io.github.screwys.rufin.shared.rufin_core.SecretStorageMode
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.ThemePreference
@@ -42,10 +41,8 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         private set
     var themeErrors by mutableStateOf<List<String>>(emptyList())
         private set
-    var applicationSettings by mutableStateOf<ApplicationPreferences?>(null)
-        private set
-    var castNetworkInterface by mutableStateOf<String?>(null)
-        private set
+    val applicationSettings by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.player?.application }
+    val castNetworkInterface by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.castNetworkInterface }
     val reduceMotion by derivedStateOf { applicationSettings?.reduceMotion == true }
     val showDownloadedBadges by derivedStateOf { applicationSettings?.showDownloadedBadges != false }
 
@@ -72,26 +69,14 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                 installedCatalogIds = null
                 bridge = preferences
                 val subscription = preferences.subscribe(packaged.map { it.removeSuffix(".po") })
-                val owner = settings!!
-                val changes = owner.subscribePreferences()
                 try {
-                    coroutineScope {
-                        launch {
-                            while (isActive) {
-                                val next = withContext(Dispatchers.Default) { changes.next() }
-                                castNetworkInterface = next.castNetworkInterface
-                                applicationSettings = next.player.application
-                            }
-                        }
-                        while (currentCoroutineContext().isActive) {
-                            val next = withContext(Dispatchers.Default) { subscription.next() }
-                            applyLanguage(next.language)
-                            state = next
-                        }
+                    while (currentCoroutineContext().isActive) {
+                        val next = withContext(Dispatchers.Default) { subscription.next() }
+                        applyLanguage(next.language)
+                        state = next
                     }
                 } finally {
                     bridge = null
-                    changes.destroy()
                     subscription.destroy()
                     preferences.destroy()
                     settings?.destroy(); settings = null

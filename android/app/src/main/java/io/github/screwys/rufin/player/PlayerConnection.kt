@@ -13,7 +13,6 @@ import io.github.screwys.rufin.core.AndroidPlayer
 import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.core.AndroidPlayerMetadata
-import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
@@ -36,8 +35,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     internal val model get() = connection
     internal val artworkCache = ArtworkCache()
     private val readings = Executors.newSingleThreadExecutor { Thread(it, "Rufin lyrics") }.asCoroutineDispatcher()
-    var settings by mutableStateOf<PlayerPreferences?>(null)
-        private set
+    val settings by derivedStateOf(structuralEqualityPolicy()) { connection.preferences?.player }
     var preferenceOptions by mutableStateOf<PlayerPreferenceOptions?>(null)
         private set
     private var settingsOwner: SettingsOwner? = null
@@ -135,15 +133,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 outputChoices = emptyList()
                 val lyricSubscription = player.subscribeLyrics()
                 val visualizerSubscription = player.subscribeVisualizer()
-                val preferenceChanges = owner.subscribePreferences()
                 try {
                     withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
                     coroutineScope {
-                        launch {
-                            while (isActive) {
-                                settings = withContext(Dispatchers.Default) { preferenceChanges.next() }.player
-                            }
-                        }
                         launch {
                             service.outputs.routes.map { routes -> routes.firstOrNull { it.selected }?.id }
                                 .distinctUntilChanged().collect { route ->
@@ -225,7 +217,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     bridge = null
                     settingsOwner = null
                     owner.destroy()
-                    settings = null
                     preferenceOptions = null
                     metadataLinks = null
                     waveform = null
@@ -237,7 +228,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     levels = emptyList()
                     lyricSubscription.destroy()
                     visualizerSubscription.destroy()
-                    preferenceChanges.destroy()
                     playbackOwner?.destroy()
                     playbackOwner = null
                     lyricsOwner?.destroy()

@@ -328,6 +328,12 @@ impl AndroidView {
             .map(|position| position as u64)
     }
 
+    /// Whether the committed settings make the page read again: those its order, rows or Home
+    /// blocks were read with changed.
+    pub fn settings_reread(&self) -> bool {
+        self.view.settings_reread(&self.settings.load()).is_some()
+    }
+
     /// Plays or queues the page whole, as its header does.
     pub fn play_all(
         &self,

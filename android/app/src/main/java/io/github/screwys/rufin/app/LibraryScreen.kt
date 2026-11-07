@@ -156,9 +156,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val reduceMotion = LocalReduceMotion.current
     val label: (String) -> String = ::translate
     val browse = model.browse
-    SideEffect {
-        browse.homeBlocksFingerprint = preferences.applicationSettings?.homeBlocks?.toString()
-    }
     val player = rememberPlayerConnection(model)
     FeedbackToast(model, player)
     val connectState = model.connect.state
@@ -379,7 +376,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                     keyboard?.hide(); focusManager.clearFocus(); routeMenu = false
                                     if (section == AppSection.Search) browse.searchText = ""
                                     if (section == AppSection.More) moreStack = listOf(MoreDestination.Root)
-                                    if (section == AppSection.Pins && !selected) pinsPage.refresh()
                                     browse.section = section; searchExpanded = false
                                 }
                             }

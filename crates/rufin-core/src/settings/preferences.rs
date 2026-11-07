@@ -7,6 +7,9 @@ use super::{PlayerPreferences, SettingsError, SettingsOwner, StoredSettings, app
 pub struct CommittedPreferences {
     pub player: PlayerPreferences,
     pub cast_network_interface: Option<String>,
+    /// The sidebar routes the tabs show, and the pins the Pins page shows.
+    pub route_items: Vec<super::SidebarRouteItemSettings>,
+    pub pins: Vec<super::SidebarPin>,
 }
 
 /// Committed preferences for one observer. The first call returns the current value.
@@ -27,6 +30,10 @@ impl PreferenceSubscription {
         Ok(CommittedPreferences {
             player: PlayerPreferences::from(&settings.ui),
             cast_network_interface: settings.ui.cast_network_interface.clone(),
+            route_items: settings.ui.sidebar.route_items.clone(),
+            pins: (settings.ui.sidebar.pins_visible)
+                .then(|| settings.ui.sidebar.pins.clone())
+                .unwrap_or_default(),
         })
     }
 }

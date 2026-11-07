@@ -116,7 +116,6 @@ internal class BrowsePage(
         val route: Route, val category: CollectionCategory, val historySource: String?, val filter: String,
         val sort: LibraryField?, val descending: Boolean, val favoritesOnly: Boolean, val downloadedOnly: Boolean,
         val revision: Int, val artistAlbumsRevision: Int,
-        val homeBlocks: String?,
         val parentPage: AndroidOpened?,
     )
 
@@ -214,10 +213,9 @@ internal class BrowsePage(
     suspend fun sourceUri(): String? = currentView?.folderUri()
     fun chooseSort(field: LibraryField, direction: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { browse.library?.setBrowseSort(location.route, options.category, field, direction) }
-        if (artistAlbums) {
-            options.sort = null
-            browse.artistAlbumsChanged(orderChanged = true)
-        } else {
+        // An artist's releases read their saved order again as the settings commit.
+        if (artistAlbums) options.sort = null
+        else {
             options.sort = field
             options.descending = direction
         }
@@ -245,7 +243,7 @@ internal class BrowsePage(
     private fun showDisplay(display: AndroidBrowseDisplay, fieldsChanged: Boolean) {
         if (artistAlbums) {
             options.displaySettings = null
-            browse.artistAlbumsChanged(display, orderChanged = fieldsChanged)
+            browse.artistAlbumsChanged(display, fieldsChanged)
         } else if (fieldsChanged) { options.displaySettings = null; refresh() }
         else options.displaySettings = display
     }
@@ -276,6 +274,13 @@ internal class BrowsePage(
             previous != null && previous == current
         launch {
             connection.changes.collect { changed -> withContext(Dispatchers.Main) { handle(changed) } }
+        }
+        launch {
+            // Committed settings read the page again as its View says; the Pins page, when its pins changed.
+            snapshotFlow { connection.preferences?.let { if (pins) it.pins else it } }.filterNotNull()
+                .distinctUntilChanged().drop(if (pins) 1 else 0).collect {
+                    withContext(Dispatchers.Main) { if (pins || currentView?.settingsReread() == true) refresh() }
+                }
         }
         var favoriteJob: Job? = null
         launch {
@@ -314,8 +319,7 @@ internal class BrowsePage(
                 if (parent != null) parent.preparedContext?.changes ?: 0 else changes,
                 location.route, options.category, options.historySource, options.filter, options.sort, options.descending,
                 options.favoritesOnly, options.downloadedOnly,
-                revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,
-                if (location.route is Route.Home && !pins) browse.homeBlocksFingerprint else null, parent?.openedPage)
+                revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0, parent?.openedPage)
         }.distinctUntilChanged(::sameContext).mapLatest { context ->
             val library = context?.library ?: return@mapLatest null
             if (sameContext(preparedContext, context)) return@mapLatest null

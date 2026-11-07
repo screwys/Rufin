@@ -75,14 +75,14 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var visiblePage by mutableStateOf<BrowsePage?>(null)
     var labelsVersion by mutableIntStateOf(0)
         private set
-    var homeBlocksFingerprint by mutableStateOf<String?>(null)
     var artistAlbumsRevision by mutableIntStateOf(0)
         private set
     var artistAlbumsDisplay by mutableStateOf<AndroidBrowseDisplay?>(null)
         private set
-    fun artistAlbumsChanged(display: AndroidBrowseDisplay? = null, orderChanged: Boolean = false) {
+    /** Shows `display` on every artist's releases, read again when the fields they show changed. */
+    fun artistAlbumsChanged(display: AndroidBrowseDisplay, fieldsChanged: Boolean) {
         artistAlbumsDisplay = display
-        if (orderChanged) artistAlbumsRevision++
+        if (fieldsChanged) artistAlbumsRevision++
     }
     private var startupRouteSelected = false
     private var translationVersion: Int? = null
@@ -138,6 +138,14 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                 catch (error: Exception) { connection.runAction { throw error } }
                 finally { library = null; bridge?.destroy() }
             }
+        }
+        scope.launch {
+            // The tabs follow the committed sidebar routes, whichever writer changed them.
+            snapshotFlow { connection.preferences?.routeItems }.filterNotNull().distinctUntilChanged().drop(1)
+                .collect { library?.let { loadDescriptors(it) } }
+        }
+        scope.launch(Dispatchers.Main) {
+            snapshotFlow { connection.preferences }.filterNotNull().collect { if (searchView?.settingsReread() == true) searchRereads++ }
         }
         scope.launch(Dispatchers.Main) {
             connection.changes.collect { changed ->
@@ -214,20 +222,10 @@ internal class BrowseConnection(private val connection: RufinConnection, private
         }
     }
 
-    fun setRouteVisible(id: String, visible: Boolean) = connection.runAction {
-        val bridge = library ?: return@runAction
-        if (bridge.setRouteVisible(id, visible)) loadDescriptors(bridge)
-    }
-
-    fun moveRoute(id: String, up: Boolean) = connection.runAction {
-        val bridge = library ?: return@runAction
-        if (bridge.moveRoute(id, up)) loadDescriptors(bridge)
-    }
-
+    fun setRouteVisible(id: String, visible: Boolean) = connection.runAction { library?.setRouteVisible(id, visible) }
+    fun moveRoute(id: String, up: Boolean) = connection.runAction { library?.moveRoute(id, up) }
     fun reorderRoute(id: String, targetId: String, after: Boolean) = connection.runAction {
-        val bridge = library ?: return@runAction
-        bridge.reorderRoute(id, targetId, after)
-        loadDescriptors(bridge)
+        library?.reorderRoute(id, targetId, after)
     }
 
     fun chooseRoot(id: String) { rootId = id; details = emptyList() }
@@ -318,9 +316,7 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     }
     fun pin(item: BrowseItem, pinned: Boolean) = connection.runAction {
         withContext(Dispatchers.IO) { item.row.pin?.let { library?.setPin(it, pinned) } }
-        refresh()
     }
-    fun refresh() { visiblePage?.refresh() }
     fun download(item: BrowseItem, remove: Boolean = false) = connection.runAction {
         library?.downloadTarget(item.row.route, item.row.mediaUri, remove)
     }
