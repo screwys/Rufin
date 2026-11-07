@@ -405,7 +405,7 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
         self.body.card.append(&self.snippet);
         if let Some(item) = self.current.borrow().as_ref() {
             self.body
-                .bind(item.title(), |field| DetailLinks::text(&item.field(field)));
+                .bind(item.title(), |field| item.field_links(field));
         }
     }
 }

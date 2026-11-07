@@ -995,16 +995,8 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
             opaque_artwork(row.artwork_binding.as_deref()),
             COLLECTION_GRID_MAX_CARD_WIDTH,
         );
-        self.body.bind(&row.title, |field| {
-            let value = album_field(&row, field);
-            if value.is_empty()
-                || !matches!(field, LibraryField::Artist | LibraryField::AlbumArtist)
-            {
-                DetailLinks::text(&value)
-            } else {
-                album_row_artist_links(&row)
-            }
-        });
+        self.body
+            .bind(&row.title, |field| album_field_links(&row, field));
         self.body
             .set_download_target(&shell, row.summary.downloaded());
         set_grid_favorite(&self.favorite, Some(row.state.favorite));
@@ -1027,10 +1019,18 @@ impl ReusableCollectionGridCell<AlbumRow> for AlbumGridCell {
         };
         self.body.replace_fields(&shell, fields);
         if let Some(row) = self.current.borrow().as_ref() {
-            self.body.bind(&row.title, |field| {
-                DetailLinks::text(&album_field(row, field))
-            });
+            self.body
+                .bind(&row.title, |field| album_field_links(row, field));
         }
+    }
+}
+
+fn album_field_links(row: &AlbumRow, field: LibraryField) -> DetailLinks {
+    let value = album_field(row, field);
+    if value.is_empty() || !matches!(field, LibraryField::Artist | LibraryField::AlbumArtist) {
+        DetailLinks::text(&value)
+    } else {
+        album_row_artist_links(row)
     }
 }
 
