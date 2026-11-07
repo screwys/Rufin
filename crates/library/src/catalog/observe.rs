@@ -59,8 +59,8 @@ impl Catalog {
         .await?)
     }
 
-    /// The source's indexed tracks whose file, CUE sheet, a picture beside their file, or source
-    /// lyrics changed after `since`, in unix seconds.
+    /// The source's indexed tracks whose file, CUE sheet, a picture in their directory or one
+    /// above it, or source lyrics changed after `since`, in unix seconds.
     pub async fn source_changed_since(
         &self,
         source: &SourceId,
@@ -75,7 +75,7 @@ impl Catalog {
              SELECT track.object_id FROM (SELECT DISTINCT root,rtrim(relative_path,replace(relative_path,'/','')) directory FROM files
                  WHERE source_key={SOURCE_KEY} AND kind='image' AND mtime_ns>?2) image
              JOIN files file ON file.source_key={SOURCE_KEY} AND file.kind='media' AND file.root=image.root
-                 AND rtrim(file.relative_path,replace(file.relative_path,'/',''))=image.directory
+                 AND substr(file.relative_path,1,length(image.directory))=image.directory
              JOIN track_details details ON details.source_path=file.path JOIN tracks track USING(track_key)
              WHERE track.indexed=1 AND track.object_id IS NOT NULL
              UNION
