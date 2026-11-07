@@ -1729,7 +1729,8 @@ impl Source {
                     .browse_folder(folder_object_id, music_folder_object_id)
                     .await
             }
-            Implementation::Peer(_) => Ok(LiveFolderPage::default()),
+            // A paired device's tracks carry no folders; its cached scope lists them.
+            Implementation::Peer(_) => Err(SourceError::NotFound),
         }
     }
 

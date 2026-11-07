@@ -77,29 +77,15 @@ pub async fn resolve_folder(
         result = live => result,
         () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
     };
+    // The live page lists what the source holds now; member reads show the resident tracks.
     match live {
-        Ok(page) => {
-            let known = catalog
-                .order(
-                    &library::Read::Members(library::MemberRead::new(
-                        library::Collection::Objects {
-                            source: selected.source_key,
-                            ids: page.tracks.clone().into(),
-                        },
-                    )),
-                    cancellation,
-                )
-                .await?
-                .len();
-            if known == page.tracks.len() {
-                let mut folders = page.folders;
-                folders.sort_by_cached_key(|folder| folder.name.to_lowercase());
-                return Ok(FolderProjection::Live {
-                    folders: folders.into(),
-                    objects: page.tracks.into(),
-                });
-            }
-            tracing::debug!("live Folder is newer than its accepted cache; using fallback");
+        Ok(mut page) => {
+            page.folders
+                .sort_by_cached_key(|folder| folder.name.to_lowercase());
+            return Ok(FolderProjection::Live {
+                folders: page.folders.into(),
+                objects: page.tracks.into(),
+            });
         }
         Err(error) => {
             tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
