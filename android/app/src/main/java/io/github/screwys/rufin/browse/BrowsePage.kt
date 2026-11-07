@@ -340,7 +340,7 @@ internal class BrowsePage(
                 val seeds = seedRows?.mapIndexed { index, row ->
                     BrowseItem(row, index.toULong(), view, display, contextTitle = location.playbackTitle, downloads = opening)
                 }
-                val detail = opened?.summary
+                val detail = opened?.summary ?: summary.takeIf { opened?.keepsSummary == true }
                 val home = if (view != null && route is Route.Home) homeSections(view, opened.home, display, opening) else emptyList()
                 val favoriteRoute = when (route) {
                     is Route.ArtistDetail -> Route.ArtistFavoriteTracks(route.v1)
@@ -369,7 +369,7 @@ internal class BrowsePage(
                     Snapshot.withMutableSnapshot {
                         capturedLabelsVersion = labelsVersion
                         currentView = view
-                        openedPage = opened
+                        openedPage = opened?.copy(summary = detail)
                         preparedContext = if (home.isNotEmpty() || route is Route.Home) context else null
                         scrollSections = emptyList()
                         supportsLetterIndex = !embedded && view?.hasLetterSections() == true

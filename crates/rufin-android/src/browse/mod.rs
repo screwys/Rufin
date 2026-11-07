@@ -536,9 +536,11 @@ impl AndroidLibrary {
         run_read(&runtime, move |cancel| async move {
             let seed = library::RouteSeedWindow::top();
             let selected = self.source.selected_library();
-            let opened = match previous.filter(|previous| {
+            let previous = previous.filter(|previous| {
                 *previous.view.route() == route && previous.view.reads_same_in(selected.as_ref())
-            }) {
+            });
+            let reread = previous.is_some();
+            let opened = match previous {
                 Some(previous) => previous.view.reread(options, seed, &cancel).await,
                 None => {
                     self.source
@@ -578,9 +580,8 @@ impl AndroidLibrary {
                 .enumerate()
                 .map(|(index, row)| shown_row(row, &view.favorite_fields, index))
                 .collect();
-            let header = opened
-                .header
-                .filter(|_| !view.view.is_missing() && !embedded);
+            let shown = !view.view.is_missing() && !embedded;
+            let header = opened.header.filter(|_| shown);
             let summary = match header {
                 Some(header) => Some(self.detail_summary(&view, header).await?),
                 None => None,
@@ -589,6 +590,7 @@ impl AndroidLibrary {
                 count: view.view.len() as u64,
                 rows,
                 summary,
+                keeps_summary: reread && shown,
                 groups,
                 favorite_rows,
                 home: view.home_sections(),

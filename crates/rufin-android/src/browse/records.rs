@@ -117,6 +117,8 @@ pub struct AndroidOpened {
     pub count: u64,
     pub rows: Vec<AndroidBrowseRow>,
     pub summary: Option<AndroidDetailSummary>,
+    /// Whether the page read again and keeps the summary it shows, as a reread reads none.
+    pub keeps_summary: bool,
     pub groups: Vec<AndroidArtistReleaseGroup>,
     pub favorite_rows: Vec<AndroidBrowseRow>,
     pub home: Vec<AndroidHomeSection>,
