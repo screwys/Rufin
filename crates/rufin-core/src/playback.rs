@@ -458,6 +458,7 @@ impl PlaybackOwner {
                     .await
                     .is_ok()
                     && let Ok(moves) = self.catalog.saved_queue_moves(&entries).await
+                    && !moves.is_empty()
                     && let Some(active) = self.active()
                 {
                     active
