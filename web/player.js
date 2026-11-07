@@ -398,6 +398,7 @@ function init() {
   document.addEventListener("keydown", (event) => {
     if (
       event.code === "Space" &&
+      !event.defaultPrevented &&
       !["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"].includes(
         event.target.tagName,
       ) &&
