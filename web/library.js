@@ -40,8 +40,6 @@ let opened = null;
 // actions.
 let shown = {};
 
-let offset = 0;
-
 let searchTimer;
 
 const rowsByNode = new WeakMap();
@@ -55,14 +53,14 @@ const pageSize = 48;
 let revealEntry = async () => {};
 let libraryTotal = null;
 let readRange = async () => [];
-// Reads the shown windows of a list again in place.
-let rereadPage = async () => {};
+// The row the list shows at its top, which a reread opens at again.
+let listPosition = () => 0;
 let selectionRequest;
 let selectionPending = Promise.resolve();
 
-// Pages the list of `token` in windows as it scrolls; `extra` parameters, such as a new
-// order, apply to the first window, which names the page as it opened.
-async function loadLibrary(token, extra, signal, initialPage = null, knownTotal = null) {
+// Pages the list of `token` in windows as it scrolls, from row `at`; `extra` parameters, such
+// as a new order, apply to the first window, which names the page as it opened.
+async function loadLibrary(token, extra, signal, initialPage, knownTotal, at) {
   signal.throwIfAborted();
   const content = $("content"), scroller = $("main"), pages = new Map();
   const before = el("div"), after = el("div");
@@ -228,26 +226,22 @@ async function loadLibrary(token, extra, signal, initialPage = null, knownTotal 
     }
     return result;
   };
-  rereadPage = async () => {
-    // Rows may have moved: a selection by position would name other entries.
-    selectionRequest?.abort();
-    selectionPending = Promise.resolve();
-    selectedTracks.clear();
-    selectionAnchor = 0;
-    total = null;
-    for (const page of pages.values()) page.remove();
-    pages.clear();
-    const first = Math.max(0, targetPage()) * pageSize;
-    await loadPage(first);
-    measure();
-    await fill();
-  };
-  const start = Math.floor(offset / pageSize) * pageSize;
-  if (offset !== start) { initialPage?.remove(); initialPage = null; }
-  await loadPage(start, initialPage);
+  let start = Math.floor(at / pageSize) * pageSize;
+  if (at !== start) { initialPage?.remove(); initialPage = null; }
+  // A reread past the end of a list that shrank opens at its end.
+  if (!(await loadPage(start, initialPage)).count && total) {
+    pages.get(start).remove();
+    pages.delete(start);
+    at = start = (pageCount() - 1) * pageSize;
+    await loadPage(start);
+  }
+  // What the page showed before stays until these rows replace it.
+  const kept = new Set([before, after, header, pages.get(start).node]);
+  for (const node of [...content.children]) if (!kept.has(node)) node.remove();
   measure();
   layout();
-  scroller.scrollTop = start ? origin() + start / pageSize * pageHeight / ratio() : 0;
+  scroller.scrollTop = at ? origin() + at / pageSize * pageHeight / ratio() : 0;
+  listPosition = () => logicalPosition() / pageHeight * pageSize;
   await fill();
   signal.throwIfAborted();
   revealEntry = async (index) => {
@@ -315,7 +309,6 @@ function navigate(target) {
     ? { route: target, source: state.source || undefined, folder: state.selectedLibrary || undefined }
     : target;
   shown = {};
-  offset = 0;
   $("search").value = opened.options?.filter || "";
   showOrder($("sort").value, false);
   $("navigation").classList.remove("open");
@@ -358,14 +351,18 @@ function empty(title, description, action) {
   $("content").replaceChildren(node);
 }
 
-async function loadView(initial = false, knownTotal = null, extra = {}) {
+// Loads the page shown; a reread (`at`, the row to show at the top) keeps what it shows
+// until the new rows replace it, and Home keeps its scroll and carousel positions.
+async function loadView(initial = false, knownTotal = null, extra = {}, at = null) {
+  const offsets = new Map(at === null ? [] : [...$("content").querySelectorAll(".home-section")]
+    .map((node) => [node.dataset.block, Number(node.dataset.offset)]));
   for (const name of ["role", "aria-label", "aria-multiselectable", "aria-rowcount"])
     $("content").removeAttribute(name);
   selectionRequest?.abort();
   selectionPending = Promise.resolve();
   revealEntry = async () => {};
   readRange = async () => [];
-  rereadPage = async () => {};
+  listPosition = () => at ?? 0;
   libraryTotal = null;
   selectedTracks.clear();
   selectionAnchor = 0;
@@ -375,7 +372,7 @@ async function loadView(initial = false, knownTotal = null, extra = {}) {
   viewRequest?.abort();
   viewRequest = new AbortController();
   const signal = AbortSignal.any([session.signal, viewRequest.signal]);
-  if (!initial) {
+  if (!initial && at === null) {
     $("content").setAttribute("aria-busy", "true");
     $("content").inert = true;
     $("content").replaceChildren(el("p", "empty-note", tr("Loading...")));
@@ -392,7 +389,7 @@ async function loadView(initial = false, knownTotal = null, extra = {}) {
       renderSources(await api("/sources", "GET", undefined, signal));
       return;
     }
-    if (!initial) {
+    if (!initial && at === null) {
       $("content").replaceChildren();
       $("main").scrollTop = 0;
     }
@@ -401,9 +398,9 @@ async function loadView(initial = false, knownTotal = null, extra = {}) {
         await fragment(`/api/page?${new URLSearchParams({ page: JSON.stringify(opened) })}`, $("content"), signal);
       const home = $("content").querySelector("[data-page]").dataset;
       showPage(home);
-      bindHome(signal);
+      bindHome(signal, offsets);
       if (home.missed) showChanged(JSON.parse(home.missed));
-    } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal);
+    } else await loadLibrary(opened, extra, signal, initial ? $("content").querySelector("[data-page]") : null, knownTotal, at ?? 0);
   } catch (error) {
     if (!signal.aborted) {
       if (state.source) empty(tr("Could not load this page"), error.message);
@@ -430,8 +427,8 @@ function showChanged(value) {
   if (value.page_refresh) run(() => refreshPage(value.page_refresh));
 }
 
-// Reads the page again as a committed change asks: in place, or opened again in the selected
-// source and music folder.
+// Reads the page again as a committed change asks: where it is, or opened again in the
+// selected source and music folder.
 async function refreshPage(verdict) {
   if (opened === "sources") return;
   if (verdict === "reopen") {
@@ -440,8 +437,7 @@ async function refreshPage(verdict) {
     updateSources(configured);
     return reopen();
   }
-  if (opened.route !== "Home") return rereadPage();
-  return loadView(false, libraryTotal);
+  return loadView(false, null, {}, listPosition());
 }
 
 async function setFavorite(rows, kind = "track") {
@@ -712,14 +708,12 @@ function init() {
   $("search").addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      offset = 0;
       opened.options = { ...opened.options, filter: $("search").value };
       run(loadView);
     }, 200);
   });
   // A chosen order goes with the first window; the page names it from then on.
   const order = () => {
-    offset = 0;
     run(() => loadView(false, libraryTotal, {
       sort: $("sort").value,
       descending: $("descending").getAttribute("aria-pressed"),
@@ -880,22 +874,17 @@ function loadCardCovers(host, signal) {
 
 let homeObserver;
 
-function bindHome(signal) {
+function bindHome(signal, offsets) {
   const layouts = [];
   bindCards($("content"));
-  const syncRows = () => {
-    state.visibleItems = [...$("content").querySelectorAll("[data-row]")].map(
-      mediaRow,
-    );
-  };
-  syncRows();
+  state.visibleItems = [...$("content").querySelectorAll("[data-row]")].map(mediaRow);
   for (const section of $("content").querySelectorAll(".home-section")) {
     const body = section.querySelector(".home-row");
     if (!body) {
       loadCardCovers(section, signal);
       continue;
     }
-    let offset = 0;
+    let offset = offsets.get(section.dataset.block) || 0;
     const layout = () => {
       const columns = getComputedStyle(body.firstElementChild).gridTemplateColumns.split(" ").length;
       const cards = body.querySelectorAll(".album-card");
@@ -910,6 +899,7 @@ function bindHome(signal) {
         offset === 0;
       section.querySelector('[data-action="next-home"]').disabled =
         offset + columns >= cards.length;
+      section.dataset.offset = offset;
       loadCardCovers(section, signal);
       return columns;
     };
@@ -926,29 +916,10 @@ function bindHome(signal) {
       refresh.onclick = () =>
         run(async () => {
           refresh.disabled = true;
+          // The change it commits reads Home again, this block from its start.
+          section.dataset.offset = offset = 0;
           try {
-            await api(
-              "/home",
-              "POST",
-              { source: state.source, block: section.dataset.block },
-              signal,
-            );
-            const params = new URLSearchParams({
-              source: state.source,
-              block: section.dataset.block,
-            });
-            if (state.selectedLibrary)
-              params.set("folder", state.selectedLibrary);
-            await fragment(
-              `/api/home?${params}`,
-              body,
-              signal,
-              ".home-row > .album-grid",
-            );
-            bindCards(body);
-            syncRows();
-            offset = 0;
-            layout();
+            await api("/home", "POST", { source: state.source, block: section.dataset.block }, signal);
           } finally {
             if (!signal.aborted) refresh.disabled = false;
           }
