@@ -898,7 +898,7 @@ impl<F: FileSource> Walker<'_, '_, F> {
             self.report(false);
         }
         drop(reads);
-        // A changed input of an accepted sheet the Store holds reads that sheet again.
+        // A changed input of an accepted sheet the Store holds is read again with that sheet.
         let paths = accepted
             .iter()
             .map(|(staged, _)| staged.row.path.as_str())
@@ -907,8 +907,8 @@ impl<F: FileSource> Walker<'_, '_, F> {
         if !paths.is_empty() {
             for (input, cue) in catalog.cue_owners(source, &paths).await? {
                 if !sheets.iter().any(|(sheet, _, _)| *sheet == cue) {
-                    owned.insert(input);
-                    self.forced.insert(cue);
+                    owned.insert(input.clone());
+                    self.forced.extend([input, cue]);
                 }
             }
         }
@@ -967,8 +967,8 @@ impl<F: FileSource> Walker<'_, '_, F> {
                 }
                 self.batch.tracks.push(track);
                 self.accepted += 1;
+                self.push_read(staged);
             }
-            self.push_read(staged);
         }
         self.check()?;
         let batch = std::mem::take(&mut self.batch);
