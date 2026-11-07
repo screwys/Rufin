@@ -639,7 +639,11 @@ pub(super) async fn run_transfer(
     prepare_download_directories(paths).await?;
     let representation = representation_key(source_id, media_uri, quality, stream.redacted_uri());
     if let Some(path) = library::file_media_path(stream.uri()) {
+        // The blocking copy cannot stop; a cancel during it is honored once it ends.
         let copied = tokio::fs::copy(path, &paths.audio_part).await;
+        if cancellation.try_recv().is_ok() {
+            return Err(SourceError::Cancelled);
+        }
         copied
             .map(|_| ())
             .map_err(|error| SourceError::Other(error.to_string()))
