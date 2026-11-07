@@ -535,8 +535,9 @@ impl Records {
                     .collect::<Vec<_>>()
             })
             .filter(|scopes| !scopes.iter().any(|scope| matches!(scope, Scope::Reload)));
+        // Settings are recorded when the session begins and when they change.
         let Some(scopes) = scopes else {
-            let mut written = self.settings_changes().await?;
+            let mut written = Vec::new();
             for (kind, tombstones) in COMPARED {
                 written.extend(self.compare(kind, tombstones).await?);
             }

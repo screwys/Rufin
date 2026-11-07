@@ -639,6 +639,8 @@ impl ConnectOwner {
         let records = Records::new(self, store, network.identity(), key);
         records.load_devices().await?;
         records.load_sessions().await?;
+        // This device's own record exists before any device pulls the profile.
+        let written = records.settings_pass().await?;
         network
             .serve(Some(rufin_connect::Profile {
                 id: profile.clone(),
@@ -667,6 +669,9 @@ impl ConnectOwner {
         });
         self.publish_devices();
         self.run(&session);
+        if let Some(sequence) = written {
+            self.changed(sequence).await;
+        }
         Ok(())
     }
 
