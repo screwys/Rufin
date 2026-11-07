@@ -3,7 +3,8 @@
 //! live in the Catalog's cache, so every window reads the current one.
 
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use library::{
     AlbumSpan, Catalog, Collection, Fetch, FolderRead, FolderRow, Header, HeaderKey, HomeAlbumRow,
@@ -12,7 +13,7 @@ use library::{
     ReadCancellation, RouteSeedWindow, Row, ScrollSection, SearchResults, SourceKey, TagRow,
 };
 
-use crate::playback::{PlayRequest, QueuePlacement};
+use crate::playback::{PlayRequest, QueuePlacement, random_u64};
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::SelectedLibrary;
 use crate::settings::app::Settings;
@@ -795,9 +796,9 @@ async fn read(
     cancel: &ReadCancellation,
 ) -> LibraryResult<Opened> {
     let catalog = Arc::clone(&view.owner.shared.catalog);
-    static READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    view.read = (view.options.read)
-        .unwrap_or_else(|| READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    // A random start keeps past processes' reads apart; 53 bits keep it a JavaScript number.
+    static READS: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(random_u64() >> 11));
+    view.read = (view.options.read).unwrap_or_else(|| READS.fetch_add(1, Ordering::Relaxed));
     let named = header.is_some();
     view.header = header.or(view.header);
     let (header, first, rows, favorites) = match plan {
@@ -1110,7 +1111,7 @@ impl View {
                 || changed.sources.iter().any(matched)
                 || changed.lyrics && mode == library::SearchMode::Lyrics
             {
-                rematch.store(true, std::sync::atomic::Ordering::Relaxed);
+                rematch.store(true, Ordering::Relaxed);
             }
         }
         let refresh = changes(
@@ -1816,7 +1817,7 @@ impl View {
             // query searches the server.
             (Body::Search(results, rematch), _) if options == self.options => {
                 let folder = self.music_folder();
-                let mut results = if rematch.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut results = if rematch.load(Ordering::Relaxed) {
                     crate::source::search::search(
                         &self.owner,
                         Scope::of(&self.route)
