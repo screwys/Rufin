@@ -83,6 +83,7 @@ impl AndroidLibrary {
         let options = OpenOptions {
             filter: text,
             search_mode: mode,
+            layout: Some(LibraryLayout::Row),
             ..Default::default()
         };
         let selected = self.source.selected_library();
