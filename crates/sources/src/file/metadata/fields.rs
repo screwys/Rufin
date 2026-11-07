@@ -226,6 +226,24 @@ pub(super) fn apply(
         } else {
             field.item
         };
+        let list = |tag: &mut Tag, item| {
+            for value in value
+                .split(';')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                // ID3 credits use TIPL instead of ordinary key mappings.
+                tag.push_unchecked(lofty::tag::TagItem::new(
+                    item,
+                    lofty::tag::ItemValue::Text(value.into()),
+                ));
+            }
+        };
+        // Artist reads prefer the credit list, so an edit rewrites it where the file has one.
+        if key == "artist" && tag.get_string(ItemKey::TrackArtists).is_some() {
+            tag.remove_key(ItemKey::TrackArtists);
+            list(tag, ItemKey::TrackArtists);
+        }
         tag.remove_key(item);
         if !value.is_empty() {
             match field.kind {
@@ -242,19 +260,7 @@ pub(super) fn apply(
                     };
                     tag.insert_text(item, value.into());
                 }
-                MetadataFieldKind::List => {
-                    for value in value
-                        .split(';')
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                    {
-                        // ID3 credits use TIPL instead of ordinary key mappings.
-                        tag.push_unchecked(lofty::tag::TagItem::new(
-                            item,
-                            lofty::tag::ItemValue::Text(value.into()),
-                        ));
-                    }
-                }
+                MetadataFieldKind::List => list(tag, item),
                 _ => {
                     if field.label.is_none() {
                         tag.insert_unchecked(lofty::tag::TagItem::new(
