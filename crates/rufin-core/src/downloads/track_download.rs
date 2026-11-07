@@ -639,10 +639,10 @@ pub(super) async fn run_transfer(
     prepare_download_directories(paths).await?;
     let representation = representation_key(source_id, media_uri, quality, stream.redacted_uri());
     if let Some(path) = library::file_media_path(stream.uri()) {
-        tokio::select! {
-            result = tokio::fs::copy(path, &paths.audio_part) => result.map(|_| ()).map_err(|error| SourceError::Other(error.to_string())),
-            _ = &mut *cancellation => Err(SourceError::Cancelled),
-        }
+        let copied = tokio::fs::copy(path, &paths.audio_part).await;
+        copied
+            .map(|_| ())
+            .map_err(|error| SourceError::Other(error.to_string()))
     } else {
         transfers
             .download_cancellable(stream, &representation, paths, cancellation)
