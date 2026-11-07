@@ -145,8 +145,10 @@ impl CatalogUi {
                 {
                     favorite_model.take(&mut read);
                     header.replace(&shell, summary);
-                    let present = !favorite_model.is_empty();
-                    releases.set_favorite_present(present);
+                    // A search that matches nothing keeps the section and its search.
+                    releases.set_favorite_present(
+                        !favorite_model.is_empty() || !read.view.options().filter.is_empty(),
+                    );
                     let height = 30 + favorite_model.len().min(4) as i32 * 64;
                     favorite_scroller.set_max_content_height(-1);
                     favorite_scroller.set_min_content_height(height);

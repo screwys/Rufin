@@ -108,9 +108,13 @@ impl PlaylistEntriesView {
         self.toolbar.layout_cycle()
     }
 
-    /// Shows whether the entries the rows took are empty.
+    /// Shows whether the playlist is empty: a search that matches nothing keeps its toolbar.
     pub fn show_empty(&self) {
-        let empty = self.rows.is_empty();
+        let empty = self.rows.is_empty()
+            && self
+                .rows
+                .view()
+                .is_none_or(|view| view.options().filter.is_empty());
         self.toolbar_widget.set_visible(!empty);
         self.stack
             .set_visible_child_name(if empty { "empty" } else { "content" });
@@ -146,7 +150,6 @@ impl CatalogUi {
         let toolbar =
             self.library_toolbar_projection(LibraryListKey::PlaylistTracks, search.clone());
         let toolbar_widget = library_route_inset(toolbar.widget());
-        toolbar_widget.set_visible(!model.is_empty());
         wrapper.append(&toolbar_widget);
 
         let collection =
@@ -162,10 +165,9 @@ impl CatalogUi {
             Some("empty"),
         );
         stack.add_named(&collection.scrolling_widget(), Some("content"));
-        stack.set_visible_child_name(if model.is_empty() { "empty" } else { "content" });
         wrapper.append(&stack);
 
-        PlaylistEntriesView {
+        let view = PlaylistEntriesView {
             widget: wrapper.upcast(),
             collection,
             toolbar,
@@ -173,7 +175,9 @@ impl CatalogUi {
             search,
             stack,
             toolbar_widget,
-        }
+        };
+        view.show_empty();
+        view
     }
 }
 
